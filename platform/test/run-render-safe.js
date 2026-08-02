@@ -280,6 +280,128 @@ ok('GA-P1-METHOD mutate is available on the CustomJS instance prototype', () => 
   assert(!Object.prototype.hasOwnProperty.call(RenderSafeClass, 'mutate'), 'mutate is not a static class member');
 });
 
+ok('PERF-0-METHOD mutateStructure is available on the CustomJS instance prototype', () => {
+  assert(typeof RenderSafe.mutateStructure === 'function', 'instance exposes mutateStructure');
+  assert(!Object.prototype.hasOwnProperty.call(RenderSafeClass, 'mutateStructure'), 'mutateStructure is not static');
+});
+
+okAsync('PERF-0-STRUCTURE-INSERT optimistic row is visible before persistence settles', async () => {
+  const rs = new RenderSafeClass();
+  rs.captureScroll = () => {};
+  const writeGate = deferred();
+  const row = { id: 'optimistic-row' };
+  const children = [{ id: 'before' }, { id: 'after' }];
+  let settled = false;
+  const pending = rs.mutateStructure({
+    mode: 'background',
+    apply: () => {
+      children.splice(1, 0, row);
+      return { row, index: 1 };
+    },
+    rollback: () => { throw new Error('success must not roll back'); },
+    write: () => writeGate.promise,
+  }).then((result) => { settled = true; return result; });
+  await flushMicrotasks();
+  assert(children[1] === row, 'the exact optimistic row is inserted immediately');
+  assert(settled === false, 'persistence remains independently pending');
+  writeGate.resolve('saved');
+  const result = await pending;
+  assert(result.ok && result.value === 'saved', 'successful structural write preserves its value');
+  assert(children.map((item) => item.id).join(',') === 'before,optimistic-row,after', 'success keeps the optimistic row');
+});
+
+okAsync('PERF-0-STRUCTURE-ROLLBACK rejected persistence restores exact row identity and position', async () => {
+  const rs = new RenderSafeClass();
+  rs.captureScroll = () => {};
+  const before = { id: 'before' };
+  const removed = { id: 'removed', state: { checked: false } };
+  const after = { id: 'after' };
+  const children = [before, removed, after];
+  let receivedError = null;
+  const failure = new Error('persistence rejected');
+  const result = await rs.mutateStructure({
+    mode: 'background',
+    apply: () => {
+      const index = children.indexOf(removed);
+      children.splice(index, 1);
+      return { node: removed, index };
+    },
+    rollback: (receipt, error) => {
+      receivedError = error;
+      children.splice(receipt.index, 0, receipt.node);
+    },
+    write: async () => { throw failure; },
+  });
+  assert(result.ok === false && result.error === failure, 'write rejection remains the result authority');
+  assert(receivedError === failure, 'rollback receives the original persistence error');
+  assert(children[0] === before && children[1] === removed && children[2] === after, 'rollback restores exact identity at exact position');
+  assert(children[1].state.checked === false, 'rollback preserves row-local state rather than reconstructing it');
+});
+
+okAsync('PERF-0-STRUCTURE-NO-GLOBAL-REFRESH happy path rejects caller attempts to force reconciliation', async () => {
+  const rs = new RenderSafeClass();
+  rs.captureScroll = () => {};
+  const runtime = makeMutationApp('spice/tasks/Parent.md');
+  const result = await rs.mutateStructure({
+    app: runtime.app,
+    dv: { page: () => ({ file: { path: 'spice/tasks/Parent.md' } }) },
+    path: 'spice/tasks/Parent.md',
+    mode: 'create',
+    isCurrent: () => true,
+    apply: () => ({ node: { id: 'new' } }),
+    rollback: () => {},
+    write: () => 'saved',
+  });
+  assert(result.ok && result.value === 'saved', 'happy path succeeds');
+  assert(runtime.calls.refresh === 0, 'structural optimism does not issue dataview-force-refresh-views');
+  assert(runtime.calls.on === 0, 'structural seam suppresses caller-provided create/isCurrent reconciliation');
+});
+
+okAsync('PERF-0-STRUCTURE-NO-GLOBAL-REFRESH mode-override mutant turns red', async () => {
+  const sourcePath = path.join(__dirname, '..', 'mechanisms', 'render-safe', 'render-safe.js');
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const anchor = `      mode: 'background',`;
+  assert(source.includes(anchor), 'production pins structural writes to natural reconciliation');
+  const MutantClass = new Function(`${source.replace(anchor, `      mode: opts.mode,`)}; return RenderSafe;`)();
+  const rs = new MutantClass();
+  rs.captureScroll = () => {};
+  const timers = makeManualTimers();
+  const runtime = makeMutationApp('Parent.md');
+  const pending = rs.mutateStructure({
+    app: runtime.app,
+    dv: { page: () => ({ file: { path: 'New.md' } }) },
+    path: 'New.md',
+    mode: 'create',
+    timers: timers.api,
+    apply: () => ({ node: {} }),
+    rollback: () => {},
+    write: () => true,
+  });
+  await flushMicrotasks();
+  runtime.calls.listener({ path: 'New.md' });
+  const result = await pending;
+  assert(result.ok && runtime.calls.refresh === 1, 'mode mutant reproduces the forbidden global refresh');
+});
+
+okAsync('PERF-0-STRUCTURE-ROLLBACK receipt-forwarding mutant turns red', async () => {
+  const sourcePath = path.join(__dirname, '..', 'mechanisms', 'render-safe', 'render-safe.js');
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const anchor = `      revert: async (error) => opts.rollback(receipt, error),`;
+  assert(source.includes(anchor), 'production forwards the opaque structural receipt');
+  const MutantClass = new Function(`${source.replace(anchor, `      revert: async (error) => opts.rollback(undefined, error),`)}; return RenderSafe;`)();
+  const rs = new MutantClass();
+  rs.captureScroll = () => {};
+  let restored = false;
+  const result = await rs.mutateStructure({
+    mode: 'background',
+    apply: () => ({ exact: true }),
+    rollback: (receipt) => { restored = !!(receipt && receipt.exact); },
+    write: async () => { throw new Error('red'); },
+  });
+  assert(result.ok === false, 'mutant still observes persistence rejection');
+  assert(restored === false, 'dropping the receipt reproduces the exact-rollback defect');
+});
+
 okAsync('GA-P1-SCROLL-CAPTURE-ALWAYS capture precedes optimistic/write on every path', async () => {
   const cases = [
     { name: 'active-success', mode: 'active', fail: false },
@@ -1450,6 +1572,38 @@ ok('GA-P1-GESTURE-CONVENTION code guide routes gesture writes through RenderSafe
   const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'Docs', 'agent-guides', 'code-conventions.md'), 'utf8');
   assert(/User gestures must route frontmatter and vault writes through the instance[\s\S]*RenderSafe\.mutate/.test(guide), 'canonical gesture convention');
   assert(/must not end in a[\s\S]*bare `processFrontMatter`, `vault\.modify`, or `vault\.create` write/.test(guide), 'bare gesture writes prohibited');
+});
+
+ok('PERF-0-LEDGER code guide pins structural receipt protocol and every audited surface', () => {
+  const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'Docs', 'agent-guides', 'code-conventions.md'), 'utf8');
+  assert(/mutateStructure[\s\S]*apply\(\)[\s\S]*rollback\(receipt, error\)/.test(guide), 'structural receipt protocol is canonical');
+  assert(/Structural instant update[\s\S]*Scroll \/ focus[\s\S]*Cold-load[\s\S]*Query efficiency/.test(guide), 'four-dimension ledger headings');
+  const roots = [
+    path.join(__dirname, '..', 'blueprints'),
+    path.join(__dirname, '..', 'mechanisms', 'task-entity'),
+  ];
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (['fixtures', 'skills', 'test', 'tests', 'rules'].includes(entry.name)) return [];
+      return walk(full);
+    }
+    return /\.(?:md|json|js)$/.test(entry.name) ? [full] : [];
+  });
+  const surfaces = new Set();
+  for (const root of roots) {
+    for (const file of walk(root)) {
+      const source = fs.readFileSync(file, 'utf8');
+      const invocation = /dv\.view[\s\S]{0,400}?class:\s*["\\]?(?:\\"|")?([A-Za-z][A-Za-z0-9_-]*)/g;
+      let match;
+      while ((match = invocation.exec(source))) surfaces.add(match[1]);
+    }
+  }
+  assert(surfaces.size === 112, 'baseline inventory contains all 112 production Dataview entry classes');
+  for (const surface of surfaces) {
+    assert(guide.includes('`' + surface + '`'), 'ledger enumerates ' + surface);
+  }
+  assert(/TaskNoteView[\s\S]*task-note-view\.js:45/.test(guide), 'ledger findings carry path:line locators');
 });
 
 // GA-P3 sweep contract: every audited active-note gesture delegates its write
