@@ -36,6 +36,7 @@ Ask BOTH, as one question each:
 3. Present the dry-run summary and get explicit approval.
 4. `node <intake> --spec <spec.json> --apply --json` → replay for `no_op: true` → remove the spec file.
 5. **Position the epic**: intake appends within In Planning. If the Director chose other than `bottom`, attempt `node <coordinator> restructure --spec <map.json> --json` (dry-run first) to place the epic at the requested rank; if the coordinator refuses the reorder, report honestly: "epic minted at the bottom of In Planning — drag it to <position> (board drag-order is your standing input)."
+6. **Review the graph** — open the minted epic's atlas: its GraphView renders the slice dependency graph you just authored (depends_on as solid edges, queue order ghosted, wait reasons on blocked/parked chips). A fast visual check that the decomposition matches intent before execution.
 
 ## Execute or wait — the Director's choice
 
