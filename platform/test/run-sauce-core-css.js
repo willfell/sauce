@@ -9,6 +9,7 @@ const { execFileSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "../..");
 const CSS_PATH = path.join(ROOT, "platform/mechanisms/styling/assets/snippets/sauce-core.css");
+const CHROME_BAR_PATH = path.join(ROOT, "platform/mechanisms/chrome-bar/chrome-bar.js");
 const MANIFEST_PATH = path.join(ROOT, "platform/mechanisms/styling/manifest.json");
 const THEME_PATH = path.join(ROOT, "platform/mechanisms/styling/assets/themes/Baseline/theme.css");
 const DAILY_CSS_PATH = path.join(ROOT, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
@@ -18,6 +19,8 @@ const css = fs.readFileSync(CSS_PATH, "utf8");
 const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
 const theme = fs.readFileSync(THEME_PATH, "utf8");
 const dailyCss = fs.readFileSync(DAILY_CSS_PATH, "utf8");
+const chromeBarSource = fs.readFileSync(CHROME_BAR_PATH, "utf8");
+const ChromeBar = new Function(`${chromeBarSource}\nreturn ChromeBar;`)();
 
 let passed = 0;
 let failed = 0;
@@ -166,6 +169,90 @@ test("button variants preserve hover geometry and active scale", () => {
   assert.match(body(".sauce-btn.sauce-btn.sauce-btn:active"), /transform:\s*scale\(0\.97\)/);
   assert.match(body(".sauce-btn.sauce-btn.sauce-btn.sauce-btn-accent"), /--interactive-accent/);
   assert.match(body(".sauce-btn.sauce-btn.sauce-btn.sauce-btn-danger"), /--color-red/);
+});
+
+test("CSS1 chrome button modifiers preserve the legacy 32px visual contract", () => {
+  const chrome = body(".sauce-chrome-btn");
+  for (const contract of [
+    "height: 32px", "min-height: 32px", "padding: 0 16px", "gap: 6px",
+    "border-radius: 8px", "border: 1px solid var(--interactive-accent)",
+    "background: var(--background-primary)", "color: var(--interactive-accent)",
+    "font-size: 0.82em", "font-weight: 500", "letter-spacing: 0.01em",
+    "overflow: hidden", "transform: scale(1)", "box-shadow: none",
+  ]) {
+    assert.ok(chrome.includes(contract), "chrome button lost legacy contract " + contract);
+  }
+  const icon = body(".sauce-btn-icon");
+  assert.match(icon, /padding:\s*0 12px/);
+  assert.match(icon, /min-width:\s*38px/);
+  assert.match(body(".sauce-chrome-btn:active"), /transform:\s*scale\(0\.94\)/);
+});
+
+test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter snapshots", () => {
+  const makeParent = () => ({
+    children: [],
+    createEl(tag, opts) {
+      const classes = new Set(String((opts && opts.cls) || "").split(/\s+/).filter(Boolean));
+      const button = {
+        tag,
+        className: [...classes].join(" "),
+        innerHTML: "",
+        disabled: false,
+        style: { cssText: "", setProperty() {} },
+        classList: {
+          add(...names) { for (const name of names) classes.add(name); button.className = [...classes].join(" "); },
+          remove(...names) { for (const name of names) classes.delete(name); button.className = [...classes].join(" "); },
+        },
+      };
+      this.children.push(button);
+      return button;
+    },
+  });
+  const bar = new ChromeBar();
+  const surfaces = {
+    project: (variant) => `pcb-btn pcb-btn-${variant}`,
+    wiki: (variant) => `wiki-chrome-btn wiki-chrome-btn-${variant}`,
+    finance: (variant) => `finance-chrome-btn finance-chrome-btn-${variant}`,
+  };
+  const expected = {
+    project: [
+      ["pcb-btn pcb-btn-home", "<svg data-icon=\"home\"/>"],
+      ["pcb-btn pcb-btn-go", "<svg data-icon=\"go\"/>"],
+      ["pcb-btn pcb-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
+      ["pcb-btn pcb-btn-dots", "<svg data-icon=\"dots\"/>"],
+    ],
+    wiki: [
+      ["wiki-chrome-btn wiki-chrome-btn-home", "<svg data-icon=\"home\"/>"],
+      ["wiki-chrome-btn wiki-chrome-btn-go", "<svg data-icon=\"go\"/>"],
+      ["wiki-chrome-btn wiki-chrome-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
+      ["wiki-chrome-btn wiki-chrome-btn-dots", "<svg data-icon=\"dots\"/>"],
+    ],
+    finance: [
+      ["finance-chrome-btn finance-chrome-btn-home", "<svg data-icon=\"home\"/>"],
+      ["finance-chrome-btn finance-chrome-btn-go", "<svg data-icon=\"go\"/>"],
+      ["finance-chrome-btn finance-chrome-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
+      ["finance-chrome-btn finance-chrome-btn-dots", "<svg data-icon=\"dots\"/>"],
+    ],
+  };
+  for (const [surface, btnClass] of Object.entries(surfaces)) {
+    const parent = makeParent();
+    for (const [variant, label, icon] of [
+      ["home", null, '<svg data-icon="home"/>'],
+      ["go", null, '<svg data-icon="go"/>'],
+      ["primary", "New", '<svg data-icon="plus"/>'],
+      ["dots", null, '<svg data-icon="dots"/>'],
+    ]) {
+      bar.renderChromeButton(parent, { cls: btnClass(variant), label, icon, onClick() {} });
+    }
+    const snapshot = parent.children.map((button) => [
+      button.className.split(/\s+/).filter((name) => !name.startsWith("sauce-")).join(" "),
+      button.innerHTML,
+    ]);
+    assert.strictEqual(JSON.stringify(snapshot), JSON.stringify(expected[surface]), surface + " chrome marker/content snapshot changed");
+    assert.ok(parent.children.every((button) => button.className.includes("sauce-btn sauce-chrome-btn")), surface + " buttons lack sauce-core classes");
+    assert.ok(parent.children.filter((button) => !button.innerHTML.includes("New")).every((button) => button.className.includes("sauce-btn-icon")), surface + " icon buttons lack the icon/+ modifier");
+    assert.ok(parent.children.every((button) => button.style.cssText === ""), surface + " ChromeBar still owns inline presentation");
+  }
 });
 
 test("C1C-PILL-VARIANT-CASCADE preserves the parent API and Daily pre-adoption", () => {
