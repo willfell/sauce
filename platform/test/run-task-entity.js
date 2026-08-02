@@ -2579,6 +2579,8 @@ async function runPerf1StructuralTests() {
     };
     const TE = new TaskEntityClass();
     const TD = new TaskDialogClass();
+    const notices = [];
+    global.Notice = function (message) { notices.push(String(message)); };
     global.window = {
       app,
       moment: () => ({ format: (f) => f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-08-02T06:00:00-06:00' : '2026-08-02' }),
@@ -2620,6 +2622,31 @@ async function runPerf1StructuralTests() {
       'successful missing-TaskTodayList fallback releases ownership to zero');
     assert(walk(container, (node) => node && node._task).length === 0,
       'persistence-first fallback does not invent an optimistic row without its renderer');
+
+    notices.length = 0;
+    TD.createQuick = async () => ({ ok: false, reason: 'write rejected' });
+    input.value = 'Rejected fallback';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Rejected fallback' && input._focusCount >= 1,
+      'result-level fallback failure preserves recoverable input and focus');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'result-level fallback failure releases ownership to zero');
+    assert(notices.length === 1 && notices[0].includes('Could not create subtask: write rejected'),
+      'result-level fallback failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+
+    notices.length = 0;
+    TD.createQuick = async () => { throw new Error('create exploded'); };
+    input.value = 'Throwing fallback';
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Throwing fallback' && input._focusCount >= 2,
+      'thrown fallback failure preserves recoverable input and focus');
+    assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
+      'thrown fallback failure releases ownership to zero');
+    assert(notices.length === 1 && notices[0].includes('Could not create subtask: create exploded'),
+      'thrown fallback failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+    global.Notice = function () {};
   });
 
   await okAsync('PERF-1-DELETE shared seam removes before write and restores exact node/index/focus on rejection', async () => {

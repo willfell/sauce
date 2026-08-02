@@ -786,11 +786,14 @@ class TaskNoteView {
                                     parent_task: quickOpts.parent_task, reconcile: false });
                                 if (!created || created.ok !== true) {
                                     try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e) {}
+                                    const reason = created && (created.reason || (created.error && created.error.message));
+                                    try { new Notice('Could not create subtask' + (reason ? ': ' + reason : ''), 6000); } catch (_e) {}
                                     return;
                                 }
                                 addInput.value = '';
                             } catch (_e) {
                                 try { if (plan && typeof TD.releaseQuickPlan === 'function') TD.releaseQuickPlan(plan); } catch (_e2) {}
+                                try { new Notice('Could not create subtask: ' + (_e && (_e.message || _e)), 6000); } catch (_e2) {}
                             }
                             try { addInput.focus(); } catch (_e) {}
                         }
