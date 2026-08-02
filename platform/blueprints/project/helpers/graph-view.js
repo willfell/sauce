@@ -46,6 +46,7 @@ class GraphView {
     this._injectedLifecycleApi = options.lifecycleApi || null;
     this._injectedLayout = options.layout || null;
     this._injectedDashboard = options.dashboard || null;
+    this._injectedInsights = options.insights || null;
     this._scope = options.scope || "epic";
   }
 
@@ -61,6 +62,49 @@ class GraphView {
   _graphLayout() {
     if (this._injectedLayout) return this._injectedLayout;
     try { return globalThis.customJS?.GraphLayout || null; } catch (_e) { return null; }
+  }
+
+  _graphInsights() {
+    if (this._injectedInsights) return this._injectedInsights;
+    try { return globalThis.customJS?.GraphInsights || null; } catch (_e) { return null; }
+  }
+
+  // GraphInsights is the sole owner of transitive semantics. GraphView only
+  // delegates the drawn graph and consumes the returned per-node membership.
+  // Missing, throwing, or malformed analysis is optional UI sugar: the graph
+  // remains byte-identical to its pre-insights rendering with no warning row.
+  _analyzeGraph(nodes, edges) {
+    try {
+      const insights = this._graphInsights();
+      if (typeof insights?.analyzeGraph !== "function") return null;
+      const analysis = insights.analyzeGraph(nodes, edges);
+      if (!analysis || typeof analysis !== "object"
+        || !analysis.perNode || typeof analysis.perNode !== "object"
+        || !analysis.summary || typeof analysis.summary !== "object") return null;
+      return analysis;
+    } catch (_e) { return null; }
+  }
+
+  _renderStuckSummary(root, analysis) {
+    const summary = analysis?.summary;
+    if (!summary || Number(summary.stuckCount) <= 0) return;
+    const rootCount = Array.isArray(summary.rootBlockers) ? summary.rootBlockers.length : 0;
+    const gatedTotal = Number.isFinite(Number(summary.gatedTotal)) ? Number(summary.gatedTotal) : 0;
+    const row = root.createEl("div", {
+      text: `${rootCount} root blocker${rootCount === 1 ? "" : "s"}`
+        + ` · gating ${gatedTotal} slice${gatedTotal === 1 ? "" : "s"}`,
+    });
+    row.className = "graph-view-stuck-summary";
+    row.setAttribute?.("aria-label", "Graph blocking summary");
+    row.style.cssText = "color:var(--text-error);font-size:0.75em;font-weight:650;";
+  }
+
+  _nodeInsight(analysis, card) {
+    try {
+      return Object.prototype.hasOwnProperty.call(analysis?.perNode || {}, card)
+        ? analysis.perNode[card]
+        : null;
+    } catch (_e) { return null; }
   }
 
   async _lifecycleApi() {
@@ -345,6 +389,9 @@ class GraphView {
   async _renderGraph(root, result, api, source, extraWarnings) {
     const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
     if (!nodes.length) return;
+    const edges = Array.isArray(result?.edges) ? result.edges : [];
+    const analysis = this._analyzeGraph(nodes, edges);
+    this._renderStuckSummary(root, analysis);
     this._renderLegend(root, nodes, api);
     const geometry = {
       rowH: 74, chipH: 56, pad: 12, colGap: 28, chipW: 172,
@@ -386,11 +433,12 @@ class GraphView {
       `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`
       + '<defs><marker id="graph-view-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
       + '<path d="M 0 0 L 8 4 L 0 8 z" fill="var(--text-muted)"/></marker></defs>'
-      + this._edgeMarkup(result?.edges, positions, geometry)
+      + this._edgeMarkup(edges, positions, geometry)
       + "</svg>";
     for (const node of nodes) {
       if (node.isStub) this._renderStub(canvas, node, positions.get(node.card), geometry, source);
-      else this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, extraWarnings, null, outcomes);
+      else this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, extraWarnings,
+        null, outcomes, this._nodeInsight(analysis, node.card));
     }
   }
 
@@ -509,7 +557,7 @@ class GraphView {
     label.style.cssText = "min-width:0;font-size:0.72em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
   }
 
-  _renderChip(canvas, node, at, geometry, api, source, extraWarnings, activeCard, outcomes) {
+  _renderChip(canvas, node, at, geometry, api, source, extraWarnings, activeCard, outcomes, insight) {
     const presentation = this._statusPresentation(node.status, api);
     if (!presentation.normalized) {
       extraWarnings.push({
@@ -571,6 +619,15 @@ class GraphView {
       wait.className = "graph-view-wait";
       wait.setAttribute?.("title", String(node.waitReason || ""));
       wait.style.cssText = "min-width:0;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    }
+    if (insight?.isRootBlocker === true) {
+      const gates = Number.isFinite(Number(insight.gates)) ? Number(insight.gates) : 0;
+      const badge = info.createEl("span", { text: `gates ${gates}` });
+      badge.className = "graph-view-gates-badge";
+      badge.style.cssText = "flex:none;margin-left:auto;padding:1px 5px;border-radius:999px;"
+        + "font-size:0.9em;font-weight:700;color:var(--text-error);"
+        + "border:1px solid color-mix(in srgb, var(--text-error) 45%, transparent);"
+        + "background:color-mix(in srgb, var(--text-error) 10%, var(--background-primary));";
     }
   }
 
@@ -705,9 +762,13 @@ class GraphView {
       cursorY = chipTop + clusterHeight + geometry.clusterGap;
     }
     const height = clusters.length ? cursorY - geometry.clusterGap + geometry.pad : 0;
+    const allNodes = clusters.flatMap((cluster) => cluster.nodes);
+    const allEdges = [...clusters.flatMap((cluster) => cluster.edges), ...crossEdges];
+    const analysis = this._analyzeGraph(allNodes, allEdges);
 
     if (clusters.length) {
-      this._renderLegend(root, clusters.flatMap((cluster) => cluster.nodes), api);
+      this._renderStuckSummary(root, analysis);
+      this._renderLegend(root, allNodes, api);
       const scroller = root.createEl("div");
       scroller.className = "graph-view-scroll";
       scroller.style.cssText = "overflow-x:auto;max-width:100%;";
@@ -717,7 +778,6 @@ class GraphView {
       const edgeLayer = canvas.createEl("div");
       edgeLayer.className = "graph-view-edges";
       edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
-      const allEdges = [...clusters.flatMap((cluster) => cluster.edges), ...crossEdges];
       edgeLayer.innerHTML =
         `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`
         + '<defs><marker id="graph-view-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
@@ -733,7 +793,8 @@ class GraphView {
           + "text-transform:uppercase;color:var(--text-muted);cursor:pointer;";
         header.addEventListener?.("click", () => this._open(cluster.atlasPath, source));
         for (const node of cluster.nodes) {
-          this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, warnings, activeCard);
+          this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, warnings,
+            activeCard, null, this._nodeInsight(analysis, node.card));
         }
       }
     }
