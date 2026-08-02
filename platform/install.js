@@ -1267,6 +1267,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectDashboardConformanceHeal(tp, mech, variables, history, git); // NEW ProjectDashboard cycle — collapses 6-block legacy hub bodies to ChromeBar + Dashboard (idempotent; MUST run after applyProjectActivityPanelsHeal so its just-injected legacy panels get promoted in the same install)
   await applyEpicScaffoldHeal(tp, mech, variables, history, git); // ES2 — exact project-board identity/action plus canonical epic context/dashboard conformance
+  await applyLoopStationGraphHeal(tp, mech, variables, history, git); // GV-3b — injects the project-scope GraphView block after OperatorStation on existing type:loop-station notes (include-guard, exactly once, .sauce-heals backup, byte-stable replay; the coordinator only scaffolds ABSENT stations)
   await applyEpicBoardRoleBackfill(tp, mech, variables, history, git); // ES2 — mark only the exact canonical board adjacent to a type:epic atlas
   await applySliceSourceBoardHeal(tp, mech, variables, history, git); // ES2 — repair direct type:slice notes to the exact canonical epic board
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
@@ -5259,6 +5260,45 @@ async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
     }
   } catch (error) {
     history?.push({ event: "warning", step: "epic_scaffold_heal", reason: error?.message || String(error),
+      git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+// applyLoopStationGraphHeal — GV-3b. Existing Loop Station notes (type:
+// loop-station at a project root) gain the project-scope GraphView
+// customjs-guard block directly after the OperatorStation block, exactly
+// once. Same include-guard + backup-write pattern as applyEpicScaffoldHeal:
+// idempotent (skip when the note already carries a GraphView invocation),
+// byte-stable on replay, .sauce-heals backup before write, never throws.
+// The coordinator's scaffold-if-absent body covers FUTURE stations; this
+// heal covers existing ones — the coordinator never rewrites a station body.
+async function applyLoopStationGraphHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const graphViewBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "GraphView", args: [{ scope: "project" }] });\n```';
+  try {
+    const projectsRoot = "spice/projects";
+    if (!(await adapter.exists(projectsRoot))) return;
+    const projects = await adapter.list(projectsRoot);
+    for (const projectDir of (projects.folders || [])) {
+      const listing = await adapter.list(projectDir);
+      for (const station of (listing.files || []).filter((entry) => entry.endsWith(".md"))) {
+        const before = await adapter.read(station);
+        if (_noteChromeFrontmatterType(before) !== "loop-station") continue;
+        if (before.includes('class: "GraphView"')) continue;
+        const operator = /(```dataviewjs[\s\S]*?class:\s*"OperatorStation"[\s\S]*?```)/;
+        const after = operator.test(before)
+          ? before.replace(operator, `$1\n\n${graphViewBlock}`)
+          : `${before.trimEnd()}\n\n${graphViewBlock}\n`;
+        if (await _epicBackupWrite(adapter, station, before, after, ts)) {
+          history?.push({ event: "info", step: "loop_station_graph_heal", target: station, action: "graph_view_injected",
+            git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+        }
+      }
+    }
+  } catch (error) {
+    history?.push({ event: "warning", step: "loop_station_graph_heal", reason: error?.message || String(error),
       git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
   }
 }
@@ -22246,6 +22286,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     module.exports.applyProjectDashboardConformanceHeal = applyProjectDashboardConformanceHeal;
     module.exports.applyEpicScaffoldHeal = applyEpicScaffoldHeal;
+    // GV-3b — Loop Station project-scope GraphView heal (run-graph-view.js).
+    module.exports.applyLoopStationGraphHeal = applyLoopStationGraphHeal;
     module.exports.applyEpicBoardRoleBackfill = applyEpicBoardRoleBackfill;
     module.exports.applySliceSourceBoardHeal = applySliceSourceBoardHeal;
     // Project Links Wiring PR3 — existing-project Links Hub backfill heal + its

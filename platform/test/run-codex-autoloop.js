@@ -8257,6 +8257,8 @@ eq(opx2UnexpectedBoardReads, 0,
   'OPX2-INJECTED-STATUS-ISOLATION injected authoritative status performs no machine-default board read');
 ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
   'OPX2-BODY-PRESERVED existing station body remains byte-identical');
+ok(!fs.readFileSync(opx2StationPath, 'utf8').includes('GraphView'),
+  'OPX2-BODY-PRESERVED the coordinator never injects the GraphView mount into an existing station body');
 const opx2ProjectedBytes = fs.readFileSync(opx2StationPath);
 const opx2Replay = projectLoopStation(
   { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
@@ -8299,8 +8301,13 @@ const opx2Scaffolded = projectLoopStation(
   opx2State, 'deploy', opx2ScaffoldDeps,
 );
 eq(opx2Scaffolded.scaffolded, true, 'OPX2-BODY-PRESERVED a missing station is scaffolded exactly once');
-ok(/customjs-guard.*OperatorStation/.test(fs.readFileSync(opx2MissingStationPath, 'utf8')),
+const opx2ScaffoldBody = fs.readFileSync(opx2MissingStationPath, 'utf8');
+ok(/customjs-guard.*OperatorStation/.test(opx2ScaffoldBody),
   'OPX2-BODY-PRESERVED scaffold carries the stock OperatorStation render body');
+ok(opx2ScaffoldBody.includes('{ class: "GraphView", args: [{ scope: "project" }] }'),
+  'OPX2-SCAFFOLD-GRAPH scaffold-if-absent body mounts the project-scope GraphView block');
+ok(opx2ScaffoldBody.indexOf('class: "OperatorStation"') < opx2ScaffoldBody.indexOf('class: "GraphView"'),
+  'OPX2-SCAFFOLD-GRAPH the GraphView mount sits after the OperatorStation block');
 eq(projectLoopStation(
   { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
   opx2State, 'deploy', opx2ScaffoldDeps,

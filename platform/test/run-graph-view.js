@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 'use strict';
 
-// run-graph-view.js — behavioral harness for the GraphView epic-scope widget
-// (platform/blueprints/project/helpers/graph-view.js).
+// run-graph-view.js — behavioral harness for the GraphView widget
+// (platform/blueprints/project/helpers/graph-view.js): epic scope, the GV-3b
+// project scope (Loop Station whole-plan graph), and the Loop Station install
+// heal (platform/install.js applyLoopStationGraphHeal).
 //
 // GV-2b lineage: the carried finding from the discarded GV-2 attempt is pinned
 // as a named fixture (GV2-STALE-DEP-EDGE) — a slice whose depends_on names a
 // card absent from the slice set (a discarded/tombstoned name) must render one
 // warning-strip row naming both the card and the unresolvable target.
+// GV-3b lineage (GV3-STALE-DEP-EDGE): at project scope the same unresolvable
+// target stays a warning, while a target living in ANOTHER cluster becomes a
+// real cross-epic edge — never a silently satisfied or silently dropped edge.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -415,11 +420,271 @@ async function main() {
     'fail-soft: a gather fault still mounts the root');
   global.app.vault.getMarkdownFiles = priorGetMarkdownFiles;
 
-  // Scope guard: only epic scope is implemented in this slice.
-  const projectScopeContainer = element();
-  await new GraphView({ scope: 'project' }).render({ container: projectScopeContainer });
-  assert.strictEqual(projectScopeContainer.children[0].children.length, 0,
-    'project scope renders nothing in this slice (GV-3 lineage surface)');
+  // ---- Project scope (GV-3b): the whole-plan graph on Loop Station ----
+  // Live epics (In Planning + In Progress + Blocked) as labeled clusters,
+  // cross-epic depends edges, active-claim outline from station frontmatter,
+  // Completed collapse, Archive/below-divider exclusion, missing-epic
+  // fail-soft (GV3-STALE-DEP-EDGE lineage: unresolvable targets stay warnings).
+  const savedApp = global.app;
+  const savedCustomJS = global.customJS;
+  const projectDir = 'spice/projects/demo';
+  const stationPath = `${projectDir}/Loop Station.md`;
+  const projectBoardPath = `${projectDir}/demo-board.md`;
+  const epicOneDir = `${projectDir}/tasks/Epic One`;
+  const epicTwoDir = `${projectDir}/tasks/Epic Two`;
+  const epicDoneDir = `${projectDir}/tasks/Epic Done`;
+  const epicBlockedDir = `${projectDir}/tasks/Epic Blocked`;
+  const epicBoardlessDir = `${projectDir}/tasks/Epic Boardless`;
+  const projectFiles = [
+    file(projectBoardPath, 1),
+    file(`${epicOneDir}/Epic One.md`, 2), file(`${epicOneDir}/board/Epic One-board.md`, 3),
+    file(`${epicOneDir}/board/E1-1 Alpha.md`, 4), file(`${epicOneDir}/board/E1-2 Beta.md`, 5),
+    file(`${epicTwoDir}/Epic Two.md`, 6), file(`${epicTwoDir}/board/Epic Two-board.md`, 7),
+    file(`${epicTwoDir}/board/E2-1 Gamma.md`, 8), file(`${epicTwoDir}/board/E2-2 Delta.md`, 9),
+    file(`${epicDoneDir}/Epic Done.md`, 10), file(`${epicDoneDir}/board/Epic Done-board.md`, 11),
+    file(`${epicDoneDir}/board/ED-1 Old.md`, 12),
+    // GV-3b repair: a Blocked-lane epic with a full atlas + board + one slice —
+    // Blocked is a LIVE lane and must render as a cluster.
+    file(`${epicBlockedDir}/Epic Blocked.md`, 13), file(`${epicBlockedDir}/board/Epic Blocked-board.md`, 14),
+    file(`${epicBlockedDir}/board/EB-1 Gate.md`, 15),
+    // GV-3b repair: atlas + slice exist but board/Epic Boardless-board.md does
+    // NOT — the atlas-present/board-missing permutation (warning AND cluster).
+    file(`${epicBoardlessDir}/Epic Boardless.md`, 16), file(`${epicBoardlessDir}/board/EX-1 Loose.md`, 17),
+  ];
+  const projectFrontmatter = new Map([
+    [projectBoardPath, { type: 'kanban', 'kanban-plugin': 'board' }],
+    [`${epicOneDir}/Epic One.md`, { type: 'epic' }],
+    [`${epicOneDir}/board/Epic One-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    [`${epicOneDir}/board/E1-1 Alpha.md`, { type: 'slice', status: 'completed', depends_on: [] }],
+    [`${epicOneDir}/board/E1-2 Beta.md`, { type: 'slice', status: 'in_progress', depends_on: ['[[E1-1 Alpha]]'] }],
+    [`${epicTwoDir}/Epic Two.md`, { type: 'epic' }],
+    [`${epicTwoDir}/board/Epic Two-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    // E2-1's depends_on crosses INTO Epic One — a real edge, never a warning.
+    [`${epicTwoDir}/board/E2-1 Gamma.md`, { type: 'slice', status: 'planning', depends_on: ['[[E1-2 Beta]]'] }],
+    // E2-2's depends_on resolves in NO cluster — the dangling warning path.
+    [`${epicTwoDir}/board/E2-2 Delta.md`, { type: 'slice', status: 'planning', depends_on: ['[[Ghost Card]]'] }],
+    [`${epicDoneDir}/Epic Done.md`, { type: 'epic' }],
+    [`${epicDoneDir}/board/Epic Done-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    [`${epicDoneDir}/board/ED-1 Old.md`, { type: 'slice', status: 'completed', depends_on: [] }],
+    [`${epicBlockedDir}/Epic Blocked.md`, { type: 'epic' }],
+    [`${epicBlockedDir}/board/Epic Blocked-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
+    [`${epicBlockedDir}/board/EB-1 Gate.md`, { type: 'slice', status: 'planning', depends_on: [] }],
+    [`${epicBoardlessDir}/Epic Boardless.md`, { type: 'epic' }],
+    [`${epicBoardlessDir}/board/EX-1 Loose.md`, { type: 'slice', status: 'planning', depends_on: [] }],
+  ]);
+  const projectBoardBody = [
+    '---', 'kanban-plugin: board', 'type: kanban', '---', '',
+    '## In Planning', '',
+    '- [ ] [[Epic Two]]', '- [ ] [[Epic Missing]]', '',
+    '## In Progress', '',
+    '- [ ] [[Epic One]]', '',
+    '## Blocked', '',
+    '- [ ] [[Epic Blocked]]', '- [ ] [[Epic Boardless]]', '',
+    '## Discovered (autoloop)', '',
+    '- [ ] [[Stray Finding]]', '',
+    '## Completed', '',
+    '- [x] [[Epic Done]]', '',
+    '## Archive', '',
+    '- [x] [[Epic Ancient]]', '',
+    '***', '',
+    // A live-lane heading BELOW the archive divider: if the divider break ever
+    // regresses, this epic would render and the P5 assertion turns red.
+    '## In Progress', '',
+    '- [ ] [[Below Divider Epic]]', '',
+  ].join('\n');
+  const projectBodies = new Map([
+    [projectBoardPath, projectBoardBody],
+    [`${epicOneDir}/board/Epic One-board.md`, [
+      '---', 'kanban-plugin: board', '---', '',
+      '## In Progress', '', '- [ ] [[E1-2 Beta]]', '',
+      '## Completed', '', '- [x] [[E1-1 Alpha]]', '',
+    ].join('\n')],
+    [`${epicTwoDir}/board/Epic Two-board.md`, [
+      '---', 'kanban-plugin: board', '---', '',
+      '## In Planning', '', '- [ ] [[E2-1 Gamma]]', '- [ ] [[E2-2 Delta]]', '',
+    ].join('\n')],
+    [`${epicDoneDir}/board/Epic Done-board.md`, [
+      '---', 'kanban-plugin: board', '---', '',
+      '## Completed', '', '- [x] [[ED-1 Old]]', '',
+    ].join('\n')],
+    [`${epicBlockedDir}/board/Epic Blocked-board.md`, [
+      '---', 'kanban-plugin: board', '---', '',
+      '## In Planning', '', '- [ ] [[EB-1 Gate]]', '',
+    ].join('\n')],
+  ]);
+  const projectOpened = [];
+  const projectMutations = [];
+  const projectMutator = (name) => () => {
+    projectMutations.push(name);
+    throw new Error(`read-only fixture invoked ${name}`);
+  };
+  global.app = {
+    vault: {
+      getMarkdownFiles: () => projectFiles,
+      cachedRead: async (entry) => {
+        if (projectBodies.has(entry.path)) return projectBodies.get(entry.path);
+        throw new Error(`unexpected read ${entry.path}`);
+      },
+      create: projectMutator('vault.create'), modify: projectMutator('vault.modify'),
+      delete: projectMutator('vault.delete'), rename: projectMutator('vault.rename'),
+      trash: projectMutator('vault.trash'),
+      adapter: {
+        write: projectMutator('adapter.write'), append: projectMutator('adapter.append'),
+        process: projectMutator('adapter.process'), remove: projectMutator('adapter.remove'),
+        rename: projectMutator('adapter.rename'), mkdir: projectMutator('adapter.mkdir'),
+        rmdir: projectMutator('adapter.rmdir'),
+      },
+    },
+    metadataCache: {
+      getFileCache: (entry) => ({ frontmatter: projectFrontmatter.get(entry.path) || {} }),
+      trigger: projectMutator('metadataCache.trigger'),
+    },
+    fileManager: { processFrontMatter: projectMutator('fileManager.processFrontMatter') },
+    workspace: { openLinkText: (...args) => projectOpened.push(args) },
+  };
+  const projectPage = {
+    file: { path: stationPath, folder: projectDir },
+    active: { card: 'E1-2 Beta', phase: 'implementing', epic: 'Epic One' },
+  };
+  global.customJS = {
+    RenderSafe: { page: () => projectPage },
+    GraphLayout: new GraphLayout(),
+    EpicDashboard: new EpicDashboard({ lifecycleApi }),
+  };
+  const projectContainer = element();
+  await new GraphView({ scope: 'project' }).render({ container: projectContainer });
+  const pRoot = projectContainer.children.find((child) => child.className === 'graph-view-root');
+  assert(pRoot, 'P: project scope mounts one graph-view-root');
+
+  // P1: two live-epic clusters render as labeled headers, stacked in board
+  // order (In Planning first), each header linking to its atlas.
+  const headers = byClass(pRoot, 'graph-view-cluster-header');
+  // P1-blocked (GV-3b repair): Blocked is a LIVE lane — its epic renders as a
+  // full labeled cluster, never a collapse or a silent drop.
+  assert(headers.some((header) => header.textContent === 'Epic Blocked'),
+    'P1-blocked: the Blocked-lane epic renders as a live cluster');
+  // P7 (GV-3b repair): atlas present + board note missing renders the warning
+  // AND the cluster — the guard skips only when the atlas itself is missing.
+  assert(headers.some((header) => header.textContent === 'Epic Boardless'),
+    'P7: an epic with atlas present but board note missing still renders as a cluster');
+  assert.deepStrictEqual(headers.map((header) => header.textContent),
+    ['Epic Two', 'Epic One', 'Epic Blocked', 'Epic Boardless'],
+    'P1: exactly the live epics render as clusters, in parent-board lane order (In Planning, In Progress, Blocked)');
+  assert(headers[0].style.cssText.includes('top:12px') && headers[1].style.cssText.includes('top:198px')
+    && headers[2].style.cssText.includes('top:310px') && headers[3].style.cssText.includes('top:422px'),
+  'P1: clusters stack vertically at the computed offsets');
+  headers[1].listeners.click();
+  assert.deepStrictEqual(projectOpened.at(-1), [`${epicOneDir}/Epic One`, stationPath, false],
+    'P1: an epic header click opens the epic atlas');
+  const pChips = byClass(pRoot, 'graph-view-chip');
+  assert.strictEqual(pChips.length, 6, 'P1: every live-epic slice renders exactly one chip');
+  const pChipFor = (id) => pChips.find((chip) => flatten(chip)
+    .some((node) => node.textContent && node.textContent.startsWith(id)));
+  for (const [id, x, y] of [['E2-1', 12, 42], ['E2-2', 12, 116], ['E1-1', 12, 228], ['E1-2', 212, 228],
+    ['EB-1', 12, 340], ['EX-1', 12, 452]]) {
+    assert(pChipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`),
+      `P1: ${id} chip sits at its cluster-offset position left:${x}px;top:${y}px`);
+  }
+  const pCanvas = byClass(pRoot, 'graph-view-project-canvas')[0];
+  assert(pCanvas && pCanvas.style.cssText.includes('width:396px;height:520px'),
+    'P1: one shared canvas spans all clusters');
+
+  // P2: the cross-epic depends_on (E2-1 Gamma → depends on E1-2 Beta) renders
+  // as a real depends edge between chips in DIFFERENT clusters, endpoints
+  // pinned to the absolute chip positions (prerequisite right-mid → dependent
+  // left-mid), and never as a dangling warning.
+  const pDepends = svgPaths(pRoot, 'edge-depends');
+  const crossPaths = pDepends.filter((chunk) => chunk.includes('edge-cross-epic'));
+  assert.strictEqual(crossPaths.length, 1, 'P2: exactly one cross-epic edge renders');
+  assert.strictEqual(dOf(crossPaths[0]), 'M 384 256 C 408 256, -12 70, 12 70',
+    'P2: the cross edge runs prerequisite E1-2 Beta (384,256) → dependent E2-1 Gamma (12,70)');
+  assert(crossPaths[0].includes('marker-end') && !crossPaths[0].includes('stroke-dasharray'),
+    'P2: the cross edge carries the solid arrowed depends markup');
+  const intraDepends = pDepends.filter((chunk) => !chunk.includes('edge-cross-epic'));
+  assert.strictEqual(intraDepends.length, 1, 'P2: the one intra-cluster depends edge renders');
+  assert.strictEqual(dOf(intraDepends[0]), 'M 184 256 C 208 256, 188 256, 212 256',
+    'P2: the Epic One intra-cluster edge is drawn at its cluster-offset positions');
+  const pOrder = svgPaths(pRoot, 'edge-order');
+  assert.deepStrictEqual(pOrder.map(dOf), ['M 98 98 L 98 116'],
+    'P2: the Epic Two ghost order edge is drawn at its cluster-offset positions');
+
+  // P3: the card named in the Loop Station's own frontmatter `active` gets a
+  // distinct outline; every other chip does not.
+  const activeChip = pChipFor('E1-2');
+  assert(activeChip.className.includes('graph-view-active'),
+    'P3: the active claim chip carries the graph-view-active class');
+  assert(activeChip.style.cssText.includes('outline:2px solid var(--interactive-accent);outline-offset:2px;'),
+    'P3: the active claim chip carries the distinct outline style');
+  for (const id of ['E2-1', 'E2-2', 'E1-1', 'EB-1', 'EX-1']) {
+    assert(!pChipFor(id).className.includes('graph-view-active')
+      && !pChipFor(id).style.cssText.includes('outline:'),
+    `P3: non-active chip ${id} carries no active outline`);
+  }
+
+  // P4: a Completed-lane epic collapses to a single done-chip; its slices
+  // never render.
+  const doneChips = byClass(pRoot, 'graph-view-done-chip');
+  assert.strictEqual(doneChips.length, 1, 'P4: exactly one done-chip renders for the Completed-lane epic');
+  assert.strictEqual(doneChips[0].textContent, 'Epic Done', 'P4: the done-chip names the completed epic');
+  assert(doneChips[0].className.includes('status-done'),
+    'P4: the done-chip carries the delegated done presentation bucket');
+  doneChips[0].listeners.click();
+  assert.deepStrictEqual(projectOpened.at(-1), [`${epicDoneDir}/Epic Done`, stationPath, false],
+    'P4: the done-chip click opens the completed epic atlas');
+  assert(!textOf(pRoot).includes('ED-1'), 'P4: slices of a Completed-lane epic never render');
+
+  // P5: Discovered triage, the Archive section, and anything below the kanban
+  // archive divider never render.
+  const pText = textOf(pRoot);
+  for (const name of ['Stray Finding', 'Epic Ancient', 'Below Divider Epic']) {
+    assert(!pText.includes(name), `P5: '${name}' never renders at project scope`);
+  }
+
+  // P6: a live-lane epic whose atlas/board note is missing renders a warning
+  // strip entry — the container still renders (never a throw, never blank).
+  const missingRows = byClass(pRoot, 'warning-missing-epic');
+  assert.strictEqual(missingRows.length, 2, 'P6: each unresolvable epic note renders exactly one warning row');
+  assert.strictEqual(missingRows[0].textContent,
+    `Epic Missing: epic atlas or board note is missing: '${projectDir}/tasks/Epic Missing/Epic Missing.md'`,
+    'P6: the warning names the epic and the missing note');
+  // P7 (GV-3b repair): the board-missing permutation warns with the BOARD path
+  // as the detail — while its cluster (asserted above) still renders.
+  assert.strictEqual(missingRows[1].textContent,
+    `Epic Boardless: epic atlas or board note is missing: '${epicBoardlessDir}/board/Epic Boardless-board.md'`,
+    'P7: the board-missing warning names the epic and the missing board note');
+
+  // GV3-STALE-DEP-EDGE lineage: a depends_on naming a card in NO cluster stays
+  // on the dangling warning path (the same code path as epic scope).
+  const pDangling = byClass(pRoot, 'warning-dangling-dependency');
+  assert.strictEqual(pDangling.length, 1, 'P: exactly one project-scope dangling warning renders');
+  assert.strictEqual(pDangling[0].textContent,
+    "E2-2 Delta: depends on a card that doesn't exist: 'Ghost Card'",
+    'P: a target resolvable in no cluster is a dangling warning, not a cross edge');
+
+  // Mount contract: the Loop Station guard block passes { scope: "project" }
+  // as a render-time arg to the epic-default singleton.
+  const overrideContainer = element();
+  await new GraphView().render({ container: overrideContainer }, { scope: 'project' });
+  assert.strictEqual(byClass(overrideContainer.children[0], 'graph-view-cluster-header').length, 4,
+    'P: customjs-guard args { scope: "project" } select project scope on the singleton');
+
+  // Fail-soft: a project without its parent board renders a warning row.
+  const orphanPage = { file: { path: 'spice/projects/ghost/Loop Station.md', folder: 'spice/projects/ghost' }, active: null };
+  global.customJS.RenderSafe = { page: () => orphanPage };
+  const orphanContainer = element();
+  await new GraphView({ scope: 'project' }).render({ container: orphanContainer });
+  const orphanRows = byClass(orphanContainer.children[0], 'warning-missing-board');
+  assert.strictEqual(orphanRows.length, 1, 'P: a missing parent board renders one warning row');
+  assert.strictEqual(orphanRows[0].textContent,
+    "ghost: parent board note is missing: 'spice/projects/ghost/ghost-board.md'",
+    'P: the warning names the expected parent board path');
+
+  // P8: zero mutator calls across every project-scope render.
+  assert.deepStrictEqual(projectMutations, [],
+    'P8: project scope invokes no vault, adapter, frontmatter, or metadata mutator');
+  assert.strictEqual(projectOpened.length, 2, 'P8: only the explicit test clicks navigated');
+  global.app = savedApp;
+  global.customJS = savedCustomJS;
 
   // Cold load: RenderSafe absent is a render-safe no-op.
   const priorRenderSafe = global.customJS.RenderSafe;
@@ -489,6 +754,71 @@ async function main() {
     firstPassStore, 'heal replay is byte-identical');
   assert.strictEqual(healAdapter.writes.length, writesAfterFirstPass, 'heal replay performs zero writes');
   assert(!healHistory.some((entry) => entry.event === 'warning'), 'heal fixtures produce no warnings');
+
+  // Loop Station heal (GV-3b): an existing type:loop-station note without the
+  // project-scope GraphView block gains it exactly once, directly after the
+  // OperatorStation block; replay is byte-identical with zero writes; a
+  // station already carrying it is untouched; non-station notes are ignored.
+  const stationGuardBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "GraphView", args: [{ scope: "project" }] });\n```';
+  const operatorOnlyStation = [
+    '---', 'type: "loop-station"', 'schema_version: "1.0.0"', '---', '',
+    '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });', '```', '',
+  ].join('\n');
+  const carryingStation = `${operatorOnlyStation}\n${stationGuardBlock}\n`;
+  // GV-3b repair: a type:loop-station note WITHOUT an OperatorStation block —
+  // the heal's fallback path appends the GraphView block at end-of-note.
+  const bareStation = [
+    '---', 'type: "loop-station"', 'schema_version: "1.0.0"', '---', '',
+    'Legacy station body with no OperatorStation block.', '',
+  ].join('\n');
+  const projectBoardNote = '---\nkanban-plugin: board\ntype: kanban\n---\n';
+  const stationAdapter = memoryAdapter({
+    'spice/projects/demo/Loop Station.md': operatorOnlyStation,
+    'spice/projects/demo/demo-board.md': projectBoardNote,
+    'spice/projects/other/Loop Station.md': carryingStation,
+    'spice/projects/bare/Loop Station.md': bareStation,
+  });
+  const stationHistory = [];
+  const stationTp = { app: { vault: { adapter: stationAdapter } } };
+  await installer.applyLoopStationGraphHeal(stationTp, { name: 'project' }, {}, stationHistory, { commit: 'fixture', tag: null, dirty: false });
+  const healedStation = stationAdapter.store.get('spice/projects/demo/Loop Station.md');
+  const operatorAt = healedStation.indexOf('class: "OperatorStation"');
+  const stationGraphAt = healedStation.indexOf('class: "GraphView"');
+  assert(operatorAt >= 0 && stationGraphAt > operatorAt,
+    'station heal injects the GraphView block after the OperatorStation block');
+  assert.strictEqual((healedStation.match(/class: "GraphView"/g) || []).length, 1,
+    'station heal injects exactly one GraphView block');
+  assert(healedStation.includes('args: [{ scope: "project" }]'),
+    'station heal mounts GraphView at PROJECT scope');
+  assert.strictEqual((healedStation.match(/class: "OperatorStation"/g) || []).length, 1,
+    'station heal keeps exactly one OperatorStation block');
+  assert.strictEqual(stationAdapter.store.get('spice/projects/other/Loop Station.md'), carryingStation,
+    'a station already carrying the block is byte-untouched');
+  assert(!stationAdapter.writes.some(({ entry }) => entry.includes('other/Loop Station.md')),
+    'no write is issued for the already-carrying station');
+  assert.strictEqual(stationAdapter.store.get('spice/projects/demo/demo-board.md'), projectBoardNote,
+    'non-loop-station notes in the project dir are ignored');
+  // GV-3b repair: the fallback append — no OperatorStation block, so the
+  // GraphView block lands at end-of-note (trimmed body + one blank line).
+  assert.strictEqual(stationAdapter.store.get('spice/projects/bare/Loop Station.md'),
+    `${bareStation.trimEnd()}\n\n${stationGuardBlock}\n`,
+    'station heal fallback-appends the GraphView block to a station lacking OperatorStation');
+  assert(stationHistory.some((entry) => entry.event === 'info' && entry.step === 'loop_station_graph_heal'
+    && entry.action === 'graph_view_injected' && entry.target === 'spice/projects/bare/Loop Station.md'),
+  'station heal records the fallback-append injection history event');
+  const stationFirstPass = [...stationAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const stationWritesAfterFirstPass = stationAdapter.writes.length;
+  await installer.applyLoopStationGraphHeal(stationTp, { name: 'project' }, {}, stationHistory, { commit: 'fixture', tag: null, dirty: false });
+  assert.deepStrictEqual(
+    [...stationAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    stationFirstPass, 'station heal replay is byte-identical');
+  assert.strictEqual(stationAdapter.writes.length, stationWritesAfterFirstPass,
+    'station heal replay performs zero writes');
+  assert(!stationHistory.some((entry) => entry.event === 'warning'),
+    'station heal fixtures produce no warnings');
+  assert(stationHistory.some((entry) => entry.event === 'info' && entry.step === 'loop_station_graph_heal'
+    && entry.action === 'graph_view_injected' && entry.target === 'spice/projects/demo/Loop Station.md'),
+  'station heal records one injection history event');
 
   console.log('graph-view: all checks passed');
 }
