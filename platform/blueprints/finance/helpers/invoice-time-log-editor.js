@@ -259,11 +259,28 @@ class InvoiceTimeLogEditor {
 
     async _propagateAfterMutation(file, dv, newEntries, siblingInvoicePath) {
         const total_hours = Math.round(newEntries.reduce((s, e) => s + (Number(e?.hours) || 0), 0) * 100) / 100;
-        const priorTimeLog = customJS.FinanceFrontmatter.read?.(file) || {};
-        const priorEntries = Array.isArray(priorTimeLog.entries) ? priorTimeLog.entries.slice() : [];
-        const priorTotal = priorTimeLog.total_hours;
+        const own = (owner, key) => Object.prototype.hasOwnProperty.call(owner, key);
+        const copy = (value) => Array.isArray(value)
+            ? value.map((row) => row && typeof row === "object" ? { ...row } : row)
+            : value;
+        const same = (left, right) => {
+            if (left.present !== right.present) return false;
+            if (!left.present) return true;
+            return JSON.stringify(left.value) === JSON.stringify(right.value);
+        };
+        let receipt = null;
         await customJS.FinanceFrontmatter.update(file, (fm) => {
-            fm.entries = newEntries;
+            receipt = {
+                entries: {
+                    before: { present: own(fm, "entries"), value: copy(fm.entries) },
+                    after: { present: true, value: copy(newEntries) },
+                },
+                total_hours: {
+                    before: { present: own(fm, "total_hours"), value: fm.total_hours },
+                    after: { present: true, value: total_hours },
+                },
+            };
+            fm.entries = copy(newEntries);
             fm.total_hours = total_hours;
         });
         try {
@@ -282,9 +299,17 @@ class InvoiceTimeLogEditor {
             // failure so the structural root can roll back truthfully.
             try {
                 await customJS.FinanceFrontmatter.update(file, (fm) => {
-                    fm.entries = priorEntries;
-                    if (priorTotal === undefined) delete fm.total_hours;
-                    else fm.total_hours = priorTotal;
+                    const currentEntries = { present: own(fm, "entries"), value: copy(fm.entries) };
+                    const currentTotal = { present: own(fm, "total_hours"), value: fm.total_hours };
+                    if (!receipt
+                        || !same(currentEntries, receipt.entries.after)
+                        || !same(currentTotal, receipt.total_hours.after)) {
+                        throw new Error("Time-Log changed after Invoice propagation began");
+                    }
+                    if (receipt.entries.before.present) fm.entries = copy(receipt.entries.before.value);
+                    else delete fm.entries;
+                    if (receipt.total_hours.before.present) fm.total_hours = receipt.total_hours.before.value;
+                    else delete fm.total_hours;
                 });
             } catch (_rollbackError) {
                 throw new Error(`Invoice write failed and Time-Log compensation failed: ${_rollbackError.message || _rollbackError}`);

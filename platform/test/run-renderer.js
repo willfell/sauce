@@ -3036,13 +3036,15 @@ async function testFF35FinanceStructuralRollback() {
 async function testFF37InvoiceTimeLogMissingSiblingCompensation() {
   console.log('\n=== FF37 / PERF-3 — missing sibling Invoice compensates the Time-Log write ===');
   const app = makeApp();
-  app.vault.getAbstractFileByPath = () => null;
   const file = { path: 'spice/finance/invoices/2026-08/Time-Log-2026-08.md' };
-  const priorEntries = [{ date: '2026-08-01', hours: 1, description: 'Prior' }];
-  const state = { entries: priorEntries.map((row) => ({ ...row })), server_only: 'keep' };
+  const state = { server_only: 'keep' };
+  app.vault.getAbstractFileByPath = () => null;
   const Cls = loadFinanceClass('InvoiceTimeLogEditor', app, {
     FinanceFrontmatter: {
-      read: () => ({ ...state, entries: state.entries.map((row) => ({ ...row })) }),
+      read: () => ({
+        entries: [{ date: '2025-01-01', hours: 99, description: 'Stale cache' }],
+        total_hours: 99,
+      }),
       update: async (_file, mutator) => { await mutator(state); },
     },
   });
@@ -3051,17 +3053,50 @@ async function testFF37InvoiceTimeLogMissingSiblingCompensation() {
     await new Cls()._propagateAfterMutation(
       file,
       {},
-      priorEntries.concat([{ date: '2026-08-02', hours: 2, description: 'New' }]),
+      [{ date: '2026-08-02', hours: 2, description: 'New' }],
       'spice/finance/invoices/2026-08/Invoice-2026-08.md',
     );
   } catch (error) {
     rejected = /Sibling Invoice file is missing/.test(String(error && error.message));
   }
-  const restored = JSON.stringify(state.entries) === JSON.stringify(priorEntries)
+  const restored = !Object.prototype.hasOwnProperty.call(state, 'entries')
     && !Object.prototype.hasOwnProperty.call(state, 'total_hours')
     && state.server_only === 'keep';
-  const pass = rejected && restored;
-  console.log(`  rejected: ${rejected} ; exact Time-Log fields restored: ${restored}`);
+  const concurrent = [{ date: '2026-08-03', hours: 8, description: 'Concurrent edit' }];
+  const conflictState = {
+    entries: [{ date: '2026-08-01', hours: 1, description: 'Prior' }],
+    total_hours: 1,
+    server_only: 'keep',
+  };
+  const conflictApp = makeApp();
+  conflictApp.vault.getAbstractFileByPath = () => {
+    conflictState.entries = concurrent.map((row) => ({ ...row }));
+    conflictState.total_hours = 8;
+    return null;
+  };
+  const ConflictCls = loadFinanceClass('InvoiceTimeLogEditor', conflictApp, {
+    FinanceFrontmatter: {
+      read: () => ({ entries: [], total_hours: 0 }),
+      update: async (_file, mutator) => { await mutator(conflictState); },
+    },
+  });
+  let conflictRejected = false;
+  try {
+    await new ConflictCls()._propagateAfterMutation(
+      file,
+      {},
+      [{ date: '2026-08-02', hours: 2, description: 'New' }],
+      'spice/finance/invoices/2026-08/Invoice-2026-08.md',
+    );
+  } catch (error) {
+    conflictRejected = /compensation failed/.test(String(error && error.message));
+  }
+  const concurrentPreserved = JSON.stringify(conflictState.entries) === JSON.stringify(concurrent)
+    && conflictState.total_hours === 8
+    && conflictState.server_only === 'keep';
+  const pass = rejected && restored && conflictRejected && concurrentPreserved;
+  console.log(`  rejected: ${rejected} ; stale read ignored + field absence restored: ${restored}`);
+  console.log(`  compensation conflict rejected: ${conflictRejected} ; concurrent edit preserved: ${concurrentPreserved}`);
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
