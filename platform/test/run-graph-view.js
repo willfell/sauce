@@ -224,6 +224,27 @@ async function main() {
 
   const opened = [];
   const mutations = [];
+  const persistenceMutations = [];
+  const savedLocalStorageDescriptor = Object.getOwnPropertyDescriptor(global, 'localStorage');
+  const savedCoordinator = global.coordinator;
+  const savedDeliveryCoordinator = global.DeliveryCoordinator;
+  const coordinatorSentinel = new Proxy({}, {
+    get(_target, name) {
+      return (...args) => persistenceMutations.push({ surface: `coordinator.${String(name)}`, args });
+    },
+  });
+  Object.defineProperty(global, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem() { return null; },
+      setItem(...args) { persistenceMutations.push({ surface: 'localStorage.setItem', args }); },
+      removeItem(...args) { persistenceMutations.push({ surface: 'localStorage.removeItem', args }); },
+      clear(...args) { persistenceMutations.push({ surface: 'localStorage.clear', args }); },
+    },
+  });
+  global.coordinator = coordinatorSentinel;
+  global.DeliveryCoordinator = coordinatorSentinel;
   const mutator = (name) => () => {
     mutations.push(name);
     throw new Error(`read-only fixture invoked ${name}`);
@@ -271,6 +292,8 @@ async function main() {
     RenderSafe: { page: () => currentPage },
     GraphLayout: new GraphLayout(),
     EpicDashboard: dashboard,
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
 
   // Case 1 + 2: gather mirrors _slicePages semantics; laneOrder comes from the
@@ -717,6 +740,11 @@ async function main() {
     && byClass(nullGatePanel, 'graph-view-detail-dependent').length === 1
     && textOf(byClass(nullGatePanel, 'graph-view-detail-dependent')[0]).includes('BLN-B'),
   'BL4-NULL-PROPAGATION: panel gates count/links exclude null-status propagation nodes exactly like GraphInsights');
+  const nullGateChips = byClass(nullGateRoot, 'graph-view-chip');
+  const nullGateChipFor = (id) => nullGateChips.find((chip) => textOf(chip).includes(id));
+  assert(!nullGateChipFor('BLN-U').className.includes('graph-view-dimmed')
+    && !nullGateChipFor('BLN-B').className.includes('graph-view-dimmed'),
+  'BL4-NULL-PROPAGATION-CHAIN: null-status U remains highlighted in A\'s transitive chain while excluded from gates');
 
   // BL-3 calm/fail-soft posture. With no stuck nodes, real analysis must be
   // structurally byte-identical to GraphInsights missing. A throwing analyzer
@@ -842,6 +870,8 @@ async function main() {
     GraphLayout: new GraphLayout(),
     GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
   const bContainer = element();
   await new GraphView().render({ container: bContainer });
@@ -973,6 +1003,8 @@ async function main() {
     RenderSafe: { page: () => mxPage },
     GraphLayout: new GraphLayout(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
   const mxContainer = element();
   await new GraphView({ lifecycleApi, insights: new GraphInsights() }).render({ container: mxContainer });
@@ -1275,6 +1307,8 @@ async function main() {
     GraphLayout: new GraphLayout(),
     GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    Coordinator: coordinatorSentinel,
+    DeliveryCoordinator: coordinatorSentinel,
   };
   const projectContainer = element();
   await new GraphView({ scope: 'project' }).render({ container: projectContainer });
@@ -1526,6 +1560,14 @@ async function main() {
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
   global.customJS.RenderSafe = priorRenderSafe;
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
+  assert.deepStrictEqual(persistenceMutations, [],
+    'BL4-ZERO-PERSISTENCE-SURFACES: selection invokes no localStorage or coordinator mutation surface');
+  if (savedLocalStorageDescriptor) Object.defineProperty(global, 'localStorage', savedLocalStorageDescriptor);
+  else delete global.localStorage;
+  if (savedCoordinator === undefined) delete global.coordinator;
+  else global.coordinator = savedCoordinator;
+  if (savedDeliveryCoordinator === undefined) delete global.DeliveryCoordinator;
+  else global.DeliveryCoordinator = savedDeliveryCoordinator;
 
   // Widget grammar: RenderSafe-only current access, bare loadable class.
   assert(!widgetSource.includes('dv.current('), 'widget uses RenderSafe instead of raw dv.current');
