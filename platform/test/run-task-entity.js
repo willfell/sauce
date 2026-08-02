@@ -2653,6 +2653,30 @@ async function runPerf1StructuralTests() {
       'result-level delete failure leaves the exact row and sibling order intact');
     assert(notices.length === 1 && notices[0].includes('Could not delete task: write rejected'),
       'result-level delete failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+
+    currentTD.markDeleted = async () => { markCalls++; return { ok: true }; };
+    const successRow = TaskTodayList.renderTaskRow(container,
+      { title: 'successful child', path: 'spice/tasks/successful child.md', status: 'open' }, currentTD);
+    const successAfter = container.createEl('div');
+    await fireClick(findByCls(successRow, 'sauce-task-action-delete'));
+    assert(markCalls === 2 && childIndex(container, successRow) === -1,
+      'no-RenderSafe ok:true calls markDeleted once and removes its exact row');
+    assert(childIndex(container, row) >= 0 && childIndex(container, successAfter) >= 0 && notices.length === 1,
+      'successful fallback preserves other rows/siblings and emits no failure notice');
+
+    currentTD.markDeleted = async () => { markCalls++; throw new Error('delete exploded'); };
+    const throwBefore = container.createEl('div');
+    const throwRow = TaskTodayList.renderTaskRow(container,
+      { title: 'throwing child', path: 'spice/tasks/throwing child.md', status: 'open' }, currentTD);
+    const throwAfter = container.createEl('div');
+    await fireClick(findByCls(throwRow, 'sauce-task-action-delete'));
+    assert(markCalls === 3 && childIndex(container, throwRow) >= 0,
+      'no-RenderSafe throw calls markDeleted once and leaves its exact row intact');
+    assert(childIndex(container, throwBefore) < childIndex(container, throwRow)
+      && childIndex(container, throwRow) < childIndex(container, throwAfter),
+    'thrown delete preserves exact sibling order');
+    assert(notices.length === 2 && notices[1].includes('Could not delete task: delete exploded'),
+      'thrown delete emits exactly one additional reason-bound notice: ' + JSON.stringify(notices));
     global.Notice = function () {};
   });
 
