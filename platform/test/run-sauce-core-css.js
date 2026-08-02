@@ -94,6 +94,22 @@ function compareSpecificity(a, b) {
   return 0;
 }
 
+function assertChromeModifierOutranksBase(source) {
+  const parsed = rules(source);
+  const base = parsed.find((rule) => rule.selector === "body .sauce-btn.sauce-btn.sauce-btn");
+  const chrome = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn")
+    && rule.declarations.includes("height: 32px")
+    && rule.declarations.includes("padding: 0 16px")
+  ));
+  assert.ok(base, "missing triple-class sauce button base selector");
+  assert.ok(chrome, "missing ChromeBar geometry modifier selector");
+  assert.ok(
+    compareSpecificity(specificity(chrome.selector), specificity(base.selector)) > 0,
+    `ChromeBar modifier ${chrome.selector} must outrank base ${base.selector}`,
+  );
+}
+
 function blockAfter(source, marker) {
   const markerIndex = source.indexOf(marker);
   assert.ok(markerIndex >= 0, "missing block " + marker);
@@ -190,6 +206,21 @@ test("CSS1 chrome button modifiers preserve the legacy 32px visual contract", ()
   assert.match(body(".sauce-chrome-btn:active"), /transform:\s*scale\(0\.94\)/);
 });
 
+test("CSS1-CHROME-MODIFIER-SPECIFICITY binds ChromeBar geometry above the triple-class base", () => {
+  assertChromeModifierOutranksBase(css);
+
+  const weakened = css.replace(
+    "body .sauce-btn.sauce-btn.sauce-btn.sauce-chrome-btn {",
+    "body .sauce-chrome-btn {",
+  );
+  assert.notStrictEqual(weakened, css, "specificity mutation did not reach the production selector");
+  assert.throws(
+    () => assertChromeModifierOutranksBase(weakened),
+    /ChromeBar modifier .* must outrank base/,
+    "weak-selector mutation must turn this fixture red",
+  );
+});
+
 test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter snapshots", () => {
   const makeParent = () => ({
     children: [],
@@ -257,7 +288,7 @@ test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter sna
   }
 });
 
-test("CSS1 ChromeBar declares the styling mechanism that owns sauce-core", () => {
+test("CSS1-STYLING-DEPENDENCY-CLOSURE declares the styling mechanism that owns sauce-core", () => {
   assert.ok(
     chromeBarManifest.depends_on.some((dependency) => dependency.name === "styling" && dependency.range === ">=0.3.0"),
     "chrome-bar must require the styling mechanism before emitting sauce-core classes",
