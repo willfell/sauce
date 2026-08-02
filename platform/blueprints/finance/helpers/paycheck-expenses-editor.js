@@ -294,6 +294,11 @@ class PaycheckExpensesEditor {
         this._materializing = true;
         let deposits = [];
         try {
+            page = this._authoritativePage(file, dv, page);
+            if (Array.isArray(page && page.deposits) && page.deposits.length > 0) {
+                await this._rerender(dv, undefined, page);
+                return;
+            }
             const pd = customJS.FinanceFrontmatter.read?.("spice/finance/Paycheck Defaults.md");
             const sched = (pd && Array.isArray(pd.deposit_schedule) && pd.deposit_schedule.length)
                 ? pd.deposit_schedule
@@ -325,6 +330,15 @@ class PaycheckExpensesEditor {
         const name = page && page.file && page.file.name;
         const m = typeof name === "string" ? name.match(/Paycheck-(\d{4}-\d{2})/) : null;
         return m ? m[1] : "";
+    }
+
+    _authoritativePage(file, dv, fallback) {
+        const page = fallback || this._page(dv);
+        const written = customJS.FinanceFrontmatter.read?.(file);
+        if (!written || typeof written !== "object") return page;
+        return Object.assign({}, page || {}, written, {
+            file: page && page.file ? page.file : { path: file.path, name: file.basename || file.name || "" }
+        });
     }
 
     _renderDepositsHeader(root, file, dv, page) {
@@ -368,8 +382,8 @@ class PaycheckExpensesEditor {
         if (raw === null) return;
         const amount = Number(raw);
         if (!isFinite(amount) || amount < 0) return;
-        const page = this._page(dv);
-        const base = (page && Array.isArray(page.deposits)) ? page.deposits : [];
+        const page = this._authoritativePage(file, dv) || {};
+        const base = Array.isArray(page.deposits) ? page.deposits : [];
         const newDeposits = base.map((d) => Object.assign({}, d));
         if (i >= 0 && i < newDeposits.length) newDeposits[i] = Object.assign({}, newDeposits[i], { amount });
         const nextPage = Object.assign({}, page, { deposits: newDeposits });
@@ -623,7 +637,7 @@ class PaycheckExpensesEditor {
     // 1-based deposit index; merge-write the `deposit` field, then render from
     // the authoritative array (dv.current() lags).
     async _moveFlow(file, dv, index, exp) {
-        const page = this._page(dv);
+        const page = this._authoritativePage(file, dv);
         const deposits = (page && Array.isArray(page.deposits)) ? page.deposits : [];
         const currentIndex = this._depositIndex(exp, deposits.length);
         const chosen = await this._promptForDeposit(deposits, currentIndex);

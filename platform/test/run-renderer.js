@@ -140,6 +140,8 @@ function makeEl(tag, opts) {
     return child;
   };
   el.querySelector = function (sel) {
+    const direct = typeof sel === 'string' ? sel.match(/^:scope\s*>\s*\.([A-Za-z0-9_-]+)$/) : null;
+    if (direct) return el.children.find((child) => child.cls === direct[1] || child.className === direct[1]) || null;
     if (typeof sel !== 'string' || sel[0] !== '.') return null;
     const cls = sel.slice(1);
     const walk = (n) => {
@@ -2028,6 +2030,15 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
   const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
   app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
   const overrides = {
+    FinanceFrontmatter: {
+      // The metadata page below remains frozen. The shared helper exposes the
+      // completed first write to the second gesture until Dataview catches up.
+      read: () => ({
+        month: store.month,
+        deposits: store.deposits.map(d => ({ ...d })),
+        expenses: store.expenses.slice(),
+      }),
+    },
     FinanceMath: {
       _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
       // depositTotals derives from the passed page so the header reflects the
@@ -2050,8 +2061,10 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
     store.deposits = fm.deposits;
     store.expenses = fm.expenses;
   };
-  // Stub window.prompt to type the NEW deposit amount (6000).
-  const restoreWin = (() => { const prior = global.window; global.window = { prompt: () => '6000' }; return () => { global.window = prior; }; })();
+  // Two gestures complete while dv.current() remains frozen. The second must
+  // retain deposit[0]=6000 while applying deposit[1]=3500.
+  const promptValues = ['6000', '3500'];
+  const restoreWin = (() => { const prior = global.window; global.window = { prompt: () => promptValues.shift() }; return () => { global.window = prior; }; })();
   // dv.current() is FROZEN to the PRE-edit page (deposit 0 amount = 4500).
   const page = {
     file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
@@ -2061,17 +2074,25 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
   };
   const dv = makeDvWithCurrent(page);
   const file = app.vault.getAbstractFileByPath(page.file.path);
+  const renderedDeposits = [];
+  const rerender = inst._rerender.bind(inst);
+  inst._rerender = async (...args) => {
+    renderedDeposits.push((args[2]?.deposits || []).map((deposit) => deposit.amount));
+    return await rerender(...args);
+  };
   await inst._editDepositAmount(file, dv, 0);
+  await inst._editDepositAmount(file, dv, 1);
   restoreWin();
-  const wroteAmount = store.deposits[0].amount === 6000;
+  const wroteAmounts = store.deposits[0].amount === 6000 && store.deposits[1].amount === 3500;
   const root = findClass(dv.container, 'pee-root');
   const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
   const joined = texts.join(' | ');
-  // The re-render must show the NEW amount (6000.00), NOT the frozen 4500.00.
-  const showsNew = joined.includes('6000.00');
-  const showsStale = joined.includes('4500.00');
-  console.log(`  wrote deposit[0]=6000: ${wroteAmount} ; re-render shows 6000.00: ${showsNew} ; stale 4500.00 still shown: ${showsStale}`);
-  const pass = wroteAmount && showsNew && !showsStale;
+  const showsBoth = joined.includes('6000.00') && joined.includes('3500.00');
+  const rootCount = dv.container.children.filter((child) => child.cls === 'pee-root').length;
+  const resurrectsStale = joined.includes('4500.00') || joined.includes('3000.00');
+  const exactSequence = JSON.stringify(renderedDeposits) === JSON.stringify([[6000, 3000], [6000, 3500]]);
+  console.log(`  persisted both edits: ${wroteAmounts} ; exact optimistic sequence: ${exactSequence} ; roots: ${rootCount} ; second repaint shows both: ${showsBoth} ; stale amount resurrected: ${resurrectsStale}`);
+  const pass = wroteAmounts && exactSequence && rootCount === 1 && showsBoth && !resurrectsStale;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
