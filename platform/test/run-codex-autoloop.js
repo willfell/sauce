@@ -8217,6 +8217,32 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
     'A4 disk repoint targets the on-disk successor');
   eq(diskDry.needs_decision.find((d) => d.card === 'DEP-ghost'), { card: 'DEP-ghost', from: 'GHOST-NEVER' },
     'A4 truly orphaned dependency (no note, no state, no superseder) ⇒ needs-decision');
+
+  // Director-directed repoint (--clear <deadRef> --to <liveTarget>): repoints an
+  // orphaned pointer to an explicit live successor; guarded against self-deps and
+  // non-live targets; --to without --clear is refused.
+  fs.writeFileSync(path.join(cardsRoot, 'SUCC-target.md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on: []', '---', 'x'].join('\n'));
+  const pDirected = mk('DEP-directed', 'ORPHAN-OLD'); // ORPHAN-OLD has no note/state/superseder
+  const directed = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-directed', clear: 'ORPHAN-OLD', to: 'SUCC-target', reason: 'director repoint', apply: true, json: true,
+  }, deps);
+  const dp = directed.plan.find((p) => p.card === 'DEP-directed');
+  eq(dp && dp.classification, 'repoint', 'A4 --to directs a repoint');
+  eq(dp && dp.to, 'SUCC-target', 'A4 --to targets the named live successor');
+  ok(/\[\[SUCC-target\]\]/.test(fs.readFileSync(pDirected, 'utf8')), 'A4 --to rewrites the dependent on disk');
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, to: 'X', reason: 'x', json: true }, deps),
+    /--to requires --clear/, 'A4 --to without --clear is refused',
+  );
+  const pSelf = mk('SELF-target', 'SELF-old');
+  fs.writeFileSync(path.join(cardsRoot, 'SELF-target.md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[SELF-old]]"', '---', 'x'].join('\n'));
+  const selfDirected = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'SELF-target', clear: 'SELF-old', to: 'SELF-target', reason: 'self', apply: true, json: true,
+  }, deps);
+  ok(!selfDirected.plan.some((p) => p.card === 'SELF-target' && p.classification === 'repoint'),
+    'A4 --to never repoints a card at itself');
 }
 
 // OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note

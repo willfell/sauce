@@ -6869,6 +6869,8 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
   if (!reason) throw new Error('reconcile-dependencies requires a non-empty --reason');
   const apply = args.apply === true;
   const clearName = args.clear ? normalizeCardLink(String(args.clear)) : null;
+  const toName = args.to ? normalizeCardLink(String(args.to)) : null;
+  if (toName !== null && clearName === null) throw new Error('reconcile-dependencies --to requires --clear to name the dead pointer');
   const loadState = deps.readState || readState;
   const writeText = deps.writeText || atomicWriteText;
   const lock = deps.withLock || withLock;
@@ -6939,8 +6941,15 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
           if (typeof ref === 'string' && /^external:/.test(ref)) continue; // off-board dep, never resolved
           // Director-authorized explicit clear takes precedence over any auto-classification.
           if (clearName && ref === clearName) {
-            if (isLive(ref)) continue; // live card (tracked or on disk) — refuse to clear
+            if (isLive(ref)) continue; // live card (tracked or on disk) — refuse to touch
             if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
+            if (toName) {
+              // Director-directed repoint: target must be a live card and never the dependent itself.
+              if (!isLive(toName) || toName === normalizeCardLink(depName)) { needsDecision.push({ card: depName, from: ref }); continue; }
+              plan.push({ card: depName, from: ref, to: toName, classification: 'repoint', path: full });
+              if (apply) { const w = rewriteDependsOn(raw, ref, toName); if (w.changed) { raw = w.text; writeText(full, raw); } }
+              continue;
+            }
             plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
             if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }
             continue;
