@@ -808,6 +808,8 @@ class TaskTodayList {
                     if (deleted && deleted.ok) {
                         try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
                         try { row.remove(); } catch (_e) {}
+                    } else {
+                        try { new Notice('Could not delete task: ' + ((deleted && deleted.reason) || 'delete failed'), 6000); } catch (_e) {}
                     }
                 }
             } catch (e) {

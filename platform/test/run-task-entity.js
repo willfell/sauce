@@ -2628,6 +2628,34 @@ async function runPerf1StructuralTests() {
       'legacy delete preserves sibling identity and order');
   });
 
+  await okAsync('PERF1-NO-RENDERSAFE-DELETE-FAILURE-SILENCE reports result-level delete failure', async () => {
+    const notices = [];
+    let markCalls = 0;
+    global.Notice = function (message) { notices.push(String(message)); };
+    const currentTD = {
+      open() {},
+      supportsDeferredDelete: () => true,
+      confirmDelete: async (_path, opts) => ({ ok: !!(opts && opts.deferWrite), confirmed: true, deferred: true }),
+      markDeleted: async () => { markCalls++; return { ok: false, reason: 'write rejected' }; },
+    };
+    global.window = {
+      app: { workspace: { openLinkText() {} } },
+      customJS: {},
+    };
+    const container = makeTreeNode('div');
+    const before = container.createEl('div');
+    const row = TaskTodayList.renderTaskRow(container,
+      { title: 'current child', path: 'spice/tasks/current child.md', status: 'open' }, currentTD);
+    const after = container.createEl('div');
+    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    assert(markCalls === 1, 'no-RenderSafe fallback calls markDeleted exactly once');
+    assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
+      'result-level delete failure leaves the exact row and sibling order intact');
+    assert(notices.length === 1 && notices[0].includes('Could not delete task: write rejected'),
+      'result-level delete failure emits one explicit reason-bound notice: ' + JSON.stringify(notices));
+    global.Notice = function () {};
+  });
+
   global.window = prevWindow;
   global.Notice = prevNotice;
 }
