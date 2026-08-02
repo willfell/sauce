@@ -201,6 +201,35 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         }
         ok("PERF3-FINANCE-COMPENSATION restores authoritative field absence", absenceRestored);
 
+        // Explicit YAML null is a present value, not an absent field. The
+        // compensation target must carry presence independently from value.
+        const nullableRecords = {
+            "Debt-First": { planned_monthly_payment: null },
+            "Debt-Second": { planned_monthly_payment: 200 },
+        };
+        rejectedSecond = false;
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            if (slug === "Debt-Second" && !rejectedSecond) {
+                rejectedSecond = true;
+                throw new Error("fixture second write rejected");
+            }
+            await mutator(nullableRecords[slug]);
+        };
+        let nullPresenceRestored = false;
+        try {
+            await w._writeAll([
+                { kind: "debt", slug: "Debt-First", before: 999, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+            ]);
+        } catch (_e) {
+            nullPresenceRestored = Object.prototype.hasOwnProperty.call(nullableRecords["Debt-First"], "planned_monthly_payment")
+                && nullableRecords["Debt-First"].planned_monthly_payment === null;
+        } finally {
+            customJS.FinanceFrontmatter.update = originalUpdate;
+        }
+        ok("PERF3-PLAN-NULL-PRESENCE restores an authoritative present YAML-null field", nullPresenceRestored);
+
         // no-plan degrade: current is the plan page but NOT in pages → ok:false
         const dv2 = makeDv(DEBTS, PLAN);
         const w2 = new Dash();

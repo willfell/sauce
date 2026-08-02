@@ -209,7 +209,7 @@ class FinancePlanDashboard {
                 // field value/presence inside processFrontMatter, immediately
                 // before this write, so compensation never trusts the modal's
                 // display-only snapshot.
-                const receipt = await this._writeDiffValue(d, d.after);
+                const receipt = await this._writeDiffValue(d, { present: true, value: d.after });
                 if (receipt.changed) applied.push(receipt);
             } catch (_e) {
                 console.error("FinancePlanDashboard apply failed", d, _e);
@@ -228,7 +228,7 @@ class FinancePlanDashboard {
         }
     }
 
-    async _writeDiffValue(diff, value, opts = {}) {
+    async _writeDiffValue(diff, target, opts = {}) {
         let receipt = null;
         const mutate = (owner, key) => {
             const before = {
@@ -240,9 +240,9 @@ class FinancePlanDashboard {
                     && (!before.present || Object.is(before.value, opts.expected.value));
                 if (!currentMatches) throw new Error(`Finance plan compensation conflict: ${diff.kind} changed after apply`);
             }
-            const after = value === undefined || value === null
-                ? { present: false, value: undefined }
-                : { present: true, value: opts.literal ? value : Number(value) };
+            const after = target && target.present
+                ? { present: true, value: opts.literal ? target.value : Number(target.value) }
+                : { present: false, value: undefined };
             const changed = before.present !== after.present
                 || (before.present && !Object.is(before.value, after.value));
             if (changed) {
@@ -282,7 +282,7 @@ class FinancePlanDashboard {
         const prior = receipt.before || { present: false, value: undefined };
         return await this._writeDiffValue(
             receipt.diff,
-            prior.present ? prior.value : undefined,
+            prior,
             { literal: true, expected: receipt.after },
         );
     }
