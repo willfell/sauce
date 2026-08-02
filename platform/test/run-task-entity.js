@@ -2749,6 +2749,23 @@ async function runPerf1StructuralTests() {
     await Promise.resolve(); await Promise.resolve();
     assert(input.value === 'Trailing draft ' && TD._quickCreateReservations.size === 0,
       'post-submit trailing-space edit survives normalized-title equality');
+
+    input.value = 'Sequence-only overlap';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[9].path === 'spice/tasks/Sequence-only overlap.md'
+      && pendingFallbacks[10].path === 'spice/tasks/Sequence-only overlap 2.md',
+    'same-title double-submit without an input event reserves distinct paths');
+    pendingFallbacks[9].resolve({ ok: true, path: pendingFallbacks[9].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Sequence-only overlap',
+      'sequence guard alone prevents older same-revision same-value success from clearing');
+    pendingFallbacks[10].resolve({ ok: true, path: pendingFallbacks[10].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === '' && TD._quickCreateReservations.size === 0,
+      'latest same-revision same-value success clears and releases ownership to zero');
     global.Notice = function () {};
   });
 
