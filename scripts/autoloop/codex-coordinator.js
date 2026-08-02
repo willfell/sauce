@@ -4049,6 +4049,48 @@ function pruneCardWorkspace(ctx, record, { run, worktreeExists }) {
   return { worktreeRemoved, worktreeError, branchReceipt };
 }
 
+// Discard-time dependents scan: when a card is discarded with a named
+// successor, any live note still pointing at the discarded predecessor is
+// walked from cardsRoot. Planning-status dependents are repointed to the
+// successor's own live tail (chased through any further supersession
+// chain); active/parked dependents, and any dependent when the successor
+// chain is a cycle or dead-end, are reported but never rewritten.
+function scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d) {
+  const rewrites = [];
+  const reports = [];
+  const predecessor = normalizeCardLink(card);
+  // Repoint dependents to the successor's own live tail (always repoint, never clear).
+  const resolved = resolveSupersessionTail(supersededBy, state);
+  const repointable = !resolved.cycle && !resolved.deadEnd;
+  const target = resolved.tail;
+  const stack = [cardsRoot];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) { stack.push(full); continue; }
+      if (!ent.name.endsWith('.md')) continue;
+      const depName = ent.name.replace(/\.md$/, '');
+      if (normalizeCardLink(depName) === predecessor) continue; // skip the predecessor's own note
+      const raw = fs.readFileSync(full, 'utf8');
+      if (!parseDependsOn(raw).includes(predecessor)) continue;
+      const record = state.cards[depName];
+      const phase = record ? record.phase : null;
+      const inFlight = record && (phase === 'claimed' || phase === 'implementing' || phase === 'parked');
+      if (inFlight || !repointable) {
+        reports.push({ card: depName, from: predecessor, phase }); // active/parked or unrepointable → report only
+        continue;
+      }
+      const rewritten = rewriteDependsOn(raw, predecessor, target);
+      if (rewritten.changed) {
+        d.writeText(full, rewritten.text);
+        rewrites.push({ card: depName, from: predecessor, to: target, path: full });
+      }
+    }
+  }
+  return { rewrites, reports };
+}
+
 // Per-card discard core. Callers own the selector + card-gate locks; commandDiscard
 // takes them for a single card and commandReap takes them per corpse in one batch.
 async function discardCardCore(ctx, operands, d) {
@@ -4115,6 +4157,11 @@ async function discardCardCore(ctx, operands, d) {
   state.cards[card] = target;
   persist(ctx, state, target);
 
+  let dependencyScan = { rewrites: [], reports: [] };
+  if (supersededBy) {
+    dependencyScan = scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d);
+  }
+
   const boardNext = removeBoardCard(boardRaw, card);
   const boardChanged = boardNext !== boardRaw;
   if (boardChanged) writeText(targetBoardPath, boardNext);
@@ -4156,6 +4203,8 @@ async function discardCardCore(ctx, operands, d) {
     ...(workspace.branchReceipt ? { branch: workspace.branchReceipt } : {}),
     ...(epicReceipt ? { epic: epicReceipt } : {}),
     ...(epicSurfaceError ? { epic_surface_error: epicSurfaceError } : {}),
+    ...(dependencyScan.rewrites.length ? { dependency_rewrites: dependencyScan.rewrites } : {}),
+    ...(dependencyScan.reports.length ? { dependency_reports: dependencyScan.reports } : {}),
   };
 }
 

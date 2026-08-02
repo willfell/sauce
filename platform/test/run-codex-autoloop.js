@@ -8027,6 +8027,43 @@ eq(discardStatus.discarded_recent.find((item) => item.name === 'Stale slice'), {
 eq(discardStatus.active_count, 0, 'tombstones never consume active capacity');
 eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false, 'tombstones have no board projection in the tracked view');
 
+// A3 discard-time scan rewrites planning dependents to the live tail
+{
+  const root = path.join(tmp, 'a3-discard-scan');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['BL-4'], planning: ['BL-5'] }));
+  const predPath = path.join(cardsRoot, 'BL-4.md');
+  const depPath = path.join(cardsRoot, 'BL-5.md');
+  const activePath = path.join(cardsRoot, 'BL-6.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  fs.writeFileSync(depPath, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[BL-4]]"', '---', 'x'].join('\n'));
+  fs.writeFileSync(activePath, ['---', 'type: slice', 'status: claimed', 'depends_on:', '  - "[[BL-4]]"', '---', 'x'].join('\n'));
+  const state = emptyState();
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'parked', card_path: predPath, gate_receipt: passingReceipt(DISCARD_HEAD) };
+  state.cards['BL-4b'] = { card: 'BL-4b', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  state.cards['BL-6'] = { card: 'BL-6', phase: 'claimed', card_path: activePath };
+  const deps = {
+    readState: () => state,
+    writeState: () => {},
+    withLock: async (_c, _n, fn) => fn(),
+    boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-02T00:00:00.000Z',
+    projectLoopStation: (_c, _s, u) => ({ action: 'loop-station-projected', no_op: false, updated_on: u }),
+  };
+  const receipt = await commandDiscard({ root }, {
+    card: 'BL-4', 'superseded-by': 'BL-4b', reason: 'superseded to BL-4c chain', json: true,
+  }, deps);
+  eq(receipt.dependency_rewrites, [{ card: 'BL-5', from: 'BL-4', to: 'BL-4c', path: depPath }],
+    'A3 planning dependent BL-5 is repointed to the live tail BL-4c');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(depPath, 'utf8')), 'A3 BL-5 note now points at BL-4c on disk');
+  eq(receipt.dependency_reports, [{ card: 'BL-6', from: 'BL-4', phase: 'claimed' }],
+    'A3 active dependent BL-6 is reported, not touched');
+  ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
+}
+
 // OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
 // residue that reap heals, but performs no mutation while doing so.
 const opx5Root = path.join(tmp, 'opx5-residue');
