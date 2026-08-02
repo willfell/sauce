@@ -1273,7 +1273,7 @@ function rewriteDependsOn(raw, fromName, toNameOrNull) {
     if (to && !next.includes(to)) next.push(to);
   }
   const serialized = next.length
-    ? ['depends_on:', ...next.map((n) => `  - "[[${n}]]"`)]
+    ? ['depends_on:', ...next.map((n) => (/^external:/.test(n) ? `  - ${JSON.stringify(n)}` : `  - "[[${n}]]"`))]
     : ['depends_on: []'];
   const text = patchFrontmatterBlocks(raw, { depends_on: serialized });
   return { text, changed: true };
@@ -6892,8 +6892,10 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
         const phase = record ? record.phase : null;
         const inFlight = record && (phase === 'claimed' || phase === 'implementing' || phase === 'parked');
         for (const ref of parseDependsOn(raw)) {
+          if (typeof ref === 'string' && /^external:/.test(ref)) continue; // off-board dep, never resolved
           // Director-authorized explicit clear takes precedence over any auto-classification.
           if (clearName && ref === clearName) {
+            if (state.cards[ref] && state.cards[ref].phase !== 'discarded') continue; // live dep — refuse to clear
             if (inFlight) { reports.push({ card: depName, from: ref, phase }); continue; }
             plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
             if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }

@@ -8120,6 +8120,18 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   eq(clearedPlan.to, null, 'A4 --clear has no target');
   ok(/depends_on: \[\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 --clear removes the confirmed-obsolete dep on disk');
 
+  // Finding #3: --clear must only remove a DANGLING pointer, never a live
+  // (non-discarded) dependency — even when the Director names it explicitly.
+  const pLiveClear = mk('DEP-liveclear', 'BL-4c'); // BL-4c is 'deployed' (live) in state
+  const liveClearBefore = fs.readFileSync(pLiveClear, 'utf8');
+  const liveClearResult = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-liveclear', clear: 'BL-4c', reason: 'attempted clear of a live dep', apply: true, json: true,
+  }, deps);
+  ok(!liveClearResult.plan.some((p) => p.card === 'DEP-liveclear' && p.classification === 'clear'),
+    'A4 --clear of a live (non-discarded) card never enters the plan as clear');
+  eq(fs.readFileSync(pLiveClear, 'utf8'), liveClearBefore,
+    'A4 --clear of a live card leaves the dependent note unchanged on disk');
+
   // Cycle chain, dead-end tombstone, and in-flight dependent — pin the
   // remaining classification branches so a refactor can't silently break them.
   const pCycle = mk('DEP-cycle', 'CYC-X');
@@ -8150,6 +8162,17 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(/\[\[BL-4\]\]/.test(fs.readFileSync(pInflight, 'utf8')), 'A4 apply leaves the in-flight dependent note untouched on disk');
   ok(/\[\[CYC-X\]\]/.test(fs.readFileSync(pCycle, 'utf8')), 'A4 apply leaves the cycle-chain dependent note untouched on disk');
   ok(/\[\[DEADEND-Z\]\]/.test(fs.readFileSync(pDeadEnd, 'utf8')), 'A4 apply leaves the dead-end dependent note untouched on disk');
+
+  // Finding #1: external: markers are off-board deps, accepted verbatim and
+  // NEVER resolved — they must not surface as either a repoint/clear plan
+  // entry or a needs_decision escalation.
+  const pExternal = path.join(cardsRoot, 'DEP-external.md');
+  fs.writeFileSync(pExternal, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "external:upstream vendor SDK"', '---', 'x'].join('\n'));
+  const externalDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  ok(!externalDry.plan.some((p) => p.card === 'DEP-external'), 'A4 external: dep never enters the plan');
+  ok(!externalDry.needs_decision.some((d) => d.card === 'DEP-external'), 'A4 external: dep never enters needs_decision');
 
   // Argument validation — exact operand-shape errors the CLI relies on.
   await assert.rejects(
@@ -8625,6 +8648,14 @@ ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
 
   const absent = coordinator.rewriteDependsOn(block, 'NOT-PRESENT', 'X');
   ok(!absent.changed && absent.text === block, 'A2 absent dep is a no-op');
+
+  // Finding #2: an external: sibling must survive serialization unwrapped —
+  // not corrupted into a wikilink when another dep on the same card is repointed.
+  const blockWithExternal = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "external:upstream vendor SDK"', '---', 'body'].join('\n');
+  const extRp = coordinator.rewriteDependsOn(blockWithExternal, 'BL-4', 'BL-4c');
+  ok(extRp.changed && /\[\[BL-4c\]\]/.test(extRp.text), 'A2 external-sibling repoint still swaps BL-4 → BL-4c');
+  ok(/external:upstream vendor SDK/.test(extRp.text), 'A2 external-sibling repoint preserves the external: entry verbatim');
+  ok(!/\[\[external:/.test(extRp.text), 'A2 external-sibling repoint leaves external: unwrapped, not [[external:...]]');
 }
 
 // BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
