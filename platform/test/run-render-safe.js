@@ -1691,7 +1691,8 @@ for (const financeEditor of [
 
 ok('PERF-3-FINANCE-PLAN applies through RenderSafe and captures before its self-render', () => {
   const src = helperSource('finance/helpers/finance-plan-dashboard.js');
-  assert(/RenderSafe\.mutate\(\{[\s\S]*write: \(\) => this\._writeAll\(diffs\)/.test(src), 'plan Apply delegates through RenderSafe');
+  assert(/RenderSafe\.mutate\(\{[\s\S]*write: \(\) => this\._writeAll\(diffs,\s*page\?\.file\?\.path\)/.test(src), 'plan Apply delegates through RenderSafe with its shared transaction key');
+  assert(/async _writeAll\([^)]*planPath[\s\S]*_serializePlanApply\(path,[\s\S]*async _serializePlanApply/.test(src), 'plan Apply serializes the full write and compensation transaction');
   assert(/async _rerender[\s\S]*captureScroll[\s\S]*this\.render\(dv\)/.test(src), 'plan repaint captures scroll');
 });
 

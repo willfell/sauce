@@ -230,6 +230,61 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         }
         ok("PERF3-PLAN-NULL-PRESENCE restores an authoritative present YAML-null field", nullPresenceRestored);
 
+        // Apply is one transaction across dashboard instances. An older Apply
+        // that rejects after its first entity write must finish compensation
+        // before an identical-target newer Apply begins, or the older receipt
+        // can roll the newer successful value back.
+        const overlapRecords = {
+            "Debt-First": { planned_monthly_payment: 100 },
+            "Debt-Second": { planned_monthly_payment: 200 },
+        };
+        let rejectBlockedSecond;
+        let markBlockedSecond;
+        const blockedSecondStarted = new Promise((resolve) => { markBlockedSecond = resolve; });
+        const blockedSecond = new Promise((_resolve, reject) => { rejectBlockedSecond = reject; });
+        let secondCalls = 0;
+        let activeWrites = 0;
+        let maxConcurrentWrites = 0;
+        const overlapEvents = [];
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            activeWrites++;
+            maxConcurrentWrites = Math.max(maxConcurrentWrites, activeWrites);
+            try {
+                overlapEvents.push(`start:${slug}`);
+                if (slug === "Debt-Second" && secondCalls++ === 0) {
+                    markBlockedSecond();
+                    await blockedSecond;
+                }
+                await mutator(overlapRecords[slug]);
+                overlapEvents.push(`finish:${slug}:${overlapRecords[slug].planned_monthly_payment}`);
+            } finally {
+                activeWrites--;
+            }
+        };
+        const overlapDiffs = [
+            { kind: "debt", slug: "Debt-First", before: 100, after: 200 },
+            { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+        ];
+        const olderDashboard = new Dash();
+        const newerDashboard = new Dash();
+        let olderRejected = false;
+        const olderApply = olderDashboard._writeAll(overlapDiffs)
+            .catch(() => { olderRejected = true; });
+        await blockedSecondStarted;
+        const newerApply = newerDashboard._writeAll(overlapDiffs);
+        await Promise.resolve();
+        const newerStayedQueued = overlapEvents.filter((event) => event.startsWith("start:")).length === 2;
+        rejectBlockedSecond(new Error("fixture older second write rejected"));
+        await olderApply;
+        await newerApply;
+        customJS.FinanceFrontmatter.update = originalUpdate;
+        ok("PERF3-SERIALIZED-PLAN-APPLY failed older transaction cannot compensate over newer success",
+            olderRejected && newerStayedQueued && maxConcurrentWrites === 1
+                && overlapRecords["Debt-First"].planned_monthly_payment === 200
+                && overlapRecords["Debt-Second"].planned_monthly_payment === 250
+                && Dash._planApplyQueues instanceof Map && Dash._planApplyQueues.size === 0);
+
         // no-plan degrade: current is the plan page but NOT in pages → ok:false
         const dv2 = makeDv(DEBTS, PLAN);
         const w2 = new Dash();

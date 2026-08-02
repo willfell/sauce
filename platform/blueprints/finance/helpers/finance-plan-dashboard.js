@@ -191,7 +191,7 @@ class FinancePlanDashboard {
                     failureMessage: "Could not apply Finance plan",
                     optimistic: () => { apply.disabled = true; },
                     revert: () => { apply.disabled = false; try { apply.focus(); } catch (_e) {} },
-                    write: () => this._writeAll(diffs),
+                    write: () => this._writeAll(diffs, page?.file?.path),
                 });
                 if (!result.ok) return;
             }
@@ -201,7 +201,26 @@ class FinancePlanDashboard {
         });
     }
 
-    async _writeAll(diffs) {
+    async _writeAll(diffs, planPath = "spice/finance/Finance Plan.md") {
+        const path = String(planPath || "spice/finance/Finance Plan.md");
+        return await this._serializePlanApply(path, () => this._writeAllNow(diffs));
+    }
+
+    async _serializePlanApply(path, task) {
+        const owner = this.constructor;
+        if (!Object.prototype.hasOwnProperty.call(owner, "_planApplyQueues")) {
+            owner._planApplyQueues = new Map();
+        }
+        const prior = owner._planApplyQueues.get(path) || Promise.resolve();
+        const current = prior.catch(() => {}).then(task);
+        owner._planApplyQueues.set(path, current);
+        try { return await current; }
+        finally {
+            if (owner._planApplyQueues.get(path) === current) owner._planApplyQueues.delete(path);
+        }
+    }
+
+    async _writeAllNow(diffs) {
         const applied = [];
         for (const d of diffs) {
             try {

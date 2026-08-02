@@ -42,17 +42,16 @@ class FinanceFrontmatter {
         });
         if (pending) await pending;
         if (!this._writtenFrontmatter) this._writtenFrontmatter = new Map();
-        // Keep this lag bridge bounded. Finance can touch an unbounded sequence
-        // of monthly/invoice files during one CustomJS session, and a file that
-        // is never read again must not leave its full frontmatter retained.
-        this._writtenFrontmatter.delete(file.path);
-        this._writtenFrontmatter.set(file.path, {
+        this._releaseWrittenSnapshot(file.path, this._writtenFrontmatter.get(file.path));
+        const written = {
             frontmatter: snapshot,
             mtime: Number(file.stat?.mtime) || null,
-        });
-        while (this._writtenFrontmatter.size > 64) {
-            this._writtenFrontmatter.delete(this._writtenFrontmatter.keys().next().value);
-        }
+            eventRef: null,
+            listener: null,
+            metadata: null,
+        };
+        this._writtenFrontmatter.set(file.path, written);
+        this._watchWrittenSnapshot(file, written);
         return this._clone(snapshot);
     }
 
@@ -264,16 +263,50 @@ class FinanceFrontmatter {
         // the authoritative post-write snapshot available for the next gesture
         // until the cache catches up. A later file mtime means an external edit
         // won the race, so stop shadowing it immediately.
-        const currentMtime = Number(file.stat?.mtime) || null;
-        if (currentMtime && written.mtime && currentMtime > written.mtime) {
-            this._writtenFrontmatter.delete(file.path);
-            return cached;
-        }
-        if (this._same(this._frontmatterData(cached, written.frontmatter), written.frontmatter)) {
-            this._writtenFrontmatter.delete(file.path);
-            return cached;
-        }
+        if (this._writtenSnapshotSettled(file, written, cached)) return cached;
         return this._clone(written.frontmatter);
+    }
+
+    _watchWrittenSnapshot(file, written) {
+        const metadata = (typeof app !== "undefined") ? app.metadataCache : null;
+        if (!metadata || typeof metadata.on !== "function") return;
+        const listener = (changedFile) => {
+            if (!changedFile || changedFile.path !== file.path) return;
+            if (this._writtenFrontmatter?.get?.(file.path) !== written) return;
+            const cached = metadata.getFileCache?.(file)?.frontmatter ?? null;
+            this._writtenSnapshotSettled(file, written, cached);
+        };
+        try {
+            written.metadata = metadata;
+            written.listener = listener;
+            written.eventRef = metadata.on("changed", listener) || null;
+        } catch (_e) {
+            written.metadata = null;
+            written.listener = null;
+            written.eventRef = null;
+        }
+    }
+
+    _writtenSnapshotSettled(file, written, cached) {
+        const currentMtime = Number(file.stat?.mtime) || null;
+        const superseded = Boolean(currentMtime && written.mtime && currentMtime > written.mtime);
+        const converged = this._same(this._frontmatterData(cached, written.frontmatter), written.frontmatter);
+        if (!superseded && !converged) return false;
+        this._releaseWrittenSnapshot(file.path, written);
+        return true;
+    }
+
+    _releaseWrittenSnapshot(path, written) {
+        if (!written || this._writtenFrontmatter?.get?.(path) !== written) return;
+        this._writtenFrontmatter.delete(path);
+        const metadata = written.metadata || ((typeof app !== "undefined") ? app.metadataCache : null);
+        try {
+            if (written.eventRef && typeof metadata?.offref === "function") metadata.offref(written.eventRef);
+            else if (written.listener && typeof metadata?.off === "function") metadata.off("changed", written.listener);
+        } catch (_e) {}
+        written.eventRef = null;
+        written.listener = null;
+        written.metadata = null;
     }
 
     _frontmatterData(frontmatter, written) {

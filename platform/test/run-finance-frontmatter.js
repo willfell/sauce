@@ -132,34 +132,106 @@ async function run() {
     const file = { path: "spice/finance/Invoices/Settled.md", stat: { mtime: 10 } };
     const persisted = { amount: 10 };
     let cached = { amount: 5, position: { start: { line: 0 } } };
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: () => ({ frontmatter: cached }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
     global.app = {
       vault: { getAbstractFileByPath: () => file },
-      metadataCache: { getFileCache: () => ({ frontmatter: cached }) },
+      metadataCache,
       fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
     };
     await ff.update(file, (fm) => { fm.amount = 15; });
     const shadowed = ff.read(file);
     cached = { amount: 15, position: { start: { line: 0 } } };
+    metadataCache.emit(file);
     const converged = ff.read(file);
-    ok("FF-12B cache convergence ignores Obsidian position metadata and releases the snapshot",
-      shadowed.amount === 15 && converged === cached && !ff._writtenFrontmatter.has(file.path));
+    ok("FF-12B metadata convergence ignores Obsidian position metadata and releases snapshot ownership",
+      shadowed.amount === 15 && converged === cached
+        && !ff._writtenFrontmatter.has(file.path) && listeners.size === 0);
   }
   {
     const files = new Map();
+    const persisted = new Map();
+    const cached = new Map();
     for (let i = 0; i < 65; i++) {
       const file = { path: `spice/finance/Invoices/${i}.md`, stat: { mtime: i + 1 } };
       files.set(file.path, file);
+      persisted.set(file.path, { amount: 0 });
+      cached.set(file.path, { amount: 0 });
     }
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: (file) => ({ frontmatter: cached.get(file.path) }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(file) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(file);
+      },
+    };
     global.app = {
       vault: { getAbstractFileByPath: (p) => files.get(p) || null },
-      metadataCache: { getFileCache: () => ({ frontmatter: { amount: 0 } }) },
-      fileManager: { async processFrontMatter(_file, mutator) { await mutator({ amount: 0 }); } },
+      metadataCache,
+      fileManager: { async processFrontMatter(file, mutator) { await mutator(persisted.get(file.path)); } },
     };
-    for (const file of files.values()) await ff.update(file, (fm) => { fm.amount = 1; });
-    ok("FF-12C authoritative write snapshots use a bounded newest-first lag bridge",
-      ff._writtenFrontmatter.size === 64
-        && !ff._writtenFrontmatter.has("spice/finance/Invoices/0.md")
-        && ff._writtenFrontmatter.has("spice/finance/Invoices/64.md"));
+    const eventFf = new FinanceFrontmatter();
+    for (const file of files.values()) await eventFf.update(file, (fm) => { fm.amount = 1; });
+    const everyFrozenReadIsAuthoritative = [...files.values()].every((file) => eventFf.read(file).amount === 1);
+    global.customJS = {
+      RenderSafe: {
+        async mutateStructure(opts) {
+          const receipt = await opts.apply();
+          return { ok: true, value: await opts.write(), receipt };
+        },
+      },
+    };
+    global.Notice = function () {};
+    const preparedAmounts = [];
+    const emptyContainer = { querySelector: () => null };
+    for (const file of files.values()) {
+      await eventFf.mutateRendered(file, {
+        container: emptyContainer,
+        selector: ".editor",
+        prepare: () => {
+          preparedAmounts.push(eventFf.read(file).amount);
+          return { render: async () => {}, write: async () => true };
+        },
+      });
+    }
+    const everyQueuedPrepareIsAuthoritative = preparedAmounts.length === 65
+      && preparedAmounts.every((amount) => amount === 1);
+    const retainedUntilConvergence = eventFf._writtenFrontmatter.size === 65 && listeners.size === 65;
+    for (const file of files.values()) {
+      cached.set(file.path, { amount: 1, position: { start: { line: 0 } } });
+      metadataCache.emit(file);
+    }
+    ok("FF-12C all 65 frozen-cache snapshots remain authoritative then release on metadata events",
+      everyFrozenReadIsAuthoritative && everyQueuedPrepareIsAuthoritative && retainedUntilConvergence
+        && eventFf._writtenFrontmatter.size === 0 && listeners.size === 0);
+
+    const repeated = files.values().next().value;
+    cached.set(repeated.path, { amount: 1 });
+    await eventFf.update(repeated, (fm) => { fm.amount = 2; });
+    await eventFf.update(repeated, (fm) => { fm.amount = 3; });
+    const replacedOwnership = eventFf.read(repeated).amount === 3
+      && eventFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    cached.set(repeated.path, { amount: 3 });
+    metadataCache.emit(repeated);
+    ok("FF-12D repeated same-file writes replace cleanup ownership without listener accumulation",
+      replacedOwnership && eventFf._writtenFrontmatter.size === 0 && listeners.size === 0);
   }
   {
     installApp({ files: {} });
