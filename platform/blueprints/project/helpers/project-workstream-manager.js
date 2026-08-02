@@ -16,11 +16,6 @@ class ProjectWorkstreamManager {
             const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
             if (noteView) scopes.push(noteView);
         } catch (_e) {}
-        try {
-            const activeLeaf = (typeof document !== "undefined")
-                ? document.querySelector?.(".workspace-leaf.mod-active .workspace-leaf-content") : null;
-            if (activeLeaf) scopes.push(activeLeaf);
-        } catch (_e) {}
         for (const scope of scopes) {
             try {
                 const root = scope?.querySelector?.(".pwm-root");

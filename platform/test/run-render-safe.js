@@ -1970,6 +1970,21 @@ okAsync('PERF-2B-WORKSTREAM-MODAL-ROLLBACK keeps cross-container modal and exact
   });
 });
 
+okAsync('PERF-2C-WORKSTREAM-OWNER fails closed instead of selecting an unrelated active leaf', async () => {
+  const Klass = loadClass('blueprints/project/helpers/project-workstream-manager.js', 'ProjectWorkstreamManager');
+  const unrelatedRoot = { querySelector: () => makeRuntimeEl() };
+  const unrelatedLeaf = {
+    querySelector: (selector) => selector === '.pwm-root' ? unrelatedRoot : null,
+  };
+  global.document = {
+    querySelector: (selector) => selector === '.workspace-leaf.mod-active .workspace-leaf-content'
+      ? unrelatedLeaf : null,
+  };
+  const detachedContainer = { querySelector: () => null, closest: () => null };
+  const root = new Klass()._workstreamRoot({ container: detachedContainer });
+  assert(root === null, 'detached workstream gesture cannot borrow an unrelated active-leaf owner');
+});
+
 okAsync('GA-P3-PROJECT-LINKS-RUNTIME invokes mutateStructure for link persistence', async () => {
   const Klass = loadClass('blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
   const file = { path: 'Links Hub.md', fm: { links: [] } };
