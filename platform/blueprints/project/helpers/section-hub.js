@@ -29,8 +29,17 @@
 // module.exports / if / const trailer would make it "Unexpected token" and the
 // class would silently never register (lesson: customjs-no-trailing-statements).
 class SectionHub {
+  _page(dv) {
+    try {
+      const renderSafe = globalThis.customJS?.RenderSafe;
+      return renderSafe && typeof renderSafe.page === "function"
+        ? renderSafe.page(dv)
+        : (dv && typeof dv.current === "function" ? dv.current() : null);
+    } catch (_e) { return null; }
+  }
+
   async render(dv, opts = {}) {
-    const cur = dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return;
     if (cur.type !== "section-hub") return;
 
@@ -265,7 +274,19 @@ class SectionHub {
         const path2 = (target && target.hubPath) || cur.file.path;
         const f = app.vault.getAbstractFileByPath(path2);
         if (!f) return Promise.resolve();
-        return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+        const page = dv.page ? dv.page(path2) : null;
+        return this._mutateStructure(dv, path2, "Could not save section links", () => {
+          const owned = !!page && Object.prototype.hasOwnProperty.call(page, "links");
+          const priorValue = page && page.links;
+          if (page) page.links = links;
+          return { page, owned, priorValue, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+        }, (receipt) => {
+          if (receipt.page) {
+            if (receipt.owned) receipt.page.links = receipt.priorValue;
+            else delete receipt.page.links;
+          }
+          try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+        }, () => app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; }));
       },
       canDelete: (section) => {
         if (!section || !section.hubPath) return false;
@@ -277,7 +298,17 @@ class SectionHub {
       deleteSection: (section) => {
         if (!section || !section.materialized) return Promise.resolve();
         const f = app.vault.getAbstractFileByPath(section.folder);
-        return f && app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve();
+        if (!f) return Promise.resolve();
+        return this._mutateStructure(dv, section.hubPath, "Could not delete section", () => {
+          const owned = Object.prototype.hasOwnProperty.call(section, "_sauceDeleted");
+          const priorValue = section._sauceDeleted;
+          section._sauceDeleted = true;
+          return { section, owned, priorValue, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+        }, (receipt) => {
+          if (receipt.owned) receipt.section._sauceDeleted = receipt.priorValue;
+          else delete receipt.section._sauceDeleted;
+          try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+        }, () => app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve());
       },
       renameSection: (section, newTitle) => {
         if (!section || !section.materialized) return Promise.resolve();
@@ -285,17 +316,25 @@ class SectionHub {
         const parentOfSection = section.folder.slice(0, section.folder.lastIndexOf("/"));
         const newFolder = `${parentOfSection}/${newSlug}`;
         const folderFile = app.vault.getAbstractFileByPath(section.folder);
-        const renamePromise = folderFile ? app.fileManager.renameFile(folderFile, newFolder) : Promise.resolve();
         const hubFile = app.vault.getAbstractFileByPath(section.hubPath);
-        const fmPromise = hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; }) : Promise.resolve();
         // Depth-1 rename must also patch every depth-2 child's parent_section
         // (a display-name string, not derived from the folder path).
         const childHubs = this._childHubsForRename ? (this._childHubsForRename(dv, section) || []) : [];
-        const childPromises = childHubs.map((childHub) => {
-          const cf = app.vault.getAbstractFileByPath(childHub.path);
-          return cf ? app.fileManager.processFrontMatter(cf, (fm) => { fm.parent_section = newTitle; }) : Promise.resolve();
-        });
-        return Promise.all([renamePromise, fmPromise, ...childPromises]);
+        const childFiles = childHubs.map((childHub) => app.vault.getAbstractFileByPath(childHub.path)).filter(Boolean);
+        return this._mutateStructure(dv, section.hubPath, "Could not rename section", () => {
+          const prior = { title: section.title, folder: section.folder, hubPath: section.hubPath };
+          section.title = newTitle;
+          section.folder = newFolder;
+          if (section.hubPath) section.hubPath = `${newFolder}/${newTitle}.md`;
+          return { section, prior, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+        }, (receipt) => {
+          Object.assign(receipt.section, receipt.prior);
+          try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+        }, () => Promise.all([
+          folderFile ? app.fileManager.renameFile(folderFile, newFolder) : Promise.resolve(),
+          hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; }) : Promise.resolve(),
+          ...childFiles.map((cf) => app.fileManager.processFrontMatter(cf, (fm) => { fm.parent_section = newTitle; })),
+        ]));
       },
       icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
       rootClass: "se-root",
@@ -328,6 +367,15 @@ class SectionHub {
         } catch (_e) { return []; }
       },
     };
+  }
+
+  async _mutateStructure(dv, path, failureMessage, apply, rollback, write) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
+      if (typeof Notice === "function") new Notice(`${failureMessage}: RenderSafe is unavailable.`, 6000);
+      return { ok: false };
+    }
+    return renderSafe.mutateStructure({ app, dv, path, failureMessage, apply, rollback, write });
   }
 
   // ── move block (shared SectionExplorer wiring) ────────────────────────────

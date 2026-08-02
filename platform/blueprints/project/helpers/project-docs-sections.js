@@ -23,7 +23,7 @@
 // the trailing "Unfiled" bucket.
 class ProjectDocsSections {
   async render(dv, opts = {}) {
-    const currentFile = dv.current()?.file;
+    const currentFile = globalThis.customJS?.RenderSafe?.page?.(dv)?.file;
     if (!currentFile) return;
     const docsFolder = currentFile.folder;                 // e.g. "spice/projects/global-k8s/docs"
     if (!docsFolder) return;

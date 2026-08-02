@@ -176,11 +176,21 @@ function loadHarness() {
         },
         SectionLabel: { divider(parent) { (parent.container || parent).createEl("div", { cls: "fixture-divider" }); } },
         RenderSafe: {
-            page: (dv) => dv.current(),
+            page: (dv) => (dv && typeof dv.current === "function" ? dv.current() : null),
             async mutate(opts) {
                 if (opts.optimistic) await opts.optimistic();
                 try { return { ok: true, value: await opts.write() }; }
                 catch (error) { if (opts.revert) await opts.revert(error); return { ok: false, error }; }
+            },
+            async mutateStructure(opts) {
+                let receipt;
+                try {
+                    receipt = await opts.apply();
+                    return { ok: true, value: await opts.write(), receipt };
+                } catch (error) {
+                    if (receipt !== undefined) await opts.rollback(receipt, error);
+                    return { ok: false, error, receipt };
+                }
             },
         },
     };
@@ -473,14 +483,14 @@ async function modalContract() {
     writes.length = 0;
     const picker = h.nav._openWorkstreamPicker([
         { id: "one", name: "One" }, { id: "two", name: "Two", description: "Second" },
-    ], "one", "spice/projects/sauce/tasks/Card.md");
+    ], "one", "spice/projects/sauce/tasks/Card.md", null, { file: { path: "spice/projects/sauce/tasks/Card.md" }, workstream: "one" });
     assert(picker); modal = mounted(h.document);
     const two = modal.backdrop.walk().find((node) => node.tagName === "BUTTON" && node.walk().some((child) => child.textContent === "Two"));
     await Promise.all([two.click(), two.click()]);
     assert.strictEqual(writes.length, 1, "double workstream click produces one write");
     assert.strictEqual(writes[0].fm.workstream, "two", "workstream assignment delegate is unchanged");
     writes.length = 0;
-    h.nav._openWorkstreamPicker([{ id: "one", name: "One" }], "", "spice/projects/sauce/tasks/Card.md");
+    h.nav._openWorkstreamPicker([{ id: "one", name: "One" }], "", "spice/projects/sauce/tasks/Card.md", null, { file: { path: "spice/projects/sauce/tasks/Card.md" } });
     modal = mounted(h.document); await modal.buttons.find((button) => button.textContent === "Cancel").click();
     assert.strictEqual(writes.length, 0, "workstream Cancel suppresses every mutation");
     console.log("  workstream single-fire: PASS");

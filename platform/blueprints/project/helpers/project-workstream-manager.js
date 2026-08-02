@@ -2,12 +2,47 @@
  * Project Workstream Manager (CustomJS)
  * Renders Add/Remove buttons + workstream cards with progress bars.
  * Reads the kanban board to cross-reference task status per workstream.
- * Routes gesture writes through RenderSafe.mutate for immediate reconciliation.
+ * Routes gesture writes through RenderSafe.mutateStructure for optimistic
+ * structural reconciliation with exact rollback receipts.
  *
  * Usage in DataviewJS (atlas note):
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
+    _applyWorkstreamPreview(dv, before, after) {
+        const root = dv && dv.container && dv.container.querySelector
+            ? dv.container.querySelector(".pwm-root") : null;
+        const cards = root && root.querySelector ? root.querySelector(".pwm-cards") : null;
+        if (!cards) return null;
+        const priorIds = new Set((before || []).map((entry) => entry && entry.id).filter(Boolean));
+        const nextIds = new Set((after || []).map((entry) => entry && entry.id).filter(Boolean));
+        const removed = (before || []).find((entry) => entry && entry.id && !nextIds.has(entry.id));
+        if (removed) {
+            const node = Array.from(cards.children || []).find((child) =>
+                String(child && child.dataset && child.dataset.workstreamId || "") === removed.id);
+            if (!node) return null;
+            const nextSibling = node.nextSibling || null;
+            node.remove?.();
+            return { kind: "remove", parent: cards, node, nextSibling };
+        }
+        const added = (after || []).find((entry) => entry && entry.id && !priorIds.has(entry.id));
+        if (!added || typeof cards.createEl !== "function") return null;
+        const node = cards.createEl("div", { cls: "pwm-card pwm-card-optimistic" });
+        if (node.dataset) node.dataset.workstreamId = added.id;
+        node.createEl("div", { text: added.name || added.id });
+        if (added.description) node.createEl("div", { text: added.description });
+        try { node.focus?.(); } catch (_e) {}
+        return { kind: "insert", parent: cards, node };
+    }
+
+    _rollbackWorkstreamPreview(receipt) {
+        if (!receipt) return;
+        if (receipt.kind === "insert") receipt.node?.remove?.();
+        if (receipt.kind === "remove" && receipt.parent && receipt.node) {
+            receipt.parent.insertBefore?.(receipt.node, receipt.nextSibling || null);
+        }
+    }
+
     // ── extracted per-call context (v0.190.x button-nav refactor) ──────────────
     // addWorkstream / removeWorkstream were CLOSURES inside render(); the chrome
     // bar's ⋯ menu needs to invoke the same Add / Remove flows without a render
@@ -49,26 +84,36 @@ class ProjectWorkstreamManager {
                 file && all.findIndex((candidate) => candidate && candidate.path === file.path) === index
             );
             const renderSafe = globalThis.customJS?.RenderSafe;
-            if (!renderSafe || typeof renderSafe.mutate !== "function") {
+            if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
                 new Notice("Could not update workstreams: RenderSafe is unavailable.", 6000);
                 return false;
             }
-            const expected = JSON.stringify(newWs);
-            const result = await renderSafe.mutate({
+            const result = await renderSafe.mutateStructure({
                 app,
                 dv,
                 path: filePath,
                 failureMessage: "Could not update workstreams",
+                apply: () => {
+                    const hadValue = Object.prototype.hasOwnProperty.call(current, "workstreams");
+                    const priorValue = current.workstreams;
+                    const priorList = getWorkstreams();
+                    const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+                    current.workstreams = newWs;
+                    const dom = this._applyWorkstreamPreview(dv, priorList, newWs);
+                    return { current, hadValue, priorValue, focusTarget, dom };
+                },
+                rollback: (receipt) => {
+                    this._rollbackWorkstreamPreview(receipt && receipt.dom);
+                    if (receipt && receipt.current) {
+                        if (receipt.hadValue) receipt.current.workstreams = receipt.priorValue;
+                        else delete receipt.current.workstreams;
+                    }
+                    try { receipt && receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+                },
                 write: async () => {
                     for (const target of targets) {
                         await app.fileManager.processFrontMatter(target, fm => { fm.workstreams = newWs; });
                     }
-                },
-                isCurrent: (page) => {
-                    const value = page && page.workstreams;
-                    if (!value || typeof value[Symbol.iterator] !== "function") return false;
-                    try { return JSON.stringify(Array.from(value)) === expected; }
-                    catch (_e) { return false; }
                 },
             });
             return result.ok === true;
@@ -262,7 +307,7 @@ class ProjectWorkstreamManager {
         // alongside ProjectMeetingsPanel's "Meetings" SectionLabel.
         customJS.SectionLabel.render(dv, { text: "Workstreams" });
 
-        const root = dv.container.createEl("div");
+        const root = dv.container.createEl("div", { cls: "pwm-root" });
 
         // Action row (Add / Remove) — suppressed in contentOnly mode: the chrome
         // bar owns these affordances. In legacy (non-chrome-bar) callers the row
@@ -298,9 +343,9 @@ class ProjectWorkstreamManager {
             `;
         }
 
+        const cards = root.createEl("div", { cls: "pwm-cards" });
+        cards.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
         if (ws.length > 0) {
-            const cards = root.createEl("div");
-            cards.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
 
             for (const w of ws) {
                 const tasks = wsTaskMap[w.id] || [];
@@ -309,7 +354,8 @@ class ProjectWorkstreamManager {
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                 const blocked = tasks.filter(t => t.lane === "Blocked").length;
 
-                const card = cards.createEl("div");
+                const card = cards.createEl("div", { cls: "pwm-card" });
+                if (card.dataset) card.dataset.workstreamId = w.id;
                 card.style.cssText = "padding: 10px 14px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px;";
 
                 const hdr = card.createEl("div");

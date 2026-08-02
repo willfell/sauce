@@ -505,7 +505,7 @@ class ProjectChromeBar {
   //   • new-task opens TaskDialog with surface:'project' + project:{ name, slug }
   //     — the same shape ToDoLeafActions uses (slug prefers the note's
   //     project_slug frontmatter; name is the resolved project display name).
-  _dispatch(dv, ctx, id) {
+  async _dispatch(dv, ctx, id) {
     try {
       const missing = (label) => { if (typeof Notice === "function") new Notice(label + " unavailable — reinstall the project blueprint.", 6000); };
       switch (id) {
@@ -667,20 +667,55 @@ class ProjectChromeBar {
             }
           } catch (_e) {}
           if (!file) { if (typeof Notice === "function") new Notice("Open the project hub note to archive it.", 5000); return; }
-          try {
-            if (typeof app !== "undefined" && app.fileManager && app.fileManager.processFrontMatter) {
-              const today = new Date().toISOString().split("T")[0];
-              app.fileManager.processFrontMatter(file, fm => ProjectChromeBar._applyArchiveToggle(fm, today));
-              if (typeof Notice === "function") new Notice("Project archive status updated.", 3000);
-            }
-          } catch (_e) {}
-          return;
+          return this._toggleProjectArchive(dv, file);
         }
         default:
           if (typeof Notice === "function") new Notice("ProjectChromeBar action: " + id);
           return;
       }
     } catch (_e) { /* never throw */ }
+  }
+
+  async _toggleProjectArchive(dv, file) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    const page = renderSafe?.page?.(dv);
+    if (!page || !renderSafe || typeof renderSafe.mutateStructure !== "function") {
+      if (typeof Notice === "function") new Notice("Could not update archive status: RenderSafe is unavailable.", 6000);
+      return false;
+    }
+    const today = new Date().toISOString().split("T")[0];
+    const keys = ["status", "pre_archive_status", "status_changed_at"];
+    const result = await renderSafe.mutateStructure({
+      app,
+      dv,
+      path: file.path,
+      failureMessage: "Could not update archive status",
+      apply: () => {
+        const prior = {};
+        for (const key of keys) prior[key] = {
+          owned: Object.prototype.hasOwnProperty.call(page, key),
+          value: page[key],
+        };
+        const next = {};
+        for (const key of keys) if (prior[key].owned) next[key] = prior[key].value;
+        ProjectChromeBar._applyArchiveToggle(next, today);
+        for (const key of keys) {
+          if (Object.prototype.hasOwnProperty.call(next, key)) page[key] = next[key];
+          else delete page[key];
+        }
+        return { page, prior, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+      },
+      rollback: (receipt) => {
+        for (const key of keys) {
+          if (receipt.prior[key].owned) receipt.page[key] = receipt.prior[key].value;
+          else delete receipt.page[key];
+        }
+        try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+      },
+      write: () => app.fileManager.processFrontMatter(file, fm => ProjectChromeBar._applyArchiveToggle(fm, today)),
+    });
+    if (result.ok && typeof Notice === "function") new Notice("Project archive status updated.", 3000);
+    return result.ok === true;
   }
 
   // Build the shared SectionExplorer adapter + a section descriptor for the
@@ -810,8 +845,11 @@ class ProjectChromeBar {
 
   // projects-hub "Sort A–Z / Recent": flip the persisted ProjectsHubCards sort
   // mode (localStorage key "sauce.projects-hub.sort") then force a Dataview
-  // refresh so ProjectsHubCards.render() reruns with the new order. The hub
-  // reads the persisted mode on render, so persisting + refreshing is enough.
+  // refresh so ProjectsHubCards.render() reruns with the new order. This is an
+  // explicit exception to the structural-write rule: the gesture writes only a
+  // localStorage display preference, while ProjectsHubCards is a separate
+  // Dataview block with no owned DOM handle that this chrome instance can patch.
+  // No vault data is written and no optimistic persistence can fail or roll back.
   _toggleProjectsSort() {
     try {
       const KEY = "sauce.projects-hub.sort";

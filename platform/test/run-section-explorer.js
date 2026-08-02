@@ -727,7 +727,18 @@ failures += !run("project adapter: renameSection on a depth-1 hub updates sectio
     },
     vault: { getAbstractFileByPath: (p) => ({ path: p }) },
   };
-  global.customJS = { DocSearch: { matches: () => true }, SectionLabel: { render: () => {}, divider: () => {} } };
+  global.customJS = {
+    DocSearch: { matches: () => true },
+    SectionLabel: { render: () => {}, divider: () => {} },
+    RenderSafe: {
+      page: (dv) => (dv && typeof dv.current === "function" ? dv.current() : null),
+      mutateStructure: async (opts) => {
+        let receipt;
+        try { receipt = opts.apply(); return { ok: true, value: await opts.write(), receipt }; }
+        catch (error) { if (receipt !== undefined) await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+      },
+    },
+  };
   factory(mod, mod.exports);
   const SectionHub = mod.exports;
   const sh = new SectionHub();

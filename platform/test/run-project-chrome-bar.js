@@ -29,10 +29,8 @@ function loadClass(relPath, className) {
   return new Function(`${src}\nreturn ${className};`)();
 }
 
-const ProjectChromeBar = loadClass(
-  'platform/blueprints/project/helpers/project-chrome-bar.js',
-  'ProjectChromeBar'
-);
+const chromeBarSource = fs.readFileSync(path.join(ROOT, 'platform/blueprints/project/helpers/project-chrome-bar.js'), 'utf8');
+const ProjectChromeBar = new Function(`${chromeBarSource}\nreturn ProjectChromeBar;`)();
 // The bar now delegates its render + Vault-section to the shared chrome-bar
 // mechanism, which delegates ordering to nav-buttons. Load both REAL classes so
 // the render + _navEntries cases exercise the true end-to-end wiring (not stubs).
@@ -47,6 +45,44 @@ const inst = new ProjectChromeBar();
 // The async new-note flow test (PCB-DISPATCH-8) is defined inside the DISPATCH
 // block but awaited from the render chain (so it runs before summarize()).
 let dispatch8Fn = async () => {};
+
+async function archiveMutationRollbackCase() {
+  const page = { file: { path: 'spice/projects/connectors/Connectors.md' }, status: 'in-progress' };
+  const file = { path: page.file.path };
+  const priorApp = global.app;
+  const priorCJS = global.customJS;
+  const priorDocument = global.document;
+  const priorNotice = global.Notice;
+  let sawOptimistic = false;
+  let focused = false;
+  global.document = { activeElement: { focus: () => { focused = true; } } };
+  global.Notice = function Notice() {};
+  global.app = {
+    fileManager: { processFrontMatter: async () => { sawOptimistic = page.status === 'archived'; throw new Error('fixture failure'); } },
+    commands: { executeCommandById: () => { throw new Error('global refresh forbidden'); } },
+  };
+  global.customJS = {
+    RenderSafe: {
+      page: () => page,
+      mutateStructure: async (opts) => {
+        const receipt = opts.apply();
+        try { await opts.write(); return { ok: true, receipt }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+      },
+    },
+  };
+  try {
+    const saved = await inst._toggleProjectArchive({ current: () => page }, file);
+    ok('ARCHTOG-5 archive applies optimistic model before persistence', sawOptimistic);
+    ok('ARCHTOG-6 archive failure restores exact status model', saved === false && page.status === 'in-progress' && !('pre_archive_status' in page));
+    ok('ARCHTOG-7 archive rollback restores focus without global refresh', focused);
+  } finally {
+    global.app = priorApp;
+    global.customJS = priorCJS;
+    global.document = priorDocument;
+    global.Notice = priorNotice;
+  }
+}
 
 // ── DOM stub ────────────────────────────────────────────────────────────────
 // Minimal element supporting createEl (Obsidian) + appendChild/createElement
@@ -486,6 +522,9 @@ function allDescendants(el) {
       store['sauce.projects-hub.sort'] === 'alpha');
     ok('PCB-DISPATCH-9b sort forces a Dataview refresh so the hub re-renders',
       cmdCalls.includes('dataview:dataview-force-refresh-views'));
+    ok('PCB-DISPATCH-9c force refresh has a narrow non-vault localStorage exception ledger',
+      chromeBarSource.includes('explicit exception to the structural-write rule')
+        && chromeBarSource.includes('No vault data is written'));
   }
 
   // PCB-DISPATCH-10 — a missing helper degrades gracefully (never throws).
@@ -950,6 +989,7 @@ function runRenderCases() {
     .then(doStyleChecks)
     .then(doCrumbClick)
     .then(() => { restore(); return dispatch8Fn(); })
+    .then(archiveMutationRollbackCase)
     .then(() => { summarize(); })
     .catch((e) => { restore(); console.error('render case threw:', e && e.stack || e); results.push(['render-cases-threw', false]); summarize(); });
 }

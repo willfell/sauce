@@ -22,15 +22,31 @@ const ROOT = path.resolve(__dirname, '..', '..');
 
 // Obsidian-ish element stub: createEl(tag, {text, href}) + setAttr + style.
 function makeEl(tag) {
-  const el = { tag, textContent: '', href: undefined, attrs: {}, style: { cssText: '' }, children: [] };
+  const el = { tag, textContent: '', href: undefined, attrs: {}, style: { cssText: '' }, children: [], className: '', dataset: {} };
+  Object.defineProperty(el, 'childNodes', { get: () => el.children });
   el.createEl = (t, opts) => {
     const c = makeEl(t);
     if (opts && opts.text != null) c.textContent = opts.text;
     if (opts && opts.href != null) c.href = opts.href;
+    if (opts && opts.cls != null) c.className = opts.cls;
+    c.parentNode = el;
     el.children.push(c);
     return c;
   };
   el.setAttr = (k, v) => { el.attrs[k] = v; };
+  el.replaceChildren = (...nodes) => { el.children = nodes; for (const node of nodes) node.parentNode = el; };
+  el.appendChild = (node) => { node.parentNode = el; el.children.push(node); return node; };
+  el.querySelector = (selector) => {
+    const cls = selector.startsWith('.') ? selector.slice(1) : null;
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        if (cls && String(child.className || '').split(/\s+/).includes(cls)) return child;
+        const nested = walk(child); if (nested) return nested;
+      }
+      return null;
+    };
+    return walk(el);
+  };
   return el;
 }
 
@@ -257,6 +273,57 @@ const dvFor = (name, p) => ({ current: () => ({ file: { name, path: p } }) });
   ok('PLP-S3 no folder -> []', Array.isArray(noFolder) && noFolder.length === 0);
 }
 
-const allPass = results.every(([, p]) => p);
-console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
-process.exit(allPass ? 0 : 1);
+async function structuralRollbackCase() {
+  const PLM = loadClass('platform/blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
+  const manager = new PLM();
+  const originalLinks = [{ url: 'https://old.example', text: 'Old' }];
+  const page = { type: 'links-hub', file: { name: 'Links Hub', path: 'spice/projects/x/Links Hub.md' }, links: originalLinks };
+  const container = makeEl('div');
+  const dv = { container, current: () => page };
+  panel.render(dv);
+  const grid = container.querySelector('.project-links-grid');
+  const originalNodes = [...grid.children];
+  let sawOptimistic = false;
+  let focusRestored = false;
+  const priorDocument = global.document;
+  const priorRenderSafe = global.customJS.RenderSafe;
+  const priorPanel = global.customJS.ProjectLinksPanel;
+  const priorApp = global.app;
+  global.document = { activeElement: { focus: () => { focusRestored = true; } } };
+  global.customJS.RenderSafe = {
+    page: () => page,
+    mutateStructure: async (opts) => {
+      const receipt = opts.apply();
+      sawOptimistic = page.links[0].url === 'https://new.example'
+        && grid.children[0] !== originalNodes[0];
+      try { await opts.write(); return { ok: true, receipt }; }
+      catch (error) { await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+    },
+  };
+  global.customJS.ProjectLinksPanel = panel;
+  global.app = {
+    vault: { getAbstractFileByPath: (path) => ({ path }) },
+    fileManager: { processFrontMatter: async () => { throw new Error('fixture write failure'); } },
+    commands: { executeCommandById: () => { throw new Error('global refresh forbidden'); } },
+  };
+  try {
+    const saved = await manager._write(dv, [{ url: 'https://new.example', text: 'New' }]);
+    ok('PLM-13 structural write applies before persistence', sawOptimistic);
+    ok('PLM-14 failed write restores exact links value + card node identities',
+      saved === false && page.links === originalLinks
+        && grid.children.length === originalNodes.length
+        && grid.children.every((node, index) => node === originalNodes[index]));
+    ok('PLM-15 failed structural write restores focus without global refresh', focusRestored);
+  } finally {
+    global.document = priorDocument;
+    global.customJS.RenderSafe = priorRenderSafe;
+    global.customJS.ProjectLinksPanel = priorPanel;
+    global.app = priorApp;
+  }
+}
+
+structuralRollbackCase().then(() => {
+  const allPass = results.every(([, p]) => p);
+  console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
+  process.exit(allPass ? 0 : 1);
+}).catch((error) => { console.error(error && error.stack || error); process.exit(1); });

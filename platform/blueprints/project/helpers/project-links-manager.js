@@ -2,7 +2,7 @@
 //
 // Add / edit / delete link dialogs on the per-project Link Hub note. Renders an
 // "Add link" + "Manage links" button row; the modals write the note's `links`
-// frontmatter via RenderSafe.mutate. The read-only list stays
+// frontmatter via RenderSafe.mutateStructure. The read-only list stays
 // owned by ProjectLinksPanel (rendered below this in the Link Hub template).
 //
 // Option B (PR1 decision): NO project->`links` mechanism dependency. The link
@@ -92,40 +92,66 @@ class ProjectLinksManager {
 
   // ── data + write ─────────────────────────────────────────────────────────
   _file(dv) {
-    const cur = dv.current && dv.current();
+    const cur = globalThis.customJS?.RenderSafe?.page?.(dv);
     if (!cur || !cur.file) return null;
     return app.vault.getAbstractFileByPath(cur.file.path);
   }
   _currentLinks(dv) {
-    const cur = dv.current && dv.current();
+    const cur = globalThis.customJS?.RenderSafe?.page?.(dv);
     return this._parse(cur ? cur.links : []);
   }
   async _write(dv, links) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the Link Hub note."); return false; }
     const renderSafe = globalThis.customJS?.RenderSafe;
-    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
       new Notice("Could not save links: RenderSafe is unavailable.", 6000);
       return false;
     }
     const next = links.map((l) => ({ url: l.url, text: l.text }));
-    const expected = JSON.stringify(next);
-    const result = await renderSafe.mutate({
+    const page = renderSafe.page?.(dv);
+    if (!page) { new Notice("Could not save links: page metadata is unavailable.", 6000); return false; }
+    const result = await renderSafe.mutateStructure({
       app,
       dv,
       path: file.path,
       failureMessage: "Could not save links",
-      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
-      isCurrent: (page) => {
-        const value = page && page.links;
-        if (!value || typeof value[Symbol.iterator] !== "function") return false;
-        try {
-          return JSON.stringify(Array.from(value).map((link) => ({
-            url: String(link && link.url || ""),
-            text: String(link && (link.text || link.url) || ""),
-          }))) === expected;
-        } catch (_e) { return false; }
+      apply: () => {
+        const hadValue = Object.prototype.hasOwnProperty.call(page, "links");
+        const priorValue = page.links;
+        const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+        const root = dv && dv.container;
+        let grid = root && root.querySelector ? root.querySelector(".project-links-grid") : null;
+        let createdGrid = null;
+        const panel = globalThis.customJS?.ProjectLinksPanel;
+        if (!grid && root && typeof root.createEl === "function"
+          && panel && typeof panel._renderCardsInto === "function") {
+          grid = root.createEl("div", { cls: "project-links-grid project-links-grid-optimistic" });
+          if (grid.style) grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:10px;";
+          createdGrid = grid;
+        }
+        const priorNodes = grid ? Array.from(grid.childNodes || grid.children || []) : [];
+        page.links = next;
+        if (grid && panel && typeof panel._renderCardsInto === "function") panel._renderCardsInto(grid, next);
+        return { page, hadValue, priorValue, focusTarget, grid, createdGrid, priorNodes };
       },
+      rollback: (receipt) => {
+        if (receipt && receipt.createdGrid) {
+          receipt.createdGrid.remove?.();
+        } else if (receipt && receipt.grid) {
+          if (typeof receipt.grid.replaceChildren === "function") receipt.grid.replaceChildren(...receipt.priorNodes);
+          else {
+            receipt.grid.empty?.();
+            for (const node of receipt.priorNodes || []) receipt.grid.appendChild?.(node);
+          }
+        }
+        if (receipt && receipt.page) {
+          if (receipt.hadValue) receipt.page.links = receipt.priorValue;
+          else delete receipt.page.links;
+        }
+        try { receipt && receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+      },
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
     });
     return result.ok === true;
   }
@@ -171,9 +197,14 @@ class ProjectLinksManager {
           if (acted) return false;
           acted = true;
           const res = ProjectLinksManager.deleteLink(this._currentLinks(dv), index);
-          if (res.changed && await this._write(dv, res.links)) { new Notice("Link deleted."); }
-          close();
-          return res.changed;
+          if (res.changed && await this._write(dv, res.links)) {
+            new Notice("Link deleted.");
+            close();
+            return true;
+          }
+          acted = false;
+          try { delBtn.focus(); } catch (_e) {}
+          return false;
         };
       });
     }});

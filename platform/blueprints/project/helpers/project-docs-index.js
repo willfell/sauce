@@ -31,6 +31,15 @@
 // module.exports / if / const trailer would make it "Unexpected token" and the
 // class would silently never register (lesson: customjs-no-trailing-statements).
 class ProjectDocsIndex {
+  _page(dv) {
+    try {
+      const renderSafe = globalThis.customJS?.RenderSafe;
+      return renderSafe && typeof renderSafe.page === "function"
+        ? renderSafe.page(dv)
+        : (dv && typeof dv.current === "function" ? dv.current() : null);
+    } catch (_e) { return null; }
+  }
+
   // Pure action-row spec — the ordered list of buttons rendered in the Docs hub
   // action row. Each entry: { id, kind }. kind "entity" → an EntityCreate button
   // (instance = id); kind "move" → the bulk Move-docs button. Node-unit-testable
@@ -46,7 +55,7 @@ class ProjectDocsIndex {
   // Resolve the project slug + docs folder from the current docs-hub note.
   // Returns null when the current note isn't a project Docs.md.
   _resolveContext(dv) {
-    const currentFile = dv.current()?.file;
+    const currentFile = this._page(dv)?.file;
     if (!currentFile) return null;
     const docsFolder = currentFile.folder;
     if (!docsFolder) return null;
@@ -108,7 +117,9 @@ class ProjectDocsIndex {
     // every visit). Leading hairline owns the tier boundary.
     if (customJS?.SectionLabel?.divider) customJS.SectionLabel.divider(dv);
 
-    this._config = this._buildConfig(dv, dv.current(), ctx);
+    const currentPage = this._page(dv);
+    if (!currentPage) return;
+    this._config = this._buildConfig(dv, currentPage, ctx);
 
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
@@ -251,7 +262,19 @@ class ProjectDocsIndex {
         if (!path2) return Promise.resolve();
         const f = app.vault.getAbstractFileByPath(path2);
         if (!f) return Promise.resolve();
-        return app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; });
+        const page = dv.page ? dv.page(path2) : null;
+        return this._mutateStructure(dv, path2, "Could not save section links", () => {
+          const owned = !!page && Object.prototype.hasOwnProperty.call(page, "links");
+          const priorValue = page && page.links;
+          if (page) page.links = links;
+          return { page, owned, priorValue, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+        }, (receipt) => {
+          if (receipt.page) {
+            if (receipt.owned) receipt.page.links = receipt.priorValue;
+            else delete receipt.page.links;
+          }
+          try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+        }, () => app.fileManager.processFrontMatter(f, (fm) => { fm.links = links; }));
       },
       // Delete/rename/add-link ALL require a materialized section — a virtual,
       // declared-only section (project.sections[] entry with no folder/hub
@@ -261,17 +284,36 @@ class ProjectDocsIndex {
         if (!section || !section.materialized) return Promise.resolve();
         const f = app.vault.getAbstractFileByPath(section.folder);
         if (!f) return Promise.resolve();
-        return app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve();
+        return this._mutateStructure(dv, section.hubPath, "Could not delete section", () => {
+          const owned = Object.prototype.hasOwnProperty.call(section, "_sauceDeleted");
+          const priorValue = section._sauceDeleted;
+          section._sauceDeleted = true;
+          return { section, owned, priorValue, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+        }, (receipt) => {
+          if (receipt.owned) receipt.section._sauceDeleted = receipt.priorValue;
+          else delete receipt.section._sauceDeleted;
+          try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+        }, () => app.fileManager.trashFile ? app.fileManager.trashFile(f) : Promise.resolve());
       },
       renameSection: (section, newTitle) => {
         if (!section || !section.materialized) return Promise.resolve();
         const newSlug = this._slugify(newTitle);
         const newFolder = `${docsFolder}/${newSlug}`;
         const folderFile = app.vault.getAbstractFileByPath(section.folder);
-        const renamePromise = folderFile ? app.fileManager.renameFile(folderFile, newFolder) : Promise.resolve();
         const hubFile = app.vault.getAbstractFileByPath(section.hubPath);
-        const fmPromise = hubFile ? app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; }) : Promise.resolve();
-        return Promise.all([renamePromise, fmPromise]);
+        return this._mutateStructure(dv, section.hubPath, "Could not rename section", () => {
+          const prior = { title: section.title, folder: section.folder, hubPath: section.hubPath };
+          section.title = newTitle;
+          section.folder = newFolder;
+          if (section.hubPath) section.hubPath = `${newFolder}/${newTitle}.md`;
+          return { section, prior, focusTarget: (typeof document !== "undefined") ? document.activeElement : null };
+        }, (receipt) => {
+          Object.assign(receipt.section, receipt.prior);
+          try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+        }, async () => {
+          if (folderFile) await app.fileManager.renameFile(folderFile, newFolder);
+          if (hubFile) await app.fileManager.processFrontMatter(hubFile, (fm) => { fm.section = newTitle; fm.section_slug = newSlug; });
+        });
       },
       icons: { folder: folderIcon, file: fileIcon, dots: dotsIcon },
       rootClass: "se-root",
@@ -305,6 +347,15 @@ class ProjectDocsIndex {
         } catch (_e) { return []; }
       },
     };
+  }
+
+  async _mutateStructure(dv, path, failureMessage, apply, rollback, write) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
+      if (typeof Notice === "function") new Notice(`${failureMessage}: RenderSafe is unavailable.`, 6000);
+      return { ok: false };
+    }
+    return renderSafe.mutateStructure({ app, dv, path, failureMessage, apply, rollback, write });
   }
 
   _projectPage(dv, projectPath) {
