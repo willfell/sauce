@@ -2603,7 +2603,9 @@ async function runPerf1StructuralTests() {
     const input = walk(container,
       (node) => node && node.tagName === 'INPUT' && node.placeholder === '+ Add subtask…')[0];
     const keydown = input && input._listeners.keydown && input._listeners.keydown[0];
+    const inputEvent = input && input._listeners.input && input._listeners.input[0];
     assert(typeof keydown === 'function', 'missing-TaskTodayList fixture owns the real Enter handler');
+    assert(typeof inputEvent === 'function', 'missing-TaskTodayList fixture owns the real input revision handler');
 
     input.value = 'Fallback child';
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
@@ -2707,6 +2709,46 @@ async function runPerf1StructuralTests() {
       'newer thrown failure stays retryable and releases all reservations');
     assert(notices.filter((message) => message.includes('Could not create subtask')).length === 1,
       'overlapping thrown failure emits exactly one failure notice: ' + JSON.stringify(notices));
+
+    input.value = 'Same-title overlap';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    input.value = 'Same-title overlap';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    assert(pendingFallbacks[5].path === 'spice/tasks/Same-title overlap.md'
+      && pendingFallbacks[6].path === 'spice/tasks/Same-title overlap 2.md',
+    'same-title overlap reserves distinct base and suffixed paths');
+    pendingFallbacks[5].resolve({ ok: true, path: pendingFallbacks[5].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Same-title overlap', 'older same-title success cannot clear newer ownership');
+    pendingFallbacks[6].resolve({ ok: true, path: pendingFallbacks[6].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === '' && TD._quickCreateReservations.size === 0,
+      'latest same-title success clears only its revision and releases ownership to zero');
+
+    input.value = 'Identical draft';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    input.value = 'Identical draft';
+    inputEvent({ target: input });
+    pendingFallbacks[7].resolve({ ok: true, path: pendingFallbacks[7].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Identical draft' && TD._quickCreateReservations.size === 0,
+      'post-submit identical input event retains the newer user-owned draft');
+
+    input.value = 'Trailing draft';
+    inputEvent({ target: input });
+    keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    await Promise.resolve(); await Promise.resolve();
+    input.value = 'Trailing draft ';
+    inputEvent({ target: input });
+    pendingFallbacks[8].resolve({ ok: true, path: pendingFallbacks[8].path });
+    await Promise.resolve(); await Promise.resolve();
+    assert(input.value === 'Trailing draft ' && TD._quickCreateReservations.size === 0,
+      'post-submit trailing-space edit survives normalized-title equality');
     global.Notice = function () {};
   });
 

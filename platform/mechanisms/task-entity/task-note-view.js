@@ -692,6 +692,8 @@ class TaskNoteView {
                     addInput.placeholder = '+ Add subtask…';
                     addInput.style.cssText = 'flex:1 1 auto; min-width:0; box-sizing:border-box; padding:6px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px;';
                     let addSequence = 0;
+                    let addInputRevision = 0;
+                    addInput.addEventListener('input', () => { addInputRevision++; });
                     const doAdd = async () => {
                         const title = String(addInput.value || '').trim();
                         if (!title) return;
@@ -701,6 +703,7 @@ class TaskNoteView {
                             return;
                         }
                         const sequence = ++addSequence;
+                        const inputRevision = addInputRevision;
                         const quickOpts = { title, parent_task: '[[' + thisBasename + ']]' };
                         let plan = null;
                         try { plan = TD.prepareQuick(quickOpts); } catch (_e) { plan = null; }
@@ -790,7 +793,8 @@ class TaskNoteView {
                                     try { new Notice('Could not create subtask' + (reason ? ': ' + reason : ''), 6000); } catch (_e) {}
                                     return;
                                 }
-                                if (sequence === addSequence && String(addInput.value || '').trim() === title) {
+                                if (sequence === addSequence && inputRevision === addInputRevision
+                                    && String(addInput.value || '').trim() === title) {
                                     addInput.value = '';
                                 }
                             } catch (_e) {
