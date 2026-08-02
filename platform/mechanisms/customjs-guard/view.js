@@ -15,9 +15,9 @@
 // Why this exists: on cold vault load, Dataview/Templater can render a
 // note before the CustomJS plugin has registered window.customJS, which
 // produces a flash of "ReferenceError: customJS is not defined" in every
-// block that uses it. This helper polls window.customJS for ~2s, shows a
-// muted spinner (.customjs-loader CSS snippet) while waiting, and falls
-// back to a "_<Class> unavailable_" placeholder if it never appears.
+// block that uses it. This helper polls for up to ~10s per registration
+// phase, shows a muted spinner (.customjs-loader CSS snippet) while waiting,
+// and gives an actionable diagnostic if CustomJS or the class never appears.
 
 const cfg = typeof input === "string" ? { class: input } : (input ?? {});
 const className = cfg.class;
@@ -30,15 +30,22 @@ if (!className) {
 } else if (!argsValid) {
   dv.paragraph("_customjs-guard: `args` must be an array_");
 } else {
+  const MAX_POLL_ATTEMPTS = 200;
+  const POLL_INTERVAL_MS = 50;
   const loader = dv.container.createEl("div", { cls: "customjs-loader", text: "loading…" });
-  for (let i = 0; i < 40 && !window.customJS?.[className]; i++) {
-    await new Promise(r => setTimeout(r, 50));
+  for (let i = 0; i < MAX_POLL_ATTEMPTS && !window.customJS; i++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  for (let i = 0; i < MAX_POLL_ATTEMPTS && window.customJS && !window.customJS[className]; i++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
   loader.remove();
 
   const klass = window.customJS?.[className];
-  if (!klass) {
-    dv.paragraph(`_${className} unavailable_`);
+  if (!window.customJS) {
+    dv.paragraph("_CustomJS is still loading — reopen this note to try again._");
+  } else if (!klass) {
+    dv.paragraph(`_${className} is not loaded. Mobile: fully reopen Obsidian, then verify its script synced._`);
   } else {
     const target = klass[method];
     if (typeof target !== "function") {
