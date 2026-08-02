@@ -521,45 +521,41 @@ git commit -m "feat(coordinator): reconcile-dependencies audit/repair verb"
 
 ## Phase B — Intake: strengthen the mint guard
 
-### Task B1: `external:` escape hatch + reject tombstoned deps
+### Task B1: `external:` escape hatch (existing guard already refuses missing/discarded deps)
 
 **Files:**
-- Modify: `.agents/skills/card-intake/scripts/card-intake.js` (guard at ~489-494; `validateCard` shape check at ~373-374)
+- Modify: `.agents/skills/card-intake/scripts/card-intake.js` (`validateCard` shape check ~373-374; `validateSpec` resolution guard ~489-494; `renderCard` `depends_on` serialization)
 - Test: `platform/test/run-card-intake.js`
 
+**Design note — the discarded-dep case is ALREADY covered.** The existing resolution guard refuses any dependency that neither appears earlier in the same batch nor resolves on disk via `findCard`. A discarded card's note is DELETED at discard time (`discardCardCore` `fs.unlinkSync`), so a mint depending on a discarded (or never-minted) card already fails with `"<title>: dependency does not resolve: <name>"`. There is therefore **no need — and no clean way — to couple intake to coordinator status**: `codex-coordinator.js status --json` exposes no per-name `cards` map (only truncated `discarded_recent`), so a status-based tombstone check would be dead code. B1's only genuinely new capability is the `external:` marker, plus the `renderCard` fix that lets it round-trip.
+
 **Interfaces:**
-- Consumes: existing `linkName`, `findCard`, `readInstalledCoordinatorStatus` (already read in `run` as `coordinatorStatus`).
-- Produces: a dependency written as `external:<free text>` is accepted verbatim (never resolved); a dependency resolving to a card whose coordinator record is `discarded` is refused with `"<title>: dependency is discarded (superseded by <successor>): <name>"`.
+- Consumes: existing `linkName`, `findCard`.
+- Produces: a dependency written as `external:<free text>` is accepted verbatim and NEVER resolved — honored in the `validateCard` shape check, the `validateSpec` resolution guard, AND `renderCard` (rendered through unwrapped, not `[[external:…]]`). The pre-existing "dependency does not resolve" guard is left intact and continues to refuse mints on missing/discarded/never-minted deps.
 
 - [ ] **Step 1: Write the failing tests**
 
-In `platform/test/run-card-intake.js`, mirror the existing dependency-validation cases:
+In `platform/test/run-card-intake.js`, construct spec objects inline in the SAME style as the adjacent dependency-validation tests (there are no `mkSpec`/`mkCard` helpers — read the existing `'unresolved dependency is refused'` test for the exact shape and the `run(spec, apply, deps)` signature). No `readCoordinatorStatus` mock is needed.
 
 ```js
-// B1 external marker is accepted without resolution
-{
-  const spec = mkSpec({ cards: [mkCard({ title: 'NEW-1 Thing', depends_on: ['external:upstream vendor SDK'] })] });
-  const res = run(spec, false, { readCoordinatorStatus: () => ({ cards: {} }) });
-  ok(res.ok, 'B1 external: dependency does not trigger a resolution error');
-}
-// B1 dependency on a discarded card is refused
-{
-  const spec = mkSpec({ cards: [mkCard({ title: 'NEW-2 Thing', depends_on: ['[[GA-P4b Gesture write lint]]'] })] });
-  const res = run(spec, false, {
-    readCoordinatorStatus: () => ({ cards: { 'GA-P4b Gesture write lint': { phase: 'discarded', superseded_by: 'GA-P4f …' } } }),
-  });
-  ok(!res.ok && res.errors.some((e) => /discarded/.test(e)), 'B1 refuses a mint depending on a tombstoned card');
-}
+// B1 external: marker is accepted without resolution (construct spec inline per existing tests)
+//   card depends_on: ['external:upstream vendor SDK'] ⇒ run(spec, false) ⇒ res.ok === true
+// B1 a dep that does not resolve on disk (a discarded/never-minted card) is still refused
+//   card depends_on: ['[[GA-P4b Gesture write lint]]'] with no such note under cards_root
+//   ⇒ res.ok === false AND res.errors includes /does not resolve/
+// B1 external: round-trips through renderCard unwrapped
+//   render the minted card and assert its depends_on line contains `external:upstream vendor SDK`
+//   and NOT `[[external:` (ordinary deps still render as [[Name]])
 ```
 
-(Use the harness's existing `mkSpec`/`mkCard` helpers; if absent, construct the spec object inline matching `validateSpec`'s expected shape — see adjacent tests in the file.)
+Fill each in with the harness's real inline spec construction and its `ok`/`eq` assertions.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npm run test:card-intake`
-Expected: FAIL — external marker currently errors as unresolved; discarded dep currently passes.
+Expected: FAIL — the `external:` marker currently errors as an invalid (non-wikilink) dependency and/or renders as `[[external:…]]`.
 
-- [ ] **Step 3: Implement the strengthening**
+- [ ] **Step 3: Implement**
 
 At the shape check (~373-374), allow the `external:` prefix:
 
@@ -571,33 +567,35 @@ At the shape check (~373-374), allow the `external:` prefix:
   }
 ```
 
-At the resolution guard (~489-494), skip externals and reject tombstoned deps (using the coordinator status the caller already loaded — thread it into `validateSpec`/this loop as `coordinatorStatus`):
+At the resolution guard (~489-494), skip externals but leave the existing resolution logic UNCHANGED (do NOT add any coordinator-status coupling):
 
 ```js
   const order = new Map(cards.map((card, index) => [card.title, index]));
-  const discarded = new Set(Object.entries((coordinatorStatus && coordinatorStatus.cards) || {})
-    .filter(([, r]) => r && r.phase === 'discarded').map(([name]) => name));
   for (const card of cards) for (const dep of card.depends_on || []) {
-    if (typeof dep === 'string' && /^external:/.test(dep)) continue;
+    if (typeof dep === 'string' && /^external:/.test(dep)) continue; // never resolved
     const name = linkName(dep);
     if (order.has(name) && order.get(name) > order.get(card.title)) errors.push(`${card.title}: dependency appears after dependent`);
-    else if (discarded.has(name)) errors.push(`${card.title}: dependency is discarded: ${name}`);
     else if (!order.has(name) && !findCard(spec.cards_root, name)) errors.push(`${card.title}: dependency does not resolve: ${name}`);
   }
 ```
 
-Thread `coordinatorStatus` into `validateSpec` (it's already available in `run`; pass it as an option the way `cutoverEnabled` is passed).
+In `renderCard`, where `depends_on` entries are serialized, pass an `external:` entry through unwrapped instead of wrapping it in `[[…]]` (ordinary bare names still get `[[${item}]]`):
+
+```js
+  // depends_on serialization: external markers pass through verbatim; ordinary names are wikilinked
+  ...depends_on.map((item) => (/^external:/.test(item) ? item : `[[${item}]]`))
+```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:card-intake`
-Expected: PASS (`… PASS`).
+Expected: PASS (`… PASS`), with no regression to the existing `'unresolved dependency is refused'` case.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add ".agents/skills/card-intake/scripts/card-intake.js" platform/test/run-card-intake.js
-git commit -m "feat(intake): external dep marker + refuse tombstoned dependencies at mint"
+git commit -m "feat(intake): external dep marker; existing resolution guard covers discarded deps"
 ```
 
 ---
