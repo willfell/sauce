@@ -66,7 +66,8 @@ class FinanceFrontmatter {
         }
         const container = opts.container || (opts.dv && opts.dv.container) || null;
         const selector = String(opts.selector || "");
-        return await renderSafe.mutateStructure({
+        let token = null;
+        const outcome = await renderSafe.mutateStructure({
             app,
             dv: opts.dv,
             path: file.path,
@@ -77,27 +78,32 @@ class FinanceFrontmatter {
                 const parent = oldRoot && oldRoot.parentNode;
                 const nextSibling = oldRoot && oldRoot.nextSibling;
                 const focus = this._captureFocus(oldRoot || container);
+                token = {
+                    container, selector, parent, oldRoot, nextSibling, focus,
+                    optimisticRoot: null,
+                    previous: this._renderOwner(container, selector),
+                    status: "pending",
+                    rolledBack: false,
+                };
+                this._setRenderOwner(container, selector, token);
                 if (typeof opts.render !== "function") throw new Error("Finance optimistic render is required");
                 try {
                     await opts.render();
                 } catch (error) {
-                    const failedRoot = container && selector && typeof container.querySelector === "function"
+                    token.optimisticRoot = container && selector && typeof container.querySelector === "function"
                         ? container.querySelector(selector) : null;
-                    try { if (failedRoot && failedRoot !== oldRoot) failedRoot.remove?.(); } catch (_e) {}
-                    try { parent?.insertBefore?.(oldRoot, nextSibling || null); } catch (_e) {}
-                    this._restoreFocus(focus, oldRoot || container, true);
+                    this._rollbackRendered(token);
                     throw error;
                 }
-                const optimisticRoot = container && selector && typeof container.querySelector === "function"
+                token.optimisticRoot = container && selector && typeof container.querySelector === "function"
                     ? container.querySelector(selector) : null;
-                this._restoreFocus(focus, optimisticRoot || container, false);
-                return { parent, oldRoot, nextSibling, optimisticRoot, focus };
+                if (this._renderOwner(container, selector) === token) {
+                    this._restoreFocus(focus, token.optimisticRoot || container, false);
+                }
+                return token;
             },
             rollback: async (receipt) => {
-                if (!receipt) return;
-                try { receipt.optimisticRoot?.remove?.(); } catch (_e) {}
-                try { receipt.parent?.insertBefore?.(receipt.oldRoot, receipt.nextSibling || null); } catch (_e) {}
-                this._restoreFocus(receipt.focus, receipt.oldRoot || container, true);
+                this._rollbackRendered(receipt || token);
             },
             write: async () => {
                 if (typeof opts.write === "function") return await opts.write();
@@ -105,6 +111,48 @@ class FinanceFrontmatter {
                 return await this.update(file, opts.mutator);
             },
         });
+        if (outcome?.ok && token) {
+            token.status = "succeeded";
+            if (this._renderOwner(container, selector) === token) {
+                this._setRenderOwner(container, selector, null);
+            }
+        }
+        return outcome;
+    }
+
+    _renderOwner(container, selector) {
+        if (!container || !selector) return null;
+        return this._renderOwners?.get?.(container)?.get?.(selector) || null;
+    }
+
+    _setRenderOwner(container, selector, token) {
+        if (!container || !selector) return;
+        if (!this._renderOwners) this._renderOwners = new WeakMap();
+        let owners = this._renderOwners.get(container);
+        if (!owners) {
+            owners = new Map();
+            this._renderOwners.set(container, owners);
+        }
+        if (token) owners.set(selector, token);
+        else owners.delete(selector);
+    }
+
+    _rollbackRendered(token) {
+        if (!token || token.rolledBack) return;
+        token.status = "failed";
+        token.rolledBack = true;
+        if (this._renderOwner(token.container, token.selector) !== token) return;
+
+        let restore = token;
+        let owner = token.previous;
+        while (owner && owner.status === "failed") {
+            restore = owner;
+            owner = owner.previous;
+        }
+        this._setRenderOwner(token.container, token.selector, owner || null);
+        try { token.optimisticRoot?.remove?.(); } catch (_e) {}
+        try { restore.parent?.insertBefore?.(restore.oldRoot, restore.nextSibling || null); } catch (_e) {}
+        this._restoreFocus(restore.focus, restore.oldRoot || token.container, true);
     }
 
     _captureFocus(scope) {

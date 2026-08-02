@@ -3101,6 +3101,42 @@ async function testFF37InvoiceTimeLogMissingSiblingCompensation() {
   return pass;
 }
 
+// PERF-3 rapid-sequence authority: InvoiceControls must derive its optimistic
+// amount from the same authoritative frontmatter snapshot used by persistence,
+// never from a frozen Dataview page.
+async function testFF38InvoiceControlsAuthoritativePreview() {
+  console.log('\n=== FF38 / PERF-3 — InvoiceControls preview uses authoritative hours ===');
+  const invoicePath = 'spice/finance/invoices/2026-08/Invoice-2026-08.md';
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const state = { hours: 2, rate: 100, amount: 200, submitted_date: '' };
+  const Cls = loadFinanceClass('InvoiceControls', app, {
+    FinanceFrontmatter: {
+      read: () => ({ ...state }),
+      update: async (_file, mutator) => { await mutator(state); },
+    },
+  });
+  const dv = makeDvWithCurrent({
+    file: { path: invoicePath, name: 'Invoice-2026-08' },
+    hours: 1, rate: 100, amount: 100, submitted_date: '',
+  });
+  await new Cls().render(dv);
+  let root = findClass(dv.container, 'ic-root');
+  const rateInput = collectAll(root, (node) => node.tag === 'input')[0];
+  const save = collectButtons(root).find((button) => String(button.innerHTML || '').includes('Save'));
+  rateInput.value = '150';
+  save.disabled = false;
+  await save.onclick();
+  root = findClass(dv.container, 'ic-root');
+  const rendered = collectAll(root, (node) => typeof node.textContent === 'string')
+    .map((node) => node.textContent).join(' | ');
+  const roots = collectAll(dv.container, (node) => node.cls === 'ic-root');
+  const pass = state.hours === 2 && state.rate === 150 && state.amount === 300
+    && rendered.includes('2h') && rendered.includes('$300.00') && roots.length === 1;
+  console.log(`  persisted amount $300: ${state.amount === 300} ; preview 2h/$300: ${rendered.includes('2h') && rendered.includes('$300.00')} ; roots: ${roots.length}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // PERF-3 source matrix: every Finance editor structural surface consumes the
 // shared seam and centralizes its authoritative self-render behind scroll
 // capture; the Plan surface uses the field mutation seam and the same rerender.
@@ -4094,6 +4130,7 @@ async function testRendHasNotes() {
       results.push(['FF35 finance-structural-rollback', await testFF35FinanceStructuralRollback()]);
       results.push(['FF36 finance-lifecycle-coverage-matrix', await testFF36FinanceLifecycleCoverageMatrix()]);
       results.push(['FF37 invoice-time-log-missing-sibling-compensation', await testFF37InvoiceTimeLogMissingSiblingCompensation()]);
+      results.push(['FF38 invoice-controls-authoritative-preview', await testFF38InvoiceControlsAuthoritativePreview()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;

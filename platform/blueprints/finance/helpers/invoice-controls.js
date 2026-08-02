@@ -93,11 +93,7 @@ class InvoiceControls {
                     new Notice("Rate must be a non-negative number.");
                     return;
                 }
-                const nextPage = Object.assign({}, page, {
-                    rate: value,
-                    amount: Math.round(value * hours * 100) / 100,
-                });
-                await this._mutatePage(file, dv, nextPage, (fm) => {
+                await this._mutatePage(file, dv, (fm) => {
                     fm.rate = value;
                     const h = Number(fm.hours || 0);
                     fm.amount = Math.round(value * h * 100) / 100;
@@ -128,11 +124,10 @@ class InvoiceControls {
             icon: submitIcon,
             onClick: async () => {
                 const today = submitted ? "" : window.moment().format("YYYY-MM-DD");
-                const nextPage = Object.assign({}, page, { submitted_date: today });
                 if (submitted) {
-                    await this._mutatePage(file, dv, nextPage, (fm) => { fm.submitted_date = ""; });
+                    await this._mutatePage(file, dv, (fm) => { fm.submitted_date = ""; });
                 } else {
-                    await this._mutatePage(file, dv, nextPage, (fm) => { fm.submitted_date = today; });
+                    await this._mutatePage(file, dv, (fm) => { fm.submitted_date = today; });
                 }
             }
         });
@@ -143,7 +138,11 @@ class InvoiceControls {
         return await this.render(dv, authoritative);
     }
 
-    async _mutatePage(file, dv, authoritative, mutator) {
+    async _mutatePage(file, dv, mutator) {
+        const page = this._page(dv) || {};
+        const current = customJS.FinanceFrontmatter.read?.(file) || page;
+        const authoritative = Object.assign({}, page, current);
+        mutator(authoritative);
         return await customJS.FinanceFrontmatter.mutateRendered(file, {
             dv,
             selector: ":scope > .ic-root",

@@ -240,6 +240,82 @@ async function run() {
 
   {
     installLifecycle();
+    const { container, oldRoot } = makeEditorDom();
+    global.document = { activeElement: null };
+    let rejectFirst;
+    let firstStarted;
+    const firstReady = new Promise((resolve) => { firstStarted = resolve; });
+    const firstWrite = new Promise((_resolve, reject) => { rejectFirst = reject; });
+    let firstOptimistic, newerRoot;
+    const first = ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor",
+      render: async () => {
+        oldRoot.remove();
+        firstOptimistic = makeNode("editor");
+        container.appendChild(firstOptimistic);
+      },
+      write: async () => { firstStarted(); return await firstWrite; },
+    });
+    await firstReady;
+    const newer = await ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor",
+      render: async () => {
+        firstOptimistic.remove();
+        newerRoot = makeNode("editor");
+        container.appendChild(newerRoot);
+      },
+      write: async () => true,
+    });
+    rejectFirst(new Error("older write rejected"));
+    const older = await first;
+    ok("FF-18 overlapping older rejection cannot resurrect its obsolete root",
+      newer.ok === true && older.ok === false
+        && container.querySelector(".editor") === newerRoot
+        && !container.children.includes(oldRoot));
+  }
+
+  {
+    installLifecycle();
+    const { container, oldRoot, tail } = makeEditorDom();
+    global.document = { activeElement: null };
+    let rejectFirst, rejectSecond;
+    let firstStarted, secondStarted;
+    const firstReady = new Promise((resolve) => { firstStarted = resolve; });
+    const secondReady = new Promise((resolve) => { secondStarted = resolve; });
+    const firstWrite = new Promise((_resolve, reject) => { rejectFirst = reject; });
+    const secondWrite = new Promise((_resolve, reject) => { rejectSecond = reject; });
+    let firstOptimistic, secondOptimistic;
+    const first = ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor",
+      render: async () => {
+        oldRoot.remove();
+        firstOptimistic = makeNode("editor");
+        container.appendChild(firstOptimistic);
+      },
+      write: async () => { firstStarted(); return await firstWrite; },
+    });
+    await firstReady;
+    const second = ff.mutateRendered({ path: "spice/finance/Budget.md" }, {
+      dv: { container }, selector: ".editor",
+      render: async () => {
+        firstOptimistic.remove();
+        secondOptimistic = makeNode("editor");
+        container.appendChild(secondOptimistic);
+      },
+      write: async () => { secondStarted(); return await secondWrite; },
+    });
+    await secondReady;
+    rejectFirst(new Error("older write rejected first"));
+    await first;
+    rejectSecond(new Error("newer write rejected second"));
+    await second;
+    ok("FF-19 overlapping double rejection unwinds through failed receipts",
+      container.children[0] === oldRoot && container.children[1] === tail
+        && firstOptimistic.parentNode === null && secondOptimistic.parentNode === null);
+  }
+
+  {
+    installLifecycle();
     const { container, oldRoot, oldInput, tail } = makeEditorDom();
     global.document = { activeElement: oldInput };
     const renderFailure = new Error("fixture render failed");
@@ -248,14 +324,14 @@ async function run() {
       render: async () => { oldRoot.remove(); throw renderFailure; },
       write: async () => { throw new Error("write must not run"); },
     });
-    ok("FF-18 optimistic render failure restores the old root before escaping",
+    ok("FF-20 optimistic render failure restores the old root before escaping",
       result && result.ok === false && result.error === renderFailure
         && container.children.length === 2 && container.children[0] === oldRoot && container.children[1] === tail);
   }
 
   {
     installLifecycle();
-    ok("FF-19 page returns null for missing or throwing cold-load current",
+    ok("FF-21 page returns null for missing or throwing cold-load current",
       ff.page({}) === null && ff.page({ current() { throw new Error("cold"); } }) === null);
   }
 
