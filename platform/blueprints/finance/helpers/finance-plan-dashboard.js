@@ -205,14 +205,17 @@ class FinancePlanDashboard {
         const applied = [];
         for (const d of diffs) {
             try {
-                if (d.before !== null && Number(d.before) === Number(d.after)) continue;
-                await this._writeDiffValue(d, d.after);
-                applied.push(d);
+                // Dataview can lag a just-completed Apply. Capture the actual
+                // field value/presence inside processFrontMatter, immediately
+                // before this write, so compensation never trusts the modal's
+                // display-only snapshot.
+                const receipt = await this._writeDiffValue(d, d.after);
+                if (receipt.changed) applied.push(receipt);
             } catch (_e) {
                 console.error("FinancePlanDashboard apply failed", d, _e);
                 let rollbackError = null;
-                for (const prior of applied.slice().reverse()) {
-                    try { await this._writeDiffValue(prior, prior.before); }
+                for (const receipt of applied.slice().reverse()) {
+                    try { await this._restoreWriteReceipt(receipt); }
                     catch (error) { rollbackError = rollbackError || error; }
                 }
                 if (rollbackError) {
@@ -225,15 +228,41 @@ class FinancePlanDashboard {
         }
     }
 
-    async _writeDiffValue(diff, value) {
+    async _writeDiffValue(diff, value, opts = {}) {
+        let receipt = null;
+        const mutate = (owner, key) => {
+            const before = {
+                present: Object.prototype.hasOwnProperty.call(owner, key),
+                value: owner[key],
+            };
+            if (opts.expected) {
+                const currentMatches = before.present === opts.expected.present
+                    && (!before.present || Object.is(before.value, opts.expected.value));
+                if (!currentMatches) throw new Error(`Finance plan compensation conflict: ${diff.kind} changed after apply`);
+            }
+            const after = value === undefined || value === null
+                ? { present: false, value: undefined }
+                : { present: true, value: opts.literal ? value : Number(value) };
+            const changed = before.present !== after.present
+                || (before.present && !Object.is(before.value, after.value));
+            if (changed) {
+                if (after.present) owner[key] = after.value;
+                else delete owner[key];
+            }
+            receipt = {
+                diff: { kind: diff.kind, slug: diff.slug },
+                before,
+                after,
+                changed,
+            };
+        };
         if (diff.kind === "debt") {
             const file = app.vault.getAbstractFileByPath(`spice/finance/debts/${diff.slug}.md`);
             if (!file) throw new Error(`Debt file missing: ${diff.slug}`);
             await customJS.FinanceFrontmatter.update(file, (fm) => {
-                if (value === undefined || value === null) delete fm.planned_monthly_payment;
-                else fm.planned_monthly_payment = Number(value);
+                mutate(fm, "planned_monthly_payment");
             });
-            return;
+            return receipt;
         }
         if (diff.kind === "savings") {
             const file = app.vault.getAbstractFileByPath("spice/finance/Paycheck Defaults.md");
@@ -242,12 +271,20 @@ class FinancePlanDashboard {
                 if (!Array.isArray(fm.expenses)) throw new Error("Paycheck Defaults expenses are missing");
                 const row = fm.expenses.find(x => x && (String(x.category || "").toLowerCase() === "savings" || String(x.item || "").toLowerCase() === "savings"));
                 if (!row) throw new Error("Paycheck Defaults Savings row is missing");
-                if (value === undefined || value === null) delete row.amount;
-                else row.amount = Number(value);
+                mutate(row, "amount");
             });
-            return;
+            return receipt;
         }
         throw new Error(`Unsupported Finance plan diff: ${diff.kind}`);
+    }
+
+    async _restoreWriteReceipt(receipt) {
+        const prior = receipt.before || { present: false, value: undefined };
+        return await this._writeDiffValue(
+            receipt.diff,
+            prior.present ? prior.value : undefined,
+            { literal: true, expected: receipt.after },
+        );
     }
 
     async _rerender(dv) {

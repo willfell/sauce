@@ -146,8 +146,9 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         try { await w._writeAll(ps.applyPlan.debtTargets.map(t => ({ kind: "debt", slug: t.slug, before: 0, after: t.planned_monthly_payment }))); } catch (e) { writeErr = e; }
         ok("HC-V0128-WIDGET-DASH-9 _writeAll writes via FinanceFrontmatter without throwing", writeErr === null, writeErr && writeErr.message);
 
-        // A later entity rejection compensates every earlier successful write,
-        // so the RenderSafe UI rollback never lies about partially-applied plan data.
+        // A later entity rejection compensates every earlier successful write
+        // from authoritative pre-write frontmatter, never the potentially stale
+        // Dataview values displayed by the confirmation modal.
         const originalUpdate = customJS.FinanceFrontmatter.update;
         const stored = { "Debt-First": 100, "Debt-Second": 200 };
         let rejectedSecond = false;
@@ -164,15 +165,41 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         let compensated = false;
         try {
             await w._writeAll([
-                { kind: "debt", slug: "Debt-First", before: 100, after: 150 },
-                { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+                { kind: "debt", slug: "Debt-First", before: 1, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 2, after: 250 },
             ]);
         } catch (_e) {
             compensated = stored["Debt-First"] === 100 && stored["Debt-Second"] === 200;
         } finally {
             customJS.FinanceFrontmatter.update = originalUpdate;
         }
-        ok("PERF-3-WIDGET-DASH plan apply compensates prior writes after a later rejection", compensated);
+        ok("PERF3-FINANCE-COMPENSATION restores authoritative pre-write values, not stale Dataview snapshots", compensated);
+
+        // Presence is part of the receipt: if a field did not exist before the
+        // successful write, compensation must delete it rather than materialize
+        // the stale modal value.
+        const records = { "Debt-First": {}, "Debt-Second": { planned_monthly_payment: 200 } };
+        rejectedSecond = false;
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            if (slug === "Debt-Second" && !rejectedSecond) {
+                rejectedSecond = true;
+                throw new Error("fixture second write rejected");
+            }
+            await mutator(records[slug]);
+        };
+        let absenceRestored = false;
+        try {
+            await w._writeAll([
+                { kind: "debt", slug: "Debt-First", before: 999, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+            ]);
+        } catch (_e) {
+            absenceRestored = !Object.prototype.hasOwnProperty.call(records["Debt-First"], "planned_monthly_payment");
+        } finally {
+            customJS.FinanceFrontmatter.update = originalUpdate;
+        }
+        ok("PERF3-FINANCE-COMPENSATION restores authoritative field absence", absenceRestored);
 
         // no-plan degrade: current is the plan page but NOT in pages → ok:false
         const dv2 = makeDv(DEBTS, PLAN);
