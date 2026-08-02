@@ -490,13 +490,10 @@ function validateSpec(spec, boardRaw = '', options = {}) {
     if (!directShape && !parentShape) errors.push('ga_exception requires direct execution or one prepared parent with nested children');
   }
   const order = new Map(cards.map((card, index) => [card.title, index]));
-  const discardedDeps = new Map(Object.entries((options.coordinatorStatus && options.coordinatorStatus.cards) || {})
-    .filter(([, record]) => record && record.phase === 'discarded'));
   for (const card of cards) for (const dep of card.depends_on || []) {
     if (typeof dep === 'string' && /^external:/.test(dep)) continue; // explicit off-board dep, never resolved
     const name = linkName(dep);
     if (order.has(name) && order.get(name) > order.get(card.title)) errors.push(`${card.title}: dependency appears after dependent`);
-    else if (discardedDeps.has(name)) errors.push(`${card.title}: dependency is discarded (superseded by ${discardedDeps.get(name).superseded_by}): ${name}`);
     else if (!order.has(name) && !findCard(spec.cards_root, name)) errors.push(`${card.title}: dependency does not resolve: ${name}`);
   }
   const lanes = parseBoard(boardRaw);
@@ -974,7 +971,7 @@ function run(spec, apply = false, deps = {}) {
   // migration-era switch. Absent both, the legacy flat path is preserved.
   const cutoverEnabled = spec.epic_native === true
     || Boolean(coordinatorStatus && coordinatorStatus.cutover && coordinatorStatus.cutover.enabled === true);
-  const validation = validateSpec(spec, boardRaw, { cutoverEnabled, coordinatorStatus });
+  const validation = validateSpec(spec, boardRaw, { cutoverEnabled });
   if (validation.errors.length) return {
     ok: false, errors: validation.errors, ...(cutoverEnabled ? { cutover_enabled: true } : {}),
   };

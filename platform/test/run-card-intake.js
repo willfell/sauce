@@ -389,13 +389,14 @@ function missingEvidenceAndRefusals() {
     const duplicateChild = execution('DUPLICATE Identity', { parent_title: 'DUPLICATE Identity', slice: 'DUP-1a' });
     ok(!run(base(dir, { classification: 'parent_children', cards: [duplicateParent, duplicateChild] }), false).ok, 'duplicate parent and child titles are refused');
     ok(!run(base(dir, { cards: [execution('BAD Missing dependency', { depends_on: ['[[Does not exist]]'] })] }), false).ok, 'unresolved dependency is refused');
-    const externalDep = execution('EXT-1 External marker dependency', { depends_on: ['external:upstream vendor SDK'] });
-    ok(run(base(dir, { cards: [externalDep] }), false).ok, 'B1 external: dependency does not trigger a resolution error');
-    const discardedDep = execution('DISC-1 Depends on tombstoned prerequisite', { depends_on: ['[[GA-P4b Gesture write lint]]'] });
-    const discardedDepResult = run(base(dir, { cards: [discardedDep] }), false, {
-      readCoordinatorStatus: () => ({ action: 'status', cutover: null, cards: { 'GA-P4b Gesture write lint': { phase: 'discarded', superseded_by: 'GA-P4f Successor' } } }),
-    });
-    ok(!discardedDepResult.ok && discardedDepResult.errors.some((e) => /discarded/.test(e)), 'B1 refuses a mint depending on a tombstoned card');
+    const discardedOrNeverMintedResult = run(base(dir, { cards: [execution('DISC-1 Depends on tombstoned prerequisite', { depends_on: ['[[GA-P4b Gesture write lint]]'] })] }), false);
+    ok(!discardedOrNeverMintedResult.ok && discardedOrNeverMintedResult.errors.some((e) => /does not resolve/.test(e)), 'B1 the existing resolution guard already refuses a dependency on a discarded/never-minted card (its note is gone on disk)');
+    const externalDep = execution('EXT-1 External marker dependency', { depends_on: ['external:upstream vendor SDK', '[[Prerequisite]]'] });
+    const externalDepResult = run(base(dir, { cards: [externalDep] }), true);
+    ok(externalDepResult.ok, 'B1 external: dependency does not trigger a resolution error');
+    const externalDepRaw = fs.readFileSync(findTaskFile(dir, externalDep.title), 'utf8');
+    ok(externalDepRaw.includes('external:upstream vendor SDK') && !externalDepRaw.includes('[[external:') && externalDepRaw.includes('[[Prerequisite]]'),
+      'B1 external: dependency round-trips through renderCard unwrapped while ordinary deps stay wikilinked');
     ok(run(base(dir, { classification: 'post_ga', cards: [{ title: 'LATER Parent', role: 'parent', lane: 'Post-GA', status: 'planning', depends_on: [] }] }), false).ok, 'Post-GA remains an undecomposed parent');
     ok(!run(base(dir, { cards: [execution('../ESCAPE')] }), false).ok, 'path-traversing card title is refused');
     ok(!run(base(dir, { project_root: path.dirname(dir), cards: [execution('BAD Broad root')] }), false).ok, 'project root broader than the board directory is refused');
