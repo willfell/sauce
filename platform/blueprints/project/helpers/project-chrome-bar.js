@@ -751,7 +751,7 @@ class ProjectChromeBar {
   // Delegate an entity-create id to the directly-callable EntityCreate.create()
   // (runs the exact prompt→create flow EntityCreate.render()'s button fires).
   // Guarded: a cold-loading EntityCreate degrades to a Notice.
-  _entityCreate(dv, instance, presetPrompts) {
+  async _entityCreate(dv, instance, presetPrompts) {
     try {
       const EC = (typeof customJS !== "undefined") && customJS.EntityCreate;
       if (!EC || typeof EC.create !== "function") {
@@ -760,7 +760,13 @@ class ProjectChromeBar {
       }
       const opts = { instance, dv };
       if (presetPrompts) opts.presetPrompts = presetPrompts;
-      EC.create(opts);
+      const explorer = (typeof customJS !== "undefined") && customJS.SectionExplorer;
+      if (!explorer || typeof explorer.entityCreateLifecycle !== "function") {
+        if (typeof Notice === "function") new Notice("SectionExplorer unavailable — cannot create safely yet.", 6000);
+        return false;
+      }
+      opts.structuralLifecycle = explorer.entityCreateLifecycle(dv);
+      return EC.create(opts);
     } catch (_e) { /* never throw */ }
   }
 

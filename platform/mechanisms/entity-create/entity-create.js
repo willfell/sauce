@@ -59,7 +59,7 @@
 class EntityCreate {
     async render(dv, opts) {
         if (dv.container.closest(".markdown-embed")) return;
-        const { instance, presetPrompts = {} } = opts || {};
+        const { instance, presetPrompts = {}, structuralLifecycle = null } = opts || {};
         const spec = await this._loadSpec(instance);
         if (!spec) { dv.paragraph(`EntityCreate: no spec for "${instance}"`); return; }
 
@@ -68,11 +68,11 @@ class EntityCreate {
         customJS.AccentButton.render(dv.container, {
             label: spec.label,
             icon: resolved || plusIcon,
-            onClick: () => this.create({ instance, dv, presetPrompts })
+            onClick: () => this.create({ instance, dv, presetPrompts, structuralLifecycle })
         });
     }
 
-    async create({ instance, dv, presetPrompts = {} }) {
+    async create({ instance, dv, presetPrompts = {}, structuralLifecycle = null }) {
         const spec = await this._loadSpec(instance);
         if (!spec) return;
         const ctx = {
@@ -137,7 +137,6 @@ class EntityCreate {
         }
         const targetPath = this._substitute(this._joinDestination(spec.destination), ctx);
         const folder = this._substitute(this._destFolder(spec.destination), ctx);
-        await this._ensureFolder(folder);
         // v0.6.0 (Issue 1): open the just-created TFile directly via
         // workspace.getLeaf().openFile() rather than openLinkText(path, "").
         // openLinkText routes through the link resolver, which can race against
@@ -164,11 +163,42 @@ class EntityCreate {
         const body = spec.body_template
             ? await this._readBody(spec.body_template, ctx)
             : (spec.inline_body ? this._substitute(spec.inline_body, ctx) : "");
-        const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
-        for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
-        const leaf = app.workspace.getLeaf(false);
-        await leaf.openFile(newFile);
-        customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+        const persist = async () => {
+            await this._ensureFolder(folder);
+            const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
+            for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
+            const leaf = app.workspace.getLeaf(false);
+            await leaf.openFile(newFile);
+            customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+            return newFile;
+        };
+
+        // Optional, backwards-compatible structural lifecycle. Project docs
+        // supply this hook so the originating Dataview surface can show a
+        // receipt-bound preview before vault.create settles and remove the
+        // exact preview node + restore focus if any persistence step rejects.
+        if (structuralLifecycle
+            && typeof structuralLifecycle.apply === "function"
+            && typeof structuralLifecycle.rollback === "function") {
+            const renderSafe = (typeof customJS !== "undefined") ? customJS.RenderSafe : null;
+            if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
+                new Notice("Could not create item: RenderSafe is unavailable.", 6000);
+                return null;
+            }
+            const lifecycleCtx = { instance, dv, targetPath, folder, prompts: ctx.prompts, spec };
+            const result = await renderSafe.mutateStructure({
+                app,
+                dv,
+                path: targetPath,
+                failureMessage: `Could not create ${spec.label || "item"}`,
+                apply: () => structuralLifecycle.apply(lifecycleCtx),
+                rollback: (receipt, error) => structuralLifecycle.rollback(receipt, error, lifecycleCtx),
+                write: persist,
+            });
+            return result.ok === true ? result.value : null;
+        }
+
+        return persist();
     }
 
     // ---------- v0.107.0: seed_from_defaults resolution ----------

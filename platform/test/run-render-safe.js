@@ -1614,20 +1614,20 @@ function helperSource(rel) {
   return fs.readFileSync(path.join(__dirname, '..', 'blueprints', rel), 'utf8');
 }
 
-ok('GA-P3-PROJECT-STATUS status pick routes through mutate with optimistic rollback', () => {
+ok('GA-P3-PROJECT-STATUS status pick routes through mutateStructure with exact rollback receipt', () => {
   const src = helperSource('project/helpers/project-status-widget.js');
-  assert(/_writeStatus\([\s\S]*renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'status mutation lifecycle');
+  assert(/_writeStatus\([\s\S]*renderSafe\.mutateStructure\(\{[\s\S]*apply:[\s\S]*rollback:[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'status mutation lifecycle');
 });
 
-ok('GA-P3-PROJECT-WORKSTREAM add and remove share mutate authority', () => {
+ok('GA-P3-PROJECT-WORKSTREAM add and remove share structural mutate authority', () => {
   const src = helperSource('project/helpers/project-workstream-manager.js');
-  assert(/updateWorkstreams = async[\s\S]*renderSafe\.mutate\(\{[\s\S]*write: async[\s\S]*processFrontMatter/.test(src), 'workstream mutation lifecycle');
+  assert(/updateWorkstreams = async[\s\S]*renderSafe\.mutateStructure\(\{[\s\S]*apply:[\s\S]*rollback:[\s\S]*write: async[\s\S]*processFrontMatter/.test(src), 'workstream mutation lifecycle');
   assert((src.match(/updateWorkstreams\(/g) || []).length === 2, 'add and remove both call the shared writer');
 });
 
-ok('GA-P3-PROJECT-LINKS add edit delete route through mutate', () => {
+ok('GA-P3-PROJECT-LINKS add edit delete route through structural mutate', () => {
   const src = helperSource('project/helpers/project-links-manager.js');
-  assert(/async _write\([\s\S]*renderSafe\.mutate\(\{[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'links mutation lifecycle');
+  assert(/async _write\([\s\S]*renderSafe\.mutateStructure\(\{[\s\S]*apply:[\s\S]*rollback:[\s\S]*write: \(\) => app\.fileManager\.processFrontMatter/.test(src), 'links mutation lifecycle');
   assert((src.match(/this\._write\(dv, res\.links\)/g) || []).length === 3, 'add edit delete share the writer');
 });
 
@@ -1675,12 +1675,27 @@ for (const financeEditor of ['budget-allocations-editor.js', 'budget-categories-
 
 function makeGestureFacade(calls) {
   return {
+    page(dv) {
+      try { return dv && typeof dv.current === 'function' ? (dv.current() || null) : null; }
+      catch (_e) { return null; }
+    },
     async mutate(opts) {
       calls.push(opts);
       if (opts.optimistic) await opts.optimistic();
       try { return { ok: true, value: await opts.write() }; }
       catch (error) {
         if (opts.revert) await opts.revert(error);
+        return { ok: false, error };
+      }
+    },
+    async mutateStructure(opts) {
+      calls.push(opts);
+      let receipt;
+      try {
+        receipt = await opts.apply();
+        return { ok: true, value: await opts.write() };
+      } catch (error) {
+        if (opts.rollback) await opts.rollback(receipt, error);
         return { ok: false, error };
       }
     },
@@ -1747,7 +1762,7 @@ async function withGestureRuntime(appRef, renderSafe, run) {
   }
 }
 
-okAsync('GA-P3-PROJECT-STATUS-RUNTIME invokes mutate and optimistic chip path', async () => {
+okAsync('GA-P3-PROJECT-STATUS-RUNTIME invokes mutateStructure and optimistic chip path', async () => {
   const Klass = loadClass('blueprints/project/helpers/project-status-widget.js', 'ProjectStatusWidget');
   const file = { path: 'Project.md', fm: { status: 'idea' } };
   const calls = [], ui = [];
@@ -1758,8 +1773,8 @@ okAsync('GA-P3-PROJECT-STATUS-RUNTIME invokes mutate and optimistic chip path', 
     });
     assert(saved && calls.length === 1, 'status delegates exactly once');
     assert(file.fm.status === 'planning' && ui.join(',') === 'planning', 'status write and optimism execute');
-    assert(calls[0].isCurrent({ status: 'idea' }) === false, 'status authority rejects stale indexed state');
-    assert(calls[0].isCurrent({ status: 'planning' }) === true, 'status authority accepts only the target state');
+    assert(typeof calls[0].apply === 'function' && typeof calls[0].rollback === 'function',
+      'status supplies structural apply and exact-receipt rollback');
   });
 });
 
@@ -1809,7 +1824,7 @@ okAsync('GA-P3-PROJECT-STATUS-PICKER-ROLLBACK executes the rendered chip and pic
       && typeof node.onclick === 'function' && /<span>planning<\/span>/.test(node.innerHTML || ''));
     assert(planning, 'rendered project picker exposes the planning choice');
     await planning.onclick();
-    assert(calls.length === 1, 'rendered picker delegates once through mutate');
+    assert(calls.length === 1, 'rendered picker delegates once through mutateStructure');
     assert(chipHistory.length >= 2
       && /planning/.test(chipHistory[chipHistory.length - 2])
       && /idea/.test(chipHistory[chipHistory.length - 1]),
@@ -1859,12 +1874,8 @@ okAsync('GA-P3-PROJECT-WORKSTREAM-RUNTIME executes add and remove across root at
     assert(atlas.fm.workstreams[0].id === 'api', 'shared writer persists the project atlas');
     assert(map.fm.workstreams[0].id === 'api', 'shared writer persists the project map');
     assert(JSON.stringify(docsAtlas.fm) === docsBefore, 'shared writer keeps the complete nested docs atlas unchanged');
-    assert(calls[0].isCurrent({ workstreams: iterableOf([{ id: 'stale' }]) }) === false,
-      'workstream authority rejects stale iterable state');
-    assert(calls[0].isCurrent({ workstreams: iterableOf([{ id: 'api', name: 'API', description: '' }]) }) === true,
-      'workstream authority accepts a non-Array iterable with the exact target');
-    assert(calls[0].isCurrent({ workstreams: { 0: { id: 'api' }, length: 1 } }) === false,
-      'workstream authority fails closed for non-iterable array-like state');
+    assert(typeof calls[0].apply === 'function' && typeof calls[0].rollback === 'function',
+      'workstream add supplies structural apply and exact-receipt rollback');
 
     indexed = [{ id: 'api', name: 'API', description: '' }];
     inst._showModal = (build) => {
@@ -1887,14 +1898,12 @@ okAsync('GA-P3-PROJECT-WORKSTREAM-RUNTIME executes add and remove across root at
     assert(atlas.fm.workstreams.length === 0 && map.fm.workstreams.length === 0,
       'remove persists the same empty target to root atlas and map');
     assert(JSON.stringify(docsAtlas.fm) === docsBefore, 'remove also keeps the complete nested docs atlas unchanged');
-    assert(calls[1].isCurrent({ workstreams: iterableOf([{ id: 'api' }]) }) === false,
-      'remove authority rejects the stale pre-remove iterable');
-    assert(calls[1].isCurrent({ workstreams: iterableOf([]) }) === true,
-      'remove authority accepts the exact empty iterable');
+    assert(typeof calls[1].apply === 'function' && typeof calls[1].rollback === 'function',
+      'workstream remove supplies structural apply and exact-receipt rollback');
   });
 });
 
-okAsync('GA-P3-PROJECT-LINKS-RUNTIME invokes mutate for link persistence', async () => {
+okAsync('GA-P3-PROJECT-LINKS-RUNTIME invokes mutateStructure for link persistence', async () => {
   const Klass = loadClass('blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
   const file = { path: 'Links Hub.md', fm: { links: [] } };
   const calls = [];
@@ -1906,12 +1915,8 @@ okAsync('GA-P3-PROJECT-LINKS-RUNTIME invokes mutate for link persistence', async
     const saved = await new Klass()._write({ current: () => ({ file: { path: file.path } }) }, [{ url: 'https://x', text: 'X' }]);
     assert(saved && calls.length === 1, 'links delegate exactly once');
     assert(file.fm.links[0].text === 'X', 'links persist through the delegated write');
-    assert(calls[0].isCurrent({ links: iterableOf([{ url: 'https://stale', text: 'Stale' }]) }) === false,
-      'links authority rejects stale iterable state');
-    assert(calls[0].isCurrent({ links: iterableOf([{ url: 'https://x', text: 'X' }]) }) === true,
-      'links authority accepts exact non-Array DataArray-shaped state');
-    assert(calls[0].isCurrent({ links: iterableOf([{ url: 'https://x' }]) }) === false,
-      'links authority rejects a label that does not match the exact target');
+    assert(typeof calls[0].apply === 'function' && typeof calls[0].rollback === 'function',
+      'links supply structural apply and exact-receipt rollback');
   });
 });
 

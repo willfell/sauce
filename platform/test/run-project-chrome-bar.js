@@ -435,10 +435,15 @@ function allDescendants(el) {
   {
     const calls = [];
     const dv = { current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md' } }) };
-    const cjs = { EntityCreate: { create: (o) => calls.push(o) } };
+    const lifecycle = { apply: () => ({}), rollback: () => {} };
+    const cjs = {
+      EntityCreate: { create: (o) => calls.push(o) },
+      SectionExplorer: { entityCreateLifecycle: (origin) => origin === dv ? lifecycle : null },
+    };
     runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'docs-hub' }, 'new-doc'));
     ok('PCB-DISPATCH-7a new-doc calls EntityCreate.create with instance:"doc-note" + dv',
-      calls.length === 1 && calls[0].instance === 'doc-note' && calls[0].dv === dv);
+      calls.length === 1 && calls[0].instance === 'doc-note' && calls[0].dv === dv
+        && calls[0].structuralLifecycle === lifecycle);
 
     calls.length = 0;
     runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'docs-hub' }, 'new-section'));
