@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.273.0",
+  "workshop_version": "0.274.0",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -134,7 +134,7 @@
   "blueprints": [
     {
       "name": "project",
-      "version": "1.60.0"
+      "version": "1.61.0"
     },
     {
       "name": "daily",
