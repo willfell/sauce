@@ -694,6 +694,30 @@ async function main() {
   assert.strictEqual(svgPaths(bl3Root, 'edge-depends').filter((chunk) => chunk.includes('graph-view-chain-edge')).length, 2,
     'BL4-HEALTHY-TRACE: both depends edges from the healthy chip to its root blocker are emphasized');
 
+  // BL4-NULL-PROPAGATION: GraphInsights keeps a null-status node in the chain
+  // for reachability but excludes it from gates. The panel must consume that
+  // authoritative answer rather than locally recounting the closure.
+  const nullGateNodes = [
+    { card: 'BLN-A Root', path: `${board}/BLN-A Root.md`, status: 'blocked', rank: 0, row: 0 },
+    { card: 'BLN-U Unknown', path: `${board}/BLN-U Unknown.md`, status: null, rank: 1, row: 0 },
+    { card: 'BLN-B Live', path: `${board}/BLN-B Live.md`, status: 'planning', rank: 2, row: 0 },
+  ];
+  const nullGateEdges = [
+    { from: 'BLN-A Root', to: 'BLN-U Unknown', kind: 'depends' },
+    { from: 'BLN-U Unknown', to: 'BLN-B Live', kind: 'depends' },
+  ];
+  const nullGateRoot = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    nullGateRoot, { nodes: nullGateNodes, edges: nullGateEdges }, lifecycleApi, epicPath, [],
+  );
+  const nullGateChip = byClass(nullGateRoot, 'graph-view-chip').find((chip) => textOf(chip).includes('BLN-A'));
+  nullGateChip.listeners.click({ stopPropagation() {} });
+  const nullGatePanel = byClass(nullGateRoot, 'graph-view-detail-panel')[0];
+  assert(textOf(nullGatePanel).includes('Gates 1 slice')
+    && byClass(nullGatePanel, 'graph-view-detail-dependent').length === 1
+    && textOf(byClass(nullGatePanel, 'graph-view-detail-dependent')[0]).includes('BLN-B'),
+  'BL4-NULL-PROPAGATION: panel gates count/links exclude null-status propagation nodes exactly like GraphInsights');
+
   // BL-3 calm/fail-soft posture. With no stuck nodes, real analysis must be
   // structurally byte-identical to GraphInsights missing. A throwing analyzer
   // follows that same legacy rendering path with no warning row.

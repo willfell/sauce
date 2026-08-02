@@ -465,10 +465,12 @@ class GraphView {
     const insight = this._nodeInsight(analysis, node.card);
     const gated = (Array.isArray(insight?.downstream) ? insight.downstream : [])
       .map((card) => byCard.get(card))
-      .filter((entry) => entry && !entry.isStub && this._statusPresentation(entry.status, api).normalized !== "completed");
+      .filter((entry) => entry && !entry.isStub && entry.status !== null
+        && String(entry.status).trim().toLowerCase() !== "completed");
+    const gatedCount = Number.isFinite(Number(insight?.gates)) ? Number(insight.gates) : 0;
     const gates = panel.createEl("div");
     gates.className = "graph-view-detail-gates";
-    gates.createEl("div", { text: `Gates ${gated.length} slice${gated.length === 1 ? "" : "s"}` })
+    gates.createEl("div", { text: `Gates ${gatedCount} slice${gatedCount === 1 ? "" : "s"}` })
       .className = "graph-view-detail-label";
     for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent");
     return panel;
