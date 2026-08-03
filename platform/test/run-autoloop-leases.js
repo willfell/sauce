@@ -31,6 +31,8 @@ const {
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count += 1; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count += 1; }
+eq(process.env.SAUCE_LOOP_BOARD_TOPOLOGY, inheritedBoardTopology,
+  'module-level flat fixture import restores inherited board topology');
 
 // commandClaim hardcodes BOARD/CARDS_ROOT from the SAUCE_LOOP_BOARD /
 // SAUCE_LOOP_CARDS_ROOT env seam at module load time and has no
@@ -252,12 +254,21 @@ async function withFreshCoordinator(envOverrides, fn) {
         statePath: path.join(claimRoot, '.git', 'sauce-autoloop', 'state.json'),
       };
 
+      const cachedCoordinatorBeforeClaim = require.cache[coordinatorModulePath];
+      const bindingBeforeClaim = Object.fromEntries(
+        ['SAUCE_LOOP_BOARD', 'SAUCE_LOOP_CARDS_ROOT', 'SAUCE_LOOP_VAULTS']
+          .map((key) => [key, process.env[key]]));
       const claimReceipt = await withFreshCoordinator({
         SAUCE_LOOP_BOARD: boardPath, SAUCE_LOOP_CARDS_ROOT: cardsRoot, SAUCE_LOOP_VAULTS: '[]',
       }, (fresh) => fresh.commandClaim(ctx, { json: true }, {
         now: () => new Date(T0).toISOString(), leaseNowMs: () => T0, leaseToken: () => 'tok-claim-1',
       }));
 
+      ok(require.cache[coordinatorModulePath] === cachedCoordinatorBeforeClaim,
+        'withFreshCoordinator restores the prior coordinator cache entry');
+      for (const [key, value] of Object.entries(bindingBeforeClaim)) {
+        eq(process.env[key], value, `withFreshCoordinator restores ${key}`);
+      }
       eq(claimReceipt.action, 'implement', 'commandClaim succeeds against the isolated fixture');
       eq(claimReceipt.card, 'A', 'commandClaim claims the only eligible card');
       eq(claimReceipt.lease_token, 'tok-claim-1', 'FINDING-2b claim receipt lease_token matches the acquired token');
