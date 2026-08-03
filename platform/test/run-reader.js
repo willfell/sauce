@@ -432,7 +432,14 @@ function makeDomEl(tag, opts) {
     empty() { for (const child of this.children) child.parentNode = null; this.children = []; },
     addEventListener(name, fn) { this.listeners[name] = fn; },
     setAttribute(name, value) { this[name] = value; },
-    focus() { this.focused = true; },
+    focus() {
+      this.focused = true;
+      try { if (global.document) global.document.activeElement = this; } catch (_e) {}
+    },
+    contains(node) {
+      for (let cur = node; cur; cur = cur.parentNode) if (cur === this) return true;
+      return false;
+    },
     closest() { return null; },
     querySelector(selector) { return walk(this).find((node) => node !== this && matches(node, selector)) || null; },
     querySelectorAll(selector) { return walk(this).filter((node) => node !== this && matches(node, selector)); },
@@ -779,6 +786,106 @@ async function dataviewCorrectnessCases() {
     }
     ok('PERF6C-CROSS-ARTICLE-FOCUS-REBIND queued sibling rejection focuses the restored live toggle, never its detached click-time node',
        focusReceiptPassed);
+
+    const hiddenArticleA = art('Hidden Focus A', 'archived', '2026-08-03T06:00:00Z');
+    const hiddenFillers = [5, 4, 3, 2].map((hour) =>
+      art('Hidden Focus filler ' + hour, 'archived', `2026-08-03T0${hour}:00:00Z`));
+    const hiddenArticleB = art('Hidden Focus B', 'archived', '2026-08-03T01:00:00Z');
+    const hiddenPages = [hiddenArticleA].concat(hiddenFillers, hiddenArticleB);
+    const hiddenPathA = hiddenArticleA.file.path;
+    const hiddenPathB = hiddenArticleB.file.path;
+    const hiddenFiles = new Map([
+      [hiddenPathA, { path: hiddenPathA, _fm: { status: 'archived' } }],
+      [hiddenPathB, { path: hiddenPathB, _fm: { status: 'archived' } }],
+    ]);
+    const hiddenPending = new Map();
+    const hiddenReceipts = new Map();
+    const hiddenApp = {
+      vault: { getAbstractFileByPath: (path) => hiddenFiles.get(path) || null },
+      fileManager: {
+        processFrontMatter: (target, mutate) => new Promise((resolve, reject) => {
+          hiddenPending.set(target.path, {
+            resolve: () => { mutate(target._fm); resolve(); },
+            reject,
+          });
+        }),
+      },
+    };
+    const hiddenQueue = new ReaderQueue();
+    const hiddenContainer = makeDomEl('div');
+    const hiddenDv = makeDv(hiddenPages);
+    const hiddenState = { statuses: new Map(), structuralQueue: null, toggles: new Map(), container: hiddenContainer, ctx: null };
+    const priorHiddenApp = global.app;
+    const priorHiddenWindow = global.window;
+    const priorHiddenCustomJS = global.customJS;
+    const hadDocument = Object.prototype.hasOwnProperty.call(global, 'document');
+    const priorDocument = global.document;
+    const waitForHiddenPending = async (path) => {
+      for (let i = 0; i < 20 && !hiddenPending.has(path); i++) await new Promise((resolve) => setImmediate(resolve));
+      return hiddenPending.has(path);
+    };
+    let hiddenFocusPassed = false;
+    let hiddenDiagnostics = {};
+    try {
+      global.document = { activeElement: null };
+      global.app = hiddenApp;
+      global.window = { app: hiddenApp };
+      global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+        const receipt = await opts.apply();
+        hiddenReceipts.set(opts.path, receipt);
+        try { await opts.write(); return { ok: true, receipt }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      } } };
+      global.window.customJS = global.customJS;
+      hiddenQueue._renderResults(hiddenDv, hiddenContainer, null, hiddenState);
+      const initialChildren = hiddenContainer.children.slice();
+      const initialToggleA = hiddenState.toggles.get(hiddenPathA);
+      const bInitiallyHidden = !hiddenState.toggles.has(hiddenPathB);
+      const pendingA = hiddenQueue._queueStatusTransition(
+        hiddenDv, hiddenState, hiddenPathA, 'archived', 'unread', initialToggleA,
+      );
+      const aApplied = await waitForHiddenPending(hiddenPathA);
+      const detachedBClickTarget = hiddenState.toggles.get(hiddenPathB);
+      const bWasRevealed = !!detachedBClickTarget && hiddenContainer.contains(detachedBClickTarget);
+      const pendingB = hiddenQueue._queueStatusTransition(
+        hiddenDv, hiddenState, hiddenPathB, 'archived', 'unread', detachedBClickTarget,
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      const bWaited = !hiddenPending.has(hiddenPathB);
+      hiddenPending.get(hiddenPathA).reject(new Error('hidden focus fixture A rejected'));
+      const bApplied = await waitForHiddenPending(hiddenPathB);
+      const reboundBTarget = hiddenReceipts.get(hiddenPathB)?.focusTarget;
+      hiddenPending.get(hiddenPathB).reject(new Error('hidden focus fixture B rejected'));
+      const settled = await Promise.all([pendingA, pendingB]);
+      const reboundWasLive = hiddenContainer.contains(reboundBTarget);
+      hiddenFocusPassed = bInitiallyHidden && aApplied && bWasRevealed && bWaited && bApplied
+        && settled[0] === false && settled[1] === false
+        && reboundBTarget === initialToggleA && reboundWasLive
+        && !hiddenState.toggles.has(hiddenPathB)
+        && global.document.activeElement === initialToggleA
+        && initialToggleA.focused && !detachedBClickTarget.focused
+        && hiddenState.statuses.get(hiddenPathA) === 'archived'
+        && hiddenState.statuses.get(hiddenPathB) === 'archived'
+        && hiddenContainer.children.length === initialChildren.length
+        && hiddenContainer.children.every((child, index) => child === initialChildren[index])
+        && hiddenState.structuralQueue === null;
+      hiddenDiagnostics = { bInitiallyHidden, aApplied, bWasRevealed, bWaited, bApplied,
+        settled, reboundIsA: reboundBTarget === initialToggleA, reboundWasLive,
+        bHiddenAfter: !hiddenState.toggles.has(hiddenPathB), activeIsA: global.document.activeElement === initialToggleA,
+        aFocused: initialToggleA.focused, detachedFocused: detachedBClickTarget.focused,
+        statusA: hiddenState.statuses.get(hiddenPathA), statusB: hiddenState.statuses.get(hiddenPathB),
+        childCount: hiddenContainer.children.length, initialCount: initialChildren.length,
+        exactChildren: hiddenContainer.children.every((child, index) => child === initialChildren[index]),
+        queueCleared: hiddenState.structuralQueue === null };
+    } finally {
+      global.app = priorHiddenApp;
+      global.window = priorHiddenWindow;
+      global.customJS = priorHiddenCustomJS;
+      if (hadDocument) global.document = priorDocument; else delete global.document;
+    }
+    ok('PERF6C-CROSS-ARTICLE-FOCUS-REBIND hidden sibling rejection focuses a live restored control, never its detached click-time node',
+       hiddenFocusPassed,
+       JSON.stringify(hiddenDiagnostics));
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;

@@ -429,7 +429,7 @@ class ReaderQueue {
                         // whole container since this gesture was clicked. Rebind
                         // at execution time so rollback focuses the currently live
                         // control rather than a detached click-time node.
-                        focusTarget: (state.toggles && state.toggles.get(path)) || focusTarget,
+                        focusTarget: this._liveFocusTarget(state, path, focusTarget),
                     };
                     try {
                         state.statuses.set(path, next);
@@ -449,6 +449,11 @@ class ReaderQueue {
                     state.statuses.set(path, receipt.priorStatus);
                     state.toggles = receipt.toggles;
                     this._restoreChildren(receipt.container, receipt.children);
+                    try {
+                        if (receipt.focusTarget === receipt.container && typeof receipt.container?.setAttribute === 'function') {
+                            receipt.container.setAttribute('tabindex', '-1');
+                        }
+                    } catch (_e) {}
                     try { receipt.focusTarget?.focus?.(); } catch (_e) {}
                 },
                 write: () => appRef.fileManager.processFrontMatter(file, (fm) => {
@@ -461,6 +466,32 @@ class ReaderQueue {
             try { new Notice('Could not update status: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             return false;
         }
+    }
+
+    _liveFocusTarget(state, path, clickTarget) {
+        const container = state && state.container;
+        const isLive = (node) => {
+            if (!node || !container) return false;
+            if (node === container) return true;
+            try { if (typeof container.contains === 'function') return container.contains(node); } catch (_e) {}
+            try {
+                for (let cur = node; cur; cur = cur.parentNode) if (cur === container) return true;
+            } catch (_e) {}
+            return false;
+        };
+        try {
+            const owned = state.toggles && state.toggles.get(path);
+            if (isLive(owned)) return owned;
+        } catch (_e) {}
+        if (isLive(clickTarget)) return clickTarget;
+        try {
+            const active = typeof document !== 'undefined' ? document.activeElement : null;
+            if (isLive(active)) return active;
+        } catch (_e) {}
+        try {
+            for (const toggle of (state.toggles && state.toggles.values()) || []) if (isLive(toggle)) return toggle;
+        } catch (_e) {}
+        return container || null;
     }
 
     _childNodes(container) {
