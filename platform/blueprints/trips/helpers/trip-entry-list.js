@@ -696,7 +696,21 @@ class TripEntryList {
           && incomingMtime > state.authority.writeMtime;
         const cacheAdvanced = metadataVersion > (state.authority.cacheVersion || 0);
         const cached = cacheAdvanced ? this._cachedEntries(path, key) : null;
-        if (matches) {
+        if (cacheAdvanced) {
+          if (cached) {
+            if (this._sameEntryModel(cached.model, state.authority.expected)) {
+              state.authority.cacheVersion = metadataVersion;
+              if (cached.mtime != null) state.authority.writeMtime = cached.mtime;
+            } else {
+              state.model = cached.model;
+              state.authority = {
+                expected: cached.model,
+                writeMtime: cached.mtime,
+                cacheVersion: metadataVersion,
+              };
+            }
+          }
+        } else if (matches) {
           state.model = incoming;
           state.authority = null;
           this._releaseMetadataPath(state);
@@ -707,18 +721,6 @@ class TripEntryList {
             writeMtime: incomingMtime,
             cacheVersion: metadataVersion,
           };
-        } else if (cacheAdvanced && cached) {
-          if (this._sameEntryModel(cached.model, state.authority.expected)) {
-            state.authority.cacheVersion = metadataVersion;
-            if (cached.mtime != null) state.authority.writeMtime = cached.mtime;
-          } else {
-            state.model = cached.model;
-            state.authority = {
-              expected: cached.model,
-              writeMtime: cached.mtime,
-              cacheVersion: metadataVersion,
-            };
-          }
         }
       } else {
         state.model = incoming;

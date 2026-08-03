@@ -742,6 +742,111 @@ function makeDv(embed, currentVal) {
             && cacheBEntryState.authority?.cacheVersion === generationVersionB
             && cacheBLinkState.model[0]?.url === 'https://external-b.example'
             && cacheBLinkState.authority?.cacheVersion === generationVersionB);
+        const intermediateEntries = [{ flight_no: 'INTERMEDIATE-LOCAL' }];
+        const intermediateLinks = [{ url: 'https://intermediate-local.example', text: 'Intermediate Local' }];
+        replacementEntryState.model = intermediateEntries;
+        replacementEntryState.authority = {
+            expected: intermediateEntries, writeMtime: 10, cacheVersion: generationVersionB,
+        };
+        replacementLinkState.model = intermediateLinks;
+        replacementLinkState.authority = {
+            expected: intermediateLinks, writeMtime: 10, cacheVersion: generationVersionB,
+        };
+        list._retainMetadataPath(replacementEntryState);
+        links._retainMetadataPath(replacementLinkState);
+        file.stat.mtime = 30;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'EVENT-FIRST' }],
+            links: [{ url: 'https://event-first.example', text: 'Event First' }],
+        };
+        generationCacheB.emit({ path: replacementPath });
+        const precedenceGeneration = generationTrackerB.versions.get(replacementPath);
+        const intermediateEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 20 },
+            flights: [{ flight_no: 'INTERMEDIATE-DV' }],
+        }, 'flights');
+        const intermediateLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 20 },
+            links: [{ url: 'https://intermediate-dv.example', text: 'Intermediate DV' }],
+        });
+        ok('PERF4F-CACHE-EVENT-PRECEDENCE observed cache event outranks an intermediate stale Dataview mtime',
+            precedenceGeneration === generationVersionB + 1
+            && intermediateEntryState.model[0]?.flight_no === 'EVENT-FIRST'
+            && intermediateEntryState.authority?.cacheVersion === precedenceGeneration
+            && intermediateLinkState.model[0]?.url === 'https://event-first.example'
+            && intermediateLinkState.authority?.cacheVersion === precedenceGeneration);
+        const matchingEntries = [{ flight_no: 'MATCHING-LOCAL' }];
+        const matchingLinks = [{ url: 'https://matching-local.example', text: 'Matching Local' }];
+        replacementEntryState.model = matchingEntries;
+        replacementEntryState.authority = {
+            expected: matchingEntries, writeMtime: 40, cacheVersion: precedenceGeneration,
+        };
+        replacementLinkState.model = matchingLinks;
+        replacementLinkState.authority = {
+            expected: matchingLinks, writeMtime: 40, cacheVersion: precedenceGeneration,
+        };
+        file.stat.mtime = 50;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'EVENT-BEATS-MATCH' }],
+            links: [{ url: 'https://event-beats-match.example', text: 'Event Beats Match' }],
+        };
+        generationCacheB.emit({ path: replacementPath });
+        const matchingGeneration = generationTrackerB.versions.get(replacementPath);
+        const matchingEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 40 }, flights: matchingEntries,
+        }, 'flights');
+        const matchingLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 40 }, links: matchingLinks,
+        });
+        ok('PERF4F-CACHE-EVENT-PRECEDENCE observed cache event outranks a matching pre-event Dataview snapshot',
+            matchingGeneration === precedenceGeneration + 1
+            && matchingEntryState.model[0]?.flight_no === 'EVENT-BEATS-MATCH'
+            && matchingEntryState.authority?.cacheVersion === matchingGeneration
+            && matchingLinkState.model[0]?.url === 'https://event-beats-match.example'
+            && matchingLinkState.authority?.cacheVersion === matchingGeneration);
+        const pendingEntries = [{ flight_no: 'PENDING-LOCAL' }];
+        const pendingAuthorityLinks = [{ url: 'https://pending-local.example', text: 'Pending Local' }];
+        replacementEntryState.model = pendingEntries;
+        replacementEntryState.authority = {
+            expected: pendingEntries, writeMtime: 60, cacheVersion: matchingGeneration,
+        };
+        replacementLinkState.model = pendingAuthorityLinks;
+        replacementLinkState.authority = {
+            expected: pendingAuthorityLinks, writeMtime: 60, cacheVersion: matchingGeneration,
+        };
+        file.stat.mtime = 80;
+        generationCacheB.frontmatter = null;
+        generationCacheB.emit({ path: replacementPath });
+        const pendingGeneration = generationTrackerB.versions.get(replacementPath);
+        const pendingEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 70 }, flights: [{ flight_no: 'PENDING-DV' }],
+        }, 'flights');
+        const pendingLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 70 },
+            links: [{ url: 'https://pending-dv.example', text: 'Pending DV' }],
+        });
+        const pendingAuthorityHeld = pendingEntryState.model[0]?.flight_no === 'PENDING-LOCAL'
+            && pendingEntryState.authority?.cacheVersion === matchingGeneration
+            && pendingLinkState.model[0]?.url === 'https://pending-local.example'
+            && pendingLinkState.authority?.cacheVersion === matchingGeneration;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'CACHE-READY' }],
+            links: [{ url: 'https://cache-ready.example', text: 'Cache Ready' }],
+        };
+        const readyEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 70 }, flights: [{ flight_no: 'PENDING-DV' }],
+        }, 'flights');
+        const readyLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 70 },
+            links: [{ url: 'https://pending-dv.example', text: 'Pending DV' }],
+        });
+        ok('PERF4F-CACHE-EVENT-PRECEDENCE unreadable event cache holds authority and retries the same generation',
+            pendingGeneration === matchingGeneration + 1
+            && pendingAuthorityHeld
+            && readyEntryState.model[0]?.flight_no === 'CACHE-READY'
+            && readyEntryState.authority?.cacheVersion === pendingGeneration
+            && readyLinkState.model[0]?.url === 'https://cache-ready.example'
+            && readyLinkState.authority?.cacheVersion === pendingGeneration);
         global.app.metadataCache = originalMetadataCache;
         list._metadataTracker();
         cachedFrontmatter = {
@@ -763,7 +868,7 @@ function makeDv(embed, currentVal) {
             && liveEntryState.authority?.cacheVersion === generationVersionLive
             && liveLinkState.model[0]?.url === 'https://external-live.example'
             && liveLinkState.authority?.cacheVersion === generationVersionLive
-            && generationVersionLive === generationVersionB + 1);
+            && generationVersionLive === pendingGeneration + 1);
         cachedFrontmatter = null;
         list._entryState(replacementEntryOwner, {
             file: { path: replacementPath }, flights: [{ flight_no: 'EXTERNAL-LIVE' }],
