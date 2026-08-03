@@ -524,7 +524,7 @@ class SpaceHome {
           } catch (_e) {}
         },
         write: async () => {
-          const created = await td.createQuick({ title: text, source: "daily" });
+          const created = await td.createQuick({ title: text, source: "daily", reconcile: false });
           if (!created || created.ok !== true) {
             const reason = created && (created.reason || created.error?.message);
             throw new Error(reason || "task create did not commit");

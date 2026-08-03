@@ -555,7 +555,11 @@ function descendants(el) {
         computeCounts: (d, t, te) => { calls.computeCounts.push({ d, t, te }); return { today: 2, overdue: 1, done: 0, meetings: 1 }; },
       },
       TaskEntity: {},
-      TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve({ ok: true }); } },
+      TaskDialog: { createQuick: (opts) => {
+        calls.createQuick.push(opts);
+        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
+        return Promise.resolve({ ok: true });
+      } },
       RenderSafe: {
         mutateStructure: async (opts) => {
           calls.structure.push("apply");
@@ -622,10 +626,13 @@ function descendants(el) {
       const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
       await fire(capAdd);
       assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
-      assertTrue("HOME-CAP-19 Add → createQuick carries title + source, no today (no default due date)",
+      assertTrue("HOME-CAP-19 Add → createQuick carries title + source + reconcile:false, no today (no default due date)",
         calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
-          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily",
-        `expected createQuick({title:'buy milk',source:'daily'}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
+          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily"
+          && calls.createQuick[0].reconcile === false,
+        `expected createQuick({title:'buy milk',source:'daily',reconcile:false}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
+      assertTrue("HOME-CAP-19a quick capture dispatch never invokes structural global refresh",
+        !calls.commandIds.includes("dataview:dataview-force-refresh-views"));
       assertEq("HOME-CAP-19b structural apply precedes persistence", calls.structure.slice(0, 2).join(","), "apply,write");
       assertTrue("HOME-CAP-19c capture success does not recursively self-render",
         !/self\.render\(dv,\s*params\)/.test(SPACE_HOME_SRC), "structural success must reconcile naturally");
@@ -692,7 +699,11 @@ function descendants(el) {
       assertTrue("HOME-CAP-21n explicit negative create result is not accepted as persistence success",
         calls.structure.slice(-3).join(",") === "apply,write,rollback");
 
-      global.customJS.TaskDialog.createQuick = (opts) => { calls.createQuick.push(opts); return Promise.resolve({ ok: true }); };
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
+        return Promise.resolve({ ok: true });
+      };
     }
 
     // ── Inline capture: blank / whitespace input → NO createQuick. ──
