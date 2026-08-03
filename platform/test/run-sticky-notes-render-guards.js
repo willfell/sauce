@@ -162,17 +162,23 @@ const variants = [
     }
     for (const w of widgets.filter((entry) => /DayList$/.test(entry.name))) {
         const WidgetClass = loadWidget(w.path, w.name);
-        await guard(`PERF-7-COLD ${w.name} — absent CustomJS and missing frontmatter never reject`, async () => {
+        await guard(`PERF7-GUARDED-CUSTOMJS ${w.name} — absent CustomJS takes the guarded missing-day path`, async () => {
             const saved = global.customJS;
+            const paragraphs = [];
             try {
                 delete global.customJS;
-                await new WidgetClass().render(makeDv(false, undefined), {});
+                const dv = makeDv(false, undefined);
+                dv.paragraph = (message) => { paragraphs.push(String(message)); return makeEl(); };
+                await new WidgetClass().render(dv, {});
                 await new WidgetClass().render(undefined, {});
+                if (paragraphs.length !== 1 || !/missing `day` arg/.test(paragraphs[0]) || /error:/i.test(paragraphs[0])) {
+                    throw new Error(`unguarded cold-load result: ${JSON.stringify(paragraphs)}`);
+                }
             } finally {
                 global.customJS = saved;
             }
         });
-        await guard(`PERF-7-COLD ${w.name} — throwing RenderSafe page never rejects`, async () => {
+        await guard(`PERF7-COLD-GUARD ${w.name} — throwing RenderSafe page never rejects`, async () => {
             const saved = global.customJS;
             try {
                 global.customJS = { RenderSafe: { page() { throw new Error('cold index'); } } };
@@ -181,7 +187,57 @@ const variants = [
                 global.customJS = saved;
             }
         });
-        await guard(`PERF-7-GENERATION ${w.name} — stale render rejection cannot contaminate newer output`, async () => {
+        await guard(`PERF7-DELAYED-INDEX-RECOVERY ${w.name} — third-poll authority renders`, async () => {
+            const savedCjs = global.customJS;
+            const savedTimeout = global.setTimeout;
+            let polls = 0;
+            let renders = 0;
+            const paragraphs = [];
+            try {
+                global.setTimeout = (fn) => { fn(); return 0; };
+                global.customJS = {
+                    RenderSafe: { page: () => (++polls >= 3 ? { day: '2026-07-02' } : null) },
+                    BeaconCards: { render: async () => { renders++; } },
+                };
+                const dv = makeDv(false, undefined);
+                dv.paragraph = (message) => { paragraphs.push(String(message)); return makeEl(); };
+                await new WidgetClass().render(dv, {});
+                if (polls !== 3 || renders !== 1 || paragraphs.length !== 0) {
+                    throw new Error(`polls=${polls}, renders=${renders}, paragraphs=${JSON.stringify(paragraphs)}`);
+                }
+            } finally {
+                global.customJS = savedCjs;
+                global.setTimeout = savedTimeout;
+            }
+        });
+        await guard(`PERF7-MISSING-DV-PAGES ${w.name} — valid day fails closed without dv.pages`, async () => {
+            const saved = global.customJS;
+            const paragraphs = [];
+            try {
+                global.customJS = { RenderSafe: { page: () => null }, BeaconCards: { render: async () => {} } };
+                const dv = makeDv(false, undefined);
+                delete dv.pages;
+                dv.paragraph = (message) => { paragraphs.push(String(message)); return makeEl(); };
+                await new WidgetClass().render(dv, { day: '2026-07-02' });
+                if (paragraphs.length !== 0) throw new Error(`missing pages surfaced an error: ${JSON.stringify(paragraphs)}`);
+            } finally {
+                global.customJS = saved;
+            }
+        });
+        await guard(`PERF7-MISSING-BEACON-CARDS ${w.name} — valid day fails closed without BeaconCards`, async () => {
+            const saved = global.customJS;
+            const paragraphs = [];
+            try {
+                global.customJS = { RenderSafe: { page: () => null } };
+                const dv = makeDv(false, undefined);
+                dv.paragraph = (message) => { paragraphs.push(String(message)); return makeEl(); };
+                await new WidgetClass().render(dv, { day: '2026-07-02' });
+                if (paragraphs.length !== 0) throw new Error(`missing BeaconCards surfaced an error: ${JSON.stringify(paragraphs)}`);
+            } finally {
+                global.customJS = saved;
+            }
+        });
+        await guard(`PERF7-GENERATION-OWNED-ERROR ${w.name} — stale render rejection cannot contaminate newer output`, async () => {
             const saved = global.customJS;
             let rejectOlder;
             let markOlderStarted;
