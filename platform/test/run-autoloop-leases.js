@@ -5,14 +5,42 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
+const delivery = require('../mechanisms/delivery');
 
+const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
-} = require('../../scripts/autoloop/codex-coordinator');
+} = require(coordinatorModulePath);
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count += 1; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count += 1; }
+
+// commandClaim hardcodes BOARD/CARDS_ROOT from the SAUCE_LOOP_BOARD /
+// SAUCE_LOOP_CARDS_ROOT env seam at module load time and has no
+// readState/writeState/findCard/sh dependency seam of its own — driving it
+// for real needs a fresh module instance bound to an isolated fixture, never
+// the real repo's bound board. Mirrors the cache-safe reimport already used
+// by run-codex-autoloop.js for its own topology-prewarm coverage.
+async function withFreshCoordinator(envOverrides, fn) {
+  const prevEnv = {};
+  for (const key of Object.keys(envOverrides)) prevEnv[key] = process.env[key];
+  const hadCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
+  const prevCacheEntry = require.cache[coordinatorModulePath];
+  try {
+    Object.assign(process.env, envOverrides);
+    delete require.cache[coordinatorModulePath];
+    const fresh = require(coordinatorModulePath);
+    return await fn(fresh);
+  } finally {
+    delete require.cache[coordinatorModulePath];
+    if (hadCache) require.cache[coordinatorModulePath] = prevCacheEntry;
+    for (const key of Object.keys(envOverrides)) {
+      if (prevEnv[key] === undefined) delete process.env[key]; else process.env[key] = prevEnv[key];
+    }
+  }
+}
 
 (async () => {
   // --- pure helpers ---
@@ -138,6 +166,103 @@ function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, 
       ok(!!state.cards.P.lease, 'parked resume record carries a lease');
     } finally {
       fs.rmSync(resumeRoot, { recursive: true, force: true });
+    }
+  }
+
+  // ADDITION (deliberate design pin): attach applies to every non-terminal
+  // phase, not only 'implementing' — a session must be able to attach to a
+  // mid-pipeline card (e.g. awaiting CI) to obtain the token for advance.
+  {
+    const state = { schema_version: 1, cards: { A: { card: 'A', phase: 'feature_pr', branch: 'b', worktree: '/w' } } };
+    const receipt = await commandResume({ root: '/ws' }, { json: true, card: 'A' }, {
+      readState: () => state, writeState: () => {}, withLock: immediateLock,
+      now: () => new Date(T0).toISOString(), leaseNowMs: () => T0, leaseToken: () => 'tok-fp1',
+    });
+    eq(receipt.action, 'attach', 'a mid-pipeline feature_pr card also attaches');
+    eq(receipt.lease_token, 'tok-fp1', 'feature_pr attach returns a token');
+    eq(state.cards.A.phase, 'feature_pr', 'feature_pr attach does not touch phase');
+  }
+
+  // commandClaim lease acquisition (Finding 2 coverage) + receipt shape
+  // (Finding 1: `lease` must be the leaseSummary contract, never the raw
+  // lease record — the token appears ONLY at `lease_token`).
+  {
+    const claimTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-claim-'));
+    try {
+      const originRepo = path.join(claimTmp, 'origin.git');
+      const seedRepo = path.join(claimTmp, 'seed');
+      const claimRoot = path.join(claimTmp, 'root');
+      const boardPath = path.join(claimTmp, 'board.md');
+      const cardsRoot = path.join(claimTmp, 'cards');
+      fs.mkdirSync(seedRepo, { recursive: true });
+      fs.mkdirSync(cardsRoot, { recursive: true });
+
+      const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+      git(['init', '--bare', '--initial-branch=main', originRepo]);
+      git(['init', '--initial-branch=main', seedRepo]);
+      fs.writeFileSync(path.join(seedRepo, 'README.md'), 'seed\n');
+      git(['add', '-A'], seedRepo);
+      git(['-c', 'user.email=lease-test@example.com', '-c', 'user.name=lease-test', 'commit', '-m', 'seed'], seedRepo);
+      git(['remote', 'add', 'origin', originRepo], seedRepo);
+      git(['push', 'origin', 'main'], seedRepo);
+      git(['clone', originRepo, claimRoot]);
+
+      fs.writeFileSync(boardPath, [
+        '## In Planning', '- [ ] [[A]]', '',
+        '## In Progress', '', '## Blocked', '', '## Completed', '',
+      ].join('\n'));
+      const zones = ['Docs/example.md'];
+      const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
+      const evidence = [{
+        source_identity: 'lease test', captured_at: '2026-07-17T06:00:00Z',
+        revision: 'fixture-v1', locator: 'platform/test/run-autoloop-leases.js', claim: 'Bounded test card.',
+      }];
+      const claimCardBody = [
+        '---', 'card: A', `schema_version: ${delivery.CONTRACT_VERSION}`,
+        'parent_card: "[[Test parent]]"', 'slice: T1', 'model_profile: standard',
+        'execution_mode: release', `batch_policy: ${policy}`, 'status: planning',
+        'touch_zones:', ...zones.map((z) => `  - ${z}`), 'depends_on: []',
+        'deploy_subscriptions:', '  headspace: []', '  accuris: []', '  ero: []',
+        'context_pack: "Docs/test-context.md"', 'epic: "[[Test epic]]"',
+        `evidence: ${JSON.stringify(evidence)}`, 'risk_dimensions: []',
+        'release_required: true', 'deployment_required: true',
+        '---', '', '# Work', '', 'Bounded work.',
+      ].join('\n');
+      fs.writeFileSync(path.join(cardsRoot, 'A.md'), claimCardBody);
+
+      const ctx = {
+        root: claimRoot,
+        commonDir: path.join(claimRoot, '.git'),
+        stateDir: path.join(claimRoot, '.git', 'sauce-autoloop'),
+        statePath: path.join(claimRoot, '.git', 'sauce-autoloop', 'state.json'),
+      };
+
+      const claimReceipt = await withFreshCoordinator({
+        SAUCE_LOOP_BOARD: boardPath, SAUCE_LOOP_CARDS_ROOT: cardsRoot, SAUCE_LOOP_VAULTS: '[]',
+      }, (fresh) => fresh.commandClaim(ctx, { json: true }, {
+        now: () => new Date(T0).toISOString(), leaseNowMs: () => T0, leaseToken: () => 'tok-claim-1',
+      }));
+
+      eq(claimReceipt.action, 'implement', 'commandClaim succeeds against the isolated fixture');
+      eq(claimReceipt.card, 'A', 'commandClaim claims the only eligible card');
+      eq(claimReceipt.lease_token, 'tok-claim-1', 'FINDING-2b claim receipt lease_token matches the acquired token');
+      ok(claimReceipt.lease && typeof claimReceipt.lease.expires_in_ms === 'number',
+        'FINDING-2c claim receipt lease is the summary shape (expires_in_ms present)');
+      eq(claimReceipt.lease.token, undefined,
+        'FINDING-2d claim receipt lease never carries the raw token (lease_token is the only place it appears)');
+      eq(claimReceipt.lease.held, true, 'FINDING-1 claim receipt lease is the leaseSummary contract, not the raw record');
+
+      const persisted = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+      const persistedLease = persisted.cards.A.lease;
+      eq(persistedLease.token, 'tok-claim-1', 'FINDING-2a claimed record carries the lease token');
+      ok(typeof persistedLease.acquired_at === 'string' && persistedLease.acquired_at.length > 0,
+        'FINDING-2a claimed record lease carries acquired_at');
+      ok(typeof persistedLease.renewed_at === 'string' && persistedLease.renewed_at.length > 0,
+        'FINDING-2a claimed record lease carries renewed_at');
+      ok(typeof persistedLease.holder.host === 'string' && persistedLease.holder.host.length > 0,
+        'FINDING-2a claimed record lease carries holder.host');
+    } finally {
+      fs.rmSync(claimTmp, { recursive: true, force: true });
     }
   }
 

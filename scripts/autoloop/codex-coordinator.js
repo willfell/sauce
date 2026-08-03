@@ -5095,6 +5095,7 @@ async function commandRestructure(ctx, args, deps = {}) {
 async function commandClaim(ctx, args, deps = {}) {
   const now = deps.now || (() => new Date().toISOString());
   const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return withLock(ctx, 'selector', async () => {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       return successReceipt('halted', { no_op: true, reason: '.autoloop-halt present' });
@@ -5144,6 +5145,7 @@ async function commandClaim(ctx, args, deps = {}) {
     return successReceipt('implement', {
       ...record, skipped: selected.skipped,
       lease_token: record.lease.token,
+      lease: leaseSummary(record.lease, leaseNowMs()),
       loop_station: station.receipt,
     });
   });
