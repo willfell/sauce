@@ -463,6 +463,48 @@ async function run() {
         && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0);
   }
   {
+    const files = new Map();
+    const persisted = new Map();
+    const cached = new Map();
+    for (let i = 0; i < 65; i++) {
+      const file = { path: `spice/finance/Invoices/Deleted-After-Watch-${i}.md`, stat: { mtime: i + 1 } };
+      files.set(file.path, file);
+      persisted.set(file.path, { amount: 0 });
+      cached.set(file.path, { amount: 0 });
+    }
+    const currentFiles = new Map(files);
+    const listeners = new Set();
+    const metadataCache = {
+      getFileCache: (file) => ({ frontmatter: cached.get(file.path) || null }),
+      on(event, listener) {
+        const ref = { event, listener };
+        listeners.add(ref);
+        return ref;
+      },
+      offref(ref) { listeners.delete(ref); },
+      emit(changedFile) {
+        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    global.app = {
+      vault: { getAbstractFileByPath: (path) => currentFiles.get(path) || null },
+      metadataCache,
+      fileManager: {
+        async processFrontMatter(file, mutator) { await mutator(persisted.get(file.path)); },
+      },
+    };
+    const deletionEventFf = new FinanceFrontmatter();
+    for (const file of files.values()) await deletionEventFf.update(file, (fm) => { fm.amount = 1; });
+    const registered = deletionEventFf._writtenFrontmatter.size === 65 && listeners.size === 65;
+    for (const file of files.values()) {
+      currentFiles.delete(file.path);
+      metadataCache.emit(file);
+      metadataCache.emit(file);
+    }
+    ok("FF-12K post-registration deletion events release all snapshot and listener ownership",
+      registered && deletionEventFf._writtenFrontmatter.size === 0 && listeners.size === 0);
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }

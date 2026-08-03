@@ -283,8 +283,20 @@ class FinanceFrontmatter {
         const listener = (changedFile) => {
             if (!changedFile || changedFile.path !== file.path) return;
             if (this._writtenFrontmatter?.get?.(file.path) !== written) return;
-            const cached = metadata.getFileCache?.(changedFile)?.frontmatter ?? null;
-            this._writtenSnapshotSettled(changedFile, written, cached);
+            let currentFile = null;
+            try {
+                currentFile = app.vault?.getAbstractFileByPath?.(file.path) || null;
+            } catch (_e) {
+                // Unknown is not deletion. Retain the single identity-guarded
+                // owner until a later event or read can observe canonical state.
+                return;
+            }
+            if (!currentFile || currentFile.path !== file.path || currentFile.children !== undefined) {
+                this._releaseWrittenSnapshot(file.path, written);
+                return;
+            }
+            const cached = metadata.getFileCache?.(currentFile)?.frontmatter ?? null;
+            this._writtenSnapshotSettled(currentFile, written, cached);
         };
         try {
             written.metadata = metadata;
