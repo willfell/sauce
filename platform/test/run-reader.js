@@ -20,6 +20,7 @@ const RDIR       = path.join(ROOT, 'platform', 'blueprints', 'reader');
 const QUEUE_SRC  = path.join(RDIR, 'helpers', 'reader-queue.js');
 const ACT_SRC    = path.join(RDIR, 'helpers', 'reader-article-actions.js');
 const VIEW_SRC   = path.join(RDIR, 'helpers', 'reader-article-view.js');
+const CHROME_SRC = path.join(RDIR, 'helpers', 'reader-chrome-bar.js');
 const LEDGER_DOC = path.join(ROOT, 'Docs', 'agent-guides', 'code-conventions.md');
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,7 @@ function loadClass(srcPath, className) {
 const ReaderQueue          = loadClass(QUEUE_SRC, 'ReaderQueue');
 const ReaderArticleActions = loadClass(ACT_SRC,   'ReaderArticleActions');
 const ReaderArticleView    = loadClass(VIEW_SRC,  'ReaderArticleView');
+const ReaderChromeBar      = loadClass(CHROME_SRC, 'ReaderChromeBar');
 
 // ---------------------------------------------------------------------------
 // Assert helpers
@@ -545,6 +547,7 @@ async function dataviewCorrectnessCases() {
     try { new ReaderQueue().render(throwingDv); } catch (_e) { coldThrows++; }
     try { new ReaderArticleActions().render(throwingDv); } catch (_e) { coldThrows++; }
     try { await new ReaderArticleView().render(throwingDv); } catch (_e) { coldThrows++; }
+    try { new ReaderChromeBar().render(throwingDv); } catch (_e) { coldThrows++; }
     ok('HC-READER-PERF-7 every Reader Dataview entry fails closed on a throwing cold current page', coldThrows === 0);
 
     const activeCustomJS = global.customJS;
@@ -558,6 +561,7 @@ async function dataviewCorrectnessCases() {
         { make: () => new ReaderQueue(), valid: { file: { path: 'spice/reader/Reader.md' }, type: 'reader-hub' } },
         { make: () => new ReaderArticleActions(), valid: { file: { path: file.path }, type: 'reader-article' } },
         { make: () => new ReaderArticleView(), valid: { file: { path: file.path }, type: 'reader-article' } },
+        { make: () => new ReaderChromeBar(), valid: { file: { path: file.path }, type: 'reader-article' } },
       ];
       for (const entry of entries) {
         const pages = [
@@ -577,8 +581,27 @@ async function dataviewCorrectnessCases() {
       global.customJS = activeCustomJS;
       global.window = activeWindow;
     }
-    ok('HC-READER-PERF-7A every Reader entry survives missing current, undefined current, file-only frontmatter, and valid-page missing dependencies',
-       matrixCases === 12 && matrixThrows === 0);
+    ok('HC-READER-PERF-7A all four Reader entries survive missing current, undefined current, file-only frontmatter, and valid-page missing dependencies',
+       matrixCases === 16 && matrixThrows === 0);
+
+    const chromeSrc = fs.readFileSync(CHROME_SRC, 'utf8');
+    const chromeGuardMutant = chromeSrc.replace(
+      '} catch (_e) { /* never throw */ }',
+      '} catch (_e) { throw _e; }',
+    );
+    const MutantReaderChromeBar = new Function(`${chromeGuardMutant}\nreturn ReaderChromeBar;`)();
+    const beforeChromeCustomJS = global.customJS;
+    let liveChromeThrew = false;
+    let mutantChromeThrew = false;
+    try {
+      delete global.customJS;
+      try { new ReaderChromeBar().render({ container: makeDomEl('div') }); } catch (_e) { liveChromeThrew = true; }
+      try { new MutantReaderChromeBar().render({ container: makeDomEl('div') }); } catch (_e) { mutantChromeThrew = true; }
+    } finally {
+      global.customJS = beforeChromeCustomJS;
+    }
+    ok('PERF6B-CHROME-ENTRY-COLD-LOAD ReaderChromeBar.render fails closed while a disabled never-throw guard mutant fails',
+       chromeGuardMutant !== chromeSrc && !liveChromeThrew && mutantChromeThrew);
 
     const queueSrc = fs.readFileSync(QUEUE_SRC, 'utf8');
     const structuralGuard = (src) => /renderSafe\.mutateStructure\s*\(\{/.test(src)
@@ -601,6 +624,7 @@ async function dataviewCorrectnessCases() {
        && /exact prior child nodes/.test(queueLedgerRow) && /triggering focus/.test(queueLedgerRow)
        && /throwing cold-load/.test(queueLedgerRow)
        && /ReaderArticleActions/.test(articleLedgerRow)
+       && /ReaderChromeBar/.test(articleLedgerRow)
        && /undefined, file-only, throwing-current, and missing-dependency/.test(articleLedgerRow));
 
     const serialState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
