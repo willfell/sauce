@@ -19,8 +19,8 @@
  * Each article renders via the shared `_renderArticleRow` — a title link that
  * OPENS the note (same openLinkText pattern the to-do TaskTodayList row uses) +
  * a source-meta subtitle + a status-cycle control (unread→reading→archived→unread)
- * that writes frontmatter via processFrontMatter (stopPropagation so it doesn't
- * also open the note).
+ * that moves the row optimistically through RenderSafe.mutateStructure before
+ * writing frontmatter (stopPropagation so it doesn't also open the note).
  *
  * COLD-LOAD SAFETY (landmines #1-2): Dataview can run this block before the note
  * is indexed. We guard `dv.current()` early and resolve every other customJS class
@@ -62,7 +62,7 @@ class ReaderQueue {
      * COLD-LOAD SAFE — a null dv, a dv with no `pages`, or zero matching pages
      * all yield empty buckets + zero counts. Never throws.
      */
-    static selectArticles(dv) {
+    static selectArticles(dv, statusOverrides) {
         const empty = { reading: [], unread: [], archived: [], counts: { unread: 0, reading: 0, archived: 0 } };
         try {
             if (!dv || typeof dv.pages !== 'function') return empty;
@@ -78,7 +78,13 @@ class ReaderQueue {
             const archived = [];
             for (const p of list) {
                 if (!p) continue;
-                const status = String(p.status == null ? '' : p.status).trim().toLowerCase();
+                const path = p.file && p.file.path ? String(p.file.path) : '';
+                let rawStatus = p.status;
+                try {
+                    if (path && statusOverrides && typeof statusOverrides.has === 'function'
+                        && statusOverrides.has(path)) rawStatus = statusOverrides.get(path);
+                } catch (_e) { /* authority snapshot remains the fallback */ }
+                const status = String(rawStatus == null ? '' : rawStatus).trim().toLowerCase();
                 if (status === 'reading') reading.push(p);
                 else if (status === 'archived') archived.push(p);
                 else unread.push(p);   // unread + any unrecognized/blank status
@@ -120,25 +126,35 @@ class ReaderQueue {
      * then draws the create row + search strip + glance pills + status bands (or a
      * flat search-results list). Fully guarded — returns quietly on cold-load (no
      * throw), and each row is wrapped in try/catch so one bad article can't break
-     * the whole queue.
+    * the whole queue.
      */
     render(dv) {
+      try {
         if (!dv || !dv.container) return;
         // Skip rendering inside embeds — the host note renders its own queue.
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
 
-        const cur = dv.current && dv.current();
+        let cur = null;
+        try {
+            const renderSafe = globalThis.customJS?.RenderSafe;
+            cur = renderSafe && typeof renderSafe.page === 'function'
+                ? renderSafe.page(dv)
+                : (dv.current && dv.current());
+        } catch (_e) { return; }
         if (!cur || !cur.file) return;
         if (cur.type !== 'reader-hub') return;
+
+        const state = { statuses: new Map(), queues: new Map(), toggles: new Map(), container: null, ctx: null };
 
         // DocSearch strip — scoped to spice/reader, NON-recursive (flat leaves),
         // entityType reader-article, persist:false (search always starts empty).
         // onChange clears ONLY the results container + re-renders the queue.
-        const DocSearch = window.customJS && window.customJS.DocSearch;
+        const DocSearch = globalThis.customJS?.DocSearch;
         if (!DocSearch || typeof DocSearch.render !== 'function') {
             // No search mechanism → render the browse view directly into the
             // container so the queue still shows (cold-load / missing dep).
-            this._renderResults(dv, dv.container, null);
+            state.container = dv.container;
+            this._renderResults(dv, dv.container, null, state);
             return;
         }
 
@@ -149,8 +165,10 @@ class ReaderQueue {
             persist: false,
             hideTags: true,
             onChange: (c) => {
-                c.resultsContainer.empty();
-                this._renderResults(dv, c.resultsContainer, c);
+                state.container = c.resultsContainer;
+                state.ctx = c;
+                this._clearContainer(c.resultsContainer);
+                this._renderResults(dv, c.resultsContainer, c, state);
             },
         });
 
@@ -161,7 +179,11 @@ class ReaderQueue {
             if (strip && strip.style) strip.style.marginTop = '12px';
         } catch (_e) { /* cosmetic only */ }
 
-        this._renderResults(dv, ctx.resultsContainer, ctx);
+        if (!ctx || !ctx.resultsContainer) return;
+        state.container = ctx.resultsContainer;
+        state.ctx = ctx;
+        this._renderResults(dv, ctx.resultsContainer, ctx, state);
+      } catch (_e) { /* never throw from a Dataview entry point */ }
     }
 
     /**
@@ -169,16 +191,17 @@ class ReaderQueue {
      * browse bands (empty search) or the flat search-results list (active filter).
      * `ctx` is the DocSearch filterContext (or null when search is unavailable).
      */
-    _renderResults(dv, container, ctx) {
+    _renderResults(dv, container, ctx, state) {
         if (!container || typeof container.createEl !== 'function') return;
-        const sel = ReaderQueue.selectArticles(dv);
+        if (state) state.toggles = new Map();
+        const sel = ReaderQueue.selectArticles(dv, state && state.statuses);
 
         // 3. Glance pills — Unread N · Reading N · Archived N (any zero hidden).
         this._renderGlancePills(container, sel.counts);
 
         // 5. SEARCH mode — a flat, newest-first list of matching articles.
         if (ctx && ctx.hasActiveFilter) {
-            const DocSearch = window.customJS && window.customJS.DocSearch;
+            const DocSearch = globalThis.customJS?.DocSearch;
             const all = sel.reading.concat(sel.unread, sel.archived).sort((a, b) => {
                 const av = this._capturedStr(a);
                 const bv = this._capturedStr(b);
@@ -198,21 +221,21 @@ class ReaderQueue {
                 return;
             }
             for (const p of matches) {
-                try { this._renderArticleRow(dv, p, container); } catch (_e) { /* one bad row */ }
+                try { this._renderArticleRow(dv, p, container, state); } catch (_e) { /* one bad row */ }
             }
             return;
         }
 
         // 4. BROWSE mode — three bands: Reading, Unread, Archived (in that order).
-        this._renderBand(dv, container, 'Reading', sel.reading, null);
-        this._renderBand(dv, container, 'Unread', sel.unread, 'No unread articles.');
+        this._renderBand(dv, container, 'Reading', sel.reading, null, state);
+        this._renderBand(dv, container, 'Unread', sel.unread, 'No unread articles.', state);
 
         // Archived — a count caption + the most-recent handful (not the whole pile).
         if (sel.archived.length) {
             const shown = sel.archived.slice(0, 5);
             this._sectionLabel(container, 'Archived (' + sel.archived.length + ')');
             for (const p of shown) {
-                try { this._renderArticleRow(dv, p, container); } catch (_e) { /* one bad row */ }
+                try { this._renderArticleRow(dv, p, container, state); } catch (_e) { /* one bad row */ }
             }
             if (sel.archived.length > shown.length) {
                 const more = container.createEl('div', { text: '+ ' + (sel.archived.length - shown.length) + ' more archived' });
@@ -247,7 +270,7 @@ class ReaderQueue {
      * `articles` is empty and `emptyHint` is provided, show a subtle hint instead
      * of rows; when empty and no hint, render nothing (skips an empty Reading band).
      */
-    _renderBand(dv, container, label, articles, emptyHint) {
+    _renderBand(dv, container, label, articles, emptyHint, state) {
         if ((!articles || !articles.length) && !emptyHint) return;
         this._sectionLabel(container, label);
         if (!articles || !articles.length) {
@@ -256,7 +279,7 @@ class ReaderQueue {
             return;
         }
         for (const p of articles) {
-            try { this._renderArticleRow(dv, p, container); } catch (_e) { /* one bad row */ }
+            try { this._renderArticleRow(dv, p, container, state); } catch (_e) { /* one bad row */ }
         }
     }
 
@@ -271,11 +294,16 @@ class ReaderQueue {
      *     doesn't also open the note).
      * Never throws.
      */
-    _renderArticleRow(dv, page, container) {
+    _renderArticleRow(dv, page, container, state) {
         if (!page || !container || typeof container.createEl !== 'function') return null;
         const path = (page.file && page.file.path) || null;
         const title = String((page.title != null && String(page.title).trim() !== '') ? page.title : (page.file && page.file.name) || '(untitled)');
-        const status = String(page.status == null ? '' : page.status).trim().toLowerCase() || 'unread';
+        const pageStatus = String(page.status == null ? '' : page.status).trim().toLowerCase() || 'unread';
+        let status = pageStatus;
+        try {
+            if (path && state && state.statuses.has(path)) status = state.statuses.get(path);
+            else if (path && state) state.statuses.set(path, pageStatus);
+        } catch (_e) { status = pageStatus; }
 
         const row = container.createEl('div', { cls: 'sauce-reader-row' });
         row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 5px 6px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;';
@@ -318,14 +346,16 @@ class ReaderQueue {
         const cluster = row.createEl('div', { cls: 'sauce-reader-row-right' });
         cluster.style.cssText = 'display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto;';
         const toggle = cluster.createEl('button', { cls: 'sauce-reader-status-toggle', text: this._statusLabel(status) });
+        try {
+            toggle._readerStatusPath = path;
+            if (path && state) state.toggles.set(path, toggle);
+        } catch (_e) {}
         try { toggle.setAttribute('type', 'button'); toggle.setAttribute('aria-label', 'Cycle status (currently ' + this._statusLabel(status) + ')'); toggle.setAttribute('title', 'Cycle status: unread → reading → archived'); } catch (_e) {}
         this._styleStatusToggle(toggle, status);
         toggle.addEventListener('click', async (ev) => {
             try { ev.stopPropagation(); } catch (_e) {}
             const next = ReaderQueue.nextStatus(status);
-            await this._setStatus(path, next);
-            // Optimistic label/style swap — the eventual Dataview re-render reconciles.
-            try { toggle.textContent = this._statusLabel(next); this._styleStatusToggle(toggle, next); } catch (_e) {}
+            await this._queueStatusTransition(dv, state, path, status, next, toggle);
         });
 
         return row;
@@ -347,17 +377,26 @@ class ReaderQueue {
 
     nextStatus(status) { return ReaderQueue.nextStatus(status); }
 
+    async _queueStatusTransition(dv, state, path, expected, next, focusTarget) {
+        if (!state || !state.queues || !path) return false;
+        const prior = state.queues.get(path) || Promise.resolve(true);
+        const run = prior.then(() => {
+            if (String(state.statuses.get(path) || 'unread') !== String(expected || 'unread')) return false;
+            return this._setStatus(dv, state, path, next, focusTarget);
+        }, () => false);
+        state.queues.set(path, run);
+        try { return await run; }
+        finally { if (state.queues.get(path) === run) state.queues.delete(path); }
+    }
+
     /**
-     * Write the article's status frontmatter (this file only) via
-     * processFrontMatter — mirrors the to-do TaskDialog status-write. Resolves the
-     * TFile from `path` (getAbstractFileByPath), then
-     * app.fileManager.processFrontMatter(file, fm => { fm.status = next; }). Relies
-     * on Obsidian reactivity to re-render the queue (like the task helpers).
-     * Best-effort — a cold-load / missing file / missing app just no-ops. Never
-     * throws.
+     * Move an article between queue bands before persistence through the shared
+     * structural lifecycle. The receipt owns the exact prior child nodes, status
+     * model, toggle map, and triggering focus so rejection restores identity and
+     * position instead of rebuilding a lookalike from a stale Dataview page.
      */
-    async _setStatus(path, next) {
-        if (!path) return;
+    async _setStatus(dv, state, path, next, focusTarget) {
+        if (!path || !state || !state.container) return false;
         try {
             const appRef = (typeof window !== 'undefined' && window.app)
                 || (typeof app !== 'undefined' && app)
@@ -365,10 +404,81 @@ class ReaderQueue {
             const file = (appRef && appRef.vault && typeof appRef.vault.getAbstractFileByPath === 'function')
                 ? appRef.vault.getAbstractFileByPath(String(path))
                 : null;
-            if (!appRef || !file || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') return;
-            await appRef.fileManager.processFrontMatter(file, (fm) => { fm.status = next; });
+            if (!appRef || !file || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') return false;
+            const renderSafe = globalThis.customJS?.RenderSafe;
+            if (!renderSafe || typeof renderSafe.mutateStructure !== 'function') {
+                try { new Notice('Could not update status: RenderSafe is unavailable.', 6000); } catch (_e) {}
+                return false;
+            }
+            const container = state.container;
+            const result = await renderSafe.mutateStructure({
+                app: appRef,
+                dv,
+                path: String(path),
+                failureMessage: 'Could not update status',
+                apply: async () => {
+                    const receipt = {
+                        container,
+                        children: this._childNodes(container),
+                        priorStatus: state.statuses.get(path),
+                        toggles: state.toggles,
+                        focusTarget,
+                    };
+                    try {
+                        state.statuses.set(path, next);
+                        this._clearContainer(container);
+                        this._renderResults(dv, container, state.ctx, state);
+                        try { state.toggles.get(path)?.focus?.(); } catch (_e) {}
+                        return receipt;
+                    } catch (error) {
+                        state.statuses.set(path, receipt.priorStatus);
+                        state.toggles = receipt.toggles;
+                        this._restoreChildren(container, receipt.children);
+                        throw error;
+                    }
+                },
+                rollback: async (receipt) => {
+                    if (!receipt) return;
+                    state.statuses.set(path, receipt.priorStatus);
+                    state.toggles = receipt.toggles;
+                    this._restoreChildren(receipt.container, receipt.children);
+                    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+                },
+                write: () => appRef.fileManager.processFrontMatter(file, (fm) => {
+                    fm.status = next;
+                    try { fm.status_changed_at = new Date().toISOString(); } catch (_e) {}
+                }),
+            });
+            return !!(result && result.ok === true);
         } catch (e) {
             try { new Notice('Could not update status: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+            return false;
+        }
+    }
+
+    _childNodes(container) {
+        try { return Array.from(container.childNodes || container.children || []); }
+        catch (_e) { return []; }
+    }
+
+    _clearContainer(container) {
+        if (!container) return;
+        if (typeof container.removeChild === 'function') {
+            while (container.firstChild) container.removeChild(container.firstChild);
+            return;
+        }
+        if (typeof container.empty === 'function') container.empty();
+        else if (Array.isArray(container.children)) container.children.splice(0);
+    }
+
+    _restoreChildren(container, children) {
+        if (!container) return;
+        this._clearContainer(container);
+        for (const child of children || []) {
+            try {
+                if (typeof container.appendChild === 'function') container.appendChild(child);
+                else if (Array.isArray(container.children)) container.children.push(child);
+            } catch (_e) { /* restore the remaining exact nodes */ }
         }
     }
 

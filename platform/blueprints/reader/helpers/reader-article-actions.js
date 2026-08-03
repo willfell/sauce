@@ -87,15 +87,22 @@ class ReaderArticleActions {
      * Entry point invoked by customjs-guard: `render(dv)`. Guards `reader-article`,
      * then draws the centered action row (Open article ↗ / status buttons / Reader
      * hub), owned top+bottom hairlines around it. Fully guarded — returns quietly
-     * on cold-load. Never throws.
+    * on cold-load. Never throws.
      */
     render(dv) {
+      try {
         if (!dv || !dv.container) return;
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
         try {
             if (dv.container.closest('.markdown-preview-view')?.querySelector('.reader-chrome-root')) return;
         } catch (_e) { /* best-effort guard */ }
-        const cur = dv.current && dv.current();
+        let cur = null;
+        try {
+            const renderSafe = globalThis.customJS?.RenderSafe;
+            cur = renderSafe && typeof renderSafe.page === 'function'
+                ? renderSafe.page(dv)
+                : (dv.current && dv.current());
+        } catch (_e) { return; }
         if (!cur || !cur.file || cur.type !== 'reader-article') return;
 
         const root = 'spice/reader';
@@ -176,6 +183,7 @@ class ReaderArticleActions {
 
         const hrBottom = wrap.createEl('hr');
         hrBottom.style.cssText = 'border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;';
+      } catch (_e) { /* never throw from a Dataview entry point */ }
     }
 
     /**

@@ -410,7 +410,184 @@ ok('HC-READER-NOCREATEROW ReaderArticleActions no longer exposes renderCreateRow
 // ---------------------------------------------------------------------------
 // Verdict
 // ---------------------------------------------------------------------------
-const passed = results.filter(([, p]) => p).length;
-const total  = results.length;
-console.log(`\n${passed}/${total} passed`);
-process.exit(passed === total ? 0 : 1);
+function makeDomEl(tag, opts) {
+  const options = opts || {};
+  const el = {
+    tag: tag || 'div', cls: options.cls || '', style: {}, children: [], parentNode: null,
+    textContent: options.text || '', innerHTML: '', focused: false, listeners: {},
+    get childNodes() { return this.children; },
+    get firstChild() { return this.children[0] || null; },
+    createEl(childTag, childOpts) { const child = makeDomEl(childTag, childOpts); return this.appendChild(child); },
+    appendChild(child) {
+      if (child.parentNode && child.parentNode !== this) child.parentNode.removeChild(child);
+      if (!this.children.includes(child)) this.children.push(child);
+      child.parentNode = this;
+      return child;
+    },
+    removeChild(child) { this.children = this.children.filter((c) => c !== child); child.parentNode = null; return child; },
+    remove() { if (this.parentNode) this.parentNode.removeChild(this); },
+    empty() { for (const child of this.children) child.parentNode = null; this.children = []; },
+    addEventListener(name, fn) { this.listeners[name] = fn; },
+    setAttribute(name, value) { this[name] = value; },
+    focus() { this.focused = true; },
+    closest() { return null; },
+    querySelector(selector) { return walk(this).find((node) => node !== this && matches(node, selector)) || null; },
+    querySelectorAll(selector) { return walk(this).filter((node) => node !== this && matches(node, selector)); },
+  };
+  return el;
+}
+
+function walk(root) {
+  const out = [];
+  const visit = (node) => { out.push(node); for (const child of node.children || []) visit(child); };
+  visit(root);
+  return out;
+}
+
+function matches(node, selector) {
+  if (!selector || selector[0] !== '.') return false;
+  return String(node.cls || '').split(/\s+/).includes(selector.slice(1));
+}
+
+async function dataviewCorrectnessCases() {
+  const article = art('Structural', 'unread', '2026-08-03T00:00:00Z');
+  const overrides = new Map([[article.file.path, 'reading']]);
+  const selected = ReaderQueue.selectArticles(makeDv([article]), overrides);
+  ok('HC-READER-PERF-1 optimistic status authority re-buckets without mutating the Dataview page',
+     selected.reading[0] === article && selected.unread.length === 0 && article.status === 'unread');
+
+  const queue = new ReaderQueue();
+  const container = makeDomEl('div');
+  const dv = makeDv([article]);
+  const state = { statuses: new Map(), queues: new Map(), toggles: new Map(), container, ctx: null };
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const priorWindow = global.window;
+  const priorNotice = global.Notice;
+  let writes = 0;
+  let forceRefreshes = 0;
+  const file = { path: article.file.path, _fm: { status: 'unread' } };
+  global.Notice = function Notice() {};
+  global.app = {
+    vault: { getAbstractFileByPath: (p) => p === file.path ? file : null },
+    fileManager: { processFrontMatter: async (_file, mutate) => { writes++; mutate(file._fm); } },
+    commands: { executeCommandById: () => { forceRefreshes++; } },
+  };
+  global.window = { app: global.app };
+  try {
+    queue._renderResults(dv, container, null, state);
+    const originalChildren = container.children.slice();
+    const originalRow = container.querySelector('.sauce-reader-row');
+    const originalToggle = state.toggles.get(file.path);
+    let appliedBeforeWrite = false;
+    global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+      const receipt = await opts.apply();
+      appliedBeforeWrite = state.statuses.get(file.path) === 'reading'
+        && !!container.querySelector('.sauce-reader-row')
+        && state.toggles.get(file.path) !== originalToggle;
+      try { throw new Error('fixture persistence failure'); }
+      catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+    } } };
+    global.window.customJS = global.customJS;
+    const failed = await queue._setStatus(dv, state, file.path, 'reading', originalToggle);
+    ok('HC-READER-PERF-2 structural status applies before persistence and reports rejection',
+       failed === false && appliedBeforeWrite && writes === 0);
+    ok('HC-READER-PERF-3 rejection restores exact queue children, row identity, status, and focus',
+       container.children.length === originalChildren.length
+       && container.children.every((child, i) => child === originalChildren[i])
+       && container.querySelector('.sauce-reader-row') === originalRow
+       && state.statuses.get(file.path) === 'unread' && originalToggle.focused);
+
+    originalToggle.focused = false;
+    global.customJS.RenderSafe.mutateStructure = async (opts) => {
+      const receipt = await opts.apply();
+      try { await opts.write(); return { ok: true, receipt }; }
+      catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+    };
+    const saved = await queue._setStatus(dv, state, file.path, 'reading', originalToggle);
+    const optimisticToggle = state.toggles.get(file.path);
+    ok('HC-READER-PERF-4 success keeps the optimistic band model and focuses its replacement control',
+       saved === true && state.statuses.get(file.path) === 'reading'
+       && optimisticToggle && optimisticToggle !== originalToggle && optimisticToggle.focused);
+    ok('HC-READER-PERF-5 persistence writes status + ISO status_changed_at with no global refresh',
+       writes === 1 && file._fm.status === 'reading'
+       && /^\d{4}-\d{2}-\d{2}T/.test(file._fm.status_changed_at || '') && forceRefreshes === 0);
+
+    const beforeUnavailable = container.children.slice();
+    delete global.customJS.RenderSafe;
+    const unavailable = await queue._setStatus(dv, state, file.path, 'archived', optimisticToggle);
+    ok('HC-READER-PERF-6 missing RenderSafe fails closed before DOM or persistence',
+       unavailable === false && writes === 1
+       && container.children.every((child, i) => child === beforeUnavailable[i]));
+
+    let coldThrows = 0;
+    const coldContainer = makeDomEl('div');
+    const throwingDv = { container: coldContainer, current: () => { throw new Error('cold current'); } };
+    try { new ReaderQueue().render(throwingDv); } catch (_e) { coldThrows++; }
+    try { new ReaderArticleActions().render(throwingDv); } catch (_e) { coldThrows++; }
+    try { await new ReaderArticleView().render(throwingDv); } catch (_e) { coldThrows++; }
+    ok('HC-READER-PERF-7 every Reader Dataview entry fails closed on a throwing cold current page', coldThrows === 0);
+
+    const queueSrc = fs.readFileSync(QUEUE_SRC, 'utf8');
+    const structuralGuard = (src) => /renderSafe\.mutateStructure\s*\(\{/.test(src)
+      && /apply:\s*async/.test(src) && /rollback:\s*async/.test(src)
+      && /status_changed_at/.test(src)
+      && !/dataview:dataview-force-refresh-views/.test(src);
+    const seamMutant = queueSrc.replace('renderSafe.mutateStructure({', 'renderSafe.mutate({');
+    const rollbackMutant = queueSrc.replace('rollback: async (receipt) => {', 'revert: async (receipt) => {');
+    ok('HC-READER-PERF-8 structural seam guard kills seam and rollback mutants',
+       structuralGuard(queueSrc) && !structuralGuard(seamMutant) && !structuralGuard(rollbackMutant));
+
+    const serialState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
+    const serialQueue = new ReaderQueue();
+    let releaseFirst = null;
+    let serialCalls = 0;
+    serialQueue._setStatus = async (_dv, localState, _path, next) => {
+      serialCalls++;
+      localState.statuses.set(file.path, next);
+      if (serialCalls === 1) await new Promise((resolve) => { releaseFirst = resolve; });
+      return true;
+    };
+    const first = serialQueue._queueStatusTransition({}, serialState, file.path, 'unread', 'reading', null);
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = serialQueue._queueStatusTransition({}, serialState, file.path, 'reading', 'archived', null);
+    releaseFirst();
+    await Promise.all([first, second]);
+    ok('HC-READER-PERF-9 rapid same-article gestures serialize in user order',
+       serialCalls === 2 && serialState.statuses.get(file.path) === 'archived');
+
+    const rejectState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
+    const rejectQueue = new ReaderQueue();
+    let releaseReject = null;
+    let rejectCalls = 0;
+    rejectQueue._setStatus = async (_dv, localState) => {
+      rejectCalls++;
+      localState.statuses.set(file.path, 'reading');
+      await new Promise((resolve) => { releaseReject = resolve; });
+      localState.statuses.set(file.path, 'unread');
+      return false;
+    };
+    const rejectedFirst = rejectQueue._queueStatusTransition({}, rejectState, file.path, 'unread', 'reading', null);
+    await new Promise((resolve) => setImmediate(resolve));
+    const rejectedChild = rejectQueue._queueStatusTransition({}, rejectState, file.path, 'reading', 'archived', null);
+    releaseReject();
+    await Promise.all([rejectedFirst, rejectedChild]);
+    ok('HC-READER-PERF-10 rejected parent gesture invalidates its queued stale descendant',
+       rejectCalls === 1 && rejectState.statuses.get(file.path) === 'unread');
+  } finally {
+    global.app = priorApp;
+    global.customJS = priorCustomJS;
+    global.window = priorWindow;
+    global.Notice = priorNotice;
+  }
+}
+
+dataviewCorrectnessCases().then(() => {
+  const passed = results.filter(([, p]) => p).length;
+  const total  = results.length;
+  console.log(`\n${passed}/${total} passed`);
+  process.exit(passed === total ? 0 : 1);
+}).catch((error) => {
+  console.error(error && error.stack || error);
+  process.exit(1);
+});
