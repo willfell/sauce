@@ -1662,16 +1662,39 @@ ok('GA-P3-TODAY-CAPTURE native checkbox routes through mutate capture and revert
   assert(/addEventListener\('change'[\s\S]*renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*replaceTaskAt/.test(src), 'today capture mutation lifecycle');
 });
 
-for (const financeEditor of ['budget-allocations-editor.js', 'budget-categories-editor.js', 'budget-defaults-editor.js']) {
+for (const financeEditor of [
+  'budget-allocations-editor.js', 'budget-categories-editor.js', 'budget-defaults-editor.js',
+  'debt-defaults-editor.js', 'invoice-controls.js', 'invoice-time-log-editor.js',
+  'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js', 'finance-plan-dashboard.js',
+]) {
   ok(`GA-P3-FINANCE-SCROLL ${financeEditor} captures before authoritative self-render`, () => {
     const src = helperSource('finance/helpers/' + financeEditor);
     const start = src.indexOf('async _rerender');
     const rerender = src.slice(start, src.indexOf('\n    }', start) + 6);
-    assert(/try\s*\{\s*customJS\.RenderSafe\?\.captureScroll\?\.\(\);\s*\}\s*catch\s*\(_e\)\s*\{\}\s*return await this\.render\(dv, authoritative\);/.test(rerender),
-      'capture is immediately adjacent to authoritative self-render with only its fail-closed catch between');
-    assert((src.match(/await this\.render/g) || []).length === 1, 'all direct self-renders are centralized');
+    assert(start >= 0 && /captureScroll[\s\S]*this\.render\(dv/.test(rerender),
+      'capture precedes the centralized self-render');
+    const outside = src.slice(0, start) + src.slice(start + rerender.length);
+    assert(!/this\.render\(dv/.test(outside), 'all direct self-renders are centralized');
   });
 }
+
+for (const financeEditor of [
+  'budget-allocations-editor.js', 'budget-categories-editor.js', 'budget-defaults-editor.js',
+  'debt-defaults-editor.js', 'invoice-controls.js', 'invoice-time-log-editor.js',
+  'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js',
+]) {
+  ok(`PERF-3-FINANCE-LIFECYCLE ${financeEditor} uses the shared optimistic receipt seam`, () => {
+    const src = helperSource('finance/helpers/' + financeEditor);
+    assert(/FinanceFrontmatter\.mutateRendered\(/.test(src), 'mutable Finance repaint delegates through mutateRendered');
+  });
+}
+
+ok('PERF-3-FINANCE-PLAN applies through RenderSafe and captures before its self-render', () => {
+  const src = helperSource('finance/helpers/finance-plan-dashboard.js');
+  assert(/RenderSafe\.mutate\(\{[\s\S]*write: \(\) => this\._writeAll\(diffs,\s*page\?\.file\?\.path\)/.test(src), 'plan Apply delegates through RenderSafe with its shared transaction key');
+  assert(/async _writeAll\([^)]*planPath[\s\S]*_serializePlanApply\(path,[\s\S]*async _serializePlanApply/.test(src), 'plan Apply serializes the full write and compensation transaction');
+  assert(/async _rerender[\s\S]*captureScroll[\s\S]*this\.render\(dv\)/.test(src), 'plan repaint captures scroll');
+});
 
 function makeGestureFacade(calls) {
   return {

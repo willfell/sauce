@@ -146,6 +146,145 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         try { await w._writeAll(ps.applyPlan.debtTargets.map(t => ({ kind: "debt", slug: t.slug, before: 0, after: t.planned_monthly_payment }))); } catch (e) { writeErr = e; }
         ok("HC-V0128-WIDGET-DASH-9 _writeAll writes via FinanceFrontmatter without throwing", writeErr === null, writeErr && writeErr.message);
 
+        // A later entity rejection compensates every earlier successful write
+        // from authoritative pre-write frontmatter, never the potentially stale
+        // Dataview values displayed by the confirmation modal.
+        const originalUpdate = customJS.FinanceFrontmatter.update;
+        const stored = { "Debt-First": 100, "Debt-Second": 200 };
+        let rejectedSecond = false;
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            if (slug === "Debt-Second" && !rejectedSecond) {
+                rejectedSecond = true;
+                throw new Error("fixture second write rejected");
+            }
+            const state = { planned_monthly_payment: stored[slug] };
+            await mutator(state);
+            stored[slug] = state.planned_monthly_payment;
+        };
+        let compensated = false;
+        try {
+            await w._writeAll([
+                { kind: "debt", slug: "Debt-First", before: 1, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 2, after: 250 },
+            ]);
+        } catch (_e) {
+            compensated = stored["Debt-First"] === 100 && stored["Debt-Second"] === 200;
+        } finally {
+            customJS.FinanceFrontmatter.update = originalUpdate;
+        }
+        ok("PERF3-FINANCE-COMPENSATION restores authoritative pre-write values, not stale Dataview snapshots", compensated);
+
+        // Presence is part of the receipt: if a field did not exist before the
+        // successful write, compensation must delete it rather than materialize
+        // the stale modal value.
+        const records = { "Debt-First": {}, "Debt-Second": { planned_monthly_payment: 200 } };
+        rejectedSecond = false;
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            if (slug === "Debt-Second" && !rejectedSecond) {
+                rejectedSecond = true;
+                throw new Error("fixture second write rejected");
+            }
+            await mutator(records[slug]);
+        };
+        let absenceRestored = false;
+        try {
+            await w._writeAll([
+                { kind: "debt", slug: "Debt-First", before: 999, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+            ]);
+        } catch (_e) {
+            absenceRestored = !Object.prototype.hasOwnProperty.call(records["Debt-First"], "planned_monthly_payment");
+        } finally {
+            customJS.FinanceFrontmatter.update = originalUpdate;
+        }
+        ok("PERF3-FINANCE-COMPENSATION restores authoritative field absence", absenceRestored);
+
+        // Explicit YAML null is a present value, not an absent field. The
+        // compensation target must carry presence independently from value.
+        const nullableRecords = {
+            "Debt-First": { planned_monthly_payment: null },
+            "Debt-Second": { planned_monthly_payment: 200 },
+        };
+        rejectedSecond = false;
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            if (slug === "Debt-Second" && !rejectedSecond) {
+                rejectedSecond = true;
+                throw new Error("fixture second write rejected");
+            }
+            await mutator(nullableRecords[slug]);
+        };
+        let nullPresenceRestored = false;
+        try {
+            await w._writeAll([
+                { kind: "debt", slug: "Debt-First", before: 999, after: 150 },
+                { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+            ]);
+        } catch (_e) {
+            nullPresenceRestored = Object.prototype.hasOwnProperty.call(nullableRecords["Debt-First"], "planned_monthly_payment")
+                && nullableRecords["Debt-First"].planned_monthly_payment === null;
+        } finally {
+            customJS.FinanceFrontmatter.update = originalUpdate;
+        }
+        ok("PERF3-PLAN-NULL-PRESENCE restores an authoritative present YAML-null field", nullPresenceRestored);
+
+        // Apply is one transaction across dashboard instances. An older Apply
+        // that rejects after its first entity write must finish compensation
+        // before an identical-target newer Apply begins, or the older receipt
+        // can roll the newer successful value back.
+        const overlapRecords = {
+            "Debt-First": { planned_monthly_payment: 100 },
+            "Debt-Second": { planned_monthly_payment: 200 },
+        };
+        let rejectBlockedSecond;
+        let markBlockedSecond;
+        const blockedSecondStarted = new Promise((resolve) => { markBlockedSecond = resolve; });
+        const blockedSecond = new Promise((_resolve, reject) => { rejectBlockedSecond = reject; });
+        let secondCalls = 0;
+        let activeWrites = 0;
+        let maxConcurrentWrites = 0;
+        const overlapEvents = [];
+        customJS.FinanceFrontmatter.update = async (file, mutator) => {
+            const slug = file.path.split("/").pop().replace(/\.md$/, "");
+            activeWrites++;
+            maxConcurrentWrites = Math.max(maxConcurrentWrites, activeWrites);
+            try {
+                overlapEvents.push(`start:${slug}`);
+                if (slug === "Debt-Second" && secondCalls++ === 0) {
+                    markBlockedSecond();
+                    await blockedSecond;
+                }
+                await mutator(overlapRecords[slug]);
+                overlapEvents.push(`finish:${slug}:${overlapRecords[slug].planned_monthly_payment}`);
+            } finally {
+                activeWrites--;
+            }
+        };
+        const overlapDiffs = [
+            { kind: "debt", slug: "Debt-First", before: 100, after: 200 },
+            { kind: "debt", slug: "Debt-Second", before: 200, after: 250 },
+        ];
+        const olderDashboard = new Dash();
+        const newerDashboard = new Dash();
+        let olderRejected = false;
+        const olderApply = olderDashboard._writeAll(overlapDiffs)
+            .catch(() => { olderRejected = true; });
+        await blockedSecondStarted;
+        const newerApply = newerDashboard._writeAll(overlapDiffs);
+        await Promise.resolve();
+        const newerStayedQueued = overlapEvents.filter((event) => event.startsWith("start:")).length === 2;
+        rejectBlockedSecond(new Error("fixture older second write rejected"));
+        await olderApply;
+        await newerApply;
+        customJS.FinanceFrontmatter.update = originalUpdate;
+        ok("PERF3-SERIALIZED-PLAN-APPLY failed older transaction cannot compensate over newer success",
+            olderRejected && newerStayedQueued && maxConcurrentWrites === 1
+                && overlapRecords["Debt-First"].planned_monthly_payment === 200
+                && overlapRecords["Debt-Second"].planned_monthly_payment === 250
+                && Dash._planApplyQueues instanceof Map && Dash._planApplyQueues.size === 0);
+
         // no-plan degrade: current is the plan page but NOT in pages → ok:false
         const dv2 = makeDv(DEBTS, PLAN);
         const w2 = new Dash();

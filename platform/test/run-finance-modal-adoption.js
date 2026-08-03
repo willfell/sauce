@@ -197,11 +197,30 @@ function installPersistenceBoundary(harness, state) {
             getFileCache: () => ({ frontmatter: state }),
         },
     };
-    harness.sandbox.customJS.FinanceFrontmatter = {
+    const boundary = harness.sandbox.customJS.FinanceFrontmatter = {
+        read: () => state,
+        page: (dv) => {
+            try { return dv && typeof dv.current === "function" ? dv.current() : state; }
+            catch (_e) { return state; }
+        },
         update: async (_file, mutator) => {
             mutator(state);
             updates.push(plain(state));
             return true;
+        },
+        mutateRendered: async (_file, opts) => {
+            const prepared = typeof opts.prepare === "function" ? await opts.prepare() : null;
+            const active = prepared && typeof prepared === "object"
+                ? Object.assign({}, opts, prepared)
+                : opts;
+            await active.render();
+            try {
+                if (typeof active.write === "function") await active.write();
+                else await boundary.update(_file, active.mutator);
+                return { ok: true };
+            } catch (error) {
+                return { ok: false, error };
+            }
         },
     };
     return updates;

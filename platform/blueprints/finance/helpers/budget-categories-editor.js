@@ -24,7 +24,7 @@ class BudgetCategoriesEditor {
         const previous = dv.container.querySelector(":scope > .bce-root");
         if (previous) previous.remove();
 
-        const page = dv.current();
+        const page = this._page(dv);
         if (!page || !page.file) return;
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
@@ -328,38 +328,29 @@ class BudgetCategoriesEditor {
     async _addFlow(file, dv, groups) {
         const result = await this._promptForCategory(null, groups);
         if (!result) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             fm.categories = (fm.categories || []).concat([result]);
-            next = fm.categories.slice();
         });
-        await this._rerender(dv, next);
     }
 
     async _editFlow(file, dv, index, current, groups) {
         const result = await this._promptForCategory(current, groups);
         if (!result) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const list = (fm.categories || []).slice();
             // Merge-on-edit: keep non-dialog fields the modal doesn't surface.
             list[index] = Object.assign({}, current, result);
             fm.categories = list;
-            next = list.slice();
         });
-        await this._rerender(dv, next);
     }
 
     async _deleteFlow(file, dv, index, current) {
         if (!window.confirm(`Delete category '${current?.name || ""}'?`)) return;
-        let next = null;
-        await this._mutate(file, (fm) => {
+        await this._mutateRender(file, dv, (fm) => {
             const list = (fm.categories || []).slice();
             list.splice(index, 1);
             fm.categories = list;
-            next = list.slice();
         });
-        await this._rerender(dv, next);
     }
 
     async _rerender(dv, authoritative) {
@@ -367,7 +358,32 @@ class BudgetCategoriesEditor {
         return await this.render(dv, authoritative);
     }
 
+    async _mutateRender(file, dv, mutator) {
+        return await customJS.FinanceFrontmatter.mutateRendered(file, {
+            dv,
+            selector: ":scope > .bce-root",
+            failureMessage: "Could not update budget category",
+            prepare: () => {
+                const current = customJS.FinanceFrontmatter.read?.(file) || this._page(dv) || {};
+                const preview = Object.assign({}, current, {
+                    categories: Array.isArray(current.categories) ? current.categories.slice() : [],
+                });
+                mutator(preview);
+                const next = preview.categories.slice();
+                return {
+                    render: () => this._rerender(dv, next),
+                    write: () => this._mutate(file, mutator),
+                };
+            },
+        });
+    }
+
     async _mutate(file, mutator) {
         return await customJS.FinanceFrontmatter.update(file, mutator);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }
