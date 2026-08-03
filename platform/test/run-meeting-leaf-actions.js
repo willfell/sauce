@@ -143,5 +143,49 @@ ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `--
   !/-{3,}[ \t]*\n+```dataviewjs\n[^`]*MeetingLeafActions/.test(meetTemplate) &&
   !/MeetingLeafActions[\s\S]*?\n```\n+-{3,}/.test(meetTemplate));
 
-console.log(`\nResult: ${pass} passed, ${fail} failed.`);
-if (fail) { console.log('Failures:'); failures.forEach(f => console.log('  ' + f)); process.exit(1); }
+(async () => {
+  const previous = { customJS: global.customJS, app: global.app };
+  const effects = [];
+  global.app = { fileManager: { processFrontMatter: async () => { effects.push('write'); } } };
+  global.customJS = {
+    RenderSafe: {
+      async mutate(opts) {
+        effects.push(typeof opts.optimistic === 'function' ? 'optimistic-hook' : 'missing-optimistic');
+        effects.push(typeof opts.revert === 'function' ? 'revert-hook' : 'missing-revert');
+        await opts.optimistic();
+        await opts.revert(new Error('fixture rejection'));
+        return { ok: false };
+      },
+    },
+  };
+  await inst._mutateFrontmatter({}, { path: 'spice/meetings/notes/Test.md' }, {
+    failureMessage: 'fixture',
+    optimistic: () => effects.push('optimistic'),
+    revert: () => effects.push('revert'),
+    write: () => {},
+  });
+  ok('PERF5-FIELDMUTATION-ROLLBACK forwards optimistic and exact revert hooks through RenderSafe',
+    effects.join(',') === 'optimistic-hook,revert-hook,optimistic,revert', effects.join(','));
+
+  ok('PERF5-FIELDMUTATION-ROLLBACK keeps mutation modals mounted on failure and closes only after success',
+    (mlaSrc.match(/if \(saved\) \{[\s\S]{0,180}close\(\);[\s\S]{0,20}\}/g) || []).length >= 2
+    && !/\}\s*close\(\);\s*\n\s*\};/.test(mlaSrc));
+
+  const personBlock = (body) => body.slice(body.indexOf('addBtn.onclick'), body.indexOf('const save =', body.indexOf('addBtn.onclick')));
+  const personLifecycleContract = (body) => {
+    const block = personBlock(body);
+    return /renderSafe\.mutateStructure\s*\(\{/.test(block)
+      && /apply:\s*\(\)\s*=>/.test(block)
+      && /rollback:\s*\(receipt\)\s*=>/.test(block)
+      && /write:\s*\(\)\s*=>/.test(block)
+      && /app\.vault\.create\s*\(/.test(block);
+  };
+  const bareCreateMutant = mlaSrc.replace('renderSafe.mutateStructure({', 'renderSafe.mutate({');
+  ok('PERF5-REQUIREMENT-MUTANTS kills the bare new-person create source mutant',
+    personLifecycleContract(mlaSrc) && !personLifecycleContract(bareCreateMutant));
+
+  global.customJS = previous.customJS;
+  global.app = previous.app;
+  console.log(`\nResult: ${pass} passed, ${fail} failed.`);
+  if (fail) { console.log('Failures:'); failures.forEach(f => console.log('  ' + f)); process.exit(1); }
+})().catch((error) => { console.error(error); process.exit(1); });

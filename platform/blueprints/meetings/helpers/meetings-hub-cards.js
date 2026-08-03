@@ -1,8 +1,8 @@
 /**
  * Meetings Hub Cards (CustomJS)
- * Thin wrapper around BeaconCards. Pre-fetches per-meeting content async
- * (attendees, task counts, notes-flag) into synthetic page objects, then
- * delegates rendering to BeaconCards with layout: "row".
+ * Thin wrapper around BeaconCards. Enriches one meeting metadata snapshot with
+ * one task metadata snapshot, then delegates rendering with layout: "row".
+ * It never reads meeting bodies per row.
  *
  * Usage in DataviewJS:
  *   await dv.view("ranch/views/customjs-guard", { class: "MeetingsHubCards" });
@@ -12,18 +12,97 @@
  * secondaryText} + badges[].icon API extensions. LOC ~159 -> ~110.
  */
 class MeetingsHubCards {
+  static _values(value) {
+    if (value == null || typeof value === "string") return [];
+    try { return typeof value[Symbol.iterator] === "function" ? Array.from(value) : []; }
+    catch (_e) { return []; }
+  }
+
+  static _name(value) {
+    if (value == null) return "";
+    if (typeof value === "object") {
+      if (value.display) return String(value.display).trim();
+      if (value.path) return String(value.path).split("/").pop().replace(/\.md$/i, "").trim();
+      if (value.name) return String(value.name).replace(/\.md$/i, "").trim();
+      return "";
+    }
+    let out = String(value).trim();
+    const link = /^\[\[([^\]]*)\]\]$/.exec(out);
+    if (link) out = link[1];
+    if (out.includes("|")) out = out.split("|").pop();
+    return out.trim();
+  }
+
+  static _attendeeNames(page) {
+    let values = MeetingsHubCards._values(page && page.attendees);
+    if (!values.length) values = MeetingsHubCards._values(page && page.people);
+    return values.map(MeetingsHubCards._name).filter(Boolean);
+  }
+
+  static _sourceBasename(value) {
+    if (value == null) return "";
+    let out = typeof value === "object" ? (value.path || value.display || "") : String(value);
+    out = String(out).trim();
+    const link = /^\[\[([^\]]*)\]\]$/.exec(out);
+    if (link) out = link[1];
+    if (out.includes("|")) out = out.split("|")[0];
+    return out.split("/").pop().replace(/\.md$/i, "").trim();
+  }
+
+  static _taskCountsBySource(dv) {
+    const counts = {};
+    try {
+      const data = dv.pages('"spice/tasks"');
+      const tasks = data && typeof data.array === "function" ? data.array() : Array.from(data || []);
+      for (const task of tasks) {
+        const path = task && task.file && task.file.path;
+        if (!task || task.type !== "task" || !path || path.includes("/_trash/")) continue;
+        const source = MeetingsHubCards._sourceBasename(task.source_note);
+        if (!source) continue;
+        const row = counts[source] || (counts[source] = { open: 0, done: 0 });
+        const status = String(task.status || "").toLowerCase();
+        if (status === "open") row.open += 1;
+        else if (["done", "completed", "closed"].includes(status)) row.done += 1;
+      }
+    } catch (_e) { return {}; }
+    return counts;
+  }
+
+  static _registeredPeople(dv) {
+    const names = new Set();
+    try {
+      const data = dv.pages('"spice/people"');
+      const people = data && typeof data.array === "function" ? data.array() : Array.from(data || []);
+      for (const person of people) {
+        const name = MeetingsHubCards._name(person && person.file);
+        if (name) names.add(name);
+      }
+    } catch (_e) { /* bounded fallback stays empty */ }
+    return names;
+  }
+
   async render(dv) {
+    try {
+    if (!dv || typeof dv.pages !== "function") return;
     // Dataview may render before indexing the embedding note. RenderSafe keeps a
     // usable active-file shim when available; otherwise a missing page/file is a
     // quiet no-op rather than a rejected render promise.
-    const renderSafe = (typeof window !== "undefined" && window.customJS && window.customJS.RenderSafe) || null;
-    const currentPage = renderSafe && typeof renderSafe.page === "function"
-      ? renderSafe.page(dv)
-      : (dv && typeof dv.current === "function" ? dv.current() : null);
+    const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
+      || (typeof window !== "undefined" && window.customJS) || null;
+    const renderSafe = cjs && cjs.RenderSafe;
+    let currentPage = null;
+    try {
+      currentPage = renderSafe && typeof renderSafe.page === "function"
+        ? renderSafe.page(dv)
+        : (typeof dv.current === "function" ? dv.current() : null);
+    } catch (_e) { currentPage = null; }
     const currentFile = currentPage && currentPage.file;
     if (!currentFile || !currentFile.name) return;
-    const dateMatch = currentFile.name.match(/(\d{4}-\d{2}-\d{2})/);
-    const currentDateStr = dateMatch ? dateMatch[1] : window.moment().format("YYYY-MM-DD");
+    const dateMatch = String(currentFile.name).match(/(\d{4}-\d{2}-\d{2})/);
+    const momentFn = (typeof window !== "undefined" && typeof window.moment === "function")
+      ? window.moment : ((typeof globalThis !== "undefined" && typeof globalThis.moment === "function") ? globalThis.moment : null);
+    const currentDateStr = dateMatch ? dateMatch[1]
+      : (momentFn ? momentFn().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10));
 
     const icons = {
       clock: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
@@ -35,40 +114,19 @@ class MeetingsHubCards {
     const meetingsRaw = dv.pages('"spice/meetings/notes"')
       .where(p => p.file.name.endsWith(`-${currentDateStr}`))
       .sort(p => {
-        if (p.date) return moment(p.date.toString()).format("HH:mm");
+        if (p.date && momentFn) return momentFn(p.date.toString()).format("HH:mm");
         return p.file.name;
       })
       .array();
 
-    // Pre-fetch async data: build synthetic page array.
-    const enriched = await Promise.all(meetingsRaw.map(async (p) => {
-      const file = app.vault.getAbstractFileByPath(p.file.path);
-      let content = "";
-      if (file) {
-        content = await app.vault.read(file);
-      }
-      const attendeesMatch = content.match(/## Attendees\s*([\s\S]*?)(?=---|##|$)/);
-      let attendees = [];
-      if (attendeesMatch) {
-        const attendeeLines = attendeesMatch[1].match(/- \[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g);
-        if (attendeeLines) {
-          attendees = attendeeLines.map(line => {
-            const m = line.match(/- \[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
-            return m ? (m[2] || m[1]) : "";
-          }).filter(a => a);
-        }
-      }
-      // v0.3.0 pilot: extract registered People (those with spice/people/<name>.md notes).
-      // Scope to the ## Attendees section ONLY — extracting from the full body would chip
-      // unrelated People mentioned in ## Notes / ## Action Items / ## Agenda.
-      const attendeesSection = (attendeesMatch && attendeesMatch[1]) || "";
-      const peopleMentions = (attendeesSection && customJS && customJS.PeopleRendering && typeof customJS.PeopleRendering.extractMentions === "function")
-        ? customJS.PeopleRendering.extractMentions(attendeesSection)
-        : [];
-      const peopleAttendeeLinks = peopleMentions.map(m => "[[" + m.display + "]]");
-      const openTasks = (content.match(/- \[ \]/g) || []).length;
-      const doneTasks = (content.match(/- \[x\]/gi) || []).length;
-      const hasNotes = MeetingsHubCards._bodyHasNotes(content);
+    // One task query for the whole hub and one bounded people snapshot. No
+    // meeting body is read, so row count cannot increase vault I/O.
+    const taskCounts = MeetingsHubCards._taskCountsBySource(dv);
+    const registeredPeople = MeetingsHubCards._registeredPeople(dv);
+    const enriched = meetingsRaw.map((p) => {
+      const attendees = MeetingsHubCards._attendeeNames(p);
+      const peopleAttendeeLinks = attendees.filter((name) => registeredPeople.has(name)).map((name) => `[[${name}]]`);
+      const counts = taskCounts[(p.file && p.file.name) || ""] || { open: 0, done: 0 };
       let summary = p.summary || "";
       if (typeof summary === "string") {
         summary = summary.trim();
@@ -78,26 +136,27 @@ class MeetingsHubCards {
       if (p.date) {
         const dateStr = p.date.toString();
         const timePart = dateStr.split(" ")[1];
-        if (timePart) timeStr = moment(timePart, "HH:mm").format("h:mm A");
+        if (timePart && momentFn) timeStr = momentFn(timePart, "HH:mm").format("h:mm A");
       }
       return {
         file: { name: p.file.name, path: p.file.path },
         attendees,
         peopleAttendeeLinks,
-        openTasks,
-        doneTasks,
-        hasNotes,
+        openTasks: counts.open,
+        doneTasks: counts.done,
+        hasNotes: p.has_notes === true || p.notes_present === true,
         summary,
         timeStr,
         project: p.project
       };
-    }));
+    });
 
     // Local helper bound to the class instance — used by the meta callback below.
     // Using a local arrow keeps `this` access reliable inside BeaconCards opts.
     const renderProjectLabel = (field) => this._renderProjectLabel(field);
 
-    await customJS.BeaconCards.render(dv, {
+    if (!cjs?.BeaconCards || typeof cjs.BeaconCards.render !== "function") return;
+    await cjs.BeaconCards.render(dv, {
       pages: enriched,
       layout: "row",
       columns: 1,
@@ -116,12 +175,12 @@ class MeetingsHubCards {
         // Falls back to existing comma-string behavior when no registered People (or PeopleRendering unavailable).
         const truncatedSummary = p.summary && p.summary.length > 80 ? p.summary.substring(0, 77) + "..." : (p.summary || null);
         if (p.peopleAttendeeLinks && p.peopleAttendeeLinks.length > 0
-            && customJS && customJS.PeopleRendering && typeof customJS.PeopleRendering.renderChip === "function") {
+            && cjs.PeopleRendering && typeof cjs.PeopleRendering.renderChip === "function") {
           return (parent) => {
             const row = parent.createEl("div");
             row.style.cssText = "display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px;";
             for (const link of p.peopleAttendeeLinks) {
-              customJS.PeopleRendering.renderChip(row, link);
+              cjs.PeopleRendering.renderChip(row, link);
             }
             const unregistered = Math.max(0, p.attendees.length - p.peopleAttendeeLinks.length);
             if (unregistered > 0) {
@@ -157,6 +216,7 @@ class MeetingsHubCards {
       empty: "No meetings scheduled for today",
       sort: () => 0  // pre-sorted by Dataview .sort() above
     });
+    } catch (_e) { /* every cold-load/missing-dependency path is a quiet no-op */ }
   }
 
   /**
