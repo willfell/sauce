@@ -20,6 +20,7 @@ const RDIR       = path.join(ROOT, 'platform', 'blueprints', 'reader');
 const QUEUE_SRC  = path.join(RDIR, 'helpers', 'reader-queue.js');
 const ACT_SRC    = path.join(RDIR, 'helpers', 'reader-article-actions.js');
 const VIEW_SRC   = path.join(RDIR, 'helpers', 'reader-article-view.js');
+const LEDGER_DOC = path.join(ROOT, 'Docs', 'agent-guides', 'code-conventions.md');
 
 // ---------------------------------------------------------------------------
 // Loader — also proves each file evals as one bare-class expression.
@@ -537,6 +538,15 @@ async function dataviewCorrectnessCases() {
     const rollbackMutant = queueSrc.replace('rollback: async (receipt) => {', 'revert: async (receipt) => {');
     ok('HC-READER-PERF-8 structural seam guard kills seam and rollback mutants',
        structuralGuard(queueSrc) && !structuralGuard(seamMutant) && !structuralGuard(rollbackMutant));
+
+    const readerLedgerRow = fs.readFileSync(LEDGER_DOC, 'utf8').split('\n')
+      .find((line) => /^\| Reader \| `ReaderQueue`/.test(line)) || '';
+    ok('PERF6-LEDGER-TOUCH-ZONE canonical ReaderQueue ledger row binds every structural receipt to OK',
+       !/GAP PERF-6/.test(readerLedgerRow)
+       && (readerLedgerRow.match(/\*\*OK\*\*/g) || []).length === 4
+       && /mutateStructure/.test(readerLedgerRow)
+       && /exact prior child nodes/.test(readerLedgerRow)
+       && /triggering focus/.test(readerLedgerRow));
 
     const serialState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
     const serialQueue = new ReaderQueue();
