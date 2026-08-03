@@ -237,8 +237,8 @@ class TripLinks {
     return null;
   }
   _linksState(owner, page) {
-    if (!this._linksMutationStates) this._linksMutationStates = new WeakMap();
-    let state = this._linksMutationStates.get(owner);
+    const states = this._linksStateStore();
+    let state = states.get(owner);
     const incoming = this._parse(page && page.links);
     const path = String(page?.file?.path || owner?.dataset?.tripLinksOwnerPath || "");
     const metadataVersion = this._metadataVersion(path);
@@ -252,7 +252,7 @@ class TripLinks {
         epoch: 0,
         authority: null,
       };
-      this._linksMutationStates.set(owner, state);
+      states.set(owner, state);
       return state;
     }
     if (state.queued === 0) {
@@ -295,6 +295,16 @@ class TripLinks {
       }
     }
     return state;
+  }
+  _linksStateStore() {
+    const slot = Symbol.for("sauce.trips.links-mutation-states");
+    let states = globalThis[slot];
+    if (!(states instanceof WeakMap)) {
+      states = new WeakMap();
+      globalThis[slot] = states;
+    }
+    this._linksMutationStates = states;
+    return states;
   }
   _sameLinks(left, right) {
     try { return JSON.stringify(this._parse(left)) === JSON.stringify(this._parse(right)); }

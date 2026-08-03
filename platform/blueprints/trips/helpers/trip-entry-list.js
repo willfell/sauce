@@ -669,8 +669,8 @@ class TripEntryList {
     return null;
   }
   _entryState(owner, page, key) {
-    if (!this._entryMutationStates) this._entryMutationStates = new WeakMap();
-    let state = this._entryMutationStates.get(owner);
+    const states = this._entryStateStore();
+    let state = states.get(owner);
     const incoming = TripEntryList._asArray(page && page[key]);
     const path = String(page?.file?.path || owner?.dataset?.tripEntryOwnerPath || "");
     const metadataVersion = this._metadataVersion(path);
@@ -685,7 +685,7 @@ class TripEntryList {
         epoch: 0,
         authority: null,
       };
-      this._entryMutationStates.set(owner, state);
+      states.set(owner, state);
       return state;
     }
     if (state.queued === 0) {
@@ -728,6 +728,16 @@ class TripEntryList {
       }
     }
     return state;
+  }
+  _entryStateStore() {
+    const slot = Symbol.for("sauce.trips.entry-mutation-states");
+    let states = globalThis[slot];
+    if (!(states instanceof WeakMap)) {
+      states = new WeakMap();
+      globalThis[slot] = states;
+    }
+    this._entryMutationStates = states;
+    return states;
   }
   _sameEntryModel(left, right) {
     try {

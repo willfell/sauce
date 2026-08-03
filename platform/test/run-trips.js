@@ -521,8 +521,9 @@ function makeDv(embed, currentVal) {
             TripEntryList.deleteEntry(list._items(rapidEntryDv, rapidEntrySpec), 0).list,
         );
         await new Promise(setImmediate);
-        const rapidEntrySecondBase = list._items(rapidEntryDv, rapidEntrySpec);
-        const rapidEntrySecond = list._write(
+        const replacementEntryHelper = new TripEntryList();
+        const rapidEntrySecondBase = replacementEntryHelper._items(rapidEntryDv, rapidEntrySpec);
+        const rapidEntrySecond = replacementEntryHelper._write(
             rapidEntryDv, rapidEntrySpec,
             TripEntryList.deleteEntry(rapidEntrySecondBase, 0).list,
         );
@@ -534,10 +535,10 @@ function makeDv(embed, currentVal) {
         await rapidEntryFirst;
         await new Promise(setImmediate);
         const rapidEntrySecondStarted = rapidEntryWrites === 2
-            && list._items(rapidEntryDv, rapidEntrySpec).length === 0;
+            && replacementEntryHelper._items(rapidEntryDv, rapidEntrySpec).length === 0;
         rapidEntryGates[1].resolve();
         const rapidEntrySaved = await rapidEntrySecond;
-        ok('PERF4B-RAPID-ENTRY stale fresh snapshots retain both gestures in one serialized owner queue',
+        ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement entry helpers share one exact-owner queue',
             rapidEntryQueued && rapidEntrySecondStarted && rapidEntrySaved
             && rapidEntryMaxActive === 1 && file.fm.flights.length === 0);
         const missingMtimeEntryState = list._entryState(rapidEntryOwner, {
@@ -718,11 +719,13 @@ function makeDv(embed, currentVal) {
             .every((trackedPath) => allowedTrackedPaths.has(trackedPath))
             && [...generationTrackerB.versions.keys()]
                 .every((trackedPath) => allowedTrackedPaths.has(trackedPath));
-        const cacheBEntryState = list._entryState(replacementEntryOwner, {
+        const replacementGenerationEntryHelper = new TripEntryList();
+        const replacementGenerationLinksHelper = new TripLinks();
+        const cacheBEntryState = replacementGenerationEntryHelper._entryState(replacementEntryOwner, {
             file: { path: replacementPath, mtime: file.stat.mtime - 1 },
             flights: [{ flight_no: 'STALE-A' }],
         }, 'flights');
-        const cacheBLinkState = links._linksState(replacementLinkOwner, {
+        const cacheBLinkState = replacementGenerationLinksHelper._linksState(replacementLinkOwner, {
             type: 'trip', file: { path: replacementPath, mtime: file.stat.mtime - 1 },
             links: [{ url: 'https://stale-a.example', text: 'Stale A' }],
         });
@@ -737,7 +740,7 @@ function makeDv(embed, currentVal) {
             && staleCacheAIsolated
             && unrelatedPathsBounded
             && generationVersionB === generationVersionA + 1);
-        ok('PERF4F-FINITE-MTIME-CACHE-CONVERGENCE cache B event outranks finite stale Dataview mtimes for both helpers',
+        ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement helpers retain owner authority and consume cache B first',
             cacheBEntryState.model[0]?.flight_no === 'EXTERNAL-B'
             && cacheBEntryState.authority?.cacheVersion === generationVersionB
             && cacheBLinkState.model[0]?.url === 'https://external-b.example'
@@ -997,8 +1000,9 @@ function makeDv(embed, currentVal) {
             rapidLinksDv, TripLinks.deleteLink(links._currentLinks(rapidLinksDv), 0).links,
         );
         await new Promise(setImmediate);
-        const rapidLinkSecondBase = links._currentLinks(rapidLinksDv);
-        const rapidLinkSecond = links._write(
+        const replacementLinksHelper = new TripLinks();
+        const rapidLinkSecondBase = replacementLinksHelper._currentLinks(rapidLinksDv);
+        const rapidLinkSecond = replacementLinksHelper._write(
             rapidLinksDv, TripLinks.deleteLink(rapidLinkSecondBase, 0).links,
         );
         await new Promise(setImmediate);
@@ -1009,10 +1013,10 @@ function makeDv(embed, currentVal) {
         await rapidLinkFirst;
         await new Promise(setImmediate);
         const rapidLinkSecondStarted = rapidLinkWrites === 2
-            && links._currentLinks(rapidLinksDv).length === 0;
+            && replacementLinksHelper._currentLinks(rapidLinksDv).length === 0;
         rapidLinkGates[1].resolve();
         const rapidLinksSaved = await rapidLinkSecond;
-        ok('PERF4B-RAPID-LINK stale fresh snapshots retain both gestures in one serialized owner queue',
+        ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement link helpers share one exact-owner queue',
             rapidLinksQueued && rapidLinkSecondStarted && rapidLinksSaved
             && rapidLinkMaxActive === 1 && file.fm.links.length === 0);
         const missingMtimeLinksState = links._linksState(rapidLinksOwner, {
