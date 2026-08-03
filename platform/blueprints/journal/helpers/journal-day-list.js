@@ -60,6 +60,7 @@ class JournalDayList {
     }
 
     async render(dv, args) {
+        let isStale = () => false;
         try {
             const container = dv && dv.container;
             if (!container) return;
@@ -67,7 +68,7 @@ class JournalDayList {
 
             const myGen = (container.__journalRenderGen || 0) + 1;
             container.__journalRenderGen = myGen;
-            const isStale = () => container.__journalRenderGen !== myGen;
+            isStale = () => container.__journalRenderGen !== myGen;
 
             while (container.firstChild) container.removeChild(container.firstChild);
 
@@ -118,6 +119,7 @@ class JournalDayList {
                 empty: "No journal entries for this day yet. Hit + New Journal Entry above to capture one."
             });
         } catch (e) {
+            if (isStale()) return;
             try { if (dv && typeof dv.paragraph === "function") dv.paragraph(`JournalDayList error: ${e && e.message ? e.message : e}`); } catch (_e) {}
         }
     }

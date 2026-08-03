@@ -23,6 +23,10 @@ const fs = require('fs');
 const path = require('path');
 
 let passes = 0, fails = 0;
+const harnessTimeout = setTimeout(() => {
+    console.error('FAIL PERF-7-HARNESS: asynchronous fixtures did not finish');
+    process.exit(1);
+}, 10000);
 async function guard(name, fn) {
     try { await fn(); console.log('ok ' + name); passes++; }
     catch (e) { console.error('FAIL ' + name + ': ' + (e && e.message ? e.message : e)); fails++; }
@@ -177,6 +181,37 @@ const variants = [
                 global.customJS = saved;
             }
         });
+        await guard(`PERF-7-GENERATION ${w.name} — stale render rejection cannot contaminate newer output`, async () => {
+            const saved = global.customJS;
+            let rejectOlder;
+            let markOlderStarted;
+            const olderStarted = new Promise((resolve) => { markOlderStarted = resolve; });
+            let calls = 0;
+            const paragraphs = [];
+            try {
+                global.customJS = {
+                    RenderSafe: { page: () => null },
+                    BeaconCards: { render: async () => {
+                        calls++;
+                        if (calls === 1) {
+                            markOlderStarted();
+                            await new Promise((_resolve, reject) => { rejectOlder = reject; });
+                        }
+                    } },
+                };
+                const dv = makeDv(false, undefined);
+                dv.paragraph = (message) => { paragraphs.push(message); return makeEl(); };
+                const instance = new WidgetClass();
+                const older = instance.render(dv, { day: '2026-07-02' });
+                await olderStarted;
+                await instance.render(dv, { day: '2026-07-02' });
+                rejectOlder(new Error('older render failed'));
+                await older;
+                if (paragraphs.length !== 0) throw new Error(`stale render appended ${paragraphs.length} paragraph(s)`);
+            } finally {
+                global.customJS = saved;
+            }
+        });
     }
     for (const spec of [
         { name: 'StickyChromeBar', path: 'platform/blueprints/sticky-notes/helpers/sticky-chrome-bar.js' },
@@ -236,5 +271,6 @@ const variants = [
         if (/dataview:force-refresh-views/.test(sources)) throw new Error('global Dataview refresh remains in audited helpers');
     });
     console.log(`\n${passes} passed, ${fails} failed`);
+    clearTimeout(harnessTimeout);
     process.exit(fails === 0 ? 0 : 1);
 })();

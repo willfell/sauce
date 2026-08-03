@@ -61,6 +61,7 @@ class StickyDayList {
     }
 
     async render(dv, args) {
+        let isStale = () => false;
         try {
             const container = dv && dv.container;
             if (!container) return;
@@ -68,7 +69,7 @@ class StickyDayList {
 
             const myGen = (container.__stickyRenderGen || 0) + 1;
             container.__stickyRenderGen = myGen;
-            const isStale = () => container.__stickyRenderGen !== myGen;
+            isStale = () => container.__stickyRenderGen !== myGen;
 
             while (container.firstChild) container.removeChild(container.firstChild);
 
@@ -119,6 +120,7 @@ class StickyDayList {
                 empty: "No sticky notes for this day yet. Hit + New Sticky Note above to capture one."
             });
         } catch (e) {
+            if (isStale()) return;
             try { if (dv && typeof dv.paragraph === "function") dv.paragraph(`StickyDayList error: ${e && e.message ? e.message : e}`); } catch (_e) {}
         }
     }
