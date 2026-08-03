@@ -1302,6 +1302,41 @@ function descendants(el) {
     assertEq("HOME-DASH-RETRY-6 delayed mount plus rerender appends exactly one dashboard",
       deferredDv._viewCalls.length, 1);
 
+    const appendedDv = makeDv();
+    let releaseSettlement;
+    let reportAppended;
+    const settlementReleased = new Promise((resolve) => { releaseSettlement = resolve; });
+    const mountAppended = new Promise((resolve) => { reportAppended = resolve; });
+    let appendFirstAttempts = 0;
+    appendedDv.view = async (viewPath, input) => {
+      appendFirstAttempts += 1;
+      appendedDv._viewCalls.push({ viewPath, input });
+      const mount = makeEl("div", { cls: "customjs-guard-mount" });
+      mount.parent = appendedDv.container;
+      appendedDv.container.children.push(mount);
+      reportAppended();
+      await settlementReleased;
+      return mount;
+    };
+    const appendFirstRender = home_.render(appendedDv, {});
+    await mountAppended;
+    appendedDv.container.children = [];
+    const appendFirstReplacement = home_.render(appendedDv, {});
+    await Promise.resolve();
+    assertEq("HOME-DASH-RETRY-7 append-before-settle remains serialized through clear",
+      appendFirstAttempts, 1);
+    releaseSettlement();
+    await Promise.all([appendFirstRender, appendFirstReplacement]);
+    const liveMounts = appendedDv.container.children
+      .filter((node) => node.cls === "customjs-guard-mount");
+    assertEq("HOME-DASH-RETRY-8 removed pre-settlement DOM triggers one serialized remount",
+      appendFirstAttempts, 2);
+    assertEq("HOME-DASH-RETRY-9 append-before-settle converges on one live dashboard",
+      liveMounts.length, 1);
+    await home_.render(appendedDv, {});
+    assertEq("HOME-DASH-RETRY-10 settled replacement mount remains deduped",
+      appendFirstAttempts, 2);
+
     delete global.customJS;
     delete global.window.customJS;
   }

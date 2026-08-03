@@ -369,7 +369,7 @@ class SpaceHome {
           signature: null,
           generation: 0,
           capture: { pending: false, token: null, controls: null },
-          dashboard: { mounted: false, token: null, generation: 0 },
+          dashboard: { mounted: false, key: null, nodes: [], token: null, generation: 0 },
         };
         dv.container.__sauceHomeSurface = surface;
       }
@@ -378,26 +378,54 @@ class SpaceHome {
         signature: null,
         generation: 0,
         capture: { pending: false, token: null, controls: null },
-        dashboard: { mounted: false, token: null, generation: 0 },
+        dashboard: { mounted: false, key: null, nodes: [], token: null, generation: 0 },
       };
     }
     const mountDashboard = async () => {
       const dashboard = surface.dashboard;
-      if (dashboard.mounted || dashboard.token || !dv || typeof dv.view !== "function") return;
-      const token = { generation: dashboard.generation };
-      dashboard.token = token;
-      try {
-        await dv.view("ranch/views/customjs-guard", {
-          class: "SpaceDailyDashboard",
-          args: [{ asOf: today, live: true }],
-        });
-        if (dashboard.token === token && dashboard.generation === token.generation) {
-          dashboard.mounted = true;
+      const children = () => Array.from((dv && dv.container && dv.container.children) || []);
+      const liveNodes = () => (Array.isArray(dashboard.nodes) ? dashboard.nodes : [])
+        .filter((node) => children().includes(node));
+      if (dashboard.mounted && dashboard.key === today && liveNodes().length) return;
+      if (dashboard.mounted && dashboard.key !== today) {
+        for (const node of liveNodes()) {
+          try { node.remove?.(); } catch (_e) {}
         }
-      } catch (_e) { /* cold guard: the Home shell remains usable and retryable */ }
-      finally {
-        if (dashboard.token === token) dashboard.token = null;
       }
+      dashboard.mounted = false;
+      dashboard.key = null;
+      dashboard.nodes = [];
+      if (dashboard.token) {
+        await dashboard.token.promise;
+        return mountDashboard();
+      }
+      if (!dv || typeof dv.view !== "function") return;
+      const token = { generation: dashboard.generation, baseline: new Set(children()), promise: null };
+      dashboard.token = token;
+      token.promise = (async () => {
+        try {
+          await dv.view("ranch/views/customjs-guard", {
+            class: "SpaceDailyDashboard",
+            args: [{ asOf: today, live: true }],
+          });
+          if (dashboard.token === token) {
+            const currentHome = dv.container.querySelector(".sauce-home");
+            const mountedNodes = children().filter((node) => !token.baseline.has(node) && node !== currentHome);
+            dashboard.nodes = mountedNodes;
+            dashboard.mounted = mountedNodes.length > 0;
+            dashboard.key = dashboard.mounted ? today : null;
+          }
+        } catch (_e) {
+          if (dashboard.token === token) {
+            dashboard.mounted = false;
+            dashboard.key = null;
+            dashboard.nodes = [];
+          }
+        } finally {
+          if (dashboard.token === token) dashboard.token = null;
+        }
+      })();
+      await token.promise;
     };
 
     // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
@@ -426,6 +454,8 @@ class SpaceHome {
       // preserved until its persistence receipt settles.
       surface.dashboard.generation += 1;
       surface.dashboard.mounted = false;
+      surface.dashboard.key = null;
+      surface.dashboard.nodes = [];
     }
     surface.signature = sig;
     surface.generation += 1;
