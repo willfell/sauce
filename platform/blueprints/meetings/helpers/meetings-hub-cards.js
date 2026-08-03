@@ -34,9 +34,30 @@ class MeetingsHubCards {
   }
 
   static _attendeeNames(page) {
+    return MeetingsHubCards._attendeeEntries(page).map((entry) => entry.display);
+  }
+
+  static _attendeeEntries(page) {
     let values = MeetingsHubCards._values(page && page.attendees);
     if (!values.length) values = MeetingsHubCards._values(page && page.people);
-    return values.map(MeetingsHubCards._name).filter(Boolean);
+    const entries = [];
+    for (const value of values) {
+      let target = "";
+      let display = "";
+      if (value && typeof value === "object") {
+        target = MeetingsHubCards._sourceBasename(value.path || value.name || value.display);
+        display = String(value.display || target).trim();
+      } else {
+        let inner = String(value == null ? "" : value).trim();
+        const link = /^\[\[([^\]]*)\]\]$/.exec(inner);
+        if (link) inner = link[1];
+        const parts = inner.split("|");
+        target = MeetingsHubCards._sourceBasename(parts[0]);
+        display = String(parts.length > 1 ? parts.slice(1).join("|") : target).trim();
+      }
+      if (target) entries.push({ target, display: display || target });
+    }
+    return entries;
   }
 
   static _sourceBasename(value) {
@@ -56,7 +77,8 @@ class MeetingsHubCards {
       const tasks = data && typeof data.array === "function" ? data.array() : Array.from(data || []);
       for (const task of tasks) {
         const path = task && task.file && task.file.path;
-        if (!task || task.type !== "task" || !path || path.includes("/_trash/")) continue;
+        const taskSource = String(task && task.source != null ? task.source : "").trim().toLowerCase();
+        if (!task || task.type !== "task" || taskSource !== "meeting" || !path || path.includes("/_trash/")) continue;
         const source = MeetingsHubCards._sourceBasename(task.source_note);
         if (!source) continue;
         const row = counts[source] || (counts[source] = { open: 0, done: 0 });
@@ -124,8 +146,11 @@ class MeetingsHubCards {
     const taskCounts = MeetingsHubCards._taskCountsBySource(dv);
     const registeredPeople = MeetingsHubCards._registeredPeople(dv);
     const enriched = meetingsRaw.map((p) => {
-      const attendees = MeetingsHubCards._attendeeNames(p);
-      const peopleAttendeeLinks = attendees.filter((name) => registeredPeople.has(name)).map((name) => `[[${name}]]`);
+      const attendeeEntries = MeetingsHubCards._attendeeEntries(p);
+      const attendees = attendeeEntries.map((entry) => entry.display);
+      const peopleAttendeeLinks = attendeeEntries
+        .filter((entry) => registeredPeople.has(entry.target))
+        .map((entry) => entry.display === entry.target ? `[[${entry.target}]]` : `[[${entry.target}|${entry.display}]]`);
       const counts = taskCounts[(p.file && p.file.name) || ""] || { open: 0, done: 0 };
       let summary = p.summary || "";
       if (typeof summary === "string") {

@@ -96,6 +96,22 @@ ok('MBL-MONTHKEY-2 plain date → YYYY-MM',
     names.length === 2 && names[0] === 'Grace Hopper' && names[1] === 'Linus');
 }
 
+{
+  const chain = (items) => ({
+    where(fn) { return chain(items.filter(fn)); },
+    array() { return items.slice(); },
+    [Symbol.iterator]: function* () { yield* items; },
+  });
+  const counts = MeetingsBrowseList._openTaskCountsBySource({
+    pages: () => chain([
+      { type: 'task', status: 'open', source: 'meeting', source_note: '[[Standup]]', file: { path: 'spice/tasks/meeting.md' } },
+      { type: 'task', status: 'open', source: 'project', source_note: '[[Standup]]', file: { path: 'spice/tasks/project.md' } },
+    ]),
+  });
+  ok('PERF5B-TASK-SOURCE-CORRELATION counts only canonical meeting-sourced tasks',
+    counts.Standup === 1);
+}
+
 // PERF5-HUB-NPLUS1 — the compatibility hub performs exactly one task snapshot
 // and correlates all meeting rows in memory. The underlying vault read seam is
 // intentionally poisoned: any legacy per-row body read turns this fixture red.
@@ -110,15 +126,16 @@ ok('MBL-MONTHKEY-2 plain date → YYYY-MM',
     [Symbol.iterator]: function* () { yield* items; },
   });
   const meetings = [
-    { file: { name: 'Alpha-2026-07-13', path: 'spice/meetings/notes/Alpha-2026-07-13.md' }, date: '2026-07-13 09:00', attendees: ['[[Ada]]'] },
+    { file: { name: 'Alpha-2026-07-13', path: 'spice/meetings/notes/Alpha-2026-07-13.md' }, date: '2026-07-13 09:00', attendees: ['[[Ada Lovelace|Ada]]'] },
     { file: { name: 'Beta-2026-07-13', path: 'spice/meetings/notes/Beta-2026-07-13.md' }, date: '2026-07-13 10:00', attendees: { *[Symbol.iterator]() { yield '[[Bob]]'; } } },
   ];
   const tasks = [
-    { type: 'task', status: 'open', source_note: '[[Alpha-2026-07-13]]', file: { path: 'spice/tasks/a.md' } },
-    { type: 'task', status: 'done', source_note: { path: 'spice/meetings/notes/Beta-2026-07-13.md' }, file: { path: 'spice/tasks/_done/b.md' } },
+    { type: 'task', status: 'open', source: 'meeting', source_note: '[[Alpha-2026-07-13]]', file: { path: 'spice/tasks/a.md' } },
+    { type: 'task', status: 'open', source: 'project', source_note: '[[Alpha-2026-07-13]]', file: { path: 'spice/tasks/unrelated.md' } },
+    { type: 'task', status: 'done', source: 'meeting', source_note: { path: 'spice/meetings/notes/Beta-2026-07-13.md' }, file: { path: 'spice/tasks/_done/b.md' } },
   ];
   const people = [
-    { file: { name: 'Ada', path: 'spice/people/Ada.md' } },
+    { file: { name: 'Ada Lovelace', path: 'spice/people/Ada Lovelace.md' } },
     { file: { name: 'Bob', path: 'spice/people/Bob.md' } },
   ];
   const previous = { customJS: global.customJS, window: global.window, app: global.app, moment: global.moment };
@@ -150,13 +167,16 @@ ok('MBL-MONTHKEY-2 plain date → YYYY-MM',
       && pageQueries.filter((q) => q === '"spice/people"').length === 1);
     ok('PERF5-HUB-NPLUS1 correlates open/done task-note counts by source_note',
       rendered[0].openTasks === 1 && rendered[1].doneTasks === 1);
+    ok('PERF5B-ALIASED-PEOPLE-CORRELATION preserves link identity separately from display alias',
+      JSON.stringify(rendered[0].attendees) === JSON.stringify(['Ada'])
+      && JSON.stringify(rendered[0].peopleAttendeeLinks) === JSON.stringify(['[[Ada Lovelace|Ada]]']));
 
     const browseSrc = fs.readFileSync(path.join(ROOT, 'platform/blueprints/meetings/helpers/meetings-browse-list.js'), 'utf8');
     const hubSrc = fs.readFileSync(path.join(ROOT, 'platform/blueprints/meetings/helpers/meetings-hub-cards.js'), 'utf8');
     const iterableContract = (src) => /_iterableValues\(page\.attendees\)/.test(src) && /value\[Symbol\.iterator\]/.test(src);
     const boundedHubContract = (src) => /_taskCountsBySource\(dv\)/.test(src) && !/app\.vault\.read\s*\(/.test(src);
     const arrayOnlyMutant = browseSrc.replace("let list = MeetingsBrowseList._iterableValues(page.attendees);", "let list = Array.isArray(page.attendees) ? page.attendees : [];");
-    const perRowReadMutant = hubSrc.replace('const attendees = MeetingsHubCards._attendeeNames(p);', 'app.vault.read(p.file); const attendees = MeetingsHubCards._attendeeNames(p);');
+    const perRowReadMutant = hubSrc.replace('const attendeeEntries = MeetingsHubCards._attendeeEntries(p);', 'app.vault.read(p.file); const attendeeEntries = MeetingsHubCards._attendeeEntries(p);');
     ok('PERF5-REQUIREMENT-MUTANTS kills the Array-only attendee source mutant',
       iterableContract(browseSrc) && !iterableContract(arrayOnlyMutant));
     ok('PERF5-REQUIREMENT-MUTANTS kills the per-row vault-read source mutant',

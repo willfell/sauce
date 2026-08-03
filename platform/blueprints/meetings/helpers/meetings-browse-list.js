@@ -94,6 +94,7 @@ class MeetingsBrowseList {
     try {
       const raw = dv.pages('"spice/tasks"').where(p =>
         p && p.type === 'task' && p.status === 'open'
+        && String(p.source == null ? '' : p.source).trim().toLowerCase() === 'meeting'
         && p.file && p.file.path
         && !p.file.path.includes('/_trash/')
         && !p.file.path.includes('/_done/'));
