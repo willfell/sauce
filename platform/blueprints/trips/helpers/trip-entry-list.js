@@ -397,8 +397,8 @@ class TripEntryList {
       c.className = `${c.className || ""} trip-entry-list-owner`.trim();
     }
 
-    const cur = dv.current && dv.current();
-    const items = TripEntryList._asArray(cur && cur[spec.key]);
+    const state = this._entryState(c, page, spec.key);
+    const items = TripEntryList._asArray(state.model);
 
     if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
       customJS.SectionLabel.divider(c);
@@ -628,6 +628,9 @@ class TripEntryList {
   // ── read + write ──────────────────────────────────────────────────────────
   _items(dv, spec) {
     const cur = this._page(dv);
+    const filePath = cur && cur.file ? cur.file.path : "";
+    const owner = filePath ? this._entryOwner(dv, filePath, spec.key) : null;
+    if (owner) return TripEntryList._asArray(this._entryState(owner, cur, spec.key).model);
     return TripEntryList._asArray(cur && cur[spec.key]);
   }
   _page(dv) {
@@ -665,6 +668,83 @@ class TripEntryList {
     }
     return null;
   }
+  _entryState(owner, page, key) {
+    if (!this._entryMutationStates) this._entryMutationStates = new WeakMap();
+    let state = this._entryMutationStates.get(owner);
+    const incoming = TripEntryList._asArray(page && page[key]);
+    const path = String(page?.file?.path || owner?.dataset?.tripEntryOwnerPath || "");
+    if (!state || state.path !== path || state.key !== String(key || "")) {
+      state = {
+        path,
+        key: String(key || ""),
+        model: incoming,
+        tail: Promise.resolve(),
+        queued: 0,
+        epoch: 0,
+        authority: null,
+      };
+      this._entryMutationStates.set(owner, state);
+      return state;
+    }
+    if (state.queued === 0) {
+      if (state.authority) {
+        const matches = this._sameEntryModel(incoming, state.authority.expected);
+        const incomingMtime = this._pageMtime(page);
+        const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
+          && incomingMtime >= state.authority.writeMtime;
+        const cannotOrder = incomingMtime == null || state.authority.writeMtime == null;
+        if (matches || externallyNewer || cannotOrder) {
+          state.model = incoming;
+          state.authority = null;
+        }
+      } else {
+        state.model = incoming;
+      }
+    }
+    return state;
+  }
+  _sameEntryModel(left, right) {
+    try {
+      return JSON.stringify(TripEntryList._mutationComparable(TripEntryList._asArray(left)))
+        === JSON.stringify(TripEntryList._mutationComparable(TripEntryList._asArray(right)));
+    } catch (_e) { return false; }
+  }
+  _pageMtime(page) {
+    const value = page?.file?.mtime;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    try {
+      const numeric = value && typeof value.valueOf === "function" ? Number(value.valueOf()) : NaN;
+      return Number.isFinite(numeric) ? numeric : null;
+    } catch (_e) { return null; }
+  }
+  _fileMtime(file) {
+    const value = file?.stat?.mtime;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  _queueEntryStructure(state, task) {
+    const epoch = state.epoch;
+    state.queued += 1;
+    const run = async () => {
+      try {
+        if (epoch !== state.epoch) {
+          new Notice("An earlier trip change failed. Retry this action.", 6000);
+          return false;
+        }
+        const ok = await task();
+        if (!ok) state.epoch += 1;
+        return ok;
+      } catch (error) {
+        state.epoch += 1;
+        new Notice("Could not save: " + (error?.message || error), 6000);
+        return false;
+      } finally {
+        state.queued = Math.max(0, state.queued - 1);
+      }
+    };
+    const result = (state.tail || Promise.resolve()).then(run, run);
+    state.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
   _rollbackStructurePreview(receipt) {
     if (!receipt) return;
     if (receipt.owner) {
@@ -677,6 +757,10 @@ class TripEntryList {
     if (receipt.page) {
       if (receipt.hadValue) receipt.page[receipt.key] = receipt.priorValue;
       else delete receipt.page[receipt.key];
+    }
+    if (receipt.state) {
+      receipt.state.model = receipt.priorModel;
+      receipt.state.authority = receipt.priorAuthority;
     }
     try { receipt.focusTarget?.focus?.(); } catch (_e) {}
   }
@@ -704,35 +788,50 @@ class TripEntryList {
       const page = this._page(dv);
       if (!page) { new Notice("Could not save: page metadata is unavailable.", 6000); return false; }
       const next = TripEntryList._asArray(list);
-      const result = await renderSafe.mutateStructure({
-        app,
-        dv,
-        path: file.path,
-        failureMessage: "Could not save",
-        apply: async () => {
-          const owner = this._entryOwner(dv, file.path, spec.key);
-          if (!owner) throw new Error("Trip entry list surface is unavailable");
-          const hadValue = Object.prototype.hasOwnProperty.call(page, spec.key);
-          const priorValue = page[spec.key];
-          const priorNodes = Array.from(owner.childNodes || owner.children || []);
-          const focusTarget = ui?.focusTarget
-            || ((typeof document !== "undefined") ? document.activeElement : null);
-          const receipt = { owner, page, key: spec.key, hadValue, priorValue, priorNodes, focusTarget };
-          try {
-            page[spec.key] = next;
-            if (typeof owner.replaceChildren === "function") owner.replaceChildren();
-            else owner.empty?.();
-            await this.render(this._previewDv(dv, owner, page), spec);
-            return receipt;
-          } catch (error) {
-            this._rollbackStructurePreview(receipt);
-            throw error;
-          }
-        },
-        rollback: (receipt) => this._rollbackStructurePreview(receipt),
-        write: () => app.fileManager.processFrontMatter(file, (fm) => { fm[spec.key] = next; }),
+      const owner = this._entryOwner(dv, file.path, spec.key);
+      if (!owner) { new Notice("Could not save: trip entry list surface is unavailable.", 6000); return false; }
+      const state = this._entryState(owner, page, spec.key);
+      return this._queueEntryStructure(state, async () => {
+        const previewPage = this._page(dv) || page;
+        const result = await renderSafe.mutateStructure({
+          app,
+          dv,
+          path: file.path,
+          failureMessage: "Could not save",
+          apply: async () => {
+            const hadValue = Object.prototype.hasOwnProperty.call(previewPage, spec.key);
+            const priorValue = previewPage[spec.key];
+            const priorModel = state.model;
+            const priorAuthority = state.authority;
+            const priorNodes = Array.from(owner.childNodes || owner.children || []);
+            const focusTarget = ui?.focusTarget
+              || ((typeof document !== "undefined") ? document.activeElement : null);
+            const receipt = {
+              owner, page: previewPage, key: spec.key, hadValue, priorValue,
+              priorModel, priorAuthority, priorNodes, focusTarget, state,
+            };
+            try {
+              state.model = next;
+              previewPage[spec.key] = next;
+              if (typeof owner.replaceChildren === "function") owner.replaceChildren();
+              else owner.empty?.();
+              await this.render(this._previewDv(dv, owner, previewPage), spec);
+              return receipt;
+            } catch (error) {
+              this._rollbackStructurePreview(receipt);
+              throw error;
+            }
+          },
+          rollback: (receipt) => this._rollbackStructurePreview(receipt),
+          write: () => app.fileManager.processFrontMatter(file, (fm) => { fm[spec.key] = next; }),
+        });
+        if (result.ok === true) {
+          state.model = next;
+          state.authority = { expected: next, writeMtime: this._fileMtime(file) };
+          return true;
+        }
+        return false;
       });
-      return result.ok === true;
     }
     const expected = JSON.stringify(TripEntryList._mutationComparable(TripEntryList._asArray(list)));
     const result = await renderSafe.mutate({

@@ -482,6 +482,98 @@ function makeDv(embed, currentVal) {
             structureSaved && file.fm.flights[0].flight_no === 'UA1'
             && refreshes === beforeStructureRefresh);
 
+        // PERF-4b: each dv.current() call can return a fresh stale snapshot
+        // while the first persistence is unresolved. The exact owner model must
+        // remain authoritative and persistence must serialize, so deleting A
+        // and then the newly visible B commits [] rather than resurrecting B.
+        const originalProcessFrontMatter = global.app.fileManager.processFrontMatter;
+        const rapidEntryGates = [deferred(), deferred()];
+        let indexedFlights = [{ flight_no: 'A' }, { flight_no: 'B' }];
+        file.fm.flights = indexedFlights.slice();
+        let rapidEntryWrites = 0;
+        let rapidEntryActive = 0;
+        let rapidEntryMaxActive = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = rapidEntryGates[rapidEntryWrites++];
+            rapidEntryActive++;
+            rapidEntryMaxActive = Math.max(rapidEntryMaxActive, rapidEntryActive);
+            await gate.promise;
+            mutate(target.fm);
+            indexedFlights = target.fm.flights.slice();
+            rapidEntryActive--;
+        };
+        const rapidEntryOwner = trackedEl('div');
+        rapidEntryOwner.dataset.tripEntryOwnerPath = pathName;
+        rapidEntryOwner.dataset.tripEntryOwnerKey = 'flights';
+        rapidEntryOwner.classList.add('trip-entry-list-owner');
+        const rapidEntryDv = {
+            container: rapidEntryOwner,
+            current: () => ({ file: { path: pathName, mtime: 1 }, flights: indexedFlights.slice() }),
+        };
+        const rapidEntrySpec = { key: 'flights', kind: 'flights' };
+        await list.render(rapidEntryDv, rapidEntrySpec);
+        const rapidEntryFirst = list._write(
+            rapidEntryDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(list._items(rapidEntryDv, rapidEntrySpec), 0).list,
+        );
+        await new Promise(setImmediate);
+        const rapidEntrySecondBase = list._items(rapidEntryDv, rapidEntrySpec);
+        const rapidEntrySecond = list._write(
+            rapidEntryDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(rapidEntrySecondBase, 0).list,
+        );
+        await new Promise(setImmediate);
+        const rapidEntryQueued = rapidEntryWrites === 1
+            && rapidEntrySecondBase.length === 1
+            && rapidEntrySecondBase[0].flight_no === 'B';
+        rapidEntryGates[0].resolve();
+        await rapidEntryFirst;
+        await new Promise(setImmediate);
+        const rapidEntrySecondStarted = rapidEntryWrites === 2
+            && list._items(rapidEntryDv, rapidEntrySpec).length === 0;
+        rapidEntryGates[1].resolve();
+        const rapidEntrySaved = await rapidEntrySecond;
+        ok('PERF4B-RAPID-ENTRY stale fresh snapshots retain both gestures in one serialized owner queue',
+            rapidEntryQueued && rapidEntrySecondStarted && rapidEntrySaved
+            && rapidEntryMaxActive === 1 && file.fm.flights.length === 0);
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        const failedQueueGate = deferred();
+        let failedQueueWrites = 0;
+        const failedQueueInitial = [{ flight_no: 'A' }, { flight_no: 'B' }];
+        file.fm.flights = failedQueueInitial;
+        global.app.fileManager.processFrontMatter = async () => {
+            failedQueueWrites++;
+            await failedQueueGate.promise;
+            throw new Error('first queued trip write failed');
+        };
+        const failedQueueOwner = trackedEl('div');
+        failedQueueOwner.dataset.tripEntryOwnerPath = pathName;
+        failedQueueOwner.dataset.tripEntryOwnerKey = 'flights';
+        failedQueueOwner.classList.add('trip-entry-list-owner');
+        const failedQueueDv = {
+            container: failedQueueOwner,
+            current: () => ({ file: { path: pathName, mtime: 1 }, flights: failedQueueInitial.slice() }),
+        };
+        await list.render(failedQueueDv, rapidEntrySpec);
+        const failedQueueFirst = list._write(
+            failedQueueDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(list._items(failedQueueDv, rapidEntrySpec), 0).list,
+        );
+        await new Promise(setImmediate);
+        const failedQueueSecond = list._write(
+            failedQueueDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(list._items(failedQueueDv, rapidEntrySpec), 0).list,
+        );
+        failedQueueGate.resolve();
+        const failedQueueResults = await Promise.all([failedQueueFirst, failedQueueSecond]);
+        ok('PERF4B-QUEUE-FAILURE earlier rejection restores authority and cancels stale queued descendants',
+            failedQueueResults[0] === false && failedQueueResults[1] === false
+            && failedQueueWrites === 1
+            && list._items(failedQueueDv, rapidEntrySpec).length === 2
+            && file.fm.flights === failedQueueInitial);
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
         const rejectedFlights = [{ flight_no: 'OLD2' }];
         page = { file: { path: pathName }, flights: rejectedFlights };
         file.fm.flights = rejectedFlights;
@@ -530,6 +622,56 @@ function makeDv(embed, currentVal) {
         ok('PERF-4-LINKS-SUCCESS persists without metadata polling or global refresh',
             linksSaved && file.fm.links[0].text === 'Example'
             && scheduled.length === 0 && refreshes === beforeStructureRefresh);
+
+        const rapidLinkGates = [deferred(), deferred()];
+        let indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let rapidLinkWrites = 0;
+        let rapidLinkActive = 0;
+        let rapidLinkMaxActive = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = rapidLinkGates[rapidLinkWrites++];
+            rapidLinkActive++;
+            rapidLinkMaxActive = Math.max(rapidLinkMaxActive, rapidLinkActive);
+            await gate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+            rapidLinkActive--;
+        };
+        const rapidLinksOwner = trackedEl('div');
+        rapidLinksOwner.dataset.tripLinksOwnerPath = pathName;
+        rapidLinksOwner.classList.add('trip-links-owner');
+        const rapidLinksDv = {
+            container: rapidLinksOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(rapidLinksDv);
+        const rapidLinkFirst = links._write(
+            rapidLinksDv, TripLinks.deleteLink(links._currentLinks(rapidLinksDv), 0).links,
+        );
+        await new Promise(setImmediate);
+        const rapidLinkSecondBase = links._currentLinks(rapidLinksDv);
+        const rapidLinkSecond = links._write(
+            rapidLinksDv, TripLinks.deleteLink(rapidLinkSecondBase, 0).links,
+        );
+        await new Promise(setImmediate);
+        const rapidLinksQueued = rapidLinkWrites === 1
+            && rapidLinkSecondBase.length === 1
+            && rapidLinkSecondBase[0].text === 'B';
+        rapidLinkGates[0].resolve();
+        await rapidLinkFirst;
+        await new Promise(setImmediate);
+        const rapidLinkSecondStarted = rapidLinkWrites === 2
+            && links._currentLinks(rapidLinksDv).length === 0;
+        rapidLinkGates[1].resolve();
+        const rapidLinksSaved = await rapidLinkSecond;
+        ok('PERF4B-RAPID-LINK stale fresh snapshots retain both gestures in one serialized owner queue',
+            rapidLinksQueued && rapidLinkSecondStarted && rapidLinksSaved
+            && rapidLinkMaxActive === 1 && file.fm.links.length === 0);
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
         page = { type: 'trip', file: { path: pathName }, links: priorLinks };
         file.fm.links = priorLinks;
@@ -592,7 +734,8 @@ function makeDv(embed, currentVal) {
             line.includes('`TripEntryList`') || line.includes('`TripLinks`'));
         ok('PERF4-LEDGER-TOUCH-ZONE mutable Trips rows bind structural receipts and contain no PERF-4 gap',
             mutableLedgerRows.length === 2
-            && mutableLedgerRows.every((line) => line.includes('mutateStructure') && !line.includes('GAP PERF-4')));
+            && mutableLedgerRows.every((line) => line.includes('mutateStructure')
+                && line.includes('serialized') && !line.includes('GAP PERF-4')));
 
         ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
             notices.some((message) => message.includes('trip write failed')));

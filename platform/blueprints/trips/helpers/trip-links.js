@@ -167,7 +167,8 @@ class TripLinks {
         c.className = `${c.className || ""} trip-links-owner`.trim();
       }
 
-      const cards = this._linkCards(page.links);
+      const state = this._linksState(c, page);
+      const cards = this._linkCards(state.model);
       if (!cards.length) return;                    // empty-state: render nothing
 
       if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
@@ -202,6 +203,9 @@ class TripLinks {
   }
   _currentLinks(dv) {
     const cur = this._page(dv);
+    const filePath = cur && cur.file ? cur.file.path : "";
+    const owner = filePath ? this._panelOwner(dv, filePath) : null;
+    if (owner) return this._parse(this._linksState(owner, cur).model);
     return this._parse(cur ? cur.links : []);
   }
   _panelOwner(dv, filePath) {
@@ -227,6 +231,80 @@ class TripLinks {
     }
     return null;
   }
+  _linksState(owner, page) {
+    if (!this._linksMutationStates) this._linksMutationStates = new WeakMap();
+    let state = this._linksMutationStates.get(owner);
+    const incoming = this._parse(page && page.links);
+    const path = String(page?.file?.path || owner?.dataset?.tripLinksOwnerPath || "");
+    if (!state || state.path !== path) {
+      state = {
+        path,
+        model: incoming,
+        tail: Promise.resolve(),
+        queued: 0,
+        epoch: 0,
+        authority: null,
+      };
+      this._linksMutationStates.set(owner, state);
+      return state;
+    }
+    if (state.queued === 0) {
+      if (state.authority) {
+        const matches = this._sameLinks(incoming, state.authority.expected);
+        const incomingMtime = this._pageMtime(page);
+        const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
+          && incomingMtime >= state.authority.writeMtime;
+        const cannotOrder = incomingMtime == null || state.authority.writeMtime == null;
+        if (matches || externallyNewer || cannotOrder) {
+          state.model = incoming;
+          state.authority = null;
+        }
+      } else {
+        state.model = incoming;
+      }
+    }
+    return state;
+  }
+  _sameLinks(left, right) {
+    try { return JSON.stringify(this._parse(left)) === JSON.stringify(this._parse(right)); }
+    catch (_e) { return false; }
+  }
+  _pageMtime(page) {
+    const value = page?.file?.mtime;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    try {
+      const numeric = value && typeof value.valueOf === "function" ? Number(value.valueOf()) : NaN;
+      return Number.isFinite(numeric) ? numeric : null;
+    } catch (_e) { return null; }
+  }
+  _fileMtime(file) {
+    const value = file?.stat?.mtime;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  _queueLinksStructure(state, task) {
+    const epoch = state.epoch;
+    state.queued += 1;
+    const run = async () => {
+      try {
+        if (epoch !== state.epoch) {
+          new Notice("An earlier trip link change failed. Retry this action.", 6000);
+          return false;
+        }
+        const ok = await task();
+        if (!ok) state.epoch += 1;
+        return ok;
+      } catch (error) {
+        state.epoch += 1;
+        new Notice("Could not save links: " + (error?.message || error), 6000);
+        return false;
+      } finally {
+        state.queued = Math.max(0, state.queued - 1);
+      }
+    };
+    const result = (state.tail || Promise.resolve()).then(run, run);
+    state.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
   _rollbackPreview(receipt) {
     if (!receipt) return;
     if (receipt.owner) {
@@ -239,6 +317,10 @@ class TripLinks {
     if (receipt.page) {
       if (receipt.hadValue) receipt.page.links = receipt.priorValue;
       else delete receipt.page.links;
+    }
+    if (receipt.state) {
+      receipt.state.model = receipt.priorModel;
+      receipt.state.authority = receipt.priorAuthority;
     }
     try { receipt.focusTarget?.focus?.(); } catch (_e) {}
   }
@@ -259,35 +341,50 @@ class TripLinks {
     const next = links.map((l) => ({ url: l.url, text: l.text }));
     const page = this._page(dv);
     if (!page) { new Notice("Could not save links: page metadata is unavailable.", 6000); return false; }
-    const result = await renderSafe.mutateStructure({
-      app,
-      dv,
-      path: file.path,
-      failureMessage: "Could not save links",
-      apply: async () => {
-        const hadValue = Object.prototype.hasOwnProperty.call(page, "links");
-        const priorValue = page.links;
-        const focusTarget = ui.focusTarget
-          || ((typeof document !== "undefined") ? document.activeElement : null);
-        const owner = this._panelOwner(dv, file.path);
-        if (!owner) throw new Error("Trip links panel is unavailable");
-        const priorNodes = Array.from(owner.childNodes || owner.children || []);
-        const receipt = { page, hadValue, priorValue, focusTarget, owner, priorNodes };
-        try {
-          page.links = next;
-          if (typeof owner.replaceChildren === "function") owner.replaceChildren();
-          else owner.empty?.();
-          await this.render(this._previewDv(dv, owner, page));
-          return receipt;
-        } catch (error) {
-          this._rollbackPreview(receipt);
-          throw error;
-        }
-      },
-      rollback: (receipt) => this._rollbackPreview(receipt),
-      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
+    const owner = this._panelOwner(dv, file.path);
+    if (!owner) { new Notice("Could not save links: trip links panel is unavailable.", 6000); return false; }
+    const state = this._linksState(owner, page);
+    return this._queueLinksStructure(state, async () => {
+      const previewPage = this._page(dv) || page;
+      const result = await renderSafe.mutateStructure({
+        app,
+        dv,
+        path: file.path,
+        failureMessage: "Could not save links",
+        apply: async () => {
+          const hadValue = Object.prototype.hasOwnProperty.call(previewPage, "links");
+          const priorValue = previewPage.links;
+          const priorModel = state.model;
+          const priorAuthority = state.authority;
+          const focusTarget = ui.focusTarget
+            || ((typeof document !== "undefined") ? document.activeElement : null);
+          const priorNodes = Array.from(owner.childNodes || owner.children || []);
+          const receipt = {
+            page: previewPage, hadValue, priorValue, priorModel, priorAuthority,
+            focusTarget, owner, priorNodes, state,
+          };
+          try {
+            state.model = next;
+            previewPage.links = next;
+            if (typeof owner.replaceChildren === "function") owner.replaceChildren();
+            else owner.empty?.();
+            await this.render(this._previewDv(dv, owner, previewPage));
+            return receipt;
+          } catch (error) {
+            this._rollbackPreview(receipt);
+            throw error;
+          }
+        },
+        rollback: (receipt) => this._rollbackPreview(receipt),
+        write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
+      });
+      if (result.ok === true) {
+        state.model = next;
+        state.authority = { expected: next, writeMtime: this._fileMtime(file) };
+        return true;
+      }
+      return false;
     });
-    return result.ok === true;
   }
 
   // ── entry points (wired from the atlas nav bar) ──────────────────────────
