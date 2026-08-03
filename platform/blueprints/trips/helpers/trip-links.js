@@ -258,9 +258,8 @@ class TripLinks {
         const matches = this._sameLinks(incoming, state.authority.expected);
         const incomingMtime = this._pageMtime(page);
         const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
-          && incomingMtime >= state.authority.writeMtime;
-        const cannotOrder = incomingMtime == null || state.authority.writeMtime == null;
-        if (matches || externallyNewer || cannotOrder) {
+          && incomingMtime > state.authority.writeMtime;
+        if (matches || externallyNewer) {
           state.model = incoming;
           state.authority = null;
         }
@@ -406,6 +405,14 @@ class TripLinks {
     const links = this._currentLinks(dv);
     if (!links.length) { new Notice("No links yet — use Add link."); return; }
     this._openModal({ title: "Manage links", build: (panel, close) => {
+      let pendingActions = 0;
+      let transitioning = false;
+      const queueState = () => {
+        const page = this._page(dv);
+        const path = page?.file?.path || "";
+        const owner = path ? this._panelOwner(dv, path) : null;
+        return owner ? this._linksState(owner, page) : null;
+      };
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:52vh; overflow:auto;";
       links.forEach((link) => {
@@ -417,7 +424,27 @@ class TripLinks {
         label.createEl("div", { text: link.url }).style.cssText = "font-size:0.75em; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis;";
         const editBtn = rowEl.createEl("button", { text: "Edit" });
         editBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer; font-size:0.8em;";
-        editBtn.onclick = () => {
+        editBtn.onclick = async () => {
+          if (transitioning) return false;
+          transitioning = true;
+          pendingActions += 1;
+          const state = queueState();
+          const epoch = state?.epoch;
+          if (state?.queued) await state.tail;
+          pendingActions = Math.max(0, pendingActions - 1);
+          if (state && state.epoch !== epoch) {
+            transitioning = false;
+            new Notice("An earlier trip link change failed. Retry this action.", 6000);
+            try { editBtn.focus?.(); } catch (_e) {}
+            return false;
+          }
+          const current = this._currentLinks(dv);
+          if (this._linkIndex(current, link) < 0) {
+            transitioning = false;
+            new Notice("That link changed. Reopen Manage links and retry.", 6000);
+            try { editBtn.focus?.(); } catch (_e) {}
+            return false;
+          }
           close();
           this._openForm({ title: "Edit link", url: link.url, text: link.text }, async ({ url, text }) => {
             const current = this._currentLinks(dv);
@@ -426,15 +453,24 @@ class TripLinks {
             if (await this._write(dv, res.links)) { new Notice("Link updated."); return true; }
             return false;
           });
+          return true;
         };
         const delBtn = rowEl.createEl("button", { text: "Delete" });
         delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); cursor:pointer; font-size:0.8em;";
         delBtn.onclick = async () => {
-          const current = this._currentLinks(dv);
-          const res = TripLinks.deleteLink(current, this._linkIndex(current, link));
-          if (res.changed && await this._write(dv, res.links, { focusTarget: delBtn })) {
+          if (transitioning) return false;
+          pendingActions += 1;
+          let saved = false;
+          try {
+            const current = this._currentLinks(dv);
+            const res = TripLinks.deleteLink(current, this._linkIndex(current, link));
+            saved = Boolean(res.changed && await this._write(dv, res.links, { focusTarget: delBtn }));
+          } finally {
+            pendingActions = Math.max(0, pendingActions - 1);
+          }
+          if (saved) {
             new Notice("Link deleted.");
-            close();
+            if (pendingActions === 0 && !transitioning) close();
             return true;
           }
           try { delBtn.focus?.(); } catch (_e) {}

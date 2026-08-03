@@ -481,6 +481,7 @@ function makeDv(embed, currentVal) {
         ok('PERF-4-ENTRY-SUCCESS persists structural list without forced refresh',
             structureSaved && file.fm.flights[0].flight_no === 'UA1'
             && refreshes === beforeStructureRefresh);
+        file.stat = { mtime: 10 };
 
         // PERF-4b: each dv.current() call can return a fresh stale snapshot
         // while the first persistence is unresolved. The exact owner model must
@@ -536,6 +537,17 @@ function makeDv(embed, currentVal) {
         ok('PERF4B-RAPID-ENTRY stale fresh snapshots retain both gestures in one serialized owner queue',
             rapidEntryQueued && rapidEntrySecondStarted && rapidEntrySaved
             && rapidEntryMaxActive === 1 && file.fm.flights.length === 0);
+        const missingMtimeEntryState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName },
+            flights: [{ flight_no: 'A' }, { flight_no: 'B' }],
+        }, 'flights');
+        ok('PERF4C-ENTRY-MISSING-MTIME stale unordered metadata cannot reclaim post-write authority',
+            missingMtimeEntryState.model.length === 0 && !!missingMtimeEntryState.authority);
+        const newerEntryState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName, mtime: 11 }, flights: [{ flight_no: 'EXTERNAL' }],
+        }, 'flights');
+        ok('PERF4C-ENTRY-NEWER-MTIME strictly newer metadata releases owner authority',
+            newerEntryState.authority === null && newerEntryState.model[0].flight_no === 'EXTERNAL');
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
         const failedQueueGate = deferred();
@@ -671,6 +683,19 @@ function makeDv(embed, currentVal) {
         ok('PERF4B-RAPID-LINK stale fresh snapshots retain both gestures in one serialized owner queue',
             rapidLinksQueued && rapidLinkSecondStarted && rapidLinksSaved
             && rapidLinkMaxActive === 1 && file.fm.links.length === 0);
+        const missingMtimeLinksState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://a.example', text: 'A' }, { url: 'https://b.example', text: 'B' }],
+        });
+        ok('PERF4C-LINKS-MISSING-MTIME stale unordered metadata cannot reclaim post-write authority',
+            missingMtimeLinksState.model.length === 0 && !!missingMtimeLinksState.authority);
+        const newerLinksState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName, mtime: 11 },
+            links: [{ url: 'https://external.example', text: 'External' }],
+        });
+        ok('PERF4C-LINKS-NEWER-MTIME strictly newer metadata releases owner authority',
+            newerLinksState.authority === null
+            && newerLinksState.model[0].url === 'https://external.example');
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
         // PERF-4c binding fixture: exercise the actual Manage Links controls,
@@ -706,9 +731,13 @@ function makeDv(embed, currentVal) {
         const originalOpenModal = links._openModal;
         let managePanel = null;
         let manageCloses = 0;
+        const manageBody = trackedEl('body');
+        let manageOverlay = null;
         links._openModal = ({ build }) => {
+            manageOverlay = manageBody.createEl('div');
             managePanel = trackedEl('div');
-            build(managePanel, () => { manageCloses++; });
+            manageOverlay.appendChild(managePanel);
+            build(managePanel, () => { manageCloses++; manageOverlay.remove(); });
         };
         links.openManage(modalLinksDv);
         const manageRows = managePanel.children[0].children;
@@ -724,6 +753,7 @@ function makeDv(embed, currentVal) {
         modalLinkGates[0].resolve();
         const modalDeleteASaved = await modalDeleteA;
         await new Promise(setImmediate);
+        const manageStayedMounted = manageOverlay.parentNode === manageBody && manageCloses === 0;
         const realModalSecondStarted = modalLinkWrites === 2
             && links._currentLinks(modalLinksDv).length === 0;
         modalLinkGates[1].resolve();
@@ -732,7 +762,8 @@ function makeDv(embed, currentVal) {
             realModalQueued && realModalSecondStarted
             && modalDeleteASaved && modalDeleteBSaved
             && modalLinkMaxActive === 1 && file.fm.links.length === 0
-            && manageCloses === 2);
+            && manageStayedMounted && manageCloses === 1
+            && manageOverlay.parentNode === null);
         links._openModal = originalOpenModal;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
@@ -759,35 +790,155 @@ function makeDv(embed, currentVal) {
         links.render(modalEditDv);
         let editPanel = null;
         let editSubmit = null;
+        let editManageCloses = 0;
         const originalOpenForm = links._openForm;
         links._openModal = ({ build }) => {
             editPanel = trackedEl('div');
-            build(editPanel, () => {});
+            build(editPanel, () => { editManageCloses++; });
         };
         links._openForm = (_fields, onSubmit) => { editSubmit = onSubmit; };
         links.openManage(modalEditDv);
         const editRows = editPanel.children[0].children;
         const deleteBeforeEdit = editRows[0].children[2].onclick();
         await new Promise(setImmediate);
-        editRows[1].children[1].onclick();
-        const editAfterShift = editSubmit({ url: 'https://b2.example', text: 'B2' });
+        const openEditAfterShift = editRows[1].children[1].onclick();
         await new Promise(setImmediate);
-        const realEditQueued = modalEditWrites === 1
+        const realEditDeferred = modalEditWrites === 1 && editSubmit === null
+            && editManageCloses === 0
             && links._currentLinks(modalEditDv)[0].url === 'https://b.example';
         modalEditGates[0].resolve();
         await deleteBeforeEdit;
+        const editOpened = await openEditAfterShift;
+        const editAfterShift = editSubmit({ url: 'https://b2.example', text: 'B2' });
         await new Promise(setImmediate);
         const realEditStarted = modalEditWrites === 2
             && links._currentLinks(modalEditDv)[0].url === 'https://b2.example';
         modalEditGates[1].resolve();
         const editAfterShiftSaved = await editAfterShift;
         ok('PERF4B-MANAGE-LINK-EDIT-IDENTITY real modal edit resolves stable URL identity after sibling shift',
-            realEditQueued && realEditStarted && editAfterShiftSaved
+            realEditDeferred && editOpened && realEditStarted && editAfterShiftSaved
+            && editManageCloses === 1
             && file.fm.links.length === 1
             && file.fm.links[0].url === 'https://b2.example'
-            && file.fm.links[0].text === 'B2');
+            && file.fm.links[0].text === 'B2', JSON.stringify({
+                realEditDeferred, editOpened, realEditStarted, editAfterShiftSaved,
+                editManageCloses, writes: modalEditWrites, links: file.fm.links,
+            }));
         links._openModal = originalOpenModal;
         links._openForm = originalOpenForm;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        // The modal must remain mounted until every rapid delete settles. A
+        // later rejection then restores focus to a live retry control instead
+        // of a button detached by an earlier successful handler's close().
+        const modalFailureGates = [deferred(), deferred()];
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalFailureWrites = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const write = modalFailureWrites++;
+            await modalFailureGates[write].promise;
+            if (write === 1) throw new Error('second modal delete failed');
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+        };
+        const modalFailureOwner = trackedEl('div');
+        modalFailureOwner.dataset.tripLinksOwnerPath = pathName;
+        modalFailureOwner.classList.add('trip-links-owner');
+        const modalFailureDv = {
+            container: modalFailureOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalFailureDv);
+        const failureBody = trackedEl('body');
+        let failureOverlay = null;
+        let failurePanel = null;
+        let failureCloses = 0;
+        links._openModal = ({ build }) => {
+            failureOverlay = failureBody.createEl('div');
+            failurePanel = failureOverlay.createEl('div');
+            build(failurePanel, () => { failureCloses++; failureOverlay.remove(); });
+        };
+        links.openManage(modalFailureDv);
+        const failureRows = failurePanel.children[0].children;
+        let rejectedFocusAttached = false;
+        failureRows[1].children[2].focus = () => {
+            rejectedFocusAttached = failureRows[1].children[2].parentNode?.parentNode?.parentNode === failurePanel
+                && failureOverlay.parentNode === failureBody;
+        };
+        const firstModalDelete = failureRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const rejectedModalDelete = failureRows[1].children[2].onclick();
+        await new Promise(setImmediate);
+        modalFailureGates[0].resolve();
+        const firstModalSaved = await firstModalDelete;
+        await new Promise(setImmediate);
+        const overlayHeldForDescendant = failureOverlay.parentNode === failureBody && failureCloses === 0;
+        modalFailureGates[1].resolve();
+        const rejectedModalSaved = await rejectedModalDelete;
+        ok('PERF4C-MANAGE-LINK-ROLLBACK queued rejection retains live overlay and retry focus',
+            firstModalSaved && !rejectedModalSaved && modalFailureWrites === 2
+            && overlayHeldForDescendant && failureOverlay.parentNode === failureBody
+            && failureCloses === 0 && rejectedFocusAttached
+            && file.fm.links.length === 1 && file.fm.links[0].url === 'https://b.example');
+
+        const firstFailureGate = deferred();
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        const firstFailureInitial = indexedLinks.slice();
+        file.fm.links = firstFailureInitial;
+        let firstFailureWrites = 0;
+        global.app.fileManager.processFrontMatter = async () => {
+            firstFailureWrites++;
+            await firstFailureGate.promise;
+            throw new Error('first modal delete failed');
+        };
+        const firstFailureOwner = trackedEl('div');
+        firstFailureOwner.dataset.tripLinksOwnerPath = pathName;
+        firstFailureOwner.classList.add('trip-links-owner');
+        const firstFailureDv = {
+            container: firstFailureOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(firstFailureDv);
+        const firstFailureBody = trackedEl('body');
+        let firstFailureOverlay = null;
+        let firstFailurePanel = null;
+        let firstFailureCloses = 0;
+        links._openModal = ({ build }) => {
+            firstFailureOverlay = firstFailureBody.createEl('div');
+            firstFailurePanel = firstFailureOverlay.createEl('div');
+            build(firstFailurePanel, () => { firstFailureCloses++; firstFailureOverlay.remove(); });
+        };
+        links.openManage(firstFailureDv);
+        const firstFailureRows = firstFailurePanel.children[0].children;
+        let firstFailureFocusAttached = false;
+        let cancelledFocusAttached = false;
+        firstFailureRows[0].children[2].focus = () => {
+            firstFailureFocusAttached = firstFailureOverlay.parentNode === firstFailureBody;
+        };
+        firstFailureRows[1].children[2].focus = () => {
+            cancelledFocusAttached = firstFailureOverlay.parentNode === firstFailureBody;
+        };
+        const rejectedFirstDelete = firstFailureRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const cancelledSecondDelete = firstFailureRows[1].children[2].onclick();
+        await new Promise(setImmediate);
+        firstFailureGate.resolve();
+        const firstFailureResults = await Promise.all([rejectedFirstDelete, cancelledSecondDelete]);
+        ok('PERF4C-MANAGE-LINK-FAIL-CLOSED first rejection keeps overlay live and cancels queued descendant',
+            firstFailureResults[0] === false && firstFailureResults[1] === false
+            && firstFailureWrites === 1 && firstFailureCloses === 0
+            && firstFailureOverlay.parentNode === firstFailureBody
+            && firstFailureFocusAttached && cancelledFocusAttached
+            && file.fm.links === firstFailureInitial
+            && links._currentLinks(firstFailureDv).length === 2);
+        links._openModal = originalOpenModal;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
         page = { type: 'trip', file: { path: pathName }, links: priorLinks };

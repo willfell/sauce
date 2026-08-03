@@ -691,9 +691,8 @@ class TripEntryList {
         const matches = this._sameEntryModel(incoming, state.authority.expected);
         const incomingMtime = this._pageMtime(page);
         const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
-          && incomingMtime >= state.authority.writeMtime;
-        const cannotOrder = incomingMtime == null || state.authority.writeMtime == null;
-        if (matches || externallyNewer || cannotOrder) {
+          && incomingMtime > state.authority.writeMtime;
+        if (matches || externallyNewer) {
           state.model = incoming;
           state.authority = null;
         }
