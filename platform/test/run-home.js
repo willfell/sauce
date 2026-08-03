@@ -128,6 +128,11 @@ function makeDv() {
       const mount = makeEl("div", { cls: "customjs-guard-mount" });
       mount.parent = root;
       root.children.push(mount);
+      const receipt = input && Array.isArray(input.args) && input.args[0] && input.args[0].mountReceipt;
+      if (receipt && typeof receipt === "object") {
+        receipt.ok = true;
+        receipt.node = mount;
+      }
       return mount;
     },
   };
@@ -1288,6 +1293,8 @@ function descendants(el) {
       const mount = makeEl("div", { cls: "customjs-guard-mount" });
       mount.parent = deferredDv.container;
       deferredDv.container.children.push(mount);
+      const receipt = input && input.args && input.args[0] && input.args[0].mountReceipt;
+      if (receipt) { receipt.ok = true; receipt.node = mount; }
       return mount;
     };
     const firstDeferredRender = home_.render(deferredDv, {});
@@ -1314,6 +1321,8 @@ function descendants(el) {
       const mount = makeEl("div", { cls: "customjs-guard-mount" });
       mount.parent = appendedDv.container;
       appendedDv.container.children.push(mount);
+      const receipt = input && input.args && input.args[0] && input.args[0].mountReceipt;
+      if (receipt) { receipt.ok = true; receipt.node = mount; }
       reportAppended();
       await settlementReleased;
       return mount;
@@ -1336,6 +1345,61 @@ function descendants(el) {
     await home_.render(appendedDv, {});
     assertEq("HOME-DASH-RETRY-10 settled replacement mount remains deduped",
       appendFirstAttempts, 2);
+
+    const placeholderDv = makeDv();
+    let dashboardAvailable = false;
+    let placeholderAttempts = 0;
+    placeholderDv.view = async (_viewPath, input) => {
+      placeholderAttempts += 1;
+      if (!dashboardAvailable) {
+        const placeholder = makeEl("p");
+        placeholder.textContent = "SpaceDailyDashboard unavailable";
+        placeholder.parent = placeholderDv.container;
+        placeholderDv.container.children.push(placeholder);
+        return placeholder;
+      }
+      const mount = makeEl("div", { cls: "customjs-guard-mount" });
+      mount.parent = placeholderDv.container;
+      placeholderDv.container.children.push(mount);
+      const receipt = input.args[0].mountReceipt;
+      receipt.ok = true;
+      receipt.node = mount;
+      return mount;
+    };
+    await home_.render(placeholderDv, {});
+    assertEq("HOME-DASH-RETRY-11 resolved unavailable guard is not a mount receipt",
+      placeholderDv.container.children.filter((node) => node.tag === "p").length, 0);
+    dashboardAvailable = true;
+    await home_.render(placeholderDv, {});
+    await home_.render(placeholderDv, {});
+    assertEq("HOME-DASH-RETRY-12 resolved unavailable guard warm-retries then dedupes",
+      placeholderAttempts, 2);
+
+    const ownershipDv = makeDv();
+    let ownedAttempts = 0;
+    const foreign = makeEl("aside", { cls: "foreign-concurrent-node" });
+    ownershipDv.view = async (_viewPath, input) => {
+      ownedAttempts += 1;
+      if (ownedAttempts === 1) {
+        foreign.parent = ownershipDv.container;
+        ownershipDv.container.children.push(foreign);
+      }
+      const mount = makeEl("div", { cls: `owned-dashboard-${ownedAttempts}` });
+      mount.parent = ownershipDv.container;
+      ownershipDv.container.children.push(mount);
+      const receipt = input.args[0].mountReceipt;
+      receipt.ok = true;
+      receipt.node = mount;
+      return mount;
+    };
+    installMoment("2026-07-02", 9);
+    await home_.render(ownershipDv, {});
+    installMoment("2026-07-03", 9);
+    await home_.render(ownershipDv, {});
+    assertTrue("HOME-DASH-RETRY-13 day-key replacement preserves unrelated concurrent DOM",
+      ownershipDv.container.children.includes(foreign), "foreign top-level node must never be claimed or removed");
+    assertEq("HOME-DASH-RETRY-14 day-key replacement owns exactly its explicit receipt",
+      ownershipDv.container.children.filter((node) => /^owned-dashboard-/.test(node.cls)).length, 1);
 
     delete global.customJS;
     delete global.window.customJS;

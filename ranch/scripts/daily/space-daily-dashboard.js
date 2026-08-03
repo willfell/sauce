@@ -570,6 +570,11 @@ class SpaceDailyDashboard {
     if (existing) existing.remove();
 
     const container = dv.el("div", "", { cls: "space-daily-dashboard" });
+    const mountReceipt = params && params.mountReceipt;
+    if (mountReceipt && typeof mountReceipt === "object") {
+      mountReceipt.ok = true;
+      mountReceipt.node = container;
+    }
     // v0.2.6: prevent horizontal scroll at narrow widths.
     // - box-sizing: border-box → padding folds into width, not adds to it
     // - max-width: 100% → can't exceed parent width

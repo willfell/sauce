@@ -526,6 +526,17 @@ async function renderDailyTaskFixture(today, options) {
       'expected 2 precomputed pages (foo direct + bar rollup), got ' + (spy.renderPages && spy.renderPages.length));
   });
 
+  await ok('PERF8J-DASH-MOUNT successful render returns its exact root through the caller receipt', async () => {
+    const { customJS } = makeCustomJS();
+    const dv = makeDv();
+    const Dash = loadDashboard(windowShim, customJS);
+    const receipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: receipt });
+    assert(receipt.ok === true, 'successful dashboard render must stamp the explicit receipt');
+    assert(receipt.node && dv.container._children.includes(receipt.node),
+      'receipt must identify the exact live dashboard root, not a broad DOM diff');
+  });
+
   await ok('DASH-L5-3 total + byBlueprint unchanged (1 direct hit + 1 rolled-up root)', async () => {
     // Drive the REAL ActivityFeed.query with the same opts the dashboard passes,
     // then the REAL static bucketByBlueprint over those pages.

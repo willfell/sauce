@@ -400,20 +400,39 @@ class SpaceHome {
         return mountDashboard();
       }
       if (!dv || typeof dv.view !== "function") return;
-      const token = { generation: dashboard.generation, baseline: new Set(children()), promise: null };
+      const token = {
+        generation: dashboard.generation,
+        baseline: new Set(children()),
+        receipt: { ok: false, node: null },
+        promise: null,
+      };
       dashboard.token = token;
       token.promise = (async () => {
         try {
           await dv.view("ranch/views/customjs-guard", {
             class: "SpaceDailyDashboard",
-            args: [{ asOf: today, live: true }],
+            args: [{ asOf: today, live: true, mountReceipt: token.receipt }],
           });
           if (dashboard.token === token) {
-            const currentHome = dv.container.querySelector(".sauce-home");
-            const mountedNodes = children().filter((node) => !token.baseline.has(node) && node !== currentHome);
-            dashboard.nodes = mountedNodes;
-            dashboard.mounted = mountedNodes.length > 0;
+            const mountedNode = token.receipt.ok === true && children().includes(token.receipt.node)
+              ? token.receipt.node
+              : null;
+            dashboard.nodes = mountedNode ? [mountedNode] : [];
+            dashboard.mounted = !!mountedNode;
             dashboard.key = dashboard.mounted ? today : null;
+            if (!dashboard.mounted) {
+              // The production guard resolves an unavailable class with this
+              // exact placeholder. It is not a successful dashboard receipt,
+              // but it is owned by this call and should not accumulate across
+              // warm retries. Never claim or remove any other concurrent node.
+              for (const node of children()) {
+                const text = String(node && (node.textContent ?? node.text ?? "")).trim();
+                if (!token.baseline.has(node)
+                    && (text === "_SpaceDailyDashboard unavailable_" || text === "SpaceDailyDashboard unavailable")) {
+                  try { node.remove?.(); } catch (_e) {}
+                }
+              }
+            }
           }
         } catch (_e) {
           if (dashboard.token === token) {
