@@ -1079,6 +1079,100 @@ async function dataviewCorrectnessCases() {
     const mutantHiddenSuccess = await runHiddenSuccessFixture(HiddenSuccessReaderQueue, false);
     ok('PERF6E-HIDDEN-SUCCESS-FOCUS capped archive success rebinds a rerender-detached fallback at settlement',
        hiddenSuccessMutantSrc !== queueSrc && liveHiddenSuccess && liveHiddenSuccessInput && !mutantHiddenSuccess);
+
+    const runQueuedApplyFocusFixture = async (QueueClass) => {
+      const queuedA = art('Queued Focus A', 'unread', '2026-08-03T07:00:00Z');
+      const queuedB = art('Queued Focus B', 'reading', '2026-08-03T00:00:00Z');
+      const queuedArchived = [5, 4, 3, 2, 1].map((hour) =>
+        art('Queued Focus archived ' + hour, 'archived', `2026-08-03T0${hour}:00:00Z`));
+      const pathA = queuedA.file.path;
+      const pathB = queuedB.file.path;
+      const queuedFiles = new Map([
+        [pathA, { path: pathA, _fm: { status: 'unread' } }],
+        [pathB, { path: pathB, _fm: { status: 'reading' } }],
+      ]);
+      const queuedWrites = new Map();
+      const queuedApp = {
+        vault: { getAbstractFileByPath: (path) => queuedFiles.get(path) || null },
+        fileManager: {
+          processFrontMatter: (target, mutate) => new Promise((resolve) => {
+            queuedWrites.set(target.path, { resolve: () => { mutate(target._fm); resolve(); } });
+          }),
+        },
+      };
+      const queuedHost = makeDomEl('div');
+      const queuedInput = queuedHost.createEl('input');
+      const queuedContainer = queuedHost.createEl('div');
+      const queuedDv = makeDv([queuedA, queuedB].concat(queuedArchived));
+      const queuedState = {
+        statuses: new Map(), structuralQueue: null, toggles: new Map(),
+        container: queuedContainer, ctx: null, renderGeneration: 0,
+      };
+      const priorQueuedApp = global.app;
+      const priorQueuedWindow = global.window;
+      const priorQueuedCustomJS = global.customJS;
+      const hadQueuedDocument = Object.prototype.hasOwnProperty.call(global, 'document');
+      const priorQueuedDocument = global.document;
+      const waitForQueuedWrite = async (path) => {
+        for (let i = 0; i < 20 && !queuedWrites.has(path); i++) await new Promise((resolve) => setImmediate(resolve));
+        return queuedWrites.has(path);
+      };
+      try {
+        global.app = queuedApp;
+        global.window = { app: queuedApp };
+        global.document = {
+          activeElement: null,
+          body: null,
+          contains: (node) => queuedHost.contains(node),
+        };
+        global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+          const receipt = await opts.apply();
+          try { await opts.write(); return { ok: true, receipt }; }
+          catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+        } } };
+        global.window.customJS = global.customJS;
+        const queue = new QueueClass();
+        queue._renderResults(queuedDv, queuedContainer, null, queuedState);
+        const clickA = queuedState.toggles.get(pathA);
+        const transitionA = queue._queueStatusTransition(queuedDv, queuedState, pathA, 'unread', 'reading', clickA);
+        const aApplied = await waitForQueuedWrite(pathA);
+        const clickB = queuedState.toggles.get(pathB);
+        const transitionB = queue._queueStatusTransition(queuedDv, queuedState, pathB, 'reading', 'archived', clickB);
+        await new Promise((resolve) => setImmediate(resolve));
+        const bWaited = !queuedWrites.has(pathB);
+        queuedInput.focus();
+        queuedWrites.get(pathA).resolve();
+        const bApplied = await waitForQueuedWrite(pathB);
+        const focusSurvivedApply = global.document.activeElement === queuedInput;
+        const bHiddenAfterApply = !queuedState.toggles.has(pathB) && !queuedContainer.contains(clickB);
+        queuedWrites.get(pathB).resolve();
+        const settled = await Promise.all([transitionA, transitionB]);
+        return aApplied && bWaited && bApplied && focusSurvivedApply && bHiddenAfterApply
+          && settled[0] === true && settled[1] === true
+          && queuedState.statuses.get(pathA) === 'reading'
+          && queuedState.statuses.get(pathB) === 'archived'
+          && queuedFiles.get(pathA)._fm.status === 'reading'
+          && queuedFiles.get(pathB)._fm.status === 'archived'
+          && global.document.activeElement === queuedInput && queuedInput.focused
+          && queuedState.structuralQueue === null;
+      } catch (_e) {
+        return false;
+      } finally {
+        global.app = priorQueuedApp;
+        global.window = priorQueuedWindow;
+        global.customJS = priorQueuedCustomJS;
+        if (hadQueuedDocument) global.document = priorQueuedDocument; else delete global.document;
+      }
+    };
+    const queuedApplyMutantSrc = queueSrc.replace(
+      'const appliedFocusTarget = this._liveFocusTarget(state, path, focusTarget, true);',
+      'const appliedFocusTarget = this._liveFocusTarget(state, path, focusTarget); // controlled queued-focus mutant',
+    );
+    const QueuedApplyReaderQueue = new Function(`${queuedApplyMutantSrc}\nreturn ReaderQueue;`)();
+    const liveQueuedApplyFocus = await runQueuedApplyFocusFixture(ReaderQueue);
+    const mutantQueuedApplyFocus = await runQueuedApplyFocusFixture(QueuedApplyReaderQueue);
+    ok('PERF6F-QUEUED-APPLY-FOCUS queued apply and settlement preserve newer connected DocSearch focus',
+       queuedApplyMutantSrc !== queueSrc && liveQueuedApplyFocus && !mutantQueuedApplyFocus);
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;
