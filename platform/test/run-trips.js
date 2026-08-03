@@ -585,6 +585,15 @@ function makeDv(embed, currentVal) {
             (helperSources.match(/mutateStructure\(/g) || []).length >= 2
             && !helperSources.includes('dataview-force-refresh-views'));
 
+        const auditLedger = fs.readFileSync(
+            path.join(__dirname, '..', '..', 'Docs', 'agent-guides', 'code-conventions.md'), 'utf8');
+        const tripsLedgerRows = auditLedger.split('\n').filter((line) => line.startsWith('| Trips |'));
+        const mutableLedgerRows = tripsLedgerRows.filter((line) =>
+            line.includes('`TripEntryList`') || line.includes('`TripLinks`'));
+        ok('PERF4-LEDGER-TOUCH-ZONE mutable Trips rows bind structural receipts and contain no PERF-4 gap',
+            mutableLedgerRows.length === 2
+            && mutableLedgerRows.every((line) => line.includes('mutateStructure') && !line.includes('GAP PERF-4')));
+
         ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
             notices.some((message) => message.includes('trip write failed')));
         global.app = originalApp;
