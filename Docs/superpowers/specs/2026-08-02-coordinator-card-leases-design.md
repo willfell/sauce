@@ -90,3 +90,9 @@ All refusals use the existing `cli-kit` refusal-receipt style (JSON, exact remed
 ## Out of scope (YAGNI)
 
 Heartbeat daemons; cross-machine coordination (state is local-per-clone by design); epic-level leases; wiring `turn-lock.js` into the plugin (leases supersede it for this problem); changes to board files or board-writer authority (leases live only in `state.json`).
+
+## Post-review notes (2026-08-03)
+
+1. §4's `.claude/commands/sauce-autoloop.md` threading item was dropped in implementation. That legacy fat command never invokes the coordinator at all — it drives its own `turn-lock.js` mutex and legacy scripts directly, so there was no coordinator verb call in that surface to thread a `--lease-token` through.
+2. §2's "unleased card + pipeline verb → verb proceeds ... receipts note `lease: none`" is superseded for the active-card case: a supplied `--lease-token` against an active (non-parked, non-terminal) unleased card now gets an explicit `lease_gone` refusal instead of a passive receipt note, since a token on an unleased active card means the caller believes it holds a lease that no longer exists (broken or superseded) and should re-attach rather than proceed silently. The passive `lease: none` behavior (silent tokenless no-op) still holds for the true back-compat case: no token supplied at all.
+3. `--lease-token` supplied against an unleased **parked** or **terminal** card is deliberately still ignored (the original silent no-op), not refused `lease_gone` — this keeps tokened idempotent replays working after a card has parked or completed, when a caller may legitimately still be holding a now-irrelevant token from before the park/terminal transition.
