@@ -1060,6 +1060,50 @@ async function run() {
 
   {
     installLifecycle();
+    const { container } = makeEditorDom();
+    global.document = { activeElement: null };
+    const file = { path: "spice/finance/Invoices/Queue-Before-Rename.md" };
+    const events = [];
+    let concurrentWrites = 0;
+    let maxConcurrentWrites = 0;
+    let releaseFirst;
+    let firstStarted;
+    const firstReady = new Promise((resolve) => { firstStarted = resolve; });
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const run = (id) => ff.mutateRendered(file, {
+      dv: { container }, selector: ".editor",
+      prepare: async () => {
+        events.push(`prepare${id}`);
+        return {
+          render: async () => { events.push(`render${id}`); },
+          write: async () => {
+            events.push(`write${id}`);
+            concurrentWrites++;
+            maxConcurrentWrites = Math.max(maxConcurrentWrites, concurrentWrites);
+            if (id === 1) { firstStarted(); await firstGate; }
+            concurrentWrites--;
+          },
+        };
+      },
+    });
+    const first = run(1);
+    await firstReady;
+    file.path = "spice/finance/Invoices/Queue-After-Rename.md";
+    const second = run(2);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    const queuedAcrossRename = events.join(",") === "prepare1,render1,write1";
+    releaseFirst();
+    const outcomes = await Promise.all([first, second]);
+    ok("FF-20B mutation serialization follows canonical TFile identity across rename",
+      queuedAcrossRename && outcomes.every((outcome) => outcome.ok === true)
+        && events.join(",") === "prepare1,render1,write1,prepare2,render2,write2"
+        && maxConcurrentWrites === 1
+        && ff._renderQueues.size === 0
+        && (!ff._renderQueuePaths || ff._renderQueuePaths.size === 0));
+  }
+
+  {
+    installLifecycle();
     const { container, oldRoot, oldInput, tail } = makeEditorDom();
     global.document = { activeElement: oldInput };
     const renderFailure = new Error("fixture render failed");

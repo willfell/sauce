@@ -79,7 +79,7 @@ class FinanceFrontmatter {
         }
         const container = opts.container || (opts.dv && opts.dv.container) || null;
         const selector = String(opts.selector || "");
-        return await this._serializeRendered(file.path, selector, async () => {
+        return await this._serializeRendered(file, selector, async () => {
             const prepared = typeof opts.prepare === "function" ? await opts.prepare() : null;
             const lifecycle = prepared && typeof prepared === "object"
                 ? Object.assign({}, opts, prepared)
@@ -88,15 +88,32 @@ class FinanceFrontmatter {
         });
     }
 
-    async _serializeRendered(path, selector, task) {
+    async _serializeRendered(file, selector, task) {
         if (!this._renderQueues) this._renderQueues = new Map();
-        const key = `${path}\u0000${selector}`;
-        const prior = this._renderQueues.get(key) || Promise.resolve();
+        if (!this._renderQueueFiles) this._renderQueueFiles = new WeakMap();
+        if (!this._renderQueuePaths) this._renderQueuePaths = new Map();
+        const path = String(file?.path || "");
+        let owner = path ? this._renderQueuePaths.get(path) || null : null;
+        if (!owner) owner = { path };
+        if (file && typeof file === "object") this._renderQueueFiles.set(file, owner);
+        if (path) this._renderQueuePaths.set(path, owner);
+        let queue = this._renderQueues.get(owner);
+        if (!queue) {
+            queue = new Map();
+            this._renderQueues.set(owner, queue);
+        }
+        const prior = queue.get(selector) || Promise.resolve();
         const current = prior.catch(() => {}).then(task);
-        this._renderQueues.set(key, current);
+        queue.set(selector, current);
         try { return await current; }
         finally {
-            if (this._renderQueues.get(key) === current) this._renderQueues.delete(key);
+            if (queue.get(selector) === current) queue.delete(selector);
+            if (queue.size === 0 && this._renderQueues.get(owner) === queue) {
+                this._renderQueues.delete(owner);
+                for (const [alias, target] of this._renderQueuePaths) {
+                    if (target === owner) this._renderQueuePaths.delete(alias);
+                }
+            }
         }
     }
 
