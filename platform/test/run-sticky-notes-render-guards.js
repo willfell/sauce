@@ -166,8 +166,14 @@ const variants = [
             const source = fs.readFileSync(path.join(__dirname, '..', '..', w.path), 'utf8');
             const polling = source.match(/async _pollForDayArg\([\s\S]*?\n    }/);
             if (!polling || !/globalThis\.customJS/.test(polling[0])) throw new Error('globalThis CustomJS guard is missing');
-            if (/(^|[^.A-Za-z0-9_$])customJS\.RenderSafe/m.test(polling[0])) {
-                throw new Error('polling contains a bare customJS.RenderSafe dereference');
+        });
+        await guard(`PERF7B-BARE-CUSTOMJS-ALIAS ${w.name} — guarded token cannot mask a bare alias`, async () => {
+            const source = fs.readFileSync(path.join(__dirname, '..', '..', w.path), 'utf8');
+            const polling = source.match(/async _pollForDayArg\([\s\S]*?\n    }/);
+            if (!polling) throw new Error('polling method is missing');
+            const withoutGuardedCustomJS = polling[0].replace(/globalThis\s*\.\s*customJS/g, '');
+            if (/\bcustomJS\b/.test(withoutGuardedCustomJS)) {
+                throw new Error('guarded CustomJS decoy masks a bare alias');
             }
         });
         await guard(`PERF7-GUARDED-CUSTOMJS ${w.name} — absent CustomJS takes the guarded missing-day path`, async () => {
@@ -327,10 +333,27 @@ const variants = [
             }
         });
     }
-    await guard('PERF-7-LEDGER Sticky and Journal rows remain OK and force-refresh-free', async () => {
+    await guard('PERF7B-LEDGER-COLUMN-BINDING Sticky and Journal verdicts remain bound to their rubric columns', async () => {
         const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'Docs/agent-guides/code-conventions.md'), 'utf8');
         const rows = guide.split('\n').filter((line) => /^\| (Sticky notes|Journal) \|/.test(line));
-        if (rows.length !== 4 || rows.some((line) => !line.includes('**OK**'))) throw new Error('ledger rows are not all OK');
+        const expected = [
+            { surface: 'StickyChromeBar', verdicts: ['**OK**', '**OK**', '**OK**', '**N/A**'] },
+            { surface: 'StickyDayList', verdicts: ['**N/A**', '**N/A**', '**OK**', '**OK**'] },
+            { surface: 'JournalChromeBar', verdicts: ['**OK**', '**OK/N/A**', '**OK**', '**N/A**'] },
+            { surface: 'JournalDayList', verdicts: ['**N/A**', '**N/A**', '**OK**', '**OK**'] },
+        ];
+        if (rows.length !== expected.length) throw new Error(`expected ${expected.length} ledger rows, found ${rows.length}`);
+        for (const requirement of expected) {
+            const row = rows.find((line) => line.includes(`\`${requirement.surface}\``));
+            if (!row) throw new Error(`missing ledger row for ${requirement.surface}`);
+            const cells = row.split('|').slice(1, -1).map((cell) => cell.trim());
+            const verdictCells = cells.slice(2, 6);
+            requirement.verdicts.forEach((verdict, index) => {
+                if (!verdictCells[index] || !verdictCells[index].startsWith(verdict)) {
+                    throw new Error(`${requirement.surface} column ${index + 1} expected ${verdict}`);
+                }
+            });
+        }
         const sources = widgets.map((entry) => fs.readFileSync(path.join(__dirname, '..', '..', entry.path), 'utf8')).join('\n');
         if (/dataview:force-refresh-views/.test(sources)) throw new Error('global Dataview refresh remains in audited helpers');
     });
