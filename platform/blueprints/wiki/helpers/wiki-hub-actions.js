@@ -17,6 +17,8 @@
  */
 class WikiHubActions {
     async render(dv) {
+      try {
+        if (!dv || !dv.container || typeof dv.current !== "function") return;
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
         const cur = dv.current();
         if (!cur || !cur.file) return;
@@ -65,7 +67,10 @@ class WikiHubActions {
                     new Notice("WikiHubActions: EntityCreate mechanism unavailable.", 8000);
                     return;
                 }
-                customJS.EntityCreate.create({ instance, dv });
+                const structuralLifecycle = customJS.SectionExplorer
+                    && typeof customJS.SectionExplorer.entityCreateLifecycle === "function"
+                    ? customJS.SectionExplorer.entityCreateLifecycle(dv) : null;
+                return customJS.EntityCreate.create({ instance, dv, structuralLifecycle });
             };
             this._mobilize(customJS.AccentButton.render(row, { label, icon, onClick: go, flex: true }));
         };
@@ -79,6 +84,7 @@ class WikiHubActions {
         // — so the divider↔search distance is IDENTICAL to the divider↔buttons one.
         const hrBottom = wrap.createEl("hr");
         hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0 0 0;";
+      } catch (_e) { /* never throw during cold load */ }
     }
 
     // Mobile-legible sizing: bigger tap target + readable label. Each button takes

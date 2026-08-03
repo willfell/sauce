@@ -757,6 +757,79 @@ async function renderDailyTaskFixture(today, options) {
     assert(writeCalls === 1, 'a user toggle writes, got ' + writeCalls);
   });
 
+  await ok('PERF8-DAILY-CREATE optimistic preview precedes persistence and exact rollback removes it/restores focus', async () => {
+    const priorApp = global.app;
+    const priorMoment = global.moment;
+    const priorDocument = global.document;
+    const priorCustomJS = global.customJS;
+    const events = [];
+    let rejectCreate = false;
+    let focused = 0;
+    let trashed = 0;
+    const trigger = { focus: () => { focused++; } };
+    const files = new Map([['ranch/templates/Today To-Do.md', { path: 'ranch/templates/Today To-Do.md' }]]);
+    const app = {
+      vault: {
+        getAbstractFileByPath: (p) => files.get(p) || null,
+        createFolder: async (p) => { events.push('folder'); files.set(p, { path: p }); },
+      },
+      fileManager: { trashFile: async (f) => { trashed++; files.delete(f.path); } },
+      plugins: { plugins: { 'templater-obsidian': { templater: {
+        create_new_note_from_template: async () => {
+          events.push('write');
+          if (rejectCreate) throw new Error('persist failed');
+          return { path: 'created' };
+        },
+      } } } },
+      workspace: { openLinkText() {} },
+    };
+    const renderSafe = {
+      mutateStructure: async (opts) => {
+        events.push('apply');
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) { events.push('rollback'); await opts.rollback(receipt, error); return { ok: false, error }; }
+      },
+    };
+    global.app = app;
+    global.moment = () => ({ format: (fmt) => fmt === 'YYYY/MM-MMMM' ? '2026/07-July' : '2026-07-13' });
+    global.document = { activeElement: trigger };
+    global.customJS = { RenderSafe: renderSafe };
+    try {
+      const Dash = loadDashboard(windowShim, { RenderSafe: renderSafe });
+      const dash = new Dash();
+      const successHost = makeDashEl();
+      const success = await dash._openTodayToDo('2026-07-13', { dv: {}, host: successHost, trigger });
+      assert(success && success.ok === true, 'successful create returns ok');
+      assert(events.indexOf('apply') < events.indexOf('write'), 'optimistic apply must precede persistence');
+      assert(successHost._children.some((n) => /sauce-daily-todo-preview/.test(n.className)), 'optimistic preview is visible immediately');
+
+      files.delete('spice/to-do/2026/07-July');
+      rejectCreate = true;
+      events.length = 0;
+      const retryHost = makeDashEl();
+      const failed = await dash._openTodayToDo('2026-07-13', { dv: {}, host: retryHost, trigger });
+      assert(failed && failed.ok === false, 'rejected create returns false');
+      assert(events.join(',').includes('apply') && events.join(',').endsWith('rollback'), 'rejection runs apply/write/rollback');
+      assert(retryHost._children.length === 0, 'rollback removes the exact preview node');
+      assert(focused === 1, 'rollback restores triggering focus exactly once');
+      assert(trashed === 1, 'rejected note creation compensates its newly-created empty folder');
+    } finally {
+      global.app = priorApp;
+      global.moment = priorMoment;
+      global.document = priorDocument;
+      global.customJS = priorCustomJS;
+    }
+  });
+
+  await ok('PERF8-DAILY-COLD render never rejects on missing or throwing Dataview state', async () => {
+    const Dash = loadDashboard(windowShim, undefined);
+    const dash = new Dash();
+    await dash.render(null, {});
+    await dash.render({ container: makeDashEl(), el: () => makeDashEl(), pages: () => { throw new Error('cold index'); } }, {});
+    assert(true, 'cold render paths resolved');
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });

@@ -285,9 +285,7 @@ class SpaceHome {
    * host injection); the composer resolves its own live `today`/`hour`.
    */
   async render(dv, params) {
-    // Capture `this` for the async re-render after an inline task capture (the
-    // input/Add handlers await createQuick then call self.render to refresh).
-    const self = this;
+    if (!dv || !dv.container || typeof dv.el !== "function") return;
 
     // Cold-start reflow guard: on the FIRST render of any app session, wait for
     // Obsidian's workspace layout (panes/sidebars) to finish restoring before
@@ -470,9 +468,11 @@ class SpaceHome {
       setMenu(!menuOpen);
     };
 
-    // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
-    // guarded; then close the menu + re-render so the Tasks panel + glance chip
-    // reflect the new task). NO autofocus — opening the menu (via "+") must
+    // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick)
+    // through the shared structural seam. The exact input/menu/focus receipt is
+    // restored on rejection; success closes the menu and leaves authoritative
+    // reconciliation to Dataview instead of recursively self-rendering. NO
+    // autofocus — opening the menu (via "+") must
     // never pop the mobile keyboard; the user taps the input to type.
     const captureRow = menu.createEl("div", { cls: "sauce-home-add-input-row" });
     const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
@@ -488,20 +488,46 @@ class SpaceHome {
         || (typeof window !== "undefined" && window.customJS)
         || null;
       const td = cjsNow && cjsNow.TaskDialog;
-      try {
-        if (td && typeof td.createQuick === "function") {
-          await td.createQuick({ title: text, source: "daily" });
-        }
-      } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
-      setMenu(false);
-      await self.render(dv, params);
+      const renderSafe = cjsNow && cjsNow.RenderSafe;
+      if (!td || typeof td.createQuick !== "function"
+          || !renderSafe || typeof renderSafe.mutateStructure !== "function") return;
+      const result = await renderSafe.mutateStructure({
+        dv,
+        app: (typeof app !== "undefined" && app) || null,
+        failureMessage: "Could not add task",
+        apply: () => {
+          const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+          const value = input.value;
+          const selectionStart = input.selectionStart;
+          const selectionEnd = input.selectionEnd;
+          const disabled = !!addTaskBtn.disabled;
+          const node = captureRow.createEl("span", { cls: "sauce-home-capture-preview is-optimistic" });
+          node.textContent = text.trim();
+          input.value = "";
+          addTaskBtn.disabled = true;
+          return { parent: captureRow, node, nextSibling: node.nextSibling || null, focusTarget,
+            input, value, selectionStart, selectionEnd, disabled, menuWasOpen: menuOpen };
+        },
+        rollback: (receipt) => {
+          if (!receipt) return;
+          if (receipt.node && typeof receipt.node.remove === "function") receipt.node.remove();
+          else receipt.parent?.removeChild?.(receipt.node);
+          receipt.input.value = receipt.value;
+          receipt.input.setSelectionRange?.(receipt.selectionStart, receipt.selectionEnd);
+          addTaskBtn.disabled = receipt.disabled;
+          setMenu(receipt.menuWasOpen);
+          try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+        },
+        write: () => td.createQuick({ title: text, source: "daily" }),
+      });
+      if (result && result.ok === true) setMenu(false);
     };
-    addTaskBtn.onclick = () => { submitCapture(); };
+    addTaskBtn.onclick = () => submitCapture();
     input.addEventListener("keydown", (ev) => {
       if (ev && ev.key === "Enter" && !ev.isComposing) {
         if (typeof ev.preventDefault === "function") ev.preventDefault();
         if (typeof ev.stopPropagation === "function") ev.stopPropagation();
-        submitCapture();
+        return submitCapture();
       }
     });
 

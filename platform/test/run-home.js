@@ -547,13 +547,21 @@ function descendants(el) {
   {
     const dv = makeDv();
 
-    const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [] };
+    const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [], structure: [] };
     global.customJS = {
       SpaceDailyDashboard: {
         computeCounts: (d, t, te) => { calls.computeCounts.push({ d, t, te }); return { today: 2, overdue: 1, done: 0, meetings: 1 }; },
       },
       TaskEntity: {},
       TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); } },
+      RenderSafe: {
+        mutateStructure: async (opts) => {
+          calls.structure.push("apply");
+          const receipt = await opts.apply();
+          try { calls.structure.push("write"); return { ok: true, value: await opts.write() }; }
+          catch (error) { calls.structure.push("rollback"); await opts.rollback(receipt, error); return { ok: false, error }; }
+        },
+      },
       EntityCreate: {
         create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); },
         _loadSpec: () => Promise.resolve(null),
@@ -611,6 +619,9 @@ function descendants(el) {
         calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
           && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily",
         `expected createQuick({title:'buy milk',source:'daily'}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
+      assertEq("HOME-CAP-19b structural apply precedes persistence", calls.structure.slice(0, 2).join(","), "apply,write");
+      assertTrue("HOME-CAP-19c capture success does not recursively self-render",
+        !/self\.render\(dv,\s*params\)/.test(SPACE_HOME_SRC), "structural success must reconcile naturally");
     }
 
     // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
@@ -628,6 +639,23 @@ function descendants(el) {
       assertEq("HOME-CAP-21 Enter → createQuick carries the typed title", calls.createQuick[0] && calls.createQuick[0].title, "call mom");
       assertTrue("HOME-CAP-21b Enter → keydown handler calls stopPropagation", stopped,
         "the Enter handler must stopPropagation so a higher-level (Obsidian/document) keydown listener can't swallow or redirect the same event");
+    }
+
+    // Rejected persistence restores the exact live input/menu receipt.
+    {
+      const homeRetry = dv.container.querySelector(".sauce-home");
+      const menuRetry = homeRetry ? descendants(homeRetry).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+      const inputRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "input") : null;
+      const addRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
+      if (menuRetry && !isOpen(menuRetry)) fire(addBtn);
+      inputRetry.value = "retry me";
+      global.customJS.TaskDialog.createQuick = () => Promise.reject(new Error("persist failed"));
+      await fire(addRetry);
+      assertEq("HOME-CAP-21c rejection restores the exact input value", inputRetry.value, "retry me");
+      assertTrue("HOME-CAP-21d rejection keeps the originating menu open", isOpen(menuRetry));
+      assertTrue("HOME-CAP-21e rejected capture ran rollback after apply/write",
+        calls.structure.slice(-3).join(",") === "apply,write,rollback");
+      global.customJS.TaskDialog.createQuick = (opts) => { calls.createQuick.push(opts); return Promise.resolve(); };
     }
 
     // ── Inline capture: blank / whitespace input → NO createQuick. ──

@@ -31,13 +31,20 @@ class WikiMove {
 
     async move(dv, targetFolder) {
         try {
-            const file = app.workspace.getActiveFile();
+            const appRef = (typeof globalThis !== "undefined" && globalThis.app) || null;
+            const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || null;
+            const file = appRef && appRef.workspace && appRef.workspace.getActiveFile
+                ? appRef.workspace.getActiveFile() : null;
             if (!file) return;
             if (this.isNoop(targetFolder, file.path)) return;
-            const newPath = this.targetPath(targetFolder, file.path);
-            await app.fileManager.renameFile(file, newPath);
+            if (!cjs || !cjs.SectionExplorer || typeof cjs.SectionExplorer.applyDocMove !== "function") return;
+            return await cjs.SectionExplorer.applyDocMove(dv, file, targetFolder, {
+                structural: true,
+                move: { rewriteOnDocMove: () => null },
+            });
         } catch (e) {
             console.error("WikiMove.move failed:", e);
+            return { ok: false, error: e };
         }
     }
 }

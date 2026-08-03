@@ -119,6 +119,81 @@ class SectionExplorer {
     };
   }
 
+  // Receipt-bound lifecycle for structural edits owned by this explorer. Wiki
+  // opts in through adapter.structural; project adapters retain their existing
+  // behavior until they explicitly adopt the same contract. Nodes carry
+  // mechanism-owned identity properties so rollback restores the exact object
+  // at its exact parent/sibling position without selector escaping or a stale
+  // Dataview reconstruction.
+  _ownedNode(root, key, value) {
+    if (!root || value == null) return null;
+    if (root[key] === value) return root;
+    for (const child of Array.from(root.children || [])) {
+      const found = this._ownedNode(child, key, value);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  _applyStructuralReceipt(dv, spec) {
+    const root = (dv && dv.container) ? dv.container : dv;
+    const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+    const node = this._ownedNode(root, spec.identityKey, spec.identityValue);
+    if (spec.kind === "rename" && node) {
+      const title = node.querySelector?.(".se-rail-title-text")
+        || this._ownedNode(node, "__seTitle", true)
+        || node;
+      const text = title.textContent;
+      title.textContent = spec.nextTitle;
+      return { kind: "rename", node, title, text, focusTarget };
+    }
+    if (node && node.parentNode) {
+      const parent = node.parentNode;
+      const nextSibling = node.nextSibling || null;
+      parent.removeChild(node);
+      return { kind: "remove", parent, node, nextSibling, focusTarget };
+    }
+    if (!root || typeof root.createEl !== "function") return { kind: "none", focusTarget };
+    const parent = (root.querySelector && (
+      root.querySelector(".se-doc-grid") || root.querySelector(".se-rail-cards")
+    )) || root;
+    const preview = parent.createEl("div", { cls: "se-entity-preview is-optimistic" });
+    preview.textContent = spec.preview || "Updating…";
+    return { kind: "preview", parent, node: preview, nextSibling: preview.nextSibling || null, focusTarget };
+  }
+
+  _rollbackStructuralReceipt(receipt) {
+    if (!receipt) return;
+    if (receipt.kind === "rename" && receipt.title) receipt.title.textContent = receipt.text;
+    if (receipt.kind === "remove" && receipt.parent && receipt.node) {
+      const anchor = receipt.nextSibling && receipt.nextSibling.parentNode === receipt.parent
+        ? receipt.nextSibling : null;
+      if (anchor && typeof receipt.parent.insertBefore === "function") receipt.parent.insertBefore(receipt.node, anchor);
+      else if (typeof receipt.parent.appendChild === "function") receipt.parent.appendChild(receipt.node);
+    }
+    if (receipt.kind === "preview" && receipt.node) {
+      if (typeof receipt.node.remove === "function") receipt.node.remove();
+      else if (receipt.parent && typeof receipt.parent.removeChild === "function") receipt.parent.removeChild(receipt.node);
+    }
+    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+  }
+
+  async _mutateStructure(dv, adapter, spec, write) {
+    const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || null;
+    const renderSafe = cjs && cjs.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
+      return { ok: false, error: new Error("SectionExplorer: RenderSafe unavailable") };
+    }
+    return renderSafe.mutateStructure({
+      app: (typeof globalThis !== "undefined" && globalThis.app) || null,
+      dv,
+      failureMessage: spec.failureMessage || "Could not update item",
+      apply: () => this._applyStructuralReceipt(dv, spec),
+      rollback: (receipt) => this._rollbackStructuralReceipt(receipt),
+      write,
+    });
+  }
+
   // ── Shared move/bulk/delete pure logic (Task C) ───────────────────────────
   // These are STATIC (referenced by class name internally + mirrored onto the
   // instance by the constructor above so blueprint adapters can reach them via
@@ -287,6 +362,7 @@ class SectionExplorer {
       emptySubsectionCount: (typeof config.emptySubsectionCount === "function")
         ? ((section) => config.emptySubsectionCount(section))
         : undefined,
+      structural: config.structural === true,
     };
   }
 
@@ -399,6 +475,7 @@ class SectionExplorer {
     const grid = pane.createEl("div", { cls: "se-doc-grid" });
     for (const c of cards) {
       const card = grid.createEl("div", { cls: select ? "se-doc-card is-selectable" : "se-doc-card" });
+      card.__sePath = c.path;
       if (select) {
         const cb = card.createEl("input", { cls: "se-doc-check" });
         try { cb.type = "checkbox"; } catch (_e) { /* stub */ }
@@ -410,6 +487,7 @@ class SectionExplorer {
       icon.innerHTML = adapter.icons.file || "";
       const body = card.createEl("div", { cls: "se-doc-body" });
       const title = body.createEl("div", { cls: "se-doc-title" });
+      title.__seTitle = true;
       title.textContent = c.title;
       const sub = body.createEl("div", { cls: "se-doc-sub" });
       sub.textContent = this._docCardSub(c);
@@ -511,11 +589,13 @@ class SectionExplorer {
 
   _renderRailRow(dv, adapter, ctx, section, host) {
     const row = host.createEl("div", { cls: "se-rail-row" });
+    row.__seFolder = section && section.folder;
     const iconHtml = adapter.icons.folder || "";
     // Stacked layout: title on its own line, meta below it — long section
     // names truncate instead of colliding with the counts.
     const main = row.createEl("div", { cls: "se-rail-main" });
     const title = main.createEl("span", { cls: "se-rail-title" });
+    title.__seTitle = true;
     title.innerHTML = iconHtml + `<span class="se-rail-title-text">${this._escape(section.title)}</span>`;
     const meta = main.createEl("span", { cls: "se-rail-meta" });
     meta.textContent = this._railMeta(section);
@@ -704,7 +784,13 @@ class SectionExplorer {
         if (!newTitle || newTitle === section.title) { try { nameInput.focus?.(); } catch (_e) {} return false; }
         submitting = true;
         try {
-          const persisted = await adapter.renameSection(section, newTitle);
+          const persisted = adapter.structural === true
+            ? await this._mutateStructure(dv, adapter, {
+                kind: "rename", identityKey: "__seFolder", identityValue: section.folder,
+                nextTitle: newTitle, preview: `Renaming ${section.title || "section"}…`,
+                failureMessage: `Could not rename ${section.title || "section"}`,
+              }, () => adapter.renameSection(section, newTitle))
+            : await adapter.renameSection(section, newTitle);
           if (persisted && persisted.ok === false) { try { nameInput.focus?.(); } catch (_e) {} return false; }
           close();
           return true;
@@ -742,7 +828,12 @@ class SectionExplorer {
         if (submitting) return false;
         submitting = true;
         try {
-          const persisted = await adapter.deleteSection(section);
+          const persisted = adapter.structural === true
+            ? await this._mutateStructure(dv, adapter, {
+                kind: "remove", identityKey: "__seFolder", identityValue: section.folder,
+                preview: `Deleting ${title}…`, failureMessage: `Could not delete ${title}`,
+              }, () => adapter.deleteSection(section))
+            : await adapter.deleteSection(section);
           if (persisted && persisted.ok === false) { try { btns?.primary?.focus?.(); } catch (_e) {} return false; }
           close();
           return true;
@@ -781,15 +872,28 @@ class SectionExplorer {
       const folder = this._fileFolder(file);
       this._openModal("se-rename-modal-overlay", (panel, close, doc) => {
         this._modalTitle(doc, panel, "Rename doc");
-        const submit = () => {
+        let submitting = false;
+        const submit = async () => {
+          if (submitting) return false;
           const raw = String(nameInput.value || "").trim();
           // Strip path separators + control chars → keep a safe single filename.
           const safe = raw.replace(/[\\/:*?"<>|]+/g, "").replace(/^\.+/, "").trim();
           if (safe && safe !== base) {
             const newPath = (folder ? folder + "/" : "") + safe + ".md";
-            try { app.fileManager.renameFile(file, newPath); } catch (_e) { /* never-throw */ }
+            submitting = true;
+            try {
+              const persisted = adapter && adapter.structural === true
+                ? await this._mutateStructure(dv, adapter, {
+                    kind: "rename", identityKey: "__sePath", identityValue: file.path,
+                    nextTitle: safe, preview: `Renaming ${base}…`, failureMessage: `Could not rename ${base}`,
+                  }, () => app.fileManager.renameFile(file, newPath))
+                : await app.fileManager.renameFile(file, newPath);
+              if (persisted && persisted.ok === false) { try { nameInput.focus?.(); } catch (_e) {} return false; }
+            } catch (_e) { try { nameInput.focus?.(); } catch (_err) {} return false; }
+            finally { submitting = false; }
           }
           close();
+          return true;
         };
         const nameInput = this._modalInput(doc, panel, { value: base, onEnter: () => submit() });
         this._modalButtons(doc, panel, close, "Rename", submit);
@@ -869,9 +973,22 @@ class SectionExplorer {
         body.textContent = "Delete '" + name + "'? It moves to trash and can be recovered.";
         body.style.cssText = "margin-bottom:12px;color:var(--text-muted);font-size:0.92em;line-height:1.4;";
         panel.appendChild(body);
-        const btns = this._modalButtons(doc, panel, close, "Delete", () => {
-          try { app.fileManager.trashFile(file); } catch (_e) { /* never-throw */ }
-          close();
+        let submitting = false;
+        const btns = this._modalButtons(doc, panel, close, "Delete", async () => {
+          if (submitting) return false;
+          submitting = true;
+          try {
+            const persisted = adapter && adapter.structural === true
+              ? await this._mutateStructure(dv, adapter, {
+                  kind: "remove", identityKey: "__sePath", identityValue: file.path,
+                  preview: `Deleting ${name}…`, failureMessage: `Could not delete ${name}`,
+                }, () => app.fileManager.trashFile(file))
+              : await app.fileManager.trashFile(file);
+            if (persisted && persisted.ok === false) { try { btns?.primary?.focus?.(); } catch (_e) {} return false; }
+            close();
+            return true;
+          } catch (_e) { try { btns?.primary?.focus?.(); } catch (_err) {} return false; }
+          finally { submitting = false; }
         });
         if (btns && btns.primary) {
           btns.primary.style.cssText = "padding:7px 14px;border-radius:8px;border:none;background:var(--color-red, #e5484d);color:#fff;cursor:pointer;font-weight:600;font-size:0.9em;";
@@ -1059,24 +1176,52 @@ class SectionExplorer {
   // Move a single doc into destFolder (Task E1). No-op guarded; renames the file
   // then, when the adapter's move block supplies a frontmatter patch, applies it
   // best-effort (wiki → null; project → { section, sub_section }).
-  applyDocMove(dv, file, destFolder, adapter) {
+  async applyDocMove(dv, file, destFolder, adapter) {
     try {
-      if (!file || !file.path) return;
-      if (SectionExplorer.isNoop(destFolder, file.path)) return;
-      const newPath = SectionExplorer.targetPath(destFolder, file.path);
-      try { app.fileManager.renameFile(file, newPath); } catch (_e) { return; }
+      if (!file || !file.path) return { ok: false };
+      if (SectionExplorer.isNoop(destFolder, file.path)) return { ok: true, no_op: true };
+      const oldPath = file.path;
+      const newPath = SectionExplorer.targetPath(destFolder, oldPath);
+      const persist = async () => {
+        await app.fileManager.renameFile(file, newPath);
+        const mv = adapter && adapter.move;
+        if (mv && typeof mv.rewriteOnDocMove === "function") {
+          let patch = null;
+          try { patch = mv.rewriteOnDocMove(destFolder, oldPath); } catch (_e) { patch = null; }
+          if (patch) {
+            const moved = app.vault.getAbstractFileByPath(newPath) || file;
+            try {
+              await app.fileManager.processFrontMatter(moved, (fm) => Object.assign(fm, patch));
+            } catch (error) {
+              try { await app.fileManager.renameFile(moved, oldPath); } catch (_e) {}
+              throw error;
+            }
+          }
+        }
+        return newPath;
+      };
+      if (adapter && adapter.structural === true) {
+        return await this._mutateStructure(dv, adapter, {
+          kind: "remove", identityKey: "__sePath", identityValue: oldPath,
+          preview: `Moving ${oldPath.split("/").pop().replace(/\.md$/i, "")}…`,
+          failureMessage: "Could not move doc",
+        }, persist);
+      }
+      // Backwards-compatible non-structural rail: retain the historical
+      // synchronous dispatch shape used by project adapters while their
+      // returned promises settle independently.
+      app.fileManager.renameFile(file, newPath);
       const mv = adapter && adapter.move;
       if (mv && typeof mv.rewriteOnDocMove === "function") {
         let patch = null;
-        try { patch = mv.rewriteOnDocMove(destFolder, file.path); } catch (_e) { patch = null; }
+        try { patch = mv.rewriteOnDocMove(destFolder, oldPath); } catch (_e) { patch = null; }
         if (patch) {
-          try {
-            const moved = app.vault.getAbstractFileByPath(newPath) || file;
-            app.fileManager.processFrontMatter(moved, (fm) => Object.assign(fm, patch));
-          } catch (_e) { /* frontmatter best-effort */ }
+          const moved = app.vault.getAbstractFileByPath(newPath) || file;
+          app.fileManager.processFrontMatter(moved, (fm) => Object.assign(fm, patch));
         }
       }
-    } catch (_e) { /* never-throw */ }
+      return { ok: true, value: newPath };
+    } catch (_e) { return { ok: false, error: _e }; }
   }
 
   // Move a section folder under destParentFolder (Task E2). Renames the folder
@@ -1090,39 +1235,45 @@ class SectionExplorer {
   // an old/renamed path off disk → ENOENT). Wiki → null plan (folder-only).
   async moveSection(dv, section, destParentFolder, adapter) {
     try {
-      if (!section || !section.folder) return;
+      if (!section || !section.folder) return { ok: false };
       const oldFolder = String(section.folder).replace(/\/+$/, "");
       const newFolder = String(destParentFolder).replace(/\/+$/, "") + "/" + SectionExplorer._slugify(section.title);
       let folderFile = null;
       try { folderFile = app.vault.getAbstractFileByPath(oldFolder); } catch (_e) { folderFile = null; }
-      if (!folderFile) return; // can't move a folder we can't resolve to a real file
+      if (!folderFile) return { ok: false }; // can't move a folder we can't resolve to a real file
       const mv = adapter && adapter.move;
       // Build the plan while child paths still point at the OLD folder.
       let plan = null;
       if (mv && typeof mv.rewriteOnSectionMove === "function") {
         try { plan = mv.rewriteOnSectionMove(section, destParentFolder); } catch (_e) { plan = null; }
       }
-      await app.fileManager.renameFile(folderFile, newFolder);
-      if (!plan) return;
-      // Old-folder path → new-folder path.
-      const remap = (p) => {
-        const s = (p == null) ? "" : String(p);
-        return (s === oldFolder || s.indexOf(oldFolder + "/") === 0) ? newFolder + s.slice(oldFolder.length) : s;
-      };
-      if (plan.hubPatch && section.hubPath) {
-        try {
+      const persist = async () => {
+        await app.fileManager.renameFile(folderFile, newFolder);
+        if (!plan) return newFolder;
+        const remap = (p) => {
+          const s = (p == null) ? "" : String(p);
+          return (s === oldFolder || s.indexOf(oldFolder + "/") === 0) ? newFolder + s.slice(oldFolder.length) : s;
+        };
+        if (plan.hubPatch && section.hubPath) {
           const hubFile = app.vault.getAbstractFileByPath(remap(section.hubPath));
           if (hubFile) await app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
-        } catch (_e) { /* best-effort */ }
-      }
-      for (const cp of (plan.childPatches || [])) {
-        try {
+        }
+        for (const cp of (plan.childPatches || [])) {
           if (!cp || !cp.path) continue;
           const cf = app.vault.getAbstractFileByPath(remap(cp.path));
           if (cf) await app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
-        } catch (_e) { /* best-effort */ }
+        }
+        return newFolder;
+      };
+      if (adapter && adapter.structural === true) {
+        return await this._mutateStructure(dv, adapter, {
+          kind: "remove", identityKey: "__seFolder", identityValue: oldFolder,
+          preview: `Moving ${section.title || "section"}…`, failureMessage: "Could not move section",
+        }, persist);
       }
-    } catch (_e) { /* never-throw */ }
+      await persist();
+      return { ok: true, value: newFolder };
+    } catch (_e) { return { ok: false, error: _e }; }
   }
 
   // Open the move picker for a SECTION (rail ⋯ → Move). Targets come from the
@@ -1225,13 +1376,22 @@ class SectionExplorer {
             targets,
             currentFolder: norm,
             title: "Move docs to section",
-            onPick: (dest) => {
+            onPick: async (dest) => {
               try {
                 const { moves, skipped } = SectionExplorer.planBulkMove([...selected], dest);
-                for (const m of moves) this.applyDocMove(dv, { path: m.from }, dest, adapter);
+                let moved = 0;
+                if (adapter && adapter.structural === true) {
+                  for (const m of moves) {
+                    const result = await this.applyDocMove(dv, { path: m.from }, dest, adapter);
+                    if (result && result.ok === true) moved += 1;
+                  }
+                } else {
+                  for (const m of moves) { this.applyDocMove(dv, { path: m.from }, dest, adapter); moved += 1; }
+                }
                 try {
-                  const bits = ["Moved " + moves.length + " doc" + (moves.length === 1 ? "" : "s")];
-                  if (skipped.length) bits.push(skipped.length + " skipped");
+                  const bits = ["Moved " + moved + " doc" + (moved === 1 ? "" : "s")];
+                  const skippedTotal = skipped.length + (moves.length - moved);
+                  if (skippedTotal) bits.push(skippedTotal + " skipped");
                   if (typeof Notice === "function") new Notice(bits.join("; "), 5000);
                 } catch (_e) { /* notice best-effort */ }
               } catch (_e) { /* never-throw */ }

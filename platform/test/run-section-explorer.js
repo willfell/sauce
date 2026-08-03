@@ -2487,6 +2487,81 @@ ASYNC_TESTS.push({ name: "moveSection: awaits rename, remaps child paths, patche
   } finally { global.app = prevApp; }
 }});
 
+ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER doc move applies before write and restores exact node/position/focus on rejection", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const priorDocument = global.document;
+  const before = { id: "before" };
+  const after = { id: "after" };
+  const row = { id: "row", __sePath: "spice/wiki/a/Doc.md" };
+  const parent = {
+    children: [before, row, after],
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; },
+    insertBefore(node, anchor) { this.children.splice(this.children.indexOf(anchor), 0, node); node.parentNode = this; },
+    appendChild(node) { this.children.push(node); node.parentNode = this; },
+  };
+  for (const node of parent.children) node.parentNode = parent;
+  Object.defineProperty(row, "nextSibling", { get: () => {
+    const index = parent.children.indexOf(row); return index >= 0 ? parent.children[index + 1] || null : null;
+  } });
+  let focused = 0;
+  const events = [];
+  global.document = { activeElement: { focus: () => { focused++; } } };
+  global.app = { fileManager: { renameFile: async () => { events.push("write"); throw new Error("rename failed"); } } };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    events.push("apply"); const receipt = await opts.apply();
+    try { return { ok: true, value: await opts.write() }; }
+    catch (error) { events.push("rollback"); await opts.rollback(receipt, error); return { ok: false, error }; }
+  } } };
+  try {
+    const result = await se.applyDocMove({ container: parent }, { path: row.__sePath }, "spice/wiki/b", {
+      structural: true, move: { rewriteOnDocMove: () => null },
+    });
+    assert.strictEqual(result.ok, false);
+    assert.deepStrictEqual(events, ["apply", "write", "rollback"], "apply must precede persistence and rollback");
+    assert.deepStrictEqual(parent.children, [before, row, after], "same row restored before exact sibling");
+    assert.strictEqual(focused, 1, "captured focus restored once");
+  } finally { global.app = priorApp; global.customJS = priorCustomJS; global.document = priorDocument; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER section rename/delete receipts preserve exact title and row identity", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorCustomJS = global.customJS;
+  const title = { __seTitle: true, textContent: "Original", children: [] };
+  const row = { __seFolder: "spice/wiki/original", children: [title] };
+  title.parentNode = row;
+  const root = { children: [row] };
+  row.parentNode = root;
+  root.removeChild = (node) => { root.children.splice(root.children.indexOf(node), 1); node.parentNode = null; };
+  root.appendChild = (node) => { root.children.push(node); node.parentNode = root; };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    const receipt = await opts.apply();
+    try { return { ok: true, value: await opts.write() }; }
+    catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+  } } };
+  try {
+    const renamed = await se._mutateStructure({ container: root }, { structural: true }, {
+      kind: "rename", identityKey: "__seFolder", identityValue: row.__seFolder, nextTitle: "Changed",
+    }, async () => { throw new Error("rename failed"); });
+    assert.strictEqual(renamed.ok, false);
+    assert.strictEqual(title.textContent, "Original", "exact prior title restored");
+    const deleted = await se._mutateStructure({ container: root }, { structural: true }, {
+      kind: "remove", identityKey: "__seFolder", identityValue: row.__seFolder,
+    }, async () => { throw new Error("delete failed"); });
+    assert.strictEqual(deleted.ok, false);
+    assert.strictEqual(root.children[0], row, "exact removed section row restored");
+  } finally { global.customJS = priorCustomJS; }
+}});
+
+failures += !run("PERF8-SECTION-EXPLORER structural bulk awaits each receipt-bound move and counts only successes", () => {
+  const source = sourceUnderTest();
+  assert.ok(/adapter\s*&&\s*adapter\.structural\s*===\s*true[\s\S]*await\s+this\.applyDocMove/.test(source));
+  assert.ok(/moved\s*\+=\s*1/.test(source));
+});
+
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {
   for (const t of ASYNC_TESTS) {

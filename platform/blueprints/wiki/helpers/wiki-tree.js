@@ -1,5 +1,7 @@
 class WikiTree {
     render(dv) {
+      try {
+        if (!dv || typeof dv.current !== "function" || typeof dv.pages !== "function" || !dv.container) return;
         const cur = dv.current();
         if (!cur || !cur.file) return;
         if (cur.type !== "wiki-hub" && cur.type !== "wiki-section") return;
@@ -34,9 +36,12 @@ class WikiTree {
         } catch (_e) { /* cosmetic only */ }
 
         this._renderResults(dv, ctx, scopePath, cur);
+      } catch (_e) { /* never throw during CustomJS/Dataview cold load */ }
     }
 
     _renderResults(dv, ctx, scopePath, cur) {
+      try {
+        if (!ctx || !ctx.resultsContainer || !dv || typeof dv.pages !== "function") return;
         const container = ctx.resultsContainer;
         const proxyDv = this._makeProxyDv(dv, container);
 
@@ -72,6 +77,7 @@ class WikiTree {
 
         // The hub's cross-subtree recent grid moved INTO SectionExplorer's page
         // pane (the adapter config's listRecent) — nothing else renders here.
+      } catch (_e) { /* stale callback or missing dependency: fail closed */ }
     }
 
     _makeProxyDv(dv, container) {
@@ -237,6 +243,7 @@ class WikiTree {
                 rewriteOnSectionMove: () => null,
                 canAcceptSection: () => true,      // arbitrary depth
             },
+            structural: true,
             deleteSection: (section) => {
                 const f = app.vault.getAbstractFileByPath(section.folder);
                 if (!f) return Promise.resolve();
