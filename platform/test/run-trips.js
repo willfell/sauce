@@ -34,8 +34,8 @@ async function okNoThrow(label, fn) {
     catch (e) { fails++; console.error('FAIL ' + label + ': ' + (e && e.message ? e.message : e)); }
 }
 
-function loadWidget(relPath, className) {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', relPath), 'utf8');
+function loadWidget(relPath, className, transform = (source) => source) {
+    const src = transform(fs.readFileSync(path.join(__dirname, '..', '..', relPath), 'utf8'));
     return new Function(`${src}; return ${className};`)();
 }
 
@@ -211,6 +211,27 @@ function makeDv(embed, currentVal) {
     {
         const TripEntryList = loadWidget('platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList');
         const TripLinks = loadWidget('platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
+        const ReloadedTripEntryList = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList');
+        const ReloadedTripLinks = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
+        const constructorStaticStore = (source) => source
+            .replace('let states = globalThis[slot];', 'let states = this.constructor._mutationStates;')
+            .replace('globalThis[slot] = states;', 'this.constructor._mutationStates = states;');
+        const StaticEntryA = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList', constructorStaticStore);
+        const StaticEntryB = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList', constructorStaticStore);
+        const StaticLinksA = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks', constructorStaticStore);
+        const StaticLinksB = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks', constructorStaticStore);
+        const disableCachePrecedence = (source) => source.replace(
+            'if (cacheAdvanced) {', 'if (false && cacheAdvanced) {');
+        const PrecedenceMutantEntry = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList', disableCachePrecedence);
+        const PrecedenceMutantLinks = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks', disableCachePrecedence);
         const originalApp = global.app;
         const originalRenderSafe = global.customJS.RenderSafe;
         const originalNotice = global.Notice;
@@ -521,7 +542,7 @@ function makeDv(embed, currentVal) {
             TripEntryList.deleteEntry(list._items(rapidEntryDv, rapidEntrySpec), 0).list,
         );
         await new Promise(setImmediate);
-        const replacementEntryHelper = new TripEntryList();
+        const replacementEntryHelper = new ReloadedTripEntryList();
         const rapidEntrySecondBase = replacementEntryHelper._items(rapidEntryDv, rapidEntrySpec);
         const rapidEntrySecond = replacementEntryHelper._write(
             rapidEntryDv, rapidEntrySpec,
@@ -539,7 +560,8 @@ function makeDv(embed, currentVal) {
         rapidEntryGates[1].resolve();
         const rapidEntrySaved = await rapidEntrySecond;
         ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement entry helpers share one exact-owner queue',
-            rapidEntryQueued && rapidEntrySecondStarted && rapidEntrySaved
+            ReloadedTripEntryList !== TripEntryList
+            && rapidEntryQueued && rapidEntrySecondStarted && rapidEntrySaved
             && rapidEntryMaxActive === 1 && file.fm.flights.length === 0);
         const missingMtimeEntryState = list._entryState(rapidEntryOwner, {
             file: { path: pathName },
@@ -719,8 +741,8 @@ function makeDv(embed, currentVal) {
             .every((trackedPath) => allowedTrackedPaths.has(trackedPath))
             && [...generationTrackerB.versions.keys()]
                 .every((trackedPath) => allowedTrackedPaths.has(trackedPath));
-        const replacementGenerationEntryHelper = new TripEntryList();
-        const replacementGenerationLinksHelper = new TripLinks();
+        const replacementGenerationEntryHelper = new ReloadedTripEntryList();
+        const replacementGenerationLinksHelper = new ReloadedTripLinks();
         const cacheBEntryState = replacementGenerationEntryHelper._entryState(replacementEntryOwner, {
             file: { path: replacementPath, mtime: file.stat.mtime - 1 },
             flights: [{ flight_no: 'STALE-A' }],
@@ -740,11 +762,17 @@ function makeDv(embed, currentVal) {
             && staleCacheAIsolated
             && unrelatedPathsBounded
             && generationVersionB === generationVersionA + 1);
-        ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement helpers retain owner authority and consume cache B first',
-            cacheBEntryState.model[0]?.flight_no === 'EXTERNAL-B'
+        const finiteMtimeCacheConverged = cacheBEntryState.model[0]?.flight_no === 'EXTERNAL-B'
             && cacheBEntryState.authority?.cacheVersion === generationVersionB
             && cacheBLinkState.model[0]?.url === 'https://external-b.example'
-            && cacheBLinkState.authority?.cacheVersion === generationVersionB);
+            && cacheBLinkState.authority?.cacheVersion === generationVersionB;
+        ok('PERF4F-FINITE-MTIME-CACHE-CONVERGENCE finite stale mtimes lose to cache B for both helpers',
+            finiteMtimeCacheConverged);
+        ok('PERF4G-CROSS-CONSTRUCTOR-HOT-RELOAD re-evaluated helpers retain owner authority and consume cache B first',
+            ReloadedTripEntryList !== TripEntryList && ReloadedTripLinks !== TripLinks
+            && finiteMtimeCacheConverged
+            && replacementGenerationEntryHelper._entryStateStore() === list._entryStateStore()
+            && replacementGenerationLinksHelper._linksStateStore() === links._linksStateStore());
         const intermediateEntries = [{ flight_no: 'INTERMEDIATE-LOCAL' }];
         const intermediateLinks = [{ url: 'https://intermediate-local.example', text: 'Intermediate Local' }];
         replacementEntryState.model = intermediateEntries;
@@ -850,6 +878,73 @@ function makeDv(embed, currentVal) {
             && readyEntryState.authority?.cacheVersion === pendingGeneration
             && readyLinkState.model[0]?.url === 'https://cache-ready.example'
             && readyLinkState.authority?.cacheVersion === pendingGeneration);
+        const staticEntryOwner = trackedEl('div');
+        const staticLinksOwner = trackedEl('div');
+        const staticEntryPage = { file: { path: 'mutants/static-entry.md' }, flights: [] };
+        const staticLinksPage = { file: { path: 'mutants/static-links.md' }, links: [] };
+        const normalEntryOwner = trackedEl('div');
+        const normalLinksOwner = trackedEl('div');
+        const normalEntryShared = list._entryState(normalEntryOwner, staticEntryPage, 'flights')
+            === new ReloadedTripEntryList()._entryState(normalEntryOwner, staticEntryPage, 'flights');
+        const normalLinksShared = links._linksState(normalLinksOwner, staticLinksPage)
+            === new ReloadedTripLinks()._linksState(normalLinksOwner, staticLinksPage);
+        const staticEntrySplit = new StaticEntryA()._entryState(staticEntryOwner, staticEntryPage, 'flights')
+            !== new StaticEntryB()._entryState(staticEntryOwner, staticEntryPage, 'flights');
+        const staticLinksSplit = new StaticLinksA()._linksState(staticLinksOwner, staticLinksPage)
+            !== new StaticLinksB()._linksState(staticLinksOwner, staticLinksPage);
+        ok('PERF4G-SPECIFIC-MUTATION-ADEQUACY constructor-static stores turn cross-constructor identity red',
+            normalEntryShared && normalLinksShared && staticEntrySplit && staticLinksSplit);
+
+        const precedenceMutantPath = 'spice/trips/demo/Precedence Mutant.md';
+        global.app.vault.getAbstractFileByPath = (targetPath) =>
+            (targetPath === replacementPath || targetPath === precedenceMutantPath)
+                ? file : originalGetAbstractFileByPath(targetPath);
+        const precedenceEntry = new PrecedenceMutantEntry();
+        const precedenceLinks = new PrecedenceMutantLinks();
+        const precedenceEntryOwner = trackedEl('div');
+        precedenceEntryOwner.dataset.tripEntryOwnerPath = precedenceMutantPath;
+        precedenceEntryOwner.dataset.tripEntryOwnerKey = 'flights';
+        const precedenceLinksOwner = trackedEl('div');
+        precedenceLinksOwner.dataset.tripLinksOwnerPath = precedenceMutantPath;
+        const mutantLocalEntries = [{ flight_no: 'MUTANT-LOCAL' }];
+        const mutantLocalLinks = [{ url: 'https://mutant-local.example', text: 'Mutant Local' }];
+        const precedenceEntryState = precedenceEntry._entryState(precedenceEntryOwner, {
+            file: { path: precedenceMutantPath }, flights: mutantLocalEntries,
+        }, 'flights');
+        precedenceEntryState.authority = {
+            expected: mutantLocalEntries, writeMtime: 10,
+            cacheVersion: precedenceEntry._metadataVersion(precedenceMutantPath),
+        };
+        const precedenceLinksState = precedenceLinks._linksState(precedenceLinksOwner, {
+            file: { path: precedenceMutantPath }, links: mutantLocalLinks,
+        });
+        precedenceLinksState.authority = {
+            expected: mutantLocalLinks, writeMtime: 10,
+            cacheVersion: precedenceLinks._metadataVersion(precedenceMutantPath),
+        };
+        precedenceEntry._retainMetadataPath(precedenceEntryState);
+        precedenceLinks._retainMetadataPath(precedenceLinksState);
+        file.stat.mtime = 30;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'MUTANT-CACHE' }],
+            links: [{ url: 'https://mutant-cache.example', text: 'Mutant Cache' }],
+        };
+        generationCacheB.emit({ path: precedenceMutantPath });
+        const mutantEntryResult = precedenceEntry._entryState(precedenceEntryOwner, {
+            file: { path: precedenceMutantPath, mtime: 20 },
+            flights: [{ flight_no: 'MUTANT-STALE-DV' }],
+        }, 'flights');
+        const mutantLinksResult = precedenceLinks._linksState(precedenceLinksOwner, {
+            file: { path: precedenceMutantPath, mtime: 20 },
+            links: [{ url: 'https://mutant-stale-dv.example', text: 'Mutant Stale DV' }],
+        });
+        ok('PERF4G-SPECIFIC-MUTATION-ADEQUACY disabled cache precedence turns both event-first fixtures red',
+            mutantEntryResult.model[0]?.flight_no === 'MUTANT-STALE-DV'
+            && mutantLinksResult.model[0]?.url === 'https://mutant-stale-dv.example');
+        precedenceEntryState.authority = null;
+        precedenceLinksState.authority = null;
+        precedenceEntry._releaseMetadataPath(precedenceEntryState);
+        precedenceLinks._releaseMetadataPath(precedenceLinksState);
         global.app.metadataCache = originalMetadataCache;
         list._metadataTracker();
         cachedFrontmatter = {
@@ -1000,7 +1095,7 @@ function makeDv(embed, currentVal) {
             rapidLinksDv, TripLinks.deleteLink(links._currentLinks(rapidLinksDv), 0).links,
         );
         await new Promise(setImmediate);
-        const replacementLinksHelper = new TripLinks();
+        const replacementLinksHelper = new ReloadedTripLinks();
         const rapidLinkSecondBase = replacementLinksHelper._currentLinks(rapidLinksDv);
         const rapidLinkSecond = replacementLinksHelper._write(
             rapidLinksDv, TripLinks.deleteLink(rapidLinkSecondBase, 0).links,
@@ -1017,7 +1112,8 @@ function makeDv(embed, currentVal) {
         rapidLinkGates[1].resolve();
         const rapidLinksSaved = await rapidLinkSecond;
         ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement link helpers share one exact-owner queue',
-            rapidLinksQueued && rapidLinkSecondStarted && rapidLinksSaved
+            ReloadedTripLinks !== TripLinks
+            && rapidLinksQueued && rapidLinkSecondStarted && rapidLinksSaved
             && rapidLinkMaxActive === 1 && file.fm.links.length === 0);
         const missingMtimeLinksState = links._linksState(rapidLinksOwner, {
             type: 'trip', file: { path: pathName },
@@ -1449,6 +1545,25 @@ function makeDv(embed, currentVal) {
             mutableLedgerRows.length === 2
             && mutableLedgerRows.every((line) => line.includes('mutateStructure')
                 && line.includes('serialized') && !line.includes('GAP PERF-4')));
+
+        const carriedFixtureNames = [
+            'PERF4-LEDGER-TOUCH-ZONE',
+            'PERF4B-MANAGE-LINK-IDENTITY',
+            'PERF4C-MODAL-ROLLBACK-OWNERSHIP',
+            'PERF4C-MISSING-MTIME-AUTHORITY',
+            'PERF4C-MODAL-CANCEL-GENERATION',
+            'PERF4D-CACHE-LISTENER-REPLACEMENT',
+            'PERF4E-ACTIVE-PATH-RETENTION',
+            'PERF4E-OFFREF-THROW-FAILOVER',
+            'PERF4F-FINITE-MTIME-CACHE-CONVERGENCE',
+            'PERF4F-CACHE-EVENT-PRECEDENCE',
+            'PERF4G-CROSS-CONSTRUCTOR-HOT-RELOAD',
+            'PERF4G-FIXTURE-NAME-COVERAGE',
+            'PERF4G-SPECIFIC-MUTATION-ADEQUACY',
+        ];
+        const tripsHarnessSource = fs.readFileSync(__filename, 'utf8');
+        ok('PERF4G-FIXTURE-NAME-COVERAGE every carried finding has an exact executable assertion label',
+            carriedFixtureNames.every((name) => tripsHarnessSource.includes(`ok('${name}`)));
 
         ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
             notices.some((message) => message.includes('trip write failed')));
