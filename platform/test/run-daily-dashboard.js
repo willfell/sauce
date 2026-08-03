@@ -537,6 +537,30 @@ async function renderDailyTaskFixture(today, options) {
       'receipt must identify the exact live dashboard root, not a broad DOM diff');
   });
 
+  await ok('PERF8K-DASH-MOUNT partial cold child render stays unmounted and warm-retries', async () => {
+    const { customJS } = makeCustomJS();
+    delete customJS.BeaconCards;
+    const dv = makeDv();
+    dv.el = (tag, _text, opts) => dv.container.createEl(tag, opts || {});
+    const originalPages = dv.pages.bind(dv);
+    dv.pages = (query) => query === '"spice/meetings/notes"'
+      ? [{ file: { name: `${TODAY} Cold Meeting`, path: `spice/meetings/notes/${TODAY} Cold Meeting.md` } }]
+      : originalPages(query);
+    const Dash = loadDashboard(windowShim, customJS);
+    const failedReceipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: failedReceipt });
+    assert(failedReceipt.ok === false && failedReceipt.node === null,
+      'missing async child mechanism must not stamp a successful mount');
+    assert(!dv.container._children.some((node) => /space-daily-dashboard/.test(node.className)),
+      'failed partial dashboard root must be removed before warm retry');
+
+    customJS.BeaconCards = { render: async () => {} };
+    const warmReceipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: warmReceipt });
+    assert(warmReceipt.ok === true && dv.container._children.includes(warmReceipt.node),
+      'same-surface warm retry must stamp the completed dashboard root');
+  });
+
   await ok('DASH-L5-3 total + byBlueprint unchanged (1 direct hit + 1 rolled-up root)', async () => {
     // Drive the REAL ActivityFeed.query with the same opts the dashboard passes,
     // then the REAL static bucketByBlueprint over those pages.

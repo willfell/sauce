@@ -465,6 +465,8 @@ class SpaceDailyDashboard {
   }
 
   async render(dv, params) {
+    let mountReceipt = null;
+    let mountedContainer = null;
     try {
     if (!dv || !dv.container || typeof dv.el !== "function" || typeof dv.pages !== "function") return;
     const icons = {
@@ -570,11 +572,8 @@ class SpaceDailyDashboard {
     if (existing) existing.remove();
 
     const container = dv.el("div", "", { cls: "space-daily-dashboard" });
-    const mountReceipt = params && params.mountReceipt;
-    if (mountReceipt && typeof mountReceipt === "object") {
-      mountReceipt.ok = true;
-      mountReceipt.node = container;
-    }
+    mountedContainer = container;
+    mountReceipt = params && params.mountReceipt;
     // v0.2.6: prevent horizontal scroll at narrow widths.
     // - box-sizing: border-box → padding folds into width, not adds to it
     // - max-width: 100% → can't exceed parent width
@@ -599,6 +598,10 @@ class SpaceDailyDashboard {
       const empty = container.createEl("div");
       empty.className = "sauce-empty-state";
       empty.innerHTML = `${icons.activity}<span>No activity recorded yet</span>`;
+      if (mountReceipt && typeof mountReceipt === "object") {
+        mountReceipt.ok = true;
+        mountReceipt.node = container;
+      }
       return;
     }
 
@@ -927,7 +930,20 @@ class SpaceDailyDashboard {
         warn.textContent = "ActivityFeed mechanism unavailable.";
       }
     }
-    } catch (_e) { /* cold-load and partial Dataview state must never reject */ }
+    if (mountReceipt && typeof mountReceipt === "object") {
+      mountReceipt.ok = true;
+      mountReceipt.node = container;
+    }
+    } catch (_e) {
+      // Cold-load and partial Dataview state never reject, but a partial root
+      // is not a successful mount receipt. Remove it so the same Home surface
+      // can retry once the missing child mechanism registers.
+      try { mountedContainer?.remove?.(); } catch (_removeError) {}
+      if (mountReceipt && typeof mountReceipt === "object") {
+        mountReceipt.ok = false;
+        mountReceipt.node = null;
+      }
+    }
   }
 
   /**
