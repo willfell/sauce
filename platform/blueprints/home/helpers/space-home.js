@@ -418,13 +418,14 @@ class SpaceHome {
       await mountDashboard();
       return;
     }
-    if (!prior) {
-      // Dataview cleared this container. Invalidate only DOM-generation-bound
-      // dashboard receipts; a pending capture remains authoritative until its
-      // persistence receipt settles.
+    if (!prior && !surface.dashboard.token) {
+      // Dataview cleared this container. A settled mount was removed and must
+      // be retried. An in-flight mount, however, remains the sole authority:
+      // invalidating it cannot cancel its eventual DOM write and would permit
+      // a duplicate replacement mount. Pending capture authority is likewise
+      // preserved until its persistence receipt settles.
       surface.dashboard.generation += 1;
       surface.dashboard.mounted = false;
-      surface.dashboard.token = null;
     }
     surface.signature = sig;
     surface.generation += 1;

@@ -1274,6 +1274,34 @@ function descendants(el) {
     assertEq("HOME-DASH-RETRY-4 successful retry creates one dashboard mount",
       rejectedDv._viewCalls.length, 1);
 
+    const deferredDv = makeDv();
+    let releaseMount;
+    let reportStarted;
+    const mountReleased = new Promise((resolve) => { releaseMount = resolve; });
+    const mountStarted = new Promise((resolve) => { reportStarted = resolve; });
+    let deferredAttempts = 0;
+    deferredDv.view = async (viewPath, input) => {
+      deferredAttempts += 1;
+      reportStarted();
+      await mountReleased;
+      deferredDv._viewCalls.push({ viewPath, input });
+      const mount = makeEl("div", { cls: "customjs-guard-mount" });
+      mount.parent = deferredDv.container;
+      deferredDv.container.children.push(mount);
+      return mount;
+    };
+    const firstDeferredRender = home_.render(deferredDv, {});
+    await mountStarted;
+    deferredDv.container.children = [];
+    const replacementDeferredRender = home_.render(deferredDv, {});
+    await Promise.resolve();
+    assertEq("HOME-DASH-RETRY-5 container clear preserves one in-flight mount authority",
+      deferredAttempts, 1);
+    releaseMount();
+    await Promise.all([firstDeferredRender, replacementDeferredRender]);
+    assertEq("HOME-DASH-RETRY-6 delayed mount plus rerender appends exactly one dashboard",
+      deferredDv._viewCalls.length, 1);
+
     delete global.customJS;
     delete global.window.customJS;
   }
