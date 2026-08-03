@@ -513,6 +513,24 @@ ok('RA-4 restores on runTest throw (fail-closed)',
   (() => { const seen = []; const r = runAdequacyCheck({ paths: ['scripts/a.js', 'platform/test/run-foo.js'],
     mutate: (a) => seen.push(a), runTest: () => { throw new Error('boom'); } });
     return r.adequate === false && seen.filter(x => x === 'restore').length >= 1; })());
+// A removal slice DELETES the old test alongside the source. A deleted test file
+// is not a runnable regression guard, so `exists` drops it: a removal that ships
+// no surviving guard is inadequate (RA-5), while one that keeps a live guard test
+// is exercised normally (RA-6). Without `exists`, the deleted test would be run
+// and always fail, poisoning the mutation check closed (the old deletion bug).
+ok('RA-5 removal whose only test is deleted → no surviving guard → inadequate',
+  (() => { const r = runAdequacyCheck({ paths: ['src/mod.py', 'tests/test_mod.py'],
+    exists: () => false, runTest: () => true, mutate: () => {},
+    config: { test_globs: ['tests/**'], exclude_globs: ['docs/**', '*.md'] } });
+    return r.adequate === false && r.reason === 'behavioral change ships no regression test'; })());
+ok('RA-6 removal with a surviving guard test → mutation check runs → adequate',
+  (() => { const order = []; const r = runAdequacyCheck({
+    paths: ['src/mod.py', 'tests/test_mod_removed.py', 'tests/test_mod.py'],
+    exists: (f) => f !== 'tests/test_mod.py',
+    mutate: (a) => order.push(a),
+    runTest: (t) => t === 'tests/test_mod_removed.py' ? order[order.length - 1] === 'restore' : true,
+    config: { test_globs: ['tests/**'], exclude_globs: ['docs/**', '*.md'] } });
+    return r.adequate === true; })());
 
 // ---- block-note (BN-*) ----
 const blockSec = renderBlockedSection({ date: '2026-06-30', reason: 'convention conflict', needs: ['change the convention or drop the ask?', 'specify the target behavior'] });

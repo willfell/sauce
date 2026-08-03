@@ -101,8 +101,14 @@ function gateVerdict(o) {
 }
 
 function runAdequacyCheck(o) {
-  const { paths, runTest, mutate, config = null } = o || {};
-  const { testFiles, sourceFiles } = splitDiff(paths, config);
+  const { paths, runTest, mutate, exists, config = null } = o || {};
+  const split = splitDiff(paths, config);
+  const sourceFiles = split.sourceFiles;
+  // A test file the change DELETES is not a runnable regression guard — removal
+  // slices routinely drop the old suite. Only test files that still exist can be
+  // exercised, so a deleted test must not poison the mutation check red. When no
+  // `exists` predicate is injected, behavior is byte-identical to before.
+  const testFiles = typeof exists === 'function' ? split.testFiles.filter((f) => exists(f)) : split.testFiles;
   if (!sourceFiles.length) return { behavioral: false, adequate: true, reason: 'no source change (doc/test-only) — Gate B not required' };
   if (!testFiles.length) return { behavioral: true, ...adequacyVerdict({ hasTest: false }) };
   const allPass = () => testFiles.every((t) => runTest(t));
@@ -141,6 +147,7 @@ if (require.main === module) {
   let paths = [];
   try { paths = sh('git', ['diff', '--name-only', `${base}...HEAD`]).split('\n').map((s) => s.trim()).filter(Boolean); } catch (_) {}
   const existsInBase = (f) => { try { sh('git', ['cat-file', '-e', `${base}:${f}`]); return true; } catch (_) { return false; } };
+  const existsInHead = (f) => { try { sh('git', ['cat-file', '-e', `HEAD:${f}`]); return true; } catch (_) { return false; } };
   const runTest = (t) => {
     try {
       if (config && config.test_command) sh('/bin/sh', ['-c', config.test_command.replaceAll('{test}', t)], { stdio: 'ignore' });
@@ -151,7 +158,12 @@ if (require.main === module) {
   const mutate = (action, files) => {
     if (action === 'revert') {
       for (const f of files) { if (existsInBase(f)) sh('git', ['checkout', base, '--', f]); else sh('git', ['rm', '-f', '--quiet', f]); }
-    } else { sh('git', ['checkout', 'HEAD', '--', ...files]); }
+    } else {
+      // Restore each source file to its HEAD state. A file the change DELETED has
+      // no HEAD blob to check out — re-delete it (mirror of revert's new-file
+      // branch) instead of throwing, so removal slices don't fail closed.
+      for (const f of files) { if (existsInHead(f)) sh('git', ['checkout', 'HEAD', '--', f]); else sh('git', ['rm', '-f', '--quiet', f]); }
+    }
   };
-  out(runAdequacyCheck({ paths, runTest, mutate, config }));
+  out(runAdequacyCheck({ paths, runTest, mutate, exists: existsInHead, config }));
 }
