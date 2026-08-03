@@ -236,6 +236,7 @@ function makeDv(embed, currentVal) {
                     this.childNodes = this.children;
                     return child;
                 },
+                createDiv(opts) { return this.createEl('div', opts); },
                 addEventListener(name, fn) { listeners[name] = fn; },
                 appendChild(child) { child.parentNode = this; this.children.push(child); this.childNodes = this.children; return child; },
                 insertBefore(child, before) {
@@ -278,6 +279,7 @@ function makeDv(embed, currentVal) {
         const file = { path: pathName, fm: { packing_items: [{ category: 'Clothes', item: 'Socks', checked: false }] } };
         let page = { file: { path: pathName }, packing_items: file.fm.packing_items };
         let metadataListener = null;
+        let cachedFrontmatter = null;
         let refreshes = 0;
         let captures = 0;
         let writeGate = deferred();
@@ -310,6 +312,7 @@ function makeDv(embed, currentVal) {
             metadataCache: {
                 on(_event, listener) { metadataListener = listener; return { id: 'trip-write' }; },
                 offref() {},
+                getFileCache() { return cachedFrontmatter ? { frontmatter: cachedFrontmatter } : null; },
             },
             commands: { executeCommandById() { refreshes++; } },
             fileManager: {
@@ -541,13 +544,16 @@ function makeDv(embed, currentVal) {
             file: { path: pathName },
             flights: [{ flight_no: 'A' }, { flight_no: 'B' }],
         }, 'flights');
-        ok('PERF4C-ENTRY-MISSING-MTIME stale unordered metadata cannot reclaim post-write authority',
+        ok('PERF4C-MISSING-MTIME-AUTHORITY entry snapshots without mtime cannot reclaim post-write authority',
             missingMtimeEntryState.model.length === 0 && !!missingMtimeEntryState.authority);
+        file.stat.mtime = 11;
+        cachedFrontmatter = { flights: [{ flight_no: 'EXTERNAL' }] };
         const newerEntryState = list._entryState(rapidEntryOwner, {
-            file: { path: pathName, mtime: 11 }, flights: [{ flight_no: 'EXTERNAL' }],
+            file: { path: pathName }, flights: [{ flight_no: 'STALE' }],
         }, 'flights');
-        ok('PERF4C-ENTRY-NEWER-MTIME strictly newer metadata releases owner authority',
+        ok('PERF4D-ENTRY-CACHE-CONVERGENCE newer current-file cache releases missing-mtime authority',
             newerEntryState.authority === null && newerEntryState.model[0].flight_no === 'EXTERNAL');
+        cachedFrontmatter = null;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
         const failedQueueGate = deferred();
@@ -687,15 +693,18 @@ function makeDv(embed, currentVal) {
             type: 'trip', file: { path: pathName },
             links: [{ url: 'https://a.example', text: 'A' }, { url: 'https://b.example', text: 'B' }],
         });
-        ok('PERF4C-LINKS-MISSING-MTIME stale unordered metadata cannot reclaim post-write authority',
+        ok('PERF4C-MISSING-MTIME-AUTHORITY link snapshots without mtime cannot reclaim post-write authority',
             missingMtimeLinksState.model.length === 0 && !!missingMtimeLinksState.authority);
+        file.stat.mtime = 12;
+        cachedFrontmatter = { links: [{ url: 'https://external.example', text: 'External' }] };
         const newerLinksState = links._linksState(rapidLinksOwner, {
-            type: 'trip', file: { path: pathName, mtime: 11 },
-            links: [{ url: 'https://external.example', text: 'External' }],
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://stale.example', text: 'Stale' }],
         });
-        ok('PERF4C-LINKS-NEWER-MTIME strictly newer metadata releases owner authority',
+        ok('PERF4D-LINKS-CACHE-CONVERGENCE newer current-file cache releases missing-mtime authority',
             newerLinksState.authority === null
             && newerLinksState.model[0].url === 'https://external.example');
+        cachedFrontmatter = null;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
         // PERF-4c binding fixture: exercise the actual Manage Links controls,
@@ -824,6 +833,89 @@ function makeDv(embed, currentVal) {
                 realEditDeferred, editOpened, realEditStarted, editAfterShiftSaved,
                 editManageCloses, writes: modalEditWrites, links: file.fm.links,
             }));
+
+        const modalCancelGate = deferred();
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalCancelWrites = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            modalCancelWrites++;
+            await modalCancelGate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+        };
+        const modalCancelOwner = trackedEl('div');
+        modalCancelOwner.dataset.tripLinksOwnerPath = pathName;
+        modalCancelOwner.classList.add('trip-links-owner');
+        const modalCancelDv = {
+            container: modalCancelOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalCancelDv);
+        let modalCancelPanel = null;
+        let modalCancelOpen = true;
+        let modalCancelCloses = 0;
+        let cancelledFormsOpened = 0;
+        links._openModal = ({ build }) => {
+            modalCancelPanel = trackedEl('div');
+            const close = () => {
+                if (!modalCancelOpen) return;
+                modalCancelOpen = false;
+                modalCancelCloses++;
+            };
+            close.isOpen = () => modalCancelOpen;
+            build(modalCancelPanel, close);
+        };
+        links._openForm = () => { cancelledFormsOpened++; };
+        links.openManage(modalCancelDv);
+        const cancelRows = modalCancelPanel.children[0].children;
+        const pendingDeleteBeforeCancel = cancelRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const deferredEditBeforeCancel = cancelRows[1].children[1].onclick();
+        await new Promise(setImmediate);
+        modalCancelPanel.children[1].onclick();
+        const cancelledWhilePending = !modalCancelOpen && modalCancelCloses === 1
+            && cancelledFormsOpened === 0 && modalCancelWrites === 1;
+        modalCancelGate.resolve();
+        const cancelledDeleteSaved = await pendingDeleteBeforeCancel;
+        const cancelledEditOpened = await deferredEditBeforeCancel;
+        ok('PERF4C-MODAL-CANCEL-GENERATION closed Manage generation cannot resurrect deferred Edit',
+            cancelledWhilePending && cancelledDeleteSaved && cancelledEditOpened === false
+            && cancelledFormsOpened === 0 && modalCancelCloses === 1
+            && file.fm.links.length === 1 && file.fm.links[0].url === 'https://b.example');
+
+        const originalDocument = global.document;
+        const modalBody = trackedEl('body');
+        const modalDocumentListeners = {};
+        global.document = {
+            body: modalBody,
+            activeElement: null,
+            querySelector: (selector) => modalBody.querySelector(selector),
+            addEventListener: (name, listener) => { modalDocumentListeners[name] = listener; },
+            removeEventListener: (name, listener) => {
+                if (modalDocumentListeners[name] === listener) delete modalDocumentListeners[name];
+            },
+        };
+        let replacedClose = null;
+        originalOpenModal.call(links, { title: 'First', build: (_panel, close) => { replacedClose = close; } });
+        const replacedOverlay = modalBody.children[0];
+        let escapeClose = null;
+        originalOpenModal.call(links, { title: 'Second', build: (_panel, close) => { escapeClose = close; } });
+        const replacementInvalidated = replacedClose.isOpen() === false
+            && replacedOverlay.parentNode === null && escapeClose.isOpen() === true;
+        modalDocumentListeners.keydown({ key: 'Escape' });
+        const escapeInvalidated = escapeClose.isOpen() === false && modalBody.children.length === 0;
+        let backdropClose = null;
+        originalOpenModal.call(links, { title: 'Third', build: (_panel, close) => { backdropClose = close; } });
+        const backdropOverlay = modalBody.children[0];
+        backdropOverlay.onclick({ target: backdropOverlay });
+        ok('PERF4D-MODAL-CLOSE-TOKEN replacement Escape and backdrop share one cancellation token',
+            replacementInvalidated && escapeInvalidated
+            && backdropClose.isOpen() === false && modalBody.children.length === 0);
+        global.document = originalDocument;
         links._openModal = originalOpenModal;
         links._openForm = originalOpenForm;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
@@ -879,7 +971,7 @@ function makeDv(embed, currentVal) {
         const overlayHeldForDescendant = failureOverlay.parentNode === failureBody && failureCloses === 0;
         modalFailureGates[1].resolve();
         const rejectedModalSaved = await rejectedModalDelete;
-        ok('PERF4C-MANAGE-LINK-ROLLBACK queued rejection retains live overlay and retry focus',
+        ok('PERF4C-MODAL-ROLLBACK-OWNERSHIP queued rejection retains live overlay and retry focus',
             firstModalSaved && !rejectedModalSaved && modalFailureWrites === 2
             && overlayHeldForDescendant && failureOverlay.parentNode === failureBody
             && failureCloses === 0 && rejectedFocusAttached

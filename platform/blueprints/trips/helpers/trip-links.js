@@ -259,8 +259,11 @@ class TripLinks {
         const incomingMtime = this._pageMtime(page);
         const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
           && incomingMtime > state.authority.writeMtime;
-        if (matches || externallyNewer) {
-          state.model = incoming;
+        const cached = incomingMtime == null ? this._cachedLinks(path) : null;
+        const cacheNewer = cached?.mtime != null && state.authority.writeMtime != null
+          && cached.mtime > state.authority.writeMtime;
+        if (matches || externallyNewer || cacheNewer) {
+          state.model = cacheNewer ? cached.model : incoming;
           state.authority = null;
         }
       } else {
@@ -284,6 +287,16 @@ class TripLinks {
   _fileMtime(file) {
     const value = file?.stat?.mtime;
     return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  _cachedLinks(path) {
+    try {
+      if (typeof app === "undefined") return null;
+      const file = app.vault?.getAbstractFileByPath?.(path);
+      if (!file) return null;
+      const frontmatter = app.metadataCache?.getFileCache?.(file)?.frontmatter;
+      if (!frontmatter || typeof frontmatter !== "object") return null;
+      return { mtime: this._fileMtime(file), model: this._parse(frontmatter.links) };
+    } catch (_e) { return null; }
   }
   _queueLinksStructure(state, task) {
     const epoch = state.epoch;
@@ -413,6 +426,7 @@ class TripLinks {
         const owner = path ? this._panelOwner(dv, path) : null;
         return owner ? this._linksState(owner, page) : null;
       };
+      const modalOpen = () => typeof close.isOpen !== "function" || close.isOpen();
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:52vh; overflow:auto;";
       links.forEach((link) => {
@@ -432,6 +446,7 @@ class TripLinks {
           const epoch = state?.epoch;
           if (state?.queued) await state.tail;
           pendingActions = Math.max(0, pendingActions - 1);
+          if (!modalOpen()) return false;
           if (state && state.epoch !== epoch) {
             transitioning = false;
             new Notice("An earlier trip link change failed. Retry this action.", 6000);
@@ -470,10 +485,10 @@ class TripLinks {
           }
           if (saved) {
             new Notice("Link deleted.");
-            if (pendingActions === 0 && !transitioning) close();
+            if (modalOpen() && pendingActions === 0 && !transitioning) close();
             return true;
           }
-          try { delBtn.focus?.(); } catch (_e) {}
+          if (modalOpen()) try { delBtn.focus?.(); } catch (_e) {}
           return false;
         };
       });
@@ -512,13 +527,24 @@ class TripLinks {
 
   _openModal({ title, build }) {
     const prior = document.querySelector(".sauce-links-modal-overlay");
-    if (prior) prior.remove();
+    if (prior) {
+      if (typeof prior._sauceClose === "function") prior._sauceClose();
+      else prior.remove();
+    }
     const overlay = document.body.createDiv({ cls: "sauce-links-modal-overlay" });
     overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 9999;";
     const modal = overlay.createDiv();
     modal.style.cssText = "background: var(--background-primary, #1c1c1c); color: var(--text-normal, #ddd); border: 1px solid var(--background-modifier-border, #444); border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: 80vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);";
     const escListener = (ev) => { if (ev.key === "Escape") close(); };
-    const close = () => { document.removeEventListener("keydown", escListener); overlay.remove(); };
+    let open = true;
+    const close = () => {
+      if (!open) return;
+      open = false;
+      document.removeEventListener("keydown", escListener);
+      overlay.remove();
+    };
+    close.isOpen = () => open;
+    overlay._sauceClose = close;
     overlay.onclick = (e) => { if (e.target === overlay) close(); };
     document.addEventListener("keydown", escListener);
     const h = modal.createEl("div", { text: title });

@@ -692,8 +692,11 @@ class TripEntryList {
         const incomingMtime = this._pageMtime(page);
         const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
           && incomingMtime > state.authority.writeMtime;
-        if (matches || externallyNewer) {
-          state.model = incoming;
+        const cached = incomingMtime == null ? this._cachedEntries(path, key) : null;
+        const cacheNewer = cached?.mtime != null && state.authority.writeMtime != null
+          && cached.mtime > state.authority.writeMtime;
+        if (matches || externallyNewer || cacheNewer) {
+          state.model = cacheNewer ? cached.model : incoming;
           state.authority = null;
         }
       } else {
@@ -719,6 +722,19 @@ class TripEntryList {
   _fileMtime(file) {
     const value = file?.stat?.mtime;
     return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  _cachedEntries(path, key) {
+    try {
+      if (typeof app === "undefined") return null;
+      const file = app.vault?.getAbstractFileByPath?.(path);
+      if (!file) return null;
+      const frontmatter = app.metadataCache?.getFileCache?.(file)?.frontmatter;
+      if (!frontmatter || typeof frontmatter !== "object") return null;
+      return {
+        mtime: this._fileMtime(file),
+        model: TripEntryList._asArray(frontmatter[key]),
+      };
+    } catch (_e) { return null; }
   }
   _queueEntryStructure(state, task) {
     const epoch = state.epoch;
