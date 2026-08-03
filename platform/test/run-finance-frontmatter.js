@@ -678,6 +678,68 @@ async function run() {
         && metadataListeners.size === 0 && vaultListeners.size === 0);
   }
   {
+    const sourcePath = "spice/finance/Invoices/Rename-Collision-Source.md";
+    const targetPath = "spice/finance/Invoices/Rename-Collision-Target.md";
+    const source = { path: sourcePath, stat: { mtime: 80 } };
+    const target = { path: targetPath, stat: { mtime: 70 } };
+    const currentFiles = new Map([[sourcePath, source], [targetPath, target]]);
+    const persisted = new Map([[source, { amount: 0 }], [target, { amount: 0 }]]);
+    const cached = new Map([[source, { amount: 0 }], [target, { amount: 0 }]]);
+    const metadataListeners = new Set();
+    const vaultListeners = new Set();
+    let lookupThrows = false;
+    const metadataCache = {
+      getFileCache: (file) => ({ frontmatter: cached.get(file) || null }),
+      on(event, listener) {
+        const ref = { event, listener };
+        metadataListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { metadataListeners.delete(ref); },
+    };
+    const vault = {
+      getAbstractFileByPath(path) {
+        if (lookupThrows) throw new Error("transient vault lookup failure");
+        return currentFiles.get(path) || null;
+      },
+      on(event, listener) {
+        const ref = { event, listener };
+        vaultListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { vaultListeners.delete(ref); },
+      emit(event, ...args) {
+        for (const ref of [...vaultListeners]) if (ref.event === event) ref.listener(...args);
+      },
+    };
+    global.app = {
+      vault,
+      metadataCache,
+      fileManager: { async processFrontMatter(file, mutator) { await mutator(persisted.get(file)); } },
+    };
+    const collisionFf = new FinanceFrontmatter();
+    await collisionFf.update(target, (fm) => { fm.amount = 2; });
+    currentFiles.delete(targetPath);
+    lookupThrows = true;
+    vault.emit("delete", target);
+    lookupThrows = false;
+    await collisionFf.update(source, (fm) => { fm.amount = 1; });
+    currentFiles.delete(sourcePath);
+    source.path = targetPath;
+    currentFiles.set(targetPath, source);
+    vault.emit("rename", source, sourcePath);
+    const observed = collisionFf.read(targetPath);
+    const sourceWon = !collisionFf._writtenFrontmatter.has(sourcePath)
+      && collisionFf._writtenFrontmatter.get(targetPath)?.frontmatter?.amount === 1
+      && observed?.amount === 1
+      && metadataListeners.size === 1 && vaultListeners.size === 2;
+    currentFiles.delete(targetPath);
+    vault.emit("delete", source);
+    ok("FF-12N rename authority replaces a displaced target retained through transient lookup failure",
+      sourceWon && collisionFf._writtenFrontmatter.size === 0
+        && metadataListeners.size === 0 && vaultListeners.size === 0);
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }

@@ -334,8 +334,11 @@ class FinanceFrontmatter {
             }
             const targetWritten = this._writtenFrontmatter.get(nextPath);
             if (targetWritten && targetWritten !== written) {
-                this._releaseWrittenSnapshot(priorPath, written);
-                return;
+                // The vault rename event proves renamedFile now owns nextPath.
+                // Any different owner retained there belongs to the displaced
+                // target identity (for example after a transient delete lookup),
+                // so retire it before moving the source authority into place.
+                this._releaseWrittenSnapshot(nextPath, targetWritten);
             }
             this._writtenFrontmatter.delete(priorPath);
             written.path = nextPath;
