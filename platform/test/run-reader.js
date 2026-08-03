@@ -654,19 +654,20 @@ async function dataviewCorrectnessCases() {
 
     const rejectState = { statuses: new Map([[file.path, 'unread']]), structuralQueue: null };
     const rejectQueue = new ReaderQueue();
-    let releaseReject = null;
+    const releaseRejects = [];
     let rejectCalls = 0;
     rejectQueue._setStatus = async (_dv, localState) => {
       rejectCalls++;
       localState.statuses.set(file.path, 'reading');
-      await new Promise((resolve) => { releaseReject = resolve; });
+      await new Promise((resolve) => { releaseRejects.push(resolve); });
       localState.statuses.set(file.path, 'unread');
       return false;
     };
     const rejectedFirst = rejectQueue._queueStatusTransition({}, rejectState, file.path, 'unread', 'reading', null);
     await new Promise((resolve) => setImmediate(resolve));
     const rejectedChild = rejectQueue._queueStatusTransition({}, rejectState, file.path, 'reading', 'archived', null);
-    releaseReject();
+    await new Promise((resolve) => setImmediate(resolve));
+    for (const releaseReject of releaseRejects.splice(0)) releaseReject();
     await Promise.all([rejectedFirst, rejectedChild]);
     ok('HC-READER-PERF-10 rejected parent gesture invalidates its queued stale descendant',
        rejectCalls === 1 && rejectState.statuses.get(file.path) === 'unread');
@@ -1181,12 +1182,19 @@ async function dataviewCorrectnessCases() {
   }
 }
 
+const harnessTimeout = setTimeout(() => {
+  console.error('Reader harness timed out before the final verdict; unresolved async fixtures are failures.');
+  process.exit(1);
+}, 10000);
+
 dataviewCorrectnessCases().then(() => {
+  clearTimeout(harnessTimeout);
   const passed = results.filter(([, p]) => p).length;
   const total  = results.length;
   console.log(`\n${passed}/${total} passed`);
   process.exit(passed === total ? 0 : 1);
 }).catch((error) => {
+  clearTimeout(harnessTimeout);
   console.error(error && error.stack || error);
   process.exit(1);
 });
