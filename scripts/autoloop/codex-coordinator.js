@@ -5474,7 +5474,10 @@ async function commandAdvance(ctx, args, deps = {}) {
       const priorPhase = record.phase;
       const stepped = await step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
       if (!args['dry-run'] && record.phase !== priorPhase) transitionedTo = record.phase;
-      if (TERMINAL.has(record.phase)) {
+      // Dry-run is a preview call — never durably release a lease on its
+      // behalf, even when the (already-terminal) record's phase happens to
+      // satisfy TERMINAL. Mirrors the transitionedTo gate immediately above.
+      if (!args['dry-run'] && TERMINAL.has(record.phase)) {
         // clearLease is a no-op on an unleased record (returns false) — only
         // persist the extra write when there was actually a lease to release,
         // so unleased advance calls stay byte-identical to pre-lease behavior.
@@ -7160,6 +7163,16 @@ async function main() {
     if (!record) throw new Error('deploy requires a known --card');
     requireLeaseToken(record, args, 'deploy', Date.now());
     result = await promoteAndDeploy(ctx, state, record);
+    // promoteAndDeploy mutates `record` in place (same reference held in
+    // `state.cards`) and persists its own writes internally; once it lands
+    // the record in a TERMINAL phase (deployed), release the lease and
+    // persist the release as a follow-up write — same conditional-persist
+    // pattern as commandAdvance's terminal release, so an unleased card
+    // never triggers an extra write.
+    if (TERMINAL.has(record.phase)) {
+      const released = clearLease(record, 'lease_released_terminal', () => new Date().toISOString());
+      if (released) writeState(ctx, state, record);
+    }
   } else if (command === 'recover') result = commandRecover(ctx);
   else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));

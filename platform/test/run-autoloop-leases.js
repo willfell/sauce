@@ -450,5 +450,32 @@ async function withFreshCoordinator(envOverrides, fn) {
     ok(writes >= 1, 'advance persists the terminal lease release');
   }
 
+  // FINDING 1 (review fix): --dry-run is a preview call and must never
+  // durably release a lease, even when the record's phase already satisfies
+  // TERMINAL (e.g. a stale --dry-run advance against an already-blocked,
+  // still-leased card). Mirrors the pre-existing `transitionedTo` dry-run
+  // gate in the same lock callback.
+  {
+    const state = { schema_version: 1, cards: { X: {
+      card: 'X', phase: 'blocked', reason: 'external block', lease: mkLease(),
+    } } };
+    let writes = 0;
+    const result = await commandAdvance({ root: '/workshop' }, {
+      card: 'X', 'lease-seconds': '0', 'lease-token': 'tok-1', 'dry-run': true,
+    }, {
+      withLock: immediateLock,
+      readState: () => state,
+      writeState: () => { writes++; },
+      stepCard: async (_ctx, _st, record) => ({ action: 'blocked', card: record.card, reason: record.reason }),
+      projectLoopStation: () => {},
+      leaseNowMs: () => T0 + 2000,
+      emit: () => {},
+    });
+    eq(result.action, 'blocked', 'dry-run advance on an already-terminal card still reports its phase');
+    ok(!!state.cards.X.lease, 'dry-run advance never releases a lease on a TERMINAL-phase card');
+    ok(!state.cards.X.lease_breaks, 'dry-run advance records no lease_breaks entry');
+    eq(writes, 0, 'dry-run advance performs zero persistence from the release path');
+  }
+
   console.log(`AUTOLOOP-LEASES PASS (${count} assertions)`);
 })().catch((err) => { console.error(err); process.exit(1); });
