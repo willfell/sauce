@@ -2613,6 +2613,26 @@ ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER ChromeBar gestures mutate the s
   } finally { global.app = priorApp; global.customJS = priorCustomJS; global.document = priorDocument; }
 }});
 
+ASYNC_TESTS.push({ name: "PERF8L-SECTION-EXPLORER singleton registry releases detached unique-note roots", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const fallback = { isConnected: true };
+  for (let i = 0; i < 500; i++) {
+    const root = { isConnected: true };
+    se._registerStructuralRoot({ structuralOwnerKey: `spice/wiki/${i}/Note.md` }, root);
+    root.isConnected = false;
+  }
+  assert.ok(se._structuralRoots.size <= 1,
+    "registering each unique note globally prunes all previously detached owner roots");
+  assert.strictEqual(
+    se._structuralRoot({ container: fallback }, { structuralOwnerKey: "spice/wiki/499/Note.md" }),
+    fallback,
+    "lookup releases the final detached owner and falls back to the dispatch container",
+  );
+  assert.strictEqual(se._structuralRoots.size, 0,
+    "no disconnected unique-note roots remain strongly reachable from the singleton registry");
+}});
+
 failures += !run("PERF8-SECTION-EXPLORER structural bulk awaits each receipt-bound move and counts only successes", () => {
   const source = sourceUnderTest();
   assert.ok(/adapter\s*&&\s*adapter\.structural\s*===\s*true[\s\S]*await\s+this\.applyDocMove/.test(source));

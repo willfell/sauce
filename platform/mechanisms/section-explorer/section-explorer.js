@@ -146,13 +146,23 @@ class SectionExplorer {
   // Wiki chrome and WikiTree are separate Dataview blocks. Bind structural
   // gestures to the explorer-owned container for the same note/view instead
   // of assuming the dispatching ChromeBar container owns the visible rows.
+  _pruneStructuralRoots() {
+    for (const [key, roots] of Array.from(this._structuralRoots.entries())) {
+      for (const root of Array.from(roots || [])) {
+        if (!root || root.isConnected === false) roots.delete(root);
+      }
+      if (!roots || roots.size === 0) this._structuralRoots.delete(key);
+    }
+  }
+
   _registerStructuralRoot(adapter, root) {
     const key = adapter && adapter.structuralOwnerKey;
     if (!key || !root) return;
+    // customJS exposes a session singleton. Sweep every owner key before a new
+    // registration so navigating through unique notes cannot retain their
+    // detached Dataview trees and closures for the rest of the app session.
+    this._pruneStructuralRoots();
     const prior = this._structuralRoots.get(key) || new Set();
-    for (const item of Array.from(prior)) {
-      if (item && item.isConnected === false) prior.delete(item);
-    }
     prior.add(root);
     this._structuralRoots.set(key, prior);
   }
@@ -160,6 +170,7 @@ class SectionExplorer {
   _structuralRoot(dv, adapter) {
     const fallback = (dv && dv.container) ? dv.container : dv;
     const key = adapter && adapter.structuralOwnerKey;
+    this._pruneStructuralRoots();
     const roots = key && this._structuralRoots.get(key);
     if (!roots || roots.size === 0) return fallback;
     const candidates = Array.from(roots).filter((root) => root && root.isConnected !== false);
