@@ -552,11 +552,13 @@ async function run() {
         && metadataListeners.size === 0 && vaultListeners.size === 0);
   }
   {
-    const originalPath = "spice/finance/Invoices/Renamed-After-Watch.md";
-    const renamedPath = "spice/finance/Invoices/Renamed-Then-Deleted.md";
-    const file = { path: originalPath, stat: { mtime: 10 } };
-    const currentFiles = new Map([[originalPath, file]]);
-    const persisted = { amount: 0 };
+    const files = [];
+    const currentFiles = new Map();
+    for (let i = 0; i < 65; i++) {
+      const file = { path: `spice/finance/Invoices/Renamed-After-Watch-${i}.md`, stat: { mtime: i + 1 } };
+      files.push({ file, originalPath: file.path, renamedPath: `spice/finance/Invoices/Renamed-Then-Deleted-${i}.md` });
+      currentFiles.set(file.path, file);
+    }
     const stale = { amount: 0 };
     const metadataListeners = new Set();
     const vaultListeners = new Set();
@@ -584,24 +586,30 @@ async function run() {
     global.app = {
       vault,
       metadataCache,
-      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator({ amount: 0 }); } },
     };
     const renamedFf = new FinanceFrontmatter();
-    await renamedFf.update(file, (fm) => { fm.amount = 1; });
-    const registered = renamedFf._writtenFrontmatter.get(originalPath)?.frontmatter?.amount === 1
-      && metadataListeners.size === 1 && vaultListeners.size === 2;
-    currentFiles.delete(originalPath);
-    file.path = renamedPath;
-    currentFiles.set(renamedPath, file);
-    vault.emit("rename", file, originalPath);
-    const rekeyed = !renamedFf._writtenFrontmatter.has(originalPath)
-      && renamedFf._writtenFrontmatter.get(renamedPath)?.frontmatter?.amount === 1
-      && renamedFf.read(file).amount === 1
-      && metadataListeners.size === 1 && vaultListeners.size === 2;
-    currentFiles.delete(renamedPath);
-    vault.emit("delete", file);
-    vault.emit("delete", file);
-    ok("FF-12L rename rekeys authoritative ownership so later deletion releases every listener",
+    for (const { file } of files) await renamedFf.update(file, (fm) => { fm.amount = 1; });
+    const registered = renamedFf._writtenFrontmatter.size === 65
+      && metadataListeners.size === 65 && vaultListeners.size === 130;
+    for (const entry of files) {
+      currentFiles.delete(entry.originalPath);
+      entry.file.path = entry.renamedPath;
+      currentFiles.set(entry.renamedPath, entry.file);
+      vault.emit("rename", entry.file, entry.originalPath);
+      vault.emit("rename", entry.file, entry.originalPath);
+    }
+    const rekeyed = files.every(({ file, originalPath, renamedPath }) =>
+      !renamedFf._writtenFrontmatter.has(originalPath)
+        && renamedFf._writtenFrontmatter.get(renamedPath)?.frontmatter?.amount === 1
+        && renamedFf.read(file).amount === 1)
+      && metadataListeners.size === 65 && vaultListeners.size === 130;
+    for (const { file, renamedPath } of files) {
+      currentFiles.delete(renamedPath);
+      vault.emit("delete", file);
+      vault.emit("delete", file);
+    }
+    ok("FF-12L repeated rename then delete rekeys authority and releases every listener",
       registered && rekeyed && renamedFf._writtenFrontmatter.size === 0
         && metadataListeners.size === 0 && vaultListeners.size === 0);
   }
