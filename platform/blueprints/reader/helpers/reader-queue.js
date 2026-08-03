@@ -144,7 +144,10 @@ class ReaderQueue {
         if (!cur || !cur.file) return;
         if (cur.type !== 'reader-hub') return;
 
-        const state = { statuses: new Map(), structuralQueue: null, toggles: new Map(), container: null, ctx: null };
+        const state = {
+            statuses: new Map(), structuralQueue: null, toggles: new Map(),
+            container: null, ctx: null, renderGeneration: 0,
+        };
 
         // DocSearch strip — scoped to spice/reader, NON-recursive (flat leaves),
         // entityType reader-article, persist:false (search always starts empty).
@@ -193,7 +196,10 @@ class ReaderQueue {
      */
     _renderResults(dv, container, ctx, state) {
         if (!container || typeof container.createEl !== 'function') return;
-        if (state) state.toggles = new Map();
+        if (state) {
+            state.renderGeneration = (Number.isSafeInteger(state.renderGeneration) ? state.renderGeneration : 0) + 1;
+            state.toggles = new Map();
+        }
         const sel = ReaderQueue.selectArticles(dv, state && state.statuses);
 
         // 3. Glance pills — Unread N · Reading N · Archived N (any zero hidden).
@@ -425,6 +431,7 @@ class ReaderQueue {
                         children: this._childNodes(container),
                         priorStatus: state.statuses.get(path),
                         toggles: state.toggles,
+                        appliedRenderGeneration: null,
                         // A prior queued receipt may have replaced or restored the
                         // whole container since this gesture was clicked. Rebind
                         // at execution time so rollback focuses the currently live
@@ -435,26 +442,40 @@ class ReaderQueue {
                         state.statuses.set(path, next);
                         this._clearContainer(container);
                         this._renderResults(dv, container, state.ctx, state);
+                        receipt.appliedRenderGeneration = state.renderGeneration;
                         try { state.toggles.get(path)?.focus?.(); } catch (_e) {}
                         return receipt;
                     } catch (error) {
                         state.statuses.set(path, receipt.priorStatus);
                         state.toggles = receipt.toggles;
                         this._restoreChildren(container, receipt.children);
+                        this._bumpRenderGeneration(state);
                         throw error;
                     }
                 },
                 rollback: async (receipt) => {
                     if (!receipt) return;
                     state.statuses.set(path, receipt.priorStatus);
-                    state.toggles = receipt.toggles;
-                    this._restoreChildren(receipt.container, receipt.children);
+                    if (this._receiptOwnsSurface(state, receipt)) {
+                        state.toggles = receipt.toggles;
+                        this._restoreChildren(receipt.container, receipt.children);
+                        this._bumpRenderGeneration(state);
+                    } else {
+                        // DocSearch (or another surface owner) rendered after this
+                        // receipt applied. Keep that newest mode/context authoritative
+                        // and redraw it from the rolled-back status model instead of
+                        // restoring stale whole-container children.
+                        const liveContainer = state.container || receipt.container;
+                        this._clearContainer(liveContainer);
+                        this._renderResults(dv, liveContainer, state.ctx, state);
+                    }
+                    const liveFocusTarget = this._liveFocusTarget(state, path, receipt.focusTarget);
                     try {
-                        if (receipt.focusTarget === receipt.container && typeof receipt.container?.setAttribute === 'function') {
-                            receipt.container.setAttribute('tabindex', '-1');
+                        if (liveFocusTarget === state.container && typeof state.container?.setAttribute === 'function') {
+                            state.container.setAttribute('tabindex', '-1');
                         }
                     } catch (_e) {}
-                    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+                    try { liveFocusTarget?.focus?.(); } catch (_e) {}
                 },
                 write: () => appRef.fileManager.processFrontMatter(file, (fm) => {
                     fm.status = next;
@@ -492,6 +513,19 @@ class ReaderQueue {
             for (const toggle of (state.toggles && state.toggles.values()) || []) if (isLive(toggle)) return toggle;
         } catch (_e) {}
         return container || null;
+    }
+
+    _receiptOwnsSurface(state, receipt) {
+        return !!(state && receipt
+            && state.container === receipt.container
+            && Number.isSafeInteger(receipt.appliedRenderGeneration)
+            && state.renderGeneration === receipt.appliedRenderGeneration);
+    }
+
+    _bumpRenderGeneration(state) {
+        if (!state) return 0;
+        state.renderGeneration = (Number.isSafeInteger(state.renderGeneration) ? state.renderGeneration : 0) + 1;
+        return state.renderGeneration;
     }
 
     _childNodes(container) {

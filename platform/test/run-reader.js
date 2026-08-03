@@ -886,6 +886,101 @@ async function dataviewCorrectnessCases() {
     ok('PERF6C-CROSS-ARTICLE-FOCUS-REBIND hidden sibling rejection focuses a live restored control, never its detached click-time node',
        hiddenFocusPassed,
        JSON.stringify(hiddenDiagnostics));
+
+    const runSearchRollbackFixture = async (QueueClass) => {
+      const searchArticle = art('Search Race', 'unread', '2026-08-03T07:00:00Z');
+      const searchPath = searchArticle.file.path;
+      const searchFile = { path: searchPath, _fm: { status: 'unread' } };
+      let pendingWrite = null;
+      let onSearchChange = null;
+      let capturedState = null;
+      const searchApp = {
+        vault: { getAbstractFileByPath: (path) => (path === searchPath ? searchFile : null) },
+        fileManager: {
+          processFrontMatter: (_target, mutate) => new Promise((resolve, reject) => {
+            pendingWrite = { resolve: () => { mutate(searchFile._fm); resolve(); }, reject };
+          }),
+        },
+      };
+      const resultsContainer = makeDomEl('div');
+      const hostContainer = makeDomEl('div');
+      hostContainer.appendChild(resultsContainer);
+      const searchDv = Object.assign(makeDv([searchArticle]), {
+        container: hostContainer,
+        current: () => ({ type: 'reader-hub', file: { path: 'spice/reader/Reader.md' } }),
+      });
+      const initialCtx = { resultsContainer, hasActiveFilter: false, query: '' };
+      const priorSearchApp = global.app;
+      const priorSearchWindow = global.window;
+      const priorSearchCustomJS = global.customJS;
+      const hadSearchDocument = Object.prototype.hasOwnProperty.call(global, 'document');
+      const priorSearchDocument = global.document;
+      try {
+        global.document = { activeElement: null };
+        global.app = searchApp;
+        global.window = { app: searchApp };
+        global.customJS = {
+          DocSearch: {
+            render: (_dv, opts) => { onSearchChange = opts.onChange; return initialCtx; },
+            matches: (page, ctx) => !ctx.query || page.file.path === searchPath,
+          },
+          RenderSafe: {
+            page: (dv) => dv.current(),
+            mutateStructure: async (opts) => {
+              const receipt = await opts.apply();
+              try { await opts.write(); return { ok: true, receipt }; }
+              catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+            },
+          },
+        };
+        global.window.customJS = global.customJS;
+        const queue = new QueueClass();
+        const renderResults = queue._renderResults;
+        queue._renderResults = function (...args) {
+          capturedState = args[3];
+          return renderResults.apply(this, args);
+        };
+        queue.render(searchDv);
+        const initialToggle = capturedState && capturedState.toggles.get(searchPath);
+        const transition = initialToggle.listeners.click({ stopPropagation() {} });
+        for (let i = 0; i < 20 && !pendingWrite; i++) await new Promise((resolve) => setImmediate(resolve));
+        if (!pendingWrite || typeof onSearchChange !== 'function') return false;
+        const activeCtx = { resultsContainer, hasActiveFilter: true, query: 'Search Race' };
+        onSearchChange(activeCtx);
+        const activeSearchRendered = resultsContainer.children.some((child) => child.textContent === 'Results (1)');
+        const optimisticSearchToggle = capturedState.toggles.get(searchPath);
+        const optimisticSearchCoherent = optimisticSearchToggle
+          && optimisticSearchToggle.textContent === 'Reading'
+          && resultsContainer.contains(optimisticSearchToggle);
+        pendingWrite.reject(new Error('search race fixture rejected'));
+        await transition;
+        const restoredToggle = capturedState.toggles.get(searchPath);
+        return activeSearchRendered && optimisticSearchCoherent
+          && capturedState.ctx === activeCtx && capturedState.statuses.get(searchPath) === 'unread'
+          && resultsContainer.children.some((child) => child.textContent === 'Results (1)')
+          && !resultsContainer.children.some((child) => child.textContent === 'Unread')
+          && restoredToggle && restoredToggle !== optimisticSearchToggle
+          && restoredToggle.textContent === 'Unread' && resultsContainer.contains(restoredToggle)
+          && global.document.activeElement === restoredToggle
+          && capturedState.structuralQueue === null;
+      } catch (_e) {
+        return false;
+      } finally {
+        global.app = priorSearchApp;
+        global.window = priorSearchWindow;
+        global.customJS = priorSearchCustomJS;
+        if (hadSearchDocument) global.document = priorSearchDocument; else delete global.document;
+      }
+    };
+    const staleSearchMutantSrc = queueSrc.replace(
+      'if (this._receiptOwnsSurface(state, receipt)) {',
+      'if (true) { // controlled stale-receipt mutant',
+    );
+    const StaleSearchReaderQueue = new Function(`${staleSearchMutantSrc}\nreturn ReaderQueue;`)();
+    const liveSearchRollback = await runSearchRollbackFixture(ReaderQueue);
+    const mutantSearchRollback = await runSearchRollbackFixture(StaleSearchReaderQueue);
+    ok('PERF6D-DOCSEARCH-ROLLBACK-COORDINATION rejection preserves the newest filtered render and kills stale whole-container restoration',
+       staleSearchMutantSrc !== queueSrc && liveSearchRollback && !mutantSearchRollback);
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;
