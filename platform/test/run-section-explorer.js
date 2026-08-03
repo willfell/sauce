@@ -295,7 +295,7 @@ failures += !run("makeAdapter returns an object exposing render-ready shape", ()
   assert.strictEqual(typeof adapter.listSections, "function");
 });
 
-failures += !run("makeAdapter forwards the move block + emptySubsectionCount (rail Move / section-⋯ depend on it)", () => {
+failures += !run("makeAdapter forwards move, emptySubsectionCount, and structural owner identity", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const moveBlock = {
@@ -313,6 +313,8 @@ failures += !run("makeAdapter forwards the move block + emptySubsectionCount (ra
     icons: { folder: "<svg/>", file: "<svg/>" },
     rootClass: "se-root",
     move: moveBlock,
+    structural: true,
+    structuralOwnerKey: "spice/wiki/Wiki.md",
     emptySubsectionCount: (section) => 3,
   });
   assert.ok(adapter.move, "makeAdapter must forward config.move");
@@ -320,6 +322,8 @@ failures += !run("makeAdapter forwards the move block + emptySubsectionCount (ra
   assert.strictEqual(typeof adapter.move.canAcceptSection, "function");
   assert.strictEqual(typeof adapter.emptySubsectionCount, "function");
   assert.strictEqual(adapter.emptySubsectionCount({ folder: "x" }), 3);
+  assert.strictEqual(adapter.structural, true);
+  assert.strictEqual(adapter.structuralOwnerKey, "spice/wiki/Wiki.md");
   // Absent config → null move + undefined helper (consumers no-op safely).
   const bare = se.makeAdapter({
     resolveContext: () => ({}), listSections: () => [], listPages: () => [],
@@ -2217,6 +2221,7 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
         { path: FOLDER + "/Two.md", name: "Two.md" },
         { path: FOLDER + "/sub/Deep.md", name: "Deep.md" },
       ]),
+      getAbstractFileByPath: (p) => ({ path: p, name: p.split("/").pop(), __realVaultFile: true }),
     },
     metadataCache: {
       getFileCache: (f) => ({ frontmatter: { type: "doc-note", title: f.name.replace(/\.md$/, "") } }),
@@ -2226,7 +2231,7 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
   // Spy the downstream move flow.
   const moveCalls = [];
   se.openMovePicker = (opts) => { se.__lastMoveOpts = opts; };
-  se.applyDocMove = (dv, file, dest) => { moveCalls.push({ from: file.path, dest }); };
+  se.applyDocMove = (dv, file, dest) => { moveCalls.push({ from: file.path, dest, real: file.__realVaultFile }); };
 
   const adapter = { move: { docType: "doc-note", root: FOLDER, enumerateSectionTargets: () => ([{ folder: "spice/projects/p/docs/b", label: "B", depth: 1 }]) } };
   const section = { folder: FOLDER };
@@ -2265,6 +2270,7 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
   const moved = moveCalls.map((m) => m.from).sort();
   assert.deepStrictEqual(moved, [FOLDER + "/One.md", FOLDER + "/Two.md"], "both checked docs moved");
   assert.ok(moveCalls.every((m) => m.dest === "spice/projects/p/docs/b"), "moved to the picked destination");
+  assert.ok(moveCalls.every((m) => m.real === true), "bulk flow resolves each selected path to a real vault file");
 
   global.app = prevApp;
   delete global.document;
@@ -2560,9 +2566,49 @@ ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER section rename/delete receipts 
   } finally { global.customJS = priorCustomJS; }
 }});
 
+ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER ChromeBar gestures mutate the same-view WikiTree owner", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const priorDocument = global.document;
+  const view = {};
+  const row = { __sePath: "spice/wiki/a/Doc.md", children: [] };
+  const tree = {
+    children: [row], closest: () => view,
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; },
+    appendChild(node) { this.children.push(node); node.parentNode = this; },
+  };
+  row.parentNode = tree;
+  const chrome = {
+    children: [], closest: () => view,
+    createEl() { const node = { parentNode: this, remove: () => { this.children = this.children.filter((x) => x !== node); } }; this.children.push(node); return node; },
+  };
+  const adapter = { structural: true, structuralOwnerKey: "spice/wiki/a/A.md", move: { rewriteOnDocMove: () => null } };
+  se._registerStructuralRoot(adapter, tree);
+  global.document = { activeElement: null, body: {} };
+  global.app = { fileManager: { renameFile: async () => { throw new Error("rename failed"); } } };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    const receipt = await opts.apply();
+    assert.deepStrictEqual(tree.children, [], "optimism removes the real WikiTree row");
+    assert.deepStrictEqual(chrome.children, [], "ChromeBar container receives no fake preview");
+    try { return { ok: true, value: await opts.write() }; }
+    catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+  } } };
+  try {
+    const result = await se.applyDocMove({ container: chrome }, { path: row.__sePath }, "spice/wiki/b", adapter);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(tree.children[0], row, "rollback restores the exact WikiTree row");
+    assert.ok(/render\(dv, adapter\)[\s\S]*_registerStructuralRoot\(adapter, container0\)/.test(sourceUnderTest()),
+      "production render registers each structural owner");
+  } finally { global.app = priorApp; global.customJS = priorCustomJS; global.document = priorDocument; }
+}});
+
 failures += !run("PERF8-SECTION-EXPLORER structural bulk awaits each receipt-bound move and counts only successes", () => {
   const source = sourceUnderTest();
   assert.ok(/adapter\s*&&\s*adapter\.structural\s*===\s*true[\s\S]*await\s+this\.applyDocMove/.test(source));
+  assert.ok(/getAbstractFileByPath\(m\.from\)[\s\S]*applyDocMove\(dv,\s*file/.test(source),
+    "bulk moves must resolve real vault files before calling fileManager.renameFile");
   assert.ok(/moved\s*\+=\s*1/.test(source));
 });
 

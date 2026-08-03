@@ -32,6 +32,7 @@ class SectionExplorer {
   // the instance here so external callers reach them. Instance (prototype)
   // methods already resolve, so we never clobber them (the `undefined` guard).
   constructor() {
+    this._structuralRoots = new Map();
     try {
       const Ctor = SectionExplorer;
       for (const key of Object.getOwnPropertyNames(Ctor)) {
@@ -95,10 +96,10 @@ class SectionExplorer {
   // Receipt-bound optimistic preview for project document/section creation.
   // EntityCreate owns persistence and calls these hooks only when a genuinely
   // new target is about to be created (existing-file navigation stays inert).
-  entityCreateLifecycle(dv) {
+  entityCreateLifecycle(dv, adapter) {
     return {
       apply: (ctx) => {
-        const root = (dv && dv.container) ? dv.container : dv;
+        const root = this._structuralRoot(dv, adapter);
         if (!root || typeof root.createEl !== "function") return { focusTarget: null };
         const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
         const parent = (root.querySelector && (
@@ -135,8 +136,41 @@ class SectionExplorer {
     return null;
   }
 
-  _applyStructuralReceipt(dv, spec) {
-    const root = (dv && dv.container) ? dv.container : dv;
+  // Wiki chrome and WikiTree are separate Dataview blocks. Bind structural
+  // gestures to the explorer-owned container for the same note/view instead
+  // of assuming the dispatching ChromeBar container owns the visible rows.
+  _registerStructuralRoot(adapter, root) {
+    const key = adapter && adapter.structuralOwnerKey;
+    if (!key || !root) return;
+    const prior = this._structuralRoots.get(key) || new Set();
+    for (const item of Array.from(prior)) {
+      if (item && item.isConnected === false) prior.delete(item);
+    }
+    prior.add(root);
+    this._structuralRoots.set(key, prior);
+  }
+
+  _structuralRoot(dv, adapter) {
+    const fallback = (dv && dv.container) ? dv.container : dv;
+    const key = adapter && adapter.structuralOwnerKey;
+    const roots = key && this._structuralRoots.get(key);
+    if (!roots || roots.size === 0) return fallback;
+    const candidates = Array.from(roots).filter((root) => root && root.isConnected !== false);
+    if (!candidates.length) return fallback;
+    const scopeOf = (node) => {
+      try { return node?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-embed") || null; }
+      catch (_e) { return null; }
+    };
+    const dispatchScope = scopeOf(fallback);
+    if (dispatchScope) {
+      const scoped = candidates.find((root) => scopeOf(root) === dispatchScope);
+      if (scoped) return scoped;
+    }
+    return candidates.length === 1 ? candidates[0] : fallback;
+  }
+
+  _applyStructuralReceipt(dv, spec, adapter) {
+    const root = this._structuralRoot(dv, adapter);
     const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
     const node = this._ownedNode(root, spec.identityKey, spec.identityValue);
     if (spec.kind === "rename" && node) {
@@ -194,7 +228,7 @@ class SectionExplorer {
       app: (typeof globalThis !== "undefined" && globalThis.app) || null,
       dv,
       failureMessage: spec.failureMessage || "Could not update item",
-      apply: () => this._applyStructuralReceipt(dv, spec),
+      apply: () => this._applyStructuralReceipt(dv, spec, adapter),
       rollback: (receipt) => this._rollbackStructuralReceipt(receipt),
       write,
     });
@@ -369,6 +403,7 @@ class SectionExplorer {
         ? ((section) => config.emptySubsectionCount(section))
         : undefined,
       structural: config.structural === true,
+      structuralOwnerKey: config.structuralOwnerKey || null,
     };
   }
 
@@ -381,6 +416,7 @@ class SectionExplorer {
     this._curDv = dv;
     const container0 = (dv && dv.container) ? dv.container : dv;
     if (!container0 || typeof container0.createEl !== "function") return;
+    if (adapter.structural === true) this._registerStructuralRoot(adapter, container0);
     const ctx = adapter.resolveContext(dv);
     if (!ctx) return;
 
@@ -1388,11 +1424,18 @@ class SectionExplorer {
                 let moved = 0;
                 if (adapter && adapter.structural === true) {
                   for (const m of moves) {
-                    const result = await this.applyDocMove(dv, { path: m.from }, dest, adapter);
+                    const file = app.vault.getAbstractFileByPath(m.from);
+                    if (!file) continue;
+                    const result = await this.applyDocMove(dv, file, dest, adapter);
                     if (result && result.ok === true) moved += 1;
                   }
                 } else {
-                  for (const m of moves) { this.applyDocMove(dv, { path: m.from }, dest, adapter); moved += 1; }
+                  for (const m of moves) {
+                    const file = app.vault.getAbstractFileByPath(m.from);
+                    if (!file) continue;
+                    this.applyDocMove(dv, file, dest, adapter);
+                    moved += 1;
+                  }
                 }
                 try {
                   const bits = ["Moved " + moved + " doc" + (moved === 1 ? "" : "s")];

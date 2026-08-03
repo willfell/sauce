@@ -759,6 +759,8 @@ const pages = [
   // W21a — move block shape.
   ok('W21a move block: root/sectionType/rootLabel present',
      cfg.move && cfg.move.root === 'spice/wiki' && cfg.move.sectionType === 'wiki-section' && cfg.move.rootLabel === 'Wiki (root)');
+  ok('W21a2 structural owner identity binds ChromeBar gestures to this WikiTree note',
+     cfg.structural === true && cfg.structuralOwnerKey === cur.file.path);
   ok('W21b move.rewriteOnDocMove() === null (folder-is-truth)',
      typeof cfg.move.rewriteOnDocMove === 'function' && cfg.move.rewriteOnDocMove('spice/wiki/x', 'spice/wiki/y/D.md') === null);
   ok('W21c move.rewriteOnSectionMove() === null',

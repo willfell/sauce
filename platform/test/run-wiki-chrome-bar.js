@@ -34,25 +34,29 @@ const cfg = inst._config();
   const calls = [];
   const prevCJS = global.customJS; const prevApp = global.app;
   global.customJS = {
-    EntityCreate: { create: (o) => calls.push({ create: o.instance }) },
+    EntityCreate: { create: (o) => calls.push({ create: o.instance, structuralLifecycle: o.structuralLifecycle }) },
     WikiLeafActions: { _openMoveDialog: (dv, p) => calls.push({ legacyMove: p }) },
     SectionExplorer: {
       openMovePicker: (o) => calls.push({ move: o && o.currentFolder }),
       pagesUnder: () => [],
       sectionTargets: () => [{ folder: 'spice/wiki', label: 'Wiki (root)', depth: 0 }],
-      applyDocMove: () => {},
+      entityCreateLifecycle: (_dv, adapter) => { calls.push({ lifecycleKey: adapter.structuralOwnerKey }); return {}; },
+      applyDocMove: (_dv, _file, _folder, adapter) => calls.push({ leafOwnerKey: adapter.structuralOwnerKey }),
     },
   };
   const dv = { current: () => ({ file: { path: 'spice/wiki/Foo/Bar.md' } }), pages: () => ({ array: () => [] }) };
   global.app = { workspace: { getActiveFile: () => ({ path: 'spice/wiki/Foo/Bar.md' }) } };
-  cfg.dispatch(dv, { context: 'wiki-hub' }, 'new-page');
-  cfg.dispatch(dv, { context: 'wiki-hub' }, 'new-section');
+  cfg.dispatch(dv, { context: 'wiki-hub', path: 'spice/wiki/Wiki.md' }, 'new-page');
+  cfg.dispatch(dv, { context: 'wiki-hub', path: 'spice/wiki/Wiki.md' }, 'new-section');
   cfg.dispatch(dv, { context: 'wiki-page' }, 'move');
   global.customJS = prevCJS; global.app = prevApp;
   ok('WCB-DISPATCH-1 new-page → EntityCreate.create(instance:"wiki-page")', calls.some((c) => c.create === 'wiki-page'));
   ok('WCB-DISPATCH-2 new-section → EntityCreate.create(instance:"wiki-section")', calls.some((c) => c.create === 'wiki-section'));
   ok('WCB-DISPATCH-3 leaf move → SectionExplorer.openMovePicker(currentFolder=file folder), not legacy dialog',
     calls.some((c) => c.move === 'spice/wiki/Foo') && !calls.some((c) => c.legacyMove !== undefined));
+  ok('WCB-DISPATCH-3b create gestures carry the WikiTree structural owner identity',
+    calls.filter((c) => c.lifecycleKey === 'spice/wiki/Wiki.md').length === 2
+      && calls.filter((c) => c.create && c.structuralLifecycle).length === 2);
 }
 // WCB-DEST — destinations lead with a { section:"This wiki" } marker + a Wiki-home entry;
 // the root hub omits its own Wiki entry (no self-nav).
@@ -91,13 +95,13 @@ const cfg = inst._config();
 {
   const calls = [];
   const prevCJS = global.customJS;
-  const stubConfig = { move: { rewriteOnDocMove: () => null, enumerateSectionTargets: () => [] } };
+  const stubConfig = { structuralOwnerKey: 'spice/wiki/cooking/Cooking.md', move: { rewriteOnDocMove: () => null, enumerateSectionTargets: () => [] } };
   global.customJS = {
     WikiTree: { _buildConfig: () => stubConfig },
     SectionExplorer: {
-      makeAdapter: (c) => ({ __fromConfig: c }),
-      openSelectDocsPicker: (dv, adapter, section) => calls.push({ selectDocs: !!dv, hasSection: !!section }),
-      _openMovePickerForSection: (dv, a, sec) => calls.push({ moveSection: sec && sec.folder }),
+      makeAdapter: (c) => ({ __fromConfig: c, structuralOwnerKey: c.structuralOwnerKey }),
+      openSelectDocsPicker: (dv, adapter, section) => calls.push({ selectDocs: !!dv, hasSection: !!section, ownerKey: adapter.structuralOwnerKey }),
+      _openMovePickerForSection: (dv, a, sec) => calls.push({ moveSection: sec && sec.folder, ownerKey: a.structuralOwnerKey }),
       _openDeleteConfirm: (dv, a, sec) => calls.push({ deleteSection: sec && sec.folder }),
       openMovePicker: (o) => calls.push({ openMovePicker: o && o.title }),
       applyDocMove: () => calls.push({ applyDocMove: true }),
@@ -121,7 +125,7 @@ const cfg = inst._config();
   global.app = prevApp;
 
   ok('WCB-DISPATCH-4 select-docs → SectionExplorer.openSelectDocsPicker(dv, adapter, section)',
-    calls.some((c) => c.selectDocs === true && c.hasSection === true));
+    calls.some((c) => c.selectDocs === true && c.hasSection === true && c.ownerKey === 'spice/wiki/cooking/Cooking.md'));
   ok('WCB-DISPATCH-5 move-section → SectionExplorer._openMovePickerForSection(section=current folder)',
     calls.some((c) => c.moveSection === 'spice/wiki/cooking'));
   ok('WCB-DISPATCH-6 delete-section → SectionExplorer._openDeleteConfirm(section=current folder)',

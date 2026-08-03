@@ -173,6 +173,7 @@ class WikiTree {
         const dotsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
 
         return {
+            structuralOwnerKey: filePath,
             resolveContext: () => ({ scopePath }),
             listSections: (dv2, ctx) => {
                 const rawPages = dv2.pages('"' + ctx.scopePath + '"');

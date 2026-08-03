@@ -115,7 +115,7 @@ class WikiChromeBar {
           if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
             const structuralLifecycle = customJS.SectionExplorer
               && typeof customJS.SectionExplorer.entityCreateLifecycle === "function"
-              ? customJS.SectionExplorer.entityCreateLifecycle(dv) : null;
+              ? customJS.SectionExplorer.entityCreateLifecycle(dv, { structuralOwnerKey: ctx.path }) : null;
             return customJS.EntityCreate.create({ instance, dv, structuralLifecycle });
           } else if (typeof Notice === "function") { new Notice("WikiChromeBar: EntityCreate unavailable — reinstall wiki blueprint.", 6000); }
           return;
@@ -135,7 +135,8 @@ class WikiChromeBar {
               labelOf: (p) => (p.title && String(p.title).trim()) || "",
             });
             const currentFolder = file.path.slice(0, file.path.lastIndexOf("/"));
-            const adapter = { structural: true, move: { rewriteOnDocMove: () => null } };
+            const adapter = { structural: true, structuralOwnerKey: file.path,
+              move: { rewriteOnDocMove: () => null } };
             customJS.SectionExplorer.openMovePicker({
               targets, currentFolder, title: "Move to section",
               onPick: (folder) => customJS.SectionExplorer.applyDocMove(dv, file, folder, adapter),
