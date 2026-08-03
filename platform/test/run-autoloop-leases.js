@@ -11,6 +11,7 @@ const delivery = require('../mechanisms/delivery');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
+  requireLeaseToken, commandRecordReview, commandPark, commandAdvance,
 } = require(coordinatorModulePath);
 
 let count = 0;
@@ -264,6 +265,189 @@ async function withFreshCoordinator(envOverrides, fn) {
     } finally {
       fs.rmSync(claimTmp, { recursive: true, force: true });
     }
+  }
+
+  // --- Task 2: pipeline-verb enforcement (requireLeaseToken) ---
+
+  // commandRecordReview is the fully-worked pure-deps example: exercises the
+  // shared guard through a real verb call (refusal codes + renew-on-match +
+  // tokenless back-compat), not just the guard function in isolation.
+  const HEAD = 'a'.repeat(40);
+  function reviewFixture(lease) {
+    // worktree must exist on disk — commandRecordReview checks it with real
+    // fs.existsSync (no worktreeExists dep seam), mirroring the os.tmpdir()
+    // fixture used by the reference invocation in run-codex-autoloop.js.
+    return { schema_version: 1, cards: { R: {
+      card: 'R', phase: 'implementing', worktree: os.tmpdir(), branch: 'b',
+      reviews: [], ...(lease ? { lease } : {}),
+    } } };
+  }
+  const reviewArgs = {
+    json: true, card: 'R', lens: 'correctness', verdict: 'pass',
+    summary: 'review looks fine and ready', 'expected-head': HEAD,
+  };
+  const reviewDeps = (state, extra = {}) => ({
+    readState: () => state, sh: () => HEAD, writeState: () => {}, projectLoopStation: () => {},
+    withLock: immediateLock, worktreeExists: () => true,
+    leaseNowMs: () => T0 + 1000, now: () => new Date(T0 + 1000).toISOString(), ...extra,
+  });
+
+  // live lease + no token → lease_required
+  await assert.rejects(() => commandRecordReview({ root: '/ws' }, { ...reviewArgs }, reviewDeps(reviewFixture(mkLease()))),
+    (e) => e.code === 'lease_required', 'record-review requires token under live lease'); count++;
+  // live lease + wrong token → lease_mismatch
+  await assert.rejects(() => commandRecordReview({ root: '/ws' }, { ...reviewArgs, 'lease-token': 'wrong' }, reviewDeps(reviewFixture(mkLease()))),
+    (e) => e.code === 'lease_mismatch', 'wrong token refused'); count++;
+  // stale lease + old token → lease_stale (must re-resume to take over)
+  {
+    const state = reviewFixture(mkLease());
+    await assert.rejects(() => commandRecordReview({ root: '/ws' }, { ...reviewArgs, 'lease-token': 'tok-1' },
+      reviewDeps(state, { leaseNowMs: () => T0 + LEASE_TTL_MS + 1, now: () => new Date(T0 + LEASE_TTL_MS + 1).toISOString() })),
+      (e) => e.code === 'lease_stale', 'stale token refused'); count++;
+  }
+  // matching token → proceeds + renews
+  {
+    const state = reviewFixture(mkLease());
+    const r = await commandRecordReview({ root: '/ws' }, { ...reviewArgs, 'lease-token': 'tok-1' }, reviewDeps(state));
+    ok(r.ok, 'matching token proceeds');
+    eq(state.cards.R.lease.renewed_at, new Date(T0 + 1000).toISOString(), 'verb renews lease');
+  }
+  // unleased card → tokenless verb still proceeds (back-compat)
+  {
+    const state = reviewFixture(null);
+    const r = await commandRecordReview({ root: '/ws' }, { ...reviewArgs }, reviewDeps(state));
+    ok(r.ok, 'unleased card works tokenless');
+  }
+
+  // requireLeaseToken directly: identical shared behavior for every enforced
+  // verb — refusal codes, action naming (`${verb}-refused`), stale-before-
+  // missing-token ordering, and renew-on-match.
+  {
+    const verbs = [
+      'record-review', 'verify-gates', 'record-pr', 'advance',
+      'park', 'amend-contract', 'consume-ratification', 'deploy',
+    ];
+    for (const verb of verbs) {
+      // unleased record → guard is a no-op (back-compat)
+      {
+        const record = { card: 'U', phase: 'implementing' };
+        requireLeaseToken(record, {}, verb, T0);
+        ok(!record.lease, `${verb}: unleased record is a tokenless no-op`);
+      }
+      // live lease + no token → lease_required
+      {
+        const record = { card: 'V', phase: 'implementing', lease: mkLease() };
+        assert.throws(() => requireLeaseToken(record, {}, verb, T0 + 1000),
+          (e) => e.code === 'lease_required' && e.action === `${verb}-refused`
+            && /--lease-token/.test(e.message) && /resume --card/.test(e.message) && /break-lease/.test(e.message),
+          `${verb}: live lease + no token refuses lease_required with remedy`); count++;
+      }
+      // live lease + wrong token → lease_mismatch
+      {
+        const record = { card: 'V', phase: 'implementing', lease: mkLease() };
+        assert.throws(() => requireLeaseToken(record, { 'lease-token': 'wrong' }, verb, T0 + 1000),
+          (e) => e.code === 'lease_mismatch' && e.action === `${verb}-refused`,
+          `${verb}: wrong token refuses lease_mismatch`); count++;
+      }
+      // stale lease → lease_stale BEFORE lease_required/lease_mismatch, even
+      // with the previously-correct token: a returning holder must re-attach
+      // via resume so the takeover is audited.
+      {
+        const record = { card: 'V', phase: 'implementing', lease: mkLease() };
+        const staleNow = T0 + LEASE_TTL_MS + 1;
+        assert.throws(() => requireLeaseToken(record, {}, verb, staleNow),
+          (e) => e.code === 'lease_stale' && e.action === `${verb}-refused`,
+          `${verb}: stale lease + no token refuses lease_stale, not lease_required`); count++;
+        assert.throws(() => requireLeaseToken(record, { 'lease-token': 'tok-1' }, verb, staleNow),
+          (e) => e.code === 'lease_stale',
+          `${verb}: stale lease + previously-correct token still refuses lease_stale`); count++;
+      }
+      // matching token on a live lease → proceeds and renews in place
+      {
+        const record = { card: 'V', phase: 'implementing', lease: mkLease() };
+        const renewNow = T0 + 1000;
+        requireLeaseToken(record, { 'lease-token': 'tok-1' }, verb, renewNow);
+        eq(record.lease.renewed_at, new Date(renewNow).toISOString(), `${verb}: matching token renews the lease`);
+        eq(record.lease.token, 'tok-1', `${verb}: matching token does not rotate the token`);
+      }
+    }
+  }
+
+  // commandPark releases the lease on success.
+  {
+    const parkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-park-'));
+    try {
+      const boardPath = path.join(parkRoot, 'board.md');
+      const cardPath = path.join(parkRoot, 'Lease park.md');
+      fs.writeFileSync(boardPath, [
+        '---', 'kanban-plugin: board', '---', '',
+        '## In Planning', '',
+        '## In Progress', '- [ ] [[Lease park]]', '',
+        '## Blocked', '',
+        '## Discovered (autoloop)', '- [ ] [[Unrelated discovery]]', '',
+        '## Completed', '',
+        '***', '', '## Archive', '',
+        '%% kanban:settings', '{}', '%%',
+      ].join('\n'));
+      fs.writeFileSync(cardPath, [
+        '---', 'kanban_column: In Progress', 'status: in_progress',
+        'parent_card: "[[Shared parent]]"', 'depends_on: []', '---', 'body',
+      ].join('\n'));
+      const state = {
+        schema_version: 1,
+        cards: { 'Lease park': {
+          card: 'Lease park', phase: 'implementing', card_path: cardPath,
+          branch: 'b-lp', worktree: '/w', touch_zones: ['platform/lp'],
+          lease: mkLease(),
+        } },
+      };
+      let writes = 0;
+      const receipt = await commandPark({ root: parkRoot }, {
+        json: true, card: 'Lease park', 'lease-token': 'tok-1',
+        'depends-on': 'Prerequisite A', 'resume-condition': 'wait for it',
+      }, {
+        readState: () => state, writeState: () => { writes++; }, withLock: immediateLock,
+        boardPath, findCard: (_root, name) => (name === 'Prerequisite A' ? `/cards/${name}.md` : null),
+        now: () => new Date(T0 + 5000).toISOString(), leaseNowMs: () => T0 + 5000,
+        projectLoopStation: () => {},
+      });
+      ok(receipt.ok, 'park with matching token succeeds');
+      ok(!state.cards['Lease park'].lease, 'park clears the lease on success');
+      const breaks = state.cards['Lease park'].lease_breaks;
+      eq(breaks[breaks.length - 1].reason, 'lease_released_park', 'park release reason is exact');
+      ok(writes >= 1, 'park persists the lease release');
+    } finally {
+      fs.rmSync(parkRoot, { recursive: true, force: true });
+    }
+  }
+
+  // commandAdvance releases the lease once the record reaches a TERMINAL
+  // phase, via stepCard injection (mirrors OPX2 deploy-transition coverage
+  // in run-codex-autoloop.js).
+  {
+    const state = { schema_version: 1, cards: { Deploy: {
+      card: 'Deploy', phase: 'tap_merged', lease: mkLease(),
+    } } };
+    let writes = 0;
+    const result = await commandAdvance({ root: '/workshop' }, {
+      card: 'Deploy', 'lease-seconds': '0', 'lease-token': 'tok-1',
+    }, {
+      withLock: immediateLock,
+      readState: () => state,
+      writeState: () => { writes++; },
+      stepCard: async (_ctx, _st, record) => {
+        record.phase = 'deployed';
+        return { action: 'complete', card: record.card, phase: record.phase };
+      },
+      projectLoopStation: () => {},
+      leaseNowMs: () => T0 + 2000,
+      emit: () => {},
+    });
+    eq(result.phase, 'deployed', 'advance completes the terminal transition');
+    ok(!state.cards.Deploy.lease, 'advance clears the lease on reaching a TERMINAL phase');
+    const breaks = state.cards.Deploy.lease_breaks;
+    eq(breaks[breaks.length - 1].reason, 'lease_released_terminal', 'advance release reason is exact');
+    ok(writes >= 1, 'advance persists the terminal lease release');
   }
 
   console.log(`AUTOLOOP-LEASES PASS (${count} assertions)`);
