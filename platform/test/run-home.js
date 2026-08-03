@@ -168,6 +168,15 @@ function assertEq(name, actual, expected) {
   if (!ok) console.log(`      ↳ expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function withWatchdog(promise, label, timeoutMs = 500) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} did not settle`)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 // Recursively collect descendants (depth-first, pre-order) of an el.
 function descendants(el) {
@@ -683,19 +692,66 @@ function descendants(el) {
         : null;
       fire(replacementToggle);
       replacementInput.value = "next draft";
-      await replacementInput.dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
+      const overlapAttempt = replacementInput.dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
+      await Promise.resolve();
+      await Promise.resolve();
       assertEq("HOME-CAP-19k deferred Enter after container rerender cannot overlap persistence",
         calls.createQuick.length, callsWhilePending);
       assertEq("HOME-CAP-19l shared pending authority disables replacement Add", replacementAdd.disabled, true);
+      assertEq("HOME-CAP-19l2 obsolete Add remains settlement-ineligible", capAdd.disabled, true);
+      assertTrue("HOME-CAP-19l3 obsolete menu remains open before settlement", isOpen(menu));
       resolvePending({ ok: true });
-      await pendingCapture;
+      await withWatchdog(Promise.all([pendingCapture, overlapAttempt]), "deferred capture and guarded overlap");
       assertEq("HOME-CAP-19m authoritative deferred success releases replacement Add", replacementAdd.disabled, false);
       assertTrue("HOME-CAP-19n obsolete settlement leaves the replacement menu open", isOpen(replacementMenu));
       assertEq("HOME-CAP-19n2 obsolete settlement preserves the replacement draft", replacementInput.value, "next draft");
+      assertEq("HOME-CAP-19n3 stale success cannot re-enable its obsolete Add", capAdd.disabled, true);
+      assertTrue("HOME-CAP-19n4 stale success cannot close its obsolete menu", isOpen(menu));
       assertTrue("HOME-CAP-19o authoritative deferred success leaves no stale preview",
         !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
       assertEq("HOME-CAP-19p overlap draft was not submitted by the guarded Enter",
         calls.createQuick.filter((entry) => entry && entry.title === "next draft").length, 0);
+
+      // A stale rejection has the same ownership rule as stale success. Keep a
+      // real watchdog alive so a missing pending/surface guard cannot let Node
+      // silently exit with an unresolved awaited Promise and zero assertions.
+      let rejectStale;
+      const deferredReject = new Promise((_resolve, reject) => { rejectStale = reject; });
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        return deferredReject;
+      };
+      const staleInput = replacementInput;
+      const staleMenu = replacementMenu;
+      const staleAdd = replacementAdd;
+      const staleOriginalValue = staleInput.value;
+      const staleCapture = fire(staleAdd);
+      await Promise.resolve();
+      await Promise.resolve();
+      assertEq("HOME-CAP-19q pending stale-rejection input is optimistically cleared", staleInput.value, "");
+      assertEq("HOME-CAP-19r pending stale-rejection Add is disabled", staleAdd.disabled, true);
+      dv.container.children = [];
+      await home_.render(dv, {});
+      const newestHome = dv.container.querySelector(".sauce-home");
+      const newestNodes = newestHome ? descendants(newestHome) : [];
+      const newestToggle = newestNodes.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+      const newestMenu = newestNodes.find((n) => hasCls(n, "sauce-home-add-menu"));
+      const newestInput = newestMenu ? descendants(newestMenu).find((n) => n.tag === "input") : null;
+      const newestAdd = newestMenu
+        ? descendants(newestMenu).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"))
+        : null;
+      fire(newestToggle);
+      newestInput.value = "replacement rejection draft";
+      rejectStale(new Error("stale persistence rejected"));
+      await withWatchdog(staleCapture, "stale rejected capture");
+      assertEq("HOME-CAP-19s stale rejection cannot restore its obsolete input", staleInput.value, "");
+      assertEq("HOME-CAP-19t stale rejection cannot re-enable its obsolete Add", staleAdd.disabled, true);
+      assertTrue("HOME-CAP-19u stale rejection cannot close its obsolete menu", isOpen(staleMenu));
+      assertEq("HOME-CAP-19v stale rejection preserves the replacement draft", newestInput.value, "replacement rejection draft");
+      assertTrue("HOME-CAP-19w stale rejection leaves the replacement menu open", isOpen(newestMenu));
+      assertEq("HOME-CAP-19x stale rejection releases the replacement Add", newestAdd.disabled, false);
+      assertEq("HOME-CAP-19y stale rejection retained the captured obsolete value only as receipt data",
+        staleOriginalValue, "next draft");
       global.customJS.TaskDialog.createQuick = (opts) => {
         calls.createQuick.push(opts);
         if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");

@@ -2373,13 +2373,18 @@ failures += !run("rail row ⋯ gains a Move entry (before Delete); _openMovePick
   delete global.customJS;
 });
 
-failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded), checked set moves through openMovePicker → applyDocMove", () => {
+ASYNC_TESTS.push({ name: "openSelectDocsPicker: structural bulk resolves exact vault files and awaits receipt moves", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const doc = makeDocStub();
 
   const FOLDER = "spice/projects/p/docs/a";
   const prevApp = global.app;
+  const vaultFiles = new Map([
+    FOLDER + "/One.md",
+    FOLDER + "/Two.md",
+    FOLDER + "/sub/Deep.md",
+  ].map((path) => [path, { path, name: path.split("/").pop(), __realVaultFile: true }]));
   global.app = {
     vault: {
       getMarkdownFiles: () => ([
@@ -2387,7 +2392,7 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
         { path: FOLDER + "/Two.md", name: "Two.md" },
         { path: FOLDER + "/sub/Deep.md", name: "Deep.md" },
       ]),
-      getAbstractFileByPath: (p) => ({ path: p, name: p.split("/").pop(), __realVaultFile: true }),
+      getAbstractFileByPath: (p) => vaultFiles.get(p) || null,
     },
     metadataCache: {
       getFileCache: (f) => ({ frontmatter: { type: "doc-note", title: f.name.replace(/\.md$/, "") } }),
@@ -2397,9 +2402,12 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
   // Spy the downstream move flow.
   const moveCalls = [];
   se.openMovePicker = (opts) => { se.__lastMoveOpts = opts; };
-  se.applyDocMove = (dv, file, dest) => { moveCalls.push({ from: file.path, dest, real: file.__realVaultFile }); };
+  se.applyDocMove = async (dv, file, dest) => {
+    moveCalls.push({ file, from: file.path, dest, real: file.__realVaultFile });
+    return { ok: true };
+  };
 
-  const adapter = { move: { docType: "doc-note", root: FOLDER, enumerateSectionTargets: () => ([{ folder: "spice/projects/p/docs/b", label: "B", depth: 1 }]) } };
+  const adapter = { structural: true, move: { docType: "doc-note", root: FOLDER, enumerateSectionTargets: () => ([{ folder: "spice/projects/p/docs/b", label: "B", depth: 1 }]) } };
   const section = { folder: FOLDER };
 
   se.openSelectDocsPicker({}, adapter, section);
@@ -2431,16 +2439,18 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
 
   // Primary opens the move picker; onPick drives applyDocMove per doc.
   assert.ok(se.__lastMoveOpts && typeof se.__lastMoveOpts.onPick === "function", "openMovePicker invoked with onPick");
-  se.__lastMoveOpts.onPick("spice/projects/p/docs/b");
+  await se.__lastMoveOpts.onPick("spice/projects/p/docs/b");
 
   const moved = moveCalls.map((m) => m.from).sort();
   assert.deepStrictEqual(moved, [FOLDER + "/One.md", FOLDER + "/Two.md"], "both checked docs moved");
   assert.ok(moveCalls.every((m) => m.dest === "spice/projects/p/docs/b"), "moved to the picked destination");
   assert.ok(moveCalls.every((m) => m.real === true), "bulk flow resolves each selected path to a real vault file");
+  assert.ok(moveCalls.every((m) => vaultFiles.get(m.from) === m.file),
+    "structural applyDocMove receives the exact object returned by the vault lookup");
 
   global.app = prevApp;
   delete global.document;
-});
+}});
 
 // ── Feature a: per-doc ⋯ menu (Rename · Move · Add link · Delete) on doc cards.
 // Doc cards are rendered by the shared _renderDocCards, used by BOTH blueprints,
