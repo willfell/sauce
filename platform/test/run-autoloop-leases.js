@@ -9,15 +9,30 @@ const { execFileSync } = require('child_process');
 const delivery = require('../mechanisms/delivery');
 
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
+// These fixtures intentionally exercise the coordinator's flat-board selection
+// seam unless a case opts into a binding through withFreshCoordinator below.
+// A live loop exports epic topology while running release:preflight, so keep
+// that ambient binding from changing the module-level fixture semantics.
+const inheritedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+let coordinator;
+try {
+  delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  coordinator = require(coordinatorModulePath);
+} finally {
+  if (inheritedBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = inheritedBoardTopology;
+}
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
   requireLeaseToken, commandRecordReview, commandPark, commandAdvance, commandBreakLease, commandDiscard,
   commandStatus,
-} = require(coordinatorModulePath);
+} = coordinator;
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count += 1; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count += 1; }
+eq(process.env.SAUCE_LOOP_BOARD_TOPOLOGY, inheritedBoardTopology,
+  'module-level flat fixture import restores inherited board topology');
 
 // commandClaim hardcodes BOARD/CARDS_ROOT from the SAUCE_LOOP_BOARD /
 // SAUCE_LOOP_CARDS_ROOT env seam at module load time and has no
@@ -239,12 +254,21 @@ async function withFreshCoordinator(envOverrides, fn) {
         statePath: path.join(claimRoot, '.git', 'sauce-autoloop', 'state.json'),
       };
 
+      const cachedCoordinatorBeforeClaim = require.cache[coordinatorModulePath];
+      const bindingBeforeClaim = Object.fromEntries(
+        ['SAUCE_LOOP_BOARD', 'SAUCE_LOOP_CARDS_ROOT', 'SAUCE_LOOP_VAULTS']
+          .map((key) => [key, process.env[key]]));
       const claimReceipt = await withFreshCoordinator({
         SAUCE_LOOP_BOARD: boardPath, SAUCE_LOOP_CARDS_ROOT: cardsRoot, SAUCE_LOOP_VAULTS: '[]',
       }, (fresh) => fresh.commandClaim(ctx, { json: true }, {
         now: () => new Date(T0).toISOString(), leaseNowMs: () => T0, leaseToken: () => 'tok-claim-1',
       }));
 
+      ok(require.cache[coordinatorModulePath] === cachedCoordinatorBeforeClaim,
+        'withFreshCoordinator restores the prior coordinator cache entry');
+      for (const [key, value] of Object.entries(bindingBeforeClaim)) {
+        eq(process.env[key], value, `withFreshCoordinator restores ${key}`);
+      }
       eq(claimReceipt.action, 'implement', 'commandClaim succeeds against the isolated fixture');
       eq(claimReceipt.card, 'A', 'commandClaim claims the only eligible card');
       eq(claimReceipt.lease_token, 'tok-claim-1', 'FINDING-2b claim receipt lease_token matches the acquired token');
