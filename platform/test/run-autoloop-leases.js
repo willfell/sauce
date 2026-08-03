@@ -335,6 +335,31 @@ async function withFreshCoordinator(envOverrides, fn) {
         requireLeaseToken(record, {}, verb, T0);
         ok(!record.lease, `${verb}: unleased record is a tokenless no-op`);
       }
+      // FIX 2: active unleased record + a supplied token → lease_gone. The
+      // token implies the caller believes it holds a lease that no longer
+      // exists (broken or superseded); refuse instead of silently no-op'ing.
+      {
+        const record = { card: 'U', phase: 'implementing' };
+        assert.throws(() => requireLeaseToken(record, { 'lease-token': 'ghost-token' }, verb, T0),
+          (e) => e.code === 'lease_gone' && e.action === `${verb}-refused`
+            && /no longer exists/.test(e.message) && /resume --card/.test(e.message),
+          `${verb}: active unleased record + token refuses lease_gone`); count++;
+        ok(!record.lease, `${verb}: lease_gone refusal never fabricates a lease`);
+      }
+      // FIX 2: PARKED unleased record + a supplied token stays the old
+      // silent no-op — tokened idempotent replays after park must still work.
+      {
+        const record = { card: 'U', phase: 'parked' };
+        requireLeaseToken(record, { 'lease-token': 'ghost-token' }, verb, T0);
+        ok(!record.lease, `${verb}: parked unleased record + token is still a silent no-op`);
+      }
+      // FIX 2: TERMINAL (e.g. deployed) unleased record + a supplied token
+      // also stays the old silent no-op, for the same idempotent-replay reason.
+      {
+        const record = { card: 'U', phase: 'deployed' };
+        requireLeaseToken(record, { 'lease-token': 'ghost-token' }, verb, T0);
+        ok(!record.lease, `${verb}: terminal unleased record + token is still a silent no-op`);
+      }
       // live lease + no token → lease_required
       {
         const record = { card: 'V', phase: 'implementing', lease: mkLease() };
@@ -476,6 +501,60 @@ async function withFreshCoordinator(envOverrides, fn) {
     ok(!!state.cards.X.lease, 'dry-run advance never releases a lease on a TERMINAL-phase card');
     ok(!state.cards.X.lease_breaks, 'dry-run advance records no lease_breaks entry');
     eq(writes, 0, 'dry-run advance performs zero persistence from the release path');
+  }
+
+  // FIX 1 (final-review): commandAdvance must arbitrate the lease on EVERY
+  // poll iteration, inside the card-gate lock, not just the first pass. A
+  // mid-poll break-lease + foreign attach (simulated here inside stepCard,
+  // as a `resume --card` from another session would perform it) must abort
+  // the loop with lease_mismatch before a second stepCard call ever runs —
+  // never silently keep stepping (and eventually writeState-stomping) a
+  // record now owned by a different holder. `deps.sleep` is injected so the
+  // test drives two real loop iterations without a real poll-interval wait.
+  {
+    const state = { schema_version: 1, cards: { P: {
+      card: 'P', phase: 'implementing', lease: mkLease(),
+    } } };
+    let stepCalls = 0;
+    const stepCard = async (_ctx, _st, record) => {
+      stepCalls += 1;
+      // Simulate a foreign attach landing between iteration 1 and 2: the
+      // original holder's lease is broken and re-acquired under a different
+      // token, exactly as `resume --card` would do it.
+      clearLease(record, 'lease_broken_manual', () => new Date(T0 + 2000).toISOString());
+      acquireLease(record, { now: () => new Date(T0 + 2000).toISOString(), token: 'tok-2', label: 'foreign' });
+      return { action: 'waiting', card: record.card };
+    };
+    await assert.rejects(() => commandAdvance({ root: '/workshop' }, {
+      card: 'P', 'lease-seconds': '60', 'lease-token': 'tok-1',
+    }, {
+      withLock: immediateLock, readState: () => state, writeState: () => {},
+      stepCard, sleep: () => Promise.resolve(), projectLoopStation: () => {},
+      leaseNowMs: () => T0 + 3000, emit: () => {},
+    }), (e) => e.code === 'lease_mismatch', 'mid-poll foreign attach aborts the advance loop with lease_mismatch'); count++;
+    eq(stepCalls, 1, 'the loop stops before a second stepCard call once the lease is foreign-mismatched');
+  }
+
+  // FIX 2 (final-review): a supplied --lease-token against an ACTIVE unleased
+  // card means the caller believes it holds a lease that no longer exists
+  // (broken or superseded) — refuse lease_gone rather than silently
+  // proceeding. Exercised end-to-end via commandRecordReview and
+  // commandAdvance (unit coverage for the shared guard itself lives in the
+  // requireLeaseToken verbs loop below).
+  {
+    const state = reviewFixture(null);
+    await assert.rejects(() => commandRecordReview({ root: '/ws' }, { ...reviewArgs, 'lease-token': 'ghost' }, reviewDeps(state)),
+      (e) => e.code === 'lease_gone', 'record-review: active unleased card + token refuses lease_gone'); count++;
+  }
+  {
+    const state = { schema_version: 1, cards: { G: { card: 'G', phase: 'implementing' } } };
+    await assert.rejects(() => commandAdvance({ root: '/workshop' }, {
+      card: 'G', 'lease-seconds': '0', 'lease-token': 'ghost',
+    }, {
+      withLock: immediateLock, readState: () => state, writeState: () => {},
+      stepCard: async () => { throw new Error('stepCard must not run once the guard refuses'); },
+      projectLoopStation: () => {}, leaseNowMs: () => T0, emit: () => {},
+    }), (e) => e.code === 'lease_gone', 'advance: active unleased card + token refuses lease_gone before stepping'); count++;
   }
 
   // --- Task 3: break-lease verb + supervised-verb lease clearing ---

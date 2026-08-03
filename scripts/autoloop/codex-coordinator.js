@@ -302,7 +302,22 @@ function clearLease(record, reason, now) {
 // an expired token. A matching token renews the lease in place — the verb's
 // own persist carries the renewal, no extra write.
 function requireLeaseToken(record, args, verb, nowMs) {
-  if (!record || !record.lease) return; // unleased → back-compat tokenless operation
+  if (!record) return;
+  if (!record.lease) {
+    // Unleased is normally a back-compat tokenless no-op — but a token
+    // supplied against an ACTIVE unleased card means the caller believes it
+    // holds a lease that no longer exists (broken, superseded, or never
+    // persisted). Parked/terminal records keep the old silent pass-through
+    // so tokened idempotent replays after park/completion still no-op.
+    const supplied = String(args['lease-token'] || '').trim();
+    const active = record.phase !== 'parked' && !TERMINAL.has(record.phase);
+    if (supplied && active) {
+      refuse(`${verb}-refused`, 'lease_gone',
+        `your lease on ${record.card} no longer exists (broken or superseded) — re-attach with resume --card "${record.card}" --json before continuing`,
+        { card: record.card });
+    }
+    return;
+  }
   const supplied = String(args['lease-token'] || '').trim();
   const live = leaseIsLive(record.lease, nowMs);
   const remedy = `resume --card "${record.card}" --json to attach (or break-lease --card "${record.card}" --reason "..." if the holder is known dead)`;
@@ -5498,9 +5513,9 @@ async function commandAdvance(ctx, args, deps = {}) {
   const emit = deps.emit || ((value) => process.stdout.write(`${JSON.stringify(value)}\n`));
   const selectorLock = deps.selectorLock || deps.withLock || withLock;
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const deadline = Date.now() + lease * 1000;
   let last = '';
-  let leaseChecked = false;
   while (true) {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       const halted = { action: 'halted', card, reason: '.autoloop-halt present' };
@@ -5510,12 +5525,12 @@ async function commandAdvance(ctx, args, deps = {}) {
     let result = await withCardGateLock(ctx, card, async () => {
       const state = loadState(ctx); const record = state.cards[card];
       if (!record) throw new Error(`card ${card} not in state`);
-      // guard once per invocation, not per poll iteration — the lease was
-      // already established by the first pass through this lock.
-      if (!leaseChecked) {
-        requireLeaseToken(record, args, 'advance', leaseNowMs());
-        leaseChecked = true;
-      }
+      // Arbitrate the lease on EVERY poll iteration, inside the card-gate
+      // lock — not just the first pass. A mid-poll break-lease + foreign
+      // attach must abort this loop with the appropriate refusal instead of
+      // silently continuing to step (and eventually writeState-stomping) a
+      // record now owned by a different holder.
+      requireLeaseToken(record, args, 'advance', leaseNowMs());
       const priorPhase = record.phase;
       const stepped = await step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
       if (!args['dry-run'] && record.phase !== priorPhase) transitionedTo = record.phase;
@@ -5549,7 +5564,7 @@ async function commandAdvance(ctx, args, deps = {}) {
       const receipt = { action: 'waiting', card, phase: loadState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
       emit(receipt); return receipt;
     }
-    await new Promise((resolve) => setTimeout(resolve, Math.min(poll * 1000, Math.max(0, deadline - Date.now()))));
+    await sleep(Math.min(poll * 1000, Math.max(0, deadline - Date.now())));
   }
 }
 
@@ -7209,20 +7224,28 @@ async function main() {
   else if (command === 'reconcile-dependencies') result = await commandReconcileDependencies(ctx, args);
   else if (command === 'cutover') result = await commandCutover(ctx, args);
   else if (command === 'deploy') {
-    const state = readState(ctx); const record = state.cards[args.card];
-    if (!record) throw new Error('deploy requires a known --card');
-    requireLeaseToken(record, args, 'deploy', Date.now());
-    result = await promoteAndDeploy(ctx, state, record);
-    // promoteAndDeploy mutates `record` in place (same reference held in
-    // `state.cards`) and persists its own writes internally; once it lands
-    // the record in a TERMINAL phase (deployed), release the lease and
-    // persist the release as a follow-up write — same conditional-persist
-    // pattern as commandAdvance's terminal release, so an unleased card
-    // never triggers an extra write.
-    if (TERMINAL.has(record.phase)) {
-      const released = clearLease(record, 'lease_released_terminal', () => new Date().toISOString());
-      if (released) writeState(ctx, state, record);
-    }
+    // Whole block runs under the card gate lock — not just the guard — so a
+    // concurrent attach during a multi-minute deploy can't have its lease
+    // clobbered by this dispatch's own whole-record writeState on terminal
+    // release. promoteAndDeploy locks under a distinct 'homebrew-promotion'
+    // name, so nesting here does not risk a same-name relock/deadlock.
+    result = await withCardGateLock(ctx, args.card, async () => {
+      const state = readState(ctx); const record = state.cards[args.card];
+      if (!record) throw new Error('deploy requires a known --card');
+      requireLeaseToken(record, args, 'deploy', Date.now());
+      const deployed = await promoteAndDeploy(ctx, state, record);
+      // promoteAndDeploy mutates `record` in place (same reference held in
+      // `state.cards`) and persists its own writes internally; once it lands
+      // the record in a TERMINAL phase (deployed), release the lease and
+      // persist the release as a follow-up write — same conditional-persist
+      // pattern as commandAdvance's terminal release, so an unleased card
+      // never triggers an extra write.
+      if (TERMINAL.has(record.phase)) {
+        const released = clearLease(record, 'lease_released_terminal', () => new Date().toISOString());
+        if (released) writeState(ctx, state, record);
+      }
+      return deployed;
+    }, { card: args.card });
   } else if (command === 'recover') result = commandRecover(ctx);
   else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
