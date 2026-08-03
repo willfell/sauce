@@ -643,7 +643,7 @@ function makeDv(embed, currentVal) {
             const offrefs = [];
             let serial = 0;
             return {
-                id, listeners, offrefs,
+                id, listeners, offrefs, frontmatter: null,
                 on(event, listener) {
                     const ref = { id: `${id}-${++serial}`, event };
                     listeners.set(ref, listener);
@@ -651,7 +651,7 @@ function makeDv(embed, currentVal) {
                 },
                 offref(ref) { offrefs.push(ref); listeners.delete(ref); },
                 emit(target) { [...listeners.values()].forEach((listener) => listener(target)); },
-                getFileCache() { return null; },
+                getFileCache() { return this.frontmatter ? { frontmatter: this.frontmatter } : null; },
             };
         };
         const generationCacheA = makeGenerationCache('cache-a');
@@ -662,25 +662,86 @@ function makeDv(embed, currentVal) {
         const staleGenerationListenerA = [...generationCacheA.listeners.values()][0];
         const sameCacheTracker = links._metadataTracker();
         generationCacheA.emit({ path: pathName });
+        const generationVersionA = generationTrackerA.versions.get(pathName);
+        const replacementEntryOwner = trackedEl('div');
+        replacementEntryOwner.dataset.tripEntryOwnerPath = pathName;
+        const replacementLinkOwner = trackedEl('div');
+        replacementLinkOwner.dataset.tripLinksOwnerPath = pathName;
+        const localReplacementEntries = [{ flight_no: 'LOCAL' }];
+        const localReplacementLinks = [{ url: 'https://local.example', text: 'Local' }];
+        const replacementEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: pathName }, flights: localReplacementEntries,
+        }, 'flights');
+        replacementEntryState.authority = {
+            expected: localReplacementEntries,
+            writeMtime: file.stat.mtime,
+            cacheVersion: list._metadataVersion(pathName),
+        };
+        const replacementLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: pathName }, links: localReplacementLinks,
+        });
+        replacementLinkState.authority = {
+            expected: localReplacementLinks,
+            writeMtime: file.stat.mtime,
+            cacheVersion: links._metadataVersion(pathName),
+        };
         global.app.metadataCache = generationCacheB;
         const generationTrackerB = links._metadataTracker();
         const hotReloadTracker = new TripEntryList()._metadataTracker();
         generationCacheA.emit({ path: pathName });
         staleGenerationListenerA({ path: pathName });
+        const staleCacheAIsolated = generationTrackerB.versions.get(pathName) === generationVersionA;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'EXTERNAL-B' }],
+            links: [{ url: 'https://external-b.example', text: 'External B' }],
+        };
         generationCacheB.emit({ path: pathName });
+        const generationVersionB = generationTrackerB.versions.get(pathName);
+        const cacheBEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'STALE-A' }],
+        }, 'flights');
+        const cacheBLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://stale-a.example', text: 'Stale A' }],
+        });
         ok('PERF4D-METADATA-GENERATION entry and link owners share one cache generation tracker',
-            generationTrackerA === sameCacheTracker && generationTrackerB === hotReloadTracker);
+            generationTrackerA === sameCacheTracker && generationTrackerB === hotReloadTracker
+            && generationTrackerA.versions === generationTrackerB.versions);
         ok('PERF4D-CACHE-LISTENER-REPLACEMENT detaches cache A and keeps one cache B listener through hot reload',
             generationCacheA.offrefs.length === 1
             && generationCacheA.offrefs[0] === generationRefA
             && generationCacheA.listeners.size === 0
             && generationCacheB.listeners.size === 1
-            && generationTrackerA.versions.get(pathName) === 1
-            && generationTrackerB.versions.get(pathName) === 1);
+            && staleCacheAIsolated
+            && generationVersionB === generationVersionA + 1);
+        ok('PERF4E-CACHE-REPLACEMENT-CONVERGENCE cache B first event advances active authority for both helpers',
+            cacheBEntryState.model[0]?.flight_no === 'EXTERNAL-B'
+            && cacheBEntryState.authority?.cacheVersion === generationVersionB
+            && cacheBLinkState.model[0]?.url === 'https://external-b.example'
+            && cacheBLinkState.authority?.cacheVersion === generationVersionB);
         global.app.metadataCache = originalMetadataCache;
         list._metadataTracker();
+        cachedFrontmatter = {
+            flights: [{ flight_no: 'EXTERNAL-LIVE' }],
+            links: [{ url: 'https://external-live.example', text: 'External Live' }],
+        };
+        metadataListener(file);
+        const generationVersionLive = list._metadataVersion(pathName);
+        const liveEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'STALE-B' }],
+        }, 'flights');
+        const liveLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://stale-b.example', text: 'Stale B' }],
+        });
         ok('PERF4D-CACHE-LISTENER-REPLACEMENT restoring the live cache releases cache B ownership',
-            generationCacheB.offrefs.length === 1 && generationCacheB.listeners.size === 0);
+            generationCacheB.offrefs.length === 1 && generationCacheB.listeners.size === 0
+            && liveEntryState.model[0]?.flight_no === 'EXTERNAL-LIVE'
+            && liveEntryState.authority?.cacheVersion === generationVersionLive
+            && liveLinkState.model[0]?.url === 'https://external-live.example'
+            && liveLinkState.authority?.cacheVersion === generationVersionLive
+            && generationVersionLive === generationVersionB + 1);
+        cachedFrontmatter = null;
         const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
         const priorLinks = [];
         page = { type: 'trip', file: { path: pathName }, links: priorLinks };

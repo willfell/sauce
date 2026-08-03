@@ -762,11 +762,12 @@ class TripEntryList {
       const slot = Symbol.for("sauce.trips.metadata-generations");
       let tracker = globalThis[slot];
       if (!tracker || tracker.cache !== cache) {
+        const versions = tracker?.versions instanceof Map ? tracker.versions : new Map();
         if (tracker?.ref != null && typeof tracker.cache?.offref === "function") {
           tracker.cache.offref(tracker.ref);
           tracker.ref = null;
         }
-        tracker = { cache, versions: new Map(), ref: null };
+        tracker = { cache, versions, ref: null };
         if (typeof cache.on === "function") {
           tracker.ref = cache.on("changed", (file) => {
             if (globalThis[slot] !== tracker) return;
