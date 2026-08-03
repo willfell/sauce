@@ -44,6 +44,7 @@ class FinanceFrontmatter {
         if (!this._writtenFrontmatter) this._writtenFrontmatter = new Map();
         this._releaseWrittenSnapshot(file.path, this._writtenFrontmatter.get(file.path));
         const written = {
+            path: file.path,
             frontmatter: snapshot,
             mtime: Number(file.stat?.mtime) || null,
             eventRef: null,
@@ -51,6 +52,8 @@ class FinanceFrontmatter {
             metadata: null,
             deleteEventRef: null,
             deleteListener: null,
+            renameEventRef: null,
+            renameListener: null,
             vault: null,
         };
         this._writtenFrontmatter.set(file.path, written);
@@ -285,17 +288,18 @@ class FinanceFrontmatter {
         if (!metadata || typeof metadata.on !== "function") return;
         const vault = (typeof app !== "undefined") ? app.vault : null;
         const settleCurrent = () => {
-            if (this._writtenFrontmatter?.get?.(file.path) !== written) return;
+            const path = written.path;
+            if (this._writtenFrontmatter?.get?.(path) !== written) return;
             let currentFile = null;
             try {
-                currentFile = vault?.getAbstractFileByPath?.(file.path) || null;
+                currentFile = vault?.getAbstractFileByPath?.(path) || null;
             } catch (_e) {
                 // Unknown is not deletion. Retain the single identity-guarded
                 // owner until a later event or read can observe canonical state.
                 return;
             }
-            if (!currentFile || currentFile.path !== file.path || currentFile.children !== undefined) {
-                this._releaseWrittenSnapshot(file.path, written);
+            if (!currentFile || currentFile.path !== path || currentFile.children !== undefined) {
+                this._releaseWrittenSnapshot(path, written);
                 return;
             }
             let cached = null;
@@ -304,13 +308,32 @@ class FinanceFrontmatter {
             this._writtenSnapshotSettled(currentFile, written, cached);
         };
         const listener = (changedFile) => {
-            if (!changedFile || changedFile.path !== file.path) return;
+            if (!changedFile || changedFile.path !== written.path) return;
             settleCurrent();
         };
         const deleteListener = (deletedFile) => {
-            if (!deletedFile || deletedFile.path !== file.path) return;
+            if (!deletedFile || deletedFile.path !== written.path) return;
             // Same-path replacement can emit delete for the old TFile. Resolve
             // canonical identity so only actual absence releases authority.
+            settleCurrent();
+        };
+        const renameListener = (renamedFile, oldPath) => {
+            const priorPath = String(oldPath || "");
+            if (!renamedFile || priorPath !== written.path) return;
+            if (this._writtenFrontmatter?.get?.(priorPath) !== written) return;
+            const nextPath = String(renamedFile.path || "");
+            if (!nextPath || renamedFile.children !== undefined) {
+                this._releaseWrittenSnapshot(priorPath, written);
+                return;
+            }
+            const targetWritten = this._writtenFrontmatter.get(nextPath);
+            if (targetWritten && targetWritten !== written) {
+                this._releaseWrittenSnapshot(priorPath, written);
+                return;
+            }
+            this._writtenFrontmatter.delete(priorPath);
+            written.path = nextPath;
+            this._writtenFrontmatter.set(nextPath, written);
             settleCurrent();
         };
         try {
@@ -323,14 +346,20 @@ class FinanceFrontmatter {
             written.eventRef = null;
         }
         if (vault && typeof vault.on === "function") {
+            written.vault = vault;
             try {
-                written.vault = vault;
                 written.deleteListener = deleteListener;
                 written.deleteEventRef = vault.on("delete", deleteListener) || null;
             } catch (_e) {
-                written.vault = null;
                 written.deleteListener = null;
                 written.deleteEventRef = null;
+            }
+            try {
+                written.renameListener = renameListener;
+                written.renameEventRef = vault.on("rename", renameListener) || null;
+            } catch (_e) {
+                written.renameListener = null;
+                written.renameEventRef = null;
             }
         }
         // Either event may have fired before registration while the write was
@@ -360,11 +389,17 @@ class FinanceFrontmatter {
             if (written.deleteEventRef && typeof vault?.offref === "function") vault.offref(written.deleteEventRef);
             else if (written.deleteListener && typeof vault?.off === "function") vault.off("delete", written.deleteListener);
         } catch (_e) {}
+        try {
+            if (written.renameEventRef && typeof vault?.offref === "function") vault.offref(written.renameEventRef);
+            else if (written.renameListener && typeof vault?.off === "function") vault.off("rename", written.renameListener);
+        } catch (_e) {}
         written.eventRef = null;
         written.listener = null;
         written.metadata = null;
         written.deleteEventRef = null;
         written.deleteListener = null;
+        written.renameEventRef = null;
+        written.renameListener = null;
         written.vault = null;
     }
 
