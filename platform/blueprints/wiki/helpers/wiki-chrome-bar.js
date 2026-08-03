@@ -125,7 +125,9 @@ class WikiChromeBar {
         if (id === "move") {
           try {
             if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.openMovePicker !== "function") return;
-            const file = (typeof app !== "undefined") ? app.workspace.getActiveFile() : null;
+            const file = (typeof app !== "undefined" && ctx && ctx.path
+              && app.vault && typeof app.vault.getAbstractFileByPath === "function")
+              ? app.vault.getAbstractFileByPath(ctx.path) : null;
             if (!file || !file.path) return;
             // dv-independent enumeration (mobile: the captured dv is torn down by
             // click time, so dv.pages() throws / returns empty).
@@ -135,7 +137,7 @@ class WikiChromeBar {
               labelOf: (p) => (p.title && String(p.title).trim()) || "",
             });
             const currentFolder = file.path.slice(0, file.path.lastIndexOf("/"));
-            const adapter = { structural: true, structuralOwnerKey: file.path,
+            const adapter = { structural: true, structuralOwnerKey: ctx.path,
               move: { rewriteOnDocMove: () => null } };
             customJS.SectionExplorer.openMovePicker({
               targets, currentFolder, title: "Move to section",

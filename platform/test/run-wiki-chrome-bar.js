@@ -37,18 +37,25 @@ const cfg = inst._config();
     EntityCreate: { create: (o) => calls.push({ create: o.instance, structuralLifecycle: o.structuralLifecycle }) },
     WikiLeafActions: { _openMoveDialog: (dv, p) => calls.push({ legacyMove: p }) },
     SectionExplorer: {
-      openMovePicker: (o) => calls.push({ move: o && o.currentFolder }),
+      openMovePicker: (o) => {
+        calls.push({ move: o && o.currentFolder });
+        if (o && typeof o.onPick === 'function') o.onPick('spice/wiki/Destination');
+      },
       pagesUnder: () => [],
       sectionTargets: () => [{ folder: 'spice/wiki', label: 'Wiki (root)', depth: 0 }],
       entityCreateLifecycle: (_dv, adapter) => { calls.push({ lifecycleKey: adapter.structuralOwnerKey }); return {}; },
-      applyDocMove: (_dv, _file, _folder, adapter) => calls.push({ leafOwnerKey: adapter.structuralOwnerKey }),
+      applyDocMove: (_dv, file, _folder, adapter) => calls.push({ leafFilePath: file.path, leafOwnerKey: adapter.structuralOwnerKey }),
     },
   };
   const dv = { current: () => ({ file: { path: 'spice/wiki/Foo/Bar.md' } }), pages: () => ({ array: () => [] }) };
-  global.app = { workspace: { getActiveFile: () => ({ path: 'spice/wiki/Foo/Bar.md' }) } };
+  const chromeFile = { path: 'spice/wiki/Foo/Bar.md' };
+  global.app = {
+    workspace: { getActiveFile: () => ({ path: 'spice/wiki/Wrong/Active.md' }) },
+    vault: { getAbstractFileByPath: (p) => p === chromeFile.path ? chromeFile : null },
+  };
   cfg.dispatch(dv, { context: 'wiki-hub', path: 'spice/wiki/Wiki.md' }, 'new-page');
   cfg.dispatch(dv, { context: 'wiki-hub', path: 'spice/wiki/Wiki.md' }, 'new-section');
-  cfg.dispatch(dv, { context: 'wiki-page' }, 'move');
+  cfg.dispatch(dv, { context: 'wiki-page', path: chromeFile.path }, 'move');
   global.customJS = prevCJS; global.app = prevApp;
   ok('WCB-DISPATCH-1 new-page → EntityCreate.create(instance:"wiki-page")', calls.some((c) => c.create === 'wiki-page'));
   ok('WCB-DISPATCH-2 new-section → EntityCreate.create(instance:"wiki-section")', calls.some((c) => c.create === 'wiki-section'));
@@ -57,6 +64,9 @@ const cfg = inst._config();
   ok('WCB-DISPATCH-3b create gestures carry the WikiTree structural owner identity',
     calls.filter((c) => c.lifecycleKey === 'spice/wiki/Wiki.md').length === 2
       && calls.filter((c) => c.create && c.structuralLifecycle).length === 2);
+  ok('WCB-DISPATCH-3c leaf move resolves ctx.path despite a divergent active file and keeps that owner identity',
+    calls.some((c) => c.leafFilePath === chromeFile.path && c.leafOwnerKey === chromeFile.path)
+      && !calls.some((c) => c.leafFilePath === 'spice/wiki/Wrong/Active.md'));
 }
 // WCB-DEST — destinations lead with a { section:"This wiki" } marker + a Wiki-home entry;
 // the root hub omits its own Wiki entry (no self-nav).
@@ -114,12 +124,16 @@ const cfg = inst._config();
     pages: () => ({ array: () => [] }),
   };
   const prevApp = global.app;
-  global.app = { workspace: { getActiveFile: () => ({ path: 'spice/wiki/cooking/Recipe.md' }) } };
+  const leafFile = { path: 'spice/wiki/cooking/Recipe.md' };
+  global.app = {
+    workspace: { getActiveFile: () => leafFile },
+    vault: { getAbstractFileByPath: (p) => p === leafFile.path ? leafFile : null },
+  };
 
   cfg.dispatch(dv, { context: 'wiki-section' }, 'select-docs');
   cfg.dispatch(dv, { context: 'wiki-section' }, 'move-section');
   cfg.dispatch(dv, { context: 'wiki-section' }, 'delete-section');
-  cfg.dispatch(dv, { context: 'wiki-page' }, 'move');
+  cfg.dispatch(dv, { context: 'wiki-page', path: leafFile.path }, 'move');
 
   global.customJS = prevCJS;
   global.app = prevApp;
