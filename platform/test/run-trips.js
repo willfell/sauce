@@ -34,8 +34,8 @@ async function okNoThrow(label, fn) {
     catch (e) { fails++; console.error('FAIL ' + label + ': ' + (e && e.message ? e.message : e)); }
 }
 
-function loadWidget(relPath, className) {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', relPath), 'utf8');
+function loadWidget(relPath, className, transform = (source) => source) {
+    const src = transform(fs.readFileSync(path.join(__dirname, '..', '..', relPath), 'utf8'));
     return new Function(`${src}; return ${className};`)();
 }
 
@@ -211,6 +211,27 @@ function makeDv(embed, currentVal) {
     {
         const TripEntryList = loadWidget('platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList');
         const TripLinks = loadWidget('platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
+        const ReloadedTripEntryList = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList');
+        const ReloadedTripLinks = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
+        const constructorStaticStore = (source) => source
+            .replace('let states = globalThis[slot];', 'let states = this.constructor._mutationStates;')
+            .replace('globalThis[slot] = states;', 'this.constructor._mutationStates = states;');
+        const StaticEntryA = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList', constructorStaticStore);
+        const StaticEntryB = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList', constructorStaticStore);
+        const StaticLinksA = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks', constructorStaticStore);
+        const StaticLinksB = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks', constructorStaticStore);
+        const disableCachePrecedence = (source) => source.replace(
+            'if (cacheAdvanced) {', 'if (false && cacheAdvanced) {');
+        const PrecedenceMutantEntry = loadWidget(
+            'platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList', disableCachePrecedence);
+        const PrecedenceMutantLinks = loadWidget(
+            'platform/blueprints/trips/helpers/trip-links.js', 'TripLinks', disableCachePrecedence);
         const originalApp = global.app;
         const originalRenderSafe = global.customJS.RenderSafe;
         const originalNotice = global.Notice;
@@ -221,19 +242,56 @@ function makeDv(embed, currentVal) {
             const classes = new Set();
             const listeners = {};
             const el = {
-                tag, children: [], style: makeStyle(), listeners, classes,
+                tag, children: [], childNodes: [], style: makeStyle(), listeners, classes, dataset: {}, parentNode: null,
                 classList: {
+                    add(...names) { names.forEach((name) => classes.add(name)); },
                     toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
                     contains(name) { return classes.has(name); },
                 },
                 createEl(childTag, opts) {
                     const child = trackedEl(childTag);
                     child.textContent = opts && opts.text ? opts.text : '';
+                    if (opts && opts.cls) String(opts.cls).split(/\s+/).filter(Boolean).forEach((name) => child.classes.add(name));
+                    child.parentNode = this;
                     this.children.push(child);
+                    this.childNodes = this.children;
                     return child;
                 },
+                createDiv(opts) { return this.createEl('div', opts); },
                 addEventListener(name, fn) { listeners[name] = fn; },
-                remove() {},
+                appendChild(child) { child.parentNode = this; this.children.push(child); this.childNodes = this.children; return child; },
+                insertBefore(child, before) {
+                    child.parentNode = this;
+                    const index = before ? this.children.indexOf(before) : -1;
+                    if (index < 0) this.children.push(child); else this.children.splice(index, 0, child);
+                    this.childNodes = this.children;
+                    return child;
+                },
+                replaceChildren(...nodes) {
+                    this.children.forEach((child) => { child.parentNode = null; });
+                    this.children = nodes;
+                    this.childNodes = this.children;
+                    nodes.forEach((child) => { child.parentNode = this; });
+                },
+                empty() { this.replaceChildren(); },
+                querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+                querySelectorAll(selector) {
+                    const className = String(selector || '').replace(/^\./, '');
+                    const found = [];
+                    const visit = (node) => {
+                        if (node !== this && node.classes && node.classes.has(className)) found.push(node);
+                        (node.children || []).forEach(visit);
+                    };
+                    visit(this);
+                    return found;
+                },
+                remove() {
+                    if (!this.parentNode) return;
+                    const index = this.parentNode.children.indexOf(this);
+                    if (index >= 0) this.parentNode.children.splice(index, 1);
+                    this.parentNode.childNodes = this.parentNode.children;
+                    this.parentNode = null;
+                },
             };
             return el;
         }
@@ -242,6 +300,7 @@ function makeDv(embed, currentVal) {
         const file = { path: pathName, fm: { packing_items: [{ category: 'Clothes', item: 'Socks', checked: false }] } };
         let page = { file: { path: pathName }, packing_items: file.fm.packing_items };
         let metadataListener = null;
+        let cachedFrontmatter = null;
         let refreshes = 0;
         let captures = 0;
         let writeGate = deferred();
@@ -274,6 +333,7 @@ function makeDv(embed, currentVal) {
             metadataCache: {
                 on(_event, listener) { metadataListener = listener; return { id: 'trip-write' }; },
                 offref() {},
+                getFileCache() { return cachedFrontmatter ? { frontmatter: cachedFrontmatter } : null; },
             },
             commands: { executeCommandById() { refreshes++; } },
             fileManager: {
@@ -299,6 +359,7 @@ function makeDv(embed, currentVal) {
         let mutationAlwaysCurrent = false;
         let mutationOptimisticBeforeCapture = false;
         const renderSafeFacade = {
+            page: (targetDv) => targetDv && typeof targetDv.current === 'function' ? targetDv.current() : null,
             mutate: async (opts) => {
                 let next = mutationAlwaysCurrent
                     ? Object.assign({}, opts, { isCurrent: () => true })
@@ -309,6 +370,7 @@ function makeDv(embed, currentVal) {
                 }
                 return rs.mutate(next);
             },
+            mutateStructure: (opts) => rs.mutateStructure(opts),
         };
         global.customJS.RenderSafe = renderSafeFacade;
         global.window.customJS = global.customJS;
@@ -414,120 +476,1094 @@ function makeDv(embed, currentVal) {
         mutationOptimisticBeforeCapture = false;
         ok('GA-P2C-OPTIMISM-BEFORE-CAPTURE-MUTANT ordered lifecycle assertion turns red', !orderMutantPassed);
 
-        // Flat Flights/Stay writes and atlas link writes share the same active
-        // mutation-specific poll authority rather than waiting for Dataview's
-        // natural tick. The typed fixtures deliberately signal metadata while
-        // Dataview is stale, then become current only on a later poll.
+        // PERF-4: array inserts/removals are structural. They repaint the exact
+        // list block before persistence, never schedule a global refresh, and
+        // restore the prior node identities + focus when the write rejects.
         failWrite = false;
-        for (const fixture of [
-            { key: 'flights', value: [{ flight_no: 'UA1', depart_date: '2026-08-14' }], dateKey: 'depart_date', identityKey: 'flight_no' },
-            { key: 'stays', value: [{ name: 'Hotel', check_in: '2026-08-15' }], dateKey: 'check_in', identityKey: 'name' },
-        ]) {
-            const indexedPage = (entry) => {
-                const indexedEntry = Object.assign({}, entry, {
-                    [fixture.dateKey]: {
-                        isLuxonDateTime: true,
-                        toISODate: () => entry[fixture.dateKey],
-                        toJSON: () => entry[fixture.dateKey] + 'T00:00:00.000Z',
-                    },
-                });
-                const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
-                return { file: { path: pathName }, [fixture.key]: dataArray };
-            };
-            page = { file: { path: pathName }, [fixture.key]: [] };
-            file.fm[fixture.key] = [];
-            scheduled.length = 0;
-            indexPage = (target) => indexedPage(Object.assign({}, target.fm[fixture.key][0], {
-                [fixture.identityKey]: 'STALE',
-            }));
-            writeGate = deferred(); writeGate.resolve();
-            const before = refreshes;
-            const pendingSave = list._write(dv, { key: fixture.key }, fixture.value);
-            await new Promise(setImmediate);
-            ok(`GA-P2B-${fixture.key.toUpperCase()}-STALE-SIGNAL matching metadata signal does not refresh stale DataArray`,
-                refreshes === before && scheduled.some((handle) => !handle.cancelled));
-            page = indexedPage(file.fm[fixture.key][0]);
-            const polled = await runNextTimer();
-            const saved = await pendingSave;
-            ok(`GA-P2B-${fixture.key.toUpperCase()}-CURRENT-POLL later DataArray + Luxon value refreshes exactly once`,
-                polled && saved && refreshes === before + 1
-                && JSON.stringify(file.fm[fixture.key]) === JSON.stringify(fixture.value));
-        }
+        const oldFlights = { [Symbol.iterator]: function* () { yield { flight_no: 'OLD' }; } };
+        page = { file: { path: pathName }, flights: oldFlights };
+        file.fm.flights = [{ flight_no: 'OLD' }];
+        const entryOwner = trackedEl('div');
+        entryOwner.dataset.tripEntryOwnerPath = pathName;
+        entryOwner.dataset.tripEntryOwnerKey = 'flights';
+        entryOwner.classList.add('trip-entry-list-owner');
+        const priorA = entryOwner.createEl('div', { text: 'prior-a' });
+        const priorB = entryOwner.createEl('div', { text: 'prior-b' });
+        const structuralDv = { container: entryOwner, current: () => page };
+        const nextFlights = [{ flight_no: 'UA1', depart_date: '2026-08-14' }];
+        writeGate = deferred();
+        const beforeStructureRefresh = refreshes;
+        const pendingStructure = list._write(structuralDv, { key: 'flights', kind: 'flights' }, nextFlights);
+        await new Promise(setImmediate);
+        ok('PERF-4-ENTRY-OPTIMISTIC iterable DataArray is replaced visibly before persistence settles',
+            Array.isArray(page.flights) && page.flights[0].flight_no === 'UA1'
+            && entryOwner.children.length > 0
+            && !entryOwner.children.includes(priorA)
+            && refreshes === beforeStructureRefresh);
+        writeGate.resolve();
+        const structureSaved = await pendingStructure;
+        ok('PERF-4-ENTRY-SUCCESS persists structural list without forced refresh',
+            structureSaved && file.fm.flights[0].flight_no === 'UA1'
+            && refreshes === beforeStructureRefresh);
+        file.stat = { mtime: 10 };
 
-        // Mutation control: replacing the exact field predicate with an
-        // always-true authority must fail the stale checkpoint above. This
-        // proves the test is sensitive to premature refresh, not merely to the
-        // eventual presence of one refresh.
-        {
-            const fixture = {
-                key: 'flights',
-                value: [{ flight_no: 'UA2', depart_date: '2026-08-16' }],
-            };
-            const indexedPage = (entry) => {
-                const indexedEntry = Object.assign({}, entry, {
-                    depart_date: {
-                        isLuxonDateTime: true,
-                        toISODate: () => entry.depart_date,
-                        toJSON: () => entry.depart_date + 'T00:00:00.000Z',
-                    },
-                });
-                const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
-                return { file: { path: pathName }, flights: dataArray };
-            };
-            page = { file: { path: pathName }, flights: [] };
-            file.fm.flights = [];
-            scheduled.length = 0;
-            indexPage = (target) => indexedPage(Object.assign({}, target.fm.flights[0], { flight_no: 'STALE' }));
-            writeGate = deferred(); writeGate.resolve();
-            mutationAlwaysCurrent = true;
-            const before = refreshes;
-            const mutantSave = list._write(dv, { key: fixture.key }, fixture.value);
-            await new Promise(setImmediate);
-            const mutantPassedStaleCheckpoint = refreshes === before;
-            const mutantSaved = await mutantSave;
-            mutationAlwaysCurrent = false;
-            ok('GA-P2B-ALWAYS-TRUE-MUTANT stale checkpoint turns red for premature authority',
-                mutantSaved && !mutantPassedStaleCheckpoint && refreshes === before + 1);
-        }
+        // PERF-4b: each dv.current() call can return a fresh stale snapshot
+        // while the first persistence is unresolved. The exact owner model must
+        // remain authoritative and persistence must serialize, so deleting A
+        // and then the newly visible B commits [] rather than resurrecting B.
+        const originalProcessFrontMatter = global.app.fileManager.processFrontMatter;
+        const rapidEntryGates = [deferred(), deferred()];
+        let indexedFlights = [{ flight_no: 'A' }, { flight_no: 'B' }];
+        file.fm.flights = indexedFlights.slice();
+        let rapidEntryWrites = 0;
+        let rapidEntryActive = 0;
+        let rapidEntryMaxActive = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = rapidEntryGates[rapidEntryWrites++];
+            rapidEntryActive++;
+            rapidEntryMaxActive = Math.max(rapidEntryMaxActive, rapidEntryActive);
+            await gate.promise;
+            mutate(target.fm);
+            indexedFlights = target.fm.flights.slice();
+            rapidEntryActive--;
+        };
+        const rapidEntryOwner = trackedEl('div');
+        rapidEntryOwner.dataset.tripEntryOwnerPath = pathName;
+        rapidEntryOwner.dataset.tripEntryOwnerKey = 'flights';
+        rapidEntryOwner.classList.add('trip-entry-list-owner');
+        const rapidEntryDv = {
+            container: rapidEntryOwner,
+            current: () => ({ file: { path: pathName, mtime: 1 }, flights: indexedFlights.slice() }),
+        };
+        const rapidEntrySpec = { key: 'flights', kind: 'flights' };
+        await list.render(rapidEntryDv, rapidEntrySpec);
+        const rapidEntryFirst = list._write(
+            rapidEntryDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(list._items(rapidEntryDv, rapidEntrySpec), 0).list,
+        );
+        await new Promise(setImmediate);
+        const replacementEntryHelper = new ReloadedTripEntryList();
+        const rapidEntrySecondBase = replacementEntryHelper._items(rapidEntryDv, rapidEntrySpec);
+        const rapidEntrySecond = replacementEntryHelper._write(
+            rapidEntryDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(rapidEntrySecondBase, 0).list,
+        );
+        await new Promise(setImmediate);
+        const rapidEntryQueued = rapidEntryWrites === 1
+            && rapidEntrySecondBase.length === 1
+            && rapidEntrySecondBase[0].flight_no === 'B';
+        rapidEntryGates[0].resolve();
+        await rapidEntryFirst;
+        await new Promise(setImmediate);
+        const rapidEntrySecondStarted = rapidEntryWrites === 2
+            && replacementEntryHelper._items(rapidEntryDv, rapidEntrySpec).length === 0;
+        rapidEntryGates[1].resolve();
+        const rapidEntrySaved = await rapidEntrySecond;
+        ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement entry helpers share one exact-owner queue',
+            ReloadedTripEntryList !== TripEntryList
+            && rapidEntryQueued && rapidEntrySecondStarted && rapidEntrySaved
+            && rapidEntryMaxActive === 1 && file.fm.flights.length === 0);
+        const missingMtimeEntryState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName },
+            flights: [{ flight_no: 'A' }, { flight_no: 'B' }],
+        }, 'flights');
+        ok('PERF4C-MISSING-MTIME-AUTHORITY entry snapshots without mtime cannot reclaim post-write authority',
+            missingMtimeEntryState.model.length === 0 && !!missingMtimeEntryState.authority);
+        file.stat.mtime = 11;
+        cachedFrontmatter = { flights: [{ flight_no: 'A' }, { flight_no: 'B' }] };
+        const laggingEntryCacheState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'OLD' }],
+        }, 'flights');
+        const laggingEntryCacheRetained = laggingEntryCacheState.model.length === 0
+            && !!laggingEntryCacheState.authority;
+        const laggingEntryFollowup = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'OLDER' }],
+        }, 'flights');
+        const laggingEntryFollowupRetained = laggingEntryFollowup.model.length === 0
+            && !!laggingEntryFollowup.authority;
+        cachedFrontmatter = { flights: [{ flight_no: 'EXTERNAL' }] };
+        metadataListener(file);
+        const newerEntryState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'STALE' }],
+        }, 'flights');
+        const entryCacheRebased = newerEntryState.authority?.expected?.[0]?.flight_no === 'EXTERNAL'
+            && newerEntryState.model[0].flight_no === 'EXTERNAL';
+        const convergedEntryState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'EXTERNAL' }],
+        }, 'flights');
+        ok('PERF4D-ENTRY-CACHE-CONVERGENCE only an observed cache generation rebases missing-mtime authority',
+            laggingEntryCacheRetained && laggingEntryFollowupRetained && entryCacheRebased
+            && convergedEntryState.authority === null
+            && convergedEntryState.model[0].flight_no === 'EXTERNAL');
+        cachedFrontmatter = null;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        const failedQueueGate = deferred();
+        let failedQueueWrites = 0;
+        const failedQueueInitial = [{ flight_no: 'A' }, { flight_no: 'B' }];
+        file.fm.flights = failedQueueInitial;
+        global.app.fileManager.processFrontMatter = async () => {
+            failedQueueWrites++;
+            await failedQueueGate.promise;
+            throw new Error('first queued trip write failed');
+        };
+        const failedQueueOwner = trackedEl('div');
+        failedQueueOwner.dataset.tripEntryOwnerPath = pathName;
+        failedQueueOwner.dataset.tripEntryOwnerKey = 'flights';
+        failedQueueOwner.classList.add('trip-entry-list-owner');
+        const failedQueueDv = {
+            container: failedQueueOwner,
+            current: () => ({ file: { path: pathName, mtime: 1 }, flights: failedQueueInitial.slice() }),
+        };
+        await list.render(failedQueueDv, rapidEntrySpec);
+        const failedQueueFirst = list._write(
+            failedQueueDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(list._items(failedQueueDv, rapidEntrySpec), 0).list,
+        );
+        await new Promise(setImmediate);
+        const failedQueueSecond = list._write(
+            failedQueueDv, rapidEntrySpec,
+            TripEntryList.deleteEntry(list._items(failedQueueDv, rapidEntrySpec), 0).list,
+        );
+        failedQueueGate.resolve();
+        const failedQueueResults = await Promise.all([failedQueueFirst, failedQueueSecond]);
+        ok('PERF4B-QUEUE-FAILURE earlier rejection restores authority and cancels stale queued descendants',
+            failedQueueResults[0] === false && failedQueueResults[1] === false
+            && failedQueueWrites === 1
+            && list._items(failedQueueDv, rapidEntrySpec).length === 2
+            && file.fm.flights === failedQueueInitial);
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        const rejectedFlights = [{ flight_no: 'OLD2' }];
+        page = { file: { path: pathName }, flights: rejectedFlights };
+        file.fm.flights = rejectedFlights;
+        entryOwner.replaceChildren(priorA, priorB);
+        let entryFocusRestored = 0;
+        const entryFocus = { focus() { entryFocusRestored++; } };
+        failWrite = true;
+        writeGate = deferred();
+        const rejectedStructure = list._write(
+            structuralDv,
+            { key: 'flights', kind: 'flights' },
+            [{ flight_no: 'FAIL' }],
+            { focusTarget: entryFocus },
+        );
+        await new Promise(setImmediate);
+        const entryChangedBeforeReject = page.flights[0].flight_no === 'FAIL'
+            && !entryOwner.children.includes(priorA);
+        writeGate.resolve();
+        const entryRejected = await rejectedStructure;
+        ok('PERF-4-ENTRY-ROLLBACK rejection restores exact nodes, model identity, and focus',
+            entryChangedBeforeReject && !entryRejected
+            && entryOwner.children[0] === priorA && entryOwner.children[1] === priorB
+            && page.flights === rejectedFlights && entryFocusRestored === 1
+            && refreshes === beforeStructureRefresh);
 
         const links = new TripLinks();
-        const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
-        page = { file: { path: pathName }, links: [] };
-        file.fm.links = [];
-        scheduled.length = 0;
-        indexPage = () => ({
-            file: { path: pathName },
-            links: [{ url: 'https://stale.example', text: 'Stale' }],
+        const originalMetadataCache = global.app.metadataCache;
+        const makeGenerationCache = (id) => {
+            const listeners = new Map();
+            const offrefs = [];
+            let serial = 0;
+            return {
+                id, listeners, offrefs, frontmatter: null, throwOnOffref: false,
+                on(event, listener) {
+                    const ref = { id: `${id}-${++serial}`, event };
+                    listeners.set(ref, listener);
+                    return ref;
+                },
+                offref(ref) {
+                    offrefs.push(ref);
+                    if (this.throwOnOffref) throw new Error(`${id} offref failed`);
+                    listeners.delete(ref);
+                },
+                emit(target) { [...listeners.values()].forEach((listener) => listener(target)); },
+                getFileCache() { return this.frontmatter ? { frontmatter: this.frontmatter } : null; },
+            };
+        };
+        const generationCacheA = makeGenerationCache('cache-a');
+        const generationCacheB = makeGenerationCache('cache-b');
+        global.app.metadataCache = generationCacheA;
+        const generationTrackerA = list._metadataTracker();
+        const generationRefA = generationTrackerA.ref;
+        const staleGenerationListenerA = [...generationCacheA.listeners.values()][0];
+        const sameCacheTracker = links._metadataTracker();
+        const replacementPath = 'spice/trips/demo/Replacement Authority.md';
+        const originalGetAbstractFileByPath = global.app.vault.getAbstractFileByPath;
+        global.app.vault.getAbstractFileByPath = (targetPath) => targetPath === replacementPath
+            ? file : originalGetAbstractFileByPath(targetPath);
+        const baselineTrackedPaths = new Set(generationTrackerA.versions.keys());
+        const replacementEntryOwner = trackedEl('div');
+        replacementEntryOwner.dataset.tripEntryOwnerPath = replacementPath;
+        const replacementLinkOwner = trackedEl('div');
+        replacementLinkOwner.dataset.tripLinksOwnerPath = replacementPath;
+        const localReplacementEntries = [{ flight_no: 'LOCAL' }];
+        const localReplacementLinks = [{ url: 'https://local.example', text: 'Local' }];
+        const replacementEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath }, flights: localReplacementEntries,
+        }, 'flights');
+        replacementEntryState.authority = {
+            expected: localReplacementEntries,
+            writeMtime: file.stat.mtime,
+            cacheVersion: list._metadataVersion(replacementPath),
+        };
+        const replacementLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath }, links: localReplacementLinks,
         });
-        writeGate = deferred(); writeGate.resolve();
-        const beforeLinks = refreshes;
-        const pendingLinks = links._write(dv, nextLinks);
-        await new Promise(setImmediate);
-        ok('GA-P2C-TRIP-LINKS-STALE-SIGNAL does not refresh mismatched indexed links',
-            refreshes === beforeLinks && scheduled.some((handle) => !handle.cancelled));
-        page = { file: { path: pathName }, links: nextLinks };
-        const linksPolled = await runNextTimer();
-        const linksSaved = await pendingLinks;
-        ok('GA-P2C-TRIP-LINKS-CURRENT-POLL refreshes matching indexed links exactly once',
-            linksPolled && linksSaved && refreshes === beforeLinks + 1 && file.fm.links[0].text === 'Example');
+        replacementLinkState.authority = {
+            expected: localReplacementLinks,
+            writeMtime: file.stat.mtime,
+            cacheVersion: links._metadataVersion(replacementPath),
+        };
+        list._retainMetadataPath(replacementEntryState);
+        links._retainMetadataPath(replacementLinkState);
+        generationCacheA.emit({ path: replacementPath });
+        const generationVersionA = generationTrackerA.versions.get(replacementPath);
+        replacementEntryState.authority.cacheVersion = generationVersionA;
+        replacementLinkState.authority.cacheVersion = generationVersionA;
+        global.app.metadataCache = generationCacheB;
+        const generationTrackerB = links._metadataTracker();
+        const hotReloadTracker = new TripEntryList()._metadataTracker();
+        generationCacheA.emit({ path: replacementPath });
+        staleGenerationListenerA({ path: replacementPath });
+        const staleCacheAIsolated = generationTrackerB.versions.get(replacementPath) === generationVersionA;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'EXTERNAL-B' }],
+            links: [{ url: 'https://external-b.example', text: 'External B' }],
+        };
+        generationCacheB.emit({ path: replacementPath });
+        const generationVersionB = generationTrackerB.versions.get(replacementPath);
+        for (let index = 0; index < 50000; index++) {
+            generationCacheB.emit({ path: `unrelated/${index}.md` });
+        }
+        const allowedTrackedPaths = new Set([...baselineTrackedPaths, replacementPath]);
+        const unrelatedPathsBounded = [...generationTrackerB.active.keys()]
+            .every((trackedPath) => allowedTrackedPaths.has(trackedPath))
+            && [...generationTrackerB.versions.keys()]
+                .every((trackedPath) => allowedTrackedPaths.has(trackedPath));
+        const replacementGenerationEntryHelper = new ReloadedTripEntryList();
+        const replacementGenerationLinksHelper = new ReloadedTripLinks();
+        const cacheBEntryState = replacementGenerationEntryHelper._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: file.stat.mtime - 1 },
+            flights: [{ flight_no: 'STALE-A' }],
+        }, 'flights');
+        const cacheBLinkState = replacementGenerationLinksHelper._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: file.stat.mtime - 1 },
+            links: [{ url: 'https://stale-a.example', text: 'Stale A' }],
+        });
+        ok('PERF4D-METADATA-GENERATION entry and link owners share one cache generation tracker',
+            generationTrackerA === sameCacheTracker && generationTrackerB === hotReloadTracker
+            && generationTrackerA.versions === generationTrackerB.versions);
+        ok('PERF4D-CACHE-LISTENER-REPLACEMENT detaches cache A and keeps one cache B listener through hot reload',
+            generationCacheA.offrefs.length === 1
+            && generationCacheA.offrefs[0] === generationRefA
+            && generationCacheA.listeners.size === 0
+            && generationCacheB.listeners.size === 1
+            && staleCacheAIsolated
+            && unrelatedPathsBounded
+            && generationVersionB === generationVersionA + 1);
+        const finiteMtimeCacheConverged = cacheBEntryState.model[0]?.flight_no === 'EXTERNAL-B'
+            && cacheBEntryState.authority?.cacheVersion === generationVersionB
+            && cacheBLinkState.model[0]?.url === 'https://external-b.example'
+            && cacheBLinkState.authority?.cacheVersion === generationVersionB;
+        ok('PERF4F-FINITE-MTIME-CACHE-CONVERGENCE finite stale mtimes lose to cache B for both helpers',
+            finiteMtimeCacheConverged);
+        ok('PERF4G-CROSS-CONSTRUCTOR-HOT-RELOAD re-evaluated helpers retain owner authority and consume cache B first',
+            ReloadedTripEntryList !== TripEntryList && ReloadedTripLinks !== TripLinks
+            && finiteMtimeCacheConverged
+            && replacementGenerationEntryHelper._entryStateStore() === list._entryStateStore()
+            && replacementGenerationLinksHelper._linksStateStore() === links._linksStateStore());
+        const intermediateEntries = [{ flight_no: 'INTERMEDIATE-LOCAL' }];
+        const intermediateLinks = [{ url: 'https://intermediate-local.example', text: 'Intermediate Local' }];
+        replacementEntryState.model = intermediateEntries;
+        replacementEntryState.authority = {
+            expected: intermediateEntries, writeMtime: 10, cacheVersion: generationVersionB,
+        };
+        replacementLinkState.model = intermediateLinks;
+        replacementLinkState.authority = {
+            expected: intermediateLinks, writeMtime: 10, cacheVersion: generationVersionB,
+        };
+        list._retainMetadataPath(replacementEntryState);
+        links._retainMetadataPath(replacementLinkState);
+        file.stat.mtime = 30;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'EVENT-FIRST' }],
+            links: [{ url: 'https://event-first.example', text: 'Event First' }],
+        };
+        generationCacheB.emit({ path: replacementPath });
+        const precedenceGeneration = generationTrackerB.versions.get(replacementPath);
+        const intermediateEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 20 },
+            flights: [{ flight_no: 'INTERMEDIATE-DV' }],
+        }, 'flights');
+        const intermediateLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 20 },
+            links: [{ url: 'https://intermediate-dv.example', text: 'Intermediate DV' }],
+        });
+        ok('PERF4F-CACHE-EVENT-PRECEDENCE observed cache event outranks an intermediate stale Dataview mtime',
+            precedenceGeneration === generationVersionB + 1
+            && intermediateEntryState.model[0]?.flight_no === 'EVENT-FIRST'
+            && intermediateEntryState.authority?.cacheVersion === precedenceGeneration
+            && intermediateLinkState.model[0]?.url === 'https://event-first.example'
+            && intermediateLinkState.authority?.cacheVersion === precedenceGeneration);
+        const matchingEntries = [{ flight_no: 'MATCHING-LOCAL' }];
+        const matchingLinks = [{ url: 'https://matching-local.example', text: 'Matching Local' }];
+        replacementEntryState.model = matchingEntries;
+        replacementEntryState.authority = {
+            expected: matchingEntries, writeMtime: 40, cacheVersion: precedenceGeneration,
+        };
+        replacementLinkState.model = matchingLinks;
+        replacementLinkState.authority = {
+            expected: matchingLinks, writeMtime: 40, cacheVersion: precedenceGeneration,
+        };
+        file.stat.mtime = 50;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'EVENT-BEATS-MATCH' }],
+            links: [{ url: 'https://event-beats-match.example', text: 'Event Beats Match' }],
+        };
+        generationCacheB.emit({ path: replacementPath });
+        const matchingGeneration = generationTrackerB.versions.get(replacementPath);
+        const matchingEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 40 }, flights: matchingEntries,
+        }, 'flights');
+        const matchingLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 40 }, links: matchingLinks,
+        });
+        ok('PERF4F-CACHE-EVENT-PRECEDENCE observed cache event outranks a matching pre-event Dataview snapshot',
+            matchingGeneration === precedenceGeneration + 1
+            && matchingEntryState.model[0]?.flight_no === 'EVENT-BEATS-MATCH'
+            && matchingEntryState.authority?.cacheVersion === matchingGeneration
+            && matchingLinkState.model[0]?.url === 'https://event-beats-match.example'
+            && matchingLinkState.authority?.cacheVersion === matchingGeneration);
+        const pendingEntries = [{ flight_no: 'PENDING-LOCAL' }];
+        const pendingAuthorityLinks = [{ url: 'https://pending-local.example', text: 'Pending Local' }];
+        replacementEntryState.model = pendingEntries;
+        replacementEntryState.authority = {
+            expected: pendingEntries, writeMtime: 60, cacheVersion: matchingGeneration,
+        };
+        replacementLinkState.model = pendingAuthorityLinks;
+        replacementLinkState.authority = {
+            expected: pendingAuthorityLinks, writeMtime: 60, cacheVersion: matchingGeneration,
+        };
+        file.stat.mtime = 80;
+        generationCacheB.frontmatter = null;
+        generationCacheB.emit({ path: replacementPath });
+        const pendingGeneration = generationTrackerB.versions.get(replacementPath);
+        const pendingEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 70 }, flights: [{ flight_no: 'PENDING-DV' }],
+        }, 'flights');
+        const pendingLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 70 },
+            links: [{ url: 'https://pending-dv.example', text: 'Pending DV' }],
+        });
+        const pendingAuthorityHeld = pendingEntryState.model[0]?.flight_no === 'PENDING-LOCAL'
+            && pendingEntryState.authority?.cacheVersion === matchingGeneration
+            && pendingLinkState.model[0]?.url === 'https://pending-local.example'
+            && pendingLinkState.authority?.cacheVersion === matchingGeneration;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'CACHE-READY' }],
+            links: [{ url: 'https://cache-ready.example', text: 'Cache Ready' }],
+        };
+        const readyEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath, mtime: 70 }, flights: [{ flight_no: 'PENDING-DV' }],
+        }, 'flights');
+        const readyLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath, mtime: 70 },
+            links: [{ url: 'https://pending-dv.example', text: 'Pending DV' }],
+        });
+        ok('PERF4F-CACHE-EVENT-PRECEDENCE unreadable event cache holds authority and retries the same generation',
+            pendingGeneration === matchingGeneration + 1
+            && pendingAuthorityHeld
+            && readyEntryState.model[0]?.flight_no === 'CACHE-READY'
+            && readyEntryState.authority?.cacheVersion === pendingGeneration
+            && readyLinkState.model[0]?.url === 'https://cache-ready.example'
+            && readyLinkState.authority?.cacheVersion === pendingGeneration);
+        const staticEntryOwner = trackedEl('div');
+        const staticLinksOwner = trackedEl('div');
+        const staticEntryPage = { file: { path: 'mutants/static-entry.md' }, flights: [] };
+        const staticLinksPage = { file: { path: 'mutants/static-links.md' }, links: [] };
+        const normalEntryOwner = trackedEl('div');
+        const normalLinksOwner = trackedEl('div');
+        const normalEntryShared = list._entryState(normalEntryOwner, staticEntryPage, 'flights')
+            === new ReloadedTripEntryList()._entryState(normalEntryOwner, staticEntryPage, 'flights');
+        const normalLinksShared = links._linksState(normalLinksOwner, staticLinksPage)
+            === new ReloadedTripLinks()._linksState(normalLinksOwner, staticLinksPage);
+        const staticEntrySplit = new StaticEntryA()._entryState(staticEntryOwner, staticEntryPage, 'flights')
+            !== new StaticEntryB()._entryState(staticEntryOwner, staticEntryPage, 'flights');
+        const staticLinksSplit = new StaticLinksA()._linksState(staticLinksOwner, staticLinksPage)
+            !== new StaticLinksB()._linksState(staticLinksOwner, staticLinksPage);
+        ok('PERF4G-SPECIFIC-MUTATION-ADEQUACY constructor-static stores turn cross-constructor identity red',
+            normalEntryShared && normalLinksShared && staticEntrySplit && staticLinksSplit);
 
-        page = { file: { path: pathName }, links: [] };
-        file.fm.links = [];
-        scheduled.length = 0;
-        indexPage = () => ({
-            file: { path: pathName },
+        const precedenceMutantPath = 'spice/trips/demo/Precedence Mutant.md';
+        global.app.vault.getAbstractFileByPath = (targetPath) =>
+            (targetPath === replacementPath || targetPath === precedenceMutantPath)
+                ? file : originalGetAbstractFileByPath(targetPath);
+        const precedenceEntry = new PrecedenceMutantEntry();
+        const precedenceLinks = new PrecedenceMutantLinks();
+        const precedenceEntryOwner = trackedEl('div');
+        precedenceEntryOwner.dataset.tripEntryOwnerPath = precedenceMutantPath;
+        precedenceEntryOwner.dataset.tripEntryOwnerKey = 'flights';
+        const precedenceLinksOwner = trackedEl('div');
+        precedenceLinksOwner.dataset.tripLinksOwnerPath = precedenceMutantPath;
+        const mutantLocalEntries = [{ flight_no: 'MUTANT-LOCAL' }];
+        const mutantLocalLinks = [{ url: 'https://mutant-local.example', text: 'Mutant Local' }];
+        const precedenceEntryState = precedenceEntry._entryState(precedenceEntryOwner, {
+            file: { path: precedenceMutantPath }, flights: mutantLocalEntries,
+        }, 'flights');
+        precedenceEntryState.authority = {
+            expected: mutantLocalEntries, writeMtime: 10,
+            cacheVersion: precedenceEntry._metadataVersion(precedenceMutantPath),
+        };
+        const precedenceLinksState = precedenceLinks._linksState(precedenceLinksOwner, {
+            file: { path: precedenceMutantPath }, links: mutantLocalLinks,
+        });
+        precedenceLinksState.authority = {
+            expected: mutantLocalLinks, writeMtime: 10,
+            cacheVersion: precedenceLinks._metadataVersion(precedenceMutantPath),
+        };
+        precedenceEntry._retainMetadataPath(precedenceEntryState);
+        precedenceLinks._retainMetadataPath(precedenceLinksState);
+        file.stat.mtime = 30;
+        generationCacheB.frontmatter = {
+            flights: [{ flight_no: 'MUTANT-CACHE' }],
+            links: [{ url: 'https://mutant-cache.example', text: 'Mutant Cache' }],
+        };
+        generationCacheB.emit({ path: precedenceMutantPath });
+        const mutantEntryResult = precedenceEntry._entryState(precedenceEntryOwner, {
+            file: { path: precedenceMutantPath, mtime: 20 },
+            flights: [{ flight_no: 'MUTANT-STALE-DV' }],
+        }, 'flights');
+        const mutantLinksResult = precedenceLinks._linksState(precedenceLinksOwner, {
+            file: { path: precedenceMutantPath, mtime: 20 },
+            links: [{ url: 'https://mutant-stale-dv.example', text: 'Mutant Stale DV' }],
+        });
+        ok('PERF4G-SPECIFIC-MUTATION-ADEQUACY disabled cache precedence turns both event-first fixtures red',
+            mutantEntryResult.model[0]?.flight_no === 'MUTANT-STALE-DV'
+            && mutantLinksResult.model[0]?.url === 'https://mutant-stale-dv.example');
+        precedenceEntryState.authority = null;
+        precedenceLinksState.authority = null;
+        precedenceEntry._releaseMetadataPath(precedenceEntryState);
+        precedenceLinks._releaseMetadataPath(precedenceLinksState);
+        global.app.metadataCache = originalMetadataCache;
+        list._metadataTracker();
+        cachedFrontmatter = {
+            flights: [{ flight_no: 'EXTERNAL-LIVE' }],
+            links: [{ url: 'https://external-live.example', text: 'External Live' }],
+        };
+        metadataListener({ path: replacementPath });
+        const generationVersionLive = list._metadataVersion(replacementPath);
+        const liveEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath }, flights: [{ flight_no: 'STALE-B' }],
+        }, 'flights');
+        const liveLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath },
+            links: [{ url: 'https://stale-b.example', text: 'Stale B' }],
+        });
+        ok('PERF4D-CACHE-LISTENER-REPLACEMENT restoring the live cache releases cache B ownership',
+            generationCacheB.offrefs.length === 1 && generationCacheB.listeners.size === 0
+            && liveEntryState.model[0]?.flight_no === 'EXTERNAL-LIVE'
+            && liveEntryState.authority?.cacheVersion === generationVersionLive
+            && liveLinkState.model[0]?.url === 'https://external-live.example'
+            && liveLinkState.authority?.cacheVersion === generationVersionLive
+            && generationVersionLive === pendingGeneration + 1);
+        cachedFrontmatter = null;
+        list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath }, flights: [{ flight_no: 'EXTERNAL-LIVE' }],
+        }, 'flights');
+        links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath },
+            links: [{ url: 'https://external-live.example', text: 'External Live' }],
+        });
+        const retiredLiveTracker = list._metadataTracker();
+        ok('PERF4E-ACTIVE-PATH-RETENTION unrelated events stay absent and converged owners retire path state',
+            !retiredLiveTracker.active.has(replacementPath)
+            && !retiredLiveTracker.versions.has(replacementPath));
+
+        const failureCacheA = makeGenerationCache('failure-a');
+        const failureCacheB = makeGenerationCache('failure-b');
+        global.app.metadataCache = failureCacheA;
+        list._metadataTracker();
+        const failoverEntries = [{ flight_no: 'FAILOVER-LOCAL' }];
+        const failoverLinks = [{ url: 'https://failover-local.example', text: 'Failover Local' }];
+        replacementEntryState.model = failoverEntries;
+        replacementEntryState.authority = {
+            expected: failoverEntries, writeMtime: file.stat.mtime, cacheVersion: 0,
+        };
+        replacementLinkState.model = failoverLinks;
+        replacementLinkState.authority = {
+            expected: failoverLinks, writeMtime: file.stat.mtime, cacheVersion: 0,
+        };
+        list._retainMetadataPath(replacementEntryState);
+        links._retainMetadataPath(replacementLinkState);
+        failureCacheA.emit({ path: replacementPath });
+        const failoverGenerationA = list._metadataVersion(replacementPath);
+        replacementEntryState.authority.cacheVersion = failoverGenerationA;
+        replacementLinkState.authority.cacheVersion = failoverGenerationA;
+        failureCacheA.throwOnOffref = true;
+        global.app.metadataCache = failureCacheB;
+        const failureTrackerB = links._metadataTracker();
+        const beforeStaleFailureA = failureTrackerB.versions.get(replacementPath);
+        failureCacheA.emit({ path: replacementPath });
+        const staleFailureAIsolated = failureTrackerB.versions.get(replacementPath) === beforeStaleFailureA;
+        failureCacheB.frontmatter = {
+            flights: [{ flight_no: 'FAILOVER-EXTERNAL' }],
+            links: [{ url: 'https://failover-external.example', text: 'Failover External' }],
+        };
+        failureCacheB.emit({ path: replacementPath });
+        const failoverGenerationB = failureTrackerB.versions.get(replacementPath);
+        const failoverEntryState = list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath }, flights: [{ flight_no: 'FAILOVER-STALE' }],
+        }, 'flights');
+        const failoverLinkState = links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath },
+            links: [{ url: 'https://failover-stale.example', text: 'Failover Stale' }],
+        });
+        ok('PERF4E-OFFREF-THROW-FAILOVER cache B wins before throwing cache A cleanup',
+            globalThis[Symbol.for('sauce.trips.metadata-generations')] === failureTrackerB
+            && failureCacheA.offrefs.length === 1
+            && failureCacheA.listeners.size === 1
+            && failureCacheB.listeners.size === 1
+            && staleFailureAIsolated
+            && failoverGenerationB === failoverGenerationA + 1
+            && failoverEntryState.model[0]?.flight_no === 'FAILOVER-EXTERNAL'
+            && failoverLinkState.model[0]?.url === 'https://failover-external.example');
+        global.app.metadataCache = originalMetadataCache;
+        list._metadataTracker();
+        list._entryState(replacementEntryOwner, {
+            file: { path: replacementPath }, flights: [{ flight_no: 'FAILOVER-EXTERNAL' }],
+        }, 'flights');
+        links._linksState(replacementLinkOwner, {
+            type: 'trip', file: { path: replacementPath },
+            links: [{ url: 'https://failover-external.example', text: 'Failover External' }],
+        });
+        const retiredFailureTracker = list._metadataTracker();
+        ok('PERF4E-OFFREF-THROW-FAILOVER settled failover owners release their generation state',
+            !retiredFailureTracker.active.has(replacementPath)
+            && !retiredFailureTracker.versions.has(replacementPath));
+        global.app.vault.getAbstractFileByPath = originalGetAbstractFileByPath;
+        const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
+        const priorLinks = [];
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        const linksOwner = trackedEl('div');
+        linksOwner.dataset.tripLinksOwnerPath = pathName;
+        linksOwner.classList.add('trip-links-owner');
+        const linksDv = { container: linksOwner, current: () => page };
+        failWrite = false;
+        writeGate = deferred();
+        const pendingLinks = links._write(linksDv, nextLinks);
+        await new Promise(setImmediate);
+        const optimisticGrid = linksOwner.querySelector('.trip-links-grid');
+        ok('PERF-4-LINKS-OPTIMISTIC empty atlas panel inserts the new card before persistence',
+            Array.isArray(page.links) && page.links[0].text === 'Example'
+            && optimisticGrid && optimisticGrid.children.length === 1
+            && refreshes === beforeStructureRefresh);
+        writeGate.resolve();
+        const linksSaved = await pendingLinks;
+        ok('PERF-4-LINKS-SUCCESS persists without metadata polling or global refresh',
+            linksSaved && file.fm.links[0].text === 'Example'
+            && scheduled.length === 0 && refreshes === beforeStructureRefresh);
+
+        const rapidLinkGates = [deferred(), deferred()];
+        let indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let rapidLinkWrites = 0;
+        let rapidLinkActive = 0;
+        let rapidLinkMaxActive = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = rapidLinkGates[rapidLinkWrites++];
+            rapidLinkActive++;
+            rapidLinkMaxActive = Math.max(rapidLinkMaxActive, rapidLinkActive);
+            await gate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+            rapidLinkActive--;
+        };
+        const rapidLinksOwner = trackedEl('div');
+        rapidLinksOwner.dataset.tripLinksOwnerPath = pathName;
+        rapidLinksOwner.classList.add('trip-links-owner');
+        const rapidLinksDv = {
+            container: rapidLinksOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(rapidLinksDv);
+        const rapidLinkFirst = links._write(
+            rapidLinksDv, TripLinks.deleteLink(links._currentLinks(rapidLinksDv), 0).links,
+        );
+        await new Promise(setImmediate);
+        const replacementLinksHelper = new ReloadedTripLinks();
+        const rapidLinkSecondBase = replacementLinksHelper._currentLinks(rapidLinksDv);
+        const rapidLinkSecond = replacementLinksHelper._write(
+            rapidLinksDv, TripLinks.deleteLink(rapidLinkSecondBase, 0).links,
+        );
+        await new Promise(setImmediate);
+        const rapidLinksQueued = rapidLinkWrites === 1
+            && rapidLinkSecondBase.length === 1
+            && rapidLinkSecondBase[0].text === 'B';
+        rapidLinkGates[0].resolve();
+        await rapidLinkFirst;
+        await new Promise(setImmediate);
+        const rapidLinkSecondStarted = rapidLinkWrites === 2
+            && replacementLinksHelper._currentLinks(rapidLinksDv).length === 0;
+        rapidLinkGates[1].resolve();
+        const rapidLinksSaved = await rapidLinkSecond;
+        ok('PERF4G-HOT-RELOAD-OWNER-STATE replacement link helpers share one exact-owner queue',
+            ReloadedTripLinks !== TripLinks
+            && rapidLinksQueued && rapidLinkSecondStarted && rapidLinksSaved
+            && rapidLinkMaxActive === 1 && file.fm.links.length === 0);
+        const missingMtimeLinksState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://a.example', text: 'A' }, { url: 'https://b.example', text: 'B' }],
+        });
+        ok('PERF4C-MISSING-MTIME-AUTHORITY link snapshots without mtime cannot reclaim post-write authority',
+            missingMtimeLinksState.model.length === 0 && !!missingMtimeLinksState.authority);
+        file.stat.mtime = 12;
+        cachedFrontmatter = {
+            links: [{ url: 'https://a.example', text: 'A' }, { url: 'https://b.example', text: 'B' }],
+        };
+        const laggingLinksCacheState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://old.example', text: 'Old' }],
+        });
+        const laggingLinksCacheRetained = laggingLinksCacheState.model.length === 0
+            && !!laggingLinksCacheState.authority;
+        const laggingLinksFollowup = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://older.example', text: 'Older' }],
+        });
+        const laggingLinksFollowupRetained = laggingLinksFollowup.model.length === 0
+            && !!laggingLinksFollowup.authority;
+        cachedFrontmatter = { links: [{ url: 'https://external.example', text: 'External' }] };
+        metadataListener(file);
+        const newerLinksState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
             links: [{ url: 'https://stale.example', text: 'Stale' }],
         });
-        writeGate = deferred(); writeGate.resolve();
-        mutationAlwaysCurrent = true;
-        const beforeLinksMutant = refreshes;
-        const linksMutantSave = links._write(dv, nextLinks);
+        const linksCacheRebased = newerLinksState.authority?.expected?.[0]?.url === 'https://external.example'
+            && newerLinksState.model[0].url === 'https://external.example';
+        const convergedLinksState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://external.example', text: 'External' }],
+        });
+        ok('PERF4D-LINKS-CACHE-CONVERGENCE only an observed cache generation rebases missing-mtime authority',
+            laggingLinksCacheRetained && laggingLinksFollowupRetained && linksCacheRebased
+            && convergedLinksState.authority === null
+            && convergedLinksState.model[0].url === 'https://external.example');
+        cachedFrontmatter = null;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        // PERF-4c binding fixture: exercise the actual Manage Links controls,
+        // whose DOM rows intentionally remain mounted while persistence is in
+        // flight. After deleting A, B's captured row must resolve its URL
+        // against the owner-authoritative [B] model instead of reusing index 1.
+        const modalLinkGates = [deferred(), deferred()];
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalLinkWrites = 0;
+        let modalLinkActive = 0;
+        let modalLinkMaxActive = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = modalLinkGates[modalLinkWrites++];
+            modalLinkActive++;
+            modalLinkMaxActive = Math.max(modalLinkMaxActive, modalLinkActive);
+            await gate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+            modalLinkActive--;
+        };
+        const modalLinksOwner = trackedEl('div');
+        modalLinksOwner.dataset.tripLinksOwnerPath = pathName;
+        modalLinksOwner.classList.add('trip-links-owner');
+        const modalLinksDv = {
+            container: modalLinksOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalLinksDv);
+        const originalOpenModal = links._openModal;
+        let managePanel = null;
+        let manageCloses = 0;
+        const manageBody = trackedEl('body');
+        let manageOverlay = null;
+        links._openModal = ({ build }) => {
+            manageOverlay = manageBody.createEl('div');
+            managePanel = trackedEl('div');
+            manageOverlay.appendChild(managePanel);
+            build(managePanel, () => { manageCloses++; manageOverlay.remove(); });
+        };
+        links.openManage(modalLinksDv);
+        const manageRows = managePanel.children[0].children;
+        const deleteA = manageRows[0].children[2];
+        const deleteB = manageRows[1].children[2];
+        const modalDeleteA = deleteA.onclick();
         await new Promise(setImmediate);
-        const linksMutantPassedStaleCheckpoint = refreshes === beforeLinksMutant;
-        const linksMutantSaved = await linksMutantSave;
-        mutationAlwaysCurrent = false;
-        ok('GA-P2C-TRIP-LINKS-ALWAYS-TRUE-MUTANT stale checkpoint turns red',
-            linksMutantSaved && !linksMutantPassedStaleCheckpoint && refreshes === beforeLinksMutant + 1);
+        const modalDeleteB = deleteB.onclick();
+        await new Promise(setImmediate);
+        const realModalQueued = modalLinkWrites === 1
+            && links._currentLinks(modalLinksDv).length === 1
+            && links._currentLinks(modalLinksDv)[0].text === 'B';
+        modalLinkGates[0].resolve();
+        const modalDeleteASaved = await modalDeleteA;
+        await new Promise(setImmediate);
+        const manageStayedMounted = manageOverlay.parentNode === manageBody && manageCloses === 0;
+        const realModalSecondStarted = modalLinkWrites === 2
+            && links._currentLinks(modalLinksDv).length === 0;
+        modalLinkGates[1].resolve();
+        const modalDeleteBSaved = await modalDeleteB;
+        ok('PERF4B-MANAGE-LINK-IDENTITY real modal rapid deletes resolve stable URL identity after index shift',
+            realModalQueued && realModalSecondStarted
+            && modalDeleteASaved && modalDeleteBSaved
+            && modalLinkMaxActive === 1 && file.fm.links.length === 0
+            && manageStayedMounted && manageCloses === 1
+            && manageOverlay.parentNode === null);
+        links._openModal = originalOpenModal;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        const modalEditGates = [deferred(), deferred()];
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalEditWrites = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = modalEditGates[modalEditWrites++];
+            await gate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+        };
+        const modalEditOwner = trackedEl('div');
+        modalEditOwner.dataset.tripLinksOwnerPath = pathName;
+        modalEditOwner.classList.add('trip-links-owner');
+        const modalEditDv = {
+            container: modalEditOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalEditDv);
+        let editPanel = null;
+        let editSubmit = null;
+        let editManageCloses = 0;
+        const originalOpenForm = links._openForm;
+        links._openModal = ({ build }) => {
+            editPanel = trackedEl('div');
+            build(editPanel, () => { editManageCloses++; });
+        };
+        links._openForm = (_fields, onSubmit) => { editSubmit = onSubmit; };
+        links.openManage(modalEditDv);
+        const editRows = editPanel.children[0].children;
+        const deleteBeforeEdit = editRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const openEditAfterShift = editRows[1].children[1].onclick();
+        await new Promise(setImmediate);
+        const realEditDeferred = modalEditWrites === 1 && editSubmit === null
+            && editManageCloses === 0
+            && links._currentLinks(modalEditDv)[0].url === 'https://b.example';
+        modalEditGates[0].resolve();
+        await deleteBeforeEdit;
+        const editOpened = await openEditAfterShift;
+        const editAfterShift = editSubmit({ url: 'https://b2.example', text: 'B2' });
+        await new Promise(setImmediate);
+        const realEditStarted = modalEditWrites === 2
+            && links._currentLinks(modalEditDv)[0].url === 'https://b2.example';
+        modalEditGates[1].resolve();
+        const editAfterShiftSaved = await editAfterShift;
+        ok('PERF4B-MANAGE-LINK-EDIT-IDENTITY real modal edit resolves stable URL identity after sibling shift',
+            realEditDeferred && editOpened && realEditStarted && editAfterShiftSaved
+            && editManageCloses === 1
+            && file.fm.links.length === 1
+            && file.fm.links[0].url === 'https://b2.example'
+            && file.fm.links[0].text === 'B2', JSON.stringify({
+                realEditDeferred, editOpened, realEditStarted, editAfterShiftSaved,
+                editManageCloses, writes: modalEditWrites, links: file.fm.links,
+            }));
+
+        const modalCancelGate = deferred();
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalCancelWrites = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            modalCancelWrites++;
+            await modalCancelGate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+        };
+        const modalCancelOwner = trackedEl('div');
+        modalCancelOwner.dataset.tripLinksOwnerPath = pathName;
+        modalCancelOwner.classList.add('trip-links-owner');
+        const modalCancelDv = {
+            container: modalCancelOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalCancelDv);
+        let modalCancelPanel = null;
+        let modalCancelOpen = true;
+        let modalCancelCloses = 0;
+        let cancelledFormsOpened = 0;
+        links._openModal = ({ build }) => {
+            modalCancelPanel = trackedEl('div');
+            const close = () => {
+                if (!modalCancelOpen) return;
+                modalCancelOpen = false;
+                modalCancelCloses++;
+            };
+            close.isOpen = () => modalCancelOpen;
+            build(modalCancelPanel, close);
+        };
+        links._openForm = () => { cancelledFormsOpened++; };
+        links.openManage(modalCancelDv);
+        const cancelRows = modalCancelPanel.children[0].children;
+        const pendingDeleteBeforeCancel = cancelRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const deferredEditBeforeCancel = cancelRows[1].children[1].onclick();
+        await new Promise(setImmediate);
+        modalCancelPanel.children[1].onclick();
+        const cancelledWhilePending = !modalCancelOpen && modalCancelCloses === 1
+            && cancelledFormsOpened === 0 && modalCancelWrites === 1;
+        modalCancelGate.resolve();
+        const cancelledDeleteSaved = await pendingDeleteBeforeCancel;
+        const cancelledEditOpened = await deferredEditBeforeCancel;
+        ok('PERF4C-MODAL-CANCEL-GENERATION closed Manage generation cannot resurrect deferred Edit',
+            cancelledWhilePending && cancelledDeleteSaved && cancelledEditOpened === false
+            && cancelledFormsOpened === 0 && modalCancelCloses === 1
+            && file.fm.links.length === 1 && file.fm.links[0].url === 'https://b.example');
+
+        const originalDocument = global.document;
+        const modalBody = trackedEl('body');
+        const modalDocumentListeners = {};
+        global.document = {
+            body: modalBody,
+            activeElement: null,
+            querySelector: (selector) => modalBody.querySelector(selector),
+            addEventListener: (name, listener) => { modalDocumentListeners[name] = listener; },
+            removeEventListener: (name, listener) => {
+                if (modalDocumentListeners[name] === listener) delete modalDocumentListeners[name];
+            },
+        };
+        let replacedClose = null;
+        originalOpenModal.call(links, { title: 'First', build: (_panel, close) => { replacedClose = close; } });
+        const replacedOverlay = modalBody.children[0];
+        let escapeClose = null;
+        originalOpenModal.call(links, { title: 'Second', build: (_panel, close) => { escapeClose = close; } });
+        const replacementInvalidated = replacedClose.isOpen() === false
+            && replacedOverlay.parentNode === null && escapeClose.isOpen() === true;
+        modalDocumentListeners.keydown({ key: 'Escape' });
+        const escapeInvalidated = escapeClose.isOpen() === false && modalBody.children.length === 0;
+        let backdropClose = null;
+        originalOpenModal.call(links, { title: 'Third', build: (_panel, close) => { backdropClose = close; } });
+        const backdropOverlay = modalBody.children[0];
+        backdropOverlay.onclick({ target: backdropOverlay });
+        ok('PERF4D-MODAL-CLOSE-TOKEN replacement Escape and backdrop share one cancellation token',
+            replacementInvalidated && escapeInvalidated
+            && backdropClose.isOpen() === false && modalBody.children.length === 0);
+        global.document = originalDocument;
+        links._openModal = originalOpenModal;
+        links._openForm = originalOpenForm;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        // The modal must remain mounted until every rapid delete settles. A
+        // later rejection then restores focus to a live retry control instead
+        // of a button detached by an earlier successful handler's close().
+        const modalFailureGates = [deferred(), deferred()];
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalFailureWrites = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const write = modalFailureWrites++;
+            await modalFailureGates[write].promise;
+            if (write === 1) throw new Error('second modal delete failed');
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+        };
+        const modalFailureOwner = trackedEl('div');
+        modalFailureOwner.dataset.tripLinksOwnerPath = pathName;
+        modalFailureOwner.classList.add('trip-links-owner');
+        const modalFailureDv = {
+            container: modalFailureOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalFailureDv);
+        const failureBody = trackedEl('body');
+        let failureOverlay = null;
+        let failurePanel = null;
+        let failureCloses = 0;
+        links._openModal = ({ build }) => {
+            failureOverlay = failureBody.createEl('div');
+            failurePanel = failureOverlay.createEl('div');
+            build(failurePanel, () => { failureCloses++; failureOverlay.remove(); });
+        };
+        links.openManage(modalFailureDv);
+        const failureRows = failurePanel.children[0].children;
+        let rejectedFocusAttached = false;
+        failureRows[1].children[2].focus = () => {
+            rejectedFocusAttached = failureRows[1].children[2].parentNode?.parentNode?.parentNode === failurePanel
+                && failureOverlay.parentNode === failureBody;
+        };
+        const firstModalDelete = failureRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const rejectedModalDelete = failureRows[1].children[2].onclick();
+        await new Promise(setImmediate);
+        modalFailureGates[0].resolve();
+        const firstModalSaved = await firstModalDelete;
+        await new Promise(setImmediate);
+        const overlayHeldForDescendant = failureOverlay.parentNode === failureBody && failureCloses === 0;
+        modalFailureGates[1].resolve();
+        const rejectedModalSaved = await rejectedModalDelete;
+        ok('PERF4C-MODAL-ROLLBACK-OWNERSHIP queued rejection retains live overlay and retry focus',
+            firstModalSaved && !rejectedModalSaved && modalFailureWrites === 2
+            && overlayHeldForDescendant && failureOverlay.parentNode === failureBody
+            && failureCloses === 0 && rejectedFocusAttached
+            && file.fm.links.length === 1 && file.fm.links[0].url === 'https://b.example');
+
+        const firstFailureGate = deferred();
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        const firstFailureInitial = indexedLinks.slice();
+        file.fm.links = firstFailureInitial;
+        let firstFailureWrites = 0;
+        global.app.fileManager.processFrontMatter = async () => {
+            firstFailureWrites++;
+            await firstFailureGate.promise;
+            throw new Error('first modal delete failed');
+        };
+        const firstFailureOwner = trackedEl('div');
+        firstFailureOwner.dataset.tripLinksOwnerPath = pathName;
+        firstFailureOwner.classList.add('trip-links-owner');
+        const firstFailureDv = {
+            container: firstFailureOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(firstFailureDv);
+        const firstFailureBody = trackedEl('body');
+        let firstFailureOverlay = null;
+        let firstFailurePanel = null;
+        let firstFailureCloses = 0;
+        links._openModal = ({ build }) => {
+            firstFailureOverlay = firstFailureBody.createEl('div');
+            firstFailurePanel = firstFailureOverlay.createEl('div');
+            build(firstFailurePanel, () => { firstFailureCloses++; firstFailureOverlay.remove(); });
+        };
+        links.openManage(firstFailureDv);
+        const firstFailureRows = firstFailurePanel.children[0].children;
+        let firstFailureFocusAttached = false;
+        let cancelledFocusAttached = false;
+        firstFailureRows[0].children[2].focus = () => {
+            firstFailureFocusAttached = firstFailureOverlay.parentNode === firstFailureBody;
+        };
+        firstFailureRows[1].children[2].focus = () => {
+            cancelledFocusAttached = firstFailureOverlay.parentNode === firstFailureBody;
+        };
+        const rejectedFirstDelete = firstFailureRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        const cancelledSecondDelete = firstFailureRows[1].children[2].onclick();
+        await new Promise(setImmediate);
+        firstFailureGate.resolve();
+        const firstFailureResults = await Promise.all([rejectedFirstDelete, cancelledSecondDelete]);
+        ok('PERF4C-MANAGE-LINK-FAIL-CLOSED first rejection keeps overlay live and cancels queued descendant',
+            firstFailureResults[0] === false && firstFailureResults[1] === false
+            && firstFailureWrites === 1 && firstFailureCloses === 0
+            && firstFailureOverlay.parentNode === firstFailureBody
+            && firstFailureFocusAttached && cancelledFocusAttached
+            && file.fm.links === firstFailureInitial
+            && links._currentLinks(firstFailureDv).length === 2);
+        links._openModal = originalOpenModal;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        linksOwner.replaceChildren();
+        let linksFocusRestored = 0;
+        const linksFocus = { focus() { linksFocusRestored++; } };
+        failWrite = true;
+        writeGate = deferred();
+        const rejectedLinks = links._write(linksDv, nextLinks, { focusTarget: linksFocus });
+        await new Promise(setImmediate);
+        const linkChangedBeforeReject = !!linksOwner.querySelector('.trip-links-grid');
+        writeGate.resolve();
+        const linksRejected = await rejectedLinks;
+        ok('PERF-4-LINKS-ROLLBACK rejection removes exact optimistic grid and restores model + focus',
+            linkChangedBeforeReject && !linksRejected
+            && linksOwner.children.length === 0 && page.links === priorLinks
+            && linksFocusRestored === 1 && refreshes === beforeStructureRefresh);
+
+        // Mutation control: drop the opaque receipt before rollback. The same
+        // rejection fixture must then leave the optimistic grid behind.
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        linksOwner.replaceChildren();
+        failWrite = true;
+        writeGate = deferred();
+        const normalMutateStructure = renderSafeFacade.mutateStructure;
+        renderSafeFacade.mutateStructure = (opts) => normalMutateStructure(Object.assign({}, opts, {
+            rollback: (_receipt, error) => opts.rollback(undefined, error),
+        }));
+        const mutantLinks = links._write(linksDv, nextLinks);
+        await new Promise(setImmediate);
+        writeGate.resolve();
+        await mutantLinks;
+        const mutantRestored = linksOwner.children.length === 0 && page.links === priorLinks;
+        renderSafeFacade.mutateStructure = normalMutateStructure;
+        ok('PERF-4-RECEIPT-MUTANT rollback assertion turns red when the receipt is dropped', !mutantRestored);
+
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        failWrite = false;
+        writeGate = deferred(); writeGate.resolve();
+        const orphanOwner = trackedEl('div');
+        const orphanSaved = await links._write({ container: orphanOwner, current: () => page }, nextLinks);
+        ok('PERF-4-OWNER-GUARD missing exact rendered owner fails before persistence',
+            !orphanSaved && page.links === priorLinks && file.fm.links === priorLinks
+            && orphanOwner.children.length === 0);
+
+        const helperSources = [
+            'platform/blueprints/trips/helpers/trip-entry-list.js',
+            'platform/blueprints/trips/helpers/trip-links.js',
+        ].map((rel) => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'utf8')).join('\n');
+        ok('PERF-4-SOURCE structural Trips writers use mutateStructure and contain no global refresh command',
+            (helperSources.match(/mutateStructure\(/g) || []).length >= 2
+            && !helperSources.includes('dataview-force-refresh-views'));
+
+        const auditLedger = fs.readFileSync(
+            path.join(__dirname, '..', '..', 'Docs', 'agent-guides', 'code-conventions.md'), 'utf8');
+        const tripsLedgerRows = auditLedger.split('\n').filter((line) => line.startsWith('| Trips |'));
+        const mutableLedgerRows = tripsLedgerRows.filter((line) =>
+            line.includes('`TripEntryList`') || line.includes('`TripLinks`'));
+        ok('PERF4-LEDGER-TOUCH-ZONE mutable Trips rows bind structural receipts and contain no PERF-4 gap',
+            mutableLedgerRows.length === 2
+            && mutableLedgerRows.every((line) => line.includes('mutateStructure')
+                && line.includes('serialized') && !line.includes('GAP PERF-4')));
+
+        const carriedFixtureNames = [
+            'PERF4-LEDGER-TOUCH-ZONE',
+            'PERF4B-MANAGE-LINK-IDENTITY',
+            'PERF4C-MODAL-ROLLBACK-OWNERSHIP',
+            'PERF4C-MISSING-MTIME-AUTHORITY',
+            'PERF4C-MODAL-CANCEL-GENERATION',
+            'PERF4D-CACHE-LISTENER-REPLACEMENT',
+            'PERF4E-ACTIVE-PATH-RETENTION',
+            'PERF4E-OFFREF-THROW-FAILOVER',
+            'PERF4F-FINITE-MTIME-CACHE-CONVERGENCE',
+            'PERF4F-CACHE-EVENT-PRECEDENCE',
+            'PERF4G-CROSS-CONSTRUCTOR-HOT-RELOAD',
+            'PERF4G-FIXTURE-NAME-COVERAGE',
+            'PERF4G-SPECIFIC-MUTATION-ADEQUACY',
+        ];
+        const tripsHarnessSource = fs.readFileSync(__filename, 'utf8');
+        ok('PERF4G-FIXTURE-NAME-COVERAGE every carried finding has an exact executable assertion label',
+            carriedFixtureNames.every((name) => tripsHarnessSource.includes(`ok('${name}`)));
 
         ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
             notices.some((message) => message.includes('trip write failed')));

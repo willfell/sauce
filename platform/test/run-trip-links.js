@@ -30,6 +30,14 @@ function loadClass(relPath, className) {
 const TripLinks = loadClass('platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
 const TripSectionKinds = loadClass('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
 
+// Dataview may expose frontmatter lists as iterable DataArrays.
+{
+    const dataArray = { [Symbol.iterator]: function* () { yield { url: 'https://a.com', text: 'A' }; } };
+    const parsed = new TripLinks()._parse(dataArray);
+    ok('DATA-1 iterable DataArray links normalize safely',
+        parsed.length === 1 && parsed[0].url === 'https://a.com' && parsed[0].text === 'A');
+}
+
 // ---------- static ops (same semantics as ProjectLinksManager) ----------
 {
     const r = TripLinks.addLink([], { url: " https://a.com ", text: "" });
@@ -50,6 +58,13 @@ const TripSectionKinds = loadClass('platform/blueprints/trips/helpers/trip-secti
 {
     const r = TripLinks.deleteLink([{ url: "x" }], 0);
     ok('DEL-1 deleteLink removes at index', r.links.length === 0, JSON.stringify(r));
+}
+{
+    const links = new TripLinks();
+    const current = [{ url: "https://b.com", text: "B" }];
+    ok('IDENTITY-1 modal target resolves by unique URL after a sibling index shift',
+        links._linkIndex(current, { url: "https://b.com", text: "stale label" }) === 0
+        && links._linkIndex(current, { url: "https://a.com" }) === -1);
 }
 
 // ---------- links section kind is gone ----------
