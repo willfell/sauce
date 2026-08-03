@@ -128,6 +128,9 @@ class FinanceFrontmatter {
                 for (const [alias, target] of this._renderQueuePaths) {
                     if (target === owner) this._renderQueuePaths.delete(alias);
                 }
+                for (const alias of this._renderQueueAliases.get(owner) || []) {
+                    if (this._renderQueueFiles.get(alias) === owner) this._renderQueueFiles.delete(alias);
+                }
                 this._renderQueueAliases.delete(owner);
             }
         }

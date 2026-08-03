@@ -1208,7 +1208,51 @@ async function run() {
         && maxActive === 1
         && queueFf._renderQueues.size === 0
         && queueFf._renderQueuePaths.size === 0
-        && queueFf._renderQueueAliases.size === 0);
+        && queueFf._renderQueueAliases.size === 0
+        && !queueFf._renderQueueFiles.has(canonical)
+        && !queueFf._renderQueueFiles.has(firstAlias)
+        && !queueFf._renderQueueFiles.has(secondAlias));
+  }
+
+  {
+    installLifecycle();
+    const queueFf = new FinanceFrontmatter();
+    const { container } = makeEditorDom();
+    global.document = { activeElement: null };
+    const canonical = { path: "spice/finance/Invoices/Identity-Old.md" };
+    const replacement = { path: "spice/finance/Invoices/Identity-New.md" };
+    let releaseOld, releaseNew, oldStarted, newStarted;
+    const oldReady = new Promise((resolve) => { oldStarted = resolve; });
+    const newReady = new Promise((resolve) => { newStarted = resolve; });
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise((resolve) => { releaseNew = resolve; });
+    const run = (file, started, gate) => queueFf.mutateRendered(file, {
+      dv: { container }, selector: ".editor",
+      render: async () => {},
+      write: async () => { if (started) started(); if (gate) await gate; },
+    });
+    const oldOwner = run(canonical, oldStarted, oldGate);
+    await oldReady;
+    const newOwner = run(replacement, newStarted, newGate);
+    await newReady;
+    canonical.path = replacement.path;
+    const rebound = run(canonical, null, null);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    const replacementOwner = queueFf._renderQueueFiles.get(replacement);
+    const reboundBeforeOldCleanup = queueFf._renderQueueFiles.get(canonical) === replacementOwner;
+    releaseOld();
+    await oldOwner;
+    const reboundSurvivedOldCleanup = queueFf._renderQueueFiles.get(canonical) === replacementOwner;
+    releaseNew();
+    const outcomes = await Promise.all([newOwner, rebound]);
+    ok("FF-20F completed owner cleanup preserves a newer identity binding then drains it",
+      reboundBeforeOldCleanup && reboundSurvivedOldCleanup
+        && outcomes.every((outcome) => outcome.ok === true)
+        && queueFf._renderQueues.size === 0
+        && queueFf._renderQueuePaths.size === 0
+        && queueFf._renderQueueAliases.size === 0
+        && !queueFf._renderQueueFiles.has(canonical)
+        && !queueFf._renderQueueFiles.has(replacement));
   }
 
   {
