@@ -2117,6 +2117,56 @@ ASYNC_TESTS.push({ name: "moveSection: renames folder to new parent + applies hu
   } finally { global.app = prevApp; }
 }});
 
+ASYNC_TESTS.push({ name: "PERF8M moveSection: a rejecting child patch cannot abort later project cascade patches", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const prevApp = global.app;
+  const oldFolder = "spice/projects/foo/docs/ems";
+  const newFolder = "spice/projects/foo/docs/knowledge/ems";
+  const known = new Set([
+    oldFolder,
+    `${oldFolder}/EMS.md`,
+    `${oldFolder}/one/One.md`,
+    `${oldFolder}/two/Two.md`,
+  ]);
+  const attempts = [];
+  global.app = {
+    fileManager: {
+      renameFile: async (folder, target) => {
+        for (const item of Array.from(known)) {
+          if (item === folder.path || item.indexOf(folder.path + "/") === 0) {
+            known.delete(item);
+            known.add(target + item.slice(folder.path.length));
+          }
+        }
+      },
+      processFrontMatter: async (file, mutate) => {
+        attempts.push(file.path);
+        mutate({});
+        if (file.path.endsWith("/one/One.md")) throw new Error("middle child rejected");
+      },
+    },
+    vault: { getAbstractFileByPath: (path) => known.has(path) ? { path } : null },
+  };
+  const section = { title: "EMS", folder: oldFolder, hubPath: `${oldFolder}/EMS.md` };
+  const adapter = { move: { rewriteOnSectionMove: () => ({
+    hubPatch: { parent_section: "Knowledge" },
+    childPatches: [
+      { path: `${oldFolder}/one/One.md`, patch: { parent_section: "EMS" } },
+      { path: `${oldFolder}/two/Two.md`, patch: { parent_section: "EMS" } },
+    ],
+  }) } };
+  try {
+    const result = await se.moveSection(null, section, "spice/projects/foo/docs/knowledge", adapter);
+    assert.strictEqual(result.ok, true, "the completed folder move remains successful despite a best-effort patch rejection");
+    assert.deepStrictEqual(attempts, [
+      `${newFolder}/EMS.md`,
+      `${newFolder}/one/One.md`,
+      `${newFolder}/two/Two.md`,
+    ], "hub, rejecting middle child, and later child are all attempted in order");
+  } finally { global.app = prevApp; }
+}});
+
 failures += !run("moveSection: wiki adapter (rewriteOnSectionMove→null) renames folder only", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();

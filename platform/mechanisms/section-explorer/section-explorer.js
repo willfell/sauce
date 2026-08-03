@@ -1318,13 +1318,17 @@ class SectionExplorer {
           return (s === oldFolder || s.indexOf(oldFolder + "/") === 0) ? newFolder + s.slice(oldFolder.length) : s;
         };
         if (plan.hubPatch && section.hubPath) {
-          const hubFile = app.vault.getAbstractFileByPath(remap(section.hubPath));
-          if (hubFile) await app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
+          try {
+            const hubFile = app.vault.getAbstractFileByPath(remap(section.hubPath));
+            if (hubFile) await app.fileManager.processFrontMatter(hubFile, (fm) => Object.assign(fm, plan.hubPatch));
+          } catch (_e) { /* cascade remains best-effort after the folder move commits */ }
         }
         for (const cp of (plan.childPatches || [])) {
-          if (!cp || !cp.path) continue;
-          const cf = app.vault.getAbstractFileByPath(remap(cp.path));
-          if (cf) await app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
+          try {
+            if (!cp || !cp.path) continue;
+            const cf = app.vault.getAbstractFileByPath(remap(cp.path));
+            if (cf) await app.fileManager.processFrontMatter(cf, (fm) => Object.assign(fm, cp.patch || {}));
+          } catch (_e) { /* one bad child must not strand every later patch */ }
         }
         return newFolder;
       };
