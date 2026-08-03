@@ -137,7 +137,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.19.3"
+      "version": "0.19.4"
     },
     {
       "name": "people",
@@ -181,7 +181,7 @@
     },
     {
       "name": "reader",
-      "version": "0.6.2"
+      "version": "0.6.3"
     }
   ]
 }
