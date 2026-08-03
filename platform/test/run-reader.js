@@ -904,6 +904,7 @@ async function dataviewCorrectnessCases() {
       };
       const resultsContainer = makeDomEl('div');
       const hostContainer = makeDomEl('div');
+      const searchInput = hostContainer.createEl('input');
       hostContainer.appendChild(resultsContainer);
       const searchDv = Object.assign(makeDv([searchArticle]), {
         container: hostContainer,
@@ -916,7 +917,11 @@ async function dataviewCorrectnessCases() {
       const hadSearchDocument = Object.prototype.hasOwnProperty.call(global, 'document');
       const priorSearchDocument = global.document;
       try {
-        global.document = { activeElement: null };
+        global.document = {
+          activeElement: null,
+          body: null,
+          contains: (node) => hostContainer.contains(node),
+        };
         global.app = searchApp;
         global.window = { app: searchApp };
         global.customJS = {
@@ -952,16 +957,18 @@ async function dataviewCorrectnessCases() {
         const optimisticSearchCoherent = optimisticSearchToggle
           && optimisticSearchToggle.textContent === 'Reading'
           && resultsContainer.contains(optimisticSearchToggle);
+        searchInput.focus();
+        const searchFocusBeforeRejection = global.document.activeElement === searchInput;
         pendingWrite.reject(new Error('search race fixture rejected'));
         await transition;
         const restoredToggle = capturedState.toggles.get(searchPath);
-        return activeSearchRendered && optimisticSearchCoherent
+        return activeSearchRendered && optimisticSearchCoherent && searchFocusBeforeRejection
           && capturedState.ctx === activeCtx && capturedState.statuses.get(searchPath) === 'unread'
           && resultsContainer.children.some((child) => child.textContent === 'Results (1)')
           && !resultsContainer.children.some((child) => child.textContent === 'Unread')
           && restoredToggle && restoredToggle !== optimisticSearchToggle
           && restoredToggle.textContent === 'Unread' && resultsContainer.contains(restoredToggle)
-          && global.document.activeElement === restoredToggle
+          && global.document.activeElement === searchInput && searchInput.focused
           && capturedState.structuralQueue === null;
       } catch (_e) {
         return false;

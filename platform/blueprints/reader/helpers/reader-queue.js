@@ -469,7 +469,7 @@ class ReaderQueue {
                         this._clearContainer(liveContainer);
                         this._renderResults(dv, liveContainer, state.ctx, state);
                     }
-                    const liveFocusTarget = this._liveFocusTarget(state, path, receipt.focusTarget);
+                    const liveFocusTarget = this._liveFocusTarget(state, path, receipt.focusTarget, true);
                     try {
                         if (liveFocusTarget === state.container && typeof state.container?.setAttribute === 'function') {
                             state.container.setAttribute('tabindex', '-1');
@@ -489,7 +489,7 @@ class ReaderQueue {
         }
     }
 
-    _liveFocusTarget(state, path, clickTarget) {
+    _liveFocusTarget(state, path, clickTarget, preserveConnectedActive) {
         const container = state && state.container;
         const isLive = (node) => {
             if (!node || !container) return false;
@@ -500,6 +500,19 @@ class ReaderQueue {
             } catch (_e) {}
             return false;
         };
+        // Persistence can settle after the user has moved into the permanent
+        // DocSearch strip (or another live control). Preserve that newer focus;
+        // only rebind when the active node was detached by a results rerender.
+        try {
+            const doc = typeof document !== 'undefined' ? document : null;
+            const active = doc && doc.activeElement;
+            const activeIsConnected = active && active !== doc.body
+                && (typeof active.isConnected === 'boolean'
+                    ? active.isConnected
+                    : (typeof doc.contains === 'function' && doc.contains(active)));
+            const owned = state.toggles && state.toggles.get(path);
+            if (preserveConnectedActive && activeIsConnected && active !== owned) return active;
+        } catch (_e) {}
         try {
             const owned = state.toggles && state.toggles.get(path);
             if (isLive(owned)) return owned;
