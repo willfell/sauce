@@ -9,11 +9,24 @@ const { execFileSync } = require('child_process');
 const delivery = require('../mechanisms/delivery');
 
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
+// These fixtures intentionally exercise the coordinator's flat-board selection
+// seam unless a case opts into a binding through withFreshCoordinator below.
+// A live loop exports epic topology while running release:preflight, so keep
+// that ambient binding from changing the module-level fixture semantics.
+const inheritedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+let coordinator;
+try {
+  delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  coordinator = require(coordinatorModulePath);
+} finally {
+  if (inheritedBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = inheritedBoardTopology;
+}
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
   requireLeaseToken, commandRecordReview, commandPark, commandAdvance, commandBreakLease, commandDiscard,
   commandStatus,
-} = require(coordinatorModulePath);
+} = coordinator;
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count += 1; }
