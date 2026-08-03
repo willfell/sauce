@@ -703,6 +703,82 @@ async function dataviewCorrectnessCases() {
        && crossResults[0] === false && crossResults[1] === true
        && crossState.statuses.get(pathA) === 'unread' && crossState.statuses.get(pathB) === 'reading'
        && crossState.structuralQueue === null);
+
+    const focusArticleA = art('Focus A', 'unread', '2026-08-03T02:00:00Z');
+    const focusArticleB = art('Focus B', 'unread', '2026-08-03T01:00:00Z');
+    const focusPathA = focusArticleA.file.path;
+    const focusPathB = focusArticleB.file.path;
+    const focusFiles = new Map([
+      [focusPathA, { path: focusPathA, _fm: { status: 'unread' } }],
+      [focusPathB, { path: focusPathB, _fm: { status: 'unread' } }],
+    ]);
+    const focusPending = new Map();
+    const focusReceipts = new Map();
+    const focusApp = {
+      vault: { getAbstractFileByPath: (path) => focusFiles.get(path) || null },
+      fileManager: {
+        processFrontMatter: (target, mutate) => new Promise((resolve, reject) => {
+          focusPending.set(target.path, {
+            resolve: () => { mutate(target._fm); resolve(); },
+            reject,
+          });
+        }),
+      },
+    };
+    const focusQueue = new ReaderQueue();
+    const focusContainer = makeDomEl('div');
+    const focusDv = makeDv([focusArticleA, focusArticleB]);
+    const focusState = { statuses: new Map(), structuralQueue: null, toggles: new Map(), container: focusContainer, ctx: null };
+    const priorFocusApp = global.app;
+    const priorFocusWindow = global.window;
+    const priorFocusCustomJS = global.customJS;
+    const waitForPending = async (path) => {
+      for (let i = 0; i < 20 && !focusPending.has(path); i++) await new Promise((resolve) => setImmediate(resolve));
+      return focusPending.has(path);
+    };
+    let focusReceiptPassed = false;
+    try {
+      global.app = focusApp;
+      global.window = { app: focusApp };
+      global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+        const receipt = await opts.apply();
+        focusReceipts.set(opts.path, receipt);
+        try { await opts.write(); return { ok: true, receipt }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+      } } };
+      global.window.customJS = global.customJS;
+      focusQueue._renderResults(focusDv, focusContainer, null, focusState);
+      const initialChildren = focusContainer.children.slice();
+      const initialToggleA = focusState.toggles.get(focusPathA);
+      const initialToggleB = focusState.toggles.get(focusPathB);
+      const pendingA = focusQueue._queueStatusTransition(focusDv, focusState, focusPathA, 'unread', 'reading', initialToggleA);
+      const aApplied = await waitForPending(focusPathA);
+      const detachedBClickTarget = focusState.toggles.get(focusPathB);
+      const pendingB = focusQueue._queueStatusTransition(focusDv, focusState, focusPathB, 'unread', 'reading', detachedBClickTarget);
+      await new Promise((resolve) => setImmediate(resolve));
+      const bWaited = !focusPending.has(focusPathB);
+      focusPending.get(focusPathA).reject(new Error('focus fixture A rejected'));
+      const bApplied = await waitForPending(focusPathB);
+      const reboundBTarget = focusReceipts.get(focusPathB)?.focusTarget;
+      focusPending.get(focusPathB).reject(new Error('focus fixture B rejected'));
+      const settled = await Promise.all([pendingA, pendingB]);
+      focusReceiptPassed = aApplied && bWaited && bApplied
+        && settled[0] === false && settled[1] === false
+        && detachedBClickTarget !== initialToggleB && reboundBTarget === initialToggleB
+        && focusState.toggles.get(focusPathB) === initialToggleB
+        && initialToggleB.focused && !detachedBClickTarget.focused
+        && focusState.statuses.get(focusPathA) === 'unread'
+        && focusState.statuses.get(focusPathB) === 'unread'
+        && focusContainer.children.length === initialChildren.length
+        && focusContainer.children.every((child, index) => child === initialChildren[index])
+        && focusState.structuralQueue === null;
+    } finally {
+      global.app = priorFocusApp;
+      global.window = priorFocusWindow;
+      global.customJS = priorFocusCustomJS;
+    }
+    ok('PERF6C-CROSS-ARTICLE-FOCUS-REBIND queued sibling rejection focuses the restored live toggle, never its detached click-time node',
+       focusReceiptPassed);
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;

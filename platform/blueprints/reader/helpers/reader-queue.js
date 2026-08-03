@@ -425,7 +425,11 @@ class ReaderQueue {
                         children: this._childNodes(container),
                         priorStatus: state.statuses.get(path),
                         toggles: state.toggles,
-                        focusTarget,
+                        // A prior queued receipt may have replaced or restored the
+                        // whole container since this gesture was clicked. Rebind
+                        // at execution time so rollback focuses the currently live
+                        // control rather than a detached click-time node.
+                        focusTarget: (state.toggles && state.toggles.get(path)) || focusTarget,
                     };
                     try {
                         state.statuses.set(path, next);
