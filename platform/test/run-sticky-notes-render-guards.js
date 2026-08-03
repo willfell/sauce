@@ -162,6 +162,14 @@ const variants = [
     }
     for (const w of widgets.filter((entry) => /DayList$/.test(entry.name))) {
         const WidgetClass = loadWidget(w.path, w.name);
+        await guard(`PERF7-GUARDED-CUSTOMJS ${w.name} — polling resolves CustomJS only through globalThis`, async () => {
+            const source = fs.readFileSync(path.join(__dirname, '..', '..', w.path), 'utf8');
+            const polling = source.match(/async _pollForDayArg\([\s\S]*?\n    }/);
+            if (!polling || !/globalThis\.customJS/.test(polling[0])) throw new Error('globalThis CustomJS guard is missing');
+            if (/(^|[^.A-Za-z0-9_$])customJS\.RenderSafe/m.test(polling[0])) {
+                throw new Error('polling contains a bare customJS.RenderSafe dereference');
+            }
+        });
         await guard(`PERF7-GUARDED-CUSTOMJS ${w.name} — absent CustomJS takes the guarded missing-day path`, async () => {
             const saved = global.customJS;
             const paragraphs = [];
