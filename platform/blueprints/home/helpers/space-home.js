@@ -491,6 +491,7 @@ class SpaceHome {
       const renderSafe = cjsNow && cjsNow.RenderSafe;
       if (!td || typeof td.createQuick !== "function"
           || !renderSafe || typeof renderSafe.mutateStructure !== "function") return;
+      let optimisticReceipt = null;
       const result = await renderSafe.mutateStructure({
         dv,
         app: (typeof app !== "undefined" && app) || null,
@@ -505,8 +506,9 @@ class SpaceHome {
           node.textContent = text.trim();
           input.value = "";
           addTaskBtn.disabled = true;
-          return { parent: captureRow, node, nextSibling: node.nextSibling || null, focusTarget,
+          optimisticReceipt = { parent: captureRow, node, nextSibling: node.nextSibling || null, focusTarget,
             input, value, selectionStart, selectionEnd, disabled, menuWasOpen: menuOpen };
+          return optimisticReceipt;
         },
         rollback: (receipt) => {
           if (!receipt) return;
@@ -532,7 +534,15 @@ class SpaceHome {
           return created;
         },
       });
-      if (result && result.ok === true) setMenu(false);
+      if (result && result.ok === true) {
+        if (optimisticReceipt?.node && typeof optimisticReceipt.node.remove === "function") {
+          optimisticReceipt.node.remove();
+        } else {
+          optimisticReceipt?.parent?.removeChild?.(optimisticReceipt.node);
+        }
+        addTaskBtn.disabled = optimisticReceipt ? optimisticReceipt.disabled : false;
+        setMenu(false);
+      }
     };
     addTaskBtn.onclick = () => submitCapture();
     input.addEventListener("keydown", (ev) => {

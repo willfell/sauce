@@ -624,6 +624,7 @@ function descendants(el) {
     {
       inputs[0].value = "buy milk";
       const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
+      const captureRow = capAdd && capAdd.parent;
       await fire(capAdd);
       assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
       assertTrue("HOME-CAP-19 Add → createQuick carries title + source + reconcile:false, no today (no default due date)",
@@ -636,6 +637,19 @@ function descendants(el) {
       assertEq("HOME-CAP-19b structural apply precedes persistence", calls.structure.slice(0, 2).join(","), "apply,write");
       assertTrue("HOME-CAP-19c capture success does not recursively self-render",
         !/self\.render\(dv,\s*params\)/.test(SPACE_HOME_SRC), "structural success must reconcile naturally");
+      assertTrue("HOME-CAP-19d success removes its exact optimistic preview",
+        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
+      assertEq("HOME-CAP-19e success re-enables Add without waiting for a rerender", capAdd.disabled, false);
+      assertEq("HOME-CAP-19f success keeps the committed input cleared", inputs[0].value, "");
+
+      fire(addBtn);
+      inputs[0].value = "second task";
+      await fire(capAdd);
+      assertEq("HOME-CAP-19g an immediate second capture commits before any rerender", calls.createQuick.length, 2);
+      assertEq("HOME-CAP-19h the immediate second capture carries its own title", calls.createQuick[1] && calls.createQuick[1].title, "second task");
+      assertEq("HOME-CAP-19i consecutive success settles Add again", capAdd.disabled, false);
+      assertTrue("HOME-CAP-19j consecutive success leaves no stale optimistic preview",
+        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
     }
 
     // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
