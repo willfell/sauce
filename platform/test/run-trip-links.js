@@ -30,6 +30,14 @@ function loadClass(relPath, className) {
 const TripLinks = loadClass('platform/blueprints/trips/helpers/trip-links.js', 'TripLinks');
 const TripSectionKinds = loadClass('platform/blueprints/trips/helpers/trip-section-kinds.js', 'TripSectionKinds');
 
+// Dataview may expose frontmatter lists as iterable DataArrays.
+{
+    const dataArray = { [Symbol.iterator]: function* () { yield { url: 'https://a.com', text: 'A' }; } };
+    const parsed = new TripLinks()._parse(dataArray);
+    ok('DATA-1 iterable DataArray links normalize safely',
+        parsed.length === 1 && parsed[0].url === 'https://a.com' && parsed[0].text === 'A');
+}
+
 // ---------- static ops (same semantics as ProjectLinksManager) ----------
 {
     const r = TripLinks.addLink([], { url: " https://a.com ", text: "" });

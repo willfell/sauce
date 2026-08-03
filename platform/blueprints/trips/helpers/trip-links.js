@@ -65,7 +65,10 @@ class TripLinks {
       try { raw = JSON.parse(s); }
       catch (_e) { raw = [s]; }
     }
-    if (!Array.isArray(raw)) return [];
+    if (!Array.isArray(raw)) {
+      if (!raw || typeof raw === "string" || typeof raw[Symbol.iterator] !== "function") return [];
+      try { raw = Array.from(raw); } catch (_e) { return []; }
+    }
     const out = [];
     const seen = new Set();
     for (const entry of raw) {
@@ -115,6 +118,34 @@ class TripLinks {
     });
   }
 
+  _renderCardsInto(grid, links) {
+    if (!grid || typeof grid.createEl !== "function") return;
+    for (const card of this._linkCards(links)) {
+      const a = grid.createEl("a", { href: card.url });
+      if (a && typeof a.setAttr === "function") {
+        a.setAttr("target", "_blank");
+        a.setAttr("rel", "noopener");
+      }
+      if (a && a.style) {
+        a.style.cssText =
+          "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
+          "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
+          "background: var(--background-primary); color: var(--text-normal); " +
+          "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
+      }
+      if (a && typeof a.addEventListener === "function") {
+        a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
+        a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
+      }
+      const title = a.createEl("div", { text: card.text });
+      if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      if (card.host) {
+        const host = a.createEl("div", { text: card.host });
+        if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      }
+    }
+  }
+
   // ── read-only render ─────────────────────────────────────────────────────
   // Draws the "Helpful Links" card grid on the trip ATLAS body. Fires ONLY when
   // page.type === "trip"; reads the note's own `links`. Per the empty-state rule
@@ -128,6 +159,13 @@ class TripLinks {
       const c = (dv && dv.container) ? dv.container : dv;
       if (!c || typeof c.createEl !== "function") return;
       if (c.closest && c.closest(".markdown-embed")) return;
+
+      const ownerPath = String(page.file.path || "");
+      if (c.dataset) c.dataset.tripLinksOwnerPath = ownerPath;
+      if (c.classList?.add) c.classList.add("trip-links-owner");
+      else if (!String(c.className || "").split(/\s+/).includes("trip-links-owner")) {
+        c.className = `${c.className || ""} trip-links-owner`.trim();
+      }
 
       const cards = this._linkCards(page.links);
       if (!cards.length) return;                    // empty-state: render nothing
@@ -143,66 +181,111 @@ class TripLinks {
         if (lbl.style) lbl.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
       }
 
-      const grid = c.createEl("div");
+      const grid = c.createEl("div", { cls: "trip-links-grid" });
+      if (grid.dataset) grid.dataset.sourcePath = ownerPath;
       if (grid.style) grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 4px;";
-      for (const card of cards) {
-        const a = grid.createEl("a", { href: card.url });
-        if (a && typeof a.setAttr === "function") {
-          a.setAttr("target", "_blank");
-          a.setAttr("rel", "noopener");
-        }
-        if (a && a.style) {
-          a.style.cssText =
-            "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
-            "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
-            "background: var(--background-primary); color: var(--text-normal); " +
-            "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
-        }
-        if (a && typeof a.addEventListener === "function") {
-          a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
-          a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
-        }
-        const title = a.createEl("div", { text: card.text });
-        if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-        if (card.host) {
-          const host = a.createEl("div", { text: card.host });
-          if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-        }
-      }
+      this._renderCardsInto(grid, cards);
     } catch (_e) { /* never throw */ }
   }
 
   // ── data + write (operate on the CURRENT note — the trip atlas) ──────────
+  _page(dv) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (renderSafe && typeof renderSafe.page === "function") return renderSafe.page(dv);
+    try { return dv && typeof dv.current === "function" ? dv.current() : null; }
+    catch (_e) { return null; }
+  }
   _file(dv) {
-    const cur = dv.current && dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return null;
     return app.vault.getAbstractFileByPath(cur.file.path);
   }
   _currentLinks(dv) {
-    const cur = dv.current && dv.current();
+    const cur = this._page(dv);
     return this._parse(cur ? cur.links : []);
   }
-  async _write(dv, links) {
+  _panelOwner(dv, filePath) {
+    const container = dv && dv.container;
+    const scopes = [container];
+    try {
+      const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+      if (noteView) scopes.push(noteView);
+    } catch (_e) {}
+    for (const scope of scopes) {
+      try {
+        const candidates = [];
+        if (scope?.dataset?.tripLinksOwnerPath != null) candidates.push(scope);
+        if (typeof scope?.querySelectorAll === "function") candidates.push(...scope.querySelectorAll(".trip-links-owner"));
+        else {
+          const owner = scope?.querySelector?.(".trip-links-owner");
+          if (owner) candidates.push(owner);
+        }
+        const match = candidates.find((owner) =>
+          String(owner?.dataset?.tripLinksOwnerPath || "") === String(filePath || ""));
+        if (match) return match;
+      } catch (_e) {}
+    }
+    return null;
+  }
+  _rollbackPreview(receipt) {
+    if (!receipt) return;
+    if (receipt.owner) {
+      if (typeof receipt.owner.replaceChildren === "function") receipt.owner.replaceChildren(...receipt.priorNodes);
+      else {
+        receipt.owner.empty?.();
+        for (const node of receipt.priorNodes || []) receipt.owner.appendChild?.(node);
+      }
+    }
+    if (receipt.page) {
+      if (receipt.hadValue) receipt.page.links = receipt.priorValue;
+      else delete receipt.page.links;
+    }
+    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+  }
+  _previewDv(dv, owner, page) {
+    const preview = Object.create((dv && typeof dv === "object") ? dv : null);
+    preview.container = owner;
+    preview.current = () => page;
+    return preview;
+  }
+  async _write(dv, links, ui = {}) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the trip atlas note."); return false; }
     const renderSafe = globalThis.customJS?.RenderSafe;
-    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
       new Notice("Could not save links: RenderSafe is unavailable.", 6000);
       return false;
     }
     const next = links.map((l) => ({ url: l.url, text: l.text }));
-    const expected = JSON.stringify(next);
-    const result = await renderSafe.mutate({
+    const page = this._page(dv);
+    if (!page) { new Notice("Could not save links: page metadata is unavailable.", 6000); return false; }
+    const result = await renderSafe.mutateStructure({
       app,
       dv,
       path: file.path,
-      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
-      isCurrent: (page) => {
-        const current = page && page.links;
-        if (!current || typeof current[Symbol.iterator] !== "function") return false;
-        try { return JSON.stringify(Array.from(current).map((l) => ({ url: l.url, text: l.text }))) === expected; }
-        catch (_e) { return false; }
+      failureMessage: "Could not save links",
+      apply: async () => {
+        const hadValue = Object.prototype.hasOwnProperty.call(page, "links");
+        const priorValue = page.links;
+        const focusTarget = ui.focusTarget
+          || ((typeof document !== "undefined") ? document.activeElement : null);
+        const owner = this._panelOwner(dv, file.path);
+        if (!owner) throw new Error("Trip links panel is unavailable");
+        const priorNodes = Array.from(owner.childNodes || owner.children || []);
+        const receipt = { page, hadValue, priorValue, focusTarget, owner, priorNodes };
+        try {
+          page.links = next;
+          if (typeof owner.replaceChildren === "function") owner.replaceChildren();
+          else owner.empty?.();
+          await this.render(this._previewDv(dv, owner, page));
+          return receipt;
+        } catch (error) {
+          this._rollbackPreview(receipt);
+          throw error;
+        }
       },
+      rollback: (receipt) => this._rollbackPreview(receipt),
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
     });
     return result.ok === true;
   }
@@ -245,8 +328,13 @@ class TripLinks {
         delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); cursor:pointer; font-size:0.8em;";
         delBtn.onclick = async () => {
           const res = TripLinks.deleteLink(this._currentLinks(dv), index);
-          if (res.changed && await this._write(dv, res.links)) { new Notice("Link deleted."); }
-          close();
+          if (res.changed && await this._write(dv, res.links, { focusTarget: delBtn })) {
+            new Notice("Link deleted.");
+            close();
+            return true;
+          }
+          try { delBtn.focus?.(); } catch (_e) {}
+          return false;
         };
       });
       const done = panel.createEl("button", { text: "Done" });

@@ -221,19 +221,55 @@ function makeDv(embed, currentVal) {
             const classes = new Set();
             const listeners = {};
             const el = {
-                tag, children: [], style: makeStyle(), listeners, classes,
+                tag, children: [], childNodes: [], style: makeStyle(), listeners, classes, dataset: {}, parentNode: null,
                 classList: {
+                    add(...names) { names.forEach((name) => classes.add(name)); },
                     toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
                     contains(name) { return classes.has(name); },
                 },
                 createEl(childTag, opts) {
                     const child = trackedEl(childTag);
                     child.textContent = opts && opts.text ? opts.text : '';
+                    if (opts && opts.cls) String(opts.cls).split(/\s+/).filter(Boolean).forEach((name) => child.classes.add(name));
+                    child.parentNode = this;
                     this.children.push(child);
+                    this.childNodes = this.children;
                     return child;
                 },
                 addEventListener(name, fn) { listeners[name] = fn; },
-                remove() {},
+                appendChild(child) { child.parentNode = this; this.children.push(child); this.childNodes = this.children; return child; },
+                insertBefore(child, before) {
+                    child.parentNode = this;
+                    const index = before ? this.children.indexOf(before) : -1;
+                    if (index < 0) this.children.push(child); else this.children.splice(index, 0, child);
+                    this.childNodes = this.children;
+                    return child;
+                },
+                replaceChildren(...nodes) {
+                    this.children.forEach((child) => { child.parentNode = null; });
+                    this.children = nodes;
+                    this.childNodes = this.children;
+                    nodes.forEach((child) => { child.parentNode = this; });
+                },
+                empty() { this.replaceChildren(); },
+                querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+                querySelectorAll(selector) {
+                    const className = String(selector || '').replace(/^\./, '');
+                    const found = [];
+                    const visit = (node) => {
+                        if (node !== this && node.classes && node.classes.has(className)) found.push(node);
+                        (node.children || []).forEach(visit);
+                    };
+                    visit(this);
+                    return found;
+                },
+                remove() {
+                    if (!this.parentNode) return;
+                    const index = this.parentNode.children.indexOf(this);
+                    if (index >= 0) this.parentNode.children.splice(index, 1);
+                    this.parentNode.childNodes = this.parentNode.children;
+                    this.parentNode = null;
+                },
             };
             return el;
         }
@@ -299,6 +335,7 @@ function makeDv(embed, currentVal) {
         let mutationAlwaysCurrent = false;
         let mutationOptimisticBeforeCapture = false;
         const renderSafeFacade = {
+            page: (targetDv) => targetDv && typeof targetDv.current === 'function' ? targetDv.current() : null,
             mutate: async (opts) => {
                 let next = mutationAlwaysCurrent
                     ? Object.assign({}, opts, { isCurrent: () => true })
@@ -309,6 +346,7 @@ function makeDv(embed, currentVal) {
                 }
                 return rs.mutate(next);
             },
+            mutateStructure: (opts) => rs.mutateStructure(opts),
         };
         global.customJS.RenderSafe = renderSafeFacade;
         global.window.customJS = global.customJS;
@@ -414,120 +452,138 @@ function makeDv(embed, currentVal) {
         mutationOptimisticBeforeCapture = false;
         ok('GA-P2C-OPTIMISM-BEFORE-CAPTURE-MUTANT ordered lifecycle assertion turns red', !orderMutantPassed);
 
-        // Flat Flights/Stay writes and atlas link writes share the same active
-        // mutation-specific poll authority rather than waiting for Dataview's
-        // natural tick. The typed fixtures deliberately signal metadata while
-        // Dataview is stale, then become current only on a later poll.
+        // PERF-4: array inserts/removals are structural. They repaint the exact
+        // list block before persistence, never schedule a global refresh, and
+        // restore the prior node identities + focus when the write rejects.
         failWrite = false;
-        for (const fixture of [
-            { key: 'flights', value: [{ flight_no: 'UA1', depart_date: '2026-08-14' }], dateKey: 'depart_date', identityKey: 'flight_no' },
-            { key: 'stays', value: [{ name: 'Hotel', check_in: '2026-08-15' }], dateKey: 'check_in', identityKey: 'name' },
-        ]) {
-            const indexedPage = (entry) => {
-                const indexedEntry = Object.assign({}, entry, {
-                    [fixture.dateKey]: {
-                        isLuxonDateTime: true,
-                        toISODate: () => entry[fixture.dateKey],
-                        toJSON: () => entry[fixture.dateKey] + 'T00:00:00.000Z',
-                    },
-                });
-                const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
-                return { file: { path: pathName }, [fixture.key]: dataArray };
-            };
-            page = { file: { path: pathName }, [fixture.key]: [] };
-            file.fm[fixture.key] = [];
-            scheduled.length = 0;
-            indexPage = (target) => indexedPage(Object.assign({}, target.fm[fixture.key][0], {
-                [fixture.identityKey]: 'STALE',
-            }));
-            writeGate = deferred(); writeGate.resolve();
-            const before = refreshes;
-            const pendingSave = list._write(dv, { key: fixture.key }, fixture.value);
-            await new Promise(setImmediate);
-            ok(`GA-P2B-${fixture.key.toUpperCase()}-STALE-SIGNAL matching metadata signal does not refresh stale DataArray`,
-                refreshes === before && scheduled.some((handle) => !handle.cancelled));
-            page = indexedPage(file.fm[fixture.key][0]);
-            const polled = await runNextTimer();
-            const saved = await pendingSave;
-            ok(`GA-P2B-${fixture.key.toUpperCase()}-CURRENT-POLL later DataArray + Luxon value refreshes exactly once`,
-                polled && saved && refreshes === before + 1
-                && JSON.stringify(file.fm[fixture.key]) === JSON.stringify(fixture.value));
-        }
+        const oldFlights = { [Symbol.iterator]: function* () { yield { flight_no: 'OLD' }; } };
+        page = { file: { path: pathName }, flights: oldFlights };
+        file.fm.flights = [{ flight_no: 'OLD' }];
+        const entryOwner = trackedEl('div');
+        entryOwner.dataset.tripEntryOwnerPath = pathName;
+        entryOwner.dataset.tripEntryOwnerKey = 'flights';
+        entryOwner.classList.add('trip-entry-list-owner');
+        const priorA = entryOwner.createEl('div', { text: 'prior-a' });
+        const priorB = entryOwner.createEl('div', { text: 'prior-b' });
+        const structuralDv = { container: entryOwner, current: () => page };
+        const nextFlights = [{ flight_no: 'UA1', depart_date: '2026-08-14' }];
+        writeGate = deferred();
+        const beforeStructureRefresh = refreshes;
+        const pendingStructure = list._write(structuralDv, { key: 'flights', kind: 'flights' }, nextFlights);
+        await new Promise(setImmediate);
+        ok('PERF-4-ENTRY-OPTIMISTIC iterable DataArray is replaced visibly before persistence settles',
+            Array.isArray(page.flights) && page.flights[0].flight_no === 'UA1'
+            && entryOwner.children.length > 0
+            && !entryOwner.children.includes(priorA)
+            && refreshes === beforeStructureRefresh);
+        writeGate.resolve();
+        const structureSaved = await pendingStructure;
+        ok('PERF-4-ENTRY-SUCCESS persists structural list without forced refresh',
+            structureSaved && file.fm.flights[0].flight_no === 'UA1'
+            && refreshes === beforeStructureRefresh);
 
-        // Mutation control: replacing the exact field predicate with an
-        // always-true authority must fail the stale checkpoint above. This
-        // proves the test is sensitive to premature refresh, not merely to the
-        // eventual presence of one refresh.
-        {
-            const fixture = {
-                key: 'flights',
-                value: [{ flight_no: 'UA2', depart_date: '2026-08-16' }],
-            };
-            const indexedPage = (entry) => {
-                const indexedEntry = Object.assign({}, entry, {
-                    depart_date: {
-                        isLuxonDateTime: true,
-                        toISODate: () => entry.depart_date,
-                        toJSON: () => entry.depart_date + 'T00:00:00.000Z',
-                    },
-                });
-                const dataArray = { [Symbol.iterator]: function* () { yield indexedEntry; } };
-                return { file: { path: pathName }, flights: dataArray };
-            };
-            page = { file: { path: pathName }, flights: [] };
-            file.fm.flights = [];
-            scheduled.length = 0;
-            indexPage = (target) => indexedPage(Object.assign({}, target.fm.flights[0], { flight_no: 'STALE' }));
-            writeGate = deferred(); writeGate.resolve();
-            mutationAlwaysCurrent = true;
-            const before = refreshes;
-            const mutantSave = list._write(dv, { key: fixture.key }, fixture.value);
-            await new Promise(setImmediate);
-            const mutantPassedStaleCheckpoint = refreshes === before;
-            const mutantSaved = await mutantSave;
-            mutationAlwaysCurrent = false;
-            ok('GA-P2B-ALWAYS-TRUE-MUTANT stale checkpoint turns red for premature authority',
-                mutantSaved && !mutantPassedStaleCheckpoint && refreshes === before + 1);
-        }
+        const rejectedFlights = [{ flight_no: 'OLD2' }];
+        page = { file: { path: pathName }, flights: rejectedFlights };
+        file.fm.flights = rejectedFlights;
+        entryOwner.replaceChildren(priorA, priorB);
+        let entryFocusRestored = 0;
+        const entryFocus = { focus() { entryFocusRestored++; } };
+        failWrite = true;
+        writeGate = deferred();
+        const rejectedStructure = list._write(
+            structuralDv,
+            { key: 'flights', kind: 'flights' },
+            [{ flight_no: 'FAIL' }],
+            { focusTarget: entryFocus },
+        );
+        await new Promise(setImmediate);
+        const entryChangedBeforeReject = page.flights[0].flight_no === 'FAIL'
+            && !entryOwner.children.includes(priorA);
+        writeGate.resolve();
+        const entryRejected = await rejectedStructure;
+        ok('PERF-4-ENTRY-ROLLBACK rejection restores exact nodes, model identity, and focus',
+            entryChangedBeforeReject && !entryRejected
+            && entryOwner.children[0] === priorA && entryOwner.children[1] === priorB
+            && page.flights === rejectedFlights && entryFocusRestored === 1
+            && refreshes === beforeStructureRefresh);
 
         const links = new TripLinks();
         const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
-        page = { file: { path: pathName }, links: [] };
-        file.fm.links = [];
-        scheduled.length = 0;
-        indexPage = () => ({
-            file: { path: pathName },
-            links: [{ url: 'https://stale.example', text: 'Stale' }],
-        });
-        writeGate = deferred(); writeGate.resolve();
-        const beforeLinks = refreshes;
-        const pendingLinks = links._write(dv, nextLinks);
+        const priorLinks = [];
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        const linksOwner = trackedEl('div');
+        linksOwner.dataset.tripLinksOwnerPath = pathName;
+        linksOwner.classList.add('trip-links-owner');
+        const linksDv = { container: linksOwner, current: () => page };
+        failWrite = false;
+        writeGate = deferred();
+        const pendingLinks = links._write(linksDv, nextLinks);
         await new Promise(setImmediate);
-        ok('GA-P2C-TRIP-LINKS-STALE-SIGNAL does not refresh mismatched indexed links',
-            refreshes === beforeLinks && scheduled.some((handle) => !handle.cancelled));
-        page = { file: { path: pathName }, links: nextLinks };
-        const linksPolled = await runNextTimer();
+        const optimisticGrid = linksOwner.querySelector('.trip-links-grid');
+        ok('PERF-4-LINKS-OPTIMISTIC empty atlas panel inserts the new card before persistence',
+            Array.isArray(page.links) && page.links[0].text === 'Example'
+            && optimisticGrid && optimisticGrid.children.length === 1
+            && refreshes === beforeStructureRefresh);
+        writeGate.resolve();
         const linksSaved = await pendingLinks;
-        ok('GA-P2C-TRIP-LINKS-CURRENT-POLL refreshes matching indexed links exactly once',
-            linksPolled && linksSaved && refreshes === beforeLinks + 1 && file.fm.links[0].text === 'Example');
+        ok('PERF-4-LINKS-SUCCESS persists without metadata polling or global refresh',
+            linksSaved && file.fm.links[0].text === 'Example'
+            && scheduled.length === 0 && refreshes === beforeStructureRefresh);
 
-        page = { file: { path: pathName }, links: [] };
-        file.fm.links = [];
-        scheduled.length = 0;
-        indexPage = () => ({
-            file: { path: pathName },
-            links: [{ url: 'https://stale.example', text: 'Stale' }],
-        });
-        writeGate = deferred(); writeGate.resolve();
-        mutationAlwaysCurrent = true;
-        const beforeLinksMutant = refreshes;
-        const linksMutantSave = links._write(dv, nextLinks);
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        linksOwner.replaceChildren();
+        let linksFocusRestored = 0;
+        const linksFocus = { focus() { linksFocusRestored++; } };
+        failWrite = true;
+        writeGate = deferred();
+        const rejectedLinks = links._write(linksDv, nextLinks, { focusTarget: linksFocus });
         await new Promise(setImmediate);
-        const linksMutantPassedStaleCheckpoint = refreshes === beforeLinksMutant;
-        const linksMutantSaved = await linksMutantSave;
-        mutationAlwaysCurrent = false;
-        ok('GA-P2C-TRIP-LINKS-ALWAYS-TRUE-MUTANT stale checkpoint turns red',
-            linksMutantSaved && !linksMutantPassedStaleCheckpoint && refreshes === beforeLinksMutant + 1);
+        const linkChangedBeforeReject = !!linksOwner.querySelector('.trip-links-grid');
+        writeGate.resolve();
+        const linksRejected = await rejectedLinks;
+        ok('PERF-4-LINKS-ROLLBACK rejection removes exact optimistic grid and restores model + focus',
+            linkChangedBeforeReject && !linksRejected
+            && linksOwner.children.length === 0 && page.links === priorLinks
+            && linksFocusRestored === 1 && refreshes === beforeStructureRefresh);
+
+        // Mutation control: drop the opaque receipt before rollback. The same
+        // rejection fixture must then leave the optimistic grid behind.
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        linksOwner.replaceChildren();
+        failWrite = true;
+        writeGate = deferred();
+        const normalMutateStructure = renderSafeFacade.mutateStructure;
+        renderSafeFacade.mutateStructure = (opts) => normalMutateStructure(Object.assign({}, opts, {
+            rollback: (_receipt, error) => opts.rollback(undefined, error),
+        }));
+        const mutantLinks = links._write(linksDv, nextLinks);
+        await new Promise(setImmediate);
+        writeGate.resolve();
+        await mutantLinks;
+        const mutantRestored = linksOwner.children.length === 0 && page.links === priorLinks;
+        renderSafeFacade.mutateStructure = normalMutateStructure;
+        ok('PERF-4-RECEIPT-MUTANT rollback assertion turns red when the receipt is dropped', !mutantRestored);
+
+        page = { type: 'trip', file: { path: pathName }, links: priorLinks };
+        file.fm.links = priorLinks;
+        failWrite = false;
+        writeGate = deferred(); writeGate.resolve();
+        const orphanOwner = trackedEl('div');
+        const orphanSaved = await links._write({ container: orphanOwner, current: () => page }, nextLinks);
+        ok('PERF-4-OWNER-GUARD missing exact rendered owner fails before persistence',
+            !orphanSaved && page.links === priorLinks && file.fm.links === priorLinks
+            && orphanOwner.children.length === 0);
+
+        const helperSources = [
+            'platform/blueprints/trips/helpers/trip-entry-list.js',
+            'platform/blueprints/trips/helpers/trip-links.js',
+        ].map((rel) => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'utf8')).join('\n');
+        ok('PERF-4-SOURCE structural Trips writers use mutateStructure and contain no global refresh command',
+            (helperSources.match(/mutateStructure\(/g) || []).length >= 2
+            && !helperSources.includes('dataview-force-refresh-views'));
 
         ok('GA-P2-GESTURE-WRITES use RenderSafe failure notice rather than a bare write catch',
             notices.some((message) => message.includes('trip write failed')));

@@ -30,6 +30,13 @@
 // register (lesson: customjs-no-trailing-statements).
 class TripEntryList {
   // ── pure mutation ops (unit-tested) ──────────────────────────────────────
+  static _asArray(value) {
+    if (Array.isArray(value)) return value.slice();
+    if (value && typeof value !== "string" && typeof value[Symbol.iterator] === "function") {
+      try { return Array.from(value); } catch (_e) {}
+    }
+    return [];
+  }
   static _norm(entry) {
     const out = {};
     for (const k of Object.keys(entry || {})) out[k] = typeof entry[k] === "string" ? entry[k].trim() : entry[k];
@@ -54,7 +61,7 @@ class TripEntryList {
     return value;
   }
   static addEntry(list, entry) {
-    const l = Array.isArray(list) ? list.slice() : [];
+    const l = TripEntryList._asArray(list);
     const e = TripEntryList._norm(entry);
     const meaningful = Object.keys(e).some((k) => k !== "category" && k !== "checked" && e[k]);
     if (!meaningful) return { list: l, changed: false, reason: "empty" };
@@ -62,19 +69,19 @@ class TripEntryList {
     return { list: l, changed: true };
   }
   static updateEntry(list, index, entry) {
-    const l = Array.isArray(list) ? list.slice() : [];
+    const l = TripEntryList._asArray(list);
     if (!Number.isInteger(index) || index < 0 || index >= l.length) return { list: l, changed: false, reason: "bad-index" };
     l[index] = TripEntryList._norm(entry);
     return { list: l, changed: true };
   }
   static deleteEntry(list, index) {
-    const l = Array.isArray(list) ? list.slice() : [];
+    const l = TripEntryList._asArray(list);
     if (!Number.isInteger(index) || index < 0 || index >= l.length) return { list: l, changed: false, reason: "bad-index" };
     l.splice(index, 1);
     return { list: l, changed: true };
   }
   static toggleChecked(list, index) {
-    const l = Array.isArray(list) ? list.slice() : [];
+    const l = TripEntryList._asArray(list);
     if (!Number.isInteger(index) || index < 0 || index >= l.length) return { list: l, changed: false, reason: "bad-index" };
     l[index] = Object.assign({}, l[index], { checked: !l[index].checked });
     return { list: l, changed: true };
@@ -95,7 +102,7 @@ class TripEntryList {
     return field.type === "link" ? "url" : field.type;
   }
   static addCategory(list, category) {
-    const l = Array.isArray(list) ? list.slice() : [];
+    const l = TripEntryList._asArray(list);
     const c = String(category || "").trim();
     if (!c) return { list: l, changed: false, reason: "empty" };
     if (l.some((e) => e && e.category === c)) return { list: l, changed: false, reason: "duplicate" };
@@ -380,8 +387,18 @@ class TripEntryList {
     if (c.closest && c.closest(".markdown-embed")) return;
     if (!spec || !spec.key) return;
 
+    const ownerPath = String(page.file.path || "");
+    if (c.dataset) {
+      c.dataset.tripEntryOwnerPath = ownerPath;
+      c.dataset.tripEntryOwnerKey = String(spec.key);
+    }
+    if (c.classList?.add) c.classList.add("trip-entry-list-owner");
+    else if (!String(c.className || "").split(/\s+/).includes("trip-entry-list-owner")) {
+      c.className = `${c.className || ""} trip-entry-list-owner`.trim();
+    }
+
     const cur = dv.current && dv.current();
-    const items = Array.isArray(cur && cur[spec.key]) ? cur[spec.key] : [];
+    const items = TripEntryList._asArray(cur && cur[spec.key]);
 
     if (customJS.SectionLabel && typeof customJS.SectionLabel.divider === "function") {
       customJS.SectionLabel.divider(c);
@@ -517,7 +534,7 @@ class TripEntryList {
     delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); font-size:0.8em;";
     delBtn.onclick = async () => {
       const res = TripEntryList.deleteEntry(this._items(dv, spec), absIndex);
-      if (res.changed) await this._write(dv, spec, res.list);
+      if (res.changed) await this._write(dv, spec, res.list, { focusTarget: delBtn });
     };
   }
 
@@ -586,7 +603,7 @@ class TripEntryList {
     delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); font-size:0.8em;";
     delBtn.onclick = async () => {
       const res = TripEntryList.deleteEntry(this._items(dv, spec), absIndex);
-      if (res.changed) await this._write(dv, spec, res.list);
+      if (res.changed) await this._write(dv, spec, res.list, { focusTarget: delBtn });
     };
   }
 
@@ -610,26 +627,114 @@ class TripEntryList {
 
   // ── read + write ──────────────────────────────────────────────────────────
   _items(dv, spec) {
-    const cur = dv.current && dv.current();
-    return Array.isArray(cur && cur[spec.key]) ? cur[spec.key] : [];
+    const cur = this._page(dv);
+    return TripEntryList._asArray(cur && cur[spec.key]);
+  }
+  _page(dv) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (renderSafe && typeof renderSafe.page === "function") return renderSafe.page(dv);
+    try { return dv && typeof dv.current === "function" ? dv.current() : null; }
+    catch (_e) { return null; }
   }
   _file(dv) {
-    const cur = dv.current && dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return null;
     return app.vault.getAbstractFileByPath(cur.file.path);
+  }
+  _entryOwner(dv, filePath, key) {
+    const container = dv && dv.container;
+    const scopes = [container];
+    try {
+      const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+      if (noteView) scopes.push(noteView);
+    } catch (_e) {}
+    for (const scope of scopes) {
+      try {
+        const candidates = [];
+        if (scope?.dataset?.tripEntryOwnerPath != null) candidates.push(scope);
+        if (typeof scope?.querySelectorAll === "function") candidates.push(...scope.querySelectorAll(".trip-entry-list-owner"));
+        else {
+          const owner = scope?.querySelector?.(".trip-entry-list-owner");
+          if (owner) candidates.push(owner);
+        }
+        const match = candidates.find((owner) =>
+          String(owner?.dataset?.tripEntryOwnerPath || "") === String(filePath || "")
+          && String(owner?.dataset?.tripEntryOwnerKey || "") === String(key || ""));
+        if (match) return match;
+      } catch (_e) {}
+    }
+    return null;
+  }
+  _rollbackStructurePreview(receipt) {
+    if (!receipt) return;
+    if (receipt.owner) {
+      if (typeof receipt.owner.replaceChildren === "function") receipt.owner.replaceChildren(...receipt.priorNodes);
+      else {
+        receipt.owner.empty?.();
+        for (const node of receipt.priorNodes || []) receipt.owner.appendChild?.(node);
+      }
+    }
+    if (receipt.page) {
+      if (receipt.hadValue) receipt.page[receipt.key] = receipt.priorValue;
+      else delete receipt.page[receipt.key];
+    }
+    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+  }
+  _previewDv(dv, owner, page) {
+    const preview = Object.create((dv && typeof dv === "object") ? dv : null);
+    preview.container = owner;
+    preview.current = () => page;
+    return preview;
   }
   async _write(dv, spec, list, ui) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve this note to save."); return false; }
     const renderSafe = globalThis.customJS?.RenderSafe;
-    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+    const fieldMutation = Boolean(ui
+      && (typeof ui.optimistic === "function" || typeof ui.revert === "function"));
+    const method = fieldMutation ? "mutate" : "mutateStructure";
+    if (!renderSafe || typeof renderSafe[method] !== "function") {
       if (ui && typeof ui.revert === "function") {
         try { await ui.revert(); } catch (_e) {}
       }
       new Notice("Could not save: RenderSafe is unavailable.", 6000);
       return false;
     }
-    const expected = JSON.stringify(TripEntryList._mutationComparable(Array.isArray(list) ? list : []));
+    if (!fieldMutation) {
+      const page = this._page(dv);
+      if (!page) { new Notice("Could not save: page metadata is unavailable.", 6000); return false; }
+      const next = TripEntryList._asArray(list);
+      const result = await renderSafe.mutateStructure({
+        app,
+        dv,
+        path: file.path,
+        failureMessage: "Could not save",
+        apply: async () => {
+          const owner = this._entryOwner(dv, file.path, spec.key);
+          if (!owner) throw new Error("Trip entry list surface is unavailable");
+          const hadValue = Object.prototype.hasOwnProperty.call(page, spec.key);
+          const priorValue = page[spec.key];
+          const priorNodes = Array.from(owner.childNodes || owner.children || []);
+          const focusTarget = ui?.focusTarget
+            || ((typeof document !== "undefined") ? document.activeElement : null);
+          const receipt = { owner, page, key: spec.key, hadValue, priorValue, priorNodes, focusTarget };
+          try {
+            page[spec.key] = next;
+            if (typeof owner.replaceChildren === "function") owner.replaceChildren();
+            else owner.empty?.();
+            await this.render(this._previewDv(dv, owner, page), spec);
+            return receipt;
+          } catch (error) {
+            this._rollbackStructurePreview(receipt);
+            throw error;
+          }
+        },
+        rollback: (receipt) => this._rollbackStructurePreview(receipt),
+        write: () => app.fileManager.processFrontMatter(file, (fm) => { fm[spec.key] = next; }),
+      });
+      return result.ok === true;
+    }
+    const expected = JSON.stringify(TripEntryList._mutationComparable(TripEntryList._asArray(list)));
     const result = await renderSafe.mutate({
       app,
       dv,
