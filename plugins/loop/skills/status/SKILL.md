@@ -22,7 +22,7 @@ The read-only glance at whatever board this repo is bound to. Answers "is it wor
    - **Headline** — "N need you · X frozen / Y waiting / Z done · active: <card> [· M new since last look]".
    - **Since you last looked** — self-ratified FID amendments (heading + date), discards (name + reason + superseded_by), cutover flips; or "Nothing new since last look."
    - **Needs you** — actionable cards (bucket + card), or "Nothing needs you — walk away."
-   - **Active** — the active claim (card + phase), or "idle".
+   - **Active** — the active claim (card + phase) with its lease (holder + expiry) when leased, or "idle". When `status.next` is `all-work-leased`, say so: "all active work is owned by live sessions (soonest lease expires in Nm)".
    - **Recent releases** — the tag list.
    - **Map** — the bound project's Loop Station carries a GraphView project-scope map (epics as clusters, cross-epic dependency edges, status-colored chips); open it to see how active claims and blocks connect at a glance.
    - Pointer: "Run /loop:review to walk the digest."

@@ -15,7 +15,7 @@ The full quorum is non-negotiable: Gate B adequacy, then correctness → regress
 
 1. Resolve: `node "${CLAUDE_PLUGIN_ROOT}/scripts/loop-config.js" resolve --json`; refusal → `/loop:init`, stop. Refuse if `config.policy.observe_only`.
 2. `<coordinator>` = `config.coordinator`; `<gate>` = sibling `gate.js`; env from `config.env` on every coordinator/gate call; cwd = repo root.
-3. `node <coordinator> status --json`. If another card is active, at-capacity rules apply — resume it or stop; never run two writers.
+3. `node <coordinator> status --json`. If another card is active, at-capacity rules apply — resume it or stop; never run two writers. Resuming an active card is a side-effect-free attach; `lease_held` means another session owns it — take a different card, never work around the refusal. If `status.next` is `all-work-leased`, every active card is owned by a live session — report the leased cards + soonest expiry and STOP; never touch a leased card's worktree.
 
 ## The slice loop
 
@@ -23,20 +23,20 @@ The target epic is whichever the Director named; when none is named, the coordin
 
 For each eligible slice of the target epic, in coordinator order (its eligibility answer is authoritative — never hand-pick):
 
-1. **Claim**: `node <coordinator> claim --json` (dry-run first if the Director wants a preview). Work ONLY in the returned worktree and branch.
+1. **Claim**: `node <coordinator> claim --json` (dry-run first if the Director wants a preview; receipt returns `lease_token` — keep it for every verb on this card). Work ONLY in the returned worktree and branch.
 2. **Implement (sub-agent)**: dispatch ONE implementation sub-agent into the worktree with the slice card as its brief. It enforces `touch_zones`, `model_profile`, dependencies, deployment map; verifies every cited loader/helper before changing code; adds a regression test that fails without the source change; commits with a release-triggering `fix:`/`feat:` title. Never edits versions, tags, release PRs, or the tap.
 3. **Gate B**: `node <gate> verify-adequacy --base origin/main --json` in the worktree.
 4. **Quorum (three read-only sub-agents, sequential)**: correctness, then regression-risk, then test-adequacy — each a SEPARATE context reviewing `git diff origin/main...HEAD`, each verdict recorded immediately:
 
    ```bash
-   node <coordinator> record-review --card "<card>" --lens <lens> --verdict <pass|refuted> --summary "<specific finding>" --json
+   node <coordinator> record-review --card "<card>" --lease-token <token> --lens <lens> --verdict <pass|refuted> --summary "<specific finding>" --json
    ```
 
    Uncertain evidence is a refutation. Stop at the first refutation.
 5. **Refutation path**: ONE same-card repair, which invalidates the entire quorum — rerun Gate B and all three lenses from scratch. A second refutation → supersede via `/loop:intake` (`supersedes` + `carried_findings` + `binding_fixtures`) and execute the returned discard instruction through the coordinator; never a third patch.
-6. **Verify-gates + PR**: `node <coordinator> verify-gates --card "<card>" --json` (full preflight at exact head), then push, open the PR against main with the same conventional title, and `node <coordinator> record-pr --card "<card>" --pr <n> --json`. Never arm auto-merge yourself.
-7. **Advance**: `node <coordinator> advance --card "<card>" --lease-seconds 600 --jsonl` — the coordinator polls CI/merge/release/deploy per the binding's `execution_mode` and deploy list. Merge-only bindings (`policy.deploy_vaults: []`) complete when the feature PR merges with green checks — no release/tag/tap/brew/deploy chain exists, never wait for one. On `complete`, `node <coordinator> reconcile --card "<card>" --json`, then take the next eligible slice.
-8. **Blockers**: park only through the coordinator with explicit `--depends-on` + `--resume-condition`; `fix-ci` → repair in the worktree and rerun the quorum; `blocked-external` → report the URL, no manual release escape hatches.
+6. **Verify-gates + PR**: `node <coordinator> verify-gates --card "<card>" --lease-token <token> --json` (full preflight at exact head), then push, open the PR against main with the same conventional title, and `node <coordinator> record-pr --card "<card>" --lease-token <token> --pr <n> --json`. Never arm auto-merge yourself.
+7. **Advance**: `node <coordinator> advance --card "<card>" --lease-token <token> --lease-seconds 600 --jsonl` — the coordinator polls CI/merge/release/deploy per the binding's `execution_mode` and deploy list. Merge-only bindings (`policy.deploy_vaults: []`) complete when the feature PR merges with green checks — no release/tag/tap/brew/deploy chain exists, never wait for one. On `complete`, `node <coordinator> reconcile --card "<card>" --json`, then take the next eligible slice.
+8. **Blockers**: park only through the coordinator with explicit `--depends-on` + `--resume-condition` + `--lease-token <token>`; `fix-ci` → repair in the worktree and rerun the quorum; `blocked-external` → report the URL, no manual release escape hatches.
 
 ## Ceilings and honesty
 
