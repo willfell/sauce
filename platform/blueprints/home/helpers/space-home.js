@@ -523,7 +523,14 @@ class SpaceHome {
             if (!userMoved) receipt.focusTarget?.focus?.();
           } catch (_e) {}
         },
-        write: () => td.createQuick({ title: text, source: "daily" }),
+        write: async () => {
+          const created = await td.createQuick({ title: text, source: "daily" });
+          if (!created || created.ok !== true) {
+            const reason = created && (created.reason || created.error?.message);
+            throw new Error(reason || "task create did not commit");
+          }
+          return created;
+        },
       });
       if (result && result.ok === true) setMenu(false);
     };

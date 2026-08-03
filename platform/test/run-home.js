@@ -555,7 +555,7 @@ function descendants(el) {
         computeCounts: (d, t, te) => { calls.computeCounts.push({ d, t, te }); return { today: 2, overdue: 1, done: 0, meetings: 1 }; },
       },
       TaskEntity: {},
-      TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); } },
+      TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve({ ok: true }); } },
       RenderSafe: {
         mutateStructure: async (opts) => {
           calls.structure.push("apply");
@@ -674,7 +674,25 @@ function descendants(el) {
       assertEq("HOME-CAP-21g late rejection preserves newer connected focus", restoredFocus, 1);
       assertTrue("HOME-CAP-21h newer focus remains authoritative", global.document.activeElement === newerFocus);
       rollbackActiveElement = null;
-      global.customJS.TaskDialog.createQuick = (opts) => { calls.createQuick.push(opts); return Promise.resolve(); };
+
+      global.document.activeElement = originFocus;
+      inputRetry.value = "missing dependency result";
+      global.customJS.TaskDialog.createQuick = () => Promise.resolve(undefined);
+      await fire(addRetry);
+      assertEq("HOME-CAP-21i undefined create result rolls back the exact input", inputRetry.value, "missing dependency result");
+      assertTrue("HOME-CAP-21j undefined create result keeps the originating menu open", isOpen(menuRetry));
+      assertTrue("HOME-CAP-21k undefined create result is not accepted as persistence success",
+        calls.structure.slice(-3).join(",") === "apply,write,rollback");
+
+      inputRetry.value = "negative create result";
+      global.customJS.TaskDialog.createQuick = () => Promise.resolve({ ok: false, reason: "invalid plan" });
+      await fire(addRetry);
+      assertEq("HOME-CAP-21l explicit negative create result rolls back the exact input", inputRetry.value, "negative create result");
+      assertTrue("HOME-CAP-21m explicit negative create result keeps the originating menu open", isOpen(menuRetry));
+      assertTrue("HOME-CAP-21n explicit negative create result is not accepted as persistence success",
+        calls.structure.slice(-3).join(",") === "apply,write,rollback");
+
+      global.customJS.TaskDialog.createQuick = (opts) => { calls.createQuick.push(opts); return Promise.resolve({ ok: true }); };
     }
 
     // ── Inline capture: blank / whitespace input → NO createQuick. ──
