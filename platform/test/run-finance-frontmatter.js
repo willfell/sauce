@@ -1258,7 +1258,9 @@ async function run() {
     const rebound = run(canonical, null, null);
     for (let i = 0; i < 4; i++) await Promise.resolve();
     const replacementOwner = queueFf._renderQueueFiles.get(replacement);
-    const reboundBeforeOldCleanup = queueFf._renderQueueFiles.get(canonical) === replacementOwner;
+    const reboundBeforeOldCleanup = replacementOwner != null
+      && queueFf._renderQueueFiles.get(replacement) === replacementOwner
+      && queueFf._renderQueueFiles.get(canonical) === replacementOwner;
     releaseOld();
     await oldOwner;
     const reboundSurvivedOldCleanup = queueFf._renderQueueFiles.get(canonical) === replacementOwner;
