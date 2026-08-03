@@ -46,64 +46,79 @@ class JournalDayList {
 
     async _pollForDayArg(args, dv) {
         let day = this._coerceDay(args && args.day);
+        let renderSafe = null;
+        try {
+            renderSafe = globalThis.customJS && globalThis.customJS.RenderSafe;
+        } catch (_e) { renderSafe = null; }
+        if (!day && (!renderSafe || typeof renderSafe.page !== "function")) return null;
         for (let i = 0; i < 40 && (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)); i++) {
             await new Promise(r => setTimeout(r, 50));
-            day = this._coerceDay(customJS.RenderSafe.page(dv)?.day);
+            try { day = this._coerceDay(renderSafe.page(dv)?.day); }
+            catch (_e) { return null; }
         }
         return day;
     }
 
     async render(dv, args) {
-        if (dv.container.closest(".markdown-embed")) return;
+        try {
+            const container = dv && dv.container;
+            if (!container) return;
+            if (typeof container.closest === "function" && container.closest(".markdown-embed")) return;
 
-        const myGen = (dv.container.__journalRenderGen || 0) + 1;
-        dv.container.__journalRenderGen = myGen;
-        const isStale = () => dv.container.__journalRenderGen !== myGen;
+            const myGen = (container.__journalRenderGen || 0) + 1;
+            container.__journalRenderGen = myGen;
+            const isStale = () => container.__journalRenderGen !== myGen;
 
-        while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
+            while (container.firstChild) container.removeChild(container.firstChild);
 
-        const day = await this._pollForDayArg(args, dv);
-        if (isStale()) return;
-        if (!day) {
-            dv.paragraph("JournalDayList: missing `day` arg.");
-            return;
-        }
-
-        const entries = dv.pages('"spice/journal"')
-            .where(p => p.type === "journal-entry" && this._coerceDay(p.day) === day);
-
-        const items = [];
-        for (const s of entries) {
-            let title = (s.title && String(s.title).trim()) || "";
-            if (!title) {
-                try {
-                    const raw = await app.vault.read(app.vault.getAbstractFileByPath(s.file.path));
-                    title = this._extractPreviewFromBody(raw);
-                } catch (e) {
-                    title = "";
-                }
+            const day = await this._pollForDayArg(args, dv);
+            if (isStale()) return;
+            if (!day) {
+                if (typeof dv.paragraph === "function") dv.paragraph("JournalDayList: missing `day` arg.");
+                return;
             }
-            if (!title) title = s.file.name;
-            items.push({
-                file: s.file,
-                _title: title,
-                _mtime: (s.file.mtime && s.file.mtime.ts) || 0
+
+            if (typeof dv.pages !== "function") return;
+            const entries = dv.pages('"spice/journal"')
+                .where(p => p.type === "journal-entry" && this._coerceDay(p.day) === day);
+
+            const items = [];
+            for (const s of entries) {
+                let title = (s.title && String(s.title).trim()) || "";
+                if (!title) {
+                    try {
+                        const raw = await app.vault.read(app.vault.getAbstractFileByPath(s.file.path));
+                        title = this._extractPreviewFromBody(raw);
+                    } catch (e) {
+                        title = "";
+                    }
+                }
+                if (!title) title = s.file.name;
+                items.push({
+                    file: s.file,
+                    _title: title,
+                    _mtime: (s.file.mtime && s.file.mtime.ts) || 0
+                });
+            }
+
+            if (isStale()) return;
+
+            const beaconCards = globalThis.customJS && globalThis.customJS.BeaconCards;
+            if (!beaconCards || typeof beaconCards.render !== "function") return;
+            await beaconCards.render(dv, {
+                pages: items,
+                layout: "row",
+                title: (p) => p._title,
+                meta: (p) => {
+                    const when = p._mtime ? window.moment(p._mtime).fromNow() : "(unknown)";
+                    return `<span title="Last edited">edited ${when}</span>`;
+                },
+                target: (p) => p.file.path,
+                sort: (a, b) => (b._mtime || 0) - (a._mtime || 0),
+                empty: "No journal entries for this day yet. Hit + New Journal Entry above to capture one."
             });
+        } catch (e) {
+            try { if (dv && typeof dv.paragraph === "function") dv.paragraph(`JournalDayList error: ${e && e.message ? e.message : e}`); } catch (_e) {}
         }
-
-        if (isStale()) return;
-
-        await customJS.BeaconCards.render(dv, {
-            pages: items,
-            layout: "row",
-            title: (p) => p._title,
-            meta: (p) => {
-                const when = p._mtime ? window.moment(p._mtime).fromNow() : "(unknown)";
-                return `<span title="Last edited">edited ${when}</span>`;
-            },
-            target: (p) => p.file.path,
-            sort: (a, b) => (b._mtime || 0) - (a._mtime || 0),
-            empty: "No journal entries for this day yet. Hit + New Journal Entry above to capture one."
-        });
     }
 }

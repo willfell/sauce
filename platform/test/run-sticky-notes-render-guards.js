@@ -1,7 +1,7 @@
 'use strict';
 
 // run-sticky-notes-render-guards.js — cold-load render coverage for the
-// sticky-notes blueprint's render widgets. Autoloop queue item
+// sticky-notes and journal blueprints' render widgets. Autoloop queue item
 // cov-blueprint-sticky-notes-widget-render (retained after the sticky-notes rename).
 //
 // The three surviving render widgets — StickyHubCards, StickyDayList, and
@@ -133,6 +133,9 @@ const widgets = [
     { name: 'StickyHubCards',  path: 'platform/blueprints/sticky-notes/helpers/sticky-hub-cards.js' },
     { name: 'StickyDayList',   path: 'platform/blueprints/sticky-notes/helpers/sticky-day-list.js' },
     { name: 'StickyChromeBar', path: 'platform/blueprints/sticky-notes/helpers/sticky-chrome-bar.js' },
+    { name: 'JournalHubCards',  path: 'platform/blueprints/journal/helpers/journal-hub-cards.js' },
+    { name: 'JournalDayList',   path: 'platform/blueprints/journal/helpers/journal-day-list.js' },
+    { name: 'JournalChromeBar', path: 'platform/blueprints/journal/helpers/journal-chrome-bar.js' },
 ];
 
 const variants = [
@@ -153,6 +156,85 @@ const variants = [
             });
         }
     }
+    for (const w of widgets.filter((entry) => /DayList$/.test(entry.name))) {
+        const WidgetClass = loadWidget(w.path, w.name);
+        await guard(`PERF-7-COLD ${w.name} — absent CustomJS and missing frontmatter never reject`, async () => {
+            const saved = global.customJS;
+            try {
+                delete global.customJS;
+                await new WidgetClass().render(makeDv(false, undefined), {});
+                await new WidgetClass().render(undefined, {});
+            } finally {
+                global.customJS = saved;
+            }
+        });
+        await guard(`PERF-7-COLD ${w.name} — throwing RenderSafe page never rejects`, async () => {
+            const saved = global.customJS;
+            try {
+                global.customJS = { RenderSafe: { page() { throw new Error('cold index'); } } };
+                await new WidgetClass().render(makeDv(false, undefined), {});
+            } finally {
+                global.customJS = saved;
+            }
+        });
+    }
+    for (const spec of [
+        { name: 'StickyChromeBar', path: 'platform/blueprints/sticky-notes/helpers/sticky-chrome-bar.js' },
+        { name: 'JournalChromeBar', path: 'platform/blueprints/journal/helpers/journal-chrome-bar.js' },
+    ]) {
+        const WidgetClass = loadWidget(spec.path, spec.name);
+        await guard(`PERF-7-TITLE ${spec.name} — shared seam preserves optimistic title on success`, async () => {
+            const savedCjs = global.customJS;
+            const savedApp = global.app;
+            const visible = [];
+            let mutation = null;
+            try {
+                global.app = { fileManager: { processFrontMatter: async (_file, update) => update({}) } };
+                global.customJS = { RenderSafe: { mutate: async (opts) => {
+                    mutation = opts;
+                    await opts.optimistic();
+                    await opts.write();
+                    return { ok: true };
+                } } };
+                const result = await new WidgetClass()._writeTitle(
+                    {}, { path: 'entry.md' }, 'Before', 'After', (value) => visible.push(value));
+                if (result !== true || visible.join(',') !== 'After') throw new Error('optimistic title did not survive success');
+                if (!mutation || mutation.path !== 'entry.md' || mutation.isCurrent({ title: 'After' }) !== true) {
+                    throw new Error('title mutation is not bound to the exact path/value');
+                }
+            } finally {
+                global.customJS = savedCjs;
+                global.app = savedApp;
+            }
+        });
+        await guard(`PERF-7-TITLE ${spec.name} — rejected persistence restores exact prior title`, async () => {
+            const savedCjs = global.customJS;
+            const savedApp = global.app;
+            const visible = [];
+            try {
+                global.app = { fileManager: { processFrontMatter: async () => { throw new Error('write rejected'); } } };
+                global.customJS = { RenderSafe: { mutate: async (opts) => {
+                    await opts.optimistic();
+                    try { await opts.write(); }
+                    catch (error) { await opts.revert(error); return { ok: false, error }; }
+                    return { ok: true };
+                } } };
+                const result = await new WidgetClass()._writeTitle(
+                    {}, { path: 'entry.md' }, 'Before', 'After', (value) => visible.push(value));
+                if (result !== false || visible.join(',') !== 'After,Before') throw new Error('exact title rollback was not preserved');
+            } finally {
+                global.customJS = savedCjs;
+                global.app = savedApp;
+            }
+        });
+    }
+    await guard('PERF-7-LEDGER Sticky and Journal rows remain OK and force-refresh-free', async () => {
+        const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'Docs/agent-guides/code-conventions.md'), 'utf8');
+        const rows = guide.split('\n').filter((line) => /^\| (Sticky notes|Journal) \|/.test(line));
+        if (rows.length !== 4 || rows.some((line) => !line.includes('**OK**'))) throw new Error('ledger rows are not all OK');
+        const sources = widgets.map((entry) => fs.readFileSync(path.join(__dirname, '..', '..', entry.path), 'utf8')).join('\n');
+        if (/dataview:force-refresh-views/.test(sources)) throw new Error('global Dataview refresh remains in audited helpers');
+    });
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();
