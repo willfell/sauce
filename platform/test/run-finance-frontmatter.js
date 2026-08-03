@@ -1103,6 +1103,60 @@ async function run() {
   }
 
   {
+    const runArrivalOrder = async (firstKind) => {
+      installLifecycle();
+      const queueFf = new FinanceFrontmatter();
+      const { container } = makeEditorDom();
+      global.document = { activeElement: null };
+      const canonical = { path: "spice/finance/Invoices/Alias-Before-Rename.md" };
+      await queueFf.mutateRendered(canonical, {
+        dv: { container }, selector: ".editor",
+        render: async () => {}, write: async () => {},
+      });
+      canonical.path = "spice/finance/Invoices/Alias-After-Rename.md";
+      const alias = { path: canonical.path };
+      const events = [];
+      let concurrentWrites = 0;
+      let maxConcurrentWrites = 0;
+      let releaseFirst;
+      let firstStarted;
+      const firstReady = new Promise((resolve) => { firstStarted = resolve; });
+      const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+      const run = (id, file) => queueFf.mutateRendered(file, {
+        dv: { container }, selector: ".editor",
+        prepare: async () => ({
+          render: async () => { events.push(`render${id}`); },
+          write: async () => {
+            events.push(`write${id}`);
+            concurrentWrites++;
+            maxConcurrentWrites = Math.max(maxConcurrentWrites, concurrentWrites);
+            if (id === 1) { firstStarted(); await firstGate; }
+            concurrentWrites--;
+          },
+        }),
+      });
+      const firstFile = firstKind === "alias" ? alias : canonical;
+      const secondFile = firstKind === "alias" ? canonical : alias;
+      const first = run(1, firstFile);
+      await firstReady;
+      const second = run(2, secondFile);
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      const secondStayedQueued = events.join(",") === "render1,write1";
+      releaseFirst();
+      const outcomes = await Promise.all([first, second]);
+      return secondStayedQueued && outcomes.every((outcome) => outcome.ok === true)
+        && events.join(",") === "render1,write1,render2,write2"
+        && maxConcurrentWrites === 1
+        && queueFf._renderQueues.size === 0
+        && queueFf._renderQueuePaths.size === 0;
+    };
+    ok("FF-20C alias-first mutation after rename coalesces with prior canonical identity",
+      await runArrivalOrder("alias"));
+    ok("FF-20D canonical-first mutation after rename coalesces a same-path alias",
+      await runArrivalOrder("canonical"));
+  }
+
+  {
     installLifecycle();
     const { container, oldRoot, oldInput, tail } = makeEditorDom();
     global.document = { activeElement: oldInput };

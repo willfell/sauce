@@ -93,8 +93,17 @@ class FinanceFrontmatter {
         if (!this._renderQueueFiles) this._renderQueueFiles = new WeakMap();
         if (!this._renderQueuePaths) this._renderQueuePaths = new Map();
         const path = String(file?.path || "");
-        let owner = (file && typeof file === "object") ? this._renderQueueFiles.get(file) : null;
-        if (!owner && path) owner = this._renderQueuePaths.get(path) || null;
+        const identityOwner = (file && typeof file === "object") ? this._renderQueueFiles.get(file) : null;
+        let pathOwner = path ? this._renderQueuePaths.get(path) || null : null;
+        if (!pathOwner && path) {
+            for (const candidate of this._renderQueues.keys()) {
+                if (String(candidate?.path || "") === path) {
+                    pathOwner = candidate;
+                    break;
+                }
+            }
+        }
+        let owner = pathOwner || identityOwner;
         if (!owner) owner = (file && typeof file === "object") ? file : { path };
         if (file && typeof file === "object") this._renderQueueFiles.set(file, owner);
         if (path) this._renderQueuePaths.set(path, owner);
