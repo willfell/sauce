@@ -432,9 +432,6 @@ class SectionExplorer {
   // rail. (Page pane + mobile drawer + animation land in later tasks.)
   render(dv, adapter) {
     if (!adapter || typeof adapter.resolveContext !== "function") return;
-    // Stash dv so the per-doc ⋯ dialogs (built inside _renderDocCards) can pass
-    // it to move/link ops without threading it through every render helper.
-    this._curDv = dv;
     const container0 = (dv && dv.container) ? dv.container : dv;
     if (!container0 || typeof container0.createEl !== "function") return;
     if (adapter.structural === true) this._registerStructuralRoot(adapter, container0);
@@ -481,7 +478,7 @@ class SectionExplorer {
     this._renderLinksRow(adapter, ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: "Recently updated" });
     const cards = (Array.isArray(recent) ? recent : Array.from(recent || [])).map((p) => this._docCardModel(p));
-    this._renderDocCards(pane, adapter, cards);
+    this._renderDocCards(dv, pane, adapter, cards);
   }
 
   // Pinned-links chips row — shared by the normal page pane and recent mode.
@@ -507,7 +504,7 @@ class SectionExplorer {
     this._renderLinksRow(adapter, section || ctx, pane);
     pane.createEl("div", { cls: "se-group-label se-pane-label", text: adapter.pageLabel || "Docs" });
     const cards = (Array.isArray(pages) ? pages : Array.from(pages || [])).map((p) => this._docCardModel(p));
-    this._renderDocCards(pane, adapter, cards);
+    this._renderDocCards(dv, pane, adapter, cards);
   }
 
   // Normalize a Dataview page into the doc-card model {title, path, mtime, where}.
@@ -529,7 +526,7 @@ class SectionExplorer {
   // `select` (optional) = { selected:Set<path>, onToggle(path,checked) } flips
   // cards into bulk-select mode: a leading checkbox (stopPropagation so a check
   // never opens the note) and no navigation onclick.
-  _renderDocCards(pane, adapter, cards, select) {
+  _renderDocCards(dv, pane, adapter, cards, select) {
     if (!Array.isArray(cards) || cards.length === 0) {
       const empty = pane.createEl("div", { cls: "se-doc-empty" });
       empty.textContent = "Nothing here yet.";
@@ -569,10 +566,10 @@ class SectionExplorer {
           try { file = app.vault.getAbstractFileByPath(c.path); } catch (_e) { file = null; }
           if (!file) return;
           const entries = [
-            { label: "Rename", onSelect: () => this._openRenameDocDialog(this._curDv, adapter, file) },
-            { label: "Move", onSelect: () => this._openMovePickerForDoc(this._curDv, adapter, file) },
-            { label: "Add link", onSelect: () => this._openAddLinkForDoc(this._curDv, adapter, file) },
-            { label: "Delete", danger: true, onSelect: () => this._openDeleteDocConfirm(this._curDv, adapter, file) },
+            { label: "Rename", onSelect: () => this._openRenameDocDialog(dv, adapter, file) },
+            { label: "Move", onSelect: () => this._openMovePickerForDoc(dv, adapter, file) },
+            { label: "Add link", onSelect: () => this._openAddLinkForDoc(dv, adapter, file) },
+            { label: "Delete", danger: true, onSelect: () => this._openDeleteDocConfirm(dv, adapter, file) },
           ];
           try { customJS.MenuPopover.open(entries, { anchor: dots }); } catch (_e) { /* never-throw */ }
         };

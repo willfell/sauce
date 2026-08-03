@@ -2505,6 +2505,76 @@ failures += !run("doc card carries a se-doc-dots control that opens MenuPopover 
   cleanup();
 });
 
+failures += !run("PERF8O doc-card actions retain their originating pane after another Wiki view renders", () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const fileA = { path: "spice/wiki/shared/A.md", name: "A.md", parent: { path: "spice/wiki/shared" } };
+  const fileB = { path: "spice/wiki/shared/B.md", name: "B.md", parent: { path: "spice/wiki/shared" } };
+  const files = new Map([[fileA.path, fileA], [fileB.path, fileB]]);
+  const menus = [];
+  global.app = {
+    vault: { getAbstractFileByPath: (path) => files.get(path) || null },
+    workspace: { openLinkText: () => {} },
+  };
+  global.customJS = { MenuPopover: { open: (entries) => menus.push(entries) } };
+  try {
+    const viewA = {};
+    const viewB = {};
+    const domA = makeDomStub();
+    const domB = makeDomStub();
+    domA.container.isConnected = true;
+    domB.container.isConnected = true;
+    domA.container.closest = () => viewA;
+    domB.container.closest = () => viewB;
+    const dvA = { container: domA.container, current: () => ({ file: { path: "spice/wiki/shared/Shared.md" } }) };
+    const dvB = { container: domB.container, current: () => ({ file: { path: "spice/wiki/shared/Shared.md" } }) };
+    const adapter = se.makeAdapter({
+      resolveContext: () => ({ scopePath: "spice/wiki/shared" }),
+      listSections: () => [],
+      listPages: (dv) => [dv === dvA
+        ? { title: "A", file: { name: "A.md", path: fileA.path, mtime: { ts: 1 } } }
+        : { title: "B", file: { name: "B.md", path: fileB.path, mtime: { ts: 1 } } }],
+      getLinks: () => [],
+      icons: { folder: "", file: "", dots: "" },
+      rootClass: "se-root",
+      structural: true,
+      structuralOwnerKey: "spice/wiki/shared/Shared.md",
+    });
+    se.render(dvA, adapter);
+    se.render(dvB, adapter);
+
+    const cardA = domA.els.find((el) => el.className === "se-doc-card");
+    const cardB = domB.els.find((el) => el.className === "se-doc-card");
+    const titleA = domA.els.find((el) => el.className === "se-doc-title");
+    const titleB = domB.els.find((el) => el.className === "se-doc-title");
+    const dotsA = domA.els.find((el) => el.className === "se-doc-dots");
+    assert.ok(cardA && cardB && titleA && titleB && dotsA, "both pane-local cards render");
+
+    let dispatchedDv = null;
+    se._openRenameDocDialog = (dv, owner, file) => {
+      dispatchedDv = dv;
+      const receipt = se._applyStructuralReceipt(dv, {
+        kind: "rename", identityKey: "__sePath", identityValue: file.path, nextTitle: "A renamed",
+      }, owner);
+      assert.strictEqual(receipt.node, cardA, "optimism owns pane A's exact card receipt");
+      assert.strictEqual(titleA.textContent, "A renamed", "pane A is optimistically renamed");
+      assert.strictEqual(titleB.textContent, "B", "pane B remains untouched");
+      se._rollbackStructuralReceipt(receipt);
+    };
+    dotsA.onclick({ stopPropagation: () => {} });
+    menus[0].find((entry) => entry.label === "Rename").onSelect();
+
+    assert.strictEqual(dispatchedDv, dvA, "the menu closure retains pane A's exact Dataview context");
+    assert.strictEqual(titleA.textContent, "A", "rollback restores pane A's exact title");
+    assert.strictEqual(titleB.textContent, "B", "rollback never mutates pane B");
+  } finally {
+    global.app = priorApp;
+    global.customJS = priorCustomJS;
+  }
+});
+
 failures += !run("doc ⋯ Rename → renameFile(file, sameFolder + sanitized basename + .md)", () => {
   const { se, opened, file, adapter, dv, openMenu, cleanup } = renderOneDocCard();
   const renamed = [];
