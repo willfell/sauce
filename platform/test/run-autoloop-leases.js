@@ -11,7 +11,7 @@ const delivery = require('../mechanisms/delivery');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
-  requireLeaseToken, commandRecordReview, commandPark, commandAdvance,
+  requireLeaseToken, commandRecordReview, commandPark, commandAdvance, commandBreakLease, commandDiscard,
 } = require(coordinatorModulePath);
 
 let count = 0;
@@ -475,6 +475,78 @@ async function withFreshCoordinator(envOverrides, fn) {
     ok(!!state.cards.X.lease, 'dry-run advance never releases a lease on a TERMINAL-phase card');
     ok(!state.cards.X.lease_breaks, 'dry-run advance records no lease_breaks entry');
     eq(writes, 0, 'dry-run advance performs zero persistence from the release path');
+  }
+
+  // --- Task 3: break-lease verb + supervised-verb lease clearing ---
+
+  // break-lease clears + audits
+  {
+    const state = { schema_version: 1, cards: { B: { card: 'B', phase: 'implementing', lease: mkLease() } } };
+    const r = await commandBreakLease({ root: '/ws' }, { json: true, card: 'B', reason: 'chat window closed' }, {
+      readState: () => state, writeState: () => {}, withLock: immediateLock,
+      now: () => new Date(T0).toISOString(), leaseNowMs: () => T0,
+    });
+    eq(r.action, 'break-lease', 'break-lease action'); eq(r.no_op, false, 'break-lease not a no-op');
+    eq(state.cards.B.lease, undefined, 'break-lease clears the lease');
+    eq(state.cards.B.lease_breaks[0].reason, 'lease_broken_manual', 'break-lease audited as manual break');
+    eq(state.cards.B.lease_breaks[0].manual_reason, 'chat window closed', 'break-lease audit carries the manual reason');
+    ok(r.broken && r.broken.holder && r.broken.holder.host === 'mac-a', 'break-lease receipt reports the broken lease summary');
+    eq(r.reason, 'chat window closed', 'break-lease receipt echoes the reason');
+  }
+  // break-lease on unleased card → no_op success
+  {
+    const state = { schema_version: 1, cards: { B: { card: 'B', phase: 'implementing' } } };
+    const r = await commandBreakLease({ root: '/ws' }, { json: true, card: 'B', reason: 'x' }, {
+      readState: () => state, writeState: () => {}, withLock: immediateLock,
+      now: () => new Date(T0).toISOString(), leaseNowMs: () => T0,
+    });
+    eq(r.no_op, true, 'unleased break-lease is no_op');
+    eq(r.broken, null, 'unleased break-lease reports no broken lease');
+  }
+  // break-lease refusals: unknown card → card_not_claimed; missing reason → reason_required; missing card → card_required
+  await assert.rejects(() => commandBreakLease({ root: '/ws' }, { json: true, card: 'ghost', reason: 'x' },
+    { readState: () => ({ schema_version: 1, cards: {} }), writeState: () => {}, withLock: immediateLock }),
+    (e) => e.code === 'card_not_claimed', 'break-lease unknown card refused'); count++;
+  await assert.rejects(() => commandBreakLease({ root: '/ws' }, { json: true, card: 'B', reason: '' },
+    { readState: () => ({ schema_version: 1, cards: { B: { card: 'B' } } }), writeState: () => {}, withLock: immediateLock }),
+    (e) => e.code === 'reason_required', 'break-lease empty reason refused'); count++;
+  await assert.rejects(() => commandBreakLease({ root: '/ws' }, { json: true, reason: 'x' },
+    { readState: () => ({ schema_version: 1, cards: {} }), writeState: () => {}, withLock: immediateLock }),
+    (e) => e.code === 'card_required', 'break-lease missing card refused via usage()'); count++;
+
+  // commandDiscard clears a live lease as a supervised verb (bypasses
+  // break-lease entirely — the card is leaving the active set for good).
+  {
+    const discardRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-discard-'));
+    try {
+      const cardPath = path.join(discardRoot, 'Lease discard.md');
+      const boardPath = path.join(discardRoot, 'board.md');
+      fs.writeFileSync(cardPath, '---\nstatus: parked\ndepends_on: []\n---\nbody\n');
+      fs.writeFileSync(boardPath, '## In Progress\n- [ ] [[Lease discard]]\n\n## Completed\n');
+      const state = {
+        schema_version: 1,
+        cards: { 'Lease discard': {
+          card: 'Lease discard', phase: 'parked', card_path: cardPath,
+          lease: mkLease(),
+        } },
+      };
+      const receipt = await commandDiscard({ root: discardRoot }, {
+        json: true, card: 'Lease discard', reason: 'lease harness cleanup',
+      }, {
+        readState: () => state, writeState: () => {}, withLock: immediateLock,
+        boardPath, cardsRoot: discardRoot, worktreeExists: () => false,
+        sh: () => { throw new Error('sh should not be called for a leaseless, worktreeless discard'); },
+        now: () => new Date(T0).toISOString(),
+        projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+      });
+      eq(receipt.action, 'discarded', 'discard succeeds against a leased parked card');
+      eq(receipt.no_op, false, 'discard is not a no-op');
+      ok(!state.cards['Lease discard'].lease, 'discard clears the lease on tombstone');
+      const breaks = state.cards['Lease discard'].lease_breaks;
+      eq(breaks[breaks.length - 1].reason, 'lease_cleared_supervised', 'discard lease clear reason is exact');
+    } finally {
+      fs.rmSync(discardRoot, { recursive: true, force: true });
+    }
   }
 
   console.log(`AUTOLOOP-LEASES PASS (${count} assertions)`);

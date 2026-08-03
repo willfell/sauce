@@ -53,6 +53,7 @@ const STRICT_CLI_OPTIONS = Object.freeze({
     'accepted-limitation', 'bound', 'lease-token',
   ],
   'record-pr': ['json', 'card', 'pr', 'lease-token'],
+  'break-lease': ['json', 'card', 'reason'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -3909,6 +3910,37 @@ async function commandAmendPark(ctx, args, deps = {}) {
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
 }
 
+// break-lease — manual escape hatch for a holder known to be gone (dead chat
+// window, crashed process). Never touches receipts, worktrees, or card
+// phase; it only clears the lease and audits the manual reason. No board
+// projection: this is a lease-only operation, so it does not need the
+// selector transitionLock that board-writing verbs (amend-park) take.
+async function commandBreakLease(ctx, args, deps = {}) {
+  requireJson(args, 'break-lease');
+  requireOnlyOptions(args, 'break-lease', STRICT_CLI_OPTIONS['break-lease']);
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const lock = deps.withLock || withLock;
+  const now = deps.now || (() => new Date().toISOString());
+  const nowMs = (deps.leaseNowMs || (() => Date.now()))();
+  const card = String(args.card || '').trim();
+  const reason = Array.isArray(args.reason) ? '' : String(args.reason || '').trim();
+  if (!card) usage('break-lease-refused', 'card_required', 'break-lease requires --card "<exact name>"');
+  if (!reason) refuse('break-lease-refused', 'reason_required', 'break-lease requires --reason "<why the holder is gone>"');
+  return withCardGateLock(ctx, card, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[card];
+    if (!record) refuse('break-lease-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    const broken = leaseSummary(record.lease, nowMs);
+    if (!clearLease(record, 'lease_broken_manual', now)) {
+      return successReceipt('break-lease', { card, no_op: true, broken: null, reason });
+    }
+    record.lease_breaks[record.lease_breaks.length - 1].manual_reason = reason;
+    persist(ctx, state, record);
+    return successReceipt('break-lease', { card, no_op: false, broken, reason });
+  }, { card }, lock);
+}
+
 async function commandResume(ctx, args, deps = {}) {
   requireJson(args, 'resume');
   requireOnlyOptions(args, 'resume', STRICT_CLI_OPTIONS.resume);
@@ -4267,6 +4299,7 @@ async function discardCardCore(ctx, operands, d) {
   const target = record || { card, card_path: noteExists ? cardPath : null };
   target.phase = 'discarded';
   Object.assign(target, tombstone);
+  clearLease(target, 'lease_cleared_supervised', now);
   state.cards[card] = target;
   persist(ctx, state, target);
 
@@ -6309,6 +6342,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
     record.vault_receipts = evidence.vault_receipts;
     record.phase = 'deployed';
     record.deployed_at = audit.recovered_at;
+    clearLease(record, 'lease_cleared_supervised', now);
     persist(ctx, state, record);
     const projection = await project(ctx, record, deps.boardPath || BOARD, {
       projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
@@ -7144,6 +7178,7 @@ async function main() {
   else if (command === 'park') result = await commandPark(ctx, args);
   else if (command === 'amend-park') result = await commandAmendPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
+  else if (command === 'break-lease') result = await commandBreakLease(ctx, args);
   else if (command === 'backfill-ratifications') result = await commandBackfillRatifications(ctx, args);
   else if (command === 'consume-ratification') result = await commandConsumeRatification(ctx, args);
   else if (command === 'discard') result = await commandDiscard(ctx, args);
@@ -7174,7 +7209,7 @@ async function main() {
       if (released) writeState(ctx, state, record);
     }
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7200,7 +7235,7 @@ module.exports = {
   ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandAmendContract, commandPark, commandAmendPark, commandResume, commandDiscard, commandReap, commandRestructure,
+  commandAmendContract, commandPark, commandAmendPark, commandResume, commandBreakLease, commandDiscard, commandReap, commandRestructure,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
