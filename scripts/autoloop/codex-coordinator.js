@@ -7245,7 +7245,7 @@ async function main() {
         if (released) writeState(ctx, state, record);
       }
       return deployed;
-    }, { card: args.card });
+    }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
   else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
