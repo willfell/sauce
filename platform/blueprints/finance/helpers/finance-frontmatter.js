@@ -92,12 +92,15 @@ class FinanceFrontmatter {
         if (!this._renderQueues) this._renderQueues = new Map();
         if (!this._renderQueueFiles) this._renderQueueFiles = new WeakMap();
         if (!this._renderQueuePaths) this._renderQueuePaths = new Map();
+        if (!this._renderQueueAliases) this._renderQueueAliases = new Map();
         const path = String(file?.path || "");
         const identityOwner = (file && typeof file === "object") ? this._renderQueueFiles.get(file) : null;
         let pathOwner = path ? this._renderQueuePaths.get(path) || null : null;
         if (!pathOwner && path) {
             for (const candidate of this._renderQueues.keys()) {
-                if (String(candidate?.path || "") === path) {
+                const aliases = this._renderQueueAliases.get(candidate);
+                if (String(candidate?.path || "") === path
+                    || [...(aliases || [])].some((alias) => String(alias?.path || "") === path)) {
                     pathOwner = candidate;
                     break;
                 }
@@ -107,6 +110,8 @@ class FinanceFrontmatter {
         if (!owner) owner = (file && typeof file === "object") ? file : { path };
         if (file && typeof file === "object") this._renderQueueFiles.set(file, owner);
         if (path) this._renderQueuePaths.set(path, owner);
+        if (!this._renderQueueAliases.has(owner)) this._renderQueueAliases.set(owner, new Set());
+        if (file && typeof file === "object") this._renderQueueAliases.get(owner).add(file);
         let queue = this._renderQueues.get(owner);
         if (!queue) {
             queue = new Map();
@@ -123,6 +128,7 @@ class FinanceFrontmatter {
                 for (const [alias, target] of this._renderQueuePaths) {
                     if (target === owner) this._renderQueuePaths.delete(alias);
                 }
+                this._renderQueueAliases.delete(owner);
             }
         }
     }

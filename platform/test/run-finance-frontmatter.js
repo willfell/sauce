@@ -1158,6 +1158,61 @@ async function run() {
 
   {
     installLifecycle();
+    const queueFf = new FinanceFrontmatter();
+    const { container } = makeEditorDom();
+    global.document = { activeElement: null };
+    const canonical = { path: "spice/finance/Invoices/Chained-Alias-Original.md" };
+    await queueFf.mutateRendered(canonical, {
+      dv: { container }, selector: ".editor", render: async () => {}, write: async () => {},
+    });
+    canonical.path = "spice/finance/Invoices/Chained-Alias-First-Rename.md";
+    const firstAlias = { path: canonical.path };
+    const events = [];
+    let activeWrites = 0;
+    let maxActive = 0;
+    let releaseFirstAlias, releaseCanonical;
+    let firstAliasStarted, canonicalStarted;
+    const firstAliasReady = new Promise((resolve) => { firstAliasStarted = resolve; });
+    const canonicalReady = new Promise((resolve) => { canonicalStarted = resolve; });
+    const firstAliasGate = new Promise((resolve) => { releaseFirstAlias = resolve; });
+    const canonicalGate = new Promise((resolve) => { releaseCanonical = resolve; });
+    const run = (id, file, started, gate) => queueFf.mutateRendered(file, {
+      dv: { container }, selector: ".editor",
+      prepare: async () => ({
+        render: async () => { events.push(`render${id}`); },
+        write: async () => {
+          events.push(`write${id}`);
+          activeWrites++;
+          maxActive = Math.max(maxActive, activeWrites);
+          if (started) started();
+          if (gate) await gate;
+          activeWrites--;
+        },
+      }),
+    });
+    const aliasFirst = run(1, firstAlias, firstAliasStarted, firstAliasGate);
+    await firstAliasReady;
+    const canonicalSecond = run(2, canonical, canonicalStarted, canonicalGate);
+    releaseFirstAlias();
+    await canonicalReady;
+    canonical.path = "spice/finance/Invoices/Chained-Alias-Second-Rename.md";
+    const secondAlias = { path: canonical.path };
+    const aliasThird = run(3, secondAlias, null, null);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    const thirdStayedQueued = events.join(",") === "render1,write1,render2,write2";
+    releaseCanonical();
+    const outcomes = await Promise.all([aliasFirst, canonicalSecond, aliasThird]);
+    ok("FF-20E chained rename follows every canonical alias bound to the active owner",
+      thirdStayedQueued && outcomes.every((outcome) => outcome.ok === true)
+        && events.join(",") === "render1,write1,render2,write2,render3,write3"
+        && maxActive === 1
+        && queueFf._renderQueues.size === 0
+        && queueFf._renderQueuePaths.size === 0
+        && queueFf._renderQueueAliases.size === 0);
+  }
+
+  {
+    installLifecycle();
     const { container, oldRoot, oldInput, tail } = makeEditorDom();
     global.document = { activeElement: oldInput };
     const renderFailure = new Error("fixture render failed");
