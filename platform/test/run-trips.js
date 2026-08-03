@@ -637,8 +637,50 @@ function makeDv(embed, currentVal) {
             && refreshes === beforeStructureRefresh);
 
         const links = new TripLinks();
+        const originalMetadataCache = global.app.metadataCache;
+        const makeGenerationCache = (id) => {
+            const listeners = new Map();
+            const offrefs = [];
+            let serial = 0;
+            return {
+                id, listeners, offrefs,
+                on(event, listener) {
+                    const ref = { id: `${id}-${++serial}`, event };
+                    listeners.set(ref, listener);
+                    return ref;
+                },
+                offref(ref) { offrefs.push(ref); listeners.delete(ref); },
+                emit(target) { [...listeners.values()].forEach((listener) => listener(target)); },
+                getFileCache() { return null; },
+            };
+        };
+        const generationCacheA = makeGenerationCache('cache-a');
+        const generationCacheB = makeGenerationCache('cache-b');
+        global.app.metadataCache = generationCacheA;
+        const generationTrackerA = list._metadataTracker();
+        const generationRefA = generationTrackerA.ref;
+        const staleGenerationListenerA = [...generationCacheA.listeners.values()][0];
+        const sameCacheTracker = links._metadataTracker();
+        generationCacheA.emit({ path: pathName });
+        global.app.metadataCache = generationCacheB;
+        const generationTrackerB = links._metadataTracker();
+        const hotReloadTracker = new TripEntryList()._metadataTracker();
+        generationCacheA.emit({ path: pathName });
+        staleGenerationListenerA({ path: pathName });
+        generationCacheB.emit({ path: pathName });
         ok('PERF4D-METADATA-GENERATION entry and link owners share one cache generation tracker',
-            list._metadataTracker() === links._metadataTracker());
+            generationTrackerA === sameCacheTracker && generationTrackerB === hotReloadTracker);
+        ok('PERF4D-CACHE-LISTENER-REPLACEMENT detaches cache A and keeps one cache B listener through hot reload',
+            generationCacheA.offrefs.length === 1
+            && generationCacheA.offrefs[0] === generationRefA
+            && generationCacheA.listeners.size === 0
+            && generationCacheB.listeners.size === 1
+            && generationTrackerA.versions.get(pathName) === 1
+            && generationTrackerB.versions.get(pathName) === 1);
+        global.app.metadataCache = originalMetadataCache;
+        list._metadataTracker();
+        ok('PERF4D-CACHE-LISTENER-REPLACEMENT restoring the live cache releases cache B ownership',
+            generationCacheB.offrefs.length === 1 && generationCacheB.listeners.size === 0);
         const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
         const priorLinks = [];
         page = { type: 'trip', file: { path: pathName }, links: priorLinks };

@@ -324,9 +324,14 @@ class TripLinks {
       const slot = Symbol.for("sauce.trips.metadata-generations");
       let tracker = globalThis[slot];
       if (!tracker || tracker.cache !== cache) {
+        if (tracker?.ref != null && typeof tracker.cache?.offref === "function") {
+          tracker.cache.offref(tracker.ref);
+          tracker.ref = null;
+        }
         tracker = { cache, versions: new Map(), ref: null };
         if (typeof cache.on === "function") {
           tracker.ref = cache.on("changed", (file) => {
+            if (globalThis[slot] !== tracker) return;
             const path = String(file?.path || "");
             if (path) tracker.versions.set(path, (tracker.versions.get(path) || 0) + 1);
           });
