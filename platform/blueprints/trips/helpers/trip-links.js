@@ -65,7 +65,10 @@ class TripLinks {
       try { raw = JSON.parse(s); }
       catch (_e) { raw = [s]; }
     }
-    if (!Array.isArray(raw)) return [];
+    if (!Array.isArray(raw)) {
+      if (!raw || typeof raw === "string" || typeof raw[Symbol.iterator] !== "function") return [];
+      try { raw = Array.from(raw); } catch (_e) { return []; }
+    }
     const out = [];
     const seen = new Set();
     for (const entry of raw) {
@@ -115,6 +118,34 @@ class TripLinks {
     });
   }
 
+  _renderCardsInto(grid, links) {
+    if (!grid || typeof grid.createEl !== "function") return;
+    for (const card of this._linkCards(links)) {
+      const a = grid.createEl("a", { href: card.url });
+      if (a && typeof a.setAttr === "function") {
+        a.setAttr("target", "_blank");
+        a.setAttr("rel", "noopener");
+      }
+      if (a && a.style) {
+        a.style.cssText =
+          "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
+          "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
+          "background: var(--background-primary); color: var(--text-normal); " +
+          "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
+      }
+      if (a && typeof a.addEventListener === "function") {
+        a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
+        a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
+      }
+      const title = a.createEl("div", { text: card.text });
+      if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      if (card.host) {
+        const host = a.createEl("div", { text: card.host });
+        if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+      }
+    }
+  }
+
   // ── read-only render ─────────────────────────────────────────────────────
   // Draws the "Helpful Links" card grid on the trip ATLAS body. Fires ONLY when
   // page.type === "trip"; reads the note's own `links`. Per the empty-state rule
@@ -129,7 +160,15 @@ class TripLinks {
       if (!c || typeof c.createEl !== "function") return;
       if (c.closest && c.closest(".markdown-embed")) return;
 
-      const cards = this._linkCards(page.links);
+      const ownerPath = String(page.file.path || "");
+      if (c.dataset) c.dataset.tripLinksOwnerPath = ownerPath;
+      if (c.classList?.add) c.classList.add("trip-links-owner");
+      else if (!String(c.className || "").split(/\s+/).includes("trip-links-owner")) {
+        c.className = `${c.className || ""} trip-links-owner`.trim();
+      }
+
+      const state = this._linksState(c, page);
+      const cards = this._linkCards(state.model);
       if (!cards.length) return;                    // empty-state: render nothing
 
       if (customJS.SectionLabel && typeof customJS.SectionLabel.render === "function") {
@@ -143,68 +182,344 @@ class TripLinks {
         if (lbl.style) lbl.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
       }
 
-      const grid = c.createEl("div");
+      const grid = c.createEl("div", { cls: "trip-links-grid" });
+      if (grid.dataset) grid.dataset.sourcePath = ownerPath;
       if (grid.style) grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 4px;";
-      for (const card of cards) {
-        const a = grid.createEl("a", { href: card.url });
-        if (a && typeof a.setAttr === "function") {
-          a.setAttr("target", "_blank");
-          a.setAttr("rel", "noopener");
-        }
-        if (a && a.style) {
-          a.style.cssText =
-            "display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; " +
-            "border: 1px solid var(--background-modifier-border); border-radius: 8px; " +
-            "background: var(--background-primary); color: var(--text-normal); " +
-            "text-decoration: none; transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;";
-        }
-        if (a && typeof a.addEventListener === "function") {
-          a.addEventListener("mouseenter", () => { if (a.style) { a.style.transform = "translateY(-1px)"; a.style.boxShadow = "0 2px 8px rgba(0,0,0,0.18)"; a.style.borderColor = "var(--interactive-accent)"; } });
-          a.addEventListener("mouseleave", () => { if (a.style) { a.style.transform = ""; a.style.boxShadow = ""; a.style.borderColor = "var(--background-modifier-border)"; } });
-        }
-        const title = a.createEl("div", { text: card.text });
-        if (title && title.style) title.style.cssText = "font-weight: 600; font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-        if (card.host) {
-          const host = a.createEl("div", { text: card.host });
-          if (host && host.style) host.style.cssText = "font-size: 0.76em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-        }
-      }
+      this._renderCardsInto(grid, cards);
     } catch (_e) { /* never throw */ }
   }
 
   // ── data + write (operate on the CURRENT note — the trip atlas) ──────────
+  _page(dv) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (renderSafe && typeof renderSafe.page === "function") return renderSafe.page(dv);
+    try { return dv && typeof dv.current === "function" ? dv.current() : null; }
+    catch (_e) { return null; }
+  }
   _file(dv) {
-    const cur = dv.current && dv.current();
+    const cur = this._page(dv);
     if (!cur || !cur.file) return null;
     return app.vault.getAbstractFileByPath(cur.file.path);
   }
   _currentLinks(dv) {
-    const cur = dv.current && dv.current();
+    const cur = this._page(dv);
+    const filePath = cur && cur.file ? cur.file.path : "";
+    const owner = filePath ? this._panelOwner(dv, filePath) : null;
+    if (owner) return this._parse(this._linksState(owner, cur).model);
     return this._parse(cur ? cur.links : []);
   }
-  async _write(dv, links) {
+  _linkIndex(links, target) {
+    const url = String(target?.url || "").trim();
+    if (!url) return -1;
+    return this._parse(links).findIndex((link) => link.url === url);
+  }
+  _panelOwner(dv, filePath) {
+    const container = dv && dv.container;
+    const scopes = [container];
+    try {
+      const noteView = container?.closest?.(".markdown-preview-view, .markdown-reading-view, .markdown-source-view, .workspace-leaf-content");
+      if (noteView) scopes.push(noteView);
+    } catch (_e) {}
+    for (const scope of scopes) {
+      try {
+        const candidates = [];
+        if (scope?.dataset?.tripLinksOwnerPath != null) candidates.push(scope);
+        if (typeof scope?.querySelectorAll === "function") candidates.push(...scope.querySelectorAll(".trip-links-owner"));
+        else {
+          const owner = scope?.querySelector?.(".trip-links-owner");
+          if (owner) candidates.push(owner);
+        }
+        const match = candidates.find((owner) =>
+          String(owner?.dataset?.tripLinksOwnerPath || "") === String(filePath || ""));
+        if (match) return match;
+      } catch (_e) {}
+    }
+    return null;
+  }
+  _linksState(owner, page) {
+    const states = this._linksStateStore();
+    let state = states.get(owner);
+    const incoming = this._parse(page && page.links);
+    const path = String(page?.file?.path || owner?.dataset?.tripLinksOwnerPath || "");
+    const metadataVersion = this._metadataVersion(path);
+    if (!state || state.path !== path) {
+      if (state) this._releaseMetadataPath(state);
+      state = {
+        path,
+        model: incoming,
+        tail: Promise.resolve(),
+        queued: 0,
+        epoch: 0,
+        authority: null,
+      };
+      states.set(owner, state);
+      return state;
+    }
+    if (state.queued === 0) {
+      if (state.authority) {
+        const matches = this._sameLinks(incoming, state.authority.expected);
+        const incomingMtime = this._pageMtime(page);
+        const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
+          && incomingMtime > state.authority.writeMtime;
+        const cacheAdvanced = metadataVersion > (state.authority.cacheVersion || 0);
+        const cached = cacheAdvanced ? this._cachedLinks(path) : null;
+        if (cacheAdvanced) {
+          if (cached) {
+            if (this._sameLinks(cached.model, state.authority.expected)) {
+              state.authority.cacheVersion = metadataVersion;
+              if (cached.mtime != null) state.authority.writeMtime = cached.mtime;
+            } else {
+              state.model = cached.model;
+              state.authority = {
+                expected: cached.model,
+                writeMtime: cached.mtime,
+                cacheVersion: metadataVersion,
+              };
+            }
+          }
+        } else if (matches) {
+          state.model = incoming;
+          state.authority = null;
+          this._releaseMetadataPath(state);
+        } else if (externallyNewer) {
+          state.model = incoming;
+          state.authority = {
+            expected: incoming,
+            writeMtime: incomingMtime,
+            cacheVersion: metadataVersion,
+          };
+        }
+      } else {
+        state.model = incoming;
+        this._releaseMetadataPath(state);
+      }
+    }
+    return state;
+  }
+  _linksStateStore() {
+    const slot = Symbol.for("sauce.trips.links-mutation-states");
+    let states = globalThis[slot];
+    if (!(states instanceof WeakMap)) {
+      states = new WeakMap();
+      globalThis[slot] = states;
+    }
+    this._linksMutationStates = states;
+    return states;
+  }
+  _sameLinks(left, right) {
+    try { return JSON.stringify(this._parse(left)) === JSON.stringify(this._parse(right)); }
+    catch (_e) { return false; }
+  }
+  _pageMtime(page) {
+    const value = page?.file?.mtime;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    try {
+      const numeric = value && typeof value.valueOf === "function" ? Number(value.valueOf()) : NaN;
+      return Number.isFinite(numeric) ? numeric : null;
+    } catch (_e) { return null; }
+  }
+  _fileMtime(file) {
+    const value = file?.stat?.mtime;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  _cachedLinks(path) {
+    try {
+      if (typeof app === "undefined") return null;
+      const file = app.vault?.getAbstractFileByPath?.(path);
+      if (!file) return null;
+      const frontmatter = app.metadataCache?.getFileCache?.(file)?.frontmatter;
+      if (!frontmatter || typeof frontmatter !== "object") return null;
+      return { mtime: this._fileMtime(file), model: this._parse(frontmatter.links) };
+    } catch (_e) { return null; }
+  }
+  _metadataTracker() {
+    try {
+      if (typeof app === "undefined" || !app.metadataCache) return null;
+      const cache = app.metadataCache;
+      const slot = Symbol.for("sauce.trips.metadata-generations");
+      let tracker = globalThis[slot];
+      if (!tracker || tracker.cache !== cache) {
+        const prior = tracker;
+        const versions = tracker?.versions instanceof Map ? tracker.versions : new Map();
+        const active = tracker?.active instanceof Map ? tracker.active : new Map();
+        tracker = { cache, versions, active, ref: null };
+        globalThis[slot] = tracker;
+        if (typeof cache.on === "function") {
+          try {
+            tracker.ref = cache.on("changed", (file) => {
+              if (globalThis[slot] !== tracker) return;
+              this._sweepMetadataTracker(tracker);
+              const path = String(file?.path || "");
+              if (!path || !tracker.active.has(path)) return;
+              tracker.versions.set(path, (tracker.versions.get(path) || 0) + 1);
+            });
+          } catch (_e) { tracker.ref = null; }
+        }
+        if (prior?.ref != null && typeof prior.cache?.offref === "function") {
+          try { prior.cache.offref(prior.ref); } catch (_e) {}
+          prior.ref = null;
+        }
+      }
+      this._sweepMetadataTracker(tracker);
+      return tracker;
+    } catch (_e) { return null; }
+  }
+  _sweepMetadataTracker(tracker) {
+    if (!tracker?.active || !tracker?.versions) return;
+    for (const [path, refs] of tracker.active) {
+      for (const ref of refs) {
+        const state = ref?.deref?.();
+        if (!state || state._metadataInterest?.ref !== ref
+          || (state.queued === 0 && !state.authority)) refs.delete(ref);
+      }
+      if (refs.size === 0) {
+        tracker.active.delete(path);
+        tracker.versions.delete(path);
+      }
+    }
+    for (const path of tracker.versions.keys()) {
+      if (!tracker.active.has(path)) tracker.versions.delete(path);
+    }
+  }
+  _retainMetadataPath(state) {
+    const path = String(state?.path || "");
+    if (!path) return;
+    const tracker = this._metadataTracker();
+    if (!tracker) return;
+    if (state._metadataInterest?.path === path
+      && state._metadataInterest.active === tracker.active) return;
+    this._releaseMetadataPath(state);
+    const ref = new WeakRef(state);
+    let refs = tracker.active.get(path);
+    if (!refs) { refs = new Set(); tracker.active.set(path, refs); }
+    refs.add(ref);
+    if (!tracker.versions.has(path)) tracker.versions.set(path, 0);
+    state._metadataInterest = { path, ref, active: tracker.active, versions: tracker.versions };
+  }
+  _releaseMetadataPath(state) {
+    const interest = state?._metadataInterest;
+    if (!interest) return;
+    const refs = interest.active?.get?.(interest.path);
+    refs?.delete?.(interest.ref);
+    if (!refs || refs.size === 0) {
+      interest.active?.delete?.(interest.path);
+      interest.versions?.delete?.(interest.path);
+    }
+    state._metadataInterest = null;
+  }
+  _metadataVersion(path) {
+    return this._metadataTracker()?.versions?.get(String(path || "")) || 0;
+  }
+  _queueLinksStructure(state, task) {
+    const epoch = state.epoch;
+    state.queued += 1;
+    this._retainMetadataPath(state);
+    const run = async () => {
+      try {
+        if (epoch !== state.epoch) {
+          new Notice("An earlier trip link change failed. Retry this action.", 6000);
+          return false;
+        }
+        const ok = await task();
+        if (!ok) state.epoch += 1;
+        return ok;
+      } catch (error) {
+        state.epoch += 1;
+        new Notice("Could not save links: " + (error?.message || error), 6000);
+        return false;
+      } finally {
+        state.queued = Math.max(0, state.queued - 1);
+        if (state.queued === 0 && !state.authority) this._releaseMetadataPath(state);
+      }
+    };
+    const result = (state.tail || Promise.resolve()).then(run, run);
+    state.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  _rollbackPreview(receipt) {
+    if (!receipt) return;
+    if (receipt.owner) {
+      if (typeof receipt.owner.replaceChildren === "function") receipt.owner.replaceChildren(...receipt.priorNodes);
+      else {
+        receipt.owner.empty?.();
+        for (const node of receipt.priorNodes || []) receipt.owner.appendChild?.(node);
+      }
+    }
+    if (receipt.page) {
+      if (receipt.hadValue) receipt.page.links = receipt.priorValue;
+      else delete receipt.page.links;
+    }
+    if (receipt.state) {
+      receipt.state.model = receipt.priorModel;
+      receipt.state.authority = receipt.priorAuthority;
+    }
+    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+  }
+  _previewDv(dv, owner, page) {
+    const preview = Object.create((dv && typeof dv === "object") ? dv : null);
+    preview.container = owner;
+    preview.current = () => page;
+    return preview;
+  }
+  async _write(dv, links, ui = {}) {
     const file = this._file(dv);
     if (!file) { new Notice("Could not resolve the trip atlas note."); return false; }
     const renderSafe = globalThis.customJS?.RenderSafe;
-    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+    if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
       new Notice("Could not save links: RenderSafe is unavailable.", 6000);
       return false;
     }
     const next = links.map((l) => ({ url: l.url, text: l.text }));
-    const expected = JSON.stringify(next);
-    const result = await renderSafe.mutate({
-      app,
-      dv,
-      path: file.path,
-      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
-      isCurrent: (page) => {
-        const current = page && page.links;
-        if (!current || typeof current[Symbol.iterator] !== "function") return false;
-        try { return JSON.stringify(Array.from(current).map((l) => ({ url: l.url, text: l.text }))) === expected; }
-        catch (_e) { return false; }
-      },
+    const page = this._page(dv);
+    if (!page) { new Notice("Could not save links: page metadata is unavailable.", 6000); return false; }
+    const owner = this._panelOwner(dv, file.path);
+    if (!owner) { new Notice("Could not save links: trip links panel is unavailable.", 6000); return false; }
+    const state = this._linksState(owner, page);
+    return this._queueLinksStructure(state, async () => {
+      const previewPage = this._page(dv) || page;
+      const result = await renderSafe.mutateStructure({
+        app,
+        dv,
+        path: file.path,
+        failureMessage: "Could not save links",
+        apply: async () => {
+          const hadValue = Object.prototype.hasOwnProperty.call(previewPage, "links");
+          const priorValue = previewPage.links;
+          const priorModel = state.model;
+          const priorAuthority = state.authority;
+          const focusTarget = ui.focusTarget
+            || ((typeof document !== "undefined") ? document.activeElement : null);
+          const priorNodes = Array.from(owner.childNodes || owner.children || []);
+          const receipt = {
+            page: previewPage, hadValue, priorValue, priorModel, priorAuthority,
+            focusTarget, owner, priorNodes, state,
+          };
+          try {
+            state.model = next;
+            previewPage.links = next;
+            if (typeof owner.replaceChildren === "function") owner.replaceChildren();
+            else owner.empty?.();
+            await this.render(this._previewDv(dv, owner, previewPage));
+            return receipt;
+          } catch (error) {
+            this._rollbackPreview(receipt);
+            throw error;
+          }
+        },
+        rollback: (receipt) => this._rollbackPreview(receipt),
+        write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.links = next; }),
+      });
+      if (result.ok === true) {
+        state.model = next;
+        state.authority = {
+          expected: next,
+          writeMtime: this._fileMtime(file),
+          cacheVersion: this._metadataVersion(state.path),
+        };
+        return true;
+      }
+      return false;
     });
-    return result.ok === true;
   }
 
   // ── entry points (wired from the atlas nav bar) ──────────────────────────
@@ -221,9 +536,18 @@ class TripLinks {
     const links = this._currentLinks(dv);
     if (!links.length) { new Notice("No links yet — use Add link."); return; }
     this._openModal({ title: "Manage links", build: (panel, close) => {
+      let pendingActions = 0;
+      let transitioning = false;
+      const queueState = () => {
+        const page = this._page(dv);
+        const path = page?.file?.path || "";
+        const owner = path ? this._panelOwner(dv, path) : null;
+        return owner ? this._linksState(owner, page) : null;
+      };
+      const modalOpen = () => typeof close.isOpen !== "function" || close.isOpen();
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:52vh; overflow:auto;";
-      links.forEach((link, index) => {
+      links.forEach((link) => {
         const rowEl = list.createEl("div");
         rowEl.style.cssText = "display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--background-modifier-border); border-radius:6px;";
         const label = rowEl.createEl("div");
@@ -232,21 +556,58 @@ class TripLinks {
         label.createEl("div", { text: link.url }).style.cssText = "font-size:0.75em; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis;";
         const editBtn = rowEl.createEl("button", { text: "Edit" });
         editBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer; font-size:0.8em;";
-        editBtn.onclick = () => {
+        editBtn.onclick = async () => {
+          if (transitioning) return false;
+          transitioning = true;
+          pendingActions += 1;
+          const state = queueState();
+          const epoch = state?.epoch;
+          if (state?.queued) await state.tail;
+          pendingActions = Math.max(0, pendingActions - 1);
+          if (!modalOpen()) return false;
+          if (state && state.epoch !== epoch) {
+            transitioning = false;
+            new Notice("An earlier trip link change failed. Retry this action.", 6000);
+            try { editBtn.focus?.(); } catch (_e) {}
+            return false;
+          }
+          const current = this._currentLinks(dv);
+          if (this._linkIndex(current, link) < 0) {
+            transitioning = false;
+            new Notice("That link changed. Reopen Manage links and retry.", 6000);
+            try { editBtn.focus?.(); } catch (_e) {}
+            return false;
+          }
           close();
           this._openForm({ title: "Edit link", url: link.url, text: link.text }, async ({ url, text }) => {
-            const res = TripLinks.updateLink(this._currentLinks(dv), index, { url, text });
+            const current = this._currentLinks(dv);
+            const res = TripLinks.updateLink(current, this._linkIndex(current, link), { url, text });
             if (!res.changed) { new Notice(res.reason === "duplicate" ? "That URL is already in the list." : "Enter a URL."); return false; }
             if (await this._write(dv, res.links)) { new Notice("Link updated."); return true; }
             return false;
           });
+          return true;
         };
         const delBtn = rowEl.createEl("button", { text: "Delete" });
         delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); cursor:pointer; font-size:0.8em;";
         delBtn.onclick = async () => {
-          const res = TripLinks.deleteLink(this._currentLinks(dv), index);
-          if (res.changed && await this._write(dv, res.links)) { new Notice("Link deleted."); }
-          close();
+          if (transitioning) return false;
+          pendingActions += 1;
+          let saved = false;
+          try {
+            const current = this._currentLinks(dv);
+            const res = TripLinks.deleteLink(current, this._linkIndex(current, link));
+            saved = Boolean(res.changed && await this._write(dv, res.links, { focusTarget: delBtn }));
+          } finally {
+            pendingActions = Math.max(0, pendingActions - 1);
+          }
+          if (saved) {
+            new Notice("Link deleted.");
+            if (modalOpen() && pendingActions === 0 && !transitioning) close();
+            return true;
+          }
+          if (modalOpen()) try { delBtn.focus?.(); } catch (_e) {}
+          return false;
         };
       });
       const done = panel.createEl("button", { text: "Done" });
@@ -284,13 +645,24 @@ class TripLinks {
 
   _openModal({ title, build }) {
     const prior = document.querySelector(".sauce-links-modal-overlay");
-    if (prior) prior.remove();
+    if (prior) {
+      if (typeof prior._sauceClose === "function") prior._sauceClose();
+      else prior.remove();
+    }
     const overlay = document.body.createDiv({ cls: "sauce-links-modal-overlay" });
     overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 9999;";
     const modal = overlay.createDiv();
     modal.style.cssText = "background: var(--background-primary, #1c1c1c); color: var(--text-normal, #ddd); border: 1px solid var(--background-modifier-border, #444); border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: 80vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);";
     const escListener = (ev) => { if (ev.key === "Escape") close(); };
-    const close = () => { document.removeEventListener("keydown", escListener); overlay.remove(); };
+    let open = true;
+    const close = () => {
+      if (!open) return;
+      open = false;
+      document.removeEventListener("keydown", escListener);
+      overlay.remove();
+    };
+    close.isOpen = () => open;
+    overlay._sauceClose = close;
     overlay.onclick = (e) => { if (e.target === overlay) close(); };
     document.addEventListener("keydown", escListener);
     const h = modal.createEl("div", { text: title });

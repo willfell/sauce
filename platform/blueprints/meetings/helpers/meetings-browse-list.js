@@ -45,19 +45,27 @@ class MeetingsBrowseList {
    * `page.people`. Each entry may be "[[Name]]", "[[Name|Alias]]", a Dataview
    * link object ({display} / {path}), or a plain string. Wikilink wrapper and
    * `|alias` are stripped; the alias (display) wins when present. Pure,
-   * never-throws; non-array / null / {} → [].
+   * never-throws; native Arrays and iterable Dataview DataArrays are accepted;
+   * strings / null / plain objects → [].
    */
   static _attendeeNames(page) {
     if (!page || typeof page !== 'object') return [];
-    let list = page.attendees;
-    if (!Array.isArray(list) || list.length === 0) list = page.people;
-    if (!Array.isArray(list)) return [];
+    let list = MeetingsBrowseList._iterableValues(page.attendees);
+    if (list.length === 0) list = MeetingsBrowseList._iterableValues(page.people);
     const out = [];
     for (const raw of list) {
       const name = MeetingsBrowseList._coerceName(raw);
       if (name) out.push(name);
     }
     return out;
+  }
+
+  static _iterableValues(value) {
+    if (value == null || typeof value === 'string') return [];
+    try {
+      if (typeof value[Symbol.iterator] !== 'function') return [];
+      return Array.from(value);
+    } catch (_e) { return []; }
   }
 
   /** Coerce one attendee entry to a display name. Never throws. */
@@ -86,6 +94,7 @@ class MeetingsBrowseList {
     try {
       const raw = dv.pages('"spice/tasks"').where(p =>
         p && p.type === 'task' && p.status === 'open'
+        && String(p.source == null ? '' : p.source).trim().toLowerCase() === 'meeting'
         && p.file && p.file.path
         && !p.file.path.includes('/_trash/')
         && !p.file.path.includes('/_done/'));
@@ -124,13 +133,18 @@ class MeetingsBrowseList {
     if (!dv || !dv.container) return;
     if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
 
-    // Cold-load guard.
-    const page = (window.customJS && window.customJS.RenderSafe)
-      ? window.customJS.RenderSafe.page(dv)
-      : (dv.current && dv.current());
-    if (!page) return;
-
     try {
+      // Cold-load guard. A throwing RenderSafe.page/dv.current is another cold
+      // input, never a reason for the render promise to reject.
+      const cjs = (typeof globalThis !== 'undefined' && globalThis.customJS)
+        || (typeof window !== 'undefined' && window.customJS) || null;
+      let page = null;
+      try {
+        page = cjs?.RenderSafe && typeof cjs.RenderSafe.page === 'function'
+          ? cjs.RenderSafe.page(dv)
+          : (typeof dv.current === 'function' ? dv.current() : null);
+      } catch (_e) { page = null; }
+      if (!page || !page.file) return;
       let meetings = dv.pages('"spice/meetings/notes"');
       meetings = (meetings && typeof meetings.array === 'function') ? meetings.array() : Array.from(meetings || []);
 
@@ -162,8 +176,8 @@ class MeetingsBrowseList {
         groups[key].push(p);
       }
 
-      const SL = window.customJS && window.customJS.SectionLabel;
-      const BC = window.customJS && window.customJS.BeaconCards;
+      const SL = cjs && cjs.SectionLabel;
+      const BC = cjs && cjs.BeaconCards;
 
       for (let i = 0; i < order.length; i++) {
         const key = order[i];
