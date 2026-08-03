@@ -12,6 +12,7 @@ const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coor
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
   requireLeaseToken, commandRecordReview, commandPark, commandAdvance, commandBreakLease, commandDiscard,
+  commandStatus,
 } = require(coordinatorModulePath);
 
 let count = 0;
@@ -547,6 +548,66 @@ async function withFreshCoordinator(envOverrides, fn) {
     } finally {
       fs.rmSync(discardRoot, { recursive: true, force: true });
     }
+  }
+
+  // --- Task 4: status projection + all-work-leased selection ---
+
+  function statusFixture(leases) { // leases: array of lease|null for three active cards
+    const cards = {};
+    ['A1', 'A2', 'A3'].forEach((name, i) => {
+      cards[name] = {
+        card: name, phase: 'implementing', branch: `b${i}`, worktree: `/w${i}`,
+        ...(leases[i] ? { lease: leases[i] } : {}),
+      };
+    });
+    return { schema_version: 1, cards };
+  }
+  const STATUS_BOARD = '## In Planning\n\n## In Progress\n\n## Blocked\n\n## Completed\n'; // minimal board — no claimable work
+
+  // all three active + all live-leased → all-work-leased
+  {
+    const receipt = commandStatus({ root: '/ws' }, {
+      state: statusFixture([mkLease(), mkLease({ token: 't2' }), mkLease({ token: 't3' })]),
+      boardMd: STATUS_BOARD, loadCard: () => null, cardsRoot: '/cards', supervised: false,
+      leaseNowMs: () => T0 + 1000,
+    });
+    eq(receipt.next.action, 'all-work-leased', 'all leased at capacity -> all-work-leased');
+    eq(receipt.next.leased.length, 3, 'names all leased cards');
+    ok(receipt.next.soonest_expiry_ms > 0 && receipt.next.soonest_expiry_ms <= LEASE_TTL_MS,
+      'soonest_expiry_ms is the minimum of the leased expiries');
+    ok(receipt.active[0].lease && receipt.active[0].lease.held === true, 'status projects lease per card');
+    eq(receipt.active.filter((r) => r.lease && r.lease.held).length, 3, 'every active card carries a live lease projection');
+  }
+
+  // one lease stale -> at-capacity with that card resumable
+  {
+    const receipt = commandStatus({ root: '/ws' }, {
+      state: statusFixture([mkLease(), mkLease({ token: 't2' }),
+        mkLease({ token: 't3', renewed_at: new Date(T0 - LEASE_TTL_MS - 1000).toISOString() })]),
+      boardMd: STATUS_BOARD, loadCard: () => null, cardsRoot: '/cards', supervised: false,
+      leaseNowMs: () => T0 + 1000,
+    });
+    eq(receipt.next.action, 'at-capacity', 'stale lease keeps at-capacity');
+    eq(receipt.next.resumable, ['A3'], 'stale-leased card listed resumable');
+    eq(receipt.next.leased.length, 2, 'the two live-leased cards are reported leased');
+    eq(receipt.next.active, ['A1', 'A2', 'A3'], 'REGRESSION at-capacity active stays a card-name string array');
+    ok(receipt.next.active.every((v) => typeof v === 'string'), 'REGRESSION every at-capacity active entry is a string');
+    ok(receipt.active.find((r) => r.card === 'A3').lease.stale === true, 'status projects the stale lease per card');
+  }
+
+  // under capacity with an unleased active card -> unchanged 'no-work'
+  // semantics (regression guard: capacity gate never fires below MAX_ACTIVE,
+  // regardless of lease state).
+  {
+    const state = statusFixture([mkLease(), null, null]);
+    delete state.cards.A3; // only two active cards tracked: under MAX_ACTIVE (3)
+    const receipt = commandStatus({ root: '/ws' }, {
+      state, boardMd: STATUS_BOARD, loadCard: () => null, cardsRoot: '/cards', supervised: false,
+      leaseNowMs: () => T0 + 1000,
+    });
+    eq(receipt.next.action, 'no-work', 'under-capacity selection is unaffected by lease projection');
+    ok(!receipt.next.leased && !receipt.next.resumable, 'under-capacity next carries no lease-selection fields');
+    eq(receipt.active.find((r) => r.card === 'A2').lease, null, 'unleased active card projects a null lease');
   }
 
   console.log(`AUTOLOOP-LEASES PASS (${count} assertions)`);

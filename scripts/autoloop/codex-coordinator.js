@@ -1724,7 +1724,7 @@ function selectClaimCandidate({
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
   if (active.length >= MAX_ACTIVE) {
-    const selected = { action: 'at-capacity', active: active.map((r) => r.card) };
+    const selected = { action: 'at-capacity', active: active.map((r) => r.card), activeRecords: active };
     if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
       boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
     });
@@ -1798,7 +1798,7 @@ function selectCoordinatorCandidate({
   });
 }
 
-function summarizeClaimSelection(selected) {
+function summarizeClaimSelection(selected, nowMs = Date.now()) {
   const skipped = selected.skipped || [];
   if (selected.action === 'claim') {
     const summary = {
@@ -1820,9 +1820,21 @@ function summarizeClaimSelection(selected) {
     return summary;
   }
   if (selected.action === 'at-capacity') {
+    const records = selected.activeRecords || [];
+    const resumable = records.filter((r) => !leaseIsLive(r.lease, nowMs)).map((r) => r.card);
+    const leased = records.filter((r) => leaseIsLive(r.lease, nowMs))
+      .map((r) => ({ card: r.card, expires_in_ms: leaseSummary(r.lease, nowMs).expires_in_ms }));
+    const shadow = selected.shadow_selection ? { shadow_selection: selected.shadow_selection } : {};
+    if (records.length && resumable.length === 0) {
+      return {
+        action: 'all-work-leased', leased,
+        soonest_expiry_ms: Math.min(...leased.map((l) => l.expires_in_ms)),
+        ...shadow,
+      };
+    }
     return {
-      action: 'at-capacity', active: selected.active || [],
-      ...(selected.shadow_selection ? { shadow_selection: selected.shadow_selection } : {}),
+      action: 'at-capacity', active: selected.active || [], resumable, leased,
+      ...shadow,
     };
   }
   const summary = {
@@ -5542,6 +5554,7 @@ async function commandAdvance(ctx, args, deps = {}) {
 }
 
 function commandStatus(ctx, opts = {}) {
+  const nowMs = (opts.leaseNowMs || (() => Date.now()))();
   const state = opts.state || readState(ctx); const active = activeRecords(state);
   const parked = Object.values(state.cards || {}).filter((record) => record.phase === 'parked');
   const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
@@ -5560,7 +5573,7 @@ function commandStatus(ctx, opts = {}) {
     cardsRoot,
     readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
     loadEpicCard: opts.loadEpicCard,
-  }));
+  }), nowMs);
   const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
@@ -5588,6 +5601,7 @@ function commandStatus(ctx, opts = {}) {
     active: active.map((r) => ({
       card: r.card, phase: r.phase, status: (projectedRecordMapping(r, cardsRoot) || {}).status || null,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null, branch: r.branch, pr: r.feature_pr || null,
+      lease: leaseSummary(r.lease, nowMs),
     })),
     parked: parked.map((r) => {
       const ratification = ratificationStatus(r, state, {
@@ -5599,6 +5613,7 @@ function commandStatus(ctx, opts = {}) {
         card: r.card, phase: r.phase, status: 'parked', model_profile: r.model_profile, branch: r.branch,
         dependencies: r.dependencies || [], resume_condition: r.resume_condition || '',
         parked_at: r.parked_at || null, projection_error: r.projection_error || null,
+        lease: leaseSummary(r.lease, nowMs),
         ...(ratification ? { ratification } : {}),
       };
     }),

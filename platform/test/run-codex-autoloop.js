@@ -5929,7 +5929,7 @@ eq(parkedStatus.available_slots, 3, 'parked cards leave every capacity slot avai
 eq(parkedStatus.parked, [{
   card: 'Park me', phase: 'parked', status: 'parked', model_profile: undefined, branch: 'codex-autoloop/park-me',
   dependencies: ['Prerequisite A', 'Prerequisite B'], resume_condition: 'Both prerequisites deploy cleanly',
-  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null,
+  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null, lease: null,
 }], 'status lists parked cards separately with prerequisites and resume condition');
 eq(parkedStatus.tracked.find((record) => record.card === 'Park me').status, 'parked', 'all-tracked status view includes canonical parked');
 
