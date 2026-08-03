@@ -181,16 +181,17 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
   }
 }});
 
-ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node receipt and restores focus on rollback", fn: async () => {
+ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node receipt and preserves newer focus on rollback", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  let restored = false;
+  let restoreCount = 0;
   const previousDocument = global.document;
-  global.document = { activeElement: { focus: () => { restored = true; } } };
+  const focusTarget = { isConnected: true, focus: () => { restoreCount += 1; } };
+  global.document = { activeElement: focusTarget, body: {} };
   const parent = {
     children: [],
     createEl(_tag, options) {
-      const node = { className: options.cls, textContent: "", nextSibling: null };
+      const node = { className: options.cls, textContent: "", nextSibling: null, contains: () => false };
       this.children.push(node);
       return node;
     },
@@ -205,7 +206,15 @@ ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node re
     assert.strictEqual(receipt.node.textContent, "Creating New Doc…");
     lifecycle.rollback(receipt);
     assert.strictEqual(parent.children.length, 0, "rollback removes only the receipt node");
-    assert.strictEqual(restored, true, "rollback restores the captured focus target");
+    assert.strictEqual(restoreCount, 1, "rollback restores the captured focus target while it remains authoritative");
+
+    const secondReceipt = lifecycle.apply({ targetPath: "spice/projects/demo/docs/knowledge/Another Doc.md" });
+    const newerFocus = { isConnected: true, focus: () => {} };
+    global.document.activeElement = newerFocus;
+    lifecycle.rollback(secondReceipt);
+    assert.strictEqual(parent.children.length, 0, "a second rollback removes only its own receipt node");
+    assert.strictEqual(restoreCount, 1, "rollback does not steal focus from a newer connected target");
+    assert.strictEqual(global.document.activeElement, newerFocus, "newer focus remains authoritative");
   } finally { global.document = previousDocument; }
 }});
 

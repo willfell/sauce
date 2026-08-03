@@ -113,9 +113,16 @@ class SectionExplorer {
         return { parent, node, nextSibling: node.nextSibling || null, focusTarget };
       },
       rollback: (receipt) => {
+        const active = (typeof document !== "undefined") ? document.activeElement : null;
+        const focusTarget = receipt?.focusTarget;
+        const previewOwnedFocus = active === receipt?.node || receipt?.node?.contains?.(active);
         if (receipt?.node?.remove) receipt.node.remove();
         else receipt?.parent?.removeChild?.(receipt.node);
-        try { receipt?.focusTarget?.focus?.(); } catch (_e) {}
+        const userMovedFocus = active && active !== focusTarget
+          && active !== document.body && active.isConnected !== false && !previewOwnedFocus;
+        if (!userMovedFocus) {
+          try { focusTarget?.focus?.(); } catch (_e) {}
+        }
       },
     };
   }
