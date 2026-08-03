@@ -641,10 +641,14 @@ class SpaceHome {
     // Injected via the DRY seam so Home always shows THIS calendar day's agenda,
     // independent of any note's filename date. Mounts AFTER greeting + capture so
     // it appends below them, into dv.container (the guard renders there).
-    await dv.view("ranch/views/customjs-guard", {
-      class: "SpaceDailyDashboard",
-      args: [{ asOf: today, live: true }],
-    });
+    if (dv && typeof dv.view === "function") {
+      try {
+        await dv.view("ranch/views/customjs-guard", {
+          class: "SpaceDailyDashboard",
+          args: [{ asOf: today, live: true }],
+        });
+      } catch (_e) { /* cold guard: the Home shell remains usable */ }
+    }
   }
 
   /**

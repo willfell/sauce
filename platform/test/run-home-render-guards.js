@@ -153,6 +153,8 @@ const variants = [
     { label: '.markdown-embed context', embed: true, current: undefined },
     { label: 'dv.current() throws during cold load', embed: false, current: THROW_CURRENT },
     { label: 'CustomJS dependencies missing', embed: false, current: undefined, missingCjs: true },
+    { label: 'dv.view missing during cold load', embed: false, current: undefined, missingView: true },
+    { label: 'dv.view rejects during cold load', embed: false, current: undefined, rejectingView: true },
 ];
 
 (async () => {
@@ -170,7 +172,10 @@ const variants = [
                         delete global.window.customJS;
                     }
                     const inst = new WidgetClass();
-                    await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
+                    const dv = makeDv(v.embed, v.current);
+                    if (v.missingView) delete dv.view;
+                    if (v.rejectingView) dv.view = async () => { throw new Error('cold guard unavailable'); };
+                    await Promise.resolve(inst.render(dv, {}));
                 } finally {
                     global.customJS = priorCjs;
                     global.window.customJS = priorWindowCjs;
