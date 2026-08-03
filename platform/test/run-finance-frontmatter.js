@@ -740,6 +740,59 @@ async function run() {
         && metadataListeners.size === 0 && vaultListeners.size === 0);
   }
   {
+    const replacementCases = [];
+    for (const replacementMtime of [90, 89]) {
+      const notePath = `spice/finance/Invoices/Identity-Replaced-${replacementMtime}.md`;
+      const original = { path: notePath, stat: { mtime: 90 } };
+      const replacement = { path: notePath, stat: { mtime: replacementMtime } };
+      const persisted = { amount: 0 };
+      const stale = { amount: 0 };
+      const external = { amount: 99 };
+      let currentFile = original;
+      const metadataListeners = new Set();
+      const vaultListeners = new Set();
+      const metadataCache = {
+        getFileCache: (file) => ({ frontmatter: file === replacement ? external : stale }),
+        on(event, listener) {
+          const ref = { event, listener };
+          metadataListeners.add(ref);
+          return ref;
+        },
+        offref(ref) { metadataListeners.delete(ref); },
+        emit(changedFile) {
+          for (const ref of [...metadataListeners]) if (ref.event === "changed") ref.listener(changedFile);
+        },
+      };
+      const vault = {
+        getAbstractFileByPath: () => currentFile,
+        on(event, listener) {
+          const ref = { event, listener };
+          vaultListeners.add(ref);
+          return ref;
+        },
+        offref(ref) { vaultListeners.delete(ref); },
+        emit(event, file) {
+          for (const ref of [...vaultListeners]) if (ref.event === event) ref.listener(file);
+        },
+      };
+      global.app = {
+        vault,
+        metadataCache,
+        fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+      };
+      const identityFf = new FinanceFrontmatter();
+      await identityFf.update(original, (fm) => { fm.amount = 1; });
+      currentFile = replacement;
+      vault.emit("delete", original);
+      metadataCache.emit(replacement);
+      replacementCases.push(identityFf.read(notePath)?.amount === 99
+        && identityFf._writtenFrontmatter.size === 0
+        && metadataListeners.size === 0 && vaultListeners.size === 0);
+    }
+    ok("FF-12O canonical replacement identity settles authority at equal and older mtimes",
+      replacementCases.length === 2 && replacementCases.every(Boolean));
+  }
+  {
     installApp({ files: {} });
     let threw = false;
     try { await ff.update("spice/finance/Nope.md", () => {}); } catch (_e) { threw = true; }

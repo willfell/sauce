@@ -45,6 +45,7 @@ class FinanceFrontmatter {
         this._releaseWrittenSnapshot(file.path, this._writtenFrontmatter.get(file.path));
         const written = {
             path: file.path,
+            file,
             frontmatter: snapshot,
             mtime: Number(file.stat?.mtime) || null,
             eventRef: null,
@@ -380,7 +381,13 @@ class FinanceFrontmatter {
 
     _writtenSnapshotSettled(file, written, cached) {
         const currentMtime = Number(file.stat?.mtime) || null;
-        const superseded = Boolean(currentMtime && written.mtime && currentMtime > written.mtime);
+        // Obsidian keeps one canonical TFile identity across rename, but a
+        // delete/recreate or sync replacement can install a distinct TFile at
+        // the same path without a monotonic mtime. Canonical identity therefore
+        // outranks timestamps when deciding whether the completed write still
+        // owns this path.
+        const replaced = Boolean(written.file && file !== written.file);
+        const superseded = replaced || Boolean(currentMtime && written.mtime && currentMtime > written.mtime);
         const converged = this._same(this._frontmatterData(cached, written.frontmatter), written.frontmatter);
         if (!superseded && !converged) return false;
         this._releaseWrittenSnapshot(file.path, written);
@@ -412,6 +419,7 @@ class FinanceFrontmatter {
         written.renameEventRef = null;
         written.renameListener = null;
         written.vault = null;
+        written.file = null;
     }
 
     _frontmatterData(frontmatter, written) {
