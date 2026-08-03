@@ -322,6 +322,7 @@ async function run() {
     let currentFile = original;
     const cacheReads = [];
     const listeners = new Set();
+    const deleteListeners = new Set();
     const metadataCache = {
       getFileCache(file) {
         cacheReads.push(file);
@@ -337,17 +338,32 @@ async function run() {
         for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
       },
     };
+    const vault = {
+      getAbstractFileByPath: () => currentFile,
+      on(event, listener) {
+        const ref = { event, listener };
+        deleteListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { deleteListeners.delete(ref); },
+      emitDelete(deletedFile) {
+        for (const ref of [...deleteListeners]) if (ref.event === "delete") ref.listener(deletedFile);
+      },
+    };
     global.app = {
-      vault: { getAbstractFileByPath: () => currentFile },
+      vault,
       metadataCache,
       fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
     };
     const replacementFf = new FinanceFrontmatter();
     await replacementFf.update(original, (fm) => { fm.amount = 1; });
-    const retainedBeforeReplacement = replacementFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    const retainedBeforeReplacement = replacementFf._writtenFrontmatter.size === 1
+      && listeners.size === 1 && deleteListeners.size === 1;
     currentFile = replacement;
+    vault.emitDelete(original);
     metadataCache.emit(replacement);
-    const releasedByEvent = replacementFf._writtenFrontmatter.size === 0 && listeners.size === 0;
+    const releasedByEvent = replacementFf._writtenFrontmatter.size === 0
+      && listeners.size === 0 && deleteListeners.size === 0;
     const externalReadThrough = replacementFf.read(replacement) === external;
     const capturedOriginalReadThrough = replacementFf.read(original) === external;
     ok("FF-12G replacement TFile events settle against changed identity and newer mtime",
@@ -422,6 +438,7 @@ async function run() {
     const persisted = { amount: 0 };
     const stale = { amount: 0 };
     const listeners = new Set();
+    const deleteListeners = new Set();
     const metadataCache = {
       getFileCache: () => ({ frontmatter: stale }),
       on(event, listener) {
@@ -436,31 +453,46 @@ async function run() {
     };
     let lookupThrows = true;
     let currentFile = file;
-    global.app = {
-      vault: {
-        getAbstractFileByPath() {
-          if (lookupThrows) throw new Error("fixture lookup failed");
-          return currentFile;
-        },
+    const vault = {
+      getAbstractFileByPath() {
+        if (lookupThrows) throw new Error("fixture lookup failed");
+        return currentFile;
       },
+      on(event, listener) {
+        const ref = { event, listener };
+        deleteListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { deleteListeners.delete(ref); },
+      emitDelete(deletedFile) {
+        for (const ref of [...deleteListeners]) if (ref.event === "delete") ref.listener(deletedFile);
+      },
+    };
+    global.app = {
+      vault,
       metadataCache,
       fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
     };
     const failedLookupFf = new FinanceFrontmatter();
     await failedLookupFf.update(file, (fm) => { fm.amount = 1; });
-    const retainedAcrossFailure = failedLookupFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    vault.emitDelete(file);
+    const retainedAcrossFailure = failedLookupFf._writtenFrontmatter.size === 1
+      && listeners.size === 1 && deleteListeners.size === 1;
     const failedClosed = failedLookupFf.read(file) === null
-      && failedLookupFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+      && failedLookupFf._writtenFrontmatter.size === 1
+      && listeners.size === 1 && deleteListeners.size === 1;
     lookupThrows = false;
     const recoveredAuthoritative = failedLookupFf.read(file).amount === 1
-      && failedLookupFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+      && failedLookupFf._writtenFrontmatter.size === 1
+      && listeners.size === 1 && deleteListeners.size === 1;
     currentFile = null;
     const releasedByDeletion = failedLookupFf.read(file.path) === null
       && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
     metadataCache.emit(file);
     ok("FF-12J transient lookup failure retains authority until deletion is proven",
       retainedAcrossFailure && failedClosed && recoveredAuthoritative && releasedByDeletion
-        && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0);
+        && failedLookupFf._writtenFrontmatter.size === 0
+        && listeners.size === 0 && deleteListeners.size === 0);
   }
   {
     const files = new Map();
@@ -473,21 +505,34 @@ async function run() {
       cached.set(file.path, { amount: 0 });
     }
     const currentFiles = new Map(files);
-    const listeners = new Set();
+    const metadataListeners = new Set();
+    const deleteListeners = new Set();
     const metadataCache = {
       getFileCache: (file) => ({ frontmatter: cached.get(file.path) || null }),
       on(event, listener) {
         const ref = { event, listener };
-        listeners.add(ref);
+        metadataListeners.add(ref);
         return ref;
       },
-      offref(ref) { listeners.delete(ref); },
+      offref(ref) { metadataListeners.delete(ref); },
       emit(changedFile) {
-        for (const ref of [...listeners]) if (ref.event === "changed") ref.listener(changedFile);
+        for (const ref of [...metadataListeners]) if (ref.event === "changed") ref.listener(changedFile);
+      },
+    };
+    const vault = {
+      getAbstractFileByPath: (path) => currentFiles.get(path) || null,
+      on(event, listener) {
+        const ref = { event, listener };
+        deleteListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { deleteListeners.delete(ref); },
+      emitDelete(file) {
+        for (const ref of [...deleteListeners]) if (ref.event === "delete") ref.listener(file);
       },
     };
     global.app = {
-      vault: { getAbstractFileByPath: (path) => currentFiles.get(path) || null },
+      vault,
       metadataCache,
       fileManager: {
         async processFrontMatter(file, mutator) { await mutator(persisted.get(file.path)); },
@@ -495,14 +540,17 @@ async function run() {
     };
     const deletionEventFf = new FinanceFrontmatter();
     for (const file of files.values()) await deletionEventFf.update(file, (fm) => { fm.amount = 1; });
-    const registered = deletionEventFf._writtenFrontmatter.size === 65 && listeners.size === 65;
+    const registered = deletionEventFf._writtenFrontmatter.size === 65
+      && metadataListeners.size === 65 && deleteListeners.size === 65;
     for (const file of files.values()) {
       currentFiles.delete(file.path);
-      metadataCache.emit(file);
+      vault.emitDelete(file);
+      vault.emitDelete(file);
       metadataCache.emit(file);
     }
     ok("FF-12K post-registration deletion events release all snapshot and listener ownership",
-      registered && deletionEventFf._writtenFrontmatter.size === 0 && listeners.size === 0);
+      registered && deletionEventFf._writtenFrontmatter.size === 0
+        && metadataListeners.size === 0 && deleteListeners.size === 0);
   }
   {
     installApp({ files: {} });

@@ -49,6 +49,9 @@ class FinanceFrontmatter {
             eventRef: null,
             listener: null,
             metadata: null,
+            deleteEventRef: null,
+            deleteListener: null,
+            vault: null,
         };
         this._writtenFrontmatter.set(file.path, written);
         this._watchWrittenSnapshot(file, written);
@@ -280,12 +283,12 @@ class FinanceFrontmatter {
     _watchWrittenSnapshot(file, written) {
         const metadata = (typeof app !== "undefined") ? app.metadataCache : null;
         if (!metadata || typeof metadata.on !== "function") return;
-        const listener = (changedFile) => {
-            if (!changedFile || changedFile.path !== file.path) return;
+        const vault = (typeof app !== "undefined") ? app.vault : null;
+        const settleCurrent = () => {
             if (this._writtenFrontmatter?.get?.(file.path) !== written) return;
             let currentFile = null;
             try {
-                currentFile = app.vault?.getAbstractFileByPath?.(file.path) || null;
+                currentFile = vault?.getAbstractFileByPath?.(file.path) || null;
             } catch (_e) {
                 // Unknown is not deletion. Retain the single identity-guarded
                 // owner until a later event or read can observe canonical state.
@@ -295,37 +298,44 @@ class FinanceFrontmatter {
                 this._releaseWrittenSnapshot(file.path, written);
                 return;
             }
-            const cached = metadata.getFileCache?.(currentFile)?.frontmatter ?? null;
+            let cached = null;
+            try { cached = metadata.getFileCache?.(currentFile)?.frontmatter ?? null; }
+            catch (_e) { return; }
             this._writtenSnapshotSettled(currentFile, written, cached);
+        };
+        const listener = (changedFile) => {
+            if (!changedFile || changedFile.path !== file.path) return;
+            settleCurrent();
+        };
+        const deleteListener = (deletedFile) => {
+            if (!deletedFile || deletedFile.path !== file.path) return;
+            // Same-path replacement can emit delete for the old TFile. Resolve
+            // canonical identity so only actual absence releases authority.
+            settleCurrent();
         };
         try {
             written.metadata = metadata;
             written.listener = listener;
             written.eventRef = metadata.on("changed", listener) || null;
-            // Metadata may have converged (and emitted) while the write promise
-            // was still settling, before this listener existed. Close that
-            // registration window immediately; identity-guarded release keeps
-            // this idempotent with the event callback and read().
-            let currentFile = null;
-            try {
-                currentFile = app.vault?.getAbstractFileByPath?.(file.path) || null;
-            } catch (_e) {
-                // Preserve authority across a transient vault lookup failure;
-                // the registered listener or a later read can settle it once
-                // the current path becomes observable again.
-                return;
-            }
-            if (!currentFile || currentFile.path !== file.path || currentFile.children !== undefined) {
-                this._releaseWrittenSnapshot(file.path, written);
-                return;
-            }
-            const cached = metadata.getFileCache?.(currentFile)?.frontmatter ?? null;
-            this._writtenSnapshotSettled(currentFile, written, cached);
         } catch (_e) {
             written.metadata = null;
             written.listener = null;
             written.eventRef = null;
         }
+        if (vault && typeof vault.on === "function") {
+            try {
+                written.vault = vault;
+                written.deleteListener = deleteListener;
+                written.deleteEventRef = vault.on("delete", deleteListener) || null;
+            } catch (_e) {
+                written.vault = null;
+                written.deleteListener = null;
+                written.deleteEventRef = null;
+            }
+        }
+        // Either event may have fired before registration while the write was
+        // settling. Close that window after both listeners are installed.
+        settleCurrent();
     }
 
     _writtenSnapshotSettled(file, written, cached) {
@@ -345,9 +355,17 @@ class FinanceFrontmatter {
             if (written.eventRef && typeof metadata?.offref === "function") metadata.offref(written.eventRef);
             else if (written.listener && typeof metadata?.off === "function") metadata.off("changed", written.listener);
         } catch (_e) {}
+        const vault = written.vault || ((typeof app !== "undefined") ? app.vault : null);
+        try {
+            if (written.deleteEventRef && typeof vault?.offref === "function") vault.offref(written.deleteEventRef);
+            else if (written.deleteListener && typeof vault?.off === "function") vault.off("delete", written.deleteListener);
+        } catch (_e) {}
         written.eventRef = null;
         written.listener = null;
         written.metadata = null;
+        written.deleteEventRef = null;
+        written.deleteListener = null;
+        written.vault = null;
     }
 
     _frontmatterData(frontmatter, written) {
