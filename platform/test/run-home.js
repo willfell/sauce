@@ -1349,13 +1349,21 @@ function descendants(el) {
     const placeholderDv = makeDv();
     let dashboardAvailable = false;
     let placeholderAttempts = 0;
+    const collidingForeign = makeEl("p", { cls: "foreign-colliding-placeholder-text" });
+    collidingForeign.textContent = "SpaceDailyDashboard unavailable";
+    let ownedPlaceholder = null;
     placeholderDv.view = async (_viewPath, input) => {
       placeholderAttempts += 1;
       if (!dashboardAvailable) {
+        collidingForeign.parent = placeholderDv.container;
+        placeholderDv.container.children.push(collidingForeign);
         const placeholder = makeEl("p");
         placeholder.textContent = "SpaceDailyDashboard unavailable";
         placeholder.parent = placeholderDv.container;
         placeholderDv.container.children.push(placeholder);
+        ownedPlaceholder = placeholder;
+        input.guardReceipt.status = "unavailable";
+        input.guardReceipt.node = placeholder;
         return placeholder;
       }
       const mount = makeEl("div", { cls: "customjs-guard-mount" });
@@ -1367,8 +1375,10 @@ function descendants(el) {
       return mount;
     };
     await home_.render(placeholderDv, {});
-    assertEq("HOME-DASH-RETRY-11 resolved unavailable guard is not a mount receipt",
-      placeholderDv.container.children.filter((node) => node.tag === "p").length, 0);
+    assertTrue("HOME-DASH-RETRY-11 guard cleanup removes only its exact unavailable receipt",
+      !placeholderDv.container.children.includes(ownedPlaceholder));
+    assertTrue("HOME-DASH-RETRY-11b colliding foreign placeholder text survives exact cleanup",
+      placeholderDv.container.children.includes(collidingForeign));
     dashboardAvailable = true;
     await home_.render(placeholderDv, {});
     await home_.render(placeholderDv, {});

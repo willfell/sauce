@@ -402,8 +402,8 @@ class SpaceHome {
       if (!dv || typeof dv.view !== "function") return;
       const token = {
         generation: dashboard.generation,
-        baseline: new Set(children()),
         receipt: { ok: false, node: null },
+        guardReceipt: { status: "pending", node: null },
         promise: null,
       };
       dashboard.token = token;
@@ -411,6 +411,7 @@ class SpaceHome {
         try {
           await dv.view("ranch/views/customjs-guard", {
             class: "SpaceDailyDashboard",
+            guardReceipt: token.guardReceipt,
             args: [{ asOf: today, live: true, mountReceipt: token.receipt }],
           });
           if (dashboard.token === token) {
@@ -421,16 +422,14 @@ class SpaceHome {
             dashboard.mounted = !!mountedNode;
             dashboard.key = dashboard.mounted ? today : null;
             if (!dashboard.mounted) {
-              // The production guard resolves an unavailable class with this
-              // exact placeholder. It is not a successful dashboard receipt,
-              // but it is owned by this call and should not accumulate across
-              // warm retries. Never claim or remove any other concurrent node.
-              for (const node of children()) {
-                const text = String(node && (node.textContent ?? node.text ?? "")).trim();
-                if (!token.baseline.has(node)
-                    && (text === "_SpaceDailyDashboard unavailable_" || text === "SpaceDailyDashboard unavailable")) {
-                  try { node.remove?.(); } catch (_e) {}
-                }
+              // The guard owns unavailable diagnostics and returns their exact
+              // identity. Remove only that receipt so retries do not accumulate
+              // placeholders; never infer ownership from text or a DOM diff.
+              const unavailable = token.guardReceipt.status === "unavailable"
+                ? token.guardReceipt.node
+                : null;
+              if (unavailable && children().includes(unavailable)) {
+                try { unavailable.remove?.(); } catch (_e) {}
               }
             }
           }
