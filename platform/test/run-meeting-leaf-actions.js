@@ -174,15 +174,66 @@ ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `--
   const personBlock = (body) => body.slice(body.indexOf('addBtn.onclick'), body.indexOf('const save =', body.indexOf('addBtn.onclick')));
   const personLifecycleContract = (body) => {
     const block = personBlock(body);
-    return /renderSafe\.mutateStructure\s*\(\{/.test(block)
-      && /apply:\s*\(\)\s*=>/.test(block)
-      && /rollback:\s*\(receipt\)\s*=>/.test(block)
-      && /write:\s*\(\)\s*=>/.test(block)
+    const lifecycle = body.slice(body.indexOf('_personLifecycle('), body.indexOf('// ── handlers'));
+    return /_enqueuePerson\(personQueue/.test(block)
+      && /renderSafe\.mutateStructure\s*\(\{/.test(block)
+      && /apply:\s*\(\)\s*=>/.test(lifecycle)
+      && /rollback:\s*\(receipt\)\s*=>/.test(lifecycle)
+      && /priorNodes:\s*Array\.from/.test(lifecycle)
       && /app\.vault\.create\s*\(/.test(block);
   };
   const bareCreateMutant = mlaSrc.replace('renderSafe.mutateStructure({', 'renderSafe.mutate({');
   ok('PERF5-REQUIREMENT-MUTANTS kills the bare new-person create source mutant',
     personLifecycleContract(mlaSrc) && !personLifecycleContract(bareCreateMutant));
+
+  // Execute the production queue and receipt callbacks: Alice paints first,
+  // Bob is queued while Alice persists, Alice rejects/rolls back, then Bob
+  // paints and succeeds. The old unqueued implementation restored pre-Alice
+  // nodes after Bob and made Bob disappear.
+  const selected = new Set();
+  const people = [];
+  const addInput = { value: 'Alice', focus() {} };
+  let nodes = ['base-node'];
+  const list = {
+    get childNodes() { return nodes; },
+    get children() { return nodes; },
+    get firstChild() { return nodes[0] || null; },
+    replaceChildren(...next) { nodes = next; },
+    removeChild(node) { nodes = nodes.filter((item) => item !== node); },
+    appendChild(node) { nodes.push(node); },
+  };
+  const redrawList = () => { nodes = [...selected]; };
+  const updateAddButton = () => {};
+  const queue = { tail: Promise.resolve() };
+  let releaseAlice;
+  let aliceApplied;
+  const aliceStarted = new Promise((resolve) => { aliceApplied = resolve; });
+  const aliceGate = new Promise((resolve) => { releaseAlice = resolve; });
+  const alice = MLA._enqueuePerson(queue, async () => {
+    const lifecycle = inst._personLifecycle({ name: 'Alice', selected, people, addInput, list, redrawList, updateAddButton });
+    const receipt = lifecycle.apply();
+    aliceApplied();
+    await aliceGate;
+    lifecycle.rollback(receipt);
+    return false;
+  });
+  await aliceStarted;
+  addInput.value = 'Bob';
+  const bob = MLA._enqueuePerson(queue, async () => {
+    const lifecycle = inst._personLifecycle({ name: 'Bob', selected, people, addInput, list, redrawList, updateAddButton });
+    lifecycle.apply();
+    return true;
+  });
+  releaseAlice();
+  await Promise.all([alice, bob]);
+  ok('PERF5-PERSON-CREATE-LIFECYCLE serializes overlapping receipts so a late rejection preserves the later success',
+    !selected.has('Alice') && selected.has('Bob')
+    && people.length === 1 && people[0] === 'Bob'
+    && nodes.length === 1 && nodes[0] === 'Bob');
+
+  const unqueuedMutant = mlaSrc.replace('MeetingLeafActions._enqueuePerson(personQueue, async () => {', '(async () => {');
+  ok('PERF5-REQUIREMENT-MUTANTS kills the unqueued person-create source mutant',
+    personLifecycleContract(mlaSrc) && !personLifecycleContract(unqueuedMutant));
 
   global.customJS = previous.customJS;
   global.app = previous.app;

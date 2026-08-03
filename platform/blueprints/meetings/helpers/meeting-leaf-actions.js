@@ -87,6 +87,12 @@ class MeetingLeafActions {
   static personStubBody(name, isoNow) {
     return `---\ntype: person\ncreated_at: "${isoNow}"\naliases: []\n---\n\n# [[${name}]]\n\n## Notes\n-\n`;
   }
+  static _enqueuePerson(queue, operation) {
+    const run = () => Promise.resolve().then(operation);
+    const result = (queue.tail || Promise.resolve()).then(run, run);
+    queue.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
 
   // ── render ─────────────────────────────────────────────────────────────────
   async render(dv) {
@@ -166,6 +172,39 @@ class MeetingLeafActions {
       const renderSafe = globalThis.customJS?.RenderSafe;
       return renderSafe?.page?.(dv) || (dv && typeof dv.current === "function" ? dv.current() : null);
     } catch (_e) { return null; }
+  }
+
+  _personLifecycle({ name, selected, people, addInput, list, redrawList, updateAddButton }) {
+    return {
+      apply: () => {
+        const receipt = {
+          hadSelected: selected.has(name),
+          peopleLength: people.length,
+          inputValue: addInput.value,
+          priorNodes: Array.from(list.childNodes || list.children || []),
+          focusTarget: (typeof document !== "undefined") ? document.activeElement : addInput,
+        };
+        selected.add(name);
+        people.push(name);
+        addInput.value = "";
+        redrawList("");
+        updateAddButton();
+        return receipt;
+      },
+      rollback: (receipt) => {
+        if (!receipt) return;
+        if (!receipt.hadSelected) selected.delete(name);
+        people.splice(receipt.peopleLength);
+        addInput.value = receipt.inputValue;
+        if (typeof list.replaceChildren === "function") list.replaceChildren(...receipt.priorNodes);
+        else {
+          while (list.firstChild) list.removeChild(list.firstChild);
+          for (const node of receipt.priorNodes) list.appendChild?.(node);
+        }
+        updateAddButton();
+        try { (receipt.focusTarget || addInput)?.focus?.(); } catch (_e) {}
+      },
+    };
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────
@@ -261,6 +300,7 @@ class MeetingLeafActions {
     const current = new Set(MeetingLeafActions.canonicalLinkNames(cur.attendees));
     const selected = new Set([...current].filter(Boolean));
     this._openModal({ title: "Edit attendees", build: (panel, close) => {
+      const personQueue = { tail: Promise.resolve() };
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:4px; margin:10px 0; max-height:46vh; overflow:auto;";
       const renderRow = (name) => {
@@ -306,52 +346,32 @@ class MeetingLeafActions {
           new Notice("Could not add person: RenderSafe is unavailable.", 6000);
           return;
         }
-        const existing = app.vault.getAbstractFileByPath(stubPath);
-        if (existing) return;
-        const result = await renderSafe.mutateStructure({
-          app,
-          dv,
-          path: stubPath,
-          failureMessage: "Could not add person",
-          apply: () => {
-            const receipt = {
-              hadSelected: selected.has(name),
-              peopleLength: people.length,
-              inputValue: addInput.value,
-              priorNodes: Array.from(list.childNodes || list.children || []),
-              focusTarget: (typeof document !== "undefined") ? document.activeElement : addInput,
-            };
-            selected.add(name);
-            people.push(name);
-            addInput.value = "";
-            redrawList("");
-            updateAddButton();
-            return receipt;
-          },
-          rollback: (receipt) => {
-            if (!receipt) return;
-            if (!receipt.hadSelected) selected.delete(name);
-            people.splice(receipt.peopleLength);
-            addInput.value = receipt.inputValue;
-            if (typeof list.replaceChildren === "function") list.replaceChildren(...receipt.priorNodes);
-            else {
-              while (list.firstChild) list.removeChild(list.firstChild);
-              for (const node of receipt.priorNodes) list.appendChild?.(node);
-            }
-            updateAddButton();
-            try { (receipt.focusTarget || addInput)?.focus?.(); } catch (_e) {}
-          },
-          write: () => {
-            const now = (typeof window !== "undefined" && typeof window.moment === "function")
-              ? window.moment().format("YYYY-MM-DDTHH:mm:ssZZ") : new Date().toISOString();
-            return app.vault.create(stubPath, MeetingLeafActions.personStubBody(name, now));
-          },
+        await MeetingLeafActions._enqueuePerson(personQueue, async () => {
+          const existing = app.vault.getAbstractFileByPath(stubPath);
+          if (existing) return true;
+          const lifecycle = this._personLifecycle({
+            name, selected, people, addInput, list, redrawList, updateAddButton,
+          });
+          const result = await renderSafe.mutateStructure({
+            app,
+            dv,
+            path: stubPath,
+            failureMessage: "Could not add person",
+            apply: lifecycle.apply,
+            rollback: lifecycle.rollback,
+            write: () => {
+              const now = (typeof window !== "undefined" && typeof window.moment === "function")
+                ? window.moment().format("YYYY-MM-DDTHH:mm:ssZZ") : new Date().toISOString();
+              return app.vault.create(stubPath, MeetingLeafActions.personStubBody(name, now));
+            },
+          });
+          return result.ok === true;
         });
-        if (result.ok !== true) return;
       };
       const save = panel.createEl("button", { text: "Save attendees" });
       save.style.cssText = "margin-top:12px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
       save.onclick = async () => {
+        await personQueue.tail;
         const selectedNames = [...selected];
         const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter(selectedNames);
         const expected = JSON.stringify(selectedNames);
