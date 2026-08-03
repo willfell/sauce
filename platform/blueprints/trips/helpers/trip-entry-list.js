@@ -694,8 +694,8 @@ class TripEntryList {
         const incomingMtime = this._pageMtime(page);
         const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
           && incomingMtime > state.authority.writeMtime;
-        const cached = incomingMtime == null ? this._cachedEntries(path, key) : null;
-        const cacheAdvanced = cached && metadataVersion > (state.authority.cacheVersion || 0);
+        const cacheAdvanced = metadataVersion > (state.authority.cacheVersion || 0);
+        const cached = cacheAdvanced ? this._cachedEntries(path, key) : null;
         if (matches) {
           state.model = incoming;
           state.authority = null;
@@ -707,7 +707,7 @@ class TripEntryList {
             writeMtime: incomingMtime,
             cacheVersion: metadataVersion,
           };
-        } else if (cacheAdvanced) {
+        } else if (cacheAdvanced && cached) {
           if (this._sameEntryModel(cached.model, state.authority.expected)) {
             state.authority.cacheVersion = metadataVersion;
             if (cached.mtime != null) state.authority.writeMtime = cached.mtime;

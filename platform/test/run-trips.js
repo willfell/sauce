@@ -719,10 +719,11 @@ function makeDv(embed, currentVal) {
             && [...generationTrackerB.versions.keys()]
                 .every((trackedPath) => allowedTrackedPaths.has(trackedPath));
         const cacheBEntryState = list._entryState(replacementEntryOwner, {
-            file: { path: replacementPath }, flights: [{ flight_no: 'STALE-A' }],
+            file: { path: replacementPath, mtime: file.stat.mtime - 1 },
+            flights: [{ flight_no: 'STALE-A' }],
         }, 'flights');
         const cacheBLinkState = links._linksState(replacementLinkOwner, {
-            type: 'trip', file: { path: replacementPath },
+            type: 'trip', file: { path: replacementPath, mtime: file.stat.mtime - 1 },
             links: [{ url: 'https://stale-a.example', text: 'Stale A' }],
         });
         ok('PERF4D-METADATA-GENERATION entry and link owners share one cache generation tracker',
@@ -736,7 +737,7 @@ function makeDv(embed, currentVal) {
             && staleCacheAIsolated
             && unrelatedPathsBounded
             && generationVersionB === generationVersionA + 1);
-        ok('PERF4E-CACHE-REPLACEMENT-CONVERGENCE cache B first event advances active authority for both helpers',
+        ok('PERF4F-FINITE-MTIME-CACHE-CONVERGENCE cache B event outranks finite stale Dataview mtimes for both helpers',
             cacheBEntryState.model[0]?.flight_no === 'EXTERNAL-B'
             && cacheBEntryState.authority?.cacheVersion === generationVersionB
             && cacheBLinkState.model[0]?.url === 'https://external-b.example'
