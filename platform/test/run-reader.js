@@ -480,6 +480,14 @@ async function dataviewCorrectnessCases() {
     const originalChildren = container.children.slice();
     const originalRow = container.querySelector('.sauce-reader-row');
     const originalToggle = state.toggles.get(file.path);
+    let clickStopped = false;
+    let routedGesture = null;
+    queue._queueStatusTransition = async (...args) => { routedGesture = args; return true; };
+    await originalToggle.listeners.click({ stopPropagation: () => { clickStopped = true; } });
+    ok('HC-READER-PERF-1A rendered status control routes through the serialized queue with exact gesture state',
+       clickStopped && routedGesture && routedGesture[0] === dv && routedGesture[1] === state
+       && routedGesture[2] === file.path && routedGesture[3] === 'unread'
+       && routedGesture[4] === 'reading' && routedGesture[5] === originalToggle);
     let appliedBeforeWrite = false;
     global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
       const receipt = await opts.apply();
@@ -497,7 +505,8 @@ async function dataviewCorrectnessCases() {
        container.children.length === originalChildren.length
        && container.children.every((child, i) => child === originalChildren[i])
        && container.querySelector('.sauce-reader-row') === originalRow
-       && state.statuses.get(file.path) === 'unread' && originalToggle.focused);
+       && state.statuses.get(file.path) === 'unread'
+       && state.toggles.get(file.path) === originalToggle && originalToggle.focused);
 
     originalToggle.focused = false;
     global.customJS.RenderSafe.mutateStructure = async (opts) => {
@@ -507,9 +516,18 @@ async function dataviewCorrectnessCases() {
     };
     const saved = await queue._setStatus(dv, state, file.path, 'reading', originalToggle);
     const optimisticToggle = state.toggles.get(file.path);
+    const renderedNodes = walk(container);
+    const readingCount = renderedNodes.find((node) => node.tag === 'span' && node.textContent === 'Reading 1');
+    const unreadCount = renderedNodes.find((node) => node.tag === 'span' && node.textContent === 'Unread 1');
+    const readingBand = renderedNodes.find((node) => node.tag === 'div' && node.textContent === 'Reading');
+    const unreadBand = renderedNodes.find((node) => node.tag === 'div' && node.textContent === 'Unread');
+    const replacementRow = container.querySelector('.sauce-reader-row');
     ok('HC-READER-PERF-4 success keeps the optimistic band model and focuses its replacement control',
        saved === true && state.statuses.get(file.path) === 'reading'
-       && optimisticToggle && optimisticToggle !== originalToggle && optimisticToggle.focused);
+       && optimisticToggle && optimisticToggle !== originalToggle && optimisticToggle.focused
+       && readingCount && !unreadCount && readingBand && unreadBand && replacementRow
+       && renderedNodes.indexOf(readingBand) < renderedNodes.indexOf(replacementRow)
+       && renderedNodes.indexOf(replacementRow) < renderedNodes.indexOf(unreadBand));
     ok('HC-READER-PERF-5 persistence writes status + ISO status_changed_at with no global refresh',
        writes === 1 && file._fm.status === 'reading'
        && /^\d{4}-\d{2}-\d{2}T/.test(file._fm.status_changed_at || '') && forceRefreshes === 0);
@@ -529,6 +547,39 @@ async function dataviewCorrectnessCases() {
     try { await new ReaderArticleView().render(throwingDv); } catch (_e) { coldThrows++; }
     ok('HC-READER-PERF-7 every Reader Dataview entry fails closed on a throwing cold current page', coldThrows === 0);
 
+    const activeCustomJS = global.customJS;
+    const activeWindow = global.window;
+    let matrixThrows = 0;
+    let matrixCases = 0;
+    try {
+      global.customJS = {};
+      global.window = {};
+      const entries = [
+        { make: () => new ReaderQueue(), valid: { file: { path: 'spice/reader/Reader.md' }, type: 'reader-hub' } },
+        { make: () => new ReaderArticleActions(), valid: { file: { path: file.path }, type: 'reader-article' } },
+        { make: () => new ReaderArticleView(), valid: { file: { path: file.path }, type: 'reader-article' } },
+      ];
+      for (const entry of entries) {
+        const pages = [
+          null,
+          () => undefined,
+          () => ({ file: { path: file.path } }),
+          () => entry.valid,
+        ];
+        for (const current of pages) {
+          matrixCases++;
+          const matrixDv = { container: makeDomEl('div') };
+          if (current) matrixDv.current = current;
+          try { await Promise.resolve(entry.make().render(matrixDv)); } catch (_e) { matrixThrows++; }
+        }
+      }
+    } finally {
+      global.customJS = activeCustomJS;
+      global.window = activeWindow;
+    }
+    ok('HC-READER-PERF-7A every Reader entry survives missing current, undefined current, file-only frontmatter, and valid-page missing dependencies',
+       matrixCases === 12 && matrixThrows === 0);
+
     const queueSrc = fs.readFileSync(QUEUE_SRC, 'utf8');
     const structuralGuard = (src) => /renderSafe\.mutateStructure\s*\(\{/.test(src)
       && /apply:\s*async/.test(src) && /rollback:\s*async/.test(src)
@@ -539,14 +590,18 @@ async function dataviewCorrectnessCases() {
     ok('HC-READER-PERF-8 structural seam guard kills seam and rollback mutants',
        structuralGuard(queueSrc) && !structuralGuard(seamMutant) && !structuralGuard(rollbackMutant));
 
-    const readerLedgerRow = fs.readFileSync(LEDGER_DOC, 'utf8').split('\n')
-      .find((line) => /^\| Reader \| `ReaderQueue`/.test(line)) || '';
-    ok('PERF6-LEDGER-TOUCH-ZONE canonical ReaderQueue ledger row binds every structural receipt to OK',
-       !/GAP PERF-6/.test(readerLedgerRow)
-       && (readerLedgerRow.match(/\*\*OK\*\*/g) || []).length === 4
-       && /mutateStructure/.test(readerLedgerRow)
-       && /exact prior child nodes/.test(readerLedgerRow)
-       && /triggering focus/.test(readerLedgerRow));
+    const readerLedgerRows = fs.readFileSync(LEDGER_DOC, 'utf8').split('\n')
+      .filter((line) => /^\| Reader \|/.test(line));
+    const queueLedgerRow = readerLedgerRows.find((line) => /`ReaderQueue`/.test(line)) || '';
+    const articleLedgerRow = readerLedgerRows.find((line) => /`ReaderArticleView`/.test(line)) || '';
+    ok('PERF6-LEDGER-TOUCH-ZONE both canonical Reader rows bind structural, serialization, rollback, and cold-load receipts',
+       readerLedgerRows.length === 2 && readerLedgerRows.every((line) => !/GAP PERF-6/.test(line))
+       && (queueLedgerRow.match(/\*\*OK\*\*/g) || []).length === 4
+       && /mutateStructure/.test(queueLedgerRow) && /serialized persistence/.test(queueLedgerRow)
+       && /exact prior child nodes/.test(queueLedgerRow) && /triggering focus/.test(queueLedgerRow)
+       && /throwing cold-load/.test(queueLedgerRow)
+       && /ReaderArticleActions/.test(articleLedgerRow)
+       && /undefined, file-only, throwing-current, and missing-dependency/.test(articleLedgerRow));
 
     const serialState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
     const serialQueue = new ReaderQueue();
