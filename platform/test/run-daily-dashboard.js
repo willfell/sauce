@@ -561,6 +561,38 @@ async function renderDailyTaskFixture(today, options) {
       'same-surface warm retry must stamp the completed dashboard root');
   });
 
+  await ok('PERF8L-DASH-MOUNT successful async child settles before the root receipt', async () => {
+    const { customJS } = makeCustomJS();
+    let releaseChild;
+    let reportChildStarted;
+    const childReleased = new Promise((resolve) => { releaseChild = resolve; });
+    const childStarted = new Promise((resolve) => { reportChildStarted = resolve; });
+    customJS.BeaconCards = {
+      render: async () => {
+        reportChildStarted();
+        await childReleased;
+      },
+    };
+    const dv = makeDv();
+    dv.el = (tag, _text, opts) => dv.container.createEl(tag, opts || {});
+    const originalPages = dv.pages.bind(dv);
+    dv.pages = (query) => query === '"spice/meetings/notes"'
+      ? [{ file: { name: `${TODAY} Deferred Meeting`, path: `spice/meetings/notes/${TODAY} Deferred Meeting.md` } }]
+      : originalPages(query);
+    const Dash = loadDashboard(windowShim, customJS);
+    const receipt = { ok: false, node: null };
+    const pendingRender = new Dash().render(dv, { asOf: TODAY, mountReceipt: receipt });
+    await childStarted;
+    assert(receipt.ok === false && receipt.node === null,
+      'receipt must remain false/null while a successful async child is pending');
+    const liveRoot = dv.container._children.find((node) => /space-daily-dashboard/.test(node.className));
+    assert(!!liveRoot, 'pending successful child keeps the candidate root live but uncommitted');
+    releaseChild();
+    await pendingRender;
+    assert(receipt.ok === true && receipt.node === liveRoot,
+      'receipt stamps the exact live root only after the successful child settles');
+  });
+
   await ok('DASH-L5-3 total + byBlueprint unchanged (1 direct hit + 1 rolled-up root)', async () => {
     // Drive the REAL ActivityFeed.query with the same opts the dashboard passes,
     // then the REAL static bucketByBlueprint over those pages.
