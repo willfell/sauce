@@ -2167,6 +2167,113 @@ ASYNC_TESTS.push({ name: "PERF8M moveSection: a rejecting child patch cannot abo
   } finally { global.app = prevApp; }
 }});
 
+ASYNC_TESTS.push({ name: "PERF8N moveSection: a rejecting hub patch cannot abort child cascade patches", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const prevApp = global.app;
+  const oldFolder = "spice/projects/foo/docs/ems";
+  const newFolder = "spice/projects/foo/docs/knowledge/ems";
+  const known = new Set([
+    oldFolder,
+    `${oldFolder}/EMS.md`,
+    `${oldFolder}/one/One.md`,
+    `${oldFolder}/two/Two.md`,
+  ]);
+  const attempts = [];
+  global.app = {
+    fileManager: {
+      renameFile: async (folder, target) => {
+        for (const item of Array.from(known)) {
+          if (item === folder.path || item.indexOf(folder.path + "/") === 0) {
+            known.delete(item);
+            known.add(target + item.slice(folder.path.length));
+          }
+        }
+      },
+      processFrontMatter: async (file, mutate) => {
+        attempts.push(file.path);
+        mutate({});
+        if (file.path.endsWith("/EMS.md")) throw new Error("hub patch rejected");
+      },
+    },
+    vault: { getAbstractFileByPath: (path) => known.has(path) ? { path } : null },
+  };
+  const section = { title: "EMS", folder: oldFolder, hubPath: `${oldFolder}/EMS.md` };
+  const adapter = { move: { rewriteOnSectionMove: () => ({
+    hubPatch: { parent_section: "Knowledge" },
+    childPatches: [
+      { path: `${oldFolder}/one/One.md`, patch: { parent_section: "EMS" } },
+      { path: `${oldFolder}/two/Two.md`, patch: { parent_section: "EMS" } },
+    ],
+  }) } };
+  try {
+    const result = await se.moveSection(null, section, "spice/projects/foo/docs/knowledge", adapter);
+    assert.strictEqual(result.ok, true, "the completed folder move remains successful despite a best-effort hub rejection");
+    assert.deepStrictEqual(attempts, [
+      `${newFolder}/EMS.md`,
+      `${newFolder}/one/One.md`,
+      `${newFolder}/two/Two.md`,
+    ], "rejecting hub and every later child are all attempted in order");
+  } finally { global.app = prevApp; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8N moveSection: rejected structural folder rename restores exact row position and focus", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const prevApp = global.app;
+  const prevCustomJS = global.customJS;
+  const prevDocument = global.document;
+  const oldFolder = "spice/wiki/cooking";
+  const before = { id: "before" };
+  const row = { id: "row", __seFolder: oldFolder };
+  const after = { id: "after" };
+  const parent = {
+    children: [before, row, after],
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; },
+    insertBefore(node, anchor) { this.children.splice(this.children.indexOf(anchor), 0, node); node.parentNode = this; },
+    appendChild(node) { this.children.push(node); node.parentNode = this; },
+  };
+  for (const node of parent.children) node.parentNode = parent;
+  Object.defineProperty(row, "nextSibling", { get: () => {
+    const index = parent.children.indexOf(row);
+    return index >= 0 ? parent.children[index + 1] || null : null;
+  } });
+  let focused = 0;
+  const focusTarget = { isConnected: true, focus: () => { focused++; } };
+  const events = [];
+  global.document = { activeElement: focusTarget, body: {} };
+  global.app = {
+    vault: { getAbstractFileByPath: (path) => path === oldFolder ? { path } : null },
+    fileManager: { renameFile: async () => { events.push("write"); throw new Error("folder rename rejected"); } },
+  };
+  global.customJS = { RenderSafe: { mutateStructure: async (options) => {
+    events.push("apply");
+    const receipt = await options.apply();
+    assert.deepStrictEqual(parent.children, [before, after], "optimism removes the exact section row before persistence");
+    try { return { ok: true, value: await options.write() }; }
+    catch (error) {
+      events.push("rollback");
+      await options.rollback(receipt, error);
+      return { ok: false, error };
+    }
+  } } };
+  const adapter = { structural: true, move: { rewriteOnSectionMove: () => null } };
+  try {
+    const result = await se.moveSection({ container: parent }, {
+      title: "Cooking", folder: oldFolder, hubPath: `${oldFolder}/Cooking.md`,
+    }, "spice/wiki/food", adapter);
+    assert.strictEqual(result.ok, false, "folder rename rejection remains an explicit structural failure");
+    assert.deepStrictEqual(events, ["apply", "write", "rollback"], "apply-before-write failure rolls back exactly once");
+    assert.deepStrictEqual(parent.children, [before, row, after], "rollback restores the exact row at its original sibling position");
+    assert.strictEqual(parent.children[1], row, "rollback preserves row object identity");
+    assert.strictEqual(focused, 1, "rollback restores the captured focus target once");
+  } finally {
+    global.app = prevApp;
+    global.customJS = prevCustomJS;
+    global.document = prevDocument;
+  }
+}});
+
 failures += !run("moveSection: wiki adapter (rewriteOnSectionMove→null) renames folder only", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();

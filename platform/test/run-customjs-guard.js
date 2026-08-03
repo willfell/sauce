@@ -11,6 +11,8 @@ const path = require('path');
 
 const VIEW_PATH = path.join(__dirname, '..', 'mechanisms', 'customjs-guard', 'view.js');
 const VIEW_SOURCE = fs.readFileSync(VIEW_PATH, 'utf8');
+const MIRROR_VIEW_PATH = path.join(__dirname, '..', '..', 'ranch', 'views', 'customjs-guard', 'view.js');
+const MIRROR_VIEW_SOURCE = fs.readFileSync(MIRROR_VIEW_PATH, 'utf8');
 
 const results = [];
 function ok(name, condition, detail) {
@@ -109,6 +111,10 @@ async function runLateClass(source) {
 }
 
 async function main() {
+  ok('CJS-GUARD-MIRROR canonical platform and ranch view bytes remain exact',
+    VIEW_SOURCE === MIRROR_VIEW_SOURCE,
+    'ranch/views/customjs-guard/view.js diverged from the canonical mechanism view');
+
   ok('CJS-GUARD-1 remains a bare inline view script',
     !/\bmodule\.exports\s*=/.test(VIEW_SOURCE));
 
