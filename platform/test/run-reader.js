@@ -462,7 +462,7 @@ async function dataviewCorrectnessCases() {
   const queue = new ReaderQueue();
   const container = makeDomEl('div');
   const dv = makeDv([article]);
-  const state = { statuses: new Map(), queues: new Map(), toggles: new Map(), container, ctx: null };
+  const state = { statuses: new Map(), structuralQueue: null, toggles: new Map(), container, ctx: null };
   const priorApp = global.app;
   const priorCustomJS = global.customJS;
   const priorWindow = global.window;
@@ -627,7 +627,7 @@ async function dataviewCorrectnessCases() {
        && /ReaderChromeBar/.test(articleLedgerRow)
        && /undefined, file-only, throwing-current, and missing-dependency/.test(articleLedgerRow));
 
-    const serialState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
+    const serialState = { statuses: new Map([[file.path, 'unread']]), structuralQueue: null };
     const serialQueue = new ReaderQueue();
     let releaseFirst = null;
     let serialCalls = 0;
@@ -645,7 +645,7 @@ async function dataviewCorrectnessCases() {
     ok('HC-READER-PERF-9 rapid same-article gestures serialize in user order',
        serialCalls === 2 && serialState.statuses.get(file.path) === 'archived');
 
-    const rejectState = { statuses: new Map([[file.path, 'unread']]), queues: new Map() };
+    const rejectState = { statuses: new Map([[file.path, 'unread']]), structuralQueue: null };
     const rejectQueue = new ReaderQueue();
     let releaseReject = null;
     let rejectCalls = 0;
@@ -663,6 +663,46 @@ async function dataviewCorrectnessCases() {
     await Promise.all([rejectedFirst, rejectedChild]);
     ok('HC-READER-PERF-10 rejected parent gesture invalidates its queued stale descendant',
        rejectCalls === 1 && rejectState.statuses.get(file.path) === 'unread');
+
+    const pathA = 'spice/reader/Cross A.md';
+    const pathB = 'spice/reader/Cross B.md';
+    const crossState = {
+      statuses: new Map([[pathA, 'unread'], [pathB, 'unread']]),
+      structuralQueue: null,
+      queues: new Map(),
+    };
+    const crossQueue = new ReaderQueue();
+    const crossOrder = [];
+    let crossActive = 0;
+    let crossMaxActive = 0;
+    let releaseCrossA = null;
+    crossQueue._setStatus = async (_dv, localState, path, next) => {
+      crossOrder.push(path);
+      crossActive++;
+      crossMaxActive = Math.max(crossMaxActive, crossActive);
+      if (path === pathA) {
+        localState.statuses.set(pathA, next);
+        await new Promise((resolve) => { releaseCrossA = resolve; });
+        localState.statuses.set(pathA, 'unread');
+        crossActive--;
+        return false;
+      }
+      localState.statuses.set(pathB, next);
+      crossActive--;
+      return true;
+    };
+    const crossA = crossQueue._queueStatusTransition({}, crossState, pathA, 'unread', 'reading', null);
+    await new Promise((resolve) => setImmediate(resolve));
+    const crossB = crossQueue._queueStatusTransition({}, crossState, pathB, 'unread', 'reading', null);
+    await new Promise((resolve) => setImmediate(resolve));
+    const siblingWaited = crossOrder.length === 1 && crossOrder[0] === pathA;
+    releaseCrossA();
+    const crossResults = await Promise.all([crossA, crossB]);
+    ok('HC-READER-PERF-11 cross-article whole-container mutations serialize so a rejected sibling cannot erase a successful render',
+       siblingWaited && crossMaxActive === 1 && crossOrder.join('|') === pathA + '|' + pathB
+       && crossResults[0] === false && crossResults[1] === true
+       && crossState.statuses.get(pathA) === 'unread' && crossState.statuses.get(pathB) === 'reading'
+       && crossState.structuralQueue === null);
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;

@@ -144,7 +144,7 @@ class ReaderQueue {
         if (!cur || !cur.file) return;
         if (cur.type !== 'reader-hub') return;
 
-        const state = { statuses: new Map(), queues: new Map(), toggles: new Map(), container: null, ctx: null };
+        const state = { statuses: new Map(), structuralQueue: null, toggles: new Map(), container: null, ctx: null };
 
         // DocSearch strip — scoped to spice/reader, NON-recursive (flat leaves),
         // entityType reader-article, persist:false (search always starts empty).
@@ -378,15 +378,18 @@ class ReaderQueue {
     nextStatus(status) { return ReaderQueue.nextStatus(status); }
 
     async _queueStatusTransition(dv, state, path, expected, next, focusTarget) {
-        if (!state || !state.queues || !path) return false;
-        const prior = state.queues.get(path) || Promise.resolve(true);
+        if (!state || !path) return false;
+        // Every receipt owns the whole rendered results container, not just one
+        // row. Serialize at the surface boundary so a late rollback for article A
+        // cannot restore a pre-A container over article B's successful preview.
+        const prior = state.structuralQueue || Promise.resolve(true);
         const run = prior.then(() => {
             if (String(state.statuses.get(path) || 'unread') !== String(expected || 'unread')) return false;
             return this._setStatus(dv, state, path, next, focusTarget);
         }, () => false);
-        state.queues.set(path, run);
+        state.structuralQueue = run;
         try { return await run; }
-        finally { if (state.queues.get(path) === run) state.queues.delete(path); }
+        finally { if (state.structuralQueue === run) state.structuralQueue = null; }
     }
 
     /**
