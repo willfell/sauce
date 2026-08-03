@@ -546,7 +546,6 @@ async function run() {
       currentFiles.delete(file.path);
       vault.emitDelete(file);
       vault.emitDelete(file);
-      metadataCache.emit(file);
     }
     ok("FF-12K post-registration deletion events release all snapshot and listener ownership",
       registered && deletionEventFf._writtenFrontmatter.size === 0
