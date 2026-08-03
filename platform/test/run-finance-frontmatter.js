@@ -1219,6 +1219,25 @@ async function run() {
     const queueFf = new FinanceFrontmatter();
     const { container } = makeEditorDom();
     global.document = { activeElement: null };
+    const rejectedFile = { path: "spice/finance/Invoices/Rejected-Identity.md" };
+    const outcome = await queueFf.mutateRendered(rejectedFile, {
+      dv: { container }, selector: ".editor",
+      render: async () => {},
+      write: async () => { throw new Error("fixture persistence rejection"); },
+    });
+    ok("FF-20F rejected queues release identity, path, alias, and owner registries",
+      outcome.ok === false
+        && !queueFf._renderQueueFiles.has(rejectedFile)
+        && queueFf._renderQueues.size === 0
+        && queueFf._renderQueuePaths.size === 0
+        && queueFf._renderQueueAliases.size === 0);
+  }
+
+  {
+    installLifecycle();
+    const queueFf = new FinanceFrontmatter();
+    const { container } = makeEditorDom();
+    global.document = { activeElement: null };
     const canonical = { path: "spice/finance/Invoices/Identity-Old.md" };
     const replacement = { path: "spice/finance/Invoices/Identity-New.md" };
     let releaseOld, releaseNew, oldStarted, newStarted;
@@ -1245,7 +1264,7 @@ async function run() {
     const reboundSurvivedOldCleanup = queueFf._renderQueueFiles.get(canonical) === replacementOwner;
     releaseNew();
     const outcomes = await Promise.all([newOwner, rebound]);
-    ok("FF-20F completed owner cleanup preserves a newer identity binding then drains it",
+    ok("FF-20G completed owner cleanup preserves a newer identity binding then drains it",
       reboundBeforeOldCleanup && reboundSurvivedOldCleanup
         && outcomes.every((outcome) => outcome.ok === true)
         && queueFf._renderQueues.size === 0
