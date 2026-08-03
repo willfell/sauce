@@ -61,7 +61,7 @@ function makeEl(tag, opts) {
       const out = [];
       if (evt === "click" && typeof el.onclick === "function") out.push(el.onclick(e));
       for (const cb of (el._listeners[evt] || [])) out.push(cb(e));
-      return out;
+      return Promise.all(out);
     },
     removeEventListener: function () {},
   };
@@ -650,6 +650,37 @@ function descendants(el) {
       assertEq("HOME-CAP-19i consecutive success settles Add again", capAdd.disabled, false);
       assertTrue("HOME-CAP-19j consecutive success leaves no stale optimistic preview",
         !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
+
+      let resolvePending;
+      const deferredCreate = new Promise((resolve) => { resolvePending = resolve; });
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        return deferredCreate;
+      };
+      fire(addBtn);
+      inputs[0].value = "slow task";
+      const pendingCapture = fire(capAdd);
+      await Promise.resolve();
+      await Promise.resolve();
+      const callsWhilePending = calls.createQuick.length;
+      inputs[0].value = "next draft";
+      await inputs[0].dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
+      assertEq("HOME-CAP-19k deferred Enter cannot create an overlapping persistence receipt",
+        calls.createQuick.length, callsWhilePending);
+      assertEq("HOME-CAP-19l the sole pending receipt keeps Add disabled", capAdd.disabled, true);
+      resolvePending({ ok: true });
+      await pendingCapture;
+      assertEq("HOME-CAP-19m authoritative deferred success re-enables Add", capAdd.disabled, false);
+      assertTrue("HOME-CAP-19n authoritative deferred success closes the menu", !isOpen(menu));
+      assertTrue("HOME-CAP-19o authoritative deferred success leaves no stale preview",
+        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
+      assertEq("HOME-CAP-19p overlap draft was not submitted by the guarded Enter",
+        calls.createQuick.filter((entry) => entry && entry.title === "next draft").length, 0);
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
+        return Promise.resolve({ ok: true });
+      };
     }
 
     // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──

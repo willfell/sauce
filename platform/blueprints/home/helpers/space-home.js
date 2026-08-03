@@ -481,7 +481,9 @@ class SpaceHome {
     const addTaskBtn = captureRow.createEl("button", { cls: "sauce-home-capture-add" });
     addTaskBtn.setAttribute("type", "button");
     addTaskBtn.textContent = "Add";
+    let capturePending = false;
     const submitCapture = async () => {
+      if (capturePending) return;
       const text = input.value;
       if (!(typeof text === "string" && text.trim())) return;
       const cjsNow = (typeof customJS !== "undefined" && customJS)
@@ -491,8 +493,11 @@ class SpaceHome {
       const renderSafe = cjsNow && cjsNow.RenderSafe;
       if (!td || typeof td.createQuick !== "function"
           || !renderSafe || typeof renderSafe.mutateStructure !== "function") return;
+      capturePending = true;
       let optimisticReceipt = null;
-      const result = await renderSafe.mutateStructure({
+      let result;
+      try {
+        result = await renderSafe.mutateStructure({
         dv,
         app: (typeof app !== "undefined" && app) || null,
         failureMessage: "Could not add task",
@@ -533,15 +538,18 @@ class SpaceHome {
           }
           return created;
         },
-      });
-      if (result && result.ok === true) {
-        if (optimisticReceipt?.node && typeof optimisticReceipt.node.remove === "function") {
-          optimisticReceipt.node.remove();
-        } else {
-          optimisticReceipt?.parent?.removeChild?.(optimisticReceipt.node);
+        });
+        if (result && result.ok === true) {
+          if (optimisticReceipt?.node && typeof optimisticReceipt.node.remove === "function") {
+            optimisticReceipt.node.remove();
+          } else {
+            optimisticReceipt?.parent?.removeChild?.(optimisticReceipt.node);
+          }
+          addTaskBtn.disabled = optimisticReceipt ? optimisticReceipt.disabled : false;
+          setMenu(false);
         }
-        addTaskBtn.disabled = optimisticReceipt ? optimisticReceipt.disabled : false;
-        setMenu(false);
+      } finally {
+        capturePending = false;
       }
     };
     addTaskBtn.onclick = () => submitCapture();
