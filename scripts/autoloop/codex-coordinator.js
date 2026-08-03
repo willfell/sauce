@@ -39,13 +39,15 @@ const MAXBUF = 64 * 1024 * 1024;
 const REPO = process.env.SAUCE_LOOP_REPO || 'willfell/sauce';
 const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
+const LEASE_TTL_MS = 2 * 60 * 60 * 1000; // per-card session lease: generous, time-based only —
+// coordinator invocations are short-lived node processes, so pid-liveness can't arbitrate here.
 const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
 const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
 const STRICT_CLI_OPTIONS = Object.freeze({
   park: ['json', 'card', 'depends-on', 'resume-condition'],
   'amend-park': ['json', 'card', 'expected-head', 'reason', 'depends-on', 'clear-dependencies', 'resume-condition'],
-  resume: ['json', 'card'],
+  resume: ['json', 'card', 'lease-token'],
   'record-review': [
     'json', 'card', 'lens', 'verdict', 'summary', 'expected-head',
     'accepted-limitation', 'bound',
@@ -250,6 +252,46 @@ function lockIsStale(owner, now = Date.now(), staleMs = 30 * 60 * 1000) {
   if (!Number.isFinite(age) || age <= staleMs) return false;
   if (owner.host && owner.host !== os.hostname()) return true;
   return !pidAlive(Number(owner.pid));
+}
+
+function leaseIsLive(lease, nowMs, ttlMs = LEASE_TTL_MS) {
+  if (!lease || typeof lease !== 'object') return false;
+  const renewed = Date.parse(lease.renewed_at);
+  if (!Number.isFinite(renewed)) return false;
+  const age = nowMs - renewed;
+  return age >= 0 && age < ttlMs; // negative age = clock skew = stale (turn-lock.js precedent)
+}
+
+function leaseSummary(lease, nowMs, ttlMs = LEASE_TTL_MS) {
+  if (!lease || typeof lease !== 'object') return null;
+  const renewed = Date.parse(lease.renewed_at);
+  const age = Number.isFinite(renewed) ? nowMs - renewed : null;
+  const held = leaseIsLive(lease, nowMs, ttlMs);
+  return {
+    held, stale: !held, age_ms: age,
+    expires_in_ms: held ? ttlMs - age : 0,
+    holder: lease.holder || null, acquired_at: lease.acquired_at || null,
+  };
+}
+
+function acquireLease(record, { now, token, label = '' } = {}) {
+  const at = (now || (() => new Date().toISOString()))();
+  record.lease = {
+    token: token || crypto.randomUUID(),
+    acquired_at: at, renewed_at: at,
+    holder: { host: os.hostname(), ...(label ? { label } : {}) },
+  };
+  return record.lease;
+}
+
+function clearLease(record, reason, now) {
+  if (!record || !record.lease) return false;
+  const at = (now || (() => new Date().toISOString()))();
+  record.lease_breaks = [...(record.lease_breaks || []), {
+    at, reason, previous_token: record.lease.token, previous_holder: record.lease.holder || null,
+  }];
+  delete record.lease;
+  return true;
 }
 
 function lockDirectoryIsStale(lockPath, owner, staleMs) {
@@ -3845,9 +3887,42 @@ async function commandResume(ctx, args, deps = {}) {
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
   const worktreeExists = deps.worktreeExists || fs.existsSync;
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('resume-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    const nowMs = leaseNowMs();
+    const suppliedToken = String(args['lease-token'] || '').trim();
+    if (record.phase !== 'parked') {
+      if (!TERMINAL.has(record.phase)) {
+        // active card → attach: lease arbitration only, zero phase/review side effects
+        const live = leaseIsLive(record.lease, nowMs);
+        if (live && suppliedToken && suppliedToken === record.lease.token) {
+          record.lease.renewed_at = now();
+          persist(ctx, state, record);
+          return successReceipt('attach', {
+            card, phase: record.phase, no_op: true,
+            lease_token: record.lease.token, lease: leaseSummary(record.lease, nowMs),
+            branch: record.branch, worktree: record.worktree,
+          });
+        }
+        if (live) {
+          refuse('resume-refused', 'lease_held',
+            `card ${card} is actively leased by ${record.lease.holder && record.lease.holder.host ? record.lease.holder.host : 'another session'} (expires in ${Math.round((LEASE_TTL_MS - (nowMs - Date.parse(record.lease.renewed_at))) / 60000)}m) — resume a different active card, claim new work, or break-lease --card "${card}" --reason "..." if the holder is known dead`,
+            { card, phase: record.phase, lease: leaseSummary(record.lease, nowMs) });
+        }
+        if (record.lease) clearLease(record, 'lease_superseded_stale', now); // stale takeover, audited
+        acquireLease(record, { now, token: mintLeaseToken() });
+        persist(ctx, state, record);
+        return successReceipt('attach', {
+          card, phase: record.phase, no_op: false,
+          lease_token: record.lease.token, lease: leaseSummary(record.lease, nowMs),
+          branch: record.branch, worktree: record.worktree,
+        });
+      }
+      // terminal phases fall through to the existing 'not parked' refusal below
+    }
     if (record.phase === 'implementing' && record.last_resume_request
       && record.last_resume_request.card === card) {
       return successReceipt(record.projection_error ? 'resume-projection-failed' : 'implement', {
@@ -3946,6 +4021,7 @@ async function commandResume(ctx, args, deps = {}) {
       origin_main_advanced: originMainAdvanced,
       requires_main_update: originMainAdvanced,
     };
+    acquireLease(record, { now, token: mintLeaseToken() });
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
       withLock: transitionLock, projectCard: project, now, state,
@@ -3961,6 +4037,7 @@ async function commandResume(ctx, args, deps = {}) {
       head_sha: headSha, origin_main_sha: originMainSha,
       origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
       loop_station: station.receipt,
+      lease_token: record.lease.token, lease: leaseSummary(record.lease, leaseNowMs()),
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
     });
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
@@ -5015,7 +5092,9 @@ async function commandRestructure(ctx, args, deps = {}) {
   return d.transitionLock(ctx, 'selector', () => restructureCore(ctx, spec, d), { staleMs: RESTRUCTURE_STALE_MS });
 }
 
-async function commandClaim(ctx, args) {
+async function commandClaim(ctx, args, deps = {}) {
+  const now = deps.now || (() => new Date().toISOString());
+  const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
   return withLock(ctx, 'selector', async () => {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       return successReceipt('halted', { no_op: true, reason: '.autoloop-halt present' });
@@ -5049,6 +5128,7 @@ async function commandClaim(ctx, args) {
       ...(selected.meta.contractSource === 'current' ? { delivery_contract: selected.meta.contract } : {}),
       branch, worktree, claimed_at: new Date().toISOString(),
     };
+    acquireLease(record, { now, token: mintLeaseToken() });
     state.cards[selected.card] = record;
     writeState(ctx, state, record);
     try {
@@ -5063,6 +5143,7 @@ async function commandClaim(ctx, args) {
     const station = await attemptLoopStationProjection(ctx, state, 'claim');
     return successReceipt('implement', {
       ...record, skipped: selected.skipped,
+      lease_token: record.lease.token,
       loop_station: station.receipt,
     });
   });
@@ -7055,6 +7136,7 @@ module.exports = {
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
   PARKED_METADATA_REBIND_CARDS,
   loopBindingEnv, resolveBoundDefaults, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS, REPO,
+  LEASE_TTL_MS, leaseIsLive, leaseSummary, acquireLease, clearLease,
 };
 
 if (require.main === module) {
