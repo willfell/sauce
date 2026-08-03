@@ -663,15 +663,30 @@ function descendants(el) {
       await Promise.resolve();
       await Promise.resolve();
       const callsWhilePending = calls.createQuick.length;
-      inputs[0].value = "next draft";
-      await inputs[0].dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
-      assertEq("HOME-CAP-19k deferred Enter cannot create an overlapping persistence receipt",
+      // Dataview can clear and execute the block again while persistence is
+      // still pending. The container-owned authority must bind this replacement
+      // render even though every closure and DOM node above is now obsolete.
+      dv.container.children = [];
+      await home_.render(dv, {});
+      const replacementHome = dv.container.querySelector(".sauce-home");
+      const replacementNodes = replacementHome ? descendants(replacementHome) : [];
+      const replacementToggle = replacementNodes.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+      const replacementMenu = replacementNodes.find((n) => hasCls(n, "sauce-home-add-menu"));
+      const replacementInput = replacementMenu ? descendants(replacementMenu).find((n) => n.tag === "input") : null;
+      const replacementAdd = replacementMenu
+        ? descendants(replacementMenu).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"))
+        : null;
+      fire(replacementToggle);
+      replacementInput.value = "next draft";
+      await replacementInput.dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
+      assertEq("HOME-CAP-19k deferred Enter after container rerender cannot overlap persistence",
         calls.createQuick.length, callsWhilePending);
-      assertEq("HOME-CAP-19l the sole pending receipt keeps Add disabled", capAdd.disabled, true);
+      assertEq("HOME-CAP-19l shared pending authority disables replacement Add", replacementAdd.disabled, true);
       resolvePending({ ok: true });
       await pendingCapture;
-      assertEq("HOME-CAP-19m authoritative deferred success re-enables Add", capAdd.disabled, false);
-      assertTrue("HOME-CAP-19n authoritative deferred success closes the menu", !isOpen(menu));
+      assertEq("HOME-CAP-19m authoritative deferred success releases replacement Add", replacementAdd.disabled, false);
+      assertTrue("HOME-CAP-19n obsolete settlement leaves the replacement menu open", isOpen(replacementMenu));
+      assertEq("HOME-CAP-19n2 obsolete settlement preserves the replacement draft", replacementInput.value, "next draft");
       assertTrue("HOME-CAP-19o authoritative deferred success leaves no stale preview",
         !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
       assertEq("HOME-CAP-19p overlap draft was not submitted by the guarded Enter",
@@ -706,7 +721,10 @@ function descendants(el) {
       const menuRetry = homeRetry ? descendants(homeRetry).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
       const inputRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "input") : null;
       const addRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
-      if (menuRetry && !isOpen(menuRetry)) fire(addBtn);
+      const toggleRetry = homeRetry
+        ? descendants(homeRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"))
+        : null;
+      if (menuRetry && !isOpen(menuRetry)) fire(toggleRetry);
       let restoredFocus = 0;
       const originFocus = { isConnected: true, focus: () => { restoredFocus++; } };
       global.document.activeElement = originFocus;
@@ -1221,6 +1239,43 @@ function descendants(el) {
     delete global.customJS;
     delete global.window.customJS;
     if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
+  }
+
+  // ── HOME-DASH-RETRY: an unchanged Home shell does not make a cold nested
+  // dashboard failure permanent. Missing and rejected view mounts retry on the
+  // same container, while the first successful mount is thereafter deduped.
+  {
+    installMoment("2026-07-02", 9);
+    global.customJS = {
+      SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) },
+    };
+
+    const missingDv = makeDv();
+    const availableView = missingDv.view;
+    delete missingDv.view;
+    await home_.render(missingDv, {});
+    assertTrue("HOME-DASH-RETRY-1 missing dv.view still paints the Home shell",
+      !!missingDv.container.querySelector(".sauce-home"));
+    missingDv.view = availableView;
+    await home_.render(missingDv, {});
+    await home_.render(missingDv, {});
+    assertEq("HOME-DASH-RETRY-2 availability warm-retry mounts exactly once",
+      missingDv._viewCalls.length, 1);
+
+    const rejectedDv = makeDv();
+    let attempts = 0;
+    const successfulView = rejectedDv.view;
+    rejectedDv.view = async () => { attempts += 1; throw new Error("guard unavailable"); };
+    await home_.render(rejectedDv, {});
+    rejectedDv.view = async (...args) => { attempts += 1; return successfulView(...args); };
+    await home_.render(rejectedDv, {});
+    await home_.render(rejectedDv, {});
+    assertEq("HOME-DASH-RETRY-3 rejection warm-retry attempts once more then dedupes", attempts, 2);
+    assertEq("HOME-DASH-RETRY-4 successful retry creates one dashboard mount",
+      rejectedDv._viewCalls.length, 1);
+
+    delete global.customJS;
+    delete global.window.customJS;
   }
 
   // ── HOME-FOCUS: clicking "+" must NOT focus the "Jot a task…" input — an
