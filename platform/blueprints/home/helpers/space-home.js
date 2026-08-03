@@ -516,7 +516,12 @@ class SpaceHome {
           receipt.input.setSelectionRange?.(receipt.selectionStart, receipt.selectionEnd);
           addTaskBtn.disabled = receipt.disabled;
           setMenu(receipt.menuWasOpen);
-          try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+          try {
+            const active = docRef && docRef.activeElement;
+            const userMoved = active && active !== receipt.focusTarget && active !== docRef.body
+              && active.isConnected !== false;
+            if (!userMoved) receipt.focusTarget?.focus?.();
+          } catch (_e) {}
         },
         write: () => td.createQuick({ title: text, source: "daily" }),
       });

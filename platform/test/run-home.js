@@ -546,6 +546,8 @@ function descendants(el) {
   installMoment("2026-07-02", 6);
   {
     const dv = makeDv();
+    const priorActiveElement = global.document.activeElement;
+    let rollbackActiveElement = null;
 
     const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [], structure: [] };
     global.customJS = {
@@ -559,7 +561,12 @@ function descendants(el) {
           calls.structure.push("apply");
           const receipt = await opts.apply();
           try { calls.structure.push("write"); return { ok: true, value: await opts.write() }; }
-          catch (error) { calls.structure.push("rollback"); await opts.rollback(receipt, error); return { ok: false, error }; }
+          catch (error) {
+            calls.structure.push("rollback");
+            if (rollbackActiveElement) global.document.activeElement = rollbackActiveElement;
+            await opts.rollback(receipt, error);
+            return { ok: false, error };
+          }
         },
       },
       EntityCreate: {
@@ -648,6 +655,9 @@ function descendants(el) {
       const inputRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "input") : null;
       const addRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
       if (menuRetry && !isOpen(menuRetry)) fire(addBtn);
+      let restoredFocus = 0;
+      const originFocus = { isConnected: true, focus: () => { restoredFocus++; } };
+      global.document.activeElement = originFocus;
       inputRetry.value = "retry me";
       global.customJS.TaskDialog.createQuick = () => Promise.reject(new Error("persist failed"));
       await fire(addRetry);
@@ -655,6 +665,15 @@ function descendants(el) {
       assertTrue("HOME-CAP-21d rejection keeps the originating menu open", isOpen(menuRetry));
       assertTrue("HOME-CAP-21e rejected capture ran rollback after apply/write",
         calls.structure.slice(-3).join(",") === "apply,write,rollback");
+      assertEq("HOME-CAP-21f rejection restores originating focus when the user has not moved", restoredFocus, 1);
+      const newerFocus = { isConnected: true };
+      global.document.activeElement = originFocus;
+      rollbackActiveElement = newerFocus;
+      inputRetry.value = "retry without stealing focus";
+      await fire(addRetry);
+      assertEq("HOME-CAP-21g late rejection preserves newer connected focus", restoredFocus, 1);
+      assertTrue("HOME-CAP-21h newer focus remains authoritative", global.document.activeElement === newerFocus);
+      rollbackActiveElement = null;
       global.customJS.TaskDialog.createQuick = (opts) => { calls.createQuick.push(opts); return Promise.resolve(); };
     }
 
@@ -673,6 +692,7 @@ function descendants(el) {
 
     delete global.customJS;
     delete global.app;
+    global.document.activeElement = priorActiveElement;
   }
 
   // ── HOME-CAP-REG: article/journal gated on EntityCreate._loadSpec(instance) ─

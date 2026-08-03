@@ -175,7 +175,13 @@ class SectionExplorer {
       if (typeof receipt.node.remove === "function") receipt.node.remove();
       else if (receipt.parent && typeof receipt.parent.removeChild === "function") receipt.parent.removeChild(receipt.node);
     }
-    try { receipt.focusTarget?.focus?.(); } catch (_e) {}
+    try {
+      const doc = (typeof document !== "undefined") ? document : null;
+      const active = doc && doc.activeElement;
+      const userMoved = active && active !== receipt.focusTarget && active !== doc.body
+        && active.isConnected !== false;
+      if (!userMoved) receipt.focusTarget?.focus?.();
+    } catch (_e) {}
   }
 
   async _mutateStructure(dv, adapter, spec, write) {

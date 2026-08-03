@@ -104,12 +104,16 @@ function makeDv(embed, currentVal) {
         view: async () => {},
         pages: () => emptyData(),
         page: () => undefined,
-        current: () => currentVal,
+        current: () => {
+            if (currentVal === THROW_CURRENT) throw new Error('cold current-page index');
+            return currentVal;
+        },
         io: { load: async () => '' },
     };
 }
 
 const RenderSafeClass = loadWidget('platform/mechanisms/render-safe/render-safe.js', 'RenderSafe');
+const THROW_CURRENT = Symbol('throw-current');
 const cjs = {
     SectionLabel: { render: () => {}, divider: () => '' },
     AccentButton: { render: () => makeEl() },
@@ -118,6 +122,7 @@ const cjs = {
     EntityCreate: { create: async () => {} },
     // WikiTree best-effort delegates to WikiHubActions; keep it inert here.
     WikiHubActions: { render: () => {} },
+    ChromeBar: { makeAdapter: (config) => config, render: () => {} },
     RenderSafe: new RenderSafeClass(),
 };
 global.customJS = Object.assign(global.customJS || {}, cjs);
@@ -135,6 +140,7 @@ const widgets = [
     { name: 'WikiTree',        path: 'platform/blueprints/wiki/helpers/wiki-tree.js' },
     { name: 'WikiLeafActions', path: 'platform/blueprints/wiki/helpers/wiki-leaf-actions.js' },
     { name: 'WikiHubActions',  path: 'platform/blueprints/wiki/helpers/wiki-hub-actions.js' },
+    { name: 'WikiChromeBar',   path: 'platform/blueprints/wiki/helpers/wiki-chrome-bar.js' },
 ];
 
 // cold-load variants: Dataview not indexed → dv.current() undefined/null; plus the
@@ -143,6 +149,8 @@ const variants = [
     { label: 'normal container, dv.current()=undefined (cold-load)', embed: false, current: undefined },
     { label: 'normal container, dv.current()=null (cold-load)', embed: false, current: null },
     { label: '.markdown-embed context', embed: true, current: undefined },
+    { label: 'dv.current() throws during cold load', embed: false, current: THROW_CURRENT },
+    { label: 'CustomJS dependencies missing', embed: false, current: undefined, missingCjs: true },
 ];
 
 (async () => {
@@ -152,8 +160,19 @@ const variants = [
         catch (e) { await guard(`WIKIGUARD-load ${w.name}`, () => { throw e; }); continue; }
         for (const v of variants) {
             await guard(`WIKIGUARD ${w.name} — ${v.label}`, async () => {
-                const inst = new WidgetClass();
-                await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
+                const priorCjs = global.customJS;
+                const priorWindowCjs = global.window.customJS;
+                try {
+                    if (v.missingCjs) {
+                        delete global.customJS;
+                        delete global.window.customJS;
+                    }
+                    const inst = new WidgetClass();
+                    await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
+                } finally {
+                    global.customJS = priorCjs;
+                    global.window.customJS = priorWindowCjs;
+                }
             });
         }
     }

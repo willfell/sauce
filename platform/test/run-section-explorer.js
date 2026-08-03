@@ -2523,6 +2523,10 @@ ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER doc move applies before write a
     assert.deepStrictEqual(events, ["apply", "write", "rollback"], "apply must precede persistence and rollback");
     assert.deepStrictEqual(parent.children, [before, row, after], "same row restored before exact sibling");
     assert.strictEqual(focused, 1, "captured focus restored once");
+    const newerFocus = { isConnected: true };
+    global.document.activeElement = newerFocus;
+    se._rollbackStructuralReceipt({ kind: "none", focusTarget: { focus: () => { focused++; } } });
+    assert.strictEqual(focused, 1, "late rollback preserves a newer connected user focus target");
   } finally { global.app = priorApp; global.customJS = priorCustomJS; global.document = priorDocument; }
 }});
 

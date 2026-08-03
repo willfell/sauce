@@ -1650,12 +1650,21 @@ class SpaceDailyDashboard {
           if (folderCreated && !appRef.vault.getAbstractFileByPath(path)) {
             try {
               const createdFolder = appRef.vault.getAbstractFileByPath(folder);
-              if (createdFolder && appRef.fileManager && typeof appRef.fileManager.trashFile === "function") {
+              const empty = createdFolder && Array.isArray(createdFolder.children)
+                && createdFolder.children.length === 0;
+              if (empty && appRef.fileManager && typeof appRef.fileManager.trashFile === "function") {
                 await appRef.fileManager.trashFile(createdFolder);
               }
             } catch (_e) {}
           }
-          try { receipt?.focusTarget?.focus?.(); } catch (_e) {}
+          try {
+            const doc = (typeof document !== "undefined") ? document : null;
+            const active = doc && doc.activeElement;
+            const target = receipt && receipt.focusTarget;
+            const userMoved = active && active !== target && active !== doc.body
+              && active.isConnected !== false;
+            if (!userMoved) target?.focus?.();
+          } catch (_e) {}
         },
         write: async () => {
           if (!appRef.vault.getAbstractFileByPath(folder)) {

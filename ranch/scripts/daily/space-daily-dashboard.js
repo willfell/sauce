@@ -465,6 +465,8 @@ class SpaceDailyDashboard {
   }
 
   async render(dv, params) {
+    try {
+    if (!dv || !dv.container || typeof dv.el !== "function" || typeof dv.pages !== "function") return;
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
       checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
@@ -626,7 +628,7 @@ class SpaceDailyDashboard {
       if (tasksTitleLink) {
         tasksTitleLink.addEventListener("click", (event) => {
           event.stopPropagation();
-          this._openTodayToDo(today);
+          this._openTodayToDo(today, { dv, host: tasksBody, trigger: tasksTitleLink });
         });
       }
 
@@ -920,6 +922,7 @@ class SpaceDailyDashboard {
         warn.textContent = "ActivityFeed mechanism unavailable.";
       }
     }
+    } catch (_e) { /* cold-load and partial Dataview state must never reject */ }
   }
 
   /**
@@ -1593,52 +1596,96 @@ class SpaceDailyDashboard {
    * `today` (the day being VIEWED, not necessarily the real today — matches
    * every other date computation in this file).
    */
-  async _openTodayToDo(dateStr) {
-    const m = moment(dateStr, "YYYY-MM-DD");
-    const folder = `spice/to-do/${m.format("YYYY/MM-MMMM")}`;
-    const filenameNoExt = `ToDo-${m.format("YYYY-MM-DD")}`;
-    const path = `${folder}/${filenameNoExt}.md`;
-
-    const existing = app.vault.getAbstractFileByPath(path);
-    if (existing) {
-      app.workspace.openLinkText(path, "");
-      return;
-    }
-
-    const tpPlugin = app.plugins.plugins["templater-obsidian"];
-    if (!tpPlugin || !tpPlugin.templater) {
-      new Notice("SpaceDailyDashboard: Templater plugin not enabled", 8000);
-      return;
-    }
-
-    if (!app.vault.getAbstractFileByPath(folder)) {
-      try {
-        await app.vault.createFolder(folder);
-      } catch (folderErr) {
-        if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) {
-          new Notice(`SpaceDailyDashboard: cannot create folder ${folder} — ${folderErr.message}`, 8000);
-          return;
-        }
-      }
-    }
-
-    const templateSource = "ranch/templates/Today To-Do.md";
-    const templateFile = app.vault.getAbstractFileByPath(templateSource);
-    if (!templateFile) {
-      new Notice(`SpaceDailyDashboard: template not found at ${templateSource}`, 8000);
-      return;
-    }
-
+  async _openTodayToDo(dateStr, opts) {
     try {
-      await tpPlugin.templater.create_new_note_from_template(templateFile, folder, filenameNoExt, true);
-    } catch (err) {
-      const msg = (err && err.message) || "";
-      if (!/already exists|exists/i.test(msg)) {
-        new Notice(`SpaceDailyDashboard: Templater create failed for ${path} — ${msg}`, 8000);
-        return;
+      const appRef = (typeof globalThis !== "undefined" && globalThis.app) || null;
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || null;
+      const momentRef = (typeof globalThis !== "undefined" && globalThis.moment) || null;
+      if (!appRef || !momentRef) return { ok: false };
+      const m = momentRef(dateStr, "YYYY-MM-DD");
+      const folder = `spice/to-do/${m.format("YYYY/MM-MMMM")}`;
+      const filenameNoExt = `ToDo-${m.format("YYYY-MM-DD")}`;
+      const path = `${folder}/${filenameNoExt}.md`;
+
+      const existing = appRef.vault.getAbstractFileByPath(path);
+      if (existing) {
+        appRef.workspace.openLinkText(path, "");
+        return { ok: true, no_op: true };
       }
-      app.workspace.openLinkText(path, "");
-    }
+
+      const tpPlugin = appRef.plugins && appRef.plugins.plugins
+        ? appRef.plugins.plugins["templater-obsidian"] : null;
+      if (!tpPlugin || !tpPlugin.templater) {
+        if (typeof Notice === "function") new Notice("SpaceDailyDashboard: Templater plugin not enabled", 8000);
+        return { ok: false };
+      }
+
+      const templateSource = "ranch/templates/Today To-Do.md";
+      const templateFile = appRef.vault.getAbstractFileByPath(templateSource);
+      if (!templateFile) {
+        if (typeof Notice === "function") new Notice(`SpaceDailyDashboard: template not found at ${templateSource}`, 8000);
+        return { ok: false };
+      }
+      const renderSafe = cjs && cjs.RenderSafe;
+      if (!renderSafe || typeof renderSafe.mutateStructure !== "function") return { ok: false };
+      let folderCreated = false;
+      return await renderSafe.mutateStructure({
+        app: appRef,
+        dv: opts && opts.dv,
+        path,
+        failureMessage: `Could not create ${filenameNoExt}`,
+        apply: () => {
+          const host = opts && opts.host;
+          const focusTarget = (typeof document !== "undefined") ? document.activeElement : (opts && opts.trigger);
+          if (!host || typeof host.createEl !== "function") return { focusTarget, kind: "none" };
+          const node = host.createEl("div", { cls: "sauce-daily-todo-preview is-optimistic" });
+          node.textContent = `Creating ${filenameNoExt}…`;
+          return { parent: host, node, nextSibling: node.nextSibling || null, focusTarget, kind: "preview" };
+        },
+        rollback: async (receipt) => {
+          if (receipt && receipt.node) {
+            if (typeof receipt.node.remove === "function") receipt.node.remove();
+            else receipt.parent?.removeChild?.(receipt.node);
+          }
+          if (folderCreated && !appRef.vault.getAbstractFileByPath(path)) {
+            try {
+              const createdFolder = appRef.vault.getAbstractFileByPath(folder);
+              const empty = createdFolder && Array.isArray(createdFolder.children)
+                && createdFolder.children.length === 0;
+              if (empty && appRef.fileManager && typeof appRef.fileManager.trashFile === "function") {
+                await appRef.fileManager.trashFile(createdFolder);
+              }
+            } catch (_e) {}
+          }
+          try {
+            const doc = (typeof document !== "undefined") ? document : null;
+            const active = doc && doc.activeElement;
+            const target = receipt && receipt.focusTarget;
+            const userMoved = active && active !== target && active !== doc.body
+              && active.isConnected !== false;
+            if (!userMoved) target?.focus?.();
+          } catch (_e) {}
+        },
+        write: async () => {
+          if (!appRef.vault.getAbstractFileByPath(folder)) {
+            try { await appRef.vault.createFolder(folder); folderCreated = true; }
+            catch (folderErr) {
+              if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) throw folderErr;
+            }
+          }
+          try {
+            return await tpPlugin.templater.create_new_note_from_template(templateFile, folder, filenameNoExt, true);
+          } catch (err) {
+            const msg = (err && err.message) || "";
+            if (/already exists|exists/i.test(msg)) {
+              appRef.workspace.openLinkText(path, "");
+              return appRef.vault.getAbstractFileByPath(path);
+            }
+            throw err;
+          }
+        },
+      });
+    } catch (_e) { return { ok: false, error: _e }; }
   }
 
   /**

@@ -766,12 +766,14 @@ async function renderDailyTaskFixture(today, options) {
     let rejectCreate = false;
     let focused = 0;
     let trashed = 0;
+    let folderChildren = [];
+    let rollbackActiveElement = null;
     const trigger = { focus: () => { focused++; } };
     const files = new Map([['ranch/templates/Today To-Do.md', { path: 'ranch/templates/Today To-Do.md' }]]);
     const app = {
       vault: {
         getAbstractFileByPath: (p) => files.get(p) || null,
-        createFolder: async (p) => { events.push('folder'); files.set(p, { path: p }); },
+        createFolder: async (p) => { events.push('folder'); files.set(p, { path: p, children: folderChildren.slice() }); },
       },
       fileManager: { trashFile: async (f) => { trashed++; files.delete(f.path); } },
       plugins: { plugins: { 'templater-obsidian': { templater: {
@@ -788,7 +790,12 @@ async function renderDailyTaskFixture(today, options) {
         events.push('apply');
         const receipt = await opts.apply();
         try { return { ok: true, value: await opts.write() }; }
-        catch (error) { events.push('rollback'); await opts.rollback(receipt, error); return { ok: false, error }; }
+        catch (error) {
+          events.push('rollback');
+          if (rollbackActiveElement) global.document.activeElement = rollbackActiveElement;
+          await opts.rollback(receipt, error);
+          return { ok: false, error };
+        }
       },
     };
     global.app = app;
@@ -814,6 +821,15 @@ async function renderDailyTaskFixture(today, options) {
       assert(retryHost._children.length === 0, 'rollback removes the exact preview node');
       assert(focused === 1, 'rollback restores triggering focus exactly once');
       assert(trashed === 1, 'rejected note creation compensates its newly-created empty folder');
+
+      files.delete('spice/to-do/2026/07-July');
+      folderChildren = [{ path: 'spice/to-do/2026/07-July/concurrent.md' }];
+      const newerFocus = { isConnected: true };
+      rollbackActiveElement = newerFocus;
+      await dash._openTodayToDo('2026-07-13', { dv: {}, host: makeDashEl(), trigger });
+      assert(trashed === 1, 'rollback never trashes a newly-created folder after concurrent content arrives');
+      assert(focused === 1 && global.document.activeElement === newerFocus,
+        'late rollback preserves newer connected focus instead of stealing it');
     } finally {
       global.app = priorApp;
       global.moment = priorMoment;
