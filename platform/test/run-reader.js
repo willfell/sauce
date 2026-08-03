@@ -988,6 +988,75 @@ async function dataviewCorrectnessCases() {
     const mutantSearchRollback = await runSearchRollbackFixture(StaleSearchReaderQueue);
     ok('PERF6D-DOCSEARCH-ROLLBACK-COORDINATION rejection preserves the newest filtered render and kills stale whole-container restoration',
        staleSearchMutantSrc !== queueSrc && liveSearchRollback && !mutantSearchRollback);
+
+    const runHiddenSuccessFixture = async (QueueClass) => {
+      const hiddenSuccessTarget = art('Hidden Success target', 'reading', '2026-08-03T00:00:00Z');
+      const hiddenSuccessArchived = [5, 4, 3, 2, 1].map((hour) =>
+        art('Hidden Success archived ' + hour, 'archived', `2026-08-03T0${hour}:00:00Z`));
+      const targetPath = hiddenSuccessTarget.file.path;
+      const targetFile = { path: targetPath, _fm: { status: 'reading' } };
+      const successApp = {
+        vault: { getAbstractFileByPath: (path) => (path === targetPath ? targetFile : null) },
+        fileManager: {
+          processFrontMatter: async (_target, mutate) => { mutate(targetFile._fm); },
+        },
+      };
+      const successContainer = makeDomEl('div');
+      const successDv = makeDv([hiddenSuccessTarget].concat(hiddenSuccessArchived));
+      const successState = {
+        statuses: new Map(), structuralQueue: null, toggles: new Map(),
+        container: successContainer, ctx: null, renderGeneration: 0,
+      };
+      const priorSuccessApp = global.app;
+      const priorSuccessWindow = global.window;
+      const priorSuccessCustomJS = global.customJS;
+      const hadSuccessDocument = Object.prototype.hasOwnProperty.call(global, 'document');
+      const priorSuccessDocument = global.document;
+      try {
+        global.app = successApp;
+        global.window = { app: successApp };
+        global.document = {
+          activeElement: null,
+          body: null,
+          contains: (node) => successContainer.contains(node),
+        };
+        global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+          const receipt = await opts.apply();
+          try { await opts.write(); return { ok: true, receipt }; }
+          catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+        } } };
+        global.window.customJS = global.customJS;
+        const queue = new QueueClass();
+        queue._renderResults(successDv, successContainer, null, successState);
+        const clickTarget = successState.toggles.get(targetPath);
+        global.document.activeElement = clickTarget;
+        const saved = await queue._setStatus(successDv, successState, targetPath, 'archived', clickTarget);
+        const active = global.document.activeElement;
+        return saved && targetFile._fm.status === 'archived'
+          && successState.statuses.get(targetPath) === 'archived'
+          && !successState.toggles.has(targetPath)
+          && successContainer.querySelectorAll('.sauce-reader-row').length === 5
+          && active && active !== clickTarget && successContainer.contains(active)
+          && [...successState.toggles.values()].includes(active) && active.focused
+          && !successContainer.contains(clickTarget);
+      } catch (_e) {
+        return false;
+      } finally {
+        global.app = priorSuccessApp;
+        global.window = priorSuccessWindow;
+        global.customJS = priorSuccessCustomJS;
+        if (hadSuccessDocument) global.document = priorSuccessDocument; else delete global.document;
+      }
+    };
+    const hiddenSuccessMutantSrc = queueSrc.replace(
+      'const appliedFocusTarget = this._liveFocusTarget(state, path, focusTarget);',
+      'const appliedFocusTarget = state.toggles.get(path); // controlled hidden-success mutant',
+    );
+    const HiddenSuccessReaderQueue = new Function(`${hiddenSuccessMutantSrc}\nreturn ReaderQueue;`)();
+    const liveHiddenSuccess = await runHiddenSuccessFixture(ReaderQueue);
+    const mutantHiddenSuccess = await runHiddenSuccessFixture(HiddenSuccessReaderQueue);
+    ok('PERF6E-HIDDEN-SUCCESS-FOCUS capped archive success focuses a live fallback and kills direct path-toggle focus',
+       hiddenSuccessMutantSrc !== queueSrc && liveHiddenSuccess && !mutantHiddenSuccess);
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;

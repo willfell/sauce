@@ -443,7 +443,13 @@ class ReaderQueue {
                         this._clearContainer(container);
                         this._renderResults(dv, container, state.ctx, state);
                         receipt.appliedRenderGeneration = state.renderGeneration;
-                        try { state.toggles.get(path)?.focus?.(); } catch (_e) {}
+                        const appliedFocusTarget = this._liveFocusTarget(state, path, focusTarget);
+                        try {
+                            if (appliedFocusTarget === container && typeof container.setAttribute === 'function') {
+                                container.setAttribute('tabindex', '-1');
+                            }
+                        } catch (_e) {}
+                        try { appliedFocusTarget?.focus?.(); } catch (_e) {}
                         return receipt;
                     } catch (error) {
                         state.statuses.set(path, receipt.priorStatus);
