@@ -10,6 +10,13 @@ const delivery = require('../../../../platform/mechanisms/delivery');
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
 const EPIC_SCHEMA_VERSION = '1.1.0';
 const VAULTS = delivery.registry.policies.required_vaults;
+// Slice-scope ceilings: a single execution slice that exceeds these is a
+// program hidden in one card. Enforced at mint (the only planning writer) so an
+// oversized slice — or a supersession chain that has accreted findings past the
+// carried_findings cap — is refused with a decompose instruction instead of
+// thrashing the loop through dozens of 1:1 supersessions. Thresholds live in
+// the schema registry, never as literals here.
+const SLICE_SCOPE_CAPS = (delivery.registry.policies && delivery.registry.policies.slice_scope_caps) || {};
 const RISK_MAP = {
   new_mechanism: 'new_mechanism', shared_abstraction: 'shared_contract', schema: 'schema',
   migration: 'migration', heal: 'migration', loader: 'control_plane',
@@ -348,6 +355,14 @@ function validateSupersede(card, errors) {
   const findings = Array.isArray(card.carried_findings) ? card.carried_findings : null;
   const fixtures = Array.isArray(card.binding_fixtures) ? card.binding_fixtures : null;
   if (!findings || !findings.length) errors.push(`${card.title}: supersede_missing_fields: carried_findings must be a non-empty array of finding names`);
+  // Carried-findings ceiling: a successor carrying more than the cap is proof
+  // the slice is mis-scoped — a 1:1 supersession chain has accreted an
+  // ever-growing acceptance conjunction that review will never pass whole.
+  // Refuse and demand decomposition rather than mint yet another mega-successor.
+  const carriedCap = SLICE_SCOPE_CAPS.carried_findings;
+  if (typeof carriedCap === 'number' && findings && findings.length > carriedCap) {
+    errors.push(`${card.title}: carried_findings_ceiling: ${findings.length} carried findings (> ${carriedCap}) signals a mis-scoped slice; decompose the predecessor into independently mergeable slices that each carry a share of the findings, do not supersede 1:1`);
+  }
   if (!fixtures || !fixtures.length) errors.push(`${card.title}: supersede_missing_fields: binding_fixtures must be a non-empty array of fixture strings or {name, description}`);
   if (!findings || !findings.length || !fixtures || !fixtures.length) return;
   if (findings.some((finding) => typeof finding !== 'string' || !finding.trim())) {
@@ -386,6 +401,15 @@ function validateCard(card, spec, errors, options = {}) {
   if (card.supersedes != null || card.carried_findings != null || card.binding_fixtures != null) validateSupersede(card, errors);
   for (const field of ['touch_zones', 'acceptance_tests', 'applicable_guides', 'trap_warnings']) {
     if (!Array.isArray(card[field]) || !card[field].length) errors.push(`${card.title}: ${field} must be non-empty`);
+  }
+  // Slice-scope ceilings (upper bound): an execution slice above any cap is a
+  // program hidden in one card and will thrash the review loop. Refuse at mint
+  // and demand decomposition. risk_dimensions counts pre-normalization entries.
+  for (const field of ['touch_zones', 'acceptance_tests', 'risk_dimensions']) {
+    const cap = SLICE_SCOPE_CAPS[field];
+    if (typeof cap === 'number' && Array.isArray(card[field]) && card[field].length > cap) {
+      errors.push(`${card.title}: slice_scope_ceiling: ${field} has ${card[field].length} > ${cap}; this slice is a program — decompose it into independently mergeable slices before minting`);
+    }
   }
   if (card.parent_title && !card.slice) errors.push(`${card.title}: nested child needs slice`);
   if (spec.completion_mode === 'release') {

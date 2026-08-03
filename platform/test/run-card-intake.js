@@ -360,6 +360,22 @@ function missingEvidenceAndRefusals() {
     fs.writeFileSync(path.join(dir, 'board.md'), board().replace('## Parked\n', '## Parked\n\n- [ ] [[PARKED Board-only card]]\n'));
     ok(!run(base(dir, { cards: [execution('PARKED Board-only card')] }), false).ok, 'board-lane parked card is immutable without loading its note');
     ok(!run(base(dir, { cards: [execution('BAD Invented lane', { lane: 'Made Up' })] }), false).ok, 'invented board lane is refused');
+    // Slice-scope ceilings: an execution slice that is a program hidden in one
+    // card is refused at mint so the loop never thrashes it through dozens of
+    // 1:1 supersessions (the TV-2 mega-slice failure mode).
+    const zones7 = Array.from({ length: 7 }, (_, i) => `platform/zone-${i}.js`);
+    ok(!run(base(dir, { cards: [execution('BAD Too many zones', { model_profile: 'heavy', touch_zones: zones7 })] }), false).ok, 'slice with more than the touch-zone cap is refused');
+    const accept13 = Array.from({ length: 13 }, (_, i) => `Acceptance behavior ${i} passes.`);
+    ok(!run(base(dir, { cards: [execution('BAD Too many acceptances', { model_profile: 'heavy', acceptance_tests: accept13 })] }), false).ok, 'slice with more than the acceptance-test cap is refused');
+    ok(!run(base(dir, { cards: [execution('BAD Too many risks', { model_profile: 'heavy', risk_dimensions: ['schema', 'migration', 'shared_contract', 'new_mechanism'] })] }), false).ok, 'slice with more than the risk-dimension cap is refused');
+    const finding = (i) => `finding-${i}`;
+    const findings13 = Array.from({ length: 13 }, (_, i) => finding(i));
+    const fixtures13 = findings13.map((name) => ({ name, description: `${name}: bound behavior for ${name}.` }));
+    ok(!run(base(dir, { cards: [execution('BAD Accreted supersession', { model_profile: 'heavy', supersedes: 'OLD mega slice', carried_findings: findings13, binding_fixtures: fixtures13 })] }), false).ok, 'supersession carrying more than the carried-findings cap is refused');
+    // A slice exactly at every cap still mints: the ceilings refuse programs, not legitimate bounded slices.
+    const zones6 = Array.from({ length: 6 }, (_, i) => `platform/ok-zone-${i}.js`);
+    const accept12 = Array.from({ length: 12 }, (_, i) => `Bounded acceptance ${i} passes.`);
+    ok(run(base(dir, { cards: [execution('OK At the scope cap', { model_profile: 'heavy', touch_zones: zones6, acceptance_tests: accept12, risk_dimensions: ['schema', 'migration', 'shared_contract'] })] }), false).ok, 'a bounded slice exactly at every scope cap still mints');
     ok(run(base(dir, { cards: [execution('ALIAS Status', { status: 'in-planning' })] }), false).ok, 'shared historical status alias is normalized');
     ok(!run(base(dir, { cards: [execution('BAD Status', { status: 'almost-done' })] }), false).ok, 'unknown status is refused');
     ok(!run(base(dir, { cards: [execution('BAD Empty schema', { schema_version: '' })] }), false).ok, 'explicitly empty schema version is not defaulted');
