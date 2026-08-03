@@ -256,7 +256,9 @@ class FinanceFrontmatter {
         try {
             file = app.vault.getAbstractFileByPath(path);
         } catch (_e) {
-            this._releaseWrittenSnapshot(path, this._writtenFrontmatter?.get?.(path));
+            // A transient lookup failure is not proof that the file was
+            // deleted. Fail the read closed while retaining the one
+            // identity-guarded authoritative snapshot for recovery.
             return null;
         }
         if (!file || !file.path || file.children !== undefined) {
@@ -296,7 +298,9 @@ class FinanceFrontmatter {
             try {
                 currentFile = app.vault?.getAbstractFileByPath?.(file.path) || null;
             } catch (_e) {
-                this._releaseWrittenSnapshot(file.path, written);
+                // Preserve authority across a transient vault lookup failure;
+                // the registered listener or a later read can settle it once
+                // the current path becomes observable again.
                 return;
             }
             if (!currentFile || currentFile.path !== file.path || currentFile.children !== undefined) {

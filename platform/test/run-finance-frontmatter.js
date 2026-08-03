@@ -419,9 +419,11 @@ async function run() {
   }
   {
     const file = { path: "spice/finance/Invoices/Lookup-Failure.md", stat: { mtime: 10 } };
+    const persisted = { amount: 0 };
+    const stale = { amount: 0 };
     const listeners = new Set();
     const metadataCache = {
-      getFileCache: () => ({ frontmatter: { amount: 0 } }),
+      getFileCache: () => ({ frontmatter: stale }),
       on(event, listener) {
         const ref = { event, listener };
         listeners.add(ref);
@@ -433,24 +435,31 @@ async function run() {
       },
     };
     let lookupThrows = true;
+    let currentFile = file;
     global.app = {
       vault: {
         getAbstractFileByPath() {
           if (lookupThrows) throw new Error("fixture lookup failed");
-          return null;
+          return currentFile;
         },
       },
       metadataCache,
-      fileManager: { async processFrontMatter(_file, mutator) { await mutator({ amount: 0 }); } },
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
     };
     const failedLookupFf = new FinanceFrontmatter();
     await failedLookupFf.update(file, (fm) => { fm.amount = 1; });
-    const releasedByUpdate = failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
-    const failedClosed = releasedByUpdate && failedLookupFf.read(file) === null;
+    const retainedAcrossFailure = failedLookupFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    const failedClosed = failedLookupFf.read(file) === null
+      && failedLookupFf._writtenFrontmatter.size === 1 && listeners.size === 1;
     lookupThrows = false;
+    const recoveredAuthoritative = failedLookupFf.read(file).amount === 1
+      && failedLookupFf._writtenFrontmatter.size === 1 && listeners.size === 1;
+    currentFile = null;
+    const releasedByDeletion = failedLookupFf.read(file.path) === null
+      && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
     metadataCache.emit(file);
-    ok("FF-12J throwing current-file lookup fails closed with bounded idempotent cleanup",
-      failedClosed && failedLookupFf.read(file.path) === null
+    ok("FF-12J transient lookup failure retains authority until deletion is proven",
+      retainedAcrossFailure && failedClosed && recoveredAuthoritative && releasedByDeletion
         && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0);
   }
   {
