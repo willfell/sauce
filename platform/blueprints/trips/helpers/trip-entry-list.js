@@ -675,6 +675,7 @@ class TripEntryList {
     const path = String(page?.file?.path || owner?.dataset?.tripEntryOwnerPath || "");
     const metadataVersion = this._metadataVersion(path);
     if (!state || state.path !== path || state.key !== String(key || "")) {
+      if (state) this._releaseMetadataPath(state);
       state = {
         path,
         key: String(key || ""),
@@ -698,6 +699,7 @@ class TripEntryList {
         if (matches) {
           state.model = incoming;
           state.authority = null;
+          this._releaseMetadataPath(state);
         } else if (externallyNewer) {
           state.model = incoming;
           state.authority = {
@@ -720,6 +722,7 @@ class TripEntryList {
         }
       } else {
         state.model = incoming;
+        this._releaseMetadataPath(state);
       }
     }
     return state;
@@ -762,23 +765,73 @@ class TripEntryList {
       const slot = Symbol.for("sauce.trips.metadata-generations");
       let tracker = globalThis[slot];
       if (!tracker || tracker.cache !== cache) {
+        const prior = tracker;
         const versions = tracker?.versions instanceof Map ? tracker.versions : new Map();
-        if (tracker?.ref != null && typeof tracker.cache?.offref === "function") {
-          tracker.cache.offref(tracker.ref);
-          tracker.ref = null;
-        }
-        tracker = { cache, versions, ref: null };
-        if (typeof cache.on === "function") {
-          tracker.ref = cache.on("changed", (file) => {
-            if (globalThis[slot] !== tracker) return;
-            const path = String(file?.path || "");
-            if (path) tracker.versions.set(path, (tracker.versions.get(path) || 0) + 1);
-          });
-        }
+        const active = tracker?.active instanceof Map ? tracker.active : new Map();
+        tracker = { cache, versions, active, ref: null };
         globalThis[slot] = tracker;
+        if (typeof cache.on === "function") {
+          try {
+            tracker.ref = cache.on("changed", (file) => {
+              if (globalThis[slot] !== tracker) return;
+              this._sweepMetadataTracker(tracker);
+              const path = String(file?.path || "");
+              if (!path || !tracker.active.has(path)) return;
+              tracker.versions.set(path, (tracker.versions.get(path) || 0) + 1);
+            });
+          } catch (_e) { tracker.ref = null; }
+        }
+        if (prior?.ref != null && typeof prior.cache?.offref === "function") {
+          try { prior.cache.offref(prior.ref); } catch (_e) {}
+          prior.ref = null;
+        }
       }
+      this._sweepMetadataTracker(tracker);
       return tracker;
     } catch (_e) { return null; }
+  }
+  _sweepMetadataTracker(tracker) {
+    if (!tracker?.active || !tracker?.versions) return;
+    for (const [path, refs] of tracker.active) {
+      for (const ref of refs) {
+        const state = ref?.deref?.();
+        if (!state || state._metadataInterest?.ref !== ref
+          || (state.queued === 0 && !state.authority)) refs.delete(ref);
+      }
+      if (refs.size === 0) {
+        tracker.active.delete(path);
+        tracker.versions.delete(path);
+      }
+    }
+    for (const path of tracker.versions.keys()) {
+      if (!tracker.active.has(path)) tracker.versions.delete(path);
+    }
+  }
+  _retainMetadataPath(state) {
+    const path = String(state?.path || "");
+    if (!path) return;
+    const tracker = this._metadataTracker();
+    if (!tracker) return;
+    if (state._metadataInterest?.path === path
+      && state._metadataInterest.active === tracker.active) return;
+    this._releaseMetadataPath(state);
+    const ref = new WeakRef(state);
+    let refs = tracker.active.get(path);
+    if (!refs) { refs = new Set(); tracker.active.set(path, refs); }
+    refs.add(ref);
+    if (!tracker.versions.has(path)) tracker.versions.set(path, 0);
+    state._metadataInterest = { path, ref, active: tracker.active, versions: tracker.versions };
+  }
+  _releaseMetadataPath(state) {
+    const interest = state?._metadataInterest;
+    if (!interest) return;
+    const refs = interest.active?.get?.(interest.path);
+    refs?.delete?.(interest.ref);
+    if (!refs || refs.size === 0) {
+      interest.active?.delete?.(interest.path);
+      interest.versions?.delete?.(interest.path);
+    }
+    state._metadataInterest = null;
   }
   _metadataVersion(path) {
     return this._metadataTracker()?.versions?.get(String(path || "")) || 0;
@@ -786,6 +839,7 @@ class TripEntryList {
   _queueEntryStructure(state, task) {
     const epoch = state.epoch;
     state.queued += 1;
+    this._retainMetadataPath(state);
     const run = async () => {
       try {
         if (epoch !== state.epoch) {
@@ -801,6 +855,7 @@ class TripEntryList {
         return false;
       } finally {
         state.queued = Math.max(0, state.queued - 1);
+        if (state.queued === 0 && !state.authority) this._releaseMetadataPath(state);
       }
     };
     const result = (state.tail || Promise.resolve()).then(run, run);
