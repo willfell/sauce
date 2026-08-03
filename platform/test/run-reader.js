@@ -989,19 +989,24 @@ async function dataviewCorrectnessCases() {
     ok('PERF6D-DOCSEARCH-ROLLBACK-COORDINATION rejection preserves the newest filtered render and kills stale whole-container restoration',
        staleSearchMutantSrc !== queueSrc && liveSearchRollback && !mutantSearchRollback);
 
-    const runHiddenSuccessFixture = async (QueueClass) => {
+    const runHiddenSuccessFixture = async (QueueClass, preserveUserFocus) => {
       const hiddenSuccessTarget = art('Hidden Success target', 'reading', '2026-08-03T00:00:00Z');
       const hiddenSuccessArchived = [5, 4, 3, 2, 1].map((hour) =>
         art('Hidden Success archived ' + hour, 'archived', `2026-08-03T0${hour}:00:00Z`));
       const targetPath = hiddenSuccessTarget.file.path;
       const targetFile = { path: targetPath, _fm: { status: 'reading' } };
+      let pendingSuccess = null;
       const successApp = {
         vault: { getAbstractFileByPath: (path) => (path === targetPath ? targetFile : null) },
         fileManager: {
-          processFrontMatter: async (_target, mutate) => { mutate(targetFile._fm); },
+          processFrontMatter: (_target, mutate) => new Promise((resolve) => {
+            pendingSuccess = { resolve: () => { mutate(targetFile._fm); resolve(); } };
+          }),
         },
       };
-      const successContainer = makeDomEl('div');
+      const successHost = makeDomEl('div');
+      const successInput = successHost.createEl('input');
+      const successContainer = successHost.createEl('div');
       const successDv = makeDv([hiddenSuccessTarget].concat(hiddenSuccessArchived));
       const successState = {
         statuses: new Map(), structuralQueue: null, toggles: new Map(),
@@ -1018,7 +1023,7 @@ async function dataviewCorrectnessCases() {
         global.document = {
           activeElement: null,
           body: null,
-          contains: (node) => successContainer.contains(node),
+          contains: (node) => successHost.contains(node),
         };
         global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
           const receipt = await opts.apply();
@@ -1030,14 +1035,30 @@ async function dataviewCorrectnessCases() {
         queue._renderResults(successDv, successContainer, null, successState);
         const clickTarget = successState.toggles.get(targetPath);
         global.document.activeElement = clickTarget;
-        const saved = await queue._setStatus(successDv, successState, targetPath, 'archived', clickTarget);
+        const saving = queue._setStatus(successDv, successState, targetPath, 'archived', clickTarget);
+        for (let i = 0; i < 20 && !pendingSuccess; i++) await new Promise((resolve) => setImmediate(resolve));
+        if (!pendingSuccess) return false;
+        const appliedFallback = global.document.activeElement;
+        const appliedFallbackWasLive = appliedFallback && appliedFallback !== clickTarget
+          && successContainer.contains(appliedFallback);
+        queue._clearContainer(successContainer);
+        queue._renderResults(successDv, successContainer, null, successState);
+        const appliedFallbackWasDetached = !successContainer.contains(appliedFallback);
+        if (preserveUserFocus) successInput.focus();
+        pendingSuccess.resolve();
+        const saved = await saving;
         const active = global.document.activeElement;
-        return saved && targetFile._fm.status === 'archived'
+        const focusIsCorrect = preserveUserFocus
+          ? active === successInput && successInput.focused
+          : active && active !== clickTarget && active !== appliedFallback
+            && successContainer.contains(active)
+            && [...successState.toggles.values()].includes(active) && active.focused;
+        return saved && appliedFallbackWasLive && appliedFallbackWasDetached
+          && targetFile._fm.status === 'archived'
           && successState.statuses.get(targetPath) === 'archived'
           && !successState.toggles.has(targetPath)
           && successContainer.querySelectorAll('.sauce-reader-row').length === 5
-          && active && active !== clickTarget && successContainer.contains(active)
-          && [...successState.toggles.values()].includes(active) && active.focused
+          && focusIsCorrect
           && !successContainer.contains(clickTarget);
       } catch (_e) {
         return false;
@@ -1049,14 +1070,15 @@ async function dataviewCorrectnessCases() {
       }
     };
     const hiddenSuccessMutantSrc = queueSrc.replace(
-      'const appliedFocusTarget = this._liveFocusTarget(state, path, focusTarget);',
-      'const appliedFocusTarget = state.toggles.get(path); // controlled hidden-success mutant',
+      'const settledFocusTarget = this._liveFocusTarget(state, path, focusTarget, true);',
+      'const settledFocusTarget = state.toggles.get(path); // controlled hidden-success mutant',
     );
     const HiddenSuccessReaderQueue = new Function(`${hiddenSuccessMutantSrc}\nreturn ReaderQueue;`)();
-    const liveHiddenSuccess = await runHiddenSuccessFixture(ReaderQueue);
-    const mutantHiddenSuccess = await runHiddenSuccessFixture(HiddenSuccessReaderQueue);
-    ok('PERF6E-HIDDEN-SUCCESS-FOCUS capped archive success focuses a live fallback and kills direct path-toggle focus',
-       hiddenSuccessMutantSrc !== queueSrc && liveHiddenSuccess && !mutantHiddenSuccess);
+    const liveHiddenSuccess = await runHiddenSuccessFixture(ReaderQueue, false);
+    const liveHiddenSuccessInput = await runHiddenSuccessFixture(ReaderQueue, true);
+    const mutantHiddenSuccess = await runHiddenSuccessFixture(HiddenSuccessReaderQueue, false);
+    ok('PERF6E-HIDDEN-SUCCESS-FOCUS capped archive success rebinds a rerender-detached fallback at settlement',
+       hiddenSuccessMutantSrc !== queueSrc && liveHiddenSuccess && liveHiddenSuccessInput && !mutantHiddenSuccess);
   } finally {
     global.app = priorApp;
     global.customJS = priorCustomJS;

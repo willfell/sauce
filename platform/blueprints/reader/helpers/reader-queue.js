@@ -488,6 +488,18 @@ class ReaderQueue {
                     try { fm.status_changed_at = new Date().toISOString(); } catch (_e) {}
                 }),
             });
+            if (result && result.ok === true) {
+                // Persistence can outlive another results render. Re-resolve at
+                // settlement so an optimistic fallback that has since detached
+                // cannot retain keyboard focus; preserve newer connected focus.
+                const settledFocusTarget = this._liveFocusTarget(state, path, focusTarget, true);
+                try {
+                    if (settledFocusTarget === state.container && typeof state.container?.setAttribute === 'function') {
+                        state.container.setAttribute('tabindex', '-1');
+                    }
+                } catch (_e) {}
+                try { settledFocusTarget?.focus?.(); } catch (_e) {}
+            }
             return !!(result && result.ok === true);
         } catch (e) {
             try { new Notice('Could not update status: ' + (e && (e.message || e)), 6000); } catch (_e) {}
