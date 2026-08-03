@@ -241,6 +241,7 @@ class TripLinks {
     let state = this._linksMutationStates.get(owner);
     const incoming = this._parse(page && page.links);
     const path = String(page?.file?.path || owner?.dataset?.tripLinksOwnerPath || "");
+    const metadataVersion = this._metadataVersion(path);
     if (!state || state.path !== path) {
       state = {
         path,
@@ -260,11 +261,29 @@ class TripLinks {
         const externallyNewer = incomingMtime != null && state.authority.writeMtime != null
           && incomingMtime > state.authority.writeMtime;
         const cached = incomingMtime == null ? this._cachedLinks(path) : null;
-        const cacheNewer = cached?.mtime != null && state.authority.writeMtime != null
-          && cached.mtime > state.authority.writeMtime;
-        if (matches || externallyNewer || cacheNewer) {
-          state.model = cacheNewer ? cached.model : incoming;
+        const cacheAdvanced = cached && metadataVersion > (state.authority.cacheVersion || 0);
+        if (matches) {
+          state.model = incoming;
           state.authority = null;
+        } else if (externallyNewer) {
+          state.model = incoming;
+          state.authority = {
+            expected: incoming,
+            writeMtime: incomingMtime,
+            cacheVersion: metadataVersion,
+          };
+        } else if (cacheAdvanced) {
+          if (this._sameLinks(cached.model, state.authority.expected)) {
+            state.authority.cacheVersion = metadataVersion;
+            if (cached.mtime != null) state.authority.writeMtime = cached.mtime;
+          } else {
+            state.model = cached.model;
+            state.authority = {
+              expected: cached.model,
+              writeMtime: cached.mtime,
+              cacheVersion: metadataVersion,
+            };
+          }
         }
       } else {
         state.model = incoming;
@@ -297,6 +316,28 @@ class TripLinks {
       if (!frontmatter || typeof frontmatter !== "object") return null;
       return { mtime: this._fileMtime(file), model: this._parse(frontmatter.links) };
     } catch (_e) { return null; }
+  }
+  _metadataTracker() {
+    try {
+      if (typeof app === "undefined" || !app.metadataCache) return null;
+      const cache = app.metadataCache;
+      const slot = Symbol.for("sauce.trips.metadata-generations");
+      let tracker = globalThis[slot];
+      if (!tracker || tracker.cache !== cache) {
+        tracker = { cache, versions: new Map(), ref: null };
+        if (typeof cache.on === "function") {
+          tracker.ref = cache.on("changed", (file) => {
+            const path = String(file?.path || "");
+            if (path) tracker.versions.set(path, (tracker.versions.get(path) || 0) + 1);
+          });
+        }
+        globalThis[slot] = tracker;
+      }
+      return tracker;
+    } catch (_e) { return null; }
+  }
+  _metadataVersion(path) {
+    return this._metadataTracker()?.versions?.get(String(path || "")) || 0;
   }
   _queueLinksStructure(state, task) {
     const epoch = state.epoch;
@@ -397,7 +438,11 @@ class TripLinks {
       });
       if (result.ok === true) {
         state.model = next;
-        state.authority = { expected: next, writeMtime: this._fileMtime(file) };
+        state.authority = {
+          expected: next,
+          writeMtime: this._fileMtime(file),
+          cacheVersion: this._metadataVersion(state.path),
+        };
         return true;
       }
       return false;

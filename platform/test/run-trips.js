@@ -547,12 +547,31 @@ function makeDv(embed, currentVal) {
         ok('PERF4C-MISSING-MTIME-AUTHORITY entry snapshots without mtime cannot reclaim post-write authority',
             missingMtimeEntryState.model.length === 0 && !!missingMtimeEntryState.authority);
         file.stat.mtime = 11;
+        cachedFrontmatter = { flights: [{ flight_no: 'A' }, { flight_no: 'B' }] };
+        const laggingEntryCacheState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'OLD' }],
+        }, 'flights');
+        const laggingEntryCacheRetained = laggingEntryCacheState.model.length === 0
+            && !!laggingEntryCacheState.authority;
+        const laggingEntryFollowup = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'OLDER' }],
+        }, 'flights');
+        const laggingEntryFollowupRetained = laggingEntryFollowup.model.length === 0
+            && !!laggingEntryFollowup.authority;
         cachedFrontmatter = { flights: [{ flight_no: 'EXTERNAL' }] };
+        metadataListener(file);
         const newerEntryState = list._entryState(rapidEntryOwner, {
             file: { path: pathName }, flights: [{ flight_no: 'STALE' }],
         }, 'flights');
-        ok('PERF4D-ENTRY-CACHE-CONVERGENCE newer current-file cache releases missing-mtime authority',
-            newerEntryState.authority === null && newerEntryState.model[0].flight_no === 'EXTERNAL');
+        const entryCacheRebased = newerEntryState.authority?.expected?.[0]?.flight_no === 'EXTERNAL'
+            && newerEntryState.model[0].flight_no === 'EXTERNAL';
+        const convergedEntryState = list._entryState(rapidEntryOwner, {
+            file: { path: pathName }, flights: [{ flight_no: 'EXTERNAL' }],
+        }, 'flights');
+        ok('PERF4D-ENTRY-CACHE-CONVERGENCE only an observed cache generation rebases missing-mtime authority',
+            laggingEntryCacheRetained && laggingEntryFollowupRetained && entryCacheRebased
+            && convergedEntryState.authority === null
+            && convergedEntryState.model[0].flight_no === 'EXTERNAL');
         cachedFrontmatter = null;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
@@ -618,6 +637,8 @@ function makeDv(embed, currentVal) {
             && refreshes === beforeStructureRefresh);
 
         const links = new TripLinks();
+        ok('PERF4D-METADATA-GENERATION entry and link owners share one cache generation tracker',
+            list._metadataTracker() === links._metadataTracker());
         const nextLinks = [{ url: 'https://example.com', text: 'Example' }];
         const priorLinks = [];
         page = { type: 'trip', file: { path: pathName }, links: priorLinks };
@@ -696,14 +717,37 @@ function makeDv(embed, currentVal) {
         ok('PERF4C-MISSING-MTIME-AUTHORITY link snapshots without mtime cannot reclaim post-write authority',
             missingMtimeLinksState.model.length === 0 && !!missingMtimeLinksState.authority);
         file.stat.mtime = 12;
+        cachedFrontmatter = {
+            links: [{ url: 'https://a.example', text: 'A' }, { url: 'https://b.example', text: 'B' }],
+        };
+        const laggingLinksCacheState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://old.example', text: 'Old' }],
+        });
+        const laggingLinksCacheRetained = laggingLinksCacheState.model.length === 0
+            && !!laggingLinksCacheState.authority;
+        const laggingLinksFollowup = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://older.example', text: 'Older' }],
+        });
+        const laggingLinksFollowupRetained = laggingLinksFollowup.model.length === 0
+            && !!laggingLinksFollowup.authority;
         cachedFrontmatter = { links: [{ url: 'https://external.example', text: 'External' }] };
+        metadataListener(file);
         const newerLinksState = links._linksState(rapidLinksOwner, {
             type: 'trip', file: { path: pathName },
             links: [{ url: 'https://stale.example', text: 'Stale' }],
         });
-        ok('PERF4D-LINKS-CACHE-CONVERGENCE newer current-file cache releases missing-mtime authority',
-            newerLinksState.authority === null
-            && newerLinksState.model[0].url === 'https://external.example');
+        const linksCacheRebased = newerLinksState.authority?.expected?.[0]?.url === 'https://external.example'
+            && newerLinksState.model[0].url === 'https://external.example';
+        const convergedLinksState = links._linksState(rapidLinksOwner, {
+            type: 'trip', file: { path: pathName },
+            links: [{ url: 'https://external.example', text: 'External' }],
+        });
+        ok('PERF4D-LINKS-CACHE-CONVERGENCE only an observed cache generation rebases missing-mtime authority',
+            laggingLinksCacheRetained && laggingLinksFollowupRetained && linksCacheRebased
+            && convergedLinksState.authority === null
+            && convergedLinksState.model[0].url === 'https://external.example');
         cachedFrontmatter = null;
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
