@@ -183,6 +183,9 @@ class SectionExplorer {
     if (dispatchScope) {
       const scoped = candidates.find((root) => scopeOf(root) === dispatchScope);
       if (scoped) return scoped;
+      // A known view scope is authoritative. Never redirect its gesture into
+      // the sole surviving tree for another pane of the same note.
+      return fallback;
     }
     return candidates.length === 1 ? candidates[0] : fallback;
   }

@@ -2633,6 +2633,29 @@ ASYNC_TESTS.push({ name: "PERF8L-SECTION-EXPLORER singleton registry releases de
     "no disconnected unique-note roots remain strongly reachable from the singleton registry");
 }});
 
+ASYNC_TESTS.push({ name: "PERF8M-SECTION-EXPLORER detached local tree never redirects into a foreign view", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const owner = { structuralOwnerKey: "spice/wiki/shared/Note.md" };
+  const viewA = {};
+  const viewB = {};
+  const rootA = { isConnected: true, closest: () => viewA };
+  const rootB = { isConnected: true, closest: () => viewB };
+  const dispatchB = { isConnected: true, closest: () => viewB };
+  se._registerStructuralRoot(owner, rootA);
+  se._registerStructuralRoot(owner, rootB);
+  assert.strictEqual(se._structuralRoot({ container: dispatchB }, owner), rootB,
+    "two live views select the exact structural root in the dispatch scope");
+  rootB.isConnected = false;
+  assert.strictEqual(se._structuralRoot({ container: dispatchB }, owner), dispatchB,
+    "a resolved scope with no live local tree falls back locally instead of selecting the foreign root");
+  assert.deepStrictEqual(Array.from(se._structuralRoots.get(owner.structuralOwnerKey) || []), [rootA],
+    "pruning releases the detached local tree while preserving the other live view");
+  const unscopedDispatch = { isConnected: true, closest: () => null };
+  assert.strictEqual(se._structuralRoot({ container: unscopedDispatch }, owner), rootA,
+    "sole-root compatibility remains available when the dispatch scope cannot be resolved");
+}});
+
 failures += !run("PERF8-SECTION-EXPLORER structural bulk awaits each receipt-bound move and counts only successes", () => {
   const source = sourceUnderTest();
   assert.ok(/adapter\s*&&\s*adapter\.structural\s*===\s*true[\s\S]*await\s+this\.applyDocMove/.test(source));
