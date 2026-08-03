@@ -439,8 +439,12 @@ async function run() {
     const stale = { amount: 0 };
     const listeners = new Set();
     const vaultListeners = new Set();
+    let cacheThrows = false;
     const metadataCache = {
-      getFileCache: () => ({ frontmatter: stale }),
+      getFileCache: () => {
+        if (cacheThrows) throw new Error("fixture cache lookup failed");
+        return { frontmatter: stale };
+      },
       on(event, listener) {
         const ref = { event, listener };
         listeners.add(ref);
@@ -485,12 +489,20 @@ async function run() {
     const recoveredAuthoritative = failedLookupFf.read(file).amount === 1
       && failedLookupFf._writtenFrontmatter.size === 1
       && listeners.size === 1 && vaultListeners.size === 2;
+    cacheThrows = true;
+    metadataCache.emit(file);
+    const cacheFailureRetained = failedLookupFf.read(file) === null
+      && failedLookupFf._writtenFrontmatter.size === 1
+      && listeners.size === 1 && vaultListeners.size === 2;
+    cacheThrows = false;
+    const cacheRecoveredAuthoritative = failedLookupFf.read(file).amount === 1;
     currentFile = null;
     const releasedByDeletion = failedLookupFf.read(file.path) === null
       && failedLookupFf._writtenFrontmatter.size === 0 && listeners.size === 0;
     metadataCache.emit(file);
     ok("FF-12J transient lookup failure retains authority until deletion is proven",
-      retainedAcrossFailure && failedClosed && recoveredAuthoritative && releasedByDeletion
+      retainedAcrossFailure && failedClosed && recoveredAuthoritative
+        && cacheFailureRetained && cacheRecoveredAuthoritative && releasedByDeletion
         && failedLookupFf._writtenFrontmatter.size === 0
         && listeners.size === 0 && vaultListeners.size === 0);
   }
@@ -611,6 +623,58 @@ async function run() {
     }
     ok("FF-12L repeated rename then delete rekeys authority and releases every listener",
       registered && rekeyed && renamedFf._writtenFrontmatter.size === 0
+        && metadataListeners.size === 0 && vaultListeners.size === 0);
+  }
+  {
+    const originalPath = "spice/finance/Invoices/Renamed-During-Registration.md";
+    const renamedPath = "spice/finance/Invoices/Rebound-During-Registration.md";
+    const file = { path: originalPath, stat: { mtime: 70 } };
+    const currentFiles = new Map([[originalPath, file]]);
+    const persisted = { amount: 0 };
+    const stale = { amount: 0 };
+    const metadataListeners = new Set();
+    const vaultListeners = new Set();
+    const metadataCache = {
+      getFileCache: () => ({ frontmatter: stale }),
+      on(event, listener) {
+        const ref = { event, listener };
+        metadataListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { metadataListeners.delete(ref); },
+    };
+    const vault = {
+      getAbstractFileByPath: (path) => currentFiles.get(path) || null,
+      on(event, listener) {
+        if (event === "rename" && file.path === originalPath) {
+          currentFiles.delete(originalPath);
+          file.path = renamedPath;
+          currentFiles.set(renamedPath, file);
+        }
+        const ref = { event, listener };
+        vaultListeners.add(ref);
+        return ref;
+      },
+      offref(ref) { vaultListeners.delete(ref); },
+      emit(event, ...args) {
+        for (const ref of [...vaultListeners]) if (ref.event === event) ref.listener(...args);
+      },
+    };
+    global.app = {
+      vault,
+      metadataCache,
+      fileManager: { async processFrontMatter(_file, mutator) { await mutator(persisted); } },
+    };
+    const earlyRenameFf = new FinanceFrontmatter();
+    await earlyRenameFf.update(file, (fm) => { fm.amount = 1; });
+    const rebound = !earlyRenameFf._writtenFrontmatter.has(originalPath)
+      && earlyRenameFf._writtenFrontmatter.get(renamedPath)?.frontmatter?.amount === 1
+      && earlyRenameFf.read(renamedPath).amount === 1
+      && metadataListeners.size === 1 && vaultListeners.size === 2;
+    currentFiles.delete(renamedPath);
+    vault.emit("delete", file);
+    ok("FF-12M rename during listener registration rebinds authority before deletion settlement",
+      rebound && earlyRenameFf._writtenFrontmatter.size === 0
         && metadataListeners.size === 0 && vaultListeners.size === 0);
   }
   {

@@ -271,7 +271,13 @@ class FinanceFrontmatter {
             this._releaseWrittenSnapshot(path, this._writtenFrontmatter?.get?.(path));
             return null;
         }
-        const cached = app.metadataCache.getFileCache(file)?.frontmatter ?? null;
+        let cached = null;
+        try { cached = app.metadataCache.getFileCache(file)?.frontmatter ?? null; }
+        catch (_e) {
+            // Cache availability is transient just like vault lookup
+            // availability. Do not expose stale data or discard authority.
+            return null;
+        }
         const written = this._writtenFrontmatter?.get?.(file.path) || null;
         if (!written) return cached;
 
@@ -362,9 +368,11 @@ class FinanceFrontmatter {
                 written.renameEventRef = null;
             }
         }
-        // Either event may have fired before registration while the write was
-        // settling. Close that window after both listeners are installed.
-        settleCurrent();
+        // A rename may mutate the captured TFile before its listener is
+        // installed. Rebind that identity first; otherwise resolving only the
+        // old path would misclassify the rename as deletion and drop authority.
+        if (file?.path && file.path !== written.path) renameListener(file, written.path);
+        else settleCurrent();
     }
 
     _writtenSnapshotSettled(file, written, cached) {
