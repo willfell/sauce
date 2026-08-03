@@ -5929,7 +5929,7 @@ eq(parkedStatus.available_slots, 3, 'parked cards leave every capacity slot avai
 eq(parkedStatus.parked, [{
   card: 'Park me', phase: 'parked', status: 'parked', model_profile: undefined, branch: 'codex-autoloop/park-me',
   dependencies: ['Prerequisite A', 'Prerequisite B'], resume_condition: 'Both prerequisites deploy cleanly',
-  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null,
+  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null, lease: null,
 }], 'status lists parked cards separately with prerequisites and resume condition');
 eq(parkedStatus.tracked.find((record) => record.card === 'Park me').status, 'parked', 'all-tracked status view includes canonical parked');
 
@@ -6006,6 +6006,8 @@ const failedResumeDeps = {
     throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
   },
   now: () => '2026-07-15T16:02:30.000Z',
+  leaseNowMs: () => Date.parse('2026-07-15T16:02:30.000Z'),
+  leaseToken: () => 'tok-crash-1',
 };
 const failedResume = await commandResume(
   { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
@@ -6016,26 +6018,29 @@ eq(failedResumeState.cards['Crash parked'].phase, 'implementing',
   'CS1-PROJECTION-REPLAY failed resume projection preserves authoritative implementing state');
 eq(failedResumeState.cards['Crash parked'].projection_error, 'resume metadata projection denied',
   'CS1-PROJECTION-REPLAY failed resume projection is saved for reconciliation');
-const failedResumeBytes = JSON.stringify(failedResumeState);
+eq(failedResumeState.cards['Crash parked'].lease.token, 'tok-crash-1',
+  'CS1-PROJECTION-REPLAY successful (if projection-failed) resume still acquires a lease');
+const failedResumeBytesSansLease = JSON.stringify({ ...failedResumeState.cards['Crash parked'], lease: undefined });
 const failedResumeWritesBeforeReplay = failedResumeWrites;
 const failedResumeGitCallsBeforeReplay = failedResumeGitCalls.length;
+// LEASE-ATTACH: resume on this now-'implementing' card is documented attach
+// behavior (Task 1 contract) — lease arbitration only, zero phase/review/
+// projection side effects; supersedes the old settled-replay no-op contract.
 const failedResumeReplay = await commandResume(
-  { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
+  { root: parkRoot }, { json: true, card: 'Crash parked', 'lease-token': 'tok-crash-1' }, failedResumeDeps,
 );
-eq(failedResumeReplay.action, 'resume-projection-failed',
-  'CS1-PROJECTION-REPLAY resume replay keeps the unresolved projection failure explicit');
+eq(failedResumeReplay.action, 'attach',
+  'LEASE-ATTACH resume on an implementing card attaches instead of replaying the settled receipt');
 eq(failedResumeReplay.no_op, true,
-  'CS1-PROJECTION-REPLAY failed resume replay is a settled zero-write no-op');
-eq(failedResumeReplay.projection_error, 'resume metadata projection denied',
-  'CS1-PROJECTION-REPLAY failed resume replay preserves the exact projection error');
-eq(failedResumeReplay.reconcile, 'reconcile --card Crash parked',
-  'CS1-PROJECTION-REPLAY failed resume replay names the exact repair command');
-eq(failedResumeWrites, failedResumeWritesBeforeReplay,
-  'CS1-PROJECTION-REPLAY failed resume replay performs zero ledger writes');
+  'LEASE-ATTACH same-token attach is idempotent');
+eq(failedResumeReplay.lease_token, 'tok-crash-1',
+  'LEASE-ATTACH attach renews the existing lease token');
 eq(failedResumeGitCalls.length, failedResumeGitCallsBeforeReplay,
-  'CS1-PROJECTION-REPLAY failed resume replay performs zero Git freshness reads');
-eq(JSON.stringify(failedResumeState), failedResumeBytes,
-  'CS1-PROJECTION-REPLAY failed resume replay preserves authoritative state byte-for-byte');
+  'LEASE-ATTACH attach performs zero Git freshness reads');
+ok(failedResumeWrites > failedResumeWritesBeforeReplay,
+  'LEASE-ATTACH attach persists the renewed lease');
+eq(JSON.stringify({ ...failedResumeState.cards['Crash parked'], lease: undefined }), failedResumeBytesSansLease,
+  'LEASE-ATTACH attach preserves every field but the lease byte-for-byte, including the unresolved projection error');
 const currentMainCalls = [];
 const currentMainResume = await commandResume({ root: parkRoot }, { json: true, card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
@@ -6209,6 +6214,8 @@ const resumed = await commandResume({ root: parkRoot }, { json: true, card: 'Par
     throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
   },
   now: () => '2026-07-15T16:05:00.000Z',
+  leaseNowMs: () => Date.parse('2026-07-15T16:05:00.000Z'),
+  leaseToken: () => 'tok-park-1',
 });
 eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite is satisfied');
 eq({ ok: resumed.ok, no_op: resumed.no_op }, { ok: true, no_op: false },
@@ -6235,32 +6242,34 @@ eq(parkState.cards['Park me'].resume_condition, null, 'successful resume clears 
 ok(!/^resume_condition:/m.test(fs.readFileSync(parkCardPath, 'utf8')), 'successful resume clears resume condition from card metadata');
 eq(parkState.cards['Park me'].branch, 'codex-autoloop/park-me', 'resume preserves the branch');
 eq(parkState.cards['Park me'].worktree, '/worktrees/park-me', 'resume preserves the worktree and implementation');
-const resumedStateBytes = JSON.stringify(parkState);
+eq(resumed.lease_token, 'tok-park-1', 'successful resume acquires a lease and reports its token');
+eq(parkState.cards['Park me'].lease.token, 'tok-park-1', 'successful resume records the lease on the ledger');
+const resumedStateBytesSansLease = JSON.stringify({ ...parkState.cards['Park me'], lease: undefined });
 const resumedCardBytes = fs.readFileSync(parkCardPath, 'utf8');
 const writesBeforeResumeReplay = parkWrites;
 const projectionsBeforeResumeReplay = opx2ParkResumeProjections.length;
-const parkResumeReplay = await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
+// LEASE-ATTACH: 'Park me' is now 'implementing', so a further resume call is
+// documented attach behavior (Task 1 contract) — same-token renewal only, no
+// Git/card/Loop-Station side effects; supersedes the old settled-replay no-op.
+const parkResumeReplay = await commandResume({ root: parkRoot }, { json: true, card: 'Park me', 'lease-token': 'tok-park-1' }, {
   ...parkDeps,
   sh: () => { throw new Error('literal resume replay must not inspect Git'); },
   writeState: () => { parkWrites++; },
   projectCard: () => { throw new Error('literal resume replay must not project card metadata'); },
   projectLoopStation: () => { throw new Error('literal resume replay must not project Loop Station'); },
+  leaseNowMs: () => Date.parse('2026-07-15T16:05:01.000Z'),
+  leaseToken: () => 'unused',
 });
-eq(parkResumeReplay.no_op, true, 'CS1-REPLAY-NOOP literal resume replay returns no_op:true');
-eq({
-  origin_main_advanced: parkResumeReplay.origin_main_advanced,
-  requires_main_update: parkResumeReplay.requires_main_update,
-}, {
-  origin_main_advanced: resumed.origin_main_advanced,
-  requires_main_update: resumed.requires_main_update,
-}, 'CS1-REPLAY-NOOP literal resume replay preserves the legacy freshness fields');
-eq(JSON.stringify(parkState), resumedStateBytes,
-  'CS1-REPLAY-NOOP literal resume replay preserves authoritative state byte-for-byte');
+eq(parkResumeReplay.action, 'attach', 'LEASE-ATTACH resume on an implementing card attaches');
+eq(parkResumeReplay.no_op, true, 'LEASE-ATTACH same-token attach returns no_op:true');
+eq(parkResumeReplay.lease_token, 'tok-park-1', 'LEASE-ATTACH same-token attach renews the existing token');
+eq(JSON.stringify({ ...parkState.cards['Park me'], lease: undefined }), resumedStateBytesSansLease,
+  'LEASE-ATTACH attach preserves every field but the lease byte-for-byte');
 eq(fs.readFileSync(parkCardPath, 'utf8'), resumedCardBytes,
-  'CS1-REPLAY-NOOP literal resume replay preserves projected card bytes');
-eq(parkWrites, writesBeforeResumeReplay, 'CS1-REPLAY-NOOP literal resume replay performs zero ledger writes');
+  'LEASE-ATTACH attach never touches the projected card file');
+ok(parkWrites > writesBeforeResumeReplay, 'LEASE-ATTACH attach persists the renewed lease');
 eq(opx2ParkResumeProjections.length, projectionsBeforeResumeReplay,
-  'CS1-REPLAY-NOOP literal resume replay performs zero Loop Station writes');
+  'LEASE-ATTACH attach performs zero Loop Station writes');
 
 const reconcileRoot = path.join(tmp, 'projection');
 fs.mkdirSync(reconcileRoot, { recursive: true });

@@ -25,7 +25,7 @@ Everything that used to vary by prompt comes from the binding and this skill: sc
 
 Infer the mode from the prompt. Default to `dry-run`; only `--live` (or an explicitly autonomous session) authorizes mutations:
 
-- `run --live`: resume eligible active work first, otherwise claim — then KEEP GOING per `config.run_scope`:
+- `run --live`: resume eligible active work first, otherwise claim — resume/claim receipts return `lease_token`; pass `--lease-token <token>` on every subsequent coordinator verb for that card. Resuming an active card is a side-effect-free attach; `lease_held` means another session owns it — take a different card, never work around the refusal. Then KEEP GOING per `config.run_scope`:
   - `board` (default): after each `complete` + reconcile, take the next eligible slice in coordinator/board order, epic by epic, until `status.next` is `no-work` (report `first_blocker` and stop) or a ceiling/halt applies.
   - `epic`: finish the current epic (all its eligible slices), then stop with the receipt.
   - `turn`: one bounded claim-or-resume turn, then stop.
@@ -41,11 +41,11 @@ Deploy posture is the binding's, never the prompt's: `policy.deploy_vaults: []` 
 1. `node <coordinator> status --json`. If `halted`, stop — never remove the halt file without an explicit user request.
 2. Read `projection_problems` and `board_drift` even when no card is active. Repair every UNAMBIGUOUS drift by single-card reconcile (`reconcile --card "<exact name>" --json`, replay to `no_op: true`); log ambiguous ones and leave them.
 3. Resume any parked card whose recorded resume condition is already satisfied — quote the satisfying artifact in the receipt.
-4. Read `status.next` before any live action: `claim` → name the slice + profile; `no-work` → report `first_blocker`, never claim; `at-capacity` → name active cards, resume one, never claim another.
+4. Read `status.next` before any live action: `claim` → name the slice + profile; `no-work` → report `first_blocker`, never claim; `at-capacity` → resume one of the cards listed in `next.resumable` (they are unleased or stale), never claim another; `all-work-leased` → every active card is owned by a live session — report the leased cards + soonest expiry and STOP; never touch a leased card's worktree.
 
 ## Execute (the slice path)
 
-Claim → isolated worktree → implement within `touch_zones` (regression test that fails without the change; conventional `fix:`/`feat:` commit; never touch versions/tags/release PRs/tap) → `node <gate> verify-adequacy --base origin/main --json` → three read-only reviews in separate contexts (correctness, regression-risk, test-adequacy), each recorded via `record-review` with exact heads, sequential, stop-at-first-refutation → `verify-gates` → push + PR + `record-pr` → `advance --lease-seconds 600 --jsonl` through CI/merge/release/deploy/reconcile per the binding's `execution_mode` and deploy list. On `complete`, reconcile and continue to the next eligible slice.
+Claim → isolated worktree → implement within `touch_zones` (regression test that fails without the change; conventional `fix:`/`feat:` commit; never touch versions/tags/release PRs/tap) → `node <gate> verify-adequacy --base origin/main --json` → three read-only reviews in separate contexts (correctness, regression-risk, test-adequacy), each recorded via `record-review --lease-token <token>` with exact heads, sequential, stop-at-first-refutation → `verify-gates --lease-token <token>` → push + PR + `record-pr --lease-token <token>` → `advance --lease-token <token> --lease-seconds 600 --jsonl` through CI/merge/release/deploy/reconcile per the binding's `execution_mode` and deploy list. On `complete`, reconcile and continue to the next eligible slice.
 
 Refutation → ONE same-card repair, full quorum rerun. Second refutation → supersede at mint via `/loop:intake` (carried findings + binding fixtures) and execute the returned discard through the coordinator. Coordinator return values (`parked`, `fix-ci`, `verify-gates`, `refresh-feature`, `waiting`, `deploy`, `complete`, `completion-projection-failed`, `blocked-external`, `needs-inspection`) are handled exactly as the coordinator prescribes — its receipt, not intuition, is authoritative.
 

@@ -33,6 +33,20 @@ the invalidation history, clears the current receipts, and records why. All thre
 reviews and `verify-gates` must run again. Resume reports whether `origin/main`
 advanced but never merges, rebases, pushes, or force-pushes the preserved branch.
 
+Every active (non-parked, non-terminal) card also carries a session lease.
+`claim`/`resume` acquire it; `record-review`, `verify-gates`, `record-pr`,
+`advance`, `park`, `amend-contract`, `consume-ratification`, and `deploy` all
+require a matching `--lease-token` and renew it in place on success. A refusal
+of `lease_held`, `lease_required`, `lease_mismatch`, `lease_stale`, or
+`lease_gone` means: re-attach with `resume --card "<exact>" --json` (pass its
+`lease_token` on to the next verb call), or pick different work. `break-lease
+--card "<exact>" --reason "..."` is the audited manual escape hatch for a
+holder that is known dead. By design, this fence is coordinator-mediated only:
+`gate.js`/`verify-adequacy` and raw worktree access never go through the
+coordinator, so the lease only holds if every session attaches (via
+claim/resume) before touching a card's worktree — never touch a leased card's
+worktree without first attaching to it.
+
 ## Concurrency
 
 - Maximum active claims: three.

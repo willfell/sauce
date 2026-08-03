@@ -39,18 +39,21 @@ const MAXBUF = 64 * 1024 * 1024;
 const REPO = process.env.SAUCE_LOOP_REPO || 'willfell/sauce';
 const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
+const LEASE_TTL_MS = 2 * 60 * 60 * 1000; // per-card session lease: generous, time-based only —
+// coordinator invocations are short-lived node processes, so pid-liveness can't arbitrate here.
 const DEFAULT_LEASE_SECONDS = 600;
 const DEFAULT_POLL_SECONDS = 20;
 const REVIEW_LENSES = ['correctness', 'regression-risk', 'test-adequacy'];
 const STRICT_CLI_OPTIONS = Object.freeze({
-  park: ['json', 'card', 'depends-on', 'resume-condition'],
+  park: ['json', 'card', 'depends-on', 'resume-condition', 'lease-token'],
   'amend-park': ['json', 'card', 'expected-head', 'reason', 'depends-on', 'clear-dependencies', 'resume-condition'],
-  resume: ['json', 'card'],
+  resume: ['json', 'card', 'lease-token'],
   'record-review': [
     'json', 'card', 'lens', 'verdict', 'summary', 'expected-head',
-    'accepted-limitation', 'bound',
+    'accepted-limitation', 'bound', 'lease-token',
   ],
-  'record-pr': ['json', 'card', 'pr'],
+  'record-pr': ['json', 'card', 'pr', 'lease-token'],
+  'break-lease': ['json', 'card', 'reason'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -250,6 +253,90 @@ function lockIsStale(owner, now = Date.now(), staleMs = 30 * 60 * 1000) {
   if (!Number.isFinite(age) || age <= staleMs) return false;
   if (owner.host && owner.host !== os.hostname()) return true;
   return !pidAlive(Number(owner.pid));
+}
+
+function leaseIsLive(lease, nowMs, ttlMs = LEASE_TTL_MS) {
+  if (!lease || typeof lease !== 'object') return false;
+  const renewed = Date.parse(lease.renewed_at);
+  if (!Number.isFinite(renewed)) return false;
+  const age = nowMs - renewed;
+  return age >= 0 && age < ttlMs; // negative age = clock skew = stale (turn-lock.js precedent)
+}
+
+function leaseSummary(lease, nowMs, ttlMs = LEASE_TTL_MS) {
+  if (!lease || typeof lease !== 'object') return null;
+  const renewed = Date.parse(lease.renewed_at);
+  const age = Number.isFinite(renewed) ? nowMs - renewed : null;
+  const held = leaseIsLive(lease, nowMs, ttlMs);
+  return {
+    held, stale: !held, age_ms: age,
+    expires_in_ms: held ? ttlMs - age : 0,
+    holder: lease.holder || null, acquired_at: lease.acquired_at || null,
+  };
+}
+
+function acquireLease(record, { now, token, label = '' } = {}) {
+  const at = (now || (() => new Date().toISOString()))();
+  record.lease = {
+    token: token || crypto.randomUUID(),
+    acquired_at: at, renewed_at: at,
+    holder: { host: os.hostname(), ...(label ? { label } : {}) },
+  };
+  return record.lease;
+}
+
+function clearLease(record, reason, now) {
+  if (!record || !record.lease) return false;
+  const at = (now || (() => new Date().toISOString()))();
+  record.lease_breaks = [...(record.lease_breaks || []), {
+    at, reason, previous_token: record.lease.token, previous_holder: record.lease.holder || null,
+  }];
+  delete record.lease;
+  return true;
+}
+
+// Shared pipeline-verb lease guard. Unleased records are a tokenless no-op
+// (back-compat); a live lease requires a matching --lease-token; a stale
+// lease refuses lease_stale BEFORE lease_required so a returning holder must
+// re-attach via resume (auditing the takeover) rather than silently reusing
+// an expired token. A matching token renews the lease in place — the verb's
+// own persist carries the renewal, no extra write.
+function requireLeaseToken(record, args, verb, nowMs) {
+  if (!record) return;
+  if (!record.lease) {
+    // Unleased is normally a back-compat tokenless no-op — but a token
+    // supplied against an ACTIVE unleased card means the caller believes it
+    // holds a lease that no longer exists (broken, superseded, or never
+    // persisted). Parked/terminal records keep the old silent pass-through
+    // so tokened idempotent replays after park/completion still no-op.
+    const supplied = String(args['lease-token'] || '').trim();
+    const active = record.phase !== 'parked' && !TERMINAL.has(record.phase);
+    if (supplied && active) {
+      refuse(`${verb}-refused`, 'lease_gone',
+        `your lease on ${record.card} no longer exists (broken or superseded) — re-attach with resume --card "${record.card}" --json before continuing`,
+        { card: record.card });
+    }
+    return;
+  }
+  const supplied = String(args['lease-token'] || '').trim();
+  const live = leaseIsLive(record.lease, nowMs);
+  const remedy = `resume --card "${record.card}" --json to attach (or break-lease --card "${record.card}" --reason "..." if the holder is known dead)`;
+  if (!live) {
+    refuse(`${verb}-refused`, 'lease_stale',
+      `card ${record.card} carries a stale lease — ${remedy}`,
+      { card: record.card, lease: leaseSummary(record.lease, nowMs) });
+  }
+  if (!supplied) {
+    refuse(`${verb}-refused`, 'lease_required',
+      `card ${record.card} is leased; ${verb} requires --lease-token <token from your claim/resume receipt> — ${remedy}`,
+      { card: record.card, lease: leaseSummary(record.lease, nowMs) });
+  }
+  if (supplied !== record.lease.token) {
+    refuse(`${verb}-refused`, 'lease_mismatch',
+      `--lease-token does not match the live lease on ${record.card} held by ${record.lease.holder && record.lease.holder.host ? record.lease.holder.host : 'another session'} — ${remedy}`,
+      { card: record.card, lease: leaseSummary(record.lease, nowMs) });
+  }
+  record.lease.renewed_at = new Date(nowMs).toISOString(); // renewal rides the verb's own persist
 }
 
 function lockDirectoryIsStale(lockPath, owner, staleMs) {
@@ -792,11 +879,13 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
   const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
   const writeText = deps.writeText || atomicWriteText;
   const now = deps.now || (() => new Date().toISOString());
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   const project = deps.projectCard || projectCard;
   return lock(ctx, 'selector', async () => withCardGateLock(ctx, operand.card, async () => {
     const state = loadState(ctx);
     const record = state.cards[operand.card];
     if (!record) throw new Error(`card ${operand.card} is not claimed`);
+    requireLeaseToken(record, args, 'consume-ratification', leaseNowMs());
     if (record.ratification_receipt) {
       if (!ratificationReplayMatches(record, operand.requestIdentity)) {
         throw new Error('ratification was already consumed with different operands; replay must be literal');
@@ -1650,7 +1739,7 @@ function selectClaimCandidate({
   const board = parseBoard(boardMd);
   const active = activeRecords(state);
   if (active.length >= MAX_ACTIVE) {
-    const selected = { action: 'at-capacity', active: active.map((r) => r.card) };
+    const selected = { action: 'at-capacity', active: active.map((r) => r.card), activeRecords: active };
     if (epicShadow) selected.shadow_selection = selectEpicShadowCandidate({
       boardMd, state, loadCard, supervised, cardsRoot, readFile, readDir, exists, loadEpicCard,
     });
@@ -1724,7 +1813,7 @@ function selectCoordinatorCandidate({
   });
 }
 
-function summarizeClaimSelection(selected) {
+function summarizeClaimSelection(selected, nowMs = Date.now()) {
   const skipped = selected.skipped || [];
   if (selected.action === 'claim') {
     const summary = {
@@ -1746,9 +1835,21 @@ function summarizeClaimSelection(selected) {
     return summary;
   }
   if (selected.action === 'at-capacity') {
+    const records = selected.activeRecords || [];
+    const resumable = records.filter((r) => !leaseIsLive(r.lease, nowMs)).map((r) => r.card);
+    const leased = records.filter((r) => leaseIsLive(r.lease, nowMs))
+      .map((r) => ({ card: r.card, expires_in_ms: leaseSummary(r.lease, nowMs).expires_in_ms }));
+    const shadow = selected.shadow_selection ? { shadow_selection: selected.shadow_selection } : {};
+    if (records.length && resumable.length === 0) {
+      return {
+        action: 'all-work-leased', leased,
+        soonest_expiry_ms: Math.min(...leased.map((l) => l.expires_in_ms)),
+        ...shadow,
+      };
+    }
     return {
-      action: 'at-capacity', active: selected.active || [],
-      ...(selected.shadow_selection ? { shadow_selection: selected.shadow_selection } : {}),
+      action: 'at-capacity', active: selected.active || [], resumable, leased,
+      ...shadow,
     };
   }
   const summary = {
@@ -3503,10 +3604,12 @@ async function commandAmendContract(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx);
     const record = state.cards[card];
     if (!record) throw new Error(`amend-contract requires a tracked --card; ${card} is not tracked`);
+    requireLeaseToken(record, args, 'amend-contract', leaseNowMs());
     if (!['claimed', 'implementing', 'parked'].includes(record.phase)) {
       throw new Error(`amend-contract accepts only claimed, implementing, or parked pre-PR work; ${card} is ${record.phase}`);
     }
@@ -3681,6 +3784,7 @@ async function commandPark(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('park-refused', 'card_not_claimed', `card ${card} is not claimed`);
@@ -3700,6 +3804,7 @@ async function commandPark(ctx, args, deps = {}) {
         } : {}),
       });
     }
+    requireLeaseToken(record, args, 'park', leaseNowMs());
     if (!['claimed', 'implementing'].includes(record.phase)) {
       refuse('park-refused', 'phase_ineligible',
         `park only accepts claimed pre-PR work; ${card} is ${record.phase}`);
@@ -3714,6 +3819,7 @@ async function commandPark(ctx, args, deps = {}) {
     record.dependencies = dependencies;
     record.resume_condition = resumeCondition;
     record.parked_at = parkedAt;
+    clearLease(record, 'lease_released_park', now);
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
       withLock: transitionLock, projectCard: project, now, state,
@@ -3831,6 +3937,37 @@ async function commandAmendPark(ctx, args, deps = {}) {
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
 }
 
+// break-lease — manual escape hatch for a holder known to be gone (dead chat
+// window, crashed process). Never touches receipts, worktrees, or card
+// phase; it only clears the lease and audits the manual reason. No board
+// projection: this is a lease-only operation, so it does not need the
+// selector transitionLock that board-writing verbs (amend-park) take.
+async function commandBreakLease(ctx, args, deps = {}) {
+  requireJson(args, 'break-lease');
+  requireOnlyOptions(args, 'break-lease', STRICT_CLI_OPTIONS['break-lease']);
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const lock = deps.withLock || withLock;
+  const now = deps.now || (() => new Date().toISOString());
+  const nowMs = (deps.leaseNowMs || (() => Date.now()))();
+  const card = String(args.card || '').trim();
+  const reason = Array.isArray(args.reason) ? '' : String(args.reason || '').trim();
+  if (!card) usage('break-lease-refused', 'card_required', 'break-lease requires --card "<exact name>"');
+  if (!reason) refuse('break-lease-refused', 'reason_required', 'break-lease requires --reason "<why the holder is gone>"');
+  return withCardGateLock(ctx, card, async () => {
+    const state = loadState(ctx);
+    const record = state.cards[card];
+    if (!record) refuse('break-lease-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    const broken = leaseSummary(record.lease, nowMs);
+    if (!clearLease(record, 'lease_broken_manual', now)) {
+      return successReceipt('break-lease', { card, no_op: true, broken: null, reason });
+    }
+    record.lease_breaks[record.lease_breaks.length - 1].manual_reason = reason;
+    persist(ctx, state, record);
+    return successReceipt('break-lease', { card, no_op: false, broken, reason });
+  }, { card }, lock);
+}
+
 async function commandResume(ctx, args, deps = {}) {
   requireJson(args, 'resume');
   requireOnlyOptions(args, 'resume', STRICT_CLI_OPTIONS.resume);
@@ -3845,9 +3982,42 @@ async function commandResume(ctx, args, deps = {}) {
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
   const worktreeExists = deps.worktreeExists || fs.existsSync;
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('resume-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    const nowMs = leaseNowMs();
+    const suppliedToken = String(args['lease-token'] || '').trim();
+    if (record.phase !== 'parked') {
+      if (!TERMINAL.has(record.phase)) {
+        // active card → attach: lease arbitration only, zero phase/review side effects
+        const live = leaseIsLive(record.lease, nowMs);
+        if (live && suppliedToken && suppliedToken === record.lease.token) {
+          record.lease.renewed_at = now();
+          persist(ctx, state, record);
+          return successReceipt('attach', {
+            card, phase: record.phase, no_op: true,
+            lease_token: record.lease.token, lease: leaseSummary(record.lease, nowMs),
+            branch: record.branch, worktree: record.worktree,
+          });
+        }
+        if (live) {
+          refuse('resume-refused', 'lease_held',
+            `card ${card} is actively leased by ${record.lease.holder && record.lease.holder.host ? record.lease.holder.host : 'another session'} (expires in ${Math.round((LEASE_TTL_MS - (nowMs - Date.parse(record.lease.renewed_at))) / 60000)}m) — resume a different active card, claim new work, or break-lease --card "${card}" --reason "..." if the holder is known dead`,
+            { card, phase: record.phase, lease: leaseSummary(record.lease, nowMs) });
+        }
+        if (record.lease) clearLease(record, 'lease_superseded_stale', now); // stale takeover, audited
+        acquireLease(record, { now, token: mintLeaseToken() });
+        persist(ctx, state, record);
+        return successReceipt('attach', {
+          card, phase: record.phase, no_op: false,
+          lease_token: record.lease.token, lease: leaseSummary(record.lease, nowMs),
+          branch: record.branch, worktree: record.worktree,
+        });
+      }
+      // terminal phases fall through to the existing 'not parked' refusal below
+    }
     if (record.phase === 'implementing' && record.last_resume_request
       && record.last_resume_request.card === card) {
       return successReceipt(record.projection_error ? 'resume-projection-failed' : 'implement', {
@@ -3946,6 +4116,7 @@ async function commandResume(ctx, args, deps = {}) {
       origin_main_advanced: originMainAdvanced,
       requires_main_update: originMainAdvanced,
     };
+    acquireLease(record, { now, token: mintLeaseToken() });
     persist(ctx, state, record);
     const projection = await attemptProjection(ctx, record, boardPath, {
       withLock: transitionLock, projectCard: project, now, state,
@@ -3961,6 +4132,7 @@ async function commandResume(ctx, args, deps = {}) {
       head_sha: headSha, origin_main_sha: originMainSha,
       origin_main_advanced: originMainAdvanced, requires_main_update: originMainAdvanced,
       loop_station: station.receipt,
+      lease_token: record.lease.token, lease: leaseSummary(record.lease, leaseNowMs()),
       ...(projection.ok ? {} : { projection_error: projection.error, reconcile: `reconcile --card ${card}` }),
     });
   }, { card, staleMs: 60 * 60 * 1000 }, transitionLock), { card, staleMs: 60 * 60 * 1000 });
@@ -4154,6 +4326,7 @@ async function discardCardCore(ctx, operands, d) {
   const target = record || { card, card_path: noteExists ? cardPath : null };
   target.phase = 'discarded';
   Object.assign(target, tombstone);
+  clearLease(target, 'lease_cleared_supervised', now);
   state.cards[card] = target;
   persist(ctx, state, target);
 
@@ -5015,7 +5188,10 @@ async function commandRestructure(ctx, args, deps = {}) {
   return d.transitionLock(ctx, 'selector', () => restructureCore(ctx, spec, d), { staleMs: RESTRUCTURE_STALE_MS });
 }
 
-async function commandClaim(ctx, args) {
+async function commandClaim(ctx, args, deps = {}) {
+  const now = deps.now || (() => new Date().toISOString());
+  const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return withLock(ctx, 'selector', async () => {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       return successReceipt('halted', { no_op: true, reason: '.autoloop-halt present' });
@@ -5049,6 +5225,7 @@ async function commandClaim(ctx, args) {
       ...(selected.meta.contractSource === 'current' ? { delivery_contract: selected.meta.contract } : {}),
       branch, worktree, claimed_at: new Date().toISOString(),
     };
+    acquireLease(record, { now, token: mintLeaseToken() });
     state.cards[selected.card] = record;
     writeState(ctx, state, record);
     try {
@@ -5063,6 +5240,8 @@ async function commandClaim(ctx, args) {
     const station = await attemptLoopStationProjection(ctx, state, 'claim');
     return successReceipt('implement', {
       ...record, skipped: selected.skipped,
+      lease_token: record.lease.token,
+      lease: leaseSummary(record.lease, leaseNowMs()),
       loop_station: station.receipt,
     });
   });
@@ -5116,9 +5295,11 @@ async function commandRecordReview(ctx, args, deps = {}) {
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
   const gateLock = deps.withLock || withLock;
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('record-review-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    requireLeaseToken(record, args, 'record-review', leaseNowMs());
     if (!record.worktree || !fs.existsSync(record.worktree)) {
       refuse('record-review-refused', 'worktree_missing', `worktree is missing for ${card}`);
     }
@@ -5166,9 +5347,11 @@ async function commandVerifyGates(ctx, args, deps = {}) {
   const persist = deps.writeState || writeState;
   const runSelfInstall = deps.runIsolatedWorkshopSelfInstall || runIsolatedWorkshopSelfInstall;
   const gateLock = deps.withLock || withLock;
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) throw new Error(`card ${card} is not claimed`);
+    requireLeaseToken(record, args, 'verify-gates', leaseNowMs());
     if (!record.worktree || !fs.existsSync(record.worktree)) throw new Error(`worktree is missing for ${card}`);
     const dirty = run('git', ['status', '--short'], { cwd: record.worktree });
     if (dirty) throw new Error(`worktree is not clean: ${dirty.split('\n')[0]}`);
@@ -5273,9 +5456,11 @@ async function commandRecordPr(ctx, args, deps = {}) {
   const run = deps.sh || sh;
   const persist = deps.writeState || writeState;
   const gateLock = deps.withLock || withLock;
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   return withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('record-pr-refused', 'card_not_claimed', `card ${card} is not claimed`);
+    requireLeaseToken(record, args, 'record-pr', leaseNowMs());
     if (record.feature_pr != null) {
       if (record.feature_pr !== number) {
         refuse('record-pr-refused', 'literal_replay_mismatch',
@@ -5322,10 +5507,13 @@ async function commandAdvance(ctx, args, deps = {}) {
   const lease = Math.min(DEFAULT_LEASE_SECONDS, Math.max(0, Number(args['lease-seconds'] || DEFAULT_LEASE_SECONDS)));
   const poll = Math.max(5, Number(args['poll-seconds'] || DEFAULT_POLL_SECONDS));
   const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   const gateLock = deps.withLock || withLock;
   const step = deps.stepCard || stepCard;
   const emit = deps.emit || ((value) => process.stdout.write(`${JSON.stringify(value)}\n`));
   const selectorLock = deps.selectorLock || deps.withLock || withLock;
+  const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const deadline = Date.now() + lease * 1000;
   let last = '';
   while (true) {
@@ -5337,9 +5525,25 @@ async function commandAdvance(ctx, args, deps = {}) {
     let result = await withCardGateLock(ctx, card, async () => {
       const state = loadState(ctx); const record = state.cards[card];
       if (!record) throw new Error(`card ${card} not in state`);
+      // Arbitrate the lease on EVERY poll iteration, inside the card-gate
+      // lock — not just the first pass. A mid-poll break-lease + foreign
+      // attach must abort this loop with the appropriate refusal instead of
+      // silently continuing to step (and eventually writeState-stomping) a
+      // record now owned by a different holder.
+      requireLeaseToken(record, args, 'advance', leaseNowMs());
       const priorPhase = record.phase;
       const stepped = await step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
       if (!args['dry-run'] && record.phase !== priorPhase) transitionedTo = record.phase;
+      // Dry-run is a preview call — never durably release a lease on its
+      // behalf, even when the (already-terminal) record's phase happens to
+      // satisfy TERMINAL. Mirrors the transitionedTo gate immediately above.
+      if (!args['dry-run'] && TERMINAL.has(record.phase)) {
+        // clearLease is a no-op on an unleased record (returns false) — only
+        // persist the extra write when there was actually a lease to release,
+        // so unleased advance calls stay byte-identical to pre-lease behavior.
+        const released = clearLease(record, 'lease_released_terminal', () => new Date(leaseNowMs()).toISOString());
+        if (released) persist(ctx, state, record);
+      }
       return stepped;
     }, { card, staleMs: 60 * 60 * 1000 }, gateLock);
     if (transitionedTo) {
@@ -5360,11 +5564,12 @@ async function commandAdvance(ctx, args, deps = {}) {
       const receipt = { action: 'waiting', card, phase: loadState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
       emit(receipt); return receipt;
     }
-    await new Promise((resolve) => setTimeout(resolve, Math.min(poll * 1000, Math.max(0, deadline - Date.now()))));
+    await sleep(Math.min(poll * 1000, Math.max(0, deadline - Date.now())));
   }
 }
 
 function commandStatus(ctx, opts = {}) {
+  const nowMs = (opts.leaseNowMs || (() => Date.now()))();
   const state = opts.state || readState(ctx); const active = activeRecords(state);
   const parked = Object.values(state.cards || {}).filter((record) => record.phase === 'parked');
   const tracked = Object.values(state.cards || {}).filter((record) => projectionMapping(record.phase));
@@ -5383,7 +5588,7 @@ function commandStatus(ctx, opts = {}) {
     cardsRoot,
     readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
     loadEpicCard: opts.loadEpicCard,
-  }));
+  }), nowMs);
   const savedProjectionProblems = Object.values(state.cards || {})
     .filter((record) => record.projection_error)
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
@@ -5411,6 +5616,7 @@ function commandStatus(ctx, opts = {}) {
     active: active.map((r) => ({
       card: r.card, phase: r.phase, status: (projectedRecordMapping(r, cardsRoot) || {}).status || null,
       model_profile: r.model_profile, batch_policy: r.batch_policy || null, branch: r.branch, pr: r.feature_pr || null,
+      lease: leaseSummary(r.lease, nowMs),
     })),
     parked: parked.map((r) => {
       const ratification = ratificationStatus(r, state, {
@@ -5422,6 +5628,7 @@ function commandStatus(ctx, opts = {}) {
         card: r.card, phase: r.phase, status: 'parked', model_profile: r.model_profile, branch: r.branch,
         dependencies: r.dependencies || [], resume_condition: r.resume_condition || '',
         parked_at: r.parked_at || null, projection_error: r.projection_error || null,
+        lease: leaseSummary(r.lease, nowMs),
         ...(ratification ? { ratification } : {}),
       };
     }),
@@ -6165,6 +6372,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
     record.vault_receipts = evidence.vault_receipts;
     record.phase = 'deployed';
     record.deployed_at = audit.recovered_at;
+    clearLease(record, 'lease_cleared_supervised', now);
     persist(ctx, state, record);
     const projection = await project(ctx, record, deps.boardPath || BOARD, {
       projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
@@ -7000,6 +7208,7 @@ async function main() {
   else if (command === 'park') result = await commandPark(ctx, args);
   else if (command === 'amend-park') result = await commandAmendPark(ctx, args);
   else if (command === 'resume') result = await commandResume(ctx, args);
+  else if (command === 'break-lease') result = await commandBreakLease(ctx, args);
   else if (command === 'backfill-ratifications') result = await commandBackfillRatifications(ctx, args);
   else if (command === 'consume-ratification') result = await commandConsumeRatification(ctx, args);
   else if (command === 'discard') result = await commandDiscard(ctx, args);
@@ -7015,11 +7224,30 @@ async function main() {
   else if (command === 'reconcile-dependencies') result = await commandReconcileDependencies(ctx, args);
   else if (command === 'cutover') result = await commandCutover(ctx, args);
   else if (command === 'deploy') {
-    const state = readState(ctx); const record = state.cards[args.card];
-    if (!record) throw new Error('deploy requires a known --card');
-    result = await promoteAndDeploy(ctx, state, record);
+    // Whole block runs under the card gate lock — not just the guard — so a
+    // concurrent attach during a multi-minute deploy can't have its lease
+    // clobbered by this dispatch's own whole-record writeState on terminal
+    // release. promoteAndDeploy locks under a distinct 'homebrew-promotion'
+    // name, so nesting here does not risk a same-name relock/deadlock.
+    result = await withCardGateLock(ctx, args.card, async () => {
+      const state = readState(ctx); const record = state.cards[args.card];
+      if (!record) throw new Error('deploy requires a known --card');
+      requireLeaseToken(record, args, 'deploy', Date.now());
+      const deployed = await promoteAndDeploy(ctx, state, record);
+      // promoteAndDeploy mutates `record` in place (same reference held in
+      // `state.cards`) and persists its own writes internally; once it lands
+      // the record in a TERMINAL phase (deployed), release the lease and
+      // persist the release as a follow-up write — same conditional-persist
+      // pattern as commandAdvance's terminal release, so an unleased card
+      // never triggers an extra write.
+      if (TERMINAL.has(record.phase)) {
+        const released = clearLease(record, 'lease_released_terminal', () => new Date().toISOString());
+        if (released) writeState(ctx, state, record);
+      }
+      return deployed;
+    }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7045,7 +7273,7 @@ module.exports = {
   ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
-  commandAmendContract, commandPark, commandAmendPark, commandResume, commandDiscard, commandReap, commandRestructure,
+  commandAmendContract, commandPark, commandAmendPark, commandResume, commandBreakLease, commandDiscard, commandReap, commandRestructure,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
@@ -7055,6 +7283,7 @@ module.exports = {
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
   PARKED_METADATA_REBIND_CARDS,
   loopBindingEnv, resolveBoundDefaults, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS, REPO,
+  LEASE_TTL_MS, leaseIsLive, leaseSummary, acquireLease, clearLease, requireLeaseToken,
 };
 
 if (require.main === module) {

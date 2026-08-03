@@ -74,7 +74,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Test harnesses
 
-139 harnesses under `platform/test/run-*.js`, one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
+140 harnesses under `platform/test/run-*.js`, one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
 
 ## In-flight / next-candidate queue
 

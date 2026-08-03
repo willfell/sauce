@@ -530,6 +530,22 @@
       "notes": "A4 durable batch ledger v1.0.0. Stored below the Git common directory with immutable batch/attempt identity, wall-clock/card/retry/usage/intervention ceilings, exact engine and Delivery contract pins, atomic integrity-checked persistence, idempotent start/status/stop/resume controls, side-effect idempotency keys, and shadow-only unattended selection. A4 never claims or dispatches a card."
     },
     {
+      "id": "autoloop-card-lease",
+      "kind": "learned-state-schema",
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
+      "source": "scripts/autoloop/codex-coordinator.js",
+      "validator": "platform/test/run-autoloop-leases.js",
+      "consumers": [
+        "plugins/loop/skills/run/SKILL.md",
+        "plugins/loop/skills/execute/SKILL.md",
+        "scripts/autoloop/batch-runner.js"
+      ],
+      "notes": "Per-card session lease on coordinator state records: lease {token, acquired_at, renewed_at, holder{host,label}}, TTL 2h from renewed_at, time-based only (coordinator processes are short-lived; pid liveness can't arbitrate). Acquired by claim/resume, required (--lease-token) + renewed by pipeline verbs, cleared on park/terminal/supervised paths, broken manually via break-lease. Audit trail in lease_breaks[]. Absent field = unleased (no migration)."
+    },
+    {
       "id": "autoloop-cli-receipt-envelope",
       "kind": "contract",
       "owner": {
