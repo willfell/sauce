@@ -208,6 +208,11 @@ class TripLinks {
     if (owner) return this._parse(this._linksState(owner, cur).model);
     return this._parse(cur ? cur.links : []);
   }
+  _linkIndex(links, target) {
+    const url = String(target?.url || "").trim();
+    if (!url) return -1;
+    return this._parse(links).findIndex((link) => link.url === url);
+  }
   _panelOwner(dv, filePath) {
     const container = dv && dv.container;
     const scopes = [container];
@@ -403,7 +408,7 @@ class TripLinks {
     this._openModal({ title: "Manage links", build: (panel, close) => {
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin:10px 0; max-height:52vh; overflow:auto;";
-      links.forEach((link, index) => {
+      links.forEach((link) => {
         const rowEl = list.createEl("div");
         rowEl.style.cssText = "display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--background-modifier-border); border-radius:6px;";
         const label = rowEl.createEl("div");
@@ -415,7 +420,8 @@ class TripLinks {
         editBtn.onclick = () => {
           close();
           this._openForm({ title: "Edit link", url: link.url, text: link.text }, async ({ url, text }) => {
-            const res = TripLinks.updateLink(this._currentLinks(dv), index, { url, text });
+            const current = this._currentLinks(dv);
+            const res = TripLinks.updateLink(current, this._linkIndex(current, link), { url, text });
             if (!res.changed) { new Notice(res.reason === "duplicate" ? "That URL is already in the list." : "Enter a URL."); return false; }
             if (await this._write(dv, res.links)) { new Notice("Link updated."); return true; }
             return false;
@@ -424,7 +430,8 @@ class TripLinks {
         const delBtn = rowEl.createEl("button", { text: "Delete" });
         delBtn.style.cssText = "padding:4px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-error); cursor:pointer; font-size:0.8em;";
         delBtn.onclick = async () => {
-          const res = TripLinks.deleteLink(this._currentLinks(dv), index);
+          const current = this._currentLinks(dv);
+          const res = TripLinks.deleteLink(current, this._linkIndex(current, link));
           if (res.changed && await this._write(dv, res.links, { focusTarget: delBtn })) {
             new Notice("Link deleted.");
             close();

@@ -59,6 +59,13 @@ const TripSectionKinds = loadClass('platform/blueprints/trips/helpers/trip-secti
     const r = TripLinks.deleteLink([{ url: "x" }], 0);
     ok('DEL-1 deleteLink removes at index', r.links.length === 0, JSON.stringify(r));
 }
+{
+    const links = new TripLinks();
+    const current = [{ url: "https://b.com", text: "B" }];
+    ok('IDENTITY-1 modal target resolves by unique URL after a sibling index shift',
+        links._linkIndex(current, { url: "https://b.com", text: "stale label" }) === 0
+        && links._linkIndex(current, { url: "https://a.com" }) === -1);
+}
 
 // ---------- links section kind is gone ----------
 {

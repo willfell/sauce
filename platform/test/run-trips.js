@@ -673,6 +673,123 @@ function makeDv(embed, currentVal) {
             && rapidLinkMaxActive === 1 && file.fm.links.length === 0);
         global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
 
+        // PERF-4c binding fixture: exercise the actual Manage Links controls,
+        // whose DOM rows intentionally remain mounted while persistence is in
+        // flight. After deleting A, B's captured row must resolve its URL
+        // against the owner-authoritative [B] model instead of reusing index 1.
+        const modalLinkGates = [deferred(), deferred()];
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalLinkWrites = 0;
+        let modalLinkActive = 0;
+        let modalLinkMaxActive = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = modalLinkGates[modalLinkWrites++];
+            modalLinkActive++;
+            modalLinkMaxActive = Math.max(modalLinkMaxActive, modalLinkActive);
+            await gate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+            modalLinkActive--;
+        };
+        const modalLinksOwner = trackedEl('div');
+        modalLinksOwner.dataset.tripLinksOwnerPath = pathName;
+        modalLinksOwner.classList.add('trip-links-owner');
+        const modalLinksDv = {
+            container: modalLinksOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalLinksDv);
+        const originalOpenModal = links._openModal;
+        let managePanel = null;
+        let manageCloses = 0;
+        links._openModal = ({ build }) => {
+            managePanel = trackedEl('div');
+            build(managePanel, () => { manageCloses++; });
+        };
+        links.openManage(modalLinksDv);
+        const manageRows = managePanel.children[0].children;
+        const deleteA = manageRows[0].children[2];
+        const deleteB = manageRows[1].children[2];
+        const modalDeleteA = deleteA.onclick();
+        await new Promise(setImmediate);
+        const modalDeleteB = deleteB.onclick();
+        await new Promise(setImmediate);
+        const realModalQueued = modalLinkWrites === 1
+            && links._currentLinks(modalLinksDv).length === 1
+            && links._currentLinks(modalLinksDv)[0].text === 'B';
+        modalLinkGates[0].resolve();
+        const modalDeleteASaved = await modalDeleteA;
+        await new Promise(setImmediate);
+        const realModalSecondStarted = modalLinkWrites === 2
+            && links._currentLinks(modalLinksDv).length === 0;
+        modalLinkGates[1].resolve();
+        const modalDeleteBSaved = await modalDeleteB;
+        ok('PERF4B-MANAGE-LINK-IDENTITY real modal rapid deletes resolve stable URL identity after index shift',
+            realModalQueued && realModalSecondStarted
+            && modalDeleteASaved && modalDeleteBSaved
+            && modalLinkMaxActive === 1 && file.fm.links.length === 0
+            && manageCloses === 2);
+        links._openModal = originalOpenModal;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
+        const modalEditGates = [deferred(), deferred()];
+        indexedLinks = [
+            { url: 'https://a.example', text: 'A' },
+            { url: 'https://b.example', text: 'B' },
+        ];
+        file.fm.links = indexedLinks.slice();
+        let modalEditWrites = 0;
+        global.app.fileManager.processFrontMatter = async (target, mutate) => {
+            const gate = modalEditGates[modalEditWrites++];
+            await gate.promise;
+            mutate(target.fm);
+            indexedLinks = target.fm.links.slice();
+        };
+        const modalEditOwner = trackedEl('div');
+        modalEditOwner.dataset.tripLinksOwnerPath = pathName;
+        modalEditOwner.classList.add('trip-links-owner');
+        const modalEditDv = {
+            container: modalEditOwner,
+            current: () => ({ type: 'trip', file: { path: pathName, mtime: 1 }, links: indexedLinks.slice() }),
+        };
+        links.render(modalEditDv);
+        let editPanel = null;
+        let editSubmit = null;
+        const originalOpenForm = links._openForm;
+        links._openModal = ({ build }) => {
+            editPanel = trackedEl('div');
+            build(editPanel, () => {});
+        };
+        links._openForm = (_fields, onSubmit) => { editSubmit = onSubmit; };
+        links.openManage(modalEditDv);
+        const editRows = editPanel.children[0].children;
+        const deleteBeforeEdit = editRows[0].children[2].onclick();
+        await new Promise(setImmediate);
+        editRows[1].children[1].onclick();
+        const editAfterShift = editSubmit({ url: 'https://b2.example', text: 'B2' });
+        await new Promise(setImmediate);
+        const realEditQueued = modalEditWrites === 1
+            && links._currentLinks(modalEditDv)[0].url === 'https://b.example';
+        modalEditGates[0].resolve();
+        await deleteBeforeEdit;
+        await new Promise(setImmediate);
+        const realEditStarted = modalEditWrites === 2
+            && links._currentLinks(modalEditDv)[0].url === 'https://b2.example';
+        modalEditGates[1].resolve();
+        const editAfterShiftSaved = await editAfterShift;
+        ok('PERF4B-MANAGE-LINK-EDIT-IDENTITY real modal edit resolves stable URL identity after sibling shift',
+            realEditQueued && realEditStarted && editAfterShiftSaved
+            && file.fm.links.length === 1
+            && file.fm.links[0].url === 'https://b2.example'
+            && file.fm.links[0].text === 'B2');
+        links._openModal = originalOpenModal;
+        links._openForm = originalOpenForm;
+        global.app.fileManager.processFrontMatter = originalProcessFrontMatter;
+
         page = { type: 'trip', file: { path: pathName }, links: priorLinks };
         file.fm.links = priorLinks;
         linksOwner.replaceChildren();
