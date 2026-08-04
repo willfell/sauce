@@ -412,7 +412,9 @@ class GraphView {
   _panelLink(parent, node, api, source, className) {
     const link = parent.createEl("button");
     link.className = className;
-    link.style.cssText = "border:0;background:transparent;padding:0;color:var(--link-color);cursor:pointer;text-align:left;";
+    link.style.cssText = "display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;"
+      + "padding:3px 8px;border:1px solid var(--background-modifier-border);border-radius:999px;"
+      + "background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;";
     const parts = this._titleParts(node.card);
     const presentation = this._statusPresentation(node.status, api);
     link.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-link-id";
@@ -424,39 +426,61 @@ class GraphView {
     return link;
   }
 
+  _panelFact(panel, label, className) {
+    const block = panel.createEl("div");
+    block.className = `graph-view-detail-fact ${className}`;
+    block.style.cssText = "display:grid;gap:4px;min-width:0;";
+    const heading = block.createEl("div", { text: label });
+    heading.className = "graph-view-detail-label";
+    heading.style.cssText = "font-size:0.7em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);";
+    return block;
+  }
+
   _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes) {
     const panel = root.createEl("div");
     panel.className = "graph-view-detail-panel";
-    panel.style.cssText = "display:grid;gap:7px;margin-top:16px;padding:10px 12px;border:1px solid var(--background-modifier-border);"
+    panel.style.cssText = "display:grid;gap:12px;margin-top:16px;padding:12px 14px;border:1px solid var(--background-modifier-border);"
       + "border-radius:9px;background:var(--background-secondary);font-size:var(--font-ui-small);";
     const legend = Array.from(root.children || [])
       .find((child) => String(child?.className || "").split(/\s+/).includes("graph-view-legend"));
     root.insertBefore?.(panel, legend?.nextSibling || scroller?.nextSibling || null);
 
     const parts = this._titleParts(node.card);
-    const heading = panel.createEl("div");
+    const header = panel.createEl("div");
+    header.className = "graph-view-detail-header";
+    header.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px;min-width:0;";
+    const heading = header.createEl("div");
     heading.className = "graph-view-detail-heading";
-    heading.style.cssText = "display:flex;align-items:baseline;gap:7px;font-weight:700;";
+    heading.style.cssText = "display:flex;align-items:baseline;gap:7px;min-width:0;font-weight:700;overflow-wrap:anywhere;";
     heading.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-id";
     if (parts.id) heading.createEl("span", { text: parts.title }).className = "graph-view-detail-title";
 
-    const open = panel.createEl("button", { text: "Open card" });
+    const controls = header.createEl("div");
+    controls.className = "graph-view-detail-controls";
+    controls.style.cssText = "display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;";
+    if (!node.isStub) {
+      const presentation = this._statusPresentation(node.status, api);
+      const status = controls.createEl("div", { text: `${presentation.glyph} ${presentation.label}` });
+      status.className = `graph-view-detail-status ${presentation.className}`;
+      status.style.cssText = "display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;"
+        + `color:${presentation.color};font-weight:650;white-space:nowrap;`
+        + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
+        + `background:color-mix(in srgb, ${presentation.color} 10%, var(--background-primary));`;
+    }
+    const open = controls.createEl("button", { text: "Open card" });
     open.className = "graph-view-detail-open";
-    open.style.cssText = "justify-self:start;cursor:pointer;";
+    open.style.cssText = "min-height:32px;padding:5px 10px;cursor:pointer;";
     open.addEventListener?.("click", (event) => {
       event?.stopPropagation?.();
       this._open(node.path || node.card, source);
     });
     if (node.isStub) return panel;
 
-    const presentation = this._statusPresentation(node.status, api);
-    const status = panel.createEl("div", { text: `${presentation.glyph} ${presentation.label}` });
-    status.className = `graph-view-detail-status ${presentation.className}`;
-    status.style.cssText = `color:${presentation.color};font-weight:650;`;
-
     if (node.waitReason) {
-      const waiting = panel.createEl("div", { text: String(node.waitReason) });
-      waiting.className = "graph-view-detail-wait";
+      const waiting = this._panelFact(panel, "Waiting on", "graph-view-detail-wait-row");
+      const value = waiting.createEl("div", { text: String(node.waitReason) });
+      value.className = "graph-view-detail-wait";
+      value.style.cssText = "overflow-wrap:anywhere;";
     }
 
     const byCard = new Map((nodes || []).map((entry) => [entry.card, entry]));
@@ -465,16 +489,16 @@ class GraphView {
       .map((edge) => byCard.get(edge.from))
       .filter((entry) => entry && (entry.isStub || this._statusPresentation(entry.status, api).normalized !== "completed"));
     if (unmet.length) {
-      const needs = panel.createEl("div");
-      needs.className = "graph-view-detail-needs";
-      needs.createEl("div", { text: "Unmet prerequisites" }).className = "graph-view-detail-label";
+      const needs = this._panelFact(panel, "Unmet prerequisites", "graph-view-detail-needs");
       for (const entry of unmet) this._panelLink(needs, entry, api, source, "graph-view-detail-prerequisite");
     }
 
     const outcome = outcomes?.get?.(node.card);
     if (outcome) {
-      const result = panel.createEl("div", { text: `Outcome: ${outcome}` });
-      result.className = "graph-view-detail-outcome";
+      const result = this._panelFact(panel, "Outcome", "graph-view-detail-outcome");
+      const value = result.createEl("div", { text: String(outcome) });
+      value.className = "graph-view-detail-outcome-value";
+      value.style.cssText = "overflow-wrap:anywhere;";
     }
 
     const insight = this._nodeInsight(analysis, node.card);
@@ -483,10 +507,9 @@ class GraphView {
       .filter((entry) => entry && !entry.isStub && entry.status !== null
         && String(entry.status).trim().toLowerCase() !== "completed");
     const gatedCount = Number.isFinite(Number(insight?.gates)) ? Number(insight.gates) : 0;
-    const gates = panel.createEl("div");
-    gates.className = "graph-view-detail-gates";
-    gates.createEl("div", { text: `Gates ${gatedCount} slice${gatedCount === 1 ? "" : "s"}` })
-      .className = "graph-view-detail-label";
+    const gates = this._panelFact(panel, "Gates", "graph-view-detail-gates");
+    const count = gates.createEl("div", { text: `${gatedCount} slice${gatedCount === 1 ? "" : "s"}` });
+    count.className = "graph-view-detail-gates-count";
     for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent");
     return panel;
   }
