@@ -113,7 +113,10 @@ class WikiChromeBar {
         if (id === "new-page" || id === "new-section") {
           const instance = id === "new-page" ? "wiki-page" : "wiki-section";
           if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
-            customJS.EntityCreate.create({ instance, dv });
+            const structuralLifecycle = customJS.SectionExplorer
+              && typeof customJS.SectionExplorer.entityCreateLifecycle === "function"
+              ? customJS.SectionExplorer.entityCreateLifecycle(dv, { structuralOwnerKey: ctx.path }) : null;
+            return customJS.EntityCreate.create({ instance, dv, structuralLifecycle });
           } else if (typeof Notice === "function") { new Notice("WikiChromeBar: EntityCreate unavailable — reinstall wiki blueprint.", 6000); }
           return;
         }
@@ -122,7 +125,9 @@ class WikiChromeBar {
         if (id === "move") {
           try {
             if (!customJS || !customJS.SectionExplorer || typeof customJS.SectionExplorer.openMovePicker !== "function") return;
-            const file = (typeof app !== "undefined") ? app.workspace.getActiveFile() : null;
+            const file = (typeof app !== "undefined" && ctx && ctx.path
+              && app.vault && typeof app.vault.getAbstractFileByPath === "function")
+              ? app.vault.getAbstractFileByPath(ctx.path) : null;
             if (!file || !file.path) return;
             // dv-independent enumeration (mobile: the captured dv is torn down by
             // click time, so dv.pages() throws / returns empty).
@@ -132,7 +137,8 @@ class WikiChromeBar {
               labelOf: (p) => (p.title && String(p.title).trim()) || "",
             });
             const currentFolder = file.path.slice(0, file.path.lastIndexOf("/"));
-            const adapter = { move: { rewriteOnDocMove: () => null } };
+            const adapter = { structural: true, structuralOwnerKey: ctx.path,
+              move: { rewriteOnDocMove: () => null } };
             customJS.SectionExplorer.openMovePicker({
               targets, currentFolder, title: "Move to section",
               onPick: (folder) => customJS.SectionExplorer.applyDocMove(dv, file, folder, adapter),

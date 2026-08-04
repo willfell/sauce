@@ -24,11 +24,17 @@ const className = cfg.class;
 const method = cfg.method ?? "render";
 const argsValid = cfg.args === undefined || Array.isArray(cfg.args);
 const args = Array.isArray(cfg.args) ? cfg.args : [];
+const guardReceipt = cfg.guardReceipt && typeof cfg.guardReceipt === "object" ? cfg.guardReceipt : null;
+const stampGuardReceipt = (status, node) => {
+  if (!guardReceipt) return;
+  guardReceipt.status = status;
+  guardReceipt.node = node || null;
+};
 
 if (!className) {
-  dv.paragraph("_customjs-guard: missing `class`_");
+  stampGuardReceipt("invalid", dv.paragraph("_customjs-guard: missing `class`_"));
 } else if (!argsValid) {
-  dv.paragraph("_customjs-guard: `args` must be an array_");
+  stampGuardReceipt("invalid", dv.paragraph("_customjs-guard: `args` must be an array_"));
 } else {
   const MAX_POLL_ATTEMPTS = 200;
   const POLL_INTERVAL_MS = 50;
@@ -43,15 +49,16 @@ if (!className) {
 
   const klass = window.customJS?.[className];
   if (!window.customJS) {
-    dv.paragraph("_CustomJS is still loading — reopen this note to try again._");
+    stampGuardReceipt("unavailable", dv.paragraph("_CustomJS is still loading — reopen this note to try again._"));
   } else if (!klass) {
-    dv.paragraph(`_${className} is not loaded. Mobile: fully reopen Obsidian, then verify its script synced._`);
+    stampGuardReceipt("unavailable", dv.paragraph(`_${className} is not loaded. Mobile: fully reopen Obsidian, then verify its script synced._`));
   } else {
     const target = klass[method];
     if (typeof target !== "function") {
-      dv.paragraph(`_${className}.${method} is not a function_`);
+      stampGuardReceipt("invalid", dv.paragraph(`_${className}.${method} is not a function_`));
     } else {
       await target.call(klass, dv, ...args);
+      stampGuardReceipt("dispatched", null);
     }
   }
 }

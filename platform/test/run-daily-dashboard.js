@@ -526,6 +526,73 @@ async function renderDailyTaskFixture(today, options) {
       'expected 2 precomputed pages (foo direct + bar rollup), got ' + (spy.renderPages && spy.renderPages.length));
   });
 
+  await ok('PERF8J-DASH-MOUNT successful render returns its exact root through the caller receipt', async () => {
+    const { customJS } = makeCustomJS();
+    const dv = makeDv();
+    const Dash = loadDashboard(windowShim, customJS);
+    const receipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: receipt });
+    assert(receipt.ok === true, 'successful dashboard render must stamp the explicit receipt');
+    assert(receipt.node && dv.container._children.includes(receipt.node),
+      'receipt must identify the exact live dashboard root, not a broad DOM diff');
+  });
+
+  await ok('PERF8K-DASH-MOUNT partial cold child render stays unmounted and warm-retries', async () => {
+    const { customJS } = makeCustomJS();
+    delete customJS.BeaconCards;
+    const dv = makeDv();
+    dv.el = (tag, _text, opts) => dv.container.createEl(tag, opts || {});
+    const originalPages = dv.pages.bind(dv);
+    dv.pages = (query) => query === '"spice/meetings/notes"'
+      ? [{ file: { name: `${TODAY} Cold Meeting`, path: `spice/meetings/notes/${TODAY} Cold Meeting.md` } }]
+      : originalPages(query);
+    const Dash = loadDashboard(windowShim, customJS);
+    const failedReceipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: failedReceipt });
+    assert(failedReceipt.ok === false && failedReceipt.node === null,
+      'missing async child mechanism must not stamp a successful mount');
+    assert(!dv.container._children.some((node) => /space-daily-dashboard/.test(node.className)),
+      'failed partial dashboard root must be removed before warm retry');
+
+    customJS.BeaconCards = { render: async () => {} };
+    const warmReceipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: warmReceipt });
+    assert(warmReceipt.ok === true && dv.container._children.includes(warmReceipt.node),
+      'same-surface warm retry must stamp the completed dashboard root');
+  });
+
+  await ok('PERF8L-DASH-MOUNT successful async child settles before the root receipt', async () => {
+    const { customJS } = makeCustomJS();
+    let releaseChild;
+    let reportChildStarted;
+    const childReleased = new Promise((resolve) => { releaseChild = resolve; });
+    const childStarted = new Promise((resolve) => { reportChildStarted = resolve; });
+    customJS.BeaconCards = {
+      render: async () => {
+        reportChildStarted();
+        await childReleased;
+      },
+    };
+    const dv = makeDv();
+    dv.el = (tag, _text, opts) => dv.container.createEl(tag, opts || {});
+    const originalPages = dv.pages.bind(dv);
+    dv.pages = (query) => query === '"spice/meetings/notes"'
+      ? [{ file: { name: `${TODAY} Deferred Meeting`, path: `spice/meetings/notes/${TODAY} Deferred Meeting.md` } }]
+      : originalPages(query);
+    const Dash = loadDashboard(windowShim, customJS);
+    const receipt = { ok: false, node: null };
+    const pendingRender = new Dash().render(dv, { asOf: TODAY, mountReceipt: receipt });
+    await childStarted;
+    assert(receipt.ok === false && receipt.node === null,
+      'receipt must remain false/null while a successful async child is pending');
+    const liveRoot = dv.container._children.find((node) => /space-daily-dashboard/.test(node.className));
+    assert(!!liveRoot, 'pending successful child keeps the candidate root live but uncommitted');
+    releaseChild();
+    await pendingRender;
+    assert(receipt.ok === true && receipt.node === liveRoot,
+      'receipt stamps the exact live root only after the successful child settles');
+  });
+
   await ok('DASH-L5-3 total + byBlueprint unchanged (1 direct hit + 1 rolled-up root)', async () => {
     // Drive the REAL ActivityFeed.query with the same opts the dashboard passes,
     // then the REAL static bucketByBlueprint over those pages.
@@ -755,6 +822,95 @@ async function renderDailyTaskFixture(today, options) {
     details.open = false;
     details._fire('toggle');
     assert(writeCalls === 1, 'a user toggle writes, got ' + writeCalls);
+  });
+
+  await ok('PERF8-DAILY-CREATE optimistic preview precedes persistence and exact rollback removes it/restores focus', async () => {
+    const priorApp = global.app;
+    const priorMoment = global.moment;
+    const priorDocument = global.document;
+    const priorCustomJS = global.customJS;
+    const events = [];
+    let rejectCreate = false;
+    let focused = 0;
+    let trashed = 0;
+    let folderChildren = [];
+    let rollbackActiveElement = null;
+    const trigger = { focus: () => { focused++; } };
+    const files = new Map([['ranch/templates/Today To-Do.md', { path: 'ranch/templates/Today To-Do.md' }]]);
+    const app = {
+      vault: {
+        getAbstractFileByPath: (p) => files.get(p) || null,
+        createFolder: async (p) => { events.push('folder'); files.set(p, { path: p, children: folderChildren.slice() }); },
+      },
+      fileManager: { trashFile: async (f) => { trashed++; files.delete(f.path); } },
+      plugins: { plugins: { 'templater-obsidian': { templater: {
+        create_new_note_from_template: async () => {
+          events.push('write');
+          if (rejectCreate) throw new Error('persist failed');
+          return { path: 'created' };
+        },
+      } } } },
+      workspace: { openLinkText() {} },
+    };
+    const renderSafe = {
+      mutateStructure: async (opts) => {
+        events.push('apply');
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) {
+          events.push('rollback');
+          if (rollbackActiveElement) global.document.activeElement = rollbackActiveElement;
+          await opts.rollback(receipt, error);
+          return { ok: false, error };
+        }
+      },
+    };
+    global.app = app;
+    global.moment = () => ({ format: (fmt) => fmt === 'YYYY/MM-MMMM' ? '2026/07-July' : '2026-07-13' });
+    global.document = { activeElement: trigger };
+    global.customJS = { RenderSafe: renderSafe };
+    try {
+      const Dash = loadDashboard(windowShim, { RenderSafe: renderSafe });
+      const dash = new Dash();
+      const successHost = makeDashEl();
+      const success = await dash._openTodayToDo('2026-07-13', { dv: {}, host: successHost, trigger });
+      assert(success && success.ok === true, 'successful create returns ok');
+      assert(events.indexOf('apply') < events.indexOf('write'), 'optimistic apply must precede persistence');
+      assert(successHost._children.some((n) => /sauce-daily-todo-preview/.test(n.className)), 'optimistic preview is visible immediately');
+
+      files.delete('spice/to-do/2026/07-July');
+      rejectCreate = true;
+      events.length = 0;
+      const retryHost = makeDashEl();
+      const failed = await dash._openTodayToDo('2026-07-13', { dv: {}, host: retryHost, trigger });
+      assert(failed && failed.ok === false, 'rejected create returns false');
+      assert(events.join(',').includes('apply') && events.join(',').endsWith('rollback'), 'rejection runs apply/write/rollback');
+      assert(retryHost._children.length === 0, 'rollback removes the exact preview node');
+      assert(focused === 1, 'rollback restores triggering focus exactly once');
+      assert(trashed === 1, 'rejected note creation compensates its newly-created empty folder');
+
+      files.delete('spice/to-do/2026/07-July');
+      folderChildren = [{ path: 'spice/to-do/2026/07-July/concurrent.md' }];
+      const newerFocus = { isConnected: true };
+      rollbackActiveElement = newerFocus;
+      await dash._openTodayToDo('2026-07-13', { dv: {}, host: makeDashEl(), trigger });
+      assert(trashed === 1, 'rollback never trashes a newly-created folder after concurrent content arrives');
+      assert(focused === 1 && global.document.activeElement === newerFocus,
+        'late rollback preserves newer connected focus instead of stealing it');
+    } finally {
+      global.app = priorApp;
+      global.moment = priorMoment;
+      global.document = priorDocument;
+      global.customJS = priorCustomJS;
+    }
+  });
+
+  await ok('PERF8-DAILY-COLD render never rejects on missing or throwing Dataview state', async () => {
+    const Dash = loadDashboard(windowShim, undefined);
+    const dash = new Dash();
+    await dash.render(null, {});
+    await dash.render({ container: makeDashEl(), el: () => makeDashEl(), pages: () => { throw new Error('cold index'); } }, {});
+    assert(true, 'cold render paths resolved');
   });
 
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);

@@ -11,6 +11,8 @@ const path = require('path');
 
 const VIEW_PATH = path.join(__dirname, '..', 'mechanisms', 'customjs-guard', 'view.js');
 const VIEW_SOURCE = fs.readFileSync(VIEW_PATH, 'utf8');
+const MIRROR_VIEW_PATH = path.join(__dirname, '..', '..', 'ranch', 'views', 'customjs-guard', 'view.js');
+const MIRROR_VIEW_SOURCE = fs.readFileSync(MIRROR_VIEW_PATH, 'utf8');
 
 const results = [];
 function ok(name, condition, detail) {
@@ -21,11 +23,18 @@ function ok(name, condition, detail) {
 
 function makeDv() {
   const paragraphs = [];
+  const paragraphNodes = [];
   const elements = [];
   return {
     paragraphs,
+    paragraphNodes,
     elements,
-    paragraph(text) { paragraphs.push(String(text)); },
+    paragraph(text) {
+      paragraphs.push(String(text));
+      const node = { textContent: String(text), removed: false, remove() { this.removed = true; } };
+      paragraphNodes.push(node);
+      return node;
+    },
     container: {
       createEl(tag, options) {
         const element = {
@@ -102,10 +111,15 @@ async function runLateClass(source) {
 }
 
 async function main() {
+  ok('CJS-GUARD-MIRROR canonical platform and ranch view bytes remain exact',
+    VIEW_SOURCE === MIRROR_VIEW_SOURCE,
+    'ranch/views/customjs-guard/view.js diverged from the canonical mechanism view');
+
   ok('CJS-GUARD-1 remains a bare inline view script',
     !/\bmodule\.exports\s*=/.test(VIEW_SOURCE));
 
   const immediateCalls = [];
+  const immediateReceipt = { status: 'pending', node: null };
   const immediateClass = {
     async render(dv, ...args) {
       immediateCalls.push({
@@ -117,7 +131,7 @@ async function main() {
     },
   };
   const immediate = await runGuard(VIEW_SOURCE, {
-    input: { class: 'ReadyClass', args: ['alpha', 2] },
+    input: { class: 'ReadyClass', args: ['alpha', 2], guardReceipt: immediateReceipt },
     window: { customJS: { ReadyClass: immediateClass } },
   });
   ok('CJS-GUARD-2 immediate class dispatches with dv, args, and instance receiver',
@@ -132,6 +146,8 @@ async function main() {
       && immediate.dv.elements[0].options.cls === 'customjs-loader'
       && immediate.dv.elements[0].removed
       && immediateCalls[0].loaderRemovedAtCall);
+  ok('CJS-GUARD-4b successful dispatch stamps the explicit guard receipt',
+    immediateReceipt.status === 'dispatched' && immediateReceipt.node === null);
 
   const lateNamespace = await runLateNamespace(VIEW_SOURCE);
   ok('CJS-GUARD-5 namespace registering after the old ~2s window still dispatches',
@@ -150,8 +166,9 @@ async function main() {
       && lateClass.dv.elements[0].removed,
     `delays=${lateClass.delayCount}, calls=${lateClass.calls}, messages=${JSON.stringify(lateClass.dv.paragraphs)}`);
 
+  const missingReceipt = { status: 'pending', node: null };
   const missing = await runGuard(VIEW_SOURCE, {
-    input: { class: 'MissingClass' },
+    input: { class: 'MissingClass', guardReceipt: missingReceipt },
     window: { customJS: {} },
   });
   ok('CJS-GUARD-6 missing class gets an actionable, non-bare diagnostic',
@@ -160,6 +177,10 @@ async function main() {
     JSON.stringify(missing.dv.paragraphs));
   ok('CJS-GUARD-7 missing class uses a materially longer wait than 40 polls',
     missing.delayCount > 40, `observed ${missing.delayCount} delays`);
+  ok('CJS-GUARD-7b unavailable class stamps the exact diagnostic node receipt',
+    missingReceipt.status === 'unavailable'
+      && missingReceipt.node === missing.dv.paragraphNodes[0]
+      && !missingReceipt.node.removed);
 
   const absent = await runGuard(VIEW_SOURCE, {
     input: { class: 'AnyClass' },
@@ -212,8 +233,8 @@ async function main() {
       && isActionableMissingClass(mutantClass.dv.paragraphs[0], 'LateClass'));
 
   const bareDiagnosticMutant = VIEW_SOURCE.replace(
-    'dv.paragraph(`_${className} is not loaded. Mobile: fully reopen Obsidian, then verify its script synced._`);',
-    'dv.paragraph(`_${className} unavailable_`);',
+    '`_${className} is not loaded. Mobile: fully reopen Obsidian, then verify its script synced._`',
+    '`_${className} unavailable_`',
   );
   ok('CJS-GUARD-MUT-5 bare-diagnostic mutation was applied', bareDiagnosticMutant !== VIEW_SOURCE);
   const mutantMissing = await runGuard(bareDiagnosticMutant, {

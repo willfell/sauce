@@ -181,16 +181,17 @@ ASYNC_TESTS.push({ name: "renderActionRow owns ordered entity/custom actions and
   }
 }});
 
-ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node receipt and restores focus on rollback", fn: async () => {
+ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node receipt and preserves newer focus on rollback", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
-  let restored = false;
+  let restoreCount = 0;
   const previousDocument = global.document;
-  global.document = { activeElement: { focus: () => { restored = true; } } };
+  const focusTarget = { isConnected: true, focus: () => { restoreCount += 1; } };
+  global.document = { activeElement: focusTarget, body: {} };
   const parent = {
     children: [],
     createEl(_tag, options) {
-      const node = { className: options.cls, textContent: "", nextSibling: null };
+      const node = { className: options.cls, textContent: "", nextSibling: null, contains: () => false };
       this.children.push(node);
       return node;
     },
@@ -205,7 +206,15 @@ ASYNC_TESTS.push({ name: "entityCreateLifecycle owns an exact optimistic node re
     assert.strictEqual(receipt.node.textContent, "Creating New Doc…");
     lifecycle.rollback(receipt);
     assert.strictEqual(parent.children.length, 0, "rollback removes only the receipt node");
-    assert.strictEqual(restored, true, "rollback restores the captured focus target");
+    assert.strictEqual(restoreCount, 1, "rollback restores the captured focus target while it remains authoritative");
+
+    const secondReceipt = lifecycle.apply({ targetPath: "spice/projects/demo/docs/knowledge/Another Doc.md" });
+    const newerFocus = { isConnected: true, focus: () => {} };
+    global.document.activeElement = newerFocus;
+    lifecycle.rollback(secondReceipt);
+    assert.strictEqual(parent.children.length, 0, "a second rollback removes only its own receipt node");
+    assert.strictEqual(restoreCount, 1, "rollback does not steal focus from a newer connected target");
+    assert.strictEqual(global.document.activeElement, newerFocus, "newer focus remains authoritative");
   } finally { global.document = previousDocument; }
 }});
 
@@ -295,7 +304,7 @@ failures += !run("makeAdapter returns an object exposing render-ready shape", ()
   assert.strictEqual(typeof adapter.listSections, "function");
 });
 
-failures += !run("makeAdapter forwards the move block + emptySubsectionCount (rail Move / section-⋯ depend on it)", () => {
+failures += !run("makeAdapter forwards move, emptySubsectionCount, and structural owner identity", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const moveBlock = {
@@ -313,6 +322,8 @@ failures += !run("makeAdapter forwards the move block + emptySubsectionCount (ra
     icons: { folder: "<svg/>", file: "<svg/>" },
     rootClass: "se-root",
     move: moveBlock,
+    structural: true,
+    structuralOwnerKey: "spice/wiki/Wiki.md",
     emptySubsectionCount: (section) => 3,
   });
   assert.ok(adapter.move, "makeAdapter must forward config.move");
@@ -320,6 +331,8 @@ failures += !run("makeAdapter forwards the move block + emptySubsectionCount (ra
   assert.strictEqual(typeof adapter.move.canAcceptSection, "function");
   assert.strictEqual(typeof adapter.emptySubsectionCount, "function");
   assert.strictEqual(adapter.emptySubsectionCount({ folder: "x" }), 3);
+  assert.strictEqual(adapter.structural, true);
+  assert.strictEqual(adapter.structuralOwnerKey, "spice/wiki/Wiki.md");
   // Absent config → null move + undefined helper (consumers no-op safely).
   const bare = se.makeAdapter({
     resolveContext: () => ({}), listSections: () => [], listPages: () => [],
@@ -2104,6 +2117,163 @@ ASYNC_TESTS.push({ name: "moveSection: renames folder to new parent + applies hu
   } finally { global.app = prevApp; }
 }});
 
+ASYNC_TESTS.push({ name: "PERF8M moveSection: a rejecting child patch cannot abort later project cascade patches", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const prevApp = global.app;
+  const oldFolder = "spice/projects/foo/docs/ems";
+  const newFolder = "spice/projects/foo/docs/knowledge/ems";
+  const known = new Set([
+    oldFolder,
+    `${oldFolder}/EMS.md`,
+    `${oldFolder}/one/One.md`,
+    `${oldFolder}/two/Two.md`,
+  ]);
+  const attempts = [];
+  global.app = {
+    fileManager: {
+      renameFile: async (folder, target) => {
+        for (const item of Array.from(known)) {
+          if (item === folder.path || item.indexOf(folder.path + "/") === 0) {
+            known.delete(item);
+            known.add(target + item.slice(folder.path.length));
+          }
+        }
+      },
+      processFrontMatter: async (file, mutate) => {
+        attempts.push(file.path);
+        mutate({});
+        if (file.path.endsWith("/one/One.md")) throw new Error("middle child rejected");
+      },
+    },
+    vault: { getAbstractFileByPath: (path) => known.has(path) ? { path } : null },
+  };
+  const section = { title: "EMS", folder: oldFolder, hubPath: `${oldFolder}/EMS.md` };
+  const adapter = { move: { rewriteOnSectionMove: () => ({
+    hubPatch: { parent_section: "Knowledge" },
+    childPatches: [
+      { path: `${oldFolder}/one/One.md`, patch: { parent_section: "EMS" } },
+      { path: `${oldFolder}/two/Two.md`, patch: { parent_section: "EMS" } },
+    ],
+  }) } };
+  try {
+    const result = await se.moveSection(null, section, "spice/projects/foo/docs/knowledge", adapter);
+    assert.strictEqual(result.ok, true, "the completed folder move remains successful despite a best-effort patch rejection");
+    assert.deepStrictEqual(attempts, [
+      `${newFolder}/EMS.md`,
+      `${newFolder}/one/One.md`,
+      `${newFolder}/two/Two.md`,
+    ], "hub, rejecting middle child, and later child are all attempted in order");
+  } finally { global.app = prevApp; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8N moveSection: a rejecting hub patch cannot abort child cascade patches", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const prevApp = global.app;
+  const oldFolder = "spice/projects/foo/docs/ems";
+  const newFolder = "spice/projects/foo/docs/knowledge/ems";
+  const known = new Set([
+    oldFolder,
+    `${oldFolder}/EMS.md`,
+    `${oldFolder}/one/One.md`,
+    `${oldFolder}/two/Two.md`,
+  ]);
+  const attempts = [];
+  global.app = {
+    fileManager: {
+      renameFile: async (folder, target) => {
+        for (const item of Array.from(known)) {
+          if (item === folder.path || item.indexOf(folder.path + "/") === 0) {
+            known.delete(item);
+            known.add(target + item.slice(folder.path.length));
+          }
+        }
+      },
+      processFrontMatter: async (file, mutate) => {
+        attempts.push(file.path);
+        mutate({});
+        if (file.path.endsWith("/EMS.md")) throw new Error("hub patch rejected");
+      },
+    },
+    vault: { getAbstractFileByPath: (path) => known.has(path) ? { path } : null },
+  };
+  const section = { title: "EMS", folder: oldFolder, hubPath: `${oldFolder}/EMS.md` };
+  const adapter = { move: { rewriteOnSectionMove: () => ({
+    hubPatch: { parent_section: "Knowledge" },
+    childPatches: [
+      { path: `${oldFolder}/one/One.md`, patch: { parent_section: "EMS" } },
+      { path: `${oldFolder}/two/Two.md`, patch: { parent_section: "EMS" } },
+    ],
+  }) } };
+  try {
+    const result = await se.moveSection(null, section, "spice/projects/foo/docs/knowledge", adapter);
+    assert.strictEqual(result.ok, true, "the completed folder move remains successful despite a best-effort hub rejection");
+    assert.deepStrictEqual(attempts, [
+      `${newFolder}/EMS.md`,
+      `${newFolder}/one/One.md`,
+      `${newFolder}/two/Two.md`,
+    ], "rejecting hub and every later child are all attempted in order");
+  } finally { global.app = prevApp; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8N moveSection: rejected structural folder rename restores exact row position and focus", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const prevApp = global.app;
+  const prevCustomJS = global.customJS;
+  const prevDocument = global.document;
+  const oldFolder = "spice/wiki/cooking";
+  const before = { id: "before" };
+  const row = { id: "row", __seFolder: oldFolder };
+  const after = { id: "after" };
+  const parent = {
+    children: [before, row, after],
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; },
+    insertBefore(node, anchor) { this.children.splice(this.children.indexOf(anchor), 0, node); node.parentNode = this; },
+    appendChild(node) { this.children.push(node); node.parentNode = this; },
+  };
+  for (const node of parent.children) node.parentNode = parent;
+  Object.defineProperty(row, "nextSibling", { get: () => {
+    const index = parent.children.indexOf(row);
+    return index >= 0 ? parent.children[index + 1] || null : null;
+  } });
+  let focused = 0;
+  const focusTarget = { isConnected: true, focus: () => { focused++; } };
+  const events = [];
+  global.document = { activeElement: focusTarget, body: {} };
+  global.app = {
+    vault: { getAbstractFileByPath: (path) => path === oldFolder ? { path } : null },
+    fileManager: { renameFile: async () => { events.push("write"); throw new Error("folder rename rejected"); } },
+  };
+  global.customJS = { RenderSafe: { mutateStructure: async (options) => {
+    events.push("apply");
+    const receipt = await options.apply();
+    assert.deepStrictEqual(parent.children, [before, after], "optimism removes the exact section row before persistence");
+    try { return { ok: true, value: await options.write() }; }
+    catch (error) {
+      events.push("rollback");
+      await options.rollback(receipt, error);
+      return { ok: false, error };
+    }
+  } } };
+  const adapter = { structural: true, move: { rewriteOnSectionMove: () => null } };
+  try {
+    const result = await se.moveSection({ container: parent }, {
+      title: "Cooking", folder: oldFolder, hubPath: `${oldFolder}/Cooking.md`,
+    }, "spice/wiki/food", adapter);
+    assert.strictEqual(result.ok, false, "folder rename rejection remains an explicit structural failure");
+    assert.deepStrictEqual(events, ["apply", "write", "rollback"], "apply-before-write failure rolls back exactly once");
+    assert.deepStrictEqual(parent.children, [before, row, after], "rollback restores the exact row at its original sibling position");
+    assert.strictEqual(parent.children[1], row, "rollback preserves row object identity");
+    assert.strictEqual(focused, 1, "rollback restores the captured focus target once");
+  } finally {
+    global.app = prevApp;
+    global.customJS = prevCustomJS;
+    global.document = prevDocument;
+  }
+}});
+
 failures += !run("moveSection: wiki adapter (rewriteOnSectionMove→null) renames folder only", () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
@@ -2203,13 +2373,18 @@ failures += !run("rail row ⋯ gains a Move entry (before Delete); _openMovePick
   delete global.customJS;
 });
 
-failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded), checked set moves through openMovePicker → applyDocMove", () => {
+ASYNC_TESTS.push({ name: "openSelectDocsPicker: structural bulk resolves exact vault files and awaits receipt moves", fn: async () => {
   const SectionExplorer = loadClass();
   const se = new SectionExplorer();
   const doc = makeDocStub();
 
   const FOLDER = "spice/projects/p/docs/a";
   const prevApp = global.app;
+  const vaultFiles = new Map([
+    FOLDER + "/One.md",
+    FOLDER + "/Two.md",
+    FOLDER + "/sub/Deep.md",
+  ].map((path) => [path, { path, name: path.split("/").pop(), __realVaultFile: true }]));
   global.app = {
     vault: {
       getMarkdownFiles: () => ([
@@ -2217,6 +2392,7 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
         { path: FOLDER + "/Two.md", name: "Two.md" },
         { path: FOLDER + "/sub/Deep.md", name: "Deep.md" },
       ]),
+      getAbstractFileByPath: (p) => vaultFiles.get(p) || null,
     },
     metadataCache: {
       getFileCache: (f) => ({ frontmatter: { type: "doc-note", title: f.name.replace(/\.md$/, "") } }),
@@ -2226,9 +2402,12 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
   // Spy the downstream move flow.
   const moveCalls = [];
   se.openMovePicker = (opts) => { se.__lastMoveOpts = opts; };
-  se.applyDocMove = (dv, file, dest) => { moveCalls.push({ from: file.path, dest }); };
+  se.applyDocMove = async (dv, file, dest) => {
+    moveCalls.push({ file, from: file.path, dest, real: file.__realVaultFile });
+    return { ok: true };
+  };
 
-  const adapter = { move: { docType: "doc-note", root: FOLDER, enumerateSectionTargets: () => ([{ folder: "spice/projects/p/docs/b", label: "B", depth: 1 }]) } };
+  const adapter = { structural: true, move: { docType: "doc-note", root: FOLDER, enumerateSectionTargets: () => ([{ folder: "spice/projects/p/docs/b", label: "B", depth: 1 }]) } };
   const section = { folder: FOLDER };
 
   se.openSelectDocsPicker({}, adapter, section);
@@ -2260,15 +2439,18 @@ failures += !run("openSelectDocsPicker: lists direct docs (sub-folder excluded),
 
   // Primary opens the move picker; onPick drives applyDocMove per doc.
   assert.ok(se.__lastMoveOpts && typeof se.__lastMoveOpts.onPick === "function", "openMovePicker invoked with onPick");
-  se.__lastMoveOpts.onPick("spice/projects/p/docs/b");
+  await se.__lastMoveOpts.onPick("spice/projects/p/docs/b");
 
   const moved = moveCalls.map((m) => m.from).sort();
   assert.deepStrictEqual(moved, [FOLDER + "/One.md", FOLDER + "/Two.md"], "both checked docs moved");
   assert.ok(moveCalls.every((m) => m.dest === "spice/projects/p/docs/b"), "moved to the picked destination");
+  assert.ok(moveCalls.every((m) => m.real === true), "bulk flow resolves each selected path to a real vault file");
+  assert.ok(moveCalls.every((m) => vaultFiles.get(m.from) === m.file),
+    "structural applyDocMove receives the exact object returned by the vault lookup");
 
   global.app = prevApp;
   delete global.document;
-});
+}});
 
 // ── Feature a: per-doc ⋯ menu (Rename · Move · Add link · Delete) on doc cards.
 // Doc cards are rendered by the shared _renderDocCards, used by BOTH blueprints,
@@ -2321,6 +2503,88 @@ failures += !run("doc card carries a se-doc-dots control that opens MenuPopover 
   assert.strictEqual(del.danger, true, "Delete entry must be danger-flagged");
   assert.strictEqual(opened[0].opts && opened[0].opts.anchor, dots, "menu anchored to the dots element");
   cleanup();
+});
+
+failures += !run("PERF8O doc-card actions retain normal and recent pane context after another Wiki view renders", () => {
+  const SectionExplorer = loadClass();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const fileA = { path: "spice/wiki/shared/A.md", name: "A.md", parent: { path: "spice/wiki/shared" } };
+  const fileB = { path: "spice/wiki/shared/B.md", name: "B.md", parent: { path: "spice/wiki/shared" } };
+  const files = new Map([[fileA.path, fileA], [fileB.path, fileB]]);
+  global.app = {
+    vault: { getAbstractFileByPath: (path) => files.get(path) || null },
+    workspace: { openLinkText: () => {} },
+  };
+  try {
+    const actions = [
+      ["Rename", "_openRenameDocDialog"],
+      ["Move", "_openMovePickerForDoc"],
+      ["Add link", "_openAddLinkForDoc"],
+      ["Delete", "_openDeleteDocConfirm"],
+    ];
+    for (const mode of ["normal", "recent"]) {
+      for (const [label, method] of actions) {
+        const se = new SectionExplorer();
+        const menus = [];
+        global.customJS = { MenuPopover: { open: (entries) => menus.push(entries) } };
+        const viewA = {};
+        const viewB = {};
+        const domA = makeDomStub();
+        const domB = makeDomStub();
+        domA.container.isConnected = true;
+        domB.container.isConnected = true;
+        domA.container.closest = () => viewA;
+        domB.container.closest = () => viewB;
+        const dvA = { container: domA.container, current: () => ({ file: { path: "spice/wiki/shared/Shared.md" } }) };
+        const dvB = { container: domB.container, current: () => ({ file: { path: "spice/wiki/shared/Shared.md" } }) };
+        const cardFor = (dv) => [dv === dvA
+          ? { title: "A", file: { name: "A.md", path: fileA.path, mtime: { ts: 1 } } }
+          : { title: "B", file: { name: "B.md", path: fileB.path, mtime: { ts: 1 } } }];
+        const adapter = se.makeAdapter({
+          resolveContext: () => ({ scopePath: "spice/wiki/shared" }),
+          listSections: () => mode === "recent" ? [{ folder: "spice/wiki/shared/child", title: "Child" }] : [],
+          listPages: (dv) => mode === "normal" ? cardFor(dv) : [],
+          listRecent: (dv) => mode === "recent" ? cardFor(dv) : [],
+          getLinks: () => [],
+          icons: { folder: "", file: "", dots: "" },
+          rootClass: "se-root",
+          structural: true,
+          structuralOwnerKey: "spice/wiki/shared/Shared.md",
+        });
+        se.render(dvA, adapter);
+        se.render(dvB, adapter);
+
+        const cardA = domA.els.find((el) => el.className === "se-doc-card");
+        const cardB = domB.els.find((el) => el.className === "se-doc-card");
+        const titleA = domA.els.find((el) => el.className === "se-doc-title");
+        const titleB = domB.els.find((el) => el.className === "se-doc-title");
+        const dotsA = domA.els.find((el) => el.className === "se-doc-dots");
+        assert.ok(cardA && cardB && titleA && titleB && dotsA, `${mode} panes render both cards for ${label}`);
+
+        let dispatchedDv = null;
+        se[method] = (dv, owner, file) => {
+          dispatchedDv = dv;
+          const receipt = se._applyStructuralReceipt(dv, {
+            kind: "rename", identityKey: "__sePath", identityValue: file.path, nextTitle: "A mutated",
+          }, owner);
+          assert.strictEqual(receipt.node, cardA, `${mode} ${label} optimism owns pane A's exact receipt`);
+          assert.strictEqual(titleA.textContent, "A mutated", `${mode} ${label} mutates pane A`);
+          assert.strictEqual(titleB.textContent, "B", `${mode} ${label} leaves pane B untouched`);
+          se._rollbackStructuralReceipt(receipt);
+        };
+        dotsA.onclick({ stopPropagation: () => {} });
+        menus[0].find((entry) => entry.label === label).onSelect();
+
+        assert.strictEqual(dispatchedDv, dvA, `${mode} ${label} retains pane A's exact Dataview context`);
+        assert.strictEqual(titleA.textContent, "A", `${mode} ${label} rollback restores pane A`);
+        assert.strictEqual(titleB.textContent, "B", `${mode} ${label} rollback never mutates pane B`);
+      }
+    }
+  } finally {
+    global.app = priorApp;
+    global.customJS = priorCustomJS;
+  }
 });
 
 failures += !run("doc ⋯ Rename → renameFile(file, sameFolder + sanitized basename + .md)", () => {
@@ -2486,6 +2750,168 @@ ASYNC_TESTS.push({ name: "moveSection: awaits rename, remaps child paths, patche
     assert.ok(fmWrites.every((w) => w.path.indexOf(OLD) !== 0), "no patch applied at an OLD path");
   } finally { global.app = prevApp; }
 }});
+
+ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER doc move applies before write and restores exact node/position/focus on rejection", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const priorDocument = global.document;
+  const before = { id: "before" };
+  const after = { id: "after" };
+  const row = { id: "row", __sePath: "spice/wiki/a/Doc.md" };
+  const parent = {
+    children: [before, row, after],
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; },
+    insertBefore(node, anchor) { this.children.splice(this.children.indexOf(anchor), 0, node); node.parentNode = this; },
+    appendChild(node) { this.children.push(node); node.parentNode = this; },
+  };
+  for (const node of parent.children) node.parentNode = parent;
+  Object.defineProperty(row, "nextSibling", { get: () => {
+    const index = parent.children.indexOf(row); return index >= 0 ? parent.children[index + 1] || null : null;
+  } });
+  let focused = 0;
+  const events = [];
+  global.document = { activeElement: { focus: () => { focused++; } } };
+  global.app = { fileManager: { renameFile: async () => { events.push("write"); throw new Error("rename failed"); } } };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    events.push("apply"); const receipt = await opts.apply();
+    try { return { ok: true, value: await opts.write() }; }
+    catch (error) { events.push("rollback"); await opts.rollback(receipt, error); return { ok: false, error }; }
+  } } };
+  try {
+    const result = await se.applyDocMove({ container: parent }, { path: row.__sePath }, "spice/wiki/b", {
+      structural: true, move: { rewriteOnDocMove: () => null },
+    });
+    assert.strictEqual(result.ok, false);
+    assert.deepStrictEqual(events, ["apply", "write", "rollback"], "apply must precede persistence and rollback");
+    assert.deepStrictEqual(parent.children, [before, row, after], "same row restored before exact sibling");
+    assert.strictEqual(focused, 1, "captured focus restored once");
+    const newerFocus = { isConnected: true };
+    global.document.activeElement = newerFocus;
+    se._rollbackStructuralReceipt({ kind: "none", focusTarget: { focus: () => { focused++; } } });
+    assert.strictEqual(focused, 1, "late rollback preserves a newer connected user focus target");
+  } finally { global.app = priorApp; global.customJS = priorCustomJS; global.document = priorDocument; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER section rename/delete receipts preserve exact title and row identity", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorCustomJS = global.customJS;
+  const title = { __seTitle: true, textContent: "Original", children: [] };
+  const row = { __seFolder: "spice/wiki/original", children: [title] };
+  title.parentNode = row;
+  const root = { children: [row] };
+  row.parentNode = root;
+  root.removeChild = (node) => { root.children.splice(root.children.indexOf(node), 1); node.parentNode = null; };
+  root.appendChild = (node) => { root.children.push(node); node.parentNode = root; };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    const receipt = await opts.apply();
+    try { return { ok: true, value: await opts.write() }; }
+    catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+  } } };
+  try {
+    const renamed = await se._mutateStructure({ container: root }, { structural: true }, {
+      kind: "rename", identityKey: "__seFolder", identityValue: row.__seFolder, nextTitle: "Changed",
+    }, async () => { throw new Error("rename failed"); });
+    assert.strictEqual(renamed.ok, false);
+    assert.strictEqual(title.textContent, "Original", "exact prior title restored");
+    const deleted = await se._mutateStructure({ container: root }, { structural: true }, {
+      kind: "remove", identityKey: "__seFolder", identityValue: row.__seFolder,
+    }, async () => { throw new Error("delete failed"); });
+    assert.strictEqual(deleted.ok, false);
+    assert.strictEqual(root.children[0], row, "exact removed section row restored");
+  } finally { global.customJS = priorCustomJS; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8-SECTION-EXPLORER ChromeBar gestures mutate the same-view WikiTree owner", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const priorApp = global.app;
+  const priorCustomJS = global.customJS;
+  const priorDocument = global.document;
+  const view = {};
+  const row = { __sePath: "spice/wiki/a/Doc.md", children: [] };
+  const tree = {
+    children: [row], closest: () => view,
+    removeChild(node) { this.children.splice(this.children.indexOf(node), 1); node.parentNode = null; },
+    appendChild(node) { this.children.push(node); node.parentNode = this; },
+  };
+  row.parentNode = tree;
+  const chrome = {
+    children: [], closest: () => view,
+    createEl() { const node = { parentNode: this, remove: () => { this.children = this.children.filter((x) => x !== node); } }; this.children.push(node); return node; },
+  };
+  const adapter = { structural: true, structuralOwnerKey: "spice/wiki/a/A.md", move: { rewriteOnDocMove: () => null } };
+  se._registerStructuralRoot(adapter, tree);
+  global.document = { activeElement: null, body: {} };
+  global.app = { fileManager: { renameFile: async () => { throw new Error("rename failed"); } } };
+  global.customJS = { RenderSafe: { mutateStructure: async (opts) => {
+    const receipt = await opts.apply();
+    assert.deepStrictEqual(tree.children, [], "optimism removes the real WikiTree row");
+    assert.deepStrictEqual(chrome.children, [], "ChromeBar container receives no fake preview");
+    try { return { ok: true, value: await opts.write() }; }
+    catch (error) { await opts.rollback(receipt, error); return { ok: false, error }; }
+  } } };
+  try {
+    const result = await se.applyDocMove({ container: chrome }, { path: row.__sePath }, "spice/wiki/b", adapter);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(tree.children[0], row, "rollback restores the exact WikiTree row");
+    assert.ok(/render\(dv, adapter\)[\s\S]*_registerStructuralRoot\(adapter, container0\)/.test(sourceUnderTest()),
+      "production render registers each structural owner");
+  } finally { global.app = priorApp; global.customJS = priorCustomJS; global.document = priorDocument; }
+}});
+
+ASYNC_TESTS.push({ name: "PERF8L-SECTION-EXPLORER singleton registry releases detached unique-note roots", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const fallback = { isConnected: true };
+  for (let i = 0; i < 500; i++) {
+    const root = { isConnected: true };
+    se._registerStructuralRoot({ structuralOwnerKey: `spice/wiki/${i}/Note.md` }, root);
+    root.isConnected = false;
+  }
+  assert.ok(se._structuralRoots.size <= 1,
+    "registering each unique note globally prunes all previously detached owner roots");
+  assert.strictEqual(
+    se._structuralRoot({ container: fallback }, { structuralOwnerKey: "spice/wiki/499/Note.md" }),
+    fallback,
+    "lookup releases the final detached owner and falls back to the dispatch container",
+  );
+  assert.strictEqual(se._structuralRoots.size, 0,
+    "no disconnected unique-note roots remain strongly reachable from the singleton registry");
+}});
+
+ASYNC_TESTS.push({ name: "PERF8M-SECTION-EXPLORER detached local tree never redirects into a foreign view", fn: async () => {
+  const SectionExplorer = loadClass();
+  const se = new SectionExplorer();
+  const owner = { structuralOwnerKey: "spice/wiki/shared/Note.md" };
+  const viewA = {};
+  const viewB = {};
+  const rootA = { isConnected: true, closest: () => viewA };
+  const rootB = { isConnected: true, closest: () => viewB };
+  const dispatchB = { isConnected: true, closest: () => viewB };
+  se._registerStructuralRoot(owner, rootA);
+  se._registerStructuralRoot(owner, rootB);
+  assert.strictEqual(se._structuralRoot({ container: dispatchB }, owner), rootB,
+    "two live views select the exact structural root in the dispatch scope");
+  rootB.isConnected = false;
+  assert.strictEqual(se._structuralRoot({ container: dispatchB }, owner), dispatchB,
+    "a resolved scope with no live local tree falls back locally instead of selecting the foreign root");
+  assert.deepStrictEqual(Array.from(se._structuralRoots.get(owner.structuralOwnerKey) || []), [rootA],
+    "pruning releases the detached local tree while preserving the other live view");
+  const unscopedDispatch = { isConnected: true, closest: () => null };
+  assert.strictEqual(se._structuralRoot({ container: unscopedDispatch }, owner), rootA,
+    "sole-root compatibility remains available when the dispatch scope cannot be resolved");
+}});
+
+failures += !run("PERF8-SECTION-EXPLORER structural bulk awaits each receipt-bound move and counts only successes", () => {
+  const source = sourceUnderTest();
+  assert.ok(/adapter\s*&&\s*adapter\.structural\s*===\s*true[\s\S]*await\s+this\.applyDocMove/.test(source));
+  assert.ok(/getAbstractFileByPath\(m\.from\)[\s\S]*applyDocMove\(dv,\s*file/.test(source),
+    "bulk moves must resolve real vault files before calling fileManager.renameFile");
+  assert.ok(/moved\s*\+=\s*1/.test(source));
+});
 
 // Async tail — runs the queued async tests, then exits with the final tally.
 (async () => {
