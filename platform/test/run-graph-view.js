@@ -382,10 +382,24 @@ async function main() {
   };
   const dashboard = new EpicDashboard({ lifecycleApi });
   const currentPage = { file: { path: epicPath, folder: epicFolder } };
+  const sectionLabel = {
+    divider(target) {
+      const divider = (target.container || target).createEl('hr');
+      divider.className = 'shared-section-divider';
+      return divider;
+    },
+    render(dv, opts) {
+      const label = (dv.container || dv).createEl('div', { text: opts.text });
+      label.className = 'shared-section-label';
+      label.__sectionOptions = opts;
+      return label;
+    },
+  };
   global.customJS = {
     RenderSafe: { page: () => currentPage },
     GraphLayout: new GraphLayout(),
     EpicDashboard: dashboard,
+    SectionLabel: sectionLabel,
     Coordinator: coordinatorSentinel,
     DeliveryCoordinator: coordinatorSentinel,
   };
@@ -422,6 +436,14 @@ async function main() {
   await new GraphView().render({ container });
   const root = container.children.find((child) => child.className === 'graph-view-root');
   assert(root, 'render mounts one graph-view-root');
+  assert.strictEqual(root.children[0]?.className, 'shared-section-divider',
+    'VP-2 epic scope owns the shared SectionLabel divider as its first child');
+  assert.strictEqual(root.children[1]?.className, 'shared-section-label',
+    'VP-2 epic scope renders its section title through the shared SectionLabel primitive');
+  assert.strictEqual(root.children[1]?.textContent, 'Dependency Graph',
+    'VP-2 epic scope labels the graph section Dependency Graph');
+  assert.strictEqual(root.children[1]?.__sectionOptions?.top, true,
+    'VP-2 shared section label does not synthesize a second divider');
   bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0,
     'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');
 
@@ -1622,6 +1644,7 @@ async function main() {
     GraphLayout: new GraphLayout(),
     GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    SectionLabel: sectionLabel,
     Coordinator: coordinatorSentinel,
     DeliveryCoordinator: coordinatorSentinel,
   };
@@ -1629,6 +1652,10 @@ async function main() {
   await new GraphView({ scope: 'project' }).render({ container: projectContainer });
   const pRoot = projectContainer.children.find((child) => child.className === 'graph-view-root');
   assert(pRoot, 'P: project scope mounts one graph-view-root');
+  assert.strictEqual(pRoot.children[0]?.className, 'shared-section-divider',
+    'VP-2 project scope owns the shared SectionLabel divider as its first child');
+  assert.strictEqual(pRoot.children[1]?.className, 'shared-section-label',
+    'VP-2 project scope renders the Dependency Graph title through SectionLabel');
 
   // BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: project Outcomes exist only for
   // the selection panel. Missing/throwing GraphInsights disables that panel,
@@ -1997,6 +2024,16 @@ async function main() {
   await new GraphView().render({ container: coldContainer });
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
   global.customJS.RenderSafe = priorRenderSafe;
+  const priorSectionLabel = global.customJS.SectionLabel;
+  delete global.customJS.SectionLabel;
+  const fallbackContainer = element();
+  await new GraphView({ layout: { layoutGraph: () => ({ nodes: [], edges: [], warnings: [] }) } })
+    .render({ container: fallbackContainer });
+  assert.strictEqual(fallbackContainer.children[0]?.children[0]?.textContent, 'Dependency Graph',
+    'VP-2 missing SectionLabel falls back to plain text without throwing');
+  assert.strictEqual(fallbackContainer.children[0]?.children[0]?.style?.cssText, '',
+    'VP-2 fallback title carries no local section-label styling');
+  global.customJS.SectionLabel = priorSectionLabel;
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
   assert.deepStrictEqual(persistenceMutations, [],
     'BL4-BL5-ZERO-PERSISTENCE-SURFACES: selection and filters invoke no localStorage or coordinator mutation surface');
@@ -2012,6 +2049,11 @@ async function main() {
   // Widget grammar: RenderSafe-only current access, bare loadable class.
   assert(!widgetSource.includes('dv.current('), 'widget uses RenderSafe instead of raw dv.current');
   assert.ok(/^class GraphView\b/m.test(widgetSource), 'file is a bare customJS-loadable class');
+  const sectionChromeSource = widgetSource.match(/_renderSectionChrome\(dv, root\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert(sectionChromeSource.includes('SL.divider(root)') && sectionChromeSource.includes('SL.render('),
+    'VP-2 section chrome delegates divider and title rendering to SectionLabel');
+  assert(!/style|cssText|className/.test(sectionChromeSource),
+    'VP-2 section chrome defines no local section-label styling');
 
   // Registration: manifest files[] + customjs_classes[], package.json script +
   // one preflight entry directly after run-graph-layout.js.
@@ -2035,13 +2077,13 @@ async function main() {
   assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-view-contract\.js/g) || []).length, 1,
     'release preflight registers the independent contract sentinel once');
 
-  // Atlas mounts: the intake scaffold and the install heal both emit the
-  // GraphView customjs-guard block directly after the EpicDashboard block.
+  // Atlas mounts: the intake scaffold and the install heal both emit GraphView
+  // before EpicDashboard, directly after ProjectChromeBar.
   const intakeSource = fs.readFileSync(path.join(ROOT, '.agents/skills/card-intake/scripts/card-intake.js'), 'utf8');
   const dashboardMountAt = intakeSource.indexOf('{ class: "EpicDashboard" }');
   const graphMountAt = intakeSource.indexOf('{ class: "GraphView" }');
-  assert(dashboardMountAt >= 0 && graphMountAt > dashboardMountAt,
-    'card-intake atlas scaffold mounts GraphView after EpicDashboard');
+  assert(graphMountAt >= 0 && dashboardMountAt > graphMountAt,
+    'card-intake atlas scaffold mounts GraphView before EpicDashboard');
 
   const chromeOnlyAtlas = [
     '---', 'type: epic', 'schema_version: 1.1.0', '---', '',
@@ -2055,11 +2097,13 @@ async function main() {
   const healHistory = [];
   const healTp = { app: { vault: { adapter: healAdapter } } };
   await installer.applyEpicScaffoldHeal(healTp, { name: 'project' }, {}, healHistory, { commit: 'fixture', tag: null, dirty: false });
+  await installer.applyEpicAtlasGraphFirstHeal(healTp, { name: 'project' }, {}, healHistory,
+    { commit: 'fixture', tag: null, dirty: false });
   for (const atlas of ['spice/projects/demo/tasks/Bare Epic/Bare Epic.md', 'spice/projects/demo/tasks/Dash Epic/Dash Epic.md']) {
     const healed = healAdapter.store.get(atlas);
     const dashboardAt = healed.indexOf('class: "EpicDashboard"');
     const graphAt = healed.indexOf('class: "GraphView"');
-    assert(dashboardAt >= 0 && graphAt > dashboardAt, `heal mounts GraphView after EpicDashboard on ${atlas}`);
+    assert(graphAt >= 0 && dashboardAt > graphAt, `heal mounts GraphView before EpicDashboard on ${atlas}`);
     assert.strictEqual((healed.match(/class: "EpicDashboard"/g) || []).length, 1,
       `heal keeps exactly one EpicDashboard block on ${atlas}`);
     assert.strictEqual((healed.match(/class: "GraphView"/g) || []).length, 1,
@@ -2068,11 +2112,77 @@ async function main() {
   const firstPassStore = [...healAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right));
   const writesAfterFirstPass = healAdapter.writes.length;
   await installer.applyEpicScaffoldHeal(healTp, { name: 'project' }, {}, healHistory, { commit: 'fixture', tag: null, dirty: false });
+  await installer.applyEpicAtlasGraphFirstHeal(healTp, { name: 'project' }, {}, healHistory,
+    { commit: 'fixture', tag: null, dirty: false });
   assert.deepStrictEqual(
     [...healAdapter.store.entries()].sort(([left], [right]) => left.localeCompare(right)),
     firstPassStore, 'heal replay is byte-identical');
   assert.strictEqual(healAdapter.writes.length, writesAfterFirstPass, 'heal replay performs zero writes');
   assert(!healHistory.some((entry) => entry.event === 'warning'), 'heal fixtures produce no warnings');
+
+  const dashboardBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });\n```';
+  const graphBlock = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "GraphView" });\n```';
+  const oldOrder = `${chromeOnlyAtlas}\n${dashboardBlock}\n\n${graphBlock}\n`;
+  const newOrder = `${chromeOnlyAtlas}\n${graphBlock}\n\n${dashboardBlock}\n`;
+  const customizedOrder = `${chromeOnlyAtlas}\n${dashboardBlock}\n\nUser-authored atlas prose.\n\n${graphBlock}\n`;
+  const missingGraph = `${chromeOnlyAtlas}\n${dashboardBlock}\n`;
+  assert.deepStrictEqual(installer._epicAtlasGraphFirstBody(oldOrder),
+    { body: newOrder, status: 'reordered' },
+  'VP-2 exact stock Dashboard→GraphView pair rewrites byte-deterministically');
+  assert.deepStrictEqual(installer._epicAtlasGraphFirstBody(newOrder),
+    { body: newOrder, status: 'current' },
+  'VP-2 already-current stock atlas is an exact no-op');
+  assert.deepStrictEqual(installer._epicAtlasGraphFirstBody(customizedOrder),
+    { body: customizedOrder, status: 'warning', reason: 'customized_between_stock_blocks' },
+  'VP-2 hand-edited content between stock blocks is preserved with a warning');
+  assert.deepStrictEqual(installer._epicAtlasGraphFirstBody(missingGraph),
+    { body: missingGraph, status: 'warning', reason: 'missing_stock_block' },
+  'VP-2 an atlas missing either stock block is preserved with a warning');
+
+  const orderFixture = {
+    'spice/projects/order/tasks/Old Epic/Old Epic.md': oldOrder,
+    'spice/projects/order/tasks/New Epic/New Epic.md': newOrder,
+    'spice/projects/order/tasks/Custom Epic/Custom Epic.md': customizedOrder,
+    'spice/projects/order/tasks/Missing Epic/Missing Epic.md': missingGraph,
+    'spice/projects/order/Loop Station.md': oldOrder.replace('type: epic', 'type: loop-station'),
+  };
+  const orderAdapter = memoryAdapter(orderFixture);
+  const orderHistory = [];
+  await installer.applyEpicAtlasGraphFirstHeal(
+    { app: { vault: { adapter: orderAdapter } } }, { name: 'project' }, {}, orderHistory,
+    { commit: 'fixture', tag: null, dirty: false },
+  );
+  assert.strictEqual(orderAdapter.store.get('spice/projects/order/tasks/Old Epic/Old Epic.md'), newOrder,
+    'VP-2 install heal reorders the exact old stock atlas');
+  assert.strictEqual(orderAdapter.store.get('spice/projects/order/tasks/New Epic/New Epic.md'), newOrder,
+    'VP-2 install heal leaves the exact new stock atlas byte-identical');
+  assert.strictEqual(orderAdapter.store.get('spice/projects/order/tasks/Custom Epic/Custom Epic.md'), customizedOrder,
+    'VP-2 install heal leaves a customized atlas byte-identical');
+  assert.strictEqual(orderAdapter.store.get('spice/projects/order/tasks/Missing Epic/Missing Epic.md'), missingGraph,
+    'VP-2 install heal leaves a missing-block atlas byte-identical');
+  assert.strictEqual(orderAdapter.store.get('spice/projects/order/Loop Station.md'), orderFixture['spice/projects/order/Loop Station.md'],
+    'VP-2 install heal does not inspect or rewrite Loop Station');
+  assert(orderHistory.some((entry) => entry.event === 'warning'
+      && entry.target?.endsWith('/Custom Epic/Custom Epic.md')
+      && entry.reason === 'customized_between_stock_blocks'),
+  'VP-2 install heal reports a warning for customized inter-block content');
+  assert(orderHistory.some((entry) => entry.event === 'warning'
+      && entry.target?.endsWith('/Missing Epic/Missing Epic.md')
+      && entry.reason === 'missing_stock_block'),
+  'VP-2 install heal reports a warning for a missing stock block');
+  assert(orderAdapter.writes.some((entry) => entry.entry.includes('.obsidian/.sauce-heals/backups/')
+      && entry.entry.endsWith('/Old Epic/Old Epic.md')),
+  'VP-2 install heal writes a backup before the conforming atlas replacement');
+  const orderStoreAfterFirstPass = [...orderAdapter.store.entries()];
+  const orderWritesAfterFirstPass = orderAdapter.writes.length;
+  await installer.applyEpicAtlasGraphFirstHeal(
+    { app: { vault: { adapter: orderAdapter } } }, { name: 'project' }, {}, orderHistory,
+    { commit: 'fixture', tag: null, dirty: false },
+  );
+  assert.deepStrictEqual([...orderAdapter.store.entries()], orderStoreAfterFirstPass,
+    'VP-2 install heal replay preserves every atlas byte');
+  assert.strictEqual(orderAdapter.writes.length, orderWritesAfterFirstPass,
+    'VP-2 install heal replay performs zero writes');
 
   // Loop Station heal (GV-3b): an existing type:loop-station note without the
   // project-scope GraphView block gains it exactly once, directly after the

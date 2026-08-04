@@ -1267,6 +1267,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectDashboardConformanceHeal(tp, mech, variables, history, git); // NEW ProjectDashboard cycle — collapses 6-block legacy hub bodies to ChromeBar + Dashboard (idempotent; MUST run after applyProjectActivityPanelsHeal so its just-injected legacy panels get promoted in the same install)
   await applyEpicScaffoldHeal(tp, mech, variables, history, git); // ES2 — exact project-board identity/action plus canonical epic context/dashboard conformance
+  await applyEpicAtlasGraphFirstHeal(tp, mech, variables, history, git); // VP-2 — swaps only the exact stock Dashboard→GraphView atlas pair; customized/missing pairs warn untouched
   await applyLoopStationGraphHeal(tp, mech, variables, history, git); // GV-3b — injects the project-scope GraphView block after OperatorStation on existing type:loop-station notes (include-guard, exactly once, .sauce-heals backup, byte-stable replay; the coordinator only scaffolds ABSENT stations)
   await applyEpicBoardRoleBackfill(tp, mech, variables, history, git); // ES2 — mark only the exact canonical board adjacent to a type:epic atlas
   await applySliceSourceBoardHeal(tp, mech, variables, history, git); // ES2 — repair direct type:slice notes to the exact canonical epic board
@@ -5260,6 +5261,58 @@ async function applyEpicScaffoldHeal(tp, manifest, variables, history, git) {
     }
   } catch (error) {
     history?.push({ event: "warning", step: "epic_scaffold_heal", reason: error?.message || String(error),
+      git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
+  }
+}
+
+const EPIC_DASHBOARD_BLOCK = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });\n```';
+const EPIC_GRAPH_VIEW_BLOCK = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "GraphView" });\n```';
+
+function _epicAtlasGraphFirstBody(body) {
+  const source = String(body || "");
+  const dashboardCount = source.split(EPIC_DASHBOARD_BLOCK).length - 1;
+  const graphCount = source.split(EPIC_GRAPH_VIEW_BLOCK).length - 1;
+  if (dashboardCount !== 1 || graphCount !== 1) {
+    return {
+      body: source,
+      status: "warning",
+      reason: dashboardCount === 0 || graphCount === 0
+        ? "missing_stock_block"
+        : "duplicate_stock_block",
+    };
+  }
+  const oldPair = `${EPIC_DASHBOARD_BLOCK}\n\n${EPIC_GRAPH_VIEW_BLOCK}`;
+  const newPair = `${EPIC_GRAPH_VIEW_BLOCK}\n\n${EPIC_DASHBOARD_BLOCK}`;
+  if (source.includes(newPair)) return { body: source, status: "current" };
+  if (source.includes(oldPair)) {
+    return { body: source.replace(oldPair, newPair), status: "reordered" };
+  }
+  return { body: source, status: "warning", reason: "customized_between_stock_blocks" };
+}
+
+async function applyEpicAtlasGraphFirstHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project" || !tp?.app?.vault?.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  try {
+    for (const epic of await _epicDirectories(adapter)) {
+      const before = await adapter.read(epic.atlas);
+      const result = _epicAtlasGraphFirstBody(before);
+      if (result.status === "warning") {
+        history?.push({ event: "warning", step: "epic_atlas_graph_first_heal", target: epic.atlas,
+          reason: result.reason, git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty,
+          attempted_at: new Date().toISOString() });
+        continue;
+      }
+      if (result.status !== "reordered") continue;
+      if (await _epicBackupWrite(adapter, epic.atlas, before, result.body, ts)) {
+        history?.push({ event: "info", step: "epic_atlas_graph_first_heal", target: epic.atlas,
+          action: "graph_first_reordered", git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+  } catch (error) {
+    history?.push({ event: "warning", step: "epic_atlas_graph_first_heal", reason: error?.message || String(error),
       git_commit: git?.commit, git_tag: git?.tag, git_dirty: git?.dirty, attempted_at: new Date().toISOString() });
   }
 }
@@ -22286,6 +22339,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     module.exports.applyProjectDashboardConformanceHeal = applyProjectDashboardConformanceHeal;
     module.exports.applyEpicScaffoldHeal = applyEpicScaffoldHeal;
+    module.exports.applyEpicAtlasGraphFirstHeal = applyEpicAtlasGraphFirstHeal;
+    module.exports._epicAtlasGraphFirstBody = _epicAtlasGraphFirstBody;
     // GV-3b — Loop Station project-scope GraphView heal (run-graph-view.js).
     module.exports.applyLoopStationGraphHeal = applyLoopStationGraphHeal;
     module.exports.applyEpicBoardRoleBackfill = applyEpicBoardRoleBackfill;

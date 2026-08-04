@@ -56,6 +56,18 @@ class GraphView {
     try { return typeof app !== "undefined" ? app : globalThis.app; } catch (_e) { return null; }
   }
 
+  _renderSectionChrome(dv, root) {
+    try {
+      const SL = globalThis.customJS?.SectionLabel;
+      if (typeof SL?.divider === "function" && typeof SL?.render === "function") {
+        SL.divider(root);
+        SL.render({ ...dv, container: root }, { text: "Dependency Graph", top: true });
+        return;
+      }
+    } catch (_e) {}
+    root.createEl("div", { text: "Dependency Graph" });
+  }
+
   _dashboard() {
     if (this._injectedDashboard) return this._injectedDashboard;
     try { return globalThis.customJS?.EpicDashboard || null; } catch (_e) { return null; }
@@ -1155,6 +1167,7 @@ class GraphView {
       const root = dv.container.createEl("div");
       root.className = "graph-view-root";
       root.style.cssText = "display:grid;gap:8px;max-width:100%;";
+      this._renderSectionChrome(dv, root);
       const scope = overrides && typeof overrides === "object" && overrides.scope
         ? String(overrides.scope)
         : this._scope;
