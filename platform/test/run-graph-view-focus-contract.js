@@ -21,7 +21,7 @@ const PACKAGE = path.join(ROOT, 'package.json');
 const source = fs.readFileSync(BEHAVIOR, 'utf8');
 const compact = source.replace(/\s+/g, ' ');
 const pkg = JSON.parse(fs.readFileSync(PACKAGE, 'utf8'));
-const EXPECTED_BEHAVIOR_SHA256 = '757caa87bee38ddb4de8992bc2b77fb2395de5942cfee501828e687bce1c5bbc';
+const EXPECTED_BEHAVIOR_SHA256 = 'b083b80be4162c575a54196612962d09940ac8d4e64e2587e736d79393d679a5';
 
 const exactPredicates = [
   ["epic no-op", "bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0, 'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');"],
