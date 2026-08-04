@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 'use strict';
 
-// Independent BL-6b executable contract. The behavioral harness records a
+// Independent BL-6c executable contract. The behavioral harness records a
 // receipt only after each exact BL-6 predicate executes successfully. This
-// sentinel binds those predicates from a separate file, runs the harness in a
-// child process, and requires the exact ordered receipt stream. Source text
-// hidden in dead code cannot produce a receipt; a weakened predicate cannot
-// satisfy the independent source contract.
+// sentinel binds the complete lexical fixture from a separate file, runs the
+// harness in a child process, and requires the exact ordered receipt stream.
+// The byte identity is intentionally independent of runtime stack formatting:
+// a dead exact call or a byte-identical call over shadow fixtures changes the
+// independently pinned harness digest before it can forge a receipt.
 
 const assert = require('assert');
 const childProcess = require('child_process');
@@ -20,6 +21,7 @@ const PACKAGE = path.join(ROOT, 'package.json');
 const source = fs.readFileSync(BEHAVIOR, 'utf8');
 const compact = source.replace(/\s+/g, ' ');
 const pkg = JSON.parse(fs.readFileSync(PACKAGE, 'utf8'));
+const EXPECTED_BEHAVIOR_SHA256 = '7b153117185b58a9f88ab28eaaf972754037350ad754fbd97b01c29b2d759818';
 
 const exactPredicates = [
   ["epic no-op", "bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0, 'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');"],
@@ -66,25 +68,17 @@ function predicateSource(call) {
   return call.slice(start, end).replace(/\s+/g, ' ');
 }
 function digest(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
-function callSite(call) {
-  const argument = call.indexOf(', () =>');
-  const prefix = call.slice(0, argument + 1);
-  const at = source.indexOf(prefix);
-  assert(at >= 0, `BL6B-CALLSITE: missing exact source prefix ${prefix}`);
-  const before = source.slice(0, at);
-  return `${before.split(/\r?\n/).length}:${at - before.lastIndexOf('\n')}`;
-}
 const expectedReceipts = exactPredicates.flatMap(([label, call]) => {
   const predicateDigest = digest(predicateSource(call));
-  const site = callSite(call);
-  return receiptNames[label].map((name) => ({ name, digest: predicateDigest, site }));
+  return receiptNames[label].map((name) => ({ name, digest: predicateDigest }));
 });
 
 function staticFailures(candidate) {
   const body = candidate.replace(/\s+/g, ' ');
   const failures = exactPredicates.filter(([, predicate]) => !body.includes(predicate)).map(([label]) => label);
-  const recorder = "const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => { let tail = null; let count = 0; const check = (name, predicate, message) => { assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`); const predicateSource = Function.prototype.toString.call(predicate).replace(/\\s+/g, ' '); const digest = crypto.createHash('sha256').update(predicateSource).digest('hex'); const caller = String(new Error().stack || '').split(/\\r?\\n/)[2] || ''; const location = caller.match(/run-graph-view\\.js:(\\d+):(\\d+)\\)?$/); assert(location, `BL6 receipt ${name} requires an exact harness callsite`); assert(predicate(), message); tail = { previous: tail, receipt: { name, digest, site: `${location[1]}:${location[2]}` } }; count += 1; }; const snapshot = () => { const output = []; output.length = count; let cursor = tail; let index = count - 1; while (cursor) { output[index] = { ...cursor.receipt }; cursor = cursor.previous; index -= 1; } return output; }; return Object.freeze({ check, snapshot }); })();";
+  const recorder = "const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => { let tail = null; let count = 0; const check = (name, predicate, message) => { assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`); const predicateSource = Function.prototype.toString.call(predicate).replace(/\\s+/g, ' '); const digest = crypto.createHash('sha256').update(predicateSource).digest('hex'); assert(predicate(), message); tail = { previous: tail, receipt: { name, digest } }; count += 1; }; const snapshot = () => { const output = []; output.length = count; let cursor = tail; let index = count - 1; while (cursor) { output[index] = { ...cursor.receipt }; cursor = cursor.previous; index -= 1; } return output; }; return Object.freeze({ check, snapshot }); })();";
   if (!body.includes(recorder) || /\breceipts?\.push\(/.test(candidate)) failures.push('receipt recorder');
+  if (digest(candidate) !== EXPECTED_BEHAVIOR_SHA256) failures.push('behavior source identity');
   if (!candidate.includes('console.log(`BL6-RECEIPTS ${JSON.stringify(bl6ReceiptSnapshot())}`);')) failures.push('receipt output');
   return failures;
 }
@@ -105,11 +99,12 @@ assert.strictEqual(run.status, 0, `BL6A-EXECUTE: GraphView behavior harness fail
 assert.deepStrictEqual(receiptFailures(run.stdout), [],
   'BL6A-EXECUTE: every BL-6 predicate executed and emitted its exact ordered receipt');
 
-// Contract self-tests: dead-code wrapping preserves the exact source string
-// but cannot satisfy the runtime receipt stream; weakening changes the exact
-// predicate and fails the independent static half.
+// Contract self-tests: every source-level attempt to relocate an exact
+// predicate away from its real lexical fixtures fails the independent byte
+// identity, while runtime receipts still prove that the pinned calls execute.
 const deadCode = source.replace("bl6Check('first-tap', () =>", "if (false) bl6Check('first-tap', () =>");
-assert.deepStrictEqual(staticFailures(deadCode), [], 'BL6A-SELF-DEAD-CODE: textual presence alone still passes static binding');
+assert(staticFailures(deadCode).includes('behavior source identity'),
+  'BL6C-SELF-DEAD-CODE: dead wrapping changes the independently pinned lexical fixture');
 const bypassedHelper = source.replace('    assert(predicate(), message);', '    if (false) assert(predicate(), message);');
 assert(staticFailures(bypassedHelper).includes('receipt recorder'),
   'BL6A-SELF-HELPER-BYPASS: assert-before-record provenance is independently bound');
@@ -126,10 +121,26 @@ const forgedReceipts = expectedReceipts.map((receipt) => receipt.name === 'first
   ? { ...receipt, digest: digest('() => Boolean(headers[1])') } : receipt);
 assert.deepStrictEqual(receiptFailures(`BL6-RECEIPTS ${JSON.stringify(forgedReceipts)}`), ['receipt sequence'],
   'BL6A-SELF-FORGED: a weaker active predicate cannot forge the exact predicate digest');
-const shadowedReceipts = expectedReceipts.map((receipt) => receipt.name === 'first-tap'
-  ? { ...receipt, site: '999:9' } : receipt);
-assert.deepStrictEqual(receiptFailures(`BL6-RECEIPTS ${JSON.stringify(shadowedReceipts)}`), ['receipt sequence'],
-  'BL6B-SELF-SHADOWED: an exact predicate at a forged callsite cannot replace the real fixture');
+const stackForgery = `${source}\nError.prepareStackTrace = () => 'forged run-graph-view.js:1:1';\n`;
+assert(staticFailures(stackForgery).includes('behavior source identity'),
+  'BL6C-SELF-STACK-FORGERY: mutable stack formatting cannot alter or replace proof provenance');
+const shadowedExact = source.replace(
+  "  for (const id of ['E1-1'",
+  "  { const firstClusterTap = { stopped: true }; const projectOpened = []; const clusterOpenCount = 0;\n"
+    + "    bl6Check('first-tap', () => firstClusterTap.stopped && projectOpened.length === clusterOpenCount, 'BL6-FIRST-TAP: first cluster-header tap stops bubbling and performs no navigation'); }\n"
+    + "  for (const id of ['E1-1'",
+);
+assert(staticFailures(shadowedExact).includes('behavior source identity'),
+  'BL6C-SELF-SHADOWED: a byte-identical predicate over shadow fixtures changes the pinned harness identity');
+const priorStackExploit = deadCode.replace(
+  "  for (const id of ['E1-1'",
+  "  { const firstClusterTap = { stopped: true }; const projectOpened = []; const clusterOpenCount = 0;\n"
+    + "    Error.prepareStackTrace = () => 'forged run-graph-view.js:1:1';\n"
+    + "    bl6Check('first-tap', () => firstClusterTap.stopped && projectOpened.length === clusterOpenCount, 'BL6-FIRST-TAP: first cluster-header tap stops bubbling and performs no navigation'); }\n"
+    + "  for (const id of ['E1-1'",
+);
+assert(staticFailures(priorStackExploit).includes('behavior source identity'),
+  'BL6C-SELF-PRIOR-EXPLOIT: dead real predicate plus shadow fixtures and forged stack stays RED');
 const directWriter = source.replace(
   "if (false) bl6Check('first-tap', () =>",
   "if (false) bl6Check('first-tap', () =>",
@@ -149,4 +160,4 @@ assert.strictEqual(pkg.scripts?.['test:graph-view-focus-contract'],
 assert.strictEqual(((pkg.scripts?.['release:preflight'] || '').match(/run-graph-view-focus-contract\.js/g) || []).length, 1,
   'BL6A-PREFLIGHT: release preflight invokes the focus contract exactly once');
 
-console.log('PASS — GraphView BL-6b single-writer focus contract');
+console.log('PASS — GraphView BL-6c scope-bound focus contract');

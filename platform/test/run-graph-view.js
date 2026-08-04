@@ -107,11 +107,8 @@ const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => {
     assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`);
     const predicateSource = Function.prototype.toString.call(predicate).replace(/\s+/g, ' ');
     const digest = crypto.createHash('sha256').update(predicateSource).digest('hex');
-    const caller = String(new Error().stack || '').split(/\r?\n/)[2] || '';
-    const location = caller.match(/run-graph-view\.js:(\d+):(\d+)\)?$/);
-    assert(location, `BL6 receipt ${name} requires an exact harness callsite`);
     assert(predicate(), message);
-    tail = { previous: tail, receipt: { name, digest, site: `${location[1]}:${location[2]}` } };
+    tail = { previous: tail, receipt: { name, digest } };
     count += 1;
   };
   const snapshot = () => {
