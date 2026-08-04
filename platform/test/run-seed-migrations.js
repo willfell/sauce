@@ -882,6 +882,17 @@ withTempVault((vault) => {
     const vp2cFirstPassBackupPaths = [...vp2cGammaBackups];
 
     // ===== Idempotency phase: snapshot, second install, compare =====
+    // A normal same-version install skips already-current blueprint items at
+    // install.js's version gate. Mark only the project ledger entry stale so
+    // the second headless install actually traverses the registered project
+    // heal sequence again; otherwise these assertions prove version-skip
+    // stability rather than migration replay safety.
+    const vp2cReplayLedgerPath = path.join(vault, 'ranch/platform-installed.json');
+    const vp2cReplayLedger = helpers.readJson(vault, 'ranch/platform-installed.json');
+    const vp2cProjectEntry = (vp2cReplayLedger.blueprints || []).find((entry) => entry.name === 'project');
+    ok('VP-2C-SEED-10 replay fixture finds the installed project ledger entry', Boolean(vp2cProjectEntry));
+    if (vp2cProjectEntry) vp2cProjectEntry.version = '0.0.0';
+    fs.writeFileSync(vp2cReplayLedgerPath, JSON.stringify(vp2cReplayLedger, null, 2) + '\n');
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
     ok(
@@ -906,8 +917,10 @@ withTempVault((vault) => {
     ]);
     function isMutable(p) {
         if (KNOWN_MUTABLE.has(p)) return true;
-        // .sauce-backup files are install-time transient
-        if (p.endsWith(".sauce-backup")) return true;
+        // .sauce-backup files are install-time transient. The forced project
+        // replay exercises its backup-first template copies, which create a
+        // timestamped directory under this root on every real traversal.
+        if (p === ".sauce-backup" || p.startsWith(".sauce-backup/") || p.endsWith(".sauce-backup")) return true;
         return false;
     }
     const unexpectedAdded = diff.added.filter((f) => !isMutable(f));
@@ -935,11 +948,11 @@ withTempVault((vault) => {
         installedJson2 && installedJson && installedJson2.history.length > installedJson.history.length,
         `before=${installedJson && installedJson.history.length} after=${installedJson2 && installedJson2.history.length}`
     );
-    ok('VP-2C-SEED-10 second install preserves every atlas byte',
+    ok('VP-2C-SEED-11 forced project replay preserves every atlas byte',
        vp2cNames.every((name) => fs.readFileSync(path.join(vault, vp2cRel(name)), 'utf8') === vp2cFirstPassBodies[name]));
     const vp2cSecondPassBackups = filesBelow(vp2cBackupRoot).filter((entry) => entry.replace(/\\/g, '/')
         .endsWith(`/${vp2cRel('Gamma Epic')}`));
-    ok('VP-2C-SEED-11 second install creates no atlas backup and cannot overwrite the original',
+    ok('VP-2C-SEED-12 forced project replay creates no atlas backup and cannot overwrite the original',
        vp2cSecondPassBackups.length === 1
          && JSON.stringify(vp2cSecondPassBackups) === JSON.stringify(vp2cFirstPassBackupPaths)
          && fs.readFileSync(vp2cSecondPassBackups[0], 'utf8') === vp2cSeedBodies['Gamma Epic']);
