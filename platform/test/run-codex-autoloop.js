@@ -8399,6 +8399,37 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-UNTRACKED tracked members are not reported');
 }
 
+// BH-LEDGERLESS — the sweep survives the failure it exists to catch: with an
+// empty ledger checks 1–3 still report, checks 4–5 contribute nothing, and the
+// receipt says so explicitly so "clean" can never mean "couldn't check".
+{
+  const root = path.join(tmp, 'bh-ledgerless');
+  const fx = bhScaffold(root, {
+    progress: ['Retire ero loop'],
+    epics: { 'Retire ero loop': {
+      lanes: { Completed: ['EM-4', 'EM-5', 'EM-6'] },
+      slices: { 'EM-4': 'completed', 'EM-5': 'completed', 'EM-6': 'completed' },
+    } },
+  });
+  const statePath = path.join(root, 'state.json');
+  fs.writeFileSync(statePath, JSON.stringify(emptyState()));
+  const receipt = await coordinator.commandBoardHealth({ root, statePath }, { json: true },
+    bhDeps(fx, { readState: () => emptyState() }));
+  eq(receipt.ledger, 'empty', 'BH-LEDGERLESS an empty ledger is named, not hidden');
+  eq(receipt.checked.records, 0, 'BH-LEDGERLESS zero records checked is explicit');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
+    'BH-LEDGERLESS check 1 needs no ledger');
+  eq(receipt.findings.binding_drift,
+    { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    'BH-LEDGERLESS check 3 needs no ledger');
+  eq(receipt.findings.lane_divergence, [], 'BH-LEDGERLESS check 4 is skipped, not failed');
+  eq(receipt.findings.projection_errors, [], 'BH-LEDGERLESS check 5 is skipped, not failed');
+  eq(receipt.no_op, false, 'BH-LEDGERLESS untracked findings keep the run from reading as clean');
+  const absent = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'nope.json') },
+    { json: true }, bhDeps(fx, { readState: () => emptyState() }));
+  eq(absent.ledger, 'absent', 'BH-LEDGERLESS a missing state file reads as absent');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {

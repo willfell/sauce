@@ -4561,6 +4561,7 @@ const BOARD_HEALTH_LANES = ['In Planning', 'In Progress', 'Blocked', 'Completed'
 // Pre-claim `planning` is the one note status the ledger legitimately has no
 // record for; anything else on an untracked member is work outside the rail.
 const BOARD_HEALTH_PROGRESS_STATUSES = new Set(['in_progress', 'parked', 'blocked', 'completed']);
+const BOARD_HEALTH_DRIFT_REMEDY = 'heal-epic-bindings --dry-run --json';
 
 function untrackedMemberFinding(epic, cardName, noteStatus) {
   return {
@@ -4611,15 +4612,43 @@ function collectBoardHealth(state, opts = {}) {
       }
     }
   }
+  // Check 3 — binding drift + orphan sub-board lines, reused verbatim from the
+  // heal planner so the sweep and the remedy can never disagree. A throw here
+  // is itself a finding: the sweep's own failures must never look like health.
+  let bindingDrift;
+  try {
+    const plan = planEpicBindingHeal(cardsRoot, boardPath);
+    bindingDrift = {
+      atlases: plan.atlases.length,
+      slices: plan.slices.length,
+      orphan_lines: plan.orphanLines.length,
+      remedy: BOARD_HEALTH_DRIFT_REMEDY,
+    };
+  } catch (err) {
+    bindingDrift = { error: `binding-drift plan is unreadable: ${err.message}`, remedy: BOARD_HEALTH_DRIFT_REMEDY };
+  }
+  // Check 5 — records carrying projection_error. Ledger-driven by nature, so
+  // an empty/absent ledger contributes zero findings (skipped, not failed).
+  const projectionErrors = ledger === 'present'
+    ? Object.values(cards)
+      .filter((record) => record.projection_error)
+      .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }))
+    : [];
   const findings = {
     untracked_members: untracked,
+    binding_drift: bindingDrift,
+    lane_divergence: [],
+    projection_errors: projectionErrors,
   };
+  const driftClean = !bindingDrift.error
+    && !bindingDrift.atlases && !bindingDrift.slices && !bindingDrift.orphan_lines;
   return {
     project: path.posix.basename(project.prefix),
     ledger,
     checked: { epics: epicCount, slices: sliceCount, records: Object.keys(cards).length },
     findings,
-    healthy: Object.values(findings).every((list) => !list.length),
+    healthy: driftClean && Object.entries(findings)
+      .every(([key, value]) => key === 'binding_drift' || !value.length),
   };
 }
 
