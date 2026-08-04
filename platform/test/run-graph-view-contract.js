@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Independent BL-5b sentinel. This file deliberately does not import or share
+// Independent BL-5c sentinel. This file deliberately does not import or share
 // assertions with run-graph-view.js: it binds the production authority seams,
 // the adversarial fixtures, and its own preflight registration from source.
 
@@ -11,6 +11,7 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const widget = fs.readFileSync(path.join(ROOT, 'platform/blueprints/project/helpers/graph-view.js'), 'utf8');
 const behavior = fs.readFileSync(path.join(ROOT, 'platform/test/run-graph-view.js'), 'utf8');
+const compactBehavior = behavior.replace(/\s+/g, ' ');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const failures = [];
 
@@ -61,6 +62,20 @@ const firstClear = behavior.indexOf("bubblingClick(bl5ChipFor('BL5-A'))", active
 check(bothActive >= 0 && activeMarker > bothActive && firstClear > activeMarker,
   'BL5B-SENTINEL-ACTIVE-ORDER: second render occurs while the first widget remains filtered');
 
+// BL5C-PREDICATE-BINDINGS: fixture markers and values are not enough. Bind
+// the executable predicates themselves so replacing any carried assertion
+// with unconditional truth turns this independent harness red.
+for (const [label, predicate] of [
+  ['ACTIVE', "assert.deepStrictEqual(domShape(bl5ActiveFreshRoot), bl5AtRest, 'BL5B-CROSS-INSTANCE-ACTIVE: a second render starts off while the first remains active');"],
+  ['DIVERGENT-BRIGHT', "assert(!bl5DivergentChipFor(id).className.includes('graph-view-dimmed'), `BL5B-CLOSURE-DIVERGENCE: authoritative keep member ${id} remains bright`);"],
+  ['DIVERGENT-DIM', "assert(bl5DivergentChipFor(id).className.includes('graph-view-dimmed'), `BL5B-CLOSURE-DIVERGENCE: non-member ${id} dims despite the drawn edge path`);"],
+  ['FAIL-SOFT-DOM', "assert.deepStrictEqual(domShape(failSoftRoot), before, `BL5-FAIL-SOFT-${label.toUpperCase()}: Stuck is an exact no-op without authoritative GraphInsights`);"],
+  ['FAIL-SOFT-CHIPS', "assert(byClass(failSoftRoot, 'graph-view-chip').every((chip) => !chip.className.includes('graph-view-dimmed')), `BL5-MUTANT-${label.toUpperCase()}-INSIGHTS-BRIDGE: unavailable analysis never dims a connecting-chain chip`);"],
+]) check(compactBehavior.includes(predicate),
+  `BL5C-SENTINEL-${label}-PREDICATE: executable behavioral predicate is exact`);
+check(!/\bassert(?:\.ok)?\s*\(\s*true\b/.test(behavior),
+  'BL5C-SENTINEL-NO-UNCONDITIONAL-ASSERT: behavior harness contains no assert(true) substitution');
+
 check(pkg.scripts?.['test:graph-view-contract'] === 'node platform/test/run-graph-view-contract.js',
   'BL5B-SENTINEL-REGISTRY: focused contract script is registered');
 check(((pkg.scripts?.['release:preflight'] || '').match(/run-graph-view-contract\.js/g) || []).length === 1,
@@ -70,4 +85,4 @@ if (failures.length) {
   for (const failure of failures) console.error(`FAIL — ${failure}`);
   process.exit(1);
 }
-console.log('PASS — GraphView BL-5b contract sentinel');
+console.log('PASS — GraphView BL-5c contract sentinel');
