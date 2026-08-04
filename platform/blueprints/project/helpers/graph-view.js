@@ -476,22 +476,63 @@ class GraphView {
     return panel;
   }
 
-  // Selection lives only in this render's closure. GraphInsights owns every
-  // transitive membership answer; GraphView performs set arithmetic over that
-  // answer and never walks the graph itself.
+  // Stuck filtering consumes GraphInsights closures only. For every root/stuck
+  // pair, nodes on a connecting path are exactly the root's downstream closure
+  // intersected with the stuck node's upstream closure. GraphView performs set
+  // arithmetic over those supplied memberships and never walks the graph.
+  _stuckKeepSet(nodes, analysis) {
+    const stuck = new Set((nodes || [])
+      .filter((node) => !node?.isStub && ["blocked", "parked"].includes(String(node?.status || "").trim().toLowerCase()))
+      .map((node) => node.card));
+    const roots = (Array.isArray(analysis?.summary?.rootBlockers) ? analysis.summary.rootBlockers : [])
+      .filter((card) => typeof card === "string" && card);
+    const keep = new Set([...stuck, ...roots]);
+    for (const root of roots) {
+      const below = new Set(this._nodeInsight(analysis, root)?.downstream || []);
+      for (const blocked of stuck) {
+        if (blocked !== root && !below.has(blocked)) continue;
+        const above = new Set(this._nodeInsight(analysis, blocked)?.upstream || []);
+        for (const card of below) if (card === blocked || above.has(card)) keep.add(card);
+      }
+    }
+    return keep;
+  }
+
+  // Selection and filters live only in this render's closure. Selection wins
+  // wholesale while active; clearing it reapplies the current filter union.
   _selectionController({ root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges }) {
     const chips = new Map();
     let selected = null;
     let panel = null;
+    const filters = { stuck: false, dimDone: false };
+    const buttons = {};
+    const setDimmed = (record, dimmed) => {
+      this._setClass(record.chip, "graph-view-dimmed", dimmed);
+      record.chip.style.cssText = record.cssText
+        + (dimmed ? "opacity:0.28;filter:saturate(0.45);" : "");
+    };
+    const updateButtons = () => {
+      for (const [key, button] of Object.entries(buttons)) {
+        const active = filters[key] === true;
+        this._setClass(button, "graph-view-filter-active", active);
+        button.setAttribute?.("aria-pressed", active ? "true" : "false");
+      }
+    };
+    const applyFilters = () => {
+      updateButtons();
+      if (selected !== null) return;
+      const keep = filters.stuck ? this._stuckKeepSet(nodes, analysis) : null;
+      for (const [card, record] of chips) {
+        const completed = this._statusPresentation(record.node.status, api).normalized === "completed";
+        setDimmed(record, (filters.stuck && !keep.has(card)) || (filters.dimDone && completed));
+      }
+      renderEdges(null);
+    };
     const clear = () => {
       selected = null;
       panel?.remove?.();
       panel = null;
-      for (const record of chips.values()) {
-        this._setClass(record.chip, "graph-view-dimmed", false);
-        record.chip.style.cssText = record.cssText;
-      }
-      renderEdges(null);
+      applyFilters();
     };
     const select = (node, event) => {
       event?.stopPropagation?.();
@@ -504,18 +545,41 @@ class GraphView {
       const insight = this._nodeInsight(analysis, node.card);
       const chain = new Set([node.card, ...(insight?.upstream || []), ...(insight?.downstream || [])]);
       for (const [card, record] of chips) {
-        const dimmed = !chain.has(card);
-        this._setClass(record.chip, "graph-view-dimmed", dimmed);
-        record.chip.style.cssText = record.cssText
-          + (dimmed ? "opacity:0.28;filter:saturate(0.45);" : "");
+        setDimmed(record, !chain.has(card));
       }
       renderEdges(chain);
       panel = this._renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes);
     };
     canvas.addEventListener?.("click", clear);
     return {
-      register(node, chip) { chips.set(node.card, { chip, cssText: chip?.style?.cssText || "" }); },
-      select,
+      register(node, chip) { chips.set(node.card, { node, chip, cssText: chip?.style?.cssText || "" }); },
+      renderToolbar: () => {
+        const toolbar = root.createEl("div");
+        toolbar.className = "graph-view-filter-toolbar";
+        toolbar.setAttribute?.("aria-label", "Graph filters");
+        toolbar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+        root.insertBefore?.(toolbar, scroller);
+        for (const [key, label, className] of [
+          ["stuck", "Stuck", "graph-view-filter-stuck"],
+          ["dimDone", "Dim done", "graph-view-filter-done"],
+        ]) {
+          const button = toolbar.createEl("button", { text: label });
+          button.className = `graph-view-filter-toggle ${className}`;
+          button.setAttribute?.("type", "button");
+          button.setAttribute?.("aria-pressed", "false");
+          button.style.cssText = "min-height:32px;padding:5px 12px;border-radius:999px;cursor:pointer;"
+            + "border:1px solid var(--background-modifier-border);background:var(--background-secondary);";
+          button.addEventListener?.("click", (event) => {
+            event?.stopPropagation?.();
+            filters[key] = !filters[key];
+            applyFilters();
+          });
+          buttons[key] = button;
+        }
+        updateButtons();
+        return toolbar;
+      },
+      select: analysis ? select : null,
       clear,
     };
   }
@@ -574,9 +638,10 @@ class GraphView {
     edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
     const renderEdges = (chain) => { edgeLayer.innerHTML = this._edgeSvg(width, height, edges, positions, geometry, chain); };
     renderEdges(null);
-    const interaction = analysis && this._selectionController({
+    const interaction = this._selectionController({
       root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges,
     });
+    interaction.renderToolbar();
     for (const node of nodes) {
       const chip = node.isStub
         ? this._renderStub(canvas, node, positions.get(node.card), geometry, source, interaction?.select)
@@ -936,9 +1001,10 @@ class GraphView {
         edgeLayer.innerHTML = this._edgeSvg(width, height, allEdges, positions, geometry, chain);
       };
       renderEdges(null);
-      const interaction = analysis && this._selectionController({
+      const interaction = this._selectionController({
         root, scroller, canvas, nodes: allNodes, edges: allEdges, analysis, api, source, outcomes, renderEdges,
       });
+      interaction.renderToolbar();
       for (const cluster of clusters) {
         const header = canvas.createEl("div", { text: cluster.epic });
         header.className = "graph-view-cluster-header";

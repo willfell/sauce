@@ -797,6 +797,91 @@ async function main() {
   assert.deepStrictEqual([...bl3HealthyWarnings, ...bl3MissingWarnings, ...bl3ThrowingWarnings], [],
     'BL3-FAIL-SOFT: unavailable analysis emits no warning spam');
 
+  // BL-5 epic filters. The completed bridge is deliberately on the connecting
+  // path from root blocker A to downstream stuck C: Stuck must keep it bright,
+  // while composing Dim done must dim it. Selection then wins wholesale and
+  // temporarily restores that bridge until the empty-canvas clear reapplies
+  // both filters.
+  const bl5Nodes = [
+    { card: 'BL5-A Root', path: `${board}/BL5-A Root.md`, status: 'blocked', rank: 0, row: 0 },
+    { card: 'BL5-B Completed bridge', path: `${board}/BL5-B Completed bridge.md`, status: 'completed', rank: 1, row: 0 },
+    { card: 'BL5-C Downstream stuck', path: `${board}/BL5-C Downstream stuck.md`, status: 'blocked', rank: 2, row: 0 },
+    { card: 'BL5-D Parked', path: `${board}/BL5-D Parked.md`, status: 'parked', rank: 0, row: 1 },
+    { card: 'BL5-E Done', path: `${board}/BL5-E Done.md`, status: 'completed', rank: 1, row: 1 },
+    { card: 'BL5-F Other', path: `${board}/BL5-F Other.md`, status: 'planning', rank: 2, row: 1 },
+  ];
+  const bl5Edges = [
+    { from: 'BL5-A Root', to: 'BL5-B Completed bridge', kind: 'depends' },
+    { from: 'BL5-B Completed bridge', to: 'BL5-C Downstream stuck', kind: 'depends' },
+  ];
+  const bl5Root = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    bl5Root, { nodes: bl5Nodes, edges: bl5Edges }, lifecycleApi, epicPath, [],
+  );
+  const bl5Toolbar = byClass(bl5Root, 'graph-view-filter-toolbar');
+  const bl5ScrollerIndex = bl5Root.children.findIndex((node) => node.className === 'graph-view-scroll');
+  assert.strictEqual(bl5Toolbar.length, 1, 'BL5-TOOLBAR-EPIC: epic scope renders one filter toolbar');
+  assert(bl5Root.children.indexOf(bl5Toolbar[0]) < bl5ScrollerIndex,
+    'BL5-TOOLBAR-EPIC: the toolbar sits above and outside the graph canvas');
+  const bl5Stuck = byClass(bl5Root, 'graph-view-filter-stuck')[0];
+  const bl5Done = byClass(bl5Root, 'graph-view-filter-done')[0];
+  assert(bl5Stuck && bl5Done && bl5Stuck.textContent === 'Stuck' && bl5Done.textContent === 'Dim done'
+    && bl5Stuck.attrs['aria-pressed'] === 'false' && bl5Done.attrs['aria-pressed'] === 'false'
+    && bl5Stuck.style.cssText.includes('min-height:32px') && bl5Done.style.cssText.includes('min-height:32px'),
+  'BL5-TOOLBAR-DEFAULT: both mobile-sized toggles render off by default');
+  const bl5Chips = byClass(bl5Root, 'graph-view-chip');
+  const bl5ChipFor = (id) => bl5Chips.find((chip) => textOf(chip).includes(id));
+  const bl5AtRest = domShape(bl5Root);
+  assert(bl5Chips.every((chip) => !chip.className.includes('graph-view-dimmed')),
+    'BL5-AT-REST: filters off leave every chip at full strength');
+
+  bl5Stuck.listeners.click({ stopPropagation() {} });
+  for (const id of ['BL5-A', 'BL5-B', 'BL5-C', 'BL5-D']) {
+    assert(!bl5ChipFor(id).className.includes('graph-view-dimmed'),
+      `BL5-MUTANT-STUCK-CHAIN: ${id} remains full strength in the authoritative stuck keep-set`);
+  }
+  for (const id of ['BL5-E', 'BL5-F']) {
+    assert(bl5ChipFor(id).className.includes('graph-view-dimmed'),
+      `BL5-STUCK-COMPLEMENT: ${id} outside the stuck keep-set dims`);
+  }
+  assert(bl5Stuck.className.includes('graph-view-filter-active') && bl5Stuck.attrs['aria-pressed'] === 'true',
+    'BL5-STUCK-STATE: Stuck exposes its active ephemeral state accessibly');
+
+  bl5Done.listeners.click({ stopPropagation() {} });
+  assert(bl5ChipFor('BL5-B').className.includes('graph-view-dimmed')
+    && bl5ChipFor('BL5-E').className.includes('graph-view-dimmed')
+    && bl5ChipFor('BL5-F').className.includes('graph-view-dimmed')
+    && !bl5ChipFor('BL5-D').className.includes('graph-view-dimmed'),
+  'BL5-FILTER-UNION: Dim done composes with Stuck and never dims the parked root');
+
+  bubblingClick(bl5ChipFor('BL5-A'));
+  assert(!bl5ChipFor('BL5-A').className.includes('graph-view-dimmed')
+    && !bl5ChipFor('BL5-B').className.includes('graph-view-dimmed')
+    && !bl5ChipFor('BL5-C').className.includes('graph-view-dimmed')
+    && bl5ChipFor('BL5-D').className.includes('graph-view-dimmed'),
+  'BL5-SELECTION-PRECEDENCE: selected closure wins wholesale and suspends both filter dim sets');
+  byClass(bl5Root, 'graph-view-canvas')[0].listeners.click();
+  assert(bl5ChipFor('BL5-B').className.includes('graph-view-dimmed')
+    && !bl5ChipFor('BL5-D').className.includes('graph-view-dimmed'),
+  'BL5-SELECTION-CLEAR: clearing selection reapplies active filter composition');
+
+  bl5Stuck.listeners.click({ stopPropagation() {} });
+  assert(bl5ChipFor('BL5-B').className.includes('graph-view-dimmed')
+    && bl5ChipFor('BL5-E').className.includes('graph-view-dimmed')
+    && !bl5ChipFor('BL5-D').className.includes('graph-view-dimmed')
+    && !bl5ChipFor('BL5-F').className.includes('graph-view-dimmed'),
+  'BL5-MUTANT-DIM-PARKED: Dim done alone dims completed chips and only completed chips');
+  bl5Done.listeners.click({ stopPropagation() {} });
+  assert.deepStrictEqual(domShape(bl5Root), bl5AtRest,
+    'BL5-TOGGLE-OFF: turning both filters off restores the exact at-rest DOM');
+
+  const bl5FreshRoot = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    bl5FreshRoot, { nodes: bl5Nodes, edges: bl5Edges }, lifecycleApi, epicPath, [],
+  );
+  assert.deepStrictEqual(domShape(bl5FreshRoot), bl5AtRest,
+    'BL5-MUTANT-PERSISTENCE: a fresh render resets both ephemeral toggles to off');
+
   // Fail-soft: a missing GraphLayout never blanks the note.
   const priorLayout = global.customJS.GraphLayout;
   delete global.customJS.GraphLayout;
@@ -1416,6 +1501,21 @@ async function main() {
   assert.strictEqual(byClass(pRoot, 'graph-view-gates-badge').length, 0,
     'BL3-PROJECT-HEALTHY: the established healthy project fixture gains no badges');
 
+  const projectToolbar = byClass(pRoot, 'graph-view-filter-toolbar');
+  const projectScrollIndex = pRoot.children.findIndex((node) => node.className === 'graph-view-scroll');
+  assert.strictEqual(projectToolbar.length, 1, 'BL5-TOOLBAR-PROJECT: project scope renders one filter toolbar');
+  assert(pRoot.children.indexOf(projectToolbar[0]) < projectScrollIndex,
+    'BL5-TOOLBAR-PROJECT: the project toolbar sits above and outside the shared canvas');
+  const projectFilterAtRest = domShape(pRoot);
+  const projectDoneToggle = byClass(projectToolbar[0], 'graph-view-filter-done')[0];
+  projectDoneToggle.listeners.click({ stopPropagation() {} });
+  assert(pChipFor('E1-1').className.includes('graph-view-dimmed')
+    && ['E2-1', 'E2-2', 'E1-2', 'EB-1', 'EX-1'].every((id) => !pChipFor(id).className.includes('graph-view-dimmed')),
+  'BL5-PROJECT-DIM-DONE: project scope dims exactly its completed slice chip');
+  projectDoneToggle.listeners.click({ stopPropagation() {} });
+  assert.deepStrictEqual(domShape(pRoot), projectFilterAtRest,
+    'BL5-PROJECT-TOGGLE-OFF: project filter off restores the exact at-rest DOM');
+
   // BL-4 project scope uses the one merged graph, including the cross-epic
   // dependency, while leaving the established at-rest geometry untouched.
   const projectAtRest = domShape(pRoot);
@@ -1570,6 +1670,8 @@ async function main() {
   // P8: zero mutator calls across every project-scope render.
   assert.deepStrictEqual(projectMutations, [],
     'P8: project scope invokes no vault, adapter, frontmatter, or metadata mutator');
+  assert.deepStrictEqual(projectMutations, [],
+    'BL5-ZERO-VAULT-WRITES: all project filter interactions remain DOM-only');
   assert.strictEqual(projectOpened.length, 2, 'P8: only the explicit test clicks navigated');
   global.app = savedApp;
   global.customJS = savedCustomJS;
@@ -1583,7 +1685,7 @@ async function main() {
   global.customJS.RenderSafe = priorRenderSafe;
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
   assert.deepStrictEqual(persistenceMutations, [],
-    'BL4-ZERO-PERSISTENCE-SURFACES: selection invokes no localStorage or coordinator mutation surface');
+    'BL4-BL5-ZERO-PERSISTENCE-SURFACES: selection and filters invoke no localStorage or coordinator mutation surface');
   if (savedLocalStorageDescriptor) Object.defineProperty(global, 'localStorage', savedLocalStorageDescriptor);
   else delete global.localStorage;
   if (savedCoordinator === undefined) delete global.coordinator;
