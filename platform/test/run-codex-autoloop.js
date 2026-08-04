@@ -8613,6 +8613,52 @@ const bhDeps = (fx, extra = {}) => ({
   eq(writes, 0, 'BH-LOCKED no write happens on a skip');
 }
 
+// BH sweep-level failure is loud: unreadable board / non-project cards root
+// refuses with a stable code and ok:false — never no_op:true. Silence must
+// mean "checked and clean", never "couldn't check".
+{
+  const root = path.join(tmp, 'bh-refusals');
+  const fx = bhScaffold(root, {});
+  await assert.rejects(
+    () => coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, {},
+      bhDeps(fx, { readState: () => emptyState() })),
+    /requires --json/, 'BH refusal: --json is mandatory');
+  let boardRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps({ boardPath: path.join(root, 'missing-board.md'), cardsRoot: fx.cardsRoot },
+        { readState: () => emptyState() }));
+  } catch (err) { boardRefusal = err; }
+  eq(boardRefusal && boardRefusal.code, 'board_unreadable',
+    'BH refusal: an unreadable board carries a stable code');
+  eq(validateReceiptEnvelope(refusalReceipt(boardRefusal.action, boardRefusal.code, boardRefusal.message)).ok, true,
+    'BH refusal: the board refusal renders a valid ok:false envelope');
+  let rootRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps({ boardPath: fx.boardPath, cardsRoot: root }, { readState: () => emptyState() }));
+  } catch (err) { rootRefusal = err; }
+  eq(rootRefusal && rootRefusal.code, 'cards_root_invalid',
+    'BH refusal: a non-project cards root carries a stable code');
+  let stateRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps(fx, { readState: () => { throw new Error('state is malformed; preserve and recover'); } }));
+  } catch (err) { stateRefusal = err; }
+  eq(stateRefusal && stateRefusal.code, 'state_unreadable',
+    'BH refusal: a malformed ledger is loud, never silently healthy');
+  let optionRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+      { json: true, apply: true }, bhDeps(fx, { readState: () => emptyState() }));
+  } catch (err) { optionRefusal = err; }
+  eq(optionRefusal && optionRefusal.code, 'unknown_option',
+    'BH the CLI grammar rejects unknown options before reads or writes');
+  const schemaIndex = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schemas-index.json'), 'utf8'));
+  ok(schemaIndex.schemas.some((entry) => entry.id === 'sauce.board-health.v1'),
+    'BH sauce.board-health.v1 is registered in the schema index');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {

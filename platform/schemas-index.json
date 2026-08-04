@@ -602,6 +602,23 @@
       "notes": "Coordinator-owned ratification inbox note under spice/projects/sauce/ratifications/*.md. Pending frontmatter requires exactly type:ratification, schema_version:1.0.0, state:pending, canonical target_card, and ISO created_at; consumption adds state:consumed plus ISO consumed_at. The embedded delivery-ratification JSON block remains governed by the Delivery registry."
     },
     {
+      "id": "sauce.board-health.v1",
+      "kind": "contract",
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
+      "source": "scripts/autoloop/codex-coordinator.js",
+      "accepted_versions": [
+        "1.0.0"
+      ],
+      "validator": "scripts/autoloop/codex-coordinator.js",
+      "consumers": [
+        "platform/test/run-codex-autoloop.js"
+      ],
+      "notes": "Sweep-owned Board Health frontmatter projection at spice/projects/<slug>/Board Health.md, written only by the board-health coordinator verb (report-only, board-driven). Lists are capped at 20 with explicit overflow counts. The payload deliberately carries NO timestamp: unchanged findings preserve the note byte-for-byte with zero writes, so mtime means when board health last changed. Scaffold-once body (BoardHealth customjs-guard); thereafter frontmatter only; a body-only note fails closed into the receipt's note_error."
+    },
+    {
       "id": "loop-plugin-binding-config",
       "kind": "contract",
       "owner": {

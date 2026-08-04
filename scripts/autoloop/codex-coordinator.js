@@ -56,6 +56,7 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   'break-lease': ['json', 'card', 'reason'],
   'supersession-depth': ['json', 'card'],
   'heal-epic-bindings': ['json', 'apply', 'dry-run'],
+  'board-health': ['json', 'write-note'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -4583,8 +4584,19 @@ function collectBoardHealth(state, opts = {}) {
   const exists = opts.exists || fs.existsSync;
   const readText = opts.readText || ((target) => fs.readFileSync(target, 'utf8'));
   const ledger = opts.ledger || 'present';
-  const project = physicalProjectPrefix(cardsRoot);
-  const parentRaw = readText(boardPath);
+  // Sweep-level failure is loud: an unresolvable cards root or unreadable
+  // board refuses with a stable code, never a quietly-clean receipt.
+  let project;
+  try { project = physicalProjectPrefix(cardsRoot); }
+  catch (err) {
+    refuse('board-health-refused', 'cards_root_invalid',
+      `cards root cannot resolve one canonical project: ${err.message}`);
+  }
+  let parentRaw;
+  try { parentRaw = readText(boardPath); }
+  catch (err) {
+    refuse('board-health-refused', 'board_unreadable', `board is unreadable: ${err.message}`);
+  }
   const cards = (state && state.cards) || {};
   const tracked = (name) => Object.prototype.hasOwnProperty.call(cards, name);
   const parsedParent = parseBoard(parentRaw);
@@ -4798,6 +4810,7 @@ function writeBoardHealthNote(payload, notePath, deps = {}) {
 }
 
 async function commandBoardHealth(ctx, args, deps = {}) {
+  requireOnlyOptions(args, 'board-health', STRICT_CLI_OPTIONS['board-health']);
   if (args.json !== true) throw new Error('board-health requires --json for a machine-readable receipt');
   const boardPath = deps.boardPath || BOARD;
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
@@ -4805,7 +4818,11 @@ async function commandBoardHealth(ctx, args, deps = {}) {
   const loadState = deps.readState || readState;
   const transitionLock = deps.withLock || withLock;
   const sweep = async () => {
-    const state = loadState(ctx);
+    let state;
+    try { state = loadState(ctx); }
+    catch (err) {
+      refuse('board-health-refused', 'state_unreadable', `ledger is unreadable: ${err.message}`);
+    }
     const records = Object.keys((state && state.cards) || {}).length;
     // Tri-state so a clean ledgerless run can never be mistaken for a fully
     // checked board: present ⇒ checks 4–5 ran; empty/absent ⇒ they were
@@ -7716,6 +7733,7 @@ async function main() {
   else if (command === 'discard') result = await commandDiscard(ctx, args);
   else if (command === 'supersession-depth') result = commandSupersessionDepth(ctx, args);
   else if (command === 'heal-epic-bindings') result = await commandHealEpicBindings(ctx, args);
+  else if (command === 'board-health') result = await commandBoardHealth(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -7751,7 +7769,7 @@ async function main() {
       return deployed;
     }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|board-health|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
