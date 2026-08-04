@@ -1779,8 +1779,8 @@ async function main() {
     'node platform/test/run-graph-view-contract.js',
   'independent GraphView contract sentinel is wired');
   assert((packageJson.scripts['release:preflight'] || '').includes(
-    'node platform/test/run-graph-layout.js && node platform/test/run-graph-view.js && node platform/test/run-graph-view-contract.js'),
-  'release preflight runs the behavior and independent contract harnesses directly after the layout core');
+    'node platform/test/run-graph-layout.js && node platform/test/run-graph-view.js && node platform/test/run-graph-insights.js && node platform/test/run-graph-view-contract.js'),
+  'release preflight preserves the inherited graph trio, then runs the independent contract sentinel');
   assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-view\.js/g) || []).length, 1,
     'release preflight registers the harness once');
   assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-view-contract\.js/g) || []).length, 1,
