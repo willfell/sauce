@@ -285,7 +285,7 @@
     "high_risk_zone_prefixes": ["platform/mechanisms", "platform/install.js", "scripts/autoloop", "scripts/release", ".github/workflows"],
     "policy_strength": ["continue", "stop_after", "supervised_only"],
     "epic_forbidden_execution_fields": ["touch_zones", "model_profile", "batch_policy", "acceptance_tests", "deploy_subscriptions", "execution_mode", "release_required", "deployment_required"],
-    "slice_scope_caps": { "touch_zones": 6, "acceptance_tests": 12, "risk_dimensions": 3, "carried_findings": 12 }
+    "slice_scope_caps": { "touch_zones": 6, "acceptance_tests": 12, "risk_dimensions": 3, "carried_findings": 12, "supersession_depth": 3 }
   },
   "changelog": [
     {

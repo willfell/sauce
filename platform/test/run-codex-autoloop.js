@@ -58,6 +58,7 @@ const {
   commandStatus, commandStatusLocked, commandAmendContract,
   commandPark: rawCommandPark, commandResume: rawCommandResume,
   commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
+  commandSupersessionDepth,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, commandRestampContractFrontmatter,
   metadataReconciliationPlan, restampContractFrontmatter, contractFrontmatterRestampPlan,
@@ -8071,6 +8072,91 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   eq(receipt.dependency_reports, [{ card: 'BL-6', from: 'BL-4', phase: 'claimed' }],
     'A3 active dependent BL-6 is reported, not touched');
   ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
+}
+
+// SD supersession-depth circuit-breaker — a lineage at the depth limit refuses
+// to supersede further and escalates to the Director instead of minting the Nth
+// successor (the runaway that spun one slice through 27 supersessions).
+{
+  const root = path.join(tmp, 'supersession-depth');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['TV-2c'] }));
+  const predPath = path.join(cardsRoot, 'TV-2c.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  const state = emptyState();
+  // Chain TV-2 → TV-2a → TV-2b → TV-2c: three prior supersessions already lead
+  // into TV-2c, so superseding it again (→ TV-2d) is the depth-limit breach.
+  state.cards['TV-2'] = { card: 'TV-2', phase: 'discarded', superseded_by: 'TV-2a' };
+  state.cards['TV-2a'] = { card: 'TV-2a', phase: 'discarded', superseded_by: 'TV-2b' };
+  state.cards['TV-2b'] = { card: 'TV-2b', phase: 'discarded', superseded_by: 'TV-2c' };
+  state.cards['TV-2c'] = { card: 'TV-2c', phase: 'parked', card_path: predPath };
+  let sdWrote = 0;
+  const deps = {
+    readState: () => state, writeState: () => { sdWrote++; }, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-04T00:00:00.000Z',
+    projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+  };
+  const sd = await commandDiscard({ root }, {
+    card: 'TV-2c', 'superseded-by': 'TV-2d', reason: 'second refutation supersede', json: true,
+  }, deps);
+  eq(sd.action, 'awaiting_user_decision', 'SD supersession at the depth limit refuses with a decision receipt');
+  eq(sd.reason, 'supersession_depth_exceeded', 'SD refusal names the supersession_depth_exceeded code');
+  eq(sd.supersession_depth, 3, 'SD receipt reports the measured chain depth');
+  eq(state.cards['TV-2c'].phase, 'parked', 'SD the predecessor is NOT discarded when the depth limit is hit');
+  eq(sdWrote, 0, 'SD no ledger write happens on a depth-limit refusal');
+  ok(/\[\[TV-2c\]\]/.test(fs.readFileSync(boardPath, 'utf8')), 'SD the predecessor board line is left in place');
+  ok(fs.existsSync(predPath), 'SD the predecessor note is not deleted');
+}
+
+// SD a shallow supersession (below the depth limit) still discards normally.
+{
+  const root = path.join(tmp, 'supersession-depth-ok');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['BO-1a'] }));
+  const predPath = path.join(cardsRoot, 'BO-1a.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  const state = emptyState();
+  // One prior supersession (BO-1 → BO-1a): well below the limit, so it proceeds.
+  state.cards['BO-1'] = { card: 'BO-1', phase: 'discarded', superseded_by: 'BO-1a' };
+  state.cards['BO-1a'] = { card: 'BO-1a', phase: 'parked', card_path: predPath };
+  const deps = {
+    readState: () => state, writeState: () => {}, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-04T00:00:00.000Z',
+    projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+  };
+  const ok2 = await commandDiscard({ root }, {
+    card: 'BO-1a', 'superseded-by': 'BO-1b', reason: 'first legitimate supersession', json: true,
+  }, deps);
+  eq(ok2.action, 'discarded', 'SD a shallow supersession below the depth limit still discards');
+  eq(state.cards['BO-1a'].superseded_by, 'BO-1b', 'SD the shallow supersession records its successor pointer');
+}
+
+// SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
+// successor the discard would then refuse (no orphaned successor left behind).
+{
+  const root = path.join(tmp, 'supersession-depth-query');
+  const state = emptyState();
+  state.cards['TV-2'] = { card: 'TV-2', phase: 'discarded', superseded_by: 'TV-2a' };
+  state.cards['TV-2a'] = { card: 'TV-2a', phase: 'discarded', superseded_by: 'TV-2b' };
+  state.cards['TV-2b'] = { card: 'TV-2b', phase: 'discarded', superseded_by: 'TV-2c' };
+  state.cards['TV-2c'] = { card: 'TV-2c', phase: 'parked' };
+  state.cards['BO-1'] = { card: 'BO-1', phase: 'discarded', superseded_by: 'BO-1a' };
+  state.cards['BO-1a'] = { card: 'BO-1a', phase: 'parked' };
+  const deps = { readState: () => state };
+  const atLimit = commandSupersessionDepth({ root }, { card: 'TV-2c', json: true }, deps);
+  eq(atLimit.action, 'supersession-depth', 'SD-QUERY reports the supersession-depth action');
+  eq(atLimit.depth, 3, 'SD-QUERY measures the full backward chain depth');
+  eq(atLimit.limit, 3, 'SD-QUERY surfaces the registry depth limit');
+  eq(atLimit.at_limit, true, 'SD-QUERY flags a lineage at the limit so the skill escalates instead of minting');
+  const belowLimit = commandSupersessionDepth({ root }, { card: 'BO-1a', json: true }, deps);
+  eq(belowLimit.depth, 1, 'SD-QUERY a shallow lineage measures depth 1');
+  eq(belowLimit.at_limit, false, 'SD-QUERY a shallow lineage is not at the limit');
 }
 
 // A4 reconcile-dependencies — classify + apply across mixed fates
