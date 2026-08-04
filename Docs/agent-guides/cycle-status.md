@@ -9,8 +9,8 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.229.0` (closed 2026-07-14)
-- **Most recent narrated cycle:** journal blueprint moved to a 3-tier multi-entry shape (global hub / day hub / leaf entry), mirroring sticky-notes. See `Docs/plans/2026-07-11-journal-multi-entry-result.md`. Several smaller autoloop releases have shipped since without a dedicated result doc (0.213.0 → 0.229.0) — see `Docs/cycle-history.md` for the full chain.
+- **Workshop version:** `0.282.0` (closed 2026-08-04)
+- **Most recent narrated cycle:** board-health sweep — board-driven divergence detection (loop-integrity workstream 1): new report-only `board-health` coordinator verb + `Board Health.md` vault note + hourly launchd job. See `Docs/plans/2026-08-04-v0.282.0-board-health-sweep-result.md`. Many autoloop releases shipped between 0.229.0 and 0.281.7 without dedicated result docs — see `Docs/cycle-history.md` for the chain (notably v0.281.1 board-projection canonical bindings, 2026-08-03).
 
 ## Mechanisms (30)
 

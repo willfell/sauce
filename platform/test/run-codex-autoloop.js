@@ -8305,6 +8305,380 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(soundDir.endsWith(path.join('Sound Epic', 'board')), 'BPX-HEAL fixture scaffolds the canonical control epic');
 }
 
+// BH board-health: the board-driven divergence sweep. Every check starts from
+// the BOARD, not the ledger — a board member with no ledger record must be
+// reachable, which is exactly what every Object.values(state.cards) check
+// cannot do. Fixtures scaffold canonical epics exactly like BPX-HEAL so
+// canonicalEpicProjection accepts them.
+const bhScaffold = (root, { epics = {}, planning = [], progress = [], completed = [] } = {}) => {
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning, progress, completed }));
+  for (const [epic, spec] of Object.entries(epics)) {
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    fs.mkdirSync(boardDir, { recursive: true });
+    fs.mkdirSync(path.join(cardsRoot, epic, 'context', 'runs'), { recursive: true });
+    fs.writeFileSync(path.join(cardsRoot, epic, `${epic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      ...(spec.atlasLines || [
+        `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+        `epic_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+      ]),
+      'status: planning', 'posture: claimable', '---', '', `${epic} atlas body`, '',
+    ].join('\n'));
+    const lanes = { 'In Planning': [], 'In Progress': [], 'Blocked': [], 'Completed': [], ...(spec.lanes || {}) };
+    fs.writeFileSync(path.join(boardDir, `${epic}-board.md`), [
+      '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${epic}]]"`, '---', '',
+      ...Object.entries(lanes).flatMap(([lane, names]) => [
+        `## ${lane}`, ...names.map((n) => `- [${lane === 'Completed' ? 'x' : ' '}] [[${n}]]`), '',
+      ]),
+    ].join('\n'));
+    for (const [name, status] of Object.entries(spec.slices || {})) {
+      if (status === null) continue; // orphan board line: note deliberately absent
+      fs.writeFileSync(path.join(boardDir, `${name}.md`), [
+        '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `task_parent: ${prefix}/tasks/${epic}/${epic}.md`,
+        `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `status: ${status}`, 'depends_on: []', '---', '', `${name} body`, '',
+      ].join('\n'));
+    }
+  }
+  return { projectRoot, cardsRoot, boardPath };
+};
+const bhDeps = (fx, extra = {}) => ({
+  boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+  withLock: async (_c, _n, fn) => fn(), ...extra,
+});
+
+// BH-UNTRACKED — the load-bearing blind-spot test: a board member with no
+// ledger record must be reported. Fixture is literally EM-4/5/6: an epic whose
+// board shows six slices complete while the ledger knows only three.
+{
+  const root = path.join(tmp, 'bh-untracked');
+  const fx = bhScaffold(root, {
+    progress: ['Retire ero loop'],
+    epics: {
+      'Retire ero loop': {
+        lanes: { Completed: ['EM-1', 'EM-2', 'EM-3', 'EM-4', 'EM-5', 'EM-6'] },
+        slices: {
+          'EM-1': 'completed', 'EM-2': 'completed', 'EM-3': 'completed',
+          'EM-4': 'completed', 'EM-5': 'completed', 'EM-6': 'completed',
+        },
+      },
+    },
+  });
+  const state = emptyState();
+  for (const name of ['EM-1', 'EM-2', 'EM-3']) {
+    state.cards[name] = {
+      card: name, phase: 'deployed', required_version: '0.233.0',
+      vault_receipts: successfulVaultReceipts(),
+    };
+  }
+  const receipt = await coordinator.commandBoardHealth(
+    { root, statePath: path.join(root, 'state.json') },
+    { json: true },
+    bhDeps(fx, { readState: () => state }),
+  );
+  eq(receipt.action, 'board-health', 'BH-UNTRACKED reports the board-health action');
+  eq(receipt.ok, true, 'BH-UNTRACKED succeeds');
+  eq(receipt.no_op, false, 'BH-UNTRACKED divergence is never a no-op');
+  eq(receipt.ledger, 'present', 'BH-UNTRACKED a populated ledger reads as present');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
+    'BH-UNTRACKED reports exactly the board members the ledger has never heard of');
+  eq(receipt.findings.untracked_members[0], {
+    epic: 'Retire ero loop', card: 'EM-4', note_status: 'completed',
+    issue: 'board member has no ledger record; a completed note is never counted done',
+    remedy: 'investigate: work completed outside the rail',
+  }, 'BH-UNTRACKED finding carries the epic, note status, issue, and non-mechanical remedy');
+  eq(receipt.checked, { epics: 1, slices: 6, records: 3 }, 'BH-UNTRACKED counts what it checked');
+  ok(!receipt.findings.untracked_members.some((f) => ['EM-1', 'EM-2', 'EM-3'].includes(f.card)),
+    'BH-UNTRACKED tracked members are not reported');
+}
+
+// BH-LEDGERLESS — the sweep survives the failure it exists to catch: with an
+// empty ledger checks 1–3 still report, checks 4–5 contribute nothing, and the
+// receipt says so explicitly so "clean" can never mean "couldn't check".
+{
+  const root = path.join(tmp, 'bh-ledgerless');
+  const fx = bhScaffold(root, {
+    progress: ['Retire ero loop'],
+    epics: { 'Retire ero loop': {
+      lanes: { Completed: ['EM-4', 'EM-5', 'EM-6'] },
+      slices: { 'EM-4': 'completed', 'EM-5': 'completed', 'EM-6': 'completed' },
+    } },
+  });
+  const statePath = path.join(root, 'state.json');
+  fs.writeFileSync(statePath, JSON.stringify(emptyState()));
+  const receipt = await coordinator.commandBoardHealth({ root, statePath }, { json: true },
+    bhDeps(fx, { readState: () => emptyState() }));
+  eq(receipt.ledger, 'empty', 'BH-LEDGERLESS an empty ledger is named, not hidden');
+  eq(receipt.checked.records, 0, 'BH-LEDGERLESS zero records checked is explicit');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
+    'BH-LEDGERLESS check 1 needs no ledger');
+  eq(receipt.findings.binding_drift,
+    { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    'BH-LEDGERLESS check 3 needs no ledger');
+  eq(receipt.findings.lane_divergence, [], 'BH-LEDGERLESS check 4 is skipped, not failed');
+  eq(receipt.findings.projection_errors, [], 'BH-LEDGERLESS check 5 is skipped, not failed');
+  eq(receipt.no_op, false, 'BH-LEDGERLESS untracked findings keep the run from reading as clean');
+  const absent = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'nope.json') },
+    { json: true }, bhDeps(fx, { readState: () => emptyState() }));
+  eq(absent.ledger, 'absent', 'BH-LEDGERLESS a missing state file reads as absent');
+}
+
+// BH-UNPROJECTABLE / BH-CONTAINMENT — one throwing epic is a finding, not an
+// abort; siblings are still fully checked. That containment is exactly what
+// was missing when one bad binding froze a whole board for days.
+{
+  const root = path.join(tmp, 'bh-unprojectable');
+  const boardAbs = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  const fx = bhScaffold(root, {
+    planning: ['Frozen Epic', 'Healthy Epic', 'Ghost Epic'],
+    epics: {
+      'Frozen Epic': {
+        atlasLines: [
+          `source_board: "${boardAbs}"`,
+          `kanban_board: "${boardAbs}"`,
+          'epic_board: "tasks/Frozen Epic/board/Frozen Epic-board.md"',
+        ],
+        lanes: { 'In Planning': ['FZ-1'], Completed: ['FZ-2'] },
+        slices: { 'FZ-1': 'planning', 'FZ-2': 'completed' },
+      },
+      'Healthy Epic': { lanes: { 'In Planning': ['HE-1'] }, slices: { 'HE-1': 'planning' } },
+    },
+  });
+  // A flat (non-epic) parent-board member with a completed note and no record
+  // is the same blind-spot class and must be reachable too.
+  fs.writeFileSync(path.join(fx.boardPath), fs.readFileSync(fx.boardPath, 'utf8')
+    .replace('- [ ] [[Ghost Epic]]', '- [ ] [[Ghost Epic]]\n- [ ] [[Flat Card]]'));
+  fs.writeFileSync(path.join(fx.cardsRoot, 'Flat Card.md'),
+    ['---', 'status: completed', '---', '', 'flat body', ''].join('\n'));
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => emptyState() }));
+  eq(receipt.findings.unprojectable_epics.map((f) => f.epic), ['Frozen Epic', 'Ghost Epic'],
+    'BH-UNPROJECTABLE the throwing epic and the scaffold-less member are findings, not aborts');
+  eq(receipt.findings.untracked_members.find((f) => f.card === 'Flat Card'), {
+    epic: null, card: 'Flat Card', note_status: 'completed',
+    issue: 'board member has no ledger record; a completed note is never counted done',
+    remedy: 'investigate: work completed outside the rail',
+  }, 'BH-UNPROJECTABLE a flat board member is still reachable by check 1');
+  ok(/does not bind its canonical parent board/.test(receipt.findings.unprojectable_epics[0].error),
+    'BH-UNPROJECTABLE carries the projection refusal verbatim');
+  eq(receipt.findings.unprojectable_epics[0].remedy, 'heal-epic-bindings --dry-run --json',
+    'BH-UNPROJECTABLE names the mechanical remedy');
+  eq(receipt.checked.epics, 3, 'BH-CONTAINMENT every parent member is visited');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['FZ-2', 'Flat Card'],
+    'BH-CONTAINMENT check 1 still reaches members of an unprojectable epic');
+  ok(receipt.findings.binding_drift.atlases >= 1,
+    'BH-CONTAINMENT check 3 still reports the frozen atlas drift');
+}
+
+// BH-LANE — derived state vs painted lane, including the agreeing case: the
+// "Retire ero_loop" shape LOOKED broken but was correct, and only showing
+// derived beside painted answers "is this wrong, or telling me something?".
+{
+  const root = path.join(tmp, 'bh-lane');
+  const fx = bhScaffold(root, {
+    planning: ['Stale Epic'], progress: ['Looks Broken Epic'],
+    epics: {
+      'Stale Epic': { lanes: { 'In Progress': ['ST-1'] }, slices: { 'ST-1': 'in_progress' } },
+      'Looks Broken Epic': {
+        lanes: { 'In Progress': ['LB-2'], Completed: ['LB-1'] },
+        slices: { 'LB-1': 'completed', 'LB-2': 'in_progress' },
+      },
+    },
+  });
+  const state = emptyState();
+  state.cards['ST-1'] = { card: 'ST-1', phase: 'implementing' };
+  state.cards['LB-2'] = { card: 'LB-2', phase: 'implementing' };
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  const byEpic = Object.fromEntries(receipt.findings.lane_divergence.map((f) => [f.epic, f]));
+  eq(byEpic['Stale Epic'], { epic: 'Stale Epic', derived: 'active', painted: 'In Planning', agrees: false },
+    'BH-LANE a stale parent lane is reported as disagreement');
+  eq(byEpic['Looks Broken Epic'], { epic: 'Looks Broken Epic', derived: 'active', painted: 'In Progress', agrees: true },
+    'BH-LANE an epic with untracked members reports its agreeing lane so it cannot be misread as broken');
+  eq(receipt.findings.lane_divergence.length, 2, 'BH-LANE one entry per interesting epic, none for healthy ones');
+}
+
+// BH-NOOP / BH-READONLY — a healthy fully-checked board is a no-op, and the
+// default invocation can never touch a vault: only the scheduled job passes
+// --write-note.
+{
+  const root = path.join(tmp, 'bh-noop');
+  const fx = bhScaffold(root, {
+    progress: ['Calm Epic'],
+    epics: { 'Calm Epic': {
+      lanes: { 'In Planning': ['CA-2'], 'In Progress': ['CA-1'] },
+      slices: { 'CA-1': 'in_progress', 'CA-2': 'planning' },
+    } },
+  });
+  const state = emptyState();
+  state.cards['CA-1'] = { card: 'CA-1', phase: 'implementing' };
+  let writes = 0;
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state, writeText: () => { writes++; } }));
+  eq(receipt.no_op, true, 'BH-NOOP a healthy fully-checked board is a no-op');
+  eq(receipt.ledger, 'present', 'BH-NOOP healthy means checked, not unchecked');
+  eq(receipt.findings, {
+    untracked_members: [], unprojectable_epics: [],
+    binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    lane_divergence: [], projection_errors: [],
+  }, 'BH-NOOP every finding class is empty');
+  eq(writes, 0, 'BH-READONLY the default invocation performs zero writes');
+  ok(!fs.existsSync(path.join(fx.projectRoot, 'Board Health.md')),
+    'BH-READONLY no vault note is created without --write-note');
+}
+
+// BH-SCAFFOLD / BH-BODY — Loop Station's proven write discipline, inherited
+// verbatim: scaffold once, frontmatter-only thereafter, unchanged findings
+// write zero bytes, body-only notes fail closed without discarding findings.
+{
+  const root = path.join(tmp, 'bh-note');
+  const fx = bhScaffold(root, {
+    progress: ['Note Epic'],
+    epics: { 'Note Epic': { lanes: { Completed: ['NT-1'] }, slices: { 'NT-1': 'completed' } } },
+  });
+  const notePath = path.join(fx.projectRoot, 'Board Health.md');
+  const deps = bhDeps(fx, { readState: () => emptyState() });
+  const first = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(first.note.scaffolded, true, 'BH-SCAFFOLD an absent note is scaffolded once');
+  eq(first.note.path, notePath, 'BH-SCAFFOLD the note lands beside the board');
+  const raw = fs.readFileSync(notePath, 'utf8');
+  ok(/class: "BoardHealth"/.test(raw), 'BH-SCAFFOLD body is the stock BoardHealth customjs-guard block');
+  eq(testScalarField(raw, 'type'), 'board-health', 'BH-SCAFFOLD payload type is registered');
+  eq(testScalarField(raw, 'schema_version'), '1.0.0', 'BH-SCAFFOLD payload carries its schema version');
+  ok(!/checked_at|updated_at/.test(raw.split('---')[1]),
+    'BH-SCAFFOLD no timestamp field — zero-writes-when-unchanged is load-bearing');
+  ok(/untracked_members_overflow_count: 0/.test(raw),
+    'BH-SCAFFOLD capped lists carry explicit overflow counts');
+
+  const replay = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(replay.note.changed, false, 'BH-SCAFFOLD same findings twice writes nothing');
+  eq(fs.readFileSync(notePath, 'utf8'), raw, 'BH-NOOP unchanged findings leave the note byte-identical');
+
+  // Body preservation: a user edit below the frontmatter survives a changed sweep.
+  const customBody = `${raw}\nMy notes about this board.\n`;
+  fs.writeFileSync(notePath, customBody);
+  const epicBoardPath = path.join(fx.cardsRoot, 'Note Epic', 'board', 'Note Epic-board.md');
+  fs.writeFileSync(path.join(fx.cardsRoot, 'Note Epic', 'board', 'NT-2.md'),
+    fs.readFileSync(path.join(fx.cardsRoot, 'Note Epic', 'board', 'NT-1.md'), 'utf8').replaceAll('NT-1', 'NT-2'));
+  fs.writeFileSync(epicBoardPath, fs.readFileSync(epicBoardPath, 'utf8')
+    .replace('- [x] [[NT-1]]', '- [x] [[NT-1]]\n- [x] [[NT-2]]'));
+  const changed = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(changed.note.changed, true, 'BH-BODY changed findings patch the frontmatter');
+  const patched = fs.readFileSync(notePath, 'utf8');
+  ok(patched.endsWith('My notes about this board.\n'), 'BH-BODY the body is preserved byte-for-byte');
+  eq(changed.findings.untracked_members.map((f) => f.card), ['NT-1', 'NT-2'],
+    'BH-BODY the changed sweep reports the new member');
+
+  // Fail closed: a body-only note (no frontmatter) is never rewritten.
+  fs.writeFileSync(notePath, 'just a body, no frontmatter\n');
+  const failed = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(failed.ok, true, 'BH-BODY note failure does not fail the sweep');
+  ok(/without frontmatter/.test(failed.note_error),
+    'BH-BODY a body-only note fails closed with a visible note_error');
+  eq(failed.findings.untracked_members.length, 2, 'BH-BODY findings are never discarded by a note failure');
+  eq(fs.readFileSync(notePath, 'utf8'), 'just a body, no frontmatter\n', 'BH-BODY the body-only note is untouched');
+}
+
+// BH-LOCKED — a held selector lock yields a clean skip receipt: a live loop
+// session must never produce a spurious alarm, and hourly means the next
+// check is soon. The skip carries no findings, so it can never be misread as
+// "checked and clean".
+{
+  const root = path.join(tmp, 'bh-locked');
+  const fx = bhScaffold(root, {});
+  let writes = 0;
+  const locked = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true },
+    bhDeps(fx, {
+      readState: () => emptyState(), writeText: () => { writes++; },
+      withLock: async () => { const e = new Error('lock selector held by pid 123 on host'); e.code = 'LOCKED'; throw e; },
+    }));
+  eq(locked.action, 'board-health', 'BH-LOCKED skip is still a board-health receipt');
+  eq(locked.ok, true, 'BH-LOCKED a busy board is a clean exit');
+  eq(locked.no_op, true, 'BH-LOCKED a skip performs no work');
+  eq(locked.skipped, true, 'BH-LOCKED the receipt says it skipped');
+  ok(/board busy/.test(locked.reason), 'BH-LOCKED the reason is plain');
+  ok(!locked.findings, 'BH-LOCKED a skip carries no findings');
+  eq(writes, 0, 'BH-LOCKED no write happens on a skip');
+}
+
+// BH sweep-level failure is loud: unreadable board / non-project cards root
+// refuses with a stable code and ok:false — never no_op:true. Silence must
+// mean "checked and clean", never "couldn't check".
+{
+  const root = path.join(tmp, 'bh-refusals');
+  const fx = bhScaffold(root, {});
+  await assert.rejects(
+    () => coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, {},
+      bhDeps(fx, { readState: () => emptyState() })),
+    /requires --json/, 'BH refusal: --json is mandatory');
+  let boardRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps({ boardPath: path.join(root, 'missing-board.md'), cardsRoot: fx.cardsRoot },
+        { readState: () => emptyState() }));
+  } catch (err) { boardRefusal = err; }
+  eq(boardRefusal && boardRefusal.code, 'board_unreadable',
+    'BH refusal: an unreadable board carries a stable code');
+  eq(validateReceiptEnvelope(refusalReceipt(boardRefusal.action, boardRefusal.code, boardRefusal.message)).ok, true,
+    'BH refusal: the board refusal renders a valid ok:false envelope');
+  let rootRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps({ boardPath: fx.boardPath, cardsRoot: root }, { readState: () => emptyState() }));
+  } catch (err) { rootRefusal = err; }
+  eq(rootRefusal && rootRefusal.code, 'cards_root_invalid',
+    'BH refusal: a non-project cards root carries a stable code');
+  let stateRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps(fx, { readState: () => { throw new Error('state is malformed; preserve and recover'); } }));
+  } catch (err) { stateRefusal = err; }
+  eq(stateRefusal && stateRefusal.code, 'state_unreadable',
+    'BH refusal: a malformed ledger is loud, never silently healthy');
+  let optionRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+      { json: true, apply: true }, bhDeps(fx, { readState: () => emptyState() }));
+  } catch (err) { optionRefusal = err; }
+  eq(optionRefusal && optionRefusal.code, 'unknown_option',
+    'BH the CLI grammar rejects unknown options before reads or writes');
+  const schemaIndex = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schemas-index.json'), 'utf8'));
+  ok(schemaIndex.schemas.some((entry) => entry.id === 'sauce.board-health.v1'),
+    'BH sauce.board-health.v1 is registered in the schema index');
+}
+
+// BH-LAUNCHD — hourly per-loop-bound-repo schedule via the cowork-reconciler
+// launchd pattern: the installed coordinator runs with the repo as cwd so the
+// binding resolver picks the right board.
+{
+  const { renderBoardHealthPlist } = require('../../scripts/autoloop/board-health-launchd');
+  const plist = renderBoardHealthPlist({
+    user: 'tester', home: '/Users/tester', nodePath: '/usr/local/bin/node',
+    coordinatorPath: '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js',
+    repoPath: '/Users/tester/repo', slug: 'test-project',
+  });
+  ok(plist.includes('<string>board-health</string>') && plist.includes('<string>--write-note</string>')
+    && plist.includes('<string>--json</string>'), 'BH-LAUNCHD runs the sweep with the note write');
+  ok(plist.includes('<key>StartInterval</key>') && plist.includes('<integer>3600</integer>'),
+    'BH-LAUNCHD fires hourly — the failure class is slow and a healthy run costs zero writes');
+  ok(plist.includes('<key>WorkingDirectory</key>') && plist.includes('<string>/Users/tester/repo</string>'),
+    'BH-LAUNCHD cwd is the bound repo');
+  ok(plist.includes('com.tester.sauce-board-health.test-project'), 'BH-LAUNCHD one label per repo');
+  ok(!plist.includes('{{$'), 'BH-LAUNCHD no template token survives substitution');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {

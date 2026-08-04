@@ -56,6 +56,7 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   'break-lease': ['json', 'card', 'reason'],
   'supersession-depth': ['json', 'card'],
   'heal-epic-bindings': ['json', 'apply', 'dry-run'],
+  'board-health': ['json', 'write-note'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -4550,6 +4551,322 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   }, { staleMs: 60 * 60 * 1000 });
 }
 
+// --- Board-health sweep (workstream 1 of the loop-integrity program).
+// Every check starts from the BOARD, not the ledger: the other checks in this
+// file iterate Object.values(state.cards), so a board member with no ledger
+// record is unreachable by them — that blind spot is why this verb exists.
+// Report-only: it never blocks, never heals, and never changes completion
+// semantics; heal-epic-bindings and reconcile remain the explicit remedies.
+
+const BOARD_HEALTH_LANES = ['In Planning', 'In Progress', 'Blocked', 'Completed'];
+// Pre-claim `planning` is the one note status the ledger legitimately has no
+// record for; anything else on an untracked member is work outside the rail.
+const BOARD_HEALTH_PROGRESS_STATUSES = new Set(['in_progress', 'parked', 'blocked', 'completed']);
+const BOARD_HEALTH_DRIFT_REMEDY = 'heal-epic-bindings --dry-run --json';
+
+function untrackedMemberFinding(epic, cardName, noteStatus) {
+  return {
+    epic,
+    card: cardName,
+    note_status: noteStatus,
+    issue: noteStatus === 'completed'
+      ? 'board member has no ledger record; a completed note is never counted done'
+      : `board member has no ledger record; the note claims ${noteStatus} with no coordinator history`,
+    // Deliberately non-mechanical: fabricating ledger records is exactly the
+    // drift the reconciler exists to flag.
+    remedy: 'investigate: work completed outside the rail',
+  };
+}
+
+function collectBoardHealth(state, opts = {}) {
+  const boardPath = opts.boardPath || BOARD;
+  const cardsRoot = opts.cardsRoot || CARDS_ROOT;
+  const exists = opts.exists || fs.existsSync;
+  const readText = opts.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const ledger = opts.ledger || 'present';
+  // Sweep-level failure is loud: an unresolvable cards root or unreadable
+  // board refuses with a stable code, never a quietly-clean receipt.
+  let project;
+  try { project = physicalProjectPrefix(cardsRoot); }
+  catch (err) {
+    refuse('board-health-refused', 'cards_root_invalid',
+      `cards root cannot resolve one canonical project: ${err.message}`);
+  }
+  let parentRaw;
+  try { parentRaw = readText(boardPath); }
+  catch (err) {
+    refuse('board-health-refused', 'board_unreadable', `board is unreadable: ${err.message}`);
+  }
+  const cards = (state && state.cards) || {};
+  const tracked = (name) => Object.prototype.hasOwnProperty.call(cards, name);
+  const parsedParent = parseBoard(parentRaw);
+  const members = BOARD_HEALTH_LANES.flatMap((lane) => parsedParent[lane] || []);
+  const untracked = [];
+  const unprojectable = [];
+  const laneDivergence = [];
+  let epicCount = 0;
+  let sliceCount = 0;
+  const untrackedCheck = (epic, name, notePath) => {
+    if (tracked(name) || !exists(notePath)) return;
+    const status = delivery.normalizeStatus(scalarField(readText(notePath), 'status')) || 'planning';
+    if (BOARD_HEALTH_PROGRESS_STATUSES.has(status)) {
+      untracked.push(untrackedMemberFinding(epic, name, status));
+    }
+  };
+  for (const member of members) {
+    const epicRoot = path.join(cardsRoot, member);
+    const atlasPath = path.join(epicRoot, `${member}.md`);
+    // Per-epic isolation: one epic that throws is a finding, not an abort — a
+    // malformed atlas in epic 7 must not hide epics 8..N. Check 1 runs BEFORE
+    // projection so an unprojectable epic's members stay reachable.
+    try {
+      const isEpic = exists(atlasPath) && scalarField(readText(atlasPath), 'type') === 'epic';
+      if (!isEpic) {
+        const flatNotePath = findCard(cardsRoot, member);
+        if (flatNotePath) {
+          sliceCount++;
+          untrackedCheck(null, member, flatNotePath);
+        } else {
+          epicCount++;
+          unprojectable.push({
+            epic: member,
+            error: 'board member has neither an epic scaffold nor a note',
+            remedy: BOARD_HEALTH_DRIFT_REMEDY,
+          });
+        }
+        continue;
+      }
+      epicCount++;
+      const boardDir = path.join(epicRoot, 'board');
+      const epicBoardRaw = readText(path.join(boardDir, `${member}-board.md`));
+      const parsedEpicBoard = parseBoard(epicBoardRaw);
+      const sliceNames = BOARD_HEALTH_LANES.flatMap((lane) => parsedEpicBoard[lane] || []);
+      sliceCount += sliceNames.length;
+      for (const name of sliceNames) untrackedCheck(member, name, path.join(boardDir, `${name}.md`));
+      // Check 2 — the epic must project through the real contract, seeded with
+      // its first existing slice note (the projection validates every member).
+      const seed = sliceNames.find((name) => exists(path.join(boardDir, `${name}.md`)));
+      if (seed) {
+        const seedPath = path.join(boardDir, `${seed}.md`);
+        const surface = canonicalEpicProjection(readText(seedPath), seedPath, boardPath, cardsRoot, { state: { cards } });
+        // Check 4 — derived slice roll-up vs painted parent lane. Ledger-driven,
+        // so an empty/absent ledger contributes nothing here. Agreement is
+        // reported too whenever the epic carries untracked members: a lane that
+        // LOOKS broken but is correct must say so, or the confusion survives.
+        if (ledger === 'present' && surface) {
+          const lifecycle = deriveEpicProjection(surface, null, null);
+          const mapping = epicProjectionMapping(lifecycle.state);
+          const painted = boardCardLocation(parentRaw, member);
+          const agrees = Boolean(painted && mapping
+            && painted.column === mapping.column && painted.checked === mapping.complete);
+          if (!agrees || untracked.some((finding) => finding.epic === member)) {
+            laneDivergence.push({
+              epic: member,
+              derived: lifecycle.state,
+              painted: painted ? painted.column : null,
+              agrees,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      unprojectable.push({ epic: member, error: err.message, remedy: BOARD_HEALTH_DRIFT_REMEDY });
+    }
+  }
+  // Check 3 — binding drift + orphan sub-board lines, reused verbatim from the
+  // heal planner so the sweep and the remedy can never disagree. A throw here
+  // is itself a finding: the sweep's own failures must never look like health.
+  let bindingDrift;
+  try {
+    const plan = planEpicBindingHeal(cardsRoot, boardPath);
+    bindingDrift = {
+      atlases: plan.atlases.length,
+      slices: plan.slices.length,
+      orphan_lines: plan.orphanLines.length,
+      remedy: BOARD_HEALTH_DRIFT_REMEDY,
+    };
+  } catch (err) {
+    bindingDrift = { error: `binding-drift plan is unreadable: ${err.message}`, remedy: BOARD_HEALTH_DRIFT_REMEDY };
+  }
+  // Check 5 — records carrying projection_error. Ledger-driven by nature, so
+  // an empty/absent ledger contributes zero findings (skipped, not failed).
+  const projectionErrors = ledger === 'present'
+    ? Object.values(cards)
+      .filter((record) => record.projection_error)
+      .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }))
+    : [];
+  const findings = {
+    untracked_members: untracked,
+    unprojectable_epics: unprojectable,
+    binding_drift: bindingDrift,
+    lane_divergence: laneDivergence,
+    projection_errors: projectionErrors,
+  };
+  const driftClean = !bindingDrift.error
+    && !bindingDrift.atlases && !bindingDrift.slices && !bindingDrift.orphan_lines;
+  return {
+    project: path.posix.basename(project.prefix),
+    ledger,
+    checked: { epics: epicCount, slices: sliceCount, records: Object.keys(cards).length },
+    findings,
+    healthy: driftClean && Object.entries(findings)
+      .every(([key, value]) => key === 'binding_drift' || !value.length),
+  };
+}
+
+const BOARD_HEALTH_SCHEMA_VERSION = '1.0.0';
+const BOARD_HEALTH_LIST_CAP = 20;
+// Scaffold-if-absent body only: an existing Board Health body is NEVER
+// rewritten (same guarantee Loop Station carries). One writer per note: this
+// note belongs to the sweep alone, so it keeps working when projection is dead.
+const BOARD_HEALTH_BODY = [
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "BoardHealth" });',
+  '```',
+  '',
+].join('\n');
+
+// Deliberately NO timestamp field anywhere in the payload: the note's mtime
+// means "when board health last CHANGED". A checked_at would write on every
+// run and defeat the zero-writes-when-unchanged rule, which is what makes a
+// scheduled vault writer acceptable at all; last-run time is the job log's job.
+function buildBoardHealthPayload(core) {
+  const capped = (items) => ({
+    items: (items || []).slice(0, BOARD_HEALTH_LIST_CAP),
+    overflow: Math.max(0, (items || []).length - BOARD_HEALTH_LIST_CAP),
+  });
+  const untracked = capped(core.findings.untracked_members);
+  const unprojectable = capped(core.findings.unprojectable_epics);
+  const lane = capped(core.findings.lane_divergence);
+  const errors = capped(core.findings.projection_errors);
+  return {
+    type: 'board-health',
+    schema_version: BOARD_HEALTH_SCHEMA_VERSION,
+    project: core.project,
+    ledger: core.ledger,
+    no_op: core.no_op,
+    checked: core.checked,
+    untracked_members: untracked.items,
+    untracked_members_overflow_count: untracked.overflow,
+    unprojectable_epics: unprojectable.items,
+    unprojectable_epics_overflow_count: unprojectable.overflow,
+    binding_drift: core.findings.binding_drift,
+    lane_divergence: lane.items,
+    lane_divergence_overflow_count: lane.overflow,
+    projection_errors: errors.items,
+    projection_errors_overflow_count: errors.overflow,
+  };
+}
+
+function validateBoardHealthPayload(payload) {
+  const errors = [];
+  const lists = ['untracked_members', 'unprojectable_epics', 'lane_divergence', 'projection_errors'];
+  for (const key of ['type', 'schema_version', 'project', 'ledger', 'no_op', 'checked', 'binding_drift',
+    ...lists, ...lists.map((list) => `${list}_overflow_count`)]) {
+    if (!Object.prototype.hasOwnProperty.call(payload || {}, key)) errors.push(`missing ${key}`);
+  }
+  if (!payload || payload.type !== 'board-health') errors.push('type must be board-health');
+  if (!payload || payload.schema_version !== BOARD_HEALTH_SCHEMA_VERSION) {
+    errors.push(`schema_version must be ${BOARD_HEALTH_SCHEMA_VERSION}`);
+  }
+  if (!payload || !['present', 'empty', 'absent'].includes(payload.ledger)) {
+    errors.push('ledger must be present|empty|absent');
+  }
+  if (!payload || typeof payload.no_op !== 'boolean') errors.push('no_op must be boolean');
+  for (const list of lists) {
+    const value = payload && payload[list];
+    const overflow = payload && payload[`${list}_overflow_count`];
+    if (!Array.isArray(value)) errors.push(`${list} must be an array`);
+    else if (value.length > BOARD_HEALTH_LIST_CAP) errors.push(`${list} exceeds ${BOARD_HEALTH_LIST_CAP}`);
+    if (!Number.isInteger(overflow) || overflow < 0) errors.push(`${list}_overflow_count must be a non-negative integer`);
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+function writeBoardHealthNote(payload, notePath, deps = {}) {
+  const exists = deps.exists || fs.existsSync;
+  const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const writeText = deps.writeText || atomicWriteText;
+  const validation = validateBoardHealthPayload(payload);
+  if (!validation.ok) throw new Error(`Board Health payload is invalid: ${validation.errors.join('; ')}`);
+  const fields = loopStationFrontmatterFields(payload);
+  if (!exists(notePath)) {
+    if (deps.ensureDir) deps.ensureDir(path.dirname(notePath));
+    else fs.mkdirSync(path.dirname(notePath), { recursive: true });
+    writeText(notePath, patchFrontmatter(`---\n\n---${BOARD_HEALTH_BODY}`, fields));
+    return { path: notePath, changed: true, scaffolded: true };
+  }
+  const raw = readText(notePath);
+  if (!/^---\n[\s\S]*?\n---/.test(raw)) {
+    throw new Error('Board Health exists without frontmatter; refusing to rewrite its body');
+  }
+  const next = patchFrontmatter(raw, fields);
+  // Unchanged findings ⇒ the complete note is preserved byte-for-byte with
+  // ZERO writes — no mtime churn, no sync churn, no race surface.
+  if (next === raw) return { path: notePath, changed: false, scaffolded: false };
+  writeText(notePath, next);
+  return { path: notePath, changed: true, scaffolded: false };
+}
+
+async function commandBoardHealth(ctx, args, deps = {}) {
+  requireOnlyOptions(args, 'board-health', STRICT_CLI_OPTIONS['board-health']);
+  if (args.json !== true) throw new Error('board-health requires --json for a machine-readable receipt');
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const exists = deps.exists || fs.existsSync;
+  const loadState = deps.readState || readState;
+  const transitionLock = deps.withLock || withLock;
+  const sweep = async () => {
+    let state;
+    try { state = loadState(ctx); }
+    catch (err) {
+      refuse('board-health-refused', 'state_unreadable', `ledger is unreadable: ${err.message}`);
+    }
+    const records = Object.keys((state && state.cards) || {}).length;
+    // Tri-state so a clean ledgerless run can never be mistaken for a fully
+    // checked board: present ⇒ checks 4–5 ran; empty/absent ⇒ they were
+    // skipped, not failed.
+    const ledger = records > 0
+      ? 'present'
+      : (ctx.statePath && exists(ctx.statePath) ? 'empty' : 'absent');
+    const { healthy, ...core } = collectBoardHealth(state, {
+      boardPath, cardsRoot, ledger, exists, readText: deps.readText,
+    });
+    const receipt = successReceipt('board-health', { no_op: healthy, ...core });
+    if (args['write-note'] === true) {
+      const notePath = deps.notePath || path.join(path.dirname(boardPath), 'Board Health.md');
+      // Note-write failure never discards findings: the receipt carries them
+      // plus a visible note_error, mirroring transition loop_station receipts.
+      try {
+        receipt.note = writeBoardHealthNote(
+          buildBoardHealthPayload({ ...core, no_op: healthy }),
+          notePath,
+          { exists, readText: deps.readText, writeText: deps.writeText, ensureDir: deps.ensureDir },
+        );
+      } catch (err) {
+        receipt.note_error = err.message;
+      }
+    }
+    return receipt;
+  };
+  try {
+    return await transitionLock(ctx, 'selector', sweep, { staleMs: 60 * 60 * 1000 });
+  } catch (err) {
+    // Lock contention is a skip, not a crash: a live loop session must never
+    // produce a spurious alarm. The skip carries no findings so it cannot be
+    // misread as "checked and clean"; hourly means the next check is soon.
+    if (err && err.code === 'LOCKED') {
+      return {
+        action: 'board-health', ok: true, no_op: true, skipped: true,
+        reason: 'selector lock held; board busy — skipped without checking',
+        lock_owner: err.owner || null,
+      };
+    }
+    throw err;
+  }
+}
+
 // Read-only supersession-depth probe: how many prior supersessions already lead
 // into --card. Lets loop:run / loop:execute fail-fast at the second-refutation
 // step — escalate to the Director instead of minting a successor the discard
@@ -7416,6 +7733,7 @@ async function main() {
   else if (command === 'discard') result = await commandDiscard(ctx, args);
   else if (command === 'supersession-depth') result = commandSupersessionDepth(ctx, args);
   else if (command === 'heal-epic-bindings') result = await commandHealEpicBindings(ctx, args);
+  else if (command === 'board-health') result = await commandBoardHealth(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -7451,7 +7769,7 @@ async function main() {
       return deployed;
     }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|board-health|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7482,6 +7800,7 @@ module.exports = {
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
+  commandBoardHealth, collectBoardHealth,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
