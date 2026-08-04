@@ -452,6 +452,8 @@ async function main() {
     'VP-2 epic scope labels the graph section Dependency Graph');
   assert.strictEqual(root.children[1]?.__sectionOptions?.top, true,
     'VP-2 shared section label does not synthesize a second divider');
+  assert.strictEqual(root.style.cssText, 'display:grid;gap:0;max-width:100%;',
+    'VP3-ROOT-RHYTHM: epic root replaces the flat grid gap with explicit child spacing');
   bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0,
     'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');
 
@@ -666,9 +668,21 @@ async function main() {
       `BL2-LEGEND-SHARED: ${label} legend entry uses the shared color`);
   }
   const canvasForLegend = byClass(root, 'graph-view-canvas')[0];
+  const epicScrollerIndex = root.children.findIndex((node) => node.className === 'graph-view-scroll');
+  const epicWarningIndex = root.children.findIndex((node) => node.className === 'graph-view-warnings');
   assert(!flatten(canvasForLegend).includes(legend)
-    && root.children.indexOf(legend) < root.children.findIndex((node) => node.className === 'graph-view-scroll'),
-  'BL2-LEGEND-GEOMETRY: legend sits above and outside the canvas');
+    && epicScrollerIndex < root.children.indexOf(legend)
+    && root.children.indexOf(legend) < epicWarningIndex,
+  'VP3-LEGEND-GEOMETRY: epic legend sits below and outside the canvas, before warnings');
+  assert.strictEqual(legend.style.cssText,
+    'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;font-size:0.7em;',
+  'VP3-LEGEND-RHYTHM: legend has the exact tight top margin and no former bottom margin');
+  assert.strictEqual(byClass(root, 'graph-view-warnings')[0].style.cssText,
+    'display:grid;gap:4px;margin-top:16px;padding:2px 0;',
+  'VP3-WARNING-RHYTHM: warnings receive the roomier 16px separation explicitly');
+  assert.strictEqual(byClass(root, 'graph-view-filter-toolbar')[0].style.cssText,
+    'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;',
+  'VP3-TOOLBAR-RHYTHM: controls hand off to the canvas on the exact tight 8px rhythm');
 
   // BL2-MISSING-STATUS: keep missing distinct from the unknown-token fixture
   // above. Suppressing unreadable_slice only for nullish status must turn this
@@ -822,6 +836,9 @@ async function main() {
 
   const bl3Summary = byClass(bl3Root, 'graph-view-stuck-summary');
   assert.strictEqual(bl3Summary.length, 1, 'BL3-SUMMARY: a stuck graph renders one summary row');
+  assert.strictEqual(bl3Summary[0].style.cssText,
+    'color:var(--text-error);font-size:0.75em;font-weight:650;margin-bottom:8px;',
+  'VP3-SUMMARY-RHYTHM: a stuck summary hands off on the exact tight rhythm');
   assert.strictEqual(bl3Summary[0].textContent, '1 root blocker · gating 2 slices',
     'BL3-SUMMARY: summary text deterministically names the root count and unique live gated total');
   const bl3Canvas = byClass(bl3Root, 'graph-view-canvas')[0];
@@ -1445,6 +1462,22 @@ async function main() {
     && textOf(mxPanel).includes(`Outcome: ${mxLongOutcome}`)
     && textOf(mxPanel).includes('Gates 0 slices'),
   'BL4-PANEL: selected card identity, shared status, wait reason, Outcome, and gated count render inline');
+  const mxScrollerIndex = mxRoot.children.findIndex((node) => node.className === 'graph-view-scroll');
+  const mxLegendIndex = mxRoot.children.findIndex((node) => node.className === 'graph-view-legend');
+  assert(mxScrollerIndex < mxLegendIndex && mxRoot.children.indexOf(mxPanel) === mxLegendIndex + 1,
+    'VP3-PANEL-ORDER: epic detail panel occupies the slot after the below-canvas legend');
+  assert.strictEqual(mxPanel.style.cssText,
+    'display:grid;gap:7px;margin-top:16px;padding:10px 12px;border:1px solid var(--background-modifier-border);'
+      + 'border-radius:9px;background:var(--background-secondary);font-size:var(--font-ui-small);',
+    'VP3-PANEL-RHYTHM: the detail panel receives the exact roomier 16px separation');
+  const mxOrderView = new GraphView();
+  mxOrderView._renderWarnings(mxRoot, [{ code: 'render_error', card: 'VP3', detail: 'order fixture' }]);
+  const mxOrderWarning = byClass(mxRoot, 'graph-view-warnings')[0];
+  assert(mxScrollerIndex < mxLegendIndex
+    && mxLegendIndex < mxRoot.children.indexOf(mxPanel)
+    && mxRoot.children.indexOf(mxPanel) < mxRoot.children.indexOf(mxOrderWarning),
+  'VP3-EPIC-LOWER-ORDER: scroller, legend, panel, then warnings keep their exact relative order');
+  mxOrderWarning.remove();
   const mxPrereq = byClass(mxPanel, 'graph-view-detail-prerequisite');
   assert.strictEqual(mxPrereq.length, 1, 'BL4-PANEL: each immediate unmet prerequisite gets one jump link');
   assert(textOf(mxPrereq[0]).includes('MX-A') && textOf(mxPrereq[0]).includes('planning'),
@@ -1668,6 +1701,8 @@ async function main() {
     'VP-2 project scope labels the graph section Dependency Graph');
   assert.strictEqual(pRoot.children[1]?.__sectionOptions?.top, true,
     'VP-2 project scope reuses the owned divider instead of synthesizing a second one');
+  assert.strictEqual(pRoot.style.cssText, 'display:grid;gap:0;max-width:100%;',
+    'VP3-ROOT-RHYTHM: project root uses explicit child spacing instead of a flat gap');
 
   // BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: project Outcomes exist only for
   // the selection panel. Missing/throwing GraphInsights disables that panel,
@@ -1708,7 +1743,7 @@ async function main() {
   assert.deepStrictEqual(headers.map((header) => header.textContent),
     ['Epic Two', 'Epic One', 'Epic Blocked', 'Epic Boardless'],
     'P1: exactly the live epics render as clusters, in parent-board lane order (In Planning, In Progress, Blocked)');
-  const pGeometry = { chipW: 172, colW: 200, headerH: 30, clusterGap: 26 };
+  const pGeometry = { chipW: 172, colW: 200, headerH: 30, clusterGap: 36 };
   const pClusters = [
     { nodes: [{ card: 'E2-1 Gamma', rank: 0, row: 0 }, { card: projectTallCard, rank: 0, row: 1 }] },
     { nodes: [{ card: 'E1-1 Alpha', rank: 0, row: 0 }, { card: 'E1-2 Beta', rank: 1, row: 0 }] },
@@ -1820,8 +1855,19 @@ async function main() {
     ['done', 'in progress', 'planning'],
     'BL2-PROJECT-LEGEND: project legend contains exactly the statuses present across live clusters');
   assert(!flatten(pCanvas).includes(pLegend)
-    && pRoot.children.indexOf(pLegend) < pRoot.children.findIndex((node) => node.className === 'graph-view-scroll'),
-  'BL2-PROJECT-LEGEND: project legend is above and outside the shared canvas');
+    && pRoot.children.findIndex((node) => node.className === 'graph-view-scroll') < pRoot.children.indexOf(pLegend)
+    && pRoot.children.indexOf(pLegend) < pRoot.children.findIndex((node) => node.className === 'graph-view-done-strip')
+    && pRoot.children.indexOf(pLegend) < pRoot.children.findIndex((node) => node.className === 'graph-view-warnings'),
+  'VP3-PROJECT-LEGEND: project legend is below the shared canvas and before completed/warning strips');
+  assert.strictEqual(pLegend.style.cssText,
+    'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;font-size:0.7em;',
+  'VP3-PROJECT-LEGEND-RHYTHM: project legend uses the same exact tight spacing contract');
+  assert.strictEqual(byClass(pRoot, 'graph-view-done-strip')[0]?.style.cssText,
+    'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:16px;',
+  'VP3-DONE-RHYTHM: the completed-epic strip receives the exact roomy separation');
+  assert.strictEqual(byClass(pRoot, 'graph-view-warnings')[0]?.style.cssText,
+    'display:grid;gap:4px;margin-top:16px;padding:2px 0;',
+  'VP3-PROJECT-WARNING-RHYTHM: project warnings receive the exact roomy separation');
   assert.strictEqual(byClass(pRoot, 'graph-view-stuck-summary').length, 0,
     'BL3-PROJECT-HEALTHY: the established healthy project fixture stays calm');
   assert.strictEqual(byClass(pRoot, 'graph-view-gates-badge').length, 0,
@@ -1864,8 +1910,14 @@ async function main() {
     'BL4-PROJECT-FIRST-TAP: first tap selects without navigation');
   const projectPanel = byClass(pRoot, 'graph-view-detail-panel')[0];
   const projectScrollerIndex = pRoot.children.findIndex((node) => node.className === 'graph-view-scroll');
-  assert(projectPanel && pRoot.children.indexOf(projectPanel) === projectScrollerIndex + 1,
-    'BL4-PROJECT-PANEL: the panel sits immediately between the canvas scroller and lower strips');
+  const projectLegendIndex = pRoot.children.findIndex((node) => node.className === 'graph-view-legend');
+  const projectDoneIndex = pRoot.children.findIndex((node) => node.className === 'graph-view-done-strip');
+  const projectWarningIndex = pRoot.children.findIndex((node) => node.className === 'graph-view-warnings');
+  assert(projectPanel && projectScrollerIndex < projectLegendIndex
+    && pRoot.children.indexOf(projectPanel) === projectLegendIndex + 1
+    && pRoot.children.indexOf(projectPanel) < projectDoneIndex
+    && projectDoneIndex < projectWarningIndex,
+    'VP3-PROJECT-PANEL: lower order is scroller, legend, panel, completed strip, then warnings');
   assert(textOf(projectPanel).includes('E2-1')
     && textOf(projectPanel).includes('Gamma')
     && textOf(projectPanel).includes('Gamma exposes the cross-epic plan path.')

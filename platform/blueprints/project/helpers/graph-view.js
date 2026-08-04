@@ -110,7 +110,7 @@ class GraphView {
     });
     row.className = "graph-view-stuck-summary";
     row.setAttribute?.("aria-label", "Graph blocking summary");
-    row.style.cssText = "color:var(--text-error);font-size:0.75em;font-weight:650;";
+    row.style.cssText = "color:var(--text-error);font-size:0.75em;font-weight:650;margin-bottom:8px;";
   }
 
   _nodeInsight(analysis, card) {
@@ -303,7 +303,7 @@ class GraphView {
     const legend = root.createEl("div");
     legend.className = "graph-view-legend";
     legend.setAttribute?.("aria-label", "Graph status legend");
-    legend.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px;font-size:0.7em;";
+    legend.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;font-size:0.7em;";
     for (const presentation of entries) {
       const entry = legend.createEl("span");
       entry.className = `graph-view-legend-entry ${presentation.className}`;
@@ -352,7 +352,7 @@ class GraphView {
     if (!rows.length) return;
     const strip = root.createEl("div");
     strip.className = "graph-view-warnings";
-    strip.style.cssText = "display:grid;gap:4px;padding:2px 0;";
+    strip.style.cssText = "display:grid;gap:4px;margin-top:16px;padding:2px 0;";
     for (const warning of rows) {
       const row = strip.createEl("div", { text: this._warningText(warning) });
       row.className = `graph-view-warning warning-${String(warning.code || "unknown").replace(/_/g, "-")}`;
@@ -427,9 +427,11 @@ class GraphView {
   _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes) {
     const panel = root.createEl("div");
     panel.className = "graph-view-detail-panel";
-    panel.style.cssText = "display:grid;gap:7px;padding:10px 12px;border:1px solid var(--background-modifier-border);"
+    panel.style.cssText = "display:grid;gap:7px;margin-top:16px;padding:10px 12px;border:1px solid var(--background-modifier-border);"
       + "border-radius:9px;background:var(--background-secondary);font-size:var(--font-ui-small);";
-    root.insertBefore?.(panel, scroller?.nextSibling || null);
+    const legend = Array.from(root.children || [])
+      .find((child) => String(child?.className || "").split(/\s+/).includes("graph-view-legend"));
+    root.insertBefore?.(panel, legend?.nextSibling || scroller?.nextSibling || null);
 
     const parts = this._titleParts(node.card);
     const heading = panel.createEl("div");
@@ -617,7 +619,7 @@ class GraphView {
         const toolbar = root.createEl("div");
         toolbar.className = "graph-view-filter-toolbar";
         toolbar.setAttribute?.("aria-label", "Graph filters");
-        toolbar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+        toolbar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;";
         root.insertBefore?.(toolbar, scroller);
         for (const [key, label, className] of [
           ["stuck", "Stuck", "graph-view-filter-stuck"],
@@ -666,7 +668,6 @@ class GraphView {
     const edges = Array.isArray(result?.edges) ? result.edges : [];
     const analysis = this._analyzeGraph(nodes, edges);
     this._renderStuckSummary(root, analysis);
-    this._renderLegend(root, nodes, api);
     const geometry = {
       chipH: 56, pad: 12, colGap: 28, rowGap: 18, chipW: 172,
       widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
@@ -718,6 +719,7 @@ class GraphView {
           null, outcomes, this._nodeInsight(analysis, node.card), interaction?.select);
       interaction?.register(node, chip);
     }
+    this._renderLegend(root, nodes, api);
   }
 
   // Deterministic chip-content width (headless-safe): word-wrap the complete
@@ -1061,7 +1063,7 @@ class GraphView {
     // Project columns stay fixed, but vertical geometry shares the same
     // deterministic full-title / bounded-wait height formula as epic scope.
     const geometry = {
-      colW: 200, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 26,
+      colW: 200, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 36,
       rowGap: 18, widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
       hPad: 18, titleLineH: 15, infoLineH: 13,
       padY: 7, contentGap: 3, scrollbarAllowance: 14,
@@ -1099,7 +1101,6 @@ class GraphView {
 
     if (clusters.length) {
       this._renderStuckSummary(root, analysis);
-      this._renderLegend(root, allNodes, api);
       const scroller = root.createEl("div");
       scroller.className = "graph-view-scroll";
       scroller.style.cssText = `overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:${geometry.scrollbarAllowance}px;box-sizing:content-box;`;
@@ -1134,6 +1135,7 @@ class GraphView {
           interaction?.register(node, chip);
         }
       }
+      this._renderLegend(root, allNodes, api);
     }
     for (const cluster of clusters) {
       for (const warning of cluster.warnings) warnings.push(warning);
@@ -1142,7 +1144,7 @@ class GraphView {
     if (lanes.completed.length) {
       const strip = root.createEl("div");
       strip.className = "graph-view-done-strip";
-      strip.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
+      strip.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:16px;";
       const presentation = this._statusPresentation("completed", api);
       for (const epic of lanes.completed) {
         const chip = strip.createEl("span", { text: epic });
@@ -1166,7 +1168,7 @@ class GraphView {
       previous?.remove?.();
       const root = dv.container.createEl("div");
       root.className = "graph-view-root";
-      root.style.cssText = "display:grid;gap:8px;max-width:100%;";
+      root.style.cssText = "display:grid;gap:0;max-width:100%;";
       this._renderSectionChrome(dv, root);
       const scope = overrides && typeof overrides === "object" && overrides.scope
         ? String(overrides.scope)
