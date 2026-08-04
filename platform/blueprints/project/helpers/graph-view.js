@@ -56,6 +56,18 @@ class GraphView {
     try { return typeof app !== "undefined" ? app : globalThis.app; } catch (_e) { return null; }
   }
 
+  _renderSectionChrome(dv, root) {
+    try {
+      const SL = globalThis.customJS?.SectionLabel;
+      if (typeof SL?.divider === "function" && typeof SL?.render === "function") {
+        SL.divider(root);
+        SL.render({ ...dv, container: root }, { text: "Dependency Graph", top: true });
+        return;
+      }
+    } catch (_e) {}
+    root.createEl("div", { text: "Dependency Graph" });
+  }
+
   _dashboard() {
     if (this._injectedDashboard) return this._injectedDashboard;
     try { return globalThis.customJS?.EpicDashboard || null; } catch (_e) { return null; }
@@ -98,7 +110,7 @@ class GraphView {
     });
     row.className = "graph-view-stuck-summary";
     row.setAttribute?.("aria-label", "Graph blocking summary");
-    row.style.cssText = "color:var(--text-error);font-size:0.75em;font-weight:650;";
+    row.style.cssText = "color:var(--text-error);font-size:0.75em;font-weight:650;margin-bottom:8px;";
   }
 
   _nodeInsight(analysis, card) {
@@ -291,7 +303,7 @@ class GraphView {
     const legend = root.createEl("div");
     legend.className = "graph-view-legend";
     legend.setAttribute?.("aria-label", "Graph status legend");
-    legend.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 6px;font-size:0.7em;";
+    legend.style.cssText = "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;font-size:0.7em;";
     for (const presentation of entries) {
       const entry = legend.createEl("span");
       entry.className = `graph-view-legend-entry ${presentation.className}`;
@@ -340,7 +352,7 @@ class GraphView {
     if (!rows.length) return;
     const strip = root.createEl("div");
     strip.className = "graph-view-warnings";
-    strip.style.cssText = "display:grid;gap:4px;padding:2px 0;";
+    strip.style.cssText = "display:grid;gap:4px;margin-top:16px;padding:2px 0;";
     for (const warning of rows) {
       const row = strip.createEl("div", { text: this._warningText(warning) });
       row.className = `graph-view-warning warning-${String(warning.code || "unknown").replace(/_/g, "-")}`;
@@ -359,16 +371,17 @@ class GraphView {
       const to = positions.get(edge.to);
       if (!from || !to) continue;
       const fromW = from.w != null ? from.w : geometry.chipW;
-      const chipH = geometry.chipH;
+      const fromH = from.h != null ? from.h : geometry.chipH;
+      const toH = to.h != null ? to.h : geometry.chipH;
       let d;
       if (from.x === to.x) {
         const x = from.x + fromW / 2;
-        d = `M ${x} ${from.y + chipH} L ${x} ${to.y}`;
+        d = `M ${x} ${from.y + fromH} L ${x} ${to.y}`;
       } else {
         const x1 = from.x + fromW;
-        const y1 = from.y + chipH / 2;
+        const y1 = from.y + fromH / 2;
         const x2 = to.x;
-        const y2 = to.y + chipH / 2;
+        const y2 = to.y + toH / 2;
         const bend = Math.max(24, (x2 - x1) / 2);
         d = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
       }
@@ -399,7 +412,9 @@ class GraphView {
   _panelLink(parent, node, api, source, className) {
     const link = parent.createEl("button");
     link.className = className;
-    link.style.cssText = "border:0;background:transparent;padding:0;color:var(--link-color);cursor:pointer;text-align:left;";
+    link.style.cssText = "display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;"
+      + "padding:3px 8px;border:1px solid var(--background-modifier-border);border-radius:999px;"
+      + "background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;";
     const parts = this._titleParts(node.card);
     const presentation = this._statusPresentation(node.status, api);
     link.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-link-id";
@@ -411,37 +426,61 @@ class GraphView {
     return link;
   }
 
+  _panelFact(panel, label, className) {
+    const block = panel.createEl("div");
+    block.className = `graph-view-detail-fact ${className}`;
+    block.style.cssText = "display:grid;gap:4px;min-width:0;";
+    const heading = block.createEl("div", { text: label });
+    heading.className = "graph-view-detail-label";
+    heading.style.cssText = "font-size:0.7em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);";
+    return block;
+  }
+
   _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes) {
     const panel = root.createEl("div");
     panel.className = "graph-view-detail-panel";
-    panel.style.cssText = "display:grid;gap:7px;padding:10px 12px;border:1px solid var(--background-modifier-border);"
+    panel.style.cssText = "display:grid;gap:12px;margin-top:16px;padding:12px 14px;border:1px solid var(--background-modifier-border);"
       + "border-radius:9px;background:var(--background-secondary);font-size:var(--font-ui-small);";
-    root.insertBefore?.(panel, scroller?.nextSibling || null);
+    const legend = Array.from(root.children || [])
+      .find((child) => String(child?.className || "").split(/\s+/).includes("graph-view-legend"));
+    root.insertBefore?.(panel, legend?.nextSibling || scroller?.nextSibling || null);
 
     const parts = this._titleParts(node.card);
-    const heading = panel.createEl("div");
+    const header = panel.createEl("div");
+    header.className = "graph-view-detail-header";
+    header.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px;min-width:0;";
+    const heading = header.createEl("div");
     heading.className = "graph-view-detail-heading";
-    heading.style.cssText = "display:flex;align-items:baseline;gap:7px;font-weight:700;";
+    heading.style.cssText = "display:flex;align-items:baseline;gap:7px;min-width:0;font-weight:700;overflow-wrap:anywhere;";
     heading.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-id";
     if (parts.id) heading.createEl("span", { text: parts.title }).className = "graph-view-detail-title";
 
-    const open = panel.createEl("button", { text: "Open card" });
+    const controls = header.createEl("div");
+    controls.className = "graph-view-detail-controls";
+    controls.style.cssText = "display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;";
+    if (!node.isStub) {
+      const presentation = this._statusPresentation(node.status, api);
+      const status = controls.createEl("div", { text: `${presentation.glyph} ${presentation.label}` });
+      status.className = `graph-view-detail-status ${presentation.className}`;
+      status.style.cssText = "display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;"
+        + `color:${presentation.color};font-weight:650;white-space:nowrap;`
+        + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
+        + `background:color-mix(in srgb, ${presentation.color} 10%, var(--background-primary));`;
+    }
+    const open = controls.createEl("button", { text: "Open card" });
     open.className = "graph-view-detail-open";
-    open.style.cssText = "justify-self:start;cursor:pointer;";
+    open.style.cssText = "min-height:32px;padding:5px 10px;cursor:pointer;";
     open.addEventListener?.("click", (event) => {
       event?.stopPropagation?.();
       this._open(node.path || node.card, source);
     });
     if (node.isStub) return panel;
 
-    const presentation = this._statusPresentation(node.status, api);
-    const status = panel.createEl("div", { text: `${presentation.glyph} ${presentation.label}` });
-    status.className = `graph-view-detail-status ${presentation.className}`;
-    status.style.cssText = `color:${presentation.color};font-weight:650;`;
-
     if (node.waitReason) {
-      const waiting = panel.createEl("div", { text: String(node.waitReason) });
-      waiting.className = "graph-view-detail-wait";
+      const waiting = this._panelFact(panel, "Waiting on", "graph-view-detail-wait-row");
+      const value = waiting.createEl("div", { text: String(node.waitReason) });
+      value.className = "graph-view-detail-wait";
+      value.style.cssText = "overflow-wrap:anywhere;";
     }
 
     const byCard = new Map((nodes || []).map((entry) => [entry.card, entry]));
@@ -450,16 +489,16 @@ class GraphView {
       .map((edge) => byCard.get(edge.from))
       .filter((entry) => entry && (entry.isStub || this._statusPresentation(entry.status, api).normalized !== "completed"));
     if (unmet.length) {
-      const needs = panel.createEl("div");
-      needs.className = "graph-view-detail-needs";
-      needs.createEl("div", { text: "Unmet prerequisites" }).className = "graph-view-detail-label";
+      const needs = this._panelFact(panel, "Unmet prerequisites", "graph-view-detail-needs");
       for (const entry of unmet) this._panelLink(needs, entry, api, source, "graph-view-detail-prerequisite");
     }
 
     const outcome = outcomes?.get?.(node.card);
     if (outcome) {
-      const result = panel.createEl("div", { text: `Outcome: ${outcome}` });
-      result.className = "graph-view-detail-outcome";
+      const result = this._panelFact(panel, "Outcome", "graph-view-detail-outcome");
+      const value = result.createEl("div", { text: String(outcome) });
+      value.className = "graph-view-detail-outcome-value";
+      value.style.cssText = "overflow-wrap:anywhere;";
     }
 
     const insight = this._nodeInsight(analysis, node.card);
@@ -468,10 +507,9 @@ class GraphView {
       .filter((entry) => entry && !entry.isStub && entry.status !== null
         && String(entry.status).trim().toLowerCase() !== "completed");
     const gatedCount = Number.isFinite(Number(insight?.gates)) ? Number(insight.gates) : 0;
-    const gates = panel.createEl("div");
-    gates.className = "graph-view-detail-gates";
-    gates.createEl("div", { text: `Gates ${gatedCount} slice${gatedCount === 1 ? "" : "s"}` })
-      .className = "graph-view-detail-label";
+    const gates = this._panelFact(panel, "Gates", "graph-view-detail-gates");
+    const count = gates.createEl("div", { text: `${gatedCount} slice${gatedCount === 1 ? "" : "s"}` });
+    count.className = "graph-view-detail-gates-count";
     for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent");
     return panel;
   }
@@ -498,11 +536,17 @@ class GraphView {
     return keep;
   }
 
-  // Selection and filters live only in this render's closure. Selection wins
-  // wholesale while active; clearing it reapplies the current filter union.
-  _selectionController({ root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges }) {
+  // Selection and filters, plus project-cluster focus, live only in this
+  // render's closure. Selection wins wholesale while active; clearing it reapplies the
+  // current filter/focus union. Cluster focus keeps the selected epic plus the
+  // direct partner at either end of every cross-epic edge at full strength.
+  _selectionController({
+    root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, clusterByCard = null,
+  }) {
     const chips = new Map();
+    const headers = new Map();
     let selected = null;
+    let focusedCluster = null;
     let panel = null;
     const filters = { stuck: false, dimDone: false };
     const buttons = {};
@@ -518,18 +562,43 @@ class GraphView {
         button.setAttribute?.("aria-pressed", active ? "true" : "false");
       }
     };
+    const updateHeaders = () => {
+      for (const [cluster, header] of headers) {
+        const active = focusedCluster === cluster;
+        this._setClass(header, "graph-view-cluster-focused", active);
+        header.setAttribute?.("aria-pressed", active ? "true" : "false");
+      }
+    };
+    const focusedKeepSet = () => {
+      if (focusedCluster === null || !clusterByCard) return null;
+      const base = new Set((nodes || [])
+        .filter((node) => clusterByCard.get(node.card) === focusedCluster)
+        .map((node) => node.card));
+      const keep = new Set(base);
+      for (const edge of edges || []) {
+        if (!edge?.cross || (!base.has(edge.from) && !base.has(edge.to))) continue;
+        keep.add(edge.from);
+        keep.add(edge.to);
+      }
+      return keep;
+    };
     const applyFilters = () => {
       updateButtons();
+      updateHeaders();
       if (selected !== null) return;
       const keep = filters.stuck ? this._stuckKeepSet(nodes, analysis) : null;
+      const focused = focusedKeepSet();
       for (const [card, record] of chips) {
         const completed = this._statusPresentation(record.node.status, api).normalized === "completed";
-        setDimmed(record, (filters.stuck && !keep.has(card)) || (filters.dimDone && completed));
+        setDimmed(record, (filters.stuck && !keep.has(card))
+          || (filters.dimDone && completed)
+          || (focused && !focused.has(card)));
       }
       renderEdges(null);
     };
     const clear = () => {
       selected = null;
+      focusedCluster = null;
       panel?.remove?.();
       panel = null;
       applyFilters();
@@ -550,14 +619,30 @@ class GraphView {
       renderEdges(chain);
       panel = this._renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes);
     };
+    const focus = (cluster, path, event) => {
+      event?.stopPropagation?.();
+      if (focusedCluster === cluster) {
+        this._open(path, source);
+        return;
+      }
+      selected = null;
+      panel?.remove?.();
+      panel = null;
+      focusedCluster = cluster;
+      applyFilters();
+    };
     canvas.addEventListener?.("click", clear);
     return {
       register(node, chip) { chips.set(node.card, { node, chip, cssText: chip?.style?.cssText || "" }); },
+      registerHeader(cluster, header) {
+        headers.set(cluster, header);
+        header.setAttribute?.("aria-pressed", focusedCluster === cluster ? "true" : "false");
+      },
       renderToolbar: () => {
         const toolbar = root.createEl("div");
         toolbar.className = "graph-view-filter-toolbar";
         toolbar.setAttribute?.("aria-label", "Graph filters");
-        toolbar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+        toolbar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;";
         root.insertBefore?.(toolbar, scroller);
         for (const [key, label, className] of [
           ["stuck", "Stuck", "graph-view-filter-stuck"],
@@ -587,6 +672,7 @@ class GraphView {
         return toolbar;
       },
       select: analysis ? select : null,
+      focus: clusterByCard ? focus : null,
       clear,
     };
   }
@@ -595,21 +681,21 @@ class GraphView {
   // width is the widest chip content in that rank (deterministic text formula,
   // NOT a live-DOM measure — the harness is headless), clamped to [minCol,
   // maxCol]. Column x-offset accumulates prior column widths plus an inter-column
-  // gap; a chip's width is its column's width. The canvas is sized to the last
-  // column's right edge plus pad EXACTLY, so the final column never clips at
-  // rest — horizontal scroll engages only when the container is genuinely
-  // narrower than that width. rowH/chipH stay constant, so vertical edge math is
-  // unchanged; only the horizontal axis is auto-width now.
+  // gap; a chip's width is its column's width. Vertical geometry is also
+  // deterministic: each chip height comes from full title lines plus at most
+  // two wait lines, each row takes its tallest chip, and row tops accumulate
+  // those heights plus rowGap. No live DOM measurement participates.
   async _renderGraph(root, result, api, source, extraWarnings) {
     const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
     if (!nodes.length) return;
     const edges = Array.isArray(result?.edges) ? result.edges : [];
     const analysis = this._analyzeGraph(nodes, edges);
     this._renderStuckSummary(root, analysis);
-    this._renderLegend(root, nodes, api);
     const geometry = {
-      rowH: 74, chipH: 56, pad: 12, colGap: 28, chipW: 172,
-      charPx: 7, hPad: 18, minCol: 120, maxCol: 260,
+      chipH: 56, pad: 12, colGap: 28, rowGap: 18, chipW: 172,
+      widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+      hPad: 18, minCol: 120, maxCol: 260,
+      titleLineH: 15, infoLineH: 13, padY: 7, contentGap: 3, scrollbarAllowance: 14,
       maxCharsPerLine: Math.floor((260 - 18) / 7),
     };
     const ranks = [...new Set(nodes.map((node) => node.rank || 0))].sort((left, right) => left - right);
@@ -623,23 +709,23 @@ class GraphView {
     let cursorX = geometry.pad;
     for (const rank of ranks) { colX.set(rank, cursorX); cursorX += colWidth.get(rank) + geometry.colGap; }
     const lastRank = ranks[ranks.length - 1];
+    const rows = this._rowGeometry(nodes, (node) => colWidth.get(node.rank || 0), geometry, geometry.pad);
     const positions = new Map(nodes.map((node) => {
       const rank = node.rank || 0;
       return [node.card, {
-        x: colX.get(rank),
-        y: geometry.pad + (node.row || 0) * geometry.rowH,
-        w: colWidth.get(rank),
+        x: colX.get(rank), y: rows.tops.get(node.row || 0),
+        w: colWidth.get(rank), h: this._chipHeight(node, colWidth.get(rank), geometry),
       }];
     }));
     const width = colX.get(lastRank) + colWidth.get(lastRank) + geometry.pad;
-    const height = geometry.pad * 2 + (Math.max(...nodes.map((node) => node.row || 0)) * geometry.rowH) + geometry.chipH;
+    const height = rows.bottom + geometry.pad;
     const outcomes = await this._loadOutcomes(nodes);
     const scroller = root.createEl("div");
     scroller.className = "graph-view-scroll";
-    scroller.style.cssText = "overflow-x:auto;max-width:100%;";
+    scroller.style.cssText = `overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:${geometry.scrollbarAllowance}px;box-sizing:content-box;`;
     const canvas = scroller.createEl("div");
     canvas.className = "graph-view-canvas";
-    canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;`;
+    canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;margin-inline:auto;`;
     const edgeLayer = canvas.createEl("div");
     edgeLayer.className = "graph-view-edges";
     edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
@@ -656,43 +742,87 @@ class GraphView {
           null, outcomes, this._nodeInsight(analysis, node.card), interaction?.select);
       interaction?.register(node, chip);
     }
+    this._renderLegend(root, nodes, api);
   }
 
-  // Deterministic chip-content width (headless-safe): word-wrap the chip's text
-  // to at most two lines at the column's character budget, then size to the
-  // widest wrapped line. A title that overflows two lines caps at maxCol (its
-  // second line ellipsizes in the DOM); everything else is clamped to
-  // [minCol, maxCol]. Stubs size to their ghost label.
+  // Deterministic chip-content width (headless-safe): word-wrap the complete
+  // chip title at the maximum column budget and size to its longest line.
+  // Nothing is visually clamped; width alone remains bounded to [minCol,maxCol].
   _chipContentWidth(node, geometry) {
     const text = node.isStub ? (node.stubLabel || node.card || "") : (node.card || "");
-    const { longest, clamped } = this._wrapTitle(text, geometry.maxCharsPerLine);
-    const raw = clamped ? geometry.maxCol : (longest * geometry.charPx + geometry.hPad);
+    const { longest } = this._wrapTitle(text, geometry.maxCharsPerLine);
+    const raw = longest * geometry.widthCharPx + geometry.hPad;
     return Math.min(geometry.maxCol, Math.max(geometry.minCol, raw));
   }
 
-  // Greedy two-line word wrap. Returns the kept (≤2) lines, the longest line's
-  // character length, and whether the text overflowed two lines (clamped → the
-  // second line ellipsizes under CSS -webkit-line-clamp:2).
+  // Greedy full-title word wrap. Oversized words split at the same character
+  // budget as CSS overflow-wrap:anywhere, so geometry cannot undercount lines.
   _wrapTitle(text, maxChars) {
     const limit = Math.max(1, Number(maxChars) || 1);
     const words = String(text == null ? "" : text).split(/\s+/).filter(Boolean);
     const lines = [];
     let line = "";
-    for (const word of words) {
+    for (const sourceWord of words) {
+      let word = sourceWord;
+      if (word.length > limit) {
+        if (line) { lines.push(line); line = ""; }
+        while (word.length > limit) {
+          lines.push(word.slice(0, limit));
+          word = word.slice(limit);
+        }
+      }
       const candidate = line ? `${line} ${word}` : word;
       if (candidate.length <= limit || !line) line = candidate;
       else { lines.push(line); line = word; }
     }
     if (line) lines.push(line);
-    const clamped = lines.length > 2;
-    const kept = lines.slice(0, 2);
-    const longest = kept.reduce((max, entry) => Math.max(max, entry.length), 0);
-    return { lines: kept, longest, clamped };
+    const longest = lines.reduce((max, entry) => Math.max(max, entry.length), 0);
+    return { lines: lines.length ? lines : [""], longest };
+  }
+
+  _chipHeight(node, chipW, geometry) {
+    if (node?.isStub) return geometry.chipH;
+    const parts = this._titleParts(node?.card);
+    // Height uses a deliberately conservative 13px glyph cell at an explicit
+    // 12px rendered font. This safely contains even repeated wide proportional
+    // glyphs (the width-sizing model remains the established 7px average).
+    const idBudget = parts.id ? parts.id.length * geometry.titleGlyphPx + 5 : 0;
+    const perLineChars = Math.max(1,
+      Math.floor((chipW - geometry.hPad - idBudget) / geometry.titleGlyphPx));
+    const titleLines = this._wrapTitle(parts.title, perLineChars).lines.length;
+    const waitText = this._waitInfo(node);
+    // Any wait may visually occupy its full two-line clamp. Reserving both
+    // exact info line boxes avoids another average-glyph estimate entirely.
+    const waitLines = waitText ? 2 : 1;
+    return Math.max(geometry.chipH,
+      geometry.padY * 2 + titleLines * geometry.titleLineH
+      + geometry.contentGap + waitLines * geometry.infoLineH);
+  }
+
+  _rowGeometry(nodes, widthForNode, geometry, startY) {
+    const rowNodes = new Map();
+    for (const node of nodes || []) {
+      const row = Number(node?.row) || 0;
+      if (!rowNodes.has(row)) rowNodes.set(row, []);
+      rowNodes.get(row).push(node);
+    }
+    const tops = new Map();
+    const heights = new Map();
+    let cursor = startY;
+    for (const row of [...rowNodes.keys()].sort((left, right) => left - right)) {
+      const height = Math.max(...rowNodes.get(row).map((node) => this._chipHeight(node, widthForNode(node), geometry)));
+      tops.set(row, cursor);
+      heights.set(row, height);
+      cursor += height + geometry.rowGap;
+    }
+    const last = [...rowNodes.keys()].sort((left, right) => left - right).at(-1);
+    return { tops, heights, bottom: last == null ? startY : tops.get(last) + heights.get(last) };
   }
 
   // Info-line wait text: a blocked slice (waitReason "waiting on: X, Y") shows
-  // "needs <first-dep-id>"; a parked slice's waitReason is the resume_condition
-  // verbatim, shown from its start (truncated). Null when the node is neither.
+  // "needs <first-dep-id>"; a parked slice's waitReason is the complete
+  // resume_condition (visual wrapping is bounded in _renderChip). Null when
+  // the node is neither.
   _waitInfo(node) {
     const reason = node && node.waitReason;
     if (reason == null || String(reason).trim() === "") return null;
@@ -702,7 +832,7 @@ class GraphView {
       const firstDep = blocked[1].split(",")[0].trim();
       return `needs ${this._titleParts(firstDep).id || firstDep}`;
     }
-    return this._truncate(text, 48);
+    return text.replace(/\s+/g, " ").trim();
   }
 
   // Outcome tooltip source (epic scope, READ-ONLY, fail-soft): read each slice's
@@ -762,7 +892,7 @@ class GraphView {
     const chip = canvas.createEl("div");
     chip.className = "graph-view-chip graph-view-stub";
     chip.style.cssText =
-      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;min-height:${geometry.chipH}px;`
+      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;height:${at.h || geometry.chipH}px;`
       + "display:flex;flex-direction:column;gap:3px;justify-content:center;padding:7px 9px;border-radius:9px;"
       + "cursor:pointer;box-sizing:border-box;color:var(--text-muted);opacity:0.75;"
       + "border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);"
@@ -788,13 +918,11 @@ class GraphView {
     const active = activeCard != null && node.card === activeCard;
     const chipW = at && at.w != null ? at.w : geometry.chipW;
     const parts = this._titleParts(node.card);
-    const perLineChars = Math.max(1, Math.floor((chipW - geometry.hPad) / geometry.charPx));
-    const wrapped = this._wrapTitle(parts.title, perLineChars);
     const chip = canvas.createEl("div");
     chip.className = `graph-view-chip ${presentation.className}`
-      + `${active ? " graph-view-active" : ""}${wrapped.clamped ? " graph-view-chip-clamped" : ""}`;
+      + `${active ? " graph-view-active" : ""}`;
     chip.style.cssText =
-      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;min-height:${geometry.chipH}px;`
+      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;height:${at.h || this._chipHeight(node, chipW, geometry)}px;`
       + "display:flex;flex-direction:column;gap:3px;justify-content:center;padding:7px 9px;border-radius:9px;"
       + `cursor:pointer;box-sizing:border-box;color:${presentation.color};`
       + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
@@ -808,25 +936,22 @@ class GraphView {
       : this._open(node.path || node.card, source));
     const titleRow = chip.createEl("div");
     titleRow.className = "graph-view-chip-title";
-    titleRow.style.cssText = "display:flex;align-items:baseline;gap:5px;min-width:0;";
+    titleRow.style.cssText = `display:flex;align-items:baseline;gap:5px;min-width:0;line-height:${geometry.titleLineH}px;`;
     if (parts.id) {
       const id = titleRow.createEl("span", { text: parts.id });
       id.className = "graph-view-chip-id";
       id.style.cssText = "flex:none;font-family:var(--font-monospace);font-size:0.72em;font-weight:600;opacity:0.85;";
     }
-    // Title wraps to two lines before any ellipsis (-webkit-line-clamp:2); the
-    // full title stays in the DOM so nothing is lost — only the visual overflow
-    // ellipsizes on the second line.
+    // Title wraps in full. Its deterministic line count is the same input used
+    // by _chipHeight, so the absolute chip box always contains every line.
     const title = titleRow.createEl("span", { text: parts.title });
     title.className = "graph-view-chip-name";
-    title.style.cssText = "min-width:0;font-size:0.78em;font-weight:600;"
-      + "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;"
-      + "overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;";
+    title.style.cssText = `min-width:0;font-size:${geometry.titleFontPx}px;font-weight:600;white-space:normal;overflow-wrap:anywhere;`;
     // Info line: the shared lifecycle glyph + colored status WORD (no local
     // presentation table) plus the inline wait reason.
     const info = chip.createEl("div");
     info.className = "graph-view-chip-info";
-    info.style.cssText = "display:flex;align-items:baseline;gap:5px;min-width:0;font-size:0.7em;";
+    info.style.cssText = `display:flex;align-items:flex-start;gap:5px;min-width:0;font-size:${geometry.infoFontPx}px;line-height:${geometry.infoLineH}px;`;
     const glyph = info.createEl("span", { text: presentation.glyph });
     glyph.className = `graph-view-status-glyph ${presentation.className}`;
     glyph.setAttribute?.("aria-hidden", "true");
@@ -839,7 +964,8 @@ class GraphView {
       const wait = info.createEl("span", { text: waitText });
       wait.className = "graph-view-wait";
       wait.setAttribute?.("title", String(node.waitReason || ""));
-      wait.style.cssText = "min-width:0;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+      wait.style.cssText = "min-width:0;color:var(--text-muted);display:-webkit-box;-webkit-box-orient:vertical;"
+        + "-webkit-line-clamp:2;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;";
     }
     if (insight?.isRootBlocker === true) {
       const gates = Number.isFinite(Number(insight.gates)) ? Number(insight.gates) : 0;
@@ -957,31 +1083,35 @@ class GraphView {
     }
 
     const activeCard = this._activeCard(current);
-    // Project-scope COLUMN geometry stays fixed (colW/rowH/chipW/chipH); charPx
-    // and hPad only feed the shared chip's two-line wrap calc.
-    const geometry = { colW: 200, rowH: 74, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 26, charPx: 7, hPad: 18 };
+    // Project columns stay fixed, but vertical geometry shares the same
+    // deterministic full-title / bounded-wait height formula as epic scope.
+    const geometry = {
+      colW: 200, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 36,
+      rowGap: 18, widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+      hPad: 18, titleLineH: 15, infoLineH: 13,
+      padY: 7, contentGap: 3, scrollbarAllowance: 14,
+    };
     const positions = new Map();
     let cursorY = geometry.pad;
     let width = geometry.pad * 2 + geometry.chipW;
     for (const cluster of clusters) {
       cluster.headerY = cursorY;
       const chipTop = cursorY + geometry.headerH;
+      const rows = this._rowGeometry(cluster.nodes, () => geometry.chipW, geometry, chipTop);
       for (const node of cluster.nodes) {
         if (!positions.has(node.card)) {
           positions.set(node.card, {
             x: geometry.pad + node.rank * geometry.colW,
-            y: chipTop + node.row * geometry.rowH,
+            y: rows.tops.get(node.row || 0),
+            h: this._chipHeight(node, geometry.chipW, geometry),
           });
         }
       }
-      const clusterHeight = cluster.nodes.length
-        ? Math.max(...cluster.nodes.map((node) => node.row)) * geometry.rowH + geometry.chipH
-        : 0;
       if (cluster.nodes.length) {
         width = Math.max(width,
           geometry.pad * 2 + Math.max(...cluster.nodes.map((node) => node.rank)) * geometry.colW + geometry.chipW);
       }
-      cursorY = chipTop + clusterHeight + geometry.clusterGap;
+      cursorY = rows.bottom + geometry.clusterGap;
     }
     const height = clusters.length ? cursorY - geometry.clusterGap + geometry.pad : 0;
     const allNodes = clusters.flatMap((cluster) => cluster.nodes);
@@ -994,13 +1124,12 @@ class GraphView {
 
     if (clusters.length) {
       this._renderStuckSummary(root, analysis);
-      this._renderLegend(root, allNodes, api);
       const scroller = root.createEl("div");
       scroller.className = "graph-view-scroll";
-      scroller.style.cssText = "overflow-x:auto;max-width:100%;";
+      scroller.style.cssText = `overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:${geometry.scrollbarAllowance}px;box-sizing:content-box;`;
       const canvas = scroller.createEl("div");
       canvas.className = "graph-view-canvas graph-view-project-canvas";
-      canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;`;
+      canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;margin-inline:auto;`;
       const edgeLayer = canvas.createEl("div");
       edgeLayer.className = "graph-view-edges";
       edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
@@ -1010,6 +1139,7 @@ class GraphView {
       renderEdges(null);
       const interaction = this._selectionController({
         root, scroller, canvas, nodes: allNodes, edges: allEdges, analysis, api, source, outcomes, renderEdges,
+        clusterByCard: new Map([...clusterOf].map(([card, cluster]) => [card, cluster.epic])),
       });
       interaction.renderToolbar();
       for (const cluster of clusters) {
@@ -1019,13 +1149,16 @@ class GraphView {
           `position:absolute;left:${geometry.pad}px;top:${cluster.headerY}px;height:${geometry.headerH}px;`
           + "display:flex;align-items:center;font-size:0.75em;font-weight:700;letter-spacing:0.05em;"
           + "text-transform:uppercase;color:var(--text-muted);cursor:pointer;";
-        header.addEventListener?.("click", () => this._open(cluster.atlasPath, source));
+        header.setAttribute?.("role", "button");
+        header.addEventListener?.("click", (event) => interaction.focus?.(cluster.epic, cluster.atlasPath, event));
+        interaction.registerHeader?.(cluster.epic, header);
         for (const node of cluster.nodes) {
           const chip = this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, warnings,
             activeCard, null, this._nodeInsight(analysis, node.card), interaction?.select);
           interaction?.register(node, chip);
         }
       }
+      this._renderLegend(root, allNodes, api);
     }
     for (const cluster of clusters) {
       for (const warning of cluster.warnings) warnings.push(warning);
@@ -1034,7 +1167,7 @@ class GraphView {
     if (lanes.completed.length) {
       const strip = root.createEl("div");
       strip.className = "graph-view-done-strip";
-      strip.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
+      strip.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:16px;";
       const presentation = this._statusPresentation("completed", api);
       for (const epic of lanes.completed) {
         const chip = strip.createEl("span", { text: epic });
@@ -1058,7 +1191,8 @@ class GraphView {
       previous?.remove?.();
       const root = dv.container.createEl("div");
       root.className = "graph-view-root";
-      root.style.cssText = "display:grid;gap:8px;max-width:100%;";
+      root.style.cssText = "display:grid;gap:0;max-width:100%;";
+      this._renderSectionChrome(dv, root);
       const scope = overrides && typeof overrides === "object" && overrides.scope
         ? String(overrides.scope)
         : this._scope;
