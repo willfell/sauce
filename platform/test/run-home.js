@@ -61,7 +61,7 @@ function makeEl(tag, opts) {
       const out = [];
       if (evt === "click" && typeof el.onclick === "function") out.push(el.onclick(e));
       for (const cb of (el._listeners[evt] || [])) out.push(cb(e));
-      return out;
+      return Promise.all(out);
     },
     removeEventListener: function () {},
   };
@@ -128,6 +128,11 @@ function makeDv() {
       const mount = makeEl("div", { cls: "customjs-guard-mount" });
       mount.parent = root;
       root.children.push(mount);
+      const receipt = input && Array.isArray(input.args) && input.args[0] && input.args[0].mountReceipt;
+      if (receipt && typeof receipt === "object") {
+        receipt.ok = true;
+        receipt.node = mount;
+      }
       return mount;
     },
   };
@@ -163,6 +168,15 @@ function assertEq(name, actual, expected) {
   if (!ok) console.log(`      ↳ expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function withWatchdog(promise, label, timeoutMs = 500) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} did not settle`)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 // Recursively collect descendants (depth-first, pre-order) of an el.
 function descendants(el) {
@@ -546,14 +560,33 @@ function descendants(el) {
   installMoment("2026-07-02", 6);
   {
     const dv = makeDv();
+    const priorActiveElement = global.document.activeElement;
+    let rollbackActiveElement = null;
 
-    const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [] };
+    const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [], structure: [] };
     global.customJS = {
       SpaceDailyDashboard: {
         computeCounts: (d, t, te) => { calls.computeCounts.push({ d, t, te }); return { today: 2, overdue: 1, done: 0, meetings: 1 }; },
       },
       TaskEntity: {},
-      TaskDialog: { createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve(); } },
+      TaskDialog: { createQuick: (opts) => {
+        calls.createQuick.push(opts);
+        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
+        return Promise.resolve({ ok: true });
+      } },
+      RenderSafe: {
+        mutateStructure: async (opts) => {
+          calls.structure.push("apply");
+          const receipt = await opts.apply();
+          try { calls.structure.push("write"); return { ok: true, value: await opts.write() }; }
+          catch (error) {
+            calls.structure.push("rollback");
+            if (rollbackActiveElement) global.document.activeElement = rollbackActiveElement;
+            await opts.rollback(receipt, error);
+            return { ok: false, error };
+          }
+        },
+      },
       EntityCreate: {
         create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); },
         _loadSpec: () => Promise.resolve(null),
@@ -605,12 +638,125 @@ function descendants(el) {
     {
       inputs[0].value = "buy milk";
       const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
+      const captureRow = capAdd && capAdd.parent;
       await fire(capAdd);
       assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
-      assertTrue("HOME-CAP-19 Add → createQuick carries title + source, no today (no default due date)",
+      assertTrue("HOME-CAP-19 Add → createQuick carries title + source + reconcile:false, no today (no default due date)",
         calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
-          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily",
-        `expected createQuick({title:'buy milk',source:'daily'}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
+          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily"
+          && calls.createQuick[0].reconcile === false,
+        `expected createQuick({title:'buy milk',source:'daily',reconcile:false}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
+      assertTrue("HOME-CAP-19a quick capture dispatch never invokes structural global refresh",
+        !calls.commandIds.includes("dataview:dataview-force-refresh-views"));
+      assertEq("HOME-CAP-19b structural apply precedes persistence", calls.structure.slice(0, 2).join(","), "apply,write");
+      assertTrue("HOME-CAP-19c capture success does not recursively self-render",
+        !/self\.render\(dv,\s*params\)/.test(SPACE_HOME_SRC), "structural success must reconcile naturally");
+      assertTrue("HOME-CAP-19d success removes its exact optimistic preview",
+        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
+      assertEq("HOME-CAP-19e success re-enables Add without waiting for a rerender", capAdd.disabled, false);
+      assertEq("HOME-CAP-19f success keeps the committed input cleared", inputs[0].value, "");
+
+      fire(addBtn);
+      inputs[0].value = "second task";
+      await fire(capAdd);
+      assertEq("HOME-CAP-19g an immediate second capture commits before any rerender", calls.createQuick.length, 2);
+      assertEq("HOME-CAP-19h the immediate second capture carries its own title", calls.createQuick[1] && calls.createQuick[1].title, "second task");
+      assertEq("HOME-CAP-19i consecutive success settles Add again", capAdd.disabled, false);
+      assertTrue("HOME-CAP-19j consecutive success leaves no stale optimistic preview",
+        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
+
+      let resolvePending;
+      const deferredCreate = new Promise((resolve) => { resolvePending = resolve; });
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        return deferredCreate;
+      };
+      fire(addBtn);
+      inputs[0].value = "slow task";
+      const pendingCapture = fire(capAdd);
+      await Promise.resolve();
+      await Promise.resolve();
+      const callsWhilePending = calls.createQuick.length;
+      // Dataview can clear and execute the block again while persistence is
+      // still pending. The container-owned authority must bind this replacement
+      // render even though every closure and DOM node above is now obsolete.
+      dv.container.children = [];
+      await home_.render(dv, {});
+      const replacementHome = dv.container.querySelector(".sauce-home");
+      const replacementNodes = replacementHome ? descendants(replacementHome) : [];
+      const replacementToggle = replacementNodes.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+      const replacementMenu = replacementNodes.find((n) => hasCls(n, "sauce-home-add-menu"));
+      const replacementInput = replacementMenu ? descendants(replacementMenu).find((n) => n.tag === "input") : null;
+      const replacementAdd = replacementMenu
+        ? descendants(replacementMenu).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"))
+        : null;
+      fire(replacementToggle);
+      replacementInput.value = "next draft";
+      const overlapAttempt = replacementInput.dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
+      await Promise.resolve();
+      await Promise.resolve();
+      assertEq("HOME-CAP-19k deferred Enter after container rerender cannot overlap persistence",
+        calls.createQuick.length, callsWhilePending);
+      assertEq("HOME-CAP-19l shared pending authority disables replacement Add", replacementAdd.disabled, true);
+      assertEq("HOME-CAP-19l2 obsolete Add remains settlement-ineligible", capAdd.disabled, true);
+      assertTrue("HOME-CAP-19l3 obsolete menu remains open before settlement", isOpen(menu));
+      resolvePending({ ok: true });
+      await withWatchdog(Promise.all([pendingCapture, overlapAttempt]), "deferred capture and guarded overlap");
+      assertEq("HOME-CAP-19m authoritative deferred success releases replacement Add", replacementAdd.disabled, false);
+      assertTrue("HOME-CAP-19n obsolete settlement leaves the replacement menu open", isOpen(replacementMenu));
+      assertEq("HOME-CAP-19n2 obsolete settlement preserves the replacement draft", replacementInput.value, "next draft");
+      assertEq("HOME-CAP-19n3 stale success cannot re-enable its obsolete Add", capAdd.disabled, true);
+      assertTrue("HOME-CAP-19n4 stale success cannot close its obsolete menu", isOpen(menu));
+      assertTrue("HOME-CAP-19o authoritative deferred success leaves no stale preview",
+        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
+      assertEq("HOME-CAP-19p overlap draft was not submitted by the guarded Enter",
+        calls.createQuick.filter((entry) => entry && entry.title === "next draft").length, 0);
+
+      // A stale rejection has the same ownership rule as stale success. Keep a
+      // real watchdog alive so a missing pending/surface guard cannot let Node
+      // silently exit with an unresolved awaited Promise and zero assertions.
+      let rejectStale;
+      const deferredReject = new Promise((_resolve, reject) => { rejectStale = reject; });
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        return deferredReject;
+      };
+      const staleInput = replacementInput;
+      const staleMenu = replacementMenu;
+      const staleAdd = replacementAdd;
+      const staleOriginalValue = staleInput.value;
+      const staleCapture = fire(staleAdd);
+      await Promise.resolve();
+      await Promise.resolve();
+      assertEq("HOME-CAP-19q pending stale-rejection input is optimistically cleared", staleInput.value, "");
+      assertEq("HOME-CAP-19r pending stale-rejection Add is disabled", staleAdd.disabled, true);
+      dv.container.children = [];
+      await home_.render(dv, {});
+      const newestHome = dv.container.querySelector(".sauce-home");
+      const newestNodes = newestHome ? descendants(newestHome) : [];
+      const newestToggle = newestNodes.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+      const newestMenu = newestNodes.find((n) => hasCls(n, "sauce-home-add-menu"));
+      const newestInput = newestMenu ? descendants(newestMenu).find((n) => n.tag === "input") : null;
+      const newestAdd = newestMenu
+        ? descendants(newestMenu).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"))
+        : null;
+      fire(newestToggle);
+      newestInput.value = "replacement rejection draft";
+      rejectStale(new Error("stale persistence rejected"));
+      await withWatchdog(staleCapture, "stale rejected capture");
+      assertEq("HOME-CAP-19s stale rejection cannot restore its obsolete input", staleInput.value, "");
+      assertEq("HOME-CAP-19t stale rejection cannot re-enable its obsolete Add", staleAdd.disabled, true);
+      assertTrue("HOME-CAP-19u stale rejection cannot close its obsolete menu", isOpen(staleMenu));
+      assertEq("HOME-CAP-19v stale rejection preserves the replacement draft", newestInput.value, "replacement rejection draft");
+      assertTrue("HOME-CAP-19w stale rejection leaves the replacement menu open", isOpen(newestMenu));
+      assertEq("HOME-CAP-19x stale rejection releases the replacement Add", newestAdd.disabled, false);
+      assertEq("HOME-CAP-19y stale rejection retained the captured obsolete value only as receipt data",
+        staleOriginalValue, "next draft");
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
+        return Promise.resolve({ ok: true });
+      };
     }
 
     // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
@@ -630,6 +776,60 @@ function descendants(el) {
         "the Enter handler must stopPropagation so a higher-level (Obsidian/document) keydown listener can't swallow or redirect the same event");
     }
 
+    // Rejected persistence restores the exact live input/menu receipt.
+    {
+      const homeRetry = dv.container.querySelector(".sauce-home");
+      const menuRetry = homeRetry ? descendants(homeRetry).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
+      const inputRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "input") : null;
+      const addRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
+      const toggleRetry = homeRetry
+        ? descendants(homeRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"))
+        : null;
+      if (menuRetry && !isOpen(menuRetry)) fire(toggleRetry);
+      let restoredFocus = 0;
+      const originFocus = { isConnected: true, focus: () => { restoredFocus++; } };
+      global.document.activeElement = originFocus;
+      inputRetry.value = "retry me";
+      global.customJS.TaskDialog.createQuick = () => Promise.reject(new Error("persist failed"));
+      await fire(addRetry);
+      assertEq("HOME-CAP-21c rejection restores the exact input value", inputRetry.value, "retry me");
+      assertTrue("HOME-CAP-21d rejection keeps the originating menu open", isOpen(menuRetry));
+      assertTrue("HOME-CAP-21e rejected capture ran rollback after apply/write",
+        calls.structure.slice(-3).join(",") === "apply,write,rollback");
+      assertEq("HOME-CAP-21f rejection restores originating focus when the user has not moved", restoredFocus, 1);
+      const newerFocus = { isConnected: true };
+      global.document.activeElement = originFocus;
+      rollbackActiveElement = newerFocus;
+      inputRetry.value = "retry without stealing focus";
+      await fire(addRetry);
+      assertEq("HOME-CAP-21g late rejection preserves newer connected focus", restoredFocus, 1);
+      assertTrue("HOME-CAP-21h newer focus remains authoritative", global.document.activeElement === newerFocus);
+      rollbackActiveElement = null;
+
+      global.document.activeElement = originFocus;
+      inputRetry.value = "missing dependency result";
+      global.customJS.TaskDialog.createQuick = () => Promise.resolve(undefined);
+      await fire(addRetry);
+      assertEq("HOME-CAP-21i undefined create result rolls back the exact input", inputRetry.value, "missing dependency result");
+      assertTrue("HOME-CAP-21j undefined create result keeps the originating menu open", isOpen(menuRetry));
+      assertTrue("HOME-CAP-21k undefined create result is not accepted as persistence success",
+        calls.structure.slice(-3).join(",") === "apply,write,rollback");
+
+      inputRetry.value = "negative create result";
+      global.customJS.TaskDialog.createQuick = () => Promise.resolve({ ok: false, reason: "invalid plan" });
+      await fire(addRetry);
+      assertEq("HOME-CAP-21l explicit negative create result rolls back the exact input", inputRetry.value, "negative create result");
+      assertTrue("HOME-CAP-21m explicit negative create result keeps the originating menu open", isOpen(menuRetry));
+      assertTrue("HOME-CAP-21n explicit negative create result is not accepted as persistence success",
+        calls.structure.slice(-3).join(",") === "apply,write,rollback");
+
+      global.customJS.TaskDialog.createQuick = (opts) => {
+        calls.createQuick.push(opts);
+        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
+        return Promise.resolve({ ok: true });
+      };
+    }
+
     // ── Inline capture: blank / whitespace input → NO createQuick. ──
     {
       calls.createQuick.length = 0;
@@ -645,6 +845,7 @@ function descendants(el) {
 
     delete global.customJS;
     delete global.app;
+    global.document.activeElement = priorActiveElement;
   }
 
   // ── HOME-CAP-REG: article/journal gated on EntityCreate._loadSpec(instance) ─
@@ -1099,6 +1300,175 @@ function descendants(el) {
     delete global.customJS;
     delete global.window.customJS;
     if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
+  }
+
+  // ── HOME-DASH-RETRY: an unchanged Home shell does not make a cold nested
+  // dashboard failure permanent. Missing and rejected view mounts retry on the
+  // same container, while the first successful mount is thereafter deduped.
+  {
+    installMoment("2026-07-02", 9);
+    global.customJS = {
+      SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) },
+    };
+
+    const missingDv = makeDv();
+    const availableView = missingDv.view;
+    delete missingDv.view;
+    await home_.render(missingDv, {});
+    assertTrue("HOME-DASH-RETRY-1 missing dv.view still paints the Home shell",
+      !!missingDv.container.querySelector(".sauce-home"));
+    missingDv.view = availableView;
+    await home_.render(missingDv, {});
+    await home_.render(missingDv, {});
+    assertEq("HOME-DASH-RETRY-2 availability warm-retry mounts exactly once",
+      missingDv._viewCalls.length, 1);
+
+    const rejectedDv = makeDv();
+    let attempts = 0;
+    const successfulView = rejectedDv.view;
+    rejectedDv.view = async () => { attempts += 1; throw new Error("guard unavailable"); };
+    await home_.render(rejectedDv, {});
+    rejectedDv.view = async (...args) => { attempts += 1; return successfulView(...args); };
+    await home_.render(rejectedDv, {});
+    await home_.render(rejectedDv, {});
+    assertEq("HOME-DASH-RETRY-3 rejection warm-retry attempts once more then dedupes", attempts, 2);
+    assertEq("HOME-DASH-RETRY-4 successful retry creates one dashboard mount",
+      rejectedDv._viewCalls.length, 1);
+
+    const deferredDv = makeDv();
+    let releaseMount;
+    let reportStarted;
+    const mountReleased = new Promise((resolve) => { releaseMount = resolve; });
+    const mountStarted = new Promise((resolve) => { reportStarted = resolve; });
+    let deferredAttempts = 0;
+    deferredDv.view = async (viewPath, input) => {
+      deferredAttempts += 1;
+      reportStarted();
+      await mountReleased;
+      deferredDv._viewCalls.push({ viewPath, input });
+      const mount = makeEl("div", { cls: "customjs-guard-mount" });
+      mount.parent = deferredDv.container;
+      deferredDv.container.children.push(mount);
+      const receipt = input && input.args && input.args[0] && input.args[0].mountReceipt;
+      if (receipt) { receipt.ok = true; receipt.node = mount; }
+      return mount;
+    };
+    const firstDeferredRender = home_.render(deferredDv, {});
+    await mountStarted;
+    deferredDv.container.children = [];
+    const replacementDeferredRender = home_.render(deferredDv, {});
+    await Promise.resolve();
+    assertEq("HOME-DASH-RETRY-5 container clear preserves one in-flight mount authority",
+      deferredAttempts, 1);
+    releaseMount();
+    await Promise.all([firstDeferredRender, replacementDeferredRender]);
+    assertEq("HOME-DASH-RETRY-6 delayed mount plus rerender appends exactly one dashboard",
+      deferredDv._viewCalls.length, 1);
+
+    const appendedDv = makeDv();
+    let releaseSettlement;
+    let reportAppended;
+    const settlementReleased = new Promise((resolve) => { releaseSettlement = resolve; });
+    const mountAppended = new Promise((resolve) => { reportAppended = resolve; });
+    let appendFirstAttempts = 0;
+    appendedDv.view = async (viewPath, input) => {
+      appendFirstAttempts += 1;
+      appendedDv._viewCalls.push({ viewPath, input });
+      const mount = makeEl("div", { cls: "customjs-guard-mount" });
+      mount.parent = appendedDv.container;
+      appendedDv.container.children.push(mount);
+      const receipt = input && input.args && input.args[0] && input.args[0].mountReceipt;
+      if (receipt) { receipt.ok = true; receipt.node = mount; }
+      reportAppended();
+      await settlementReleased;
+      return mount;
+    };
+    const appendFirstRender = home_.render(appendedDv, {});
+    await mountAppended;
+    appendedDv.container.children = [];
+    const appendFirstReplacement = home_.render(appendedDv, {});
+    await Promise.resolve();
+    assertEq("HOME-DASH-RETRY-7 append-before-settle remains serialized through clear",
+      appendFirstAttempts, 1);
+    releaseSettlement();
+    await Promise.all([appendFirstRender, appendFirstReplacement]);
+    const liveMounts = appendedDv.container.children
+      .filter((node) => node.cls === "customjs-guard-mount");
+    assertEq("HOME-DASH-RETRY-8 removed pre-settlement DOM triggers one serialized remount",
+      appendFirstAttempts, 2);
+    assertEq("HOME-DASH-RETRY-9 append-before-settle converges on one live dashboard",
+      liveMounts.length, 1);
+    await home_.render(appendedDv, {});
+    assertEq("HOME-DASH-RETRY-10 settled replacement mount remains deduped",
+      appendFirstAttempts, 2);
+
+    const placeholderDv = makeDv();
+    let dashboardAvailable = false;
+    let placeholderAttempts = 0;
+    const collidingForeign = makeEl("p", { cls: "foreign-colliding-placeholder-text" });
+    collidingForeign.textContent = "SpaceDailyDashboard unavailable";
+    let ownedPlaceholder = null;
+    placeholderDv.view = async (_viewPath, input) => {
+      placeholderAttempts += 1;
+      if (!dashboardAvailable) {
+        collidingForeign.parent = placeholderDv.container;
+        placeholderDv.container.children.push(collidingForeign);
+        const placeholder = makeEl("p");
+        placeholder.textContent = "SpaceDailyDashboard unavailable";
+        placeholder.parent = placeholderDv.container;
+        placeholderDv.container.children.push(placeholder);
+        ownedPlaceholder = placeholder;
+        input.guardReceipt.status = "unavailable";
+        input.guardReceipt.node = placeholder;
+        return placeholder;
+      }
+      const mount = makeEl("div", { cls: "customjs-guard-mount" });
+      mount.parent = placeholderDv.container;
+      placeholderDv.container.children.push(mount);
+      const receipt = input.args[0].mountReceipt;
+      receipt.ok = true;
+      receipt.node = mount;
+      return mount;
+    };
+    await home_.render(placeholderDv, {});
+    assertTrue("HOME-DASH-RETRY-11 guard cleanup removes only its exact unavailable receipt",
+      !placeholderDv.container.children.includes(ownedPlaceholder));
+    assertTrue("HOME-DASH-RETRY-11b colliding foreign placeholder text survives exact cleanup",
+      placeholderDv.container.children.includes(collidingForeign));
+    dashboardAvailable = true;
+    await home_.render(placeholderDv, {});
+    await home_.render(placeholderDv, {});
+    assertEq("HOME-DASH-RETRY-12 resolved unavailable guard warm-retries then dedupes",
+      placeholderAttempts, 2);
+
+    const ownershipDv = makeDv();
+    let ownedAttempts = 0;
+    const foreign = makeEl("aside", { cls: "foreign-concurrent-node" });
+    ownershipDv.view = async (_viewPath, input) => {
+      ownedAttempts += 1;
+      if (ownedAttempts === 1) {
+        foreign.parent = ownershipDv.container;
+        ownershipDv.container.children.push(foreign);
+      }
+      const mount = makeEl("div", { cls: `owned-dashboard-${ownedAttempts}` });
+      mount.parent = ownershipDv.container;
+      ownershipDv.container.children.push(mount);
+      const receipt = input.args[0].mountReceipt;
+      receipt.ok = true;
+      receipt.node = mount;
+      return mount;
+    };
+    installMoment("2026-07-02", 9);
+    await home_.render(ownershipDv, {});
+    installMoment("2026-07-03", 9);
+    await home_.render(ownershipDv, {});
+    assertTrue("HOME-DASH-RETRY-13 day-key replacement preserves unrelated concurrent DOM",
+      ownershipDv.container.children.includes(foreign), "foreign top-level node must never be claimed or removed");
+    assertEq("HOME-DASH-RETRY-14 day-key replacement owns exactly its explicit receipt",
+      ownershipDv.container.children.filter((node) => /^owned-dashboard-/.test(node.cls)).length, 1);
+
+    delete global.customJS;
+    delete global.window.customJS;
   }
 
   // ── HOME-FOCUS: clicking "+" must NOT focus the "Jot a task…" input — an
