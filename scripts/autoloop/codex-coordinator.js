@@ -4804,7 +4804,7 @@ async function commandBoardHealth(ctx, args, deps = {}) {
   const exists = deps.exists || fs.existsSync;
   const loadState = deps.readState || readState;
   const transitionLock = deps.withLock || withLock;
-  return transitionLock(ctx, 'selector', async () => {
+  const sweep = async () => {
     const state = loadState(ctx);
     const records = Object.keys((state && state.cards) || {}).length;
     // Tri-state so a clean ledgerless run can never be mistaken for a fully
@@ -4832,7 +4832,22 @@ async function commandBoardHealth(ctx, args, deps = {}) {
       }
     }
     return receipt;
-  }, { staleMs: 60 * 60 * 1000 });
+  };
+  try {
+    return await transitionLock(ctx, 'selector', sweep, { staleMs: 60 * 60 * 1000 });
+  } catch (err) {
+    // Lock contention is a skip, not a crash: a live loop session must never
+    // produce a spurious alarm. The skip carries no findings so it cannot be
+    // misread as "checked and clean"; hourly means the next check is soon.
+    if (err && err.code === 'LOCKED') {
+      return {
+        action: 'board-health', ok: true, no_op: true, skipped: true,
+        reason: 'selector lock held; board busy — skipped without checking',
+        lock_owner: err.owner || null,
+      };
+    }
+    throw err;
+  }
 }
 
 // Read-only supersession-depth probe: how many prior supersessions already lead

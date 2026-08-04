@@ -8590,6 +8590,29 @@ const bhDeps = (fx, extra = {}) => ({
   eq(fs.readFileSync(notePath, 'utf8'), 'just a body, no frontmatter\n', 'BH-BODY the body-only note is untouched');
 }
 
+// BH-LOCKED — a held selector lock yields a clean skip receipt: a live loop
+// session must never produce a spurious alarm, and hourly means the next
+// check is soon. The skip carries no findings, so it can never be misread as
+// "checked and clean".
+{
+  const root = path.join(tmp, 'bh-locked');
+  const fx = bhScaffold(root, {});
+  let writes = 0;
+  const locked = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true },
+    bhDeps(fx, {
+      readState: () => emptyState(), writeText: () => { writes++; },
+      withLock: async () => { const e = new Error('lock selector held by pid 123 on host'); e.code = 'LOCKED'; throw e; },
+    }));
+  eq(locked.action, 'board-health', 'BH-LOCKED skip is still a board-health receipt');
+  eq(locked.ok, true, 'BH-LOCKED a busy board is a clean exit');
+  eq(locked.no_op, true, 'BH-LOCKED a skip performs no work');
+  eq(locked.skipped, true, 'BH-LOCKED the receipt says it skipped');
+  ok(/board busy/.test(locked.reason), 'BH-LOCKED the reason is plain');
+  ok(!locked.findings, 'BH-LOCKED a skip carries no findings');
+  eq(writes, 0, 'BH-LOCKED no write happens on a skip');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {
