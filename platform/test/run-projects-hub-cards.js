@@ -19,6 +19,8 @@ const SRC_PATH = path.join(
   __dirname, "..", "blueprints", "project", "helpers", "projects-hub-cards.js"
 );
 const src = fs.readFileSync(SRC_PATH, "utf8");
+const PERF_RECEIPT_PATH = path.join(__dirname, "perf-10-hub-render-performance.js");
+const perfReceiptSrc = fs.readFileSync(PERF_RECEIPT_PATH, "utf8");
 
 // In-memory localStorage shim injected into the class scope via the loader.
 function makeLocalStorage() {
@@ -208,6 +210,23 @@ function makePage(name, mtimeTs) {
       typeof (captured && captured.sort) === "function" && captured.sort({}, {}) === 0);
     eqArr("PHC-SORTFIX-3 pages order preserved as given (B,A)",
       captured && captured.pages && captured.pages.map((p) => p.file.name), ["B", "A"]);
+  }
+
+  // -------------------------------------------------------------------------
+  // VI. PERF-10a measurement receipt counts actual BeaconCards emissions.
+  // Keep this deterministic contract in preflight without turning the manual
+  // wall-clock budget into a CI timing promise.
+  // -------------------------------------------------------------------------
+  {
+    console.log("\n=== PERF10-EMIT: benchmark receipt ownership ===");
+    ok("PERF10-EMIT-1 counter increments inside the BeaconCards loop",
+      /for \(const p of opts\.pages \|\| \[\]\) \{\s*metrics\.beaconEmitted \+= 1;/.test(perfReceiptSrc));
+    ok("PERF10-EMIT-2 counter never trusts eligible input length",
+      !/beaconEmitted \+= \(opts\.pages \|\| \[\]\)\.length/.test(perfReceiptSrc));
+    ok("PERF10-EMIT-3 Projects requires exactly 106 emitted cards",
+      /metrics\.beaconEmitted === 106/.test(perfReceiptSrc));
+    ok("PERF10-EMIT-4 Daily requires exactly 180 emitted cards",
+      /metrics\.beaconEmitted === 180/.test(perfReceiptSrc));
   }
 
   console.log("");
