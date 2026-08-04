@@ -1524,3 +1524,15 @@ sauce update --bump-pins
 - **The Journal nav-button now opens the day-hub**, not a single note directly. Use the day-hub's `+ New Journal Entry` button to capture additional entries for the same day.
 
 **Effect of running this upgrade:** the migration runs once automatically; **Cmd+R** to load the new `JournalDayList` / `JournalHubCards` / rebuilt `JournalChromeBar` classes.
+
+## Upgrading from v0.281.x to v0.282.0 — board-health sweep (no consumer-vault action)
+
+```bash
+brew update && brew upgrade sauce
+```
+
+**What changes:** the coordinator gains a report-only `board-health` verb (loop-integrity workstream 1). No blueprint or mechanism surface changes, no migrations, no consumer-vault action required.
+
+- `board-health --json` (read-only, the default) sweeps the bound board board-first: untracked members, unprojectable epics, binding drift, lane divergence, `projection_error` records.
+- `board-health --write-note --json` additionally maintains `spice/projects/<slug>/Board Health.md` (frontmatter payload `sauce.board-health.v1`; zero writes when findings are unchanged).
+- Optional hourly schedule per loop-bound repo: `node "$(brew --prefix sauce)/libexec/scripts/autoloop/board-health-launchd.js" install <repo>` (or run from the workshop clone).
