@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.{{$user}}.sauce-board-health.{{$slug}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{$node_path}}</string>
+    <string>{{$coordinator_path}}</string>
+    <string>board-health</string>
+    <string>--write-note</string>
+    <string>--json</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{$repo_path}}</string>
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>{{$home}}/Library/Logs/sauce-board-health.{{$slug}}.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{$home}}/Library/Logs/sauce-board-health.{{$slug}}.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

@@ -8659,6 +8659,26 @@ const bhDeps = (fx, extra = {}) => ({
     'BH sauce.board-health.v1 is registered in the schema index');
 }
 
+// BH-LAUNCHD — hourly per-loop-bound-repo schedule via the cowork-reconciler
+// launchd pattern: the installed coordinator runs with the repo as cwd so the
+// binding resolver picks the right board.
+{
+  const { renderBoardHealthPlist } = require('../../scripts/autoloop/board-health-launchd');
+  const plist = renderBoardHealthPlist({
+    user: 'tester', home: '/Users/tester', nodePath: '/usr/local/bin/node',
+    coordinatorPath: '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js',
+    repoPath: '/Users/tester/repo', slug: 'test-project',
+  });
+  ok(plist.includes('<string>board-health</string>') && plist.includes('<string>--write-note</string>')
+    && plist.includes('<string>--json</string>'), 'BH-LAUNCHD runs the sweep with the note write');
+  ok(plist.includes('<key>StartInterval</key>') && plist.includes('<integer>3600</integer>'),
+    'BH-LAUNCHD fires hourly — the failure class is slow and a healthy run costs zero writes');
+  ok(plist.includes('<key>WorkingDirectory</key>') && plist.includes('<string>/Users/tester/repo</string>'),
+    'BH-LAUNCHD cwd is the bound repo');
+  ok(plist.includes('com.tester.sauce-board-health.test-project'), 'BH-LAUNCHD one label per repo');
+  ok(!plist.includes('{{$'), 'BH-LAUNCHD no template token survives substitution');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {
