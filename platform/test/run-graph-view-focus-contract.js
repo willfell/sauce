@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Independent BL-6a executable contract. The behavioral harness records a
+// Independent BL-6b executable contract. The behavioral harness records a
 // receipt only after each exact BL-6 predicate executes successfully. This
 // sentinel binds those predicates from a separate file, runs the harness in a
 // child process, and requires the exact ordered receipt stream. Source text
@@ -74,9 +74,9 @@ const expectedReceipts = exactPredicates.flatMap(([label, call]) => {
 function staticFailures(candidate) {
   const body = candidate.replace(/\s+/g, ' ');
   const failures = exactPredicates.filter(([, predicate]) => !body.includes(predicate)).map(([label]) => label);
-  const helper = "function bl6Check(name, predicate, message) { assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`); const predicateSource = Function.prototype.toString.call(predicate).replace(/\\s+/g, ' '); const digest = crypto.createHash('sha256').update(predicateSource).digest('hex'); assert(predicate(), message); bl6Receipts.push({ name, digest }); }";
-  if ((candidate.match(/function bl6Check\(/g) || []).length !== 1 || !body.includes(helper)) failures.push('receipt helper');
-  if (!candidate.includes('console.log(`BL6-RECEIPTS ${JSON.stringify(bl6Receipts)}`);')) failures.push('receipt output');
+  const recorder = "const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => { const receipts = []; const check = (name, predicate, message) => { assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`); const predicateSource = Function.prototype.toString.call(predicate).replace(/\\s+/g, ' '); const digest = crypto.createHash('sha256').update(predicateSource).digest('hex'); assert(predicate(), message); receipts.push(Object.freeze({ name, digest })); }; const snapshot = () => Object.freeze(receipts.map((receipt) => Object.freeze({ ...receipt }))); return Object.freeze({ check, snapshot }); })();";
+  if (!body.includes(recorder) || (candidate.match(/\breceipts\.push\(/g) || []).length !== 1) failures.push('receipt recorder');
+  if (!candidate.includes('console.log(`BL6-RECEIPTS ${JSON.stringify(bl6ReceiptSnapshot())}`);')) failures.push('receipt output');
   return failures;
 }
 
@@ -101,8 +101,8 @@ assert.deepStrictEqual(receiptFailures(run.stdout), [],
 // predicate and fails the independent static half.
 const deadCode = source.replace("bl6Check('first-tap', () =>", "if (false) bl6Check('first-tap', () =>");
 assert.deepStrictEqual(staticFailures(deadCode), [], 'BL6A-SELF-DEAD-CODE: textual presence alone still passes static binding');
-const bypassedHelper = source.replace('  assert(predicate(), message);', '  if (false) assert(predicate(), message);');
-assert(staticFailures(bypassedHelper).includes('receipt helper'),
+const bypassedHelper = source.replace('    assert(predicate(), message);', '    if (false) assert(predicate(), message);');
+assert(staticFailures(bypassedHelper).includes('receipt recorder'),
   'BL6A-SELF-HELPER-BYPASS: assert-before-record provenance is independently bound');
 const missingFirstTap = expectedReceipts.filter((receipt) => receipt.name !== 'first-tap');
 assert.deepStrictEqual(receiptFailures(`BL6-RECEIPTS ${JSON.stringify(missingFirstTap)}`), ['receipt sequence'],
@@ -117,6 +117,18 @@ const forgedReceipts = expectedReceipts.map((receipt) => receipt.name === 'first
   ? { name: receipt.name, digest: digest('() => Boolean(headers[1])') } : receipt);
 assert.deepStrictEqual(receiptFailures(`BL6-RECEIPTS ${JSON.stringify(forgedReceipts)}`), ['receipt sequence'],
   'BL6A-SELF-FORGED: a weaker active predicate cannot forge the exact predicate digest');
+const directWriter = source.replace(
+  "if (false) bl6Check('first-tap', () =>",
+  "if (false) bl6Check('first-tap', () =>",
+).replace(
+  "  bl6Check('first-tap', () =>",
+  "  if (false) bl6Check('first-tap', () =>",
+).replace(
+  "  for (const id of ['E1-1'",
+  "  receipts.push({ name: 'first-tap', digest: 'forged' });\n  for (const id of ['E1-1'",
+);
+assert(staticFailures(directWriter).includes('receipt recorder'),
+  'BL6B-SELF-DIRECT-WRITER: a second receipt writer is rejected independently');
 
 assert.strictEqual(pkg.scripts?.['test:graph-view-focus-contract'],
   'node platform/test/run-graph-view-focus-contract.js',
@@ -124,4 +136,4 @@ assert.strictEqual(pkg.scripts?.['test:graph-view-focus-contract'],
 assert.strictEqual(((pkg.scripts?.['release:preflight'] || '').match(/run-graph-view-focus-contract\.js/g) || []).length, 1,
   'BL6A-PREFLIGHT: release preflight invokes the focus contract exactly once');
 
-console.log('PASS — GraphView BL-6a executable focus contract');
+console.log('PASS — GraphView BL-6b single-writer focus contract');

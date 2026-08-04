@@ -100,14 +100,18 @@ function byClass(root, className) {
   return flatten(root).filter((node) => node.className.split(/\s+/).includes(className));
 }
 function textOf(root) { return flatten(root).map((node) => node.textContent).filter(Boolean).join('\n'); }
-const bl6Receipts = [];
-function bl6Check(name, predicate, message) {
-  assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`);
-  const predicateSource = Function.prototype.toString.call(predicate).replace(/\s+/g, ' ');
-  const digest = crypto.createHash('sha256').update(predicateSource).digest('hex');
-  assert(predicate(), message);
-  bl6Receipts.push({ name, digest });
-}
+const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => {
+  const receipts = [];
+  const check = (name, predicate, message) => {
+    assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`);
+    const predicateSource = Function.prototype.toString.call(predicate).replace(/\s+/g, ' ');
+    const digest = crypto.createHash('sha256').update(predicateSource).digest('hex');
+    assert(predicate(), message);
+    receipts.push(Object.freeze({ name, digest }));
+  };
+  const snapshot = () => Object.freeze(receipts.map((receipt) => Object.freeze({ ...receipt })));
+  return Object.freeze({ check, snapshot });
+})();
 function domShape(root) {
   return {
     tag: root.tag,
@@ -1974,7 +1978,7 @@ async function main() {
     && entry.action === 'graph_view_injected' && entry.target === 'spice/projects/demo/Loop Station.md'),
   'station heal records one injection history event');
 
-  console.log(`BL6-RECEIPTS ${JSON.stringify(bl6Receipts)}`);
+  console.log(`BL6-RECEIPTS ${JSON.stringify(bl6ReceiptSnapshot())}`);
   console.log('graph-view: all checks passed');
 }
 
