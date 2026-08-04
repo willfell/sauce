@@ -8305,6 +8305,100 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(soundDir.endsWith(path.join('Sound Epic', 'board')), 'BPX-HEAL fixture scaffolds the canonical control epic');
 }
 
+// BH board-health: the board-driven divergence sweep. Every check starts from
+// the BOARD, not the ledger — a board member with no ledger record must be
+// reachable, which is exactly what every Object.values(state.cards) check
+// cannot do. Fixtures scaffold canonical epics exactly like BPX-HEAL so
+// canonicalEpicProjection accepts them.
+const bhScaffold = (root, { epics = {}, planning = [], progress = [], completed = [] } = {}) => {
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning, progress, completed }));
+  for (const [epic, spec] of Object.entries(epics)) {
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    fs.mkdirSync(boardDir, { recursive: true });
+    fs.mkdirSync(path.join(cardsRoot, epic, 'context', 'runs'), { recursive: true });
+    fs.writeFileSync(path.join(cardsRoot, epic, `${epic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      ...(spec.atlasLines || [
+        `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+        `epic_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+      ]),
+      'status: planning', 'posture: claimable', '---', '', `${epic} atlas body`, '',
+    ].join('\n'));
+    const lanes = { 'In Planning': [], 'In Progress': [], 'Blocked': [], 'Completed': [], ...(spec.lanes || {}) };
+    fs.writeFileSync(path.join(boardDir, `${epic}-board.md`), [
+      '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${epic}]]"`, '---', '',
+      ...Object.entries(lanes).flatMap(([lane, names]) => [
+        `## ${lane}`, ...names.map((n) => `- [${lane === 'Completed' ? 'x' : ' '}] [[${n}]]`), '',
+      ]),
+    ].join('\n'));
+    for (const [name, status] of Object.entries(spec.slices || {})) {
+      if (status === null) continue; // orphan board line: note deliberately absent
+      fs.writeFileSync(path.join(boardDir, `${name}.md`), [
+        '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `task_parent: ${prefix}/tasks/${epic}/${epic}.md`,
+        `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `status: ${status}`, 'depends_on: []', '---', '', `${name} body`, '',
+      ].join('\n'));
+    }
+  }
+  return { projectRoot, cardsRoot, boardPath };
+};
+const bhDeps = (fx, extra = {}) => ({
+  boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+  withLock: async (_c, _n, fn) => fn(), ...extra,
+});
+
+// BH-UNTRACKED — the load-bearing blind-spot test: a board member with no
+// ledger record must be reported. Fixture is literally EM-4/5/6: an epic whose
+// board shows six slices complete while the ledger knows only three.
+{
+  const root = path.join(tmp, 'bh-untracked');
+  const fx = bhScaffold(root, {
+    progress: ['Retire ero loop'],
+    epics: {
+      'Retire ero loop': {
+        lanes: { Completed: ['EM-1', 'EM-2', 'EM-3', 'EM-4', 'EM-5', 'EM-6'] },
+        slices: {
+          'EM-1': 'completed', 'EM-2': 'completed', 'EM-3': 'completed',
+          'EM-4': 'completed', 'EM-5': 'completed', 'EM-6': 'completed',
+        },
+      },
+    },
+  });
+  const state = emptyState();
+  for (const name of ['EM-1', 'EM-2', 'EM-3']) {
+    state.cards[name] = {
+      card: name, phase: 'deployed', required_version: '0.233.0',
+      vault_receipts: successfulVaultReceipts(),
+    };
+  }
+  const receipt = await coordinator.commandBoardHealth(
+    { root, statePath: path.join(root, 'state.json') },
+    { json: true },
+    bhDeps(fx, { readState: () => state }),
+  );
+  eq(receipt.action, 'board-health', 'BH-UNTRACKED reports the board-health action');
+  eq(receipt.ok, true, 'BH-UNTRACKED succeeds');
+  eq(receipt.no_op, false, 'BH-UNTRACKED divergence is never a no-op');
+  eq(receipt.ledger, 'present', 'BH-UNTRACKED a populated ledger reads as present');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
+    'BH-UNTRACKED reports exactly the board members the ledger has never heard of');
+  eq(receipt.findings.untracked_members[0], {
+    epic: 'Retire ero loop', card: 'EM-4', note_status: 'completed',
+    issue: 'board member has no ledger record; a completed note is never counted done',
+    remedy: 'investigate: work completed outside the rail',
+  }, 'BH-UNTRACKED finding carries the epic, note status, issue, and non-mechanical remedy');
+  eq(receipt.checked, { epics: 1, slices: 6, records: 3 }, 'BH-UNTRACKED counts what it checked');
+  ok(!receipt.findings.untracked_members.some((f) => ['EM-1', 'EM-2', 'EM-3'].includes(f.card)),
+    'BH-UNTRACKED tracked members are not reported');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {

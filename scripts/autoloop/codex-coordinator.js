@@ -4550,6 +4550,102 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   }, { staleMs: 60 * 60 * 1000 });
 }
 
+// --- Board-health sweep (workstream 1 of the loop-integrity program).
+// Every check starts from the BOARD, not the ledger: the other checks in this
+// file iterate Object.values(state.cards), so a board member with no ledger
+// record is unreachable by them — that blind spot is why this verb exists.
+// Report-only: it never blocks, never heals, and never changes completion
+// semantics; heal-epic-bindings and reconcile remain the explicit remedies.
+
+const BOARD_HEALTH_LANES = ['In Planning', 'In Progress', 'Blocked', 'Completed'];
+// Pre-claim `planning` is the one note status the ledger legitimately has no
+// record for; anything else on an untracked member is work outside the rail.
+const BOARD_HEALTH_PROGRESS_STATUSES = new Set(['in_progress', 'parked', 'blocked', 'completed']);
+
+function untrackedMemberFinding(epic, cardName, noteStatus) {
+  return {
+    epic,
+    card: cardName,
+    note_status: noteStatus,
+    issue: noteStatus === 'completed'
+      ? 'board member has no ledger record; a completed note is never counted done'
+      : `board member has no ledger record; the note claims ${noteStatus} with no coordinator history`,
+    // Deliberately non-mechanical: fabricating ledger records is exactly the
+    // drift the reconciler exists to flag.
+    remedy: 'investigate: work completed outside the rail',
+  };
+}
+
+function collectBoardHealth(state, opts = {}) {
+  const boardPath = opts.boardPath || BOARD;
+  const cardsRoot = opts.cardsRoot || CARDS_ROOT;
+  const exists = opts.exists || fs.existsSync;
+  const readText = opts.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const ledger = opts.ledger || 'present';
+  const project = physicalProjectPrefix(cardsRoot);
+  const parentRaw = readText(boardPath);
+  const cards = (state && state.cards) || {};
+  const tracked = (name) => Object.prototype.hasOwnProperty.call(cards, name);
+  const parsedParent = parseBoard(parentRaw);
+  const members = BOARD_HEALTH_LANES.flatMap((lane) => parsedParent[lane] || []);
+  const untracked = [];
+  let epicCount = 0;
+  let sliceCount = 0;
+  for (const member of members) {
+    const epicRoot = path.join(cardsRoot, member);
+    const atlasPath = path.join(epicRoot, `${member}.md`);
+    const isEpic = exists(atlasPath) && scalarField(readText(atlasPath), 'type') === 'epic';
+    if (!isEpic) continue;
+    epicCount++;
+    const boardDir = path.join(epicRoot, 'board');
+    const epicBoardRaw = readText(path.join(boardDir, `${member}-board.md`));
+    const parsedEpicBoard = parseBoard(epicBoardRaw);
+    const sliceNames = BOARD_HEALTH_LANES.flatMap((lane) => parsedEpicBoard[lane] || []);
+    sliceCount += sliceNames.length;
+    for (const name of sliceNames) {
+      const notePath = path.join(boardDir, `${name}.md`);
+      if (tracked(name) || !exists(notePath)) continue;
+      const status = delivery.normalizeStatus(scalarField(readText(notePath), 'status')) || 'planning';
+      if (BOARD_HEALTH_PROGRESS_STATUSES.has(status)) {
+        untracked.push(untrackedMemberFinding(member, name, status));
+      }
+    }
+  }
+  const findings = {
+    untracked_members: untracked,
+  };
+  return {
+    project: path.posix.basename(project.prefix),
+    ledger,
+    checked: { epics: epicCount, slices: sliceCount, records: Object.keys(cards).length },
+    findings,
+    healthy: Object.values(findings).every((list) => !list.length),
+  };
+}
+
+async function commandBoardHealth(ctx, args, deps = {}) {
+  if (args.json !== true) throw new Error('board-health requires --json for a machine-readable receipt');
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const exists = deps.exists || fs.existsSync;
+  const loadState = deps.readState || readState;
+  const transitionLock = deps.withLock || withLock;
+  return transitionLock(ctx, 'selector', async () => {
+    const state = loadState(ctx);
+    const records = Object.keys((state && state.cards) || {}).length;
+    // Tri-state so a clean ledgerless run can never be mistaken for a fully
+    // checked board: present ⇒ checks 4–5 ran; empty/absent ⇒ they were
+    // skipped, not failed.
+    const ledger = records > 0
+      ? 'present'
+      : (ctx.statePath && exists(ctx.statePath) ? 'empty' : 'absent');
+    const { healthy, ...core } = collectBoardHealth(state, {
+      boardPath, cardsRoot, ledger, exists, readText: deps.readText,
+    });
+    return successReceipt('board-health', { no_op: healthy, ...core });
+  }, { staleMs: 60 * 60 * 1000 });
+}
+
 // Read-only supersession-depth probe: how many prior supersessions already lead
 // into --card. Lets loop:run / loop:execute fail-fast at the second-refutation
 // step — escalate to the Director instead of minting a successor the discard
@@ -7482,6 +7578,7 @@ module.exports = {
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
+  commandBoardHealth, collectBoardHealth,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
