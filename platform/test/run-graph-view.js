@@ -1381,7 +1381,11 @@ async function main() {
     [`${epicOneDir}/Epic One.md`, { type: 'epic' }],
     [`${epicOneDir}/board/Epic One-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     [`${epicOneDir}/board/E1-1 Alpha.md`, { type: 'slice', status: 'completed', depends_on: [] }],
-    [`${epicOneDir}/board/E1-2 Beta.md`, { type: 'slice', status: 'in_progress', depends_on: ['[[E1-1 Alpha]]'] }],
+    // BL-6: Epic One has one cross edge in each direction — E1-2 is gated by
+    // EB-1 while it gates E2-1 — so focus must preserve both outside partners.
+    [`${epicOneDir}/board/E1-2 Beta.md`, {
+      type: 'slice', status: 'in_progress', depends_on: ['[[E1-1 Alpha]]', '[[EB-1 Gate]]'],
+    }],
     [`${epicTwoDir}/Epic Two.md`, { type: 'epic' }],
     [`${epicTwoDir}/board/Epic Two-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     // E2-1's depends_on crosses INTO Epic One — a real edge, never a warning.
@@ -1513,8 +1517,7 @@ async function main() {
     + byClass(throwingProjectRoot, 'graph-view-detail-panel').length, 0,
   'BL4-MUTANT-LOAD-OUTCOMES-WITHOUT-ANALYSIS: unavailable analysis creates no panel artifact');
 
-  // P1: two live-epic clusters render as labeled headers, stacked in board
-  // order (In Planning first), each header linking to its atlas.
+  // P1: live-epic clusters render as labeled headers, stacked in board order.
   const headers = byClass(pRoot, 'graph-view-cluster-header');
   // P1-blocked (GV-3b repair): Blocked is a LIVE lane — its epic renders as a
   // full labeled cluster, never a collapse or a silent drop.
@@ -1530,9 +1533,6 @@ async function main() {
   assert(headers[0].style.cssText.includes('top:12px') && headers[1].style.cssText.includes('top:198px')
     && headers[2].style.cssText.includes('top:310px') && headers[3].style.cssText.includes('top:422px'),
   'P1: clusters stack vertically at the computed offsets');
-  headers[1].listeners.click();
-  assert.deepStrictEqual(projectOpened.at(-1), [`${epicOneDir}/Epic One`, stationPath, false],
-    'P1: an epic header click opens the epic atlas');
   const pChips = byClass(pRoot, 'graph-view-chip');
   assert.strictEqual(pChips.length, 6, 'P1: every live-epic slice renders exactly one chip');
   const pChipFor = (id) => pChips.find((chip) => flatten(chip)
@@ -1556,6 +1556,52 @@ async function main() {
   const pCanvas = byClass(pRoot, 'graph-view-project-canvas')[0];
   assert(pCanvas && pCanvas.style.cssText.includes('width:396px;height:520px'),
     'P1: one shared canvas spans all clusters');
+
+  // BL-6 select-first cluster focus. Epic One's own chips plus its direct
+  // partners on the incoming EB-1 → E1-2 and outgoing E1-2 → E2-1 edges stay
+  // full strength; every unrelated cluster chip dims by exact class footprint.
+  const clusterAtRest = domShape(pRoot);
+  const clusterOpenCount = projectOpened.length;
+  const firstClusterTap = bubblingClick(headers[1]);
+  assert(firstClusterTap.stopped && projectOpened.length === clusterOpenCount,
+    'BL6-FIRST-TAP: first cluster-header tap stops bubbling and performs no navigation');
+  for (const id of ['E1-1', 'E1-2', 'E2-1', 'EB-1']) {
+    assert(!pChipFor(id).className.includes('graph-view-dimmed'),
+      `BL6-BIDIRECTIONAL-PARTNER: focused Epic One keeps ${id} full-strength`);
+  }
+  for (const id of ['E2-2', 'EX-1']) {
+    assert(pChipFor(id).className.includes('graph-view-dimmed'),
+      `BL6-EXACT-FOOTPRINT: unrelated ${id} dims`);
+  }
+  assert(headers[1].className.includes('graph-view-cluster-focused')
+    && headers[1].attrs['aria-pressed'] === 'true',
+  'BL6-FOCUSED-HEADER: focused cluster exposes class and pressed state');
+  assert(!byClass(pRoot, 'graph-view-done-chip')[0].className.includes('graph-view-dimmed')
+    && byClass(pRoot, 'warning-missing-epic').every((row) => !row.className.includes('graph-view-dimmed')),
+  'BL6-STRIPS-UNAFFECTED: done and warning strips remain outside cluster focus');
+
+  bubblingClick(headers[1]);
+  assert.deepStrictEqual(projectOpened.at(-1), [`${epicOneDir}/Epic One`, stationPath, false],
+    'BL6-SECOND-TAP: second tap on the focused header opens its atlas');
+  const opensAfterSecondTap = projectOpened.length;
+  bubblingClick(headers[0]);
+  assert.strictEqual(projectOpened.length, opensAfterSecondTap,
+    'BL6-REFOCUS: tapping a different header refocuses instead of opening');
+  for (const id of ['E2-1', 'E2-2', 'E1-2']) {
+    assert(!pChipFor(id).className.includes('graph-view-dimmed'),
+      `BL6-REFOCUS: Epic Two keeps ${id} full-strength`);
+  }
+  for (const id of ['E1-1', 'EB-1', 'EX-1']) {
+    assert(pChipFor(id).className.includes('graph-view-dimmed'),
+      `BL6-REFOCUS: Epic Two dims unrelated ${id}`);
+  }
+  pCanvas.listeners.click();
+  assert.deepStrictEqual(domShape(pRoot), clusterAtRest,
+    'BL6-EMPTY-CANVAS: empty canvas clears focus and restores exact at-rest DOM');
+  const freshProjectContainer = element();
+  await new GraphView({ scope: 'project' }).render({ container: freshProjectContainer });
+  assert.deepStrictEqual(domShape(freshProjectContainer.children[0]), clusterAtRest,
+    'BL6-FRESH-RENDER: a new widget instance has no persisted cluster focus');
   const pLegend = byClass(pRoot, 'graph-view-legend')[0];
   assert.deepStrictEqual(byClass(pLegend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
     ['done', 'in progress', 'planning'],
@@ -1575,13 +1621,24 @@ async function main() {
     'BL5-TOOLBAR-PROJECT: the project toolbar sits above and outside the shared canvas');
   const projectFilterAtRest = domShape(pRoot);
   const projectDoneToggle = byClass(projectToolbar[0], 'graph-view-filter-done')[0];
+  bubblingClick(headers[1]);
   projectDoneToggle.listeners.click({ stopPropagation() {} });
   assert(pChipFor('E1-1').className.includes('graph-view-dimmed')
+    && ['E2-2', 'EX-1'].every((id) => pChipFor(id).className.includes('graph-view-dimmed'))
+    && ['E2-1', 'E1-2', 'EB-1'].every((id) => !pChipFor(id).className.includes('graph-view-dimmed')),
+  'BL6-FILTER-COMPOSITION: cluster focus and Dim done compose as a dimming union');
+  bubblingClick(pChipFor('E2-2'));
+  assert(!pChipFor('E2-2').className.includes('graph-view-dimmed')
+    && ['E2-1', 'E1-1', 'E1-2', 'EB-1', 'EX-1']
+      .every((id) => pChipFor(id).className.includes('graph-view-dimmed')),
+  'BL6-SELECTION-PRECEDENCE: chip selection wins wholesale over focus and filters');
+  pCanvas.listeners.click();
+  assert(pChipFor('E1-1').className.includes('graph-view-dimmed')
     && ['E2-1', 'E2-2', 'E1-2', 'EB-1', 'EX-1'].every((id) => !pChipFor(id).className.includes('graph-view-dimmed')),
-  'BL5-PROJECT-DIM-DONE: project scope dims exactly its completed slice chip');
+  'BL6-CLEAR-PRECEDENCE: empty canvas clears selection and focus but reapplies the active filter');
   projectDoneToggle.listeners.click({ stopPropagation() {} });
   assert.deepStrictEqual(domShape(pRoot), projectFilterAtRest,
-    'BL5-PROJECT-TOGGLE-OFF: project filter off restores the exact at-rest DOM');
+    'BL6-EPHEMERAL-COMPOSITION: clearing focus and toggling the filter off restores exact at-rest DOM');
 
   // BL-4 project scope uses the one merged graph, including the cross-epic
   // dependency, while leaving the established at-rest geometry untouched.
@@ -1605,9 +1662,10 @@ async function main() {
   assert(pChipFor('E1-1').className.includes('graph-view-dimmed') === false
     && pChipFor('E1-2').className.includes('graph-view-dimmed') === false
     && pChipFor('E2-1').className.includes('graph-view-dimmed') === false
+    && pChipFor('EB-1').className.includes('graph-view-dimmed') === false
     && pChipFor('E2-2').className.includes('graph-view-dimmed'),
   'BL4-PROJECT-CHAIN: the merged transitive chain stays full strength and its complement dims');
-  assert.strictEqual(svgPaths(pRoot, 'edge-depends').filter((chunk) => chunk.includes('graph-view-chain-edge')).length, 2,
+  assert.strictEqual(svgPaths(pRoot, 'edge-depends').filter((chunk) => chunk.includes('graph-view-chain-edge')).length, 3,
     'BL4-PROJECT-CHAIN: intra- and cross-epic depends edges inside the selected chain are emphasized');
   pCanvas.listeners.click();
   assert.strictEqual(byClass(pRoot, 'graph-view-detail-panel').length, 0,
@@ -1621,11 +1679,13 @@ async function main() {
   // left-mid), and never as a dangling warning.
   const pDepends = svgPaths(pRoot, 'edge-depends');
   const crossPaths = pDepends.filter((chunk) => chunk.includes('edge-cross-epic'));
-  assert.strictEqual(crossPaths.length, 1, 'P2: exactly one cross-epic edge renders');
-  assert.strictEqual(dOf(crossPaths[0]), 'M 384 256 C 408 256, -12 70, 12 70',
-    'P2: the cross edge runs prerequisite E1-2 Beta (384,256) → dependent E2-1 Gamma (12,70)');
-  assert(crossPaths[0].includes('marker-end') && !crossPaths[0].includes('stroke-dasharray'),
-    'P2: the cross edge carries the solid arrowed depends markup');
+  assert.strictEqual(crossPaths.length, 2, 'P2: both cross-epic directions render');
+  assert.deepStrictEqual(crossPaths.map(dOf).sort(), [
+    'M 184 368 C 208 368, 188 256, 212 256',
+    'M 384 256 C 408 256, -12 70, 12 70',
+  ].sort(), 'P2: incoming and outgoing cross edges use the exact absolute endpoints');
+  assert(crossPaths.every((chunk) => chunk.includes('marker-end') && !chunk.includes('stroke-dasharray')),
+    'P2: both cross edges carry solid arrowed depends markup');
   const intraDepends = pDepends.filter((chunk) => !chunk.includes('edge-cross-epic'));
   assert.strictEqual(intraDepends.length, 1, 'P2: the one intra-cluster depends edge renders');
   assert.strictEqual(dOf(intraDepends[0]), 'M 184 256 C 208 256, 188 256, 212 256',

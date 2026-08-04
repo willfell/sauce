@@ -498,11 +498,17 @@ class GraphView {
     return keep;
   }
 
-  // Selection and filters live only in this render's closure. Selection wins
-  // wholesale while active; clearing it reapplies the current filter union.
-  _selectionController({ root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges }) {
+  // Selection and filters, plus project-cluster focus, live only in this
+  // render's closure. Selection wins wholesale while active; clearing it reapplies the
+  // current filter/focus union. Cluster focus keeps the selected epic plus the
+  // direct partner at either end of every cross-epic edge at full strength.
+  _selectionController({
+    root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, clusterByCard = null,
+  }) {
     const chips = new Map();
+    const headers = new Map();
     let selected = null;
+    let focusedCluster = null;
     let panel = null;
     const filters = { stuck: false, dimDone: false };
     const buttons = {};
@@ -518,18 +524,43 @@ class GraphView {
         button.setAttribute?.("aria-pressed", active ? "true" : "false");
       }
     };
+    const updateHeaders = () => {
+      for (const [cluster, header] of headers) {
+        const active = focusedCluster === cluster;
+        this._setClass(header, "graph-view-cluster-focused", active);
+        header.setAttribute?.("aria-pressed", active ? "true" : "false");
+      }
+    };
+    const focusedKeepSet = () => {
+      if (focusedCluster === null || !clusterByCard) return null;
+      const base = new Set((nodes || [])
+        .filter((node) => clusterByCard.get(node.card) === focusedCluster)
+        .map((node) => node.card));
+      const keep = new Set(base);
+      for (const edge of edges || []) {
+        if (!edge?.cross || (!base.has(edge.from) && !base.has(edge.to))) continue;
+        keep.add(edge.from);
+        keep.add(edge.to);
+      }
+      return keep;
+    };
     const applyFilters = () => {
       updateButtons();
+      updateHeaders();
       if (selected !== null) return;
       const keep = filters.stuck ? this._stuckKeepSet(nodes, analysis) : null;
+      const focused = focusedKeepSet();
       for (const [card, record] of chips) {
         const completed = this._statusPresentation(record.node.status, api).normalized === "completed";
-        setDimmed(record, (filters.stuck && !keep.has(card)) || (filters.dimDone && completed));
+        setDimmed(record, (filters.stuck && !keep.has(card))
+          || (filters.dimDone && completed)
+          || (focused && !focused.has(card)));
       }
       renderEdges(null);
     };
     const clear = () => {
       selected = null;
+      focusedCluster = null;
       panel?.remove?.();
       panel = null;
       applyFilters();
@@ -550,9 +581,25 @@ class GraphView {
       renderEdges(chain);
       panel = this._renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes);
     };
+    const focus = (cluster, path, event) => {
+      event?.stopPropagation?.();
+      if (focusedCluster === cluster) {
+        this._open(path, source);
+        return;
+      }
+      selected = null;
+      panel?.remove?.();
+      panel = null;
+      focusedCluster = cluster;
+      applyFilters();
+    };
     canvas.addEventListener?.("click", clear);
     return {
       register(node, chip) { chips.set(node.card, { node, chip, cssText: chip?.style?.cssText || "" }); },
+      registerHeader(cluster, header) {
+        headers.set(cluster, header);
+        header.setAttribute?.("aria-pressed", focusedCluster === cluster ? "true" : "false");
+      },
       renderToolbar: () => {
         const toolbar = root.createEl("div");
         toolbar.className = "graph-view-filter-toolbar";
@@ -587,6 +634,7 @@ class GraphView {
         return toolbar;
       },
       select: analysis ? select : null,
+      focus: clusterByCard ? focus : null,
       clear,
     };
   }
@@ -1010,6 +1058,7 @@ class GraphView {
       renderEdges(null);
       const interaction = this._selectionController({
         root, scroller, canvas, nodes: allNodes, edges: allEdges, analysis, api, source, outcomes, renderEdges,
+        clusterByCard: new Map([...clusterOf].map(([card, cluster]) => [card, cluster.epic])),
       });
       interaction.renderToolbar();
       for (const cluster of clusters) {
@@ -1019,7 +1068,9 @@ class GraphView {
           `position:absolute;left:${geometry.pad}px;top:${cluster.headerY}px;height:${geometry.headerH}px;`
           + "display:flex;align-items:center;font-size:0.75em;font-weight:700;letter-spacing:0.05em;"
           + "text-transform:uppercase;color:var(--text-muted);cursor:pointer;";
-        header.addEventListener?.("click", () => this._open(cluster.atlasPath, source));
+        header.setAttribute?.("role", "button");
+        header.addEventListener?.("click", (event) => interaction.focus?.(cluster.epic, cluster.atlasPath, event));
+        interaction.registerHeader?.(cluster.epic, header);
         for (const node of cluster.nodes) {
           const chip = this._renderChip(canvas, node, positions.get(node.card), geometry, api, source, warnings,
             activeCard, null, this._nodeInsight(analysis, node.card), interaction?.select);
