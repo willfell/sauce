@@ -58,7 +58,7 @@ const {
   commandStatus, commandStatusLocked, commandAmendContract,
   commandPark: rawCommandPark, commandResume: rawCommandResume,
   commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
-  commandSupersessionDepth,
+  commandSupersessionDepth, commandHealEpicBindings,
   removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
   commandRecoverDeployed, commandReconcileMetadata, commandRestampContractFrontmatter,
   metadataReconciliationPlan, restampContractFrontmatter, contractFrontmatterRestampPlan,
@@ -8135,6 +8135,174 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   }, deps);
   eq(ok2.action, 'discarded', 'SD a shallow supersession below the depth limit still discards');
   eq(state.cards['BO-1a'].superseded_by, 'BO-1b', 'SD the shallow supersession records its successor pointer');
+}
+
+// BPX a discard whose EPIC SURFACE FAILS must still clean the epic sub-board.
+// Live failure this reproduces: an epic whose atlas binds a non-canonical parent
+// board makes canonicalEpicProjection throw, discard silently fell back to the
+// PARENT board, removed nothing, deleted the note anyway — and the surviving
+// sub-board line then made every later projection of that epic throw
+// "epic slice <X> note is missing", freezing the whole board permanently.
+{
+  const root = path.join(tmp, 'bpx-orphan-prevention');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const epicBoardDir = path.join(cardsRoot, 'Epic A', 'board');
+  fs.mkdirSync(epicBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(cardsRoot, 'Epic A', 'context', 'runs'), { recursive: true });
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Epic A'] }));
+  // The exact live Mode-1 shape: an ABSOLUTE source_board on the atlas.
+  fs.writeFileSync(path.join(cardsRoot, 'Epic A', 'Epic A.md'), [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    `source_board: "${boardPath}"`, `kanban_board: "${boardPath}"`,
+    'status: planning', 'epic_board: "tasks/Epic A/board/Epic A-board.md"',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
+  fs.writeFileSync(epicBoardPath, [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '- [ ] [[AO-1]]', '- [ ] [[AO-2]]', '',
+    '## In Progress', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const orphanPath = path.join(epicBoardDir, 'AO-1.md');
+  for (const [name, file] of [['AO-1', orphanPath], ['AO-2', path.join(epicBoardDir, 'AO-2.md')]]) {
+    fs.writeFileSync(file, [
+      '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+      'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+      'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+      'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+      'kanban_column: In Planning', 'status: parked', 'depends_on: []', '---', `${name} body`, '',
+    ].join('\n'));
+  }
+  const state = emptyState();
+  state.cards['AO-1'] = { card: 'AO-1', phase: 'parked', card_path: orphanPath };
+  const parentBefore = fs.readFileSync(boardPath, 'utf8');
+  const receipt = await commandDiscard({ root }, {
+    card: 'AO-1', 'superseded-by': 'AO-1a', reason: 'superseded after refutation', json: true,
+  }, {
+    readState: () => state, writeState: () => {}, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-04T00:00:00.000Z',
+    projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+  });
+  ok(Boolean(receipt.epic_surface_error),
+    'BPX-ORPHAN the epic surface genuinely fails on a non-canonical atlas (the reproduced precondition)');
+  eq(receipt.board_path, epicBoardPath,
+    'BPX-ORPHAN discard targets the slice\'s OWN epic sub-board, not the parent board');
+  const epicBoardAfter = fs.readFileSync(epicBoardPath, 'utf8');
+  ok(!/\[\[AO-1\]\]/.test(epicBoardAfter),
+    'BPX-ORPHAN the discarded slice leaves NO orphan line on its epic sub-board');
+  ok(/\[\[AO-2\]\]/.test(epicBoardAfter), 'BPX-ORPHAN the surviving sibling line is untouched');
+  eq(receipt.board_line_removed, true, 'BPX-ORPHAN the receipt reports the sub-board line removal');
+  eq(receipt.note_deleted, true, 'BPX-ORPHAN the slice note is deleted');
+  eq(fs.readFileSync(boardPath, 'utf8'), parentBefore,
+    'BPX-ORPHAN the parent board is left byte-identical');
+}
+
+// BPX heal-epic-bindings: the reusable repair for boards already frozen by the
+// two failure modes — non-canonical (absolute / project-relative) atlas + slice
+// board bindings, and orphaned sub-board lines whose slice note is gone.
+{
+  const root = path.join(tmp, 'bpx-heal');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Broken Epic', 'Sound Epic'] }));
+
+  const scaffold = (epic, atlasLines, slices) => {
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    fs.mkdirSync(boardDir, { recursive: true });
+    fs.mkdirSync(path.join(cardsRoot, epic, 'context', 'runs'), { recursive: true });
+    fs.writeFileSync(path.join(cardsRoot, epic, `${epic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0', ...atlasLines,
+      'status: planning', 'posture: claimable', '---', '', `${epic} atlas body`, '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(boardDir, `${epic}-board.md`), [
+      '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${epic}]]"`, '---', '',
+      '## In Planning', ...Object.keys(slices).map((n) => `- [ ] [[${n}]]`), '',
+      '## In Progress', '', '## Blocked', '', '## Completed', '',
+    ].join('\n'));
+    for (const [name, taskParent] of Object.entries(slices)) {
+      if (taskParent === null) continue; // orphan: on the board, note deliberately absent
+      fs.writeFileSync(path.join(boardDir, `${name}.md`), [
+        '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `task_parent: ${taskParent}`,
+        `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        'kanban_column: In Planning', 'status: planning', 'depends_on: []', '---', '', `${name} body`, '',
+      ].join('\n'));
+    }
+    return boardDir;
+  };
+
+  const brokenDir = scaffold('Broken Epic', [
+    `source_board: "${boardPath}"`, `kanban_board: "${boardPath}"`,
+    'epic_board: "tasks/Broken Epic/board/Broken Epic-board.md"',
+  ], {
+    'BX-1': 'tasks/Broken Epic/Broken Epic.md',
+    'BX-0 gone': null,
+  });
+  const soundDir = scaffold('Sound Epic', [
+    `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+    `epic_board: ${prefix}/tasks/Sound Epic/board/Sound Epic-board.md`,
+  ], { 'SE-1': `${prefix}/tasks/Sound Epic/Sound Epic.md` });
+
+  const soundBytesBefore = ['Sound Epic.md', path.join('board', 'Sound Epic-board.md'), path.join('board', 'SE-1.md')]
+    .map((rel) => fs.readFileSync(path.join(cardsRoot, 'Sound Epic', rel), 'utf8'));
+  const brokenSliceBefore = fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8');
+
+  const healDeps = { boardPath, cardsRoot, writeText: (p, t) => fs.writeFileSync(p, t), withLock: async (_c, _n, fn) => fn() };
+  const projects = (epic, slice) => {
+    try {
+      return Boolean(canonicalEpicProjection(
+        fs.readFileSync(path.join(cardsRoot, epic, 'board', `${slice}.md`), 'utf8'),
+        path.join(cardsRoot, epic, 'board', `${slice}.md`), boardPath, cardsRoot,
+        { state: { cards: {} }, currentCard: slice },
+      ));
+    } catch (_) { return false; }
+  };
+  ok(!projects('Broken Epic', 'BX-1'), 'BPX-HEAL the broken epic does not project before the heal (precondition)');
+
+  const dry = await commandHealEpicBindings({ root }, { 'dry-run': true, json: true }, healDeps);
+  eq(dry.action, 'heal-epic-bindings', 'BPX-HEAL dry-run reports the heal-epic-bindings action');
+  eq(dry.applied, false, 'BPX-HEAL dry-run reports it applied nothing');
+  eq(dry.atlases.map((a) => a.epic), ['Broken Epic'],
+    'BPX-HEAL dry-run names only the epic whose atlas bindings are non-canonical');
+  eq(dry.atlases[0].fields.source_board.to, `${prefix}/project-board.md`,
+    'BPX-HEAL dry-run rewrites the absolute source_board to the vault-relative parent board');
+  eq(dry.atlases[0].fields.epic_board.to, `${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'BPX-HEAL dry-run rewrites the project-relative epic_board to vault-relative');
+  eq(dry.slices.map((s) => s.card), ['BX-1'], 'BPX-HEAL dry-run names only the slice with a non-canonical task_parent');
+  eq(dry.slices[0].fields.task_parent.to, `${prefix}/tasks/Broken Epic/Broken Epic.md`,
+    'BPX-HEAL dry-run rewrites the slice task_parent to vault-relative');
+  eq(dry.orphan_lines, [{ board: path.join(brokenDir, 'Broken Epic-board.md'), epic: 'Broken Epic', card: 'BX-0 gone' }],
+    'BPX-HEAL dry-run names the orphaned sub-board line whose slice note is gone');
+  eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), brokenSliceBefore,
+    'BPX-HEAL dry-run writes nothing');
+
+  const applied = await commandHealEpicBindings({ root }, { apply: true, json: true }, healDeps);
+  eq(applied.applied, true, 'BPX-HEAL apply reports it wrote');
+  eq(applied.no_op, false, 'BPX-HEAL apply on a broken board is not a no-op');
+  ok(projects('Broken Epic', 'BX-1'), 'BPX-HEAL the formerly frozen epic projects through the real contract after the heal');
+  ok(!/\[\[BX-0 gone\]\]/.test(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')),
+    'BPX-HEAL the orphaned sub-board line is pruned');
+  ok(/\[\[BX-1\]\]/.test(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')),
+    'BPX-HEAL the live sibling line survives the prune');
+  const healedSlice = fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8');
+  ok(healedSlice.split('---\n')[2] === brokenSliceBefore.split('---\n')[2],
+    'BPX-HEAL the slice body below frontmatter is byte-identical');
+  eq(['Sound Epic.md', path.join('board', 'Sound Epic-board.md'), path.join('board', 'SE-1.md')]
+    .map((rel) => fs.readFileSync(path.join(cardsRoot, 'Sound Epic', rel), 'utf8')), soundBytesBefore,
+  'BPX-HEAL the already-canonical epic is left byte-identical');
+
+  const replay = await commandHealEpicBindings({ root }, { apply: true, json: true }, healDeps);
+  eq(replay.no_op, true, 'BPX-HEAL replay on a healed board is a no-op');
+  eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), healedSlice,
+    'BPX-HEAL replay keeps every healed surface byte-stable');
+  ok(soundDir.endsWith(path.join('Sound Epic', 'board')), 'BPX-HEAL fixture scaffolds the canonical control epic');
 }
 
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a

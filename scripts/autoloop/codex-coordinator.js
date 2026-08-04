@@ -55,6 +55,7 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   'record-pr': ['json', 'card', 'pr', 'lease-token'],
   'break-lease': ['json', 'card', 'reason'],
   'supersession-depth': ['json', 'card'],
+  'heal-epic-bindings': ['json', 'apply', 'dry-run'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -4294,6 +4295,31 @@ function scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d) {
   return { rewrites, reports };
 }
 
+// The epic sub-board that physically owns a card note. A canonical slice lives
+// flat beside its epic board, so the owning board is derivable from the note's own
+// directory alone — no projection contract required.
+//
+// This exists because the full contract is fragile by design: one non-canonical
+// atlas binding, or one already-orphaned sibling, makes canonicalEpicProjection
+// throw for the whole epic. Discard used to fall back to the PARENT board in that
+// case, which never carries slice lines, so it removed nothing and unlinked the
+// note anyway. The surviving sub-board line then made every later projection of
+// that epic throw "epic slice <X> note is missing" — one failed surface silently
+// converted into permanent board-wide freeze.
+function owningEpicBoardPath(cardPath, cardsRoot) {
+  if (!cardPath) return null;
+  const boardDir = path.dirname(path.resolve(cardPath));
+  if (path.basename(boardDir) !== 'board') return null;
+  const epic = path.basename(path.dirname(boardDir));
+  const candidate = path.join(boardDir, `${epic}-board.md`);
+  try {
+    const entry = fs.lstatSync(candidate);
+    if (entry.isSymbolicLink() || !entry.isFile()) return null;
+    physicalDescendant(cardsRoot, candidate, `epic board beside ${path.basename(cardPath)}`);
+    return scalarField(fs.readFileSync(candidate, 'utf8'), 'board_role') === 'epic' ? candidate : null;
+  } catch (_) { return null; }
+}
+
 // Per-card discard core. Callers own the selector + card-gate locks; commandDiscard
 // takes them for a single card and commandReap takes them per corpse in one batch.
 async function discardCardCore(ctx, operands, d) {
@@ -4337,7 +4363,9 @@ async function discardCardCore(ctx, operands, d) {
       epicSurface = canonicalEpicProjection(cardRaw, cardPath, boardPath, cardsRoot, { state, currentCard: card });
     } catch (err) { epicSurfaceError = err.message; }
   }
-  const targetBoardPath = epicSurface ? epicSurface.boardPath : boardPath;
+  const targetBoardPath = (epicSurface && epicSurface.boardPath)
+    || owningEpicBoardPath(cardPath, cardsRoot)
+    || boardPath;
   let boardRaw;
   try { boardRaw = fs.readFileSync(targetBoardPath, 'utf8'); }
   catch (err) { throw new Error(`discard target board is unreadable: ${err.message}`); }
@@ -4410,6 +4438,116 @@ async function discardCardCore(ctx, operands, d) {
     ...(dependencyScan.rewrites.length ? { dependency_rewrites: dependencyScan.rewrites } : {}),
     ...(dependencyScan.reports.length ? { dependency_reports: dependencyScan.reports } : {}),
   };
+}
+
+// The canonical vault-relative bindings for one epic, derived from the physical
+// project prefix — the same authority canonicalEpicProjection validates against,
+// so "what the heal writes" and "what the contract demands" cannot drift.
+function canonicalEpicBindings(epic, cardsRoot, parentBoardPath) {
+  const { prefix } = physicalProjectPrefix(cardsRoot);
+  return {
+    parentBoard: path.posix.join(prefix, path.basename(parentBoardPath)),
+    atlas: path.posix.join(prefix, 'tasks', epic, `${epic}.md`),
+    board: path.posix.join(prefix, 'tasks', epic, 'board', `${epic}-board.md`),
+  };
+}
+
+// Everything the heal would change, computed before any write. Two findings:
+// bindings whose value differs from the canonical vault-relative form, and epic
+// sub-board lines whose slice note no longer exists (each one of which makes the
+// whole epic's projection throw "epic slice <X> note is missing").
+function planEpicBindingHeal(cardsRoot, parentBoardPath) {
+  const atlases = [];
+  const slices = [];
+  const orphanLines = [];
+  const drift = (raw, wanted) => {
+    const fields = {};
+    for (const [key, to] of wanted) {
+      const from = scalarField(raw, key);
+      if (from && from !== to) fields[key] = { from, to };
+    }
+    return fields;
+  };
+  const epics = fs.readdirSync(cardsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  for (const epic of epics) {
+    const atlasPath = path.join(cardsRoot, epic, `${epic}.md`);
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    const epicBoardPath = path.join(boardDir, `${epic}-board.md`);
+    if (!fs.existsSync(atlasPath) || !fs.existsSync(epicBoardPath)) continue;
+    const atlasRaw = fs.readFileSync(atlasPath, 'utf8');
+    if (scalarField(atlasRaw, 'type') !== 'epic') continue;
+    const want = canonicalEpicBindings(epic, cardsRoot, parentBoardPath);
+    const atlasFields = drift(atlasRaw, [
+      ['source_board', want.parentBoard], ['kanban_board', want.parentBoard], ['epic_board', want.board],
+    ]);
+    if (Object.keys(atlasFields).length) atlases.push({ epic, path: atlasPath, fields: atlasFields });
+    const boardRaw = fs.readFileSync(epicBoardPath, 'utf8');
+    const parsed = parseBoard(boardRaw);
+    for (const name of ['In Planning', 'In Progress', 'Blocked', 'Completed'].flatMap((c) => parsed[c] || [])) {
+      const notePath = path.join(boardDir, `${name}.md`);
+      if (!fs.existsSync(notePath)) {
+        orphanLines.push({ board: epicBoardPath, epic, card: name });
+        continue;
+      }
+      const sliceRaw = fs.readFileSync(notePath, 'utf8');
+      if (scalarField(sliceRaw, 'type') !== 'slice') continue;
+      const sliceFields = drift(sliceRaw, [
+        ['task_parent', want.atlas], ['source_board', want.board], ['kanban_board', want.board],
+      ]);
+      if (Object.keys(sliceFields).length) slices.push({ card: name, epic, path: notePath, fields: sliceFields });
+    }
+  }
+  return { atlases, slices, orphanLines };
+}
+
+// Reusable repair for boards frozen by non-canonical bindings or orphaned
+// sub-board lines. Deliberately NOT spec-handshaked like `reconcile-metadata`:
+// the target state is derived entirely from the on-disk canonical form rather
+// than from operator-supplied operands, so recomputing at apply time is exactly
+// as safe as replaying a recorded intent, and the verb is idempotent by
+// construction. It touches ONLY the drifted frontmatter fields and the orphaned
+// board lines — never bodies, ledger state, worktrees, or lane placement.
+async function commandHealEpicBindings(ctx, args, deps = {}) {
+  requireOnlyOptions(args, 'heal-epic-bindings', STRICT_CLI_OPTIONS['heal-epic-bindings']);
+  if (args.json !== true) throw new Error('heal-epic-bindings requires --json for a machine-readable receipt');
+  const apply = args.apply === true;
+  const dryRun = args['dry-run'] === true;
+  if (apply === dryRun) throw new Error('heal-epic-bindings requires exactly one of --apply or --dry-run');
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const writeText = deps.writeText || atomicWriteText;
+  const transitionLock = deps.withLock || withLock;
+  return transitionLock(ctx, 'selector', async () => {
+    const plan = planEpicBindingHeal(cardsRoot, boardPath);
+    const { atlases, slices, orphanLines } = plan;
+    if (apply) {
+      for (const target of [...atlases, ...slices]) {
+        const raw = fs.readFileSync(target.path, 'utf8');
+        const patch = {};
+        for (const [key, change] of Object.entries(target.fields)) patch[key] = JSON.stringify(change.to);
+        writeText(target.path, patchFrontmatter(raw, patch));
+      }
+      // Group by board so one board with several orphans is written once.
+      const byBoard = new Map();
+      for (const orphan of orphanLines) {
+        if (!byBoard.has(orphan.board)) byBoard.set(orphan.board, []);
+        byBoard.get(orphan.board).push(orphan.card);
+      }
+      for (const [board, cards] of byBoard) {
+        let raw = fs.readFileSync(board, 'utf8');
+        for (const card of cards) raw = removeBoardCard(raw, card);
+        writeText(board, raw);
+      }
+    }
+    return successReceipt('heal-epic-bindings', {
+      no_op: !atlases.length && !slices.length && !orphanLines.length,
+      applied: apply,
+      atlases: atlases.map(({ epic, path: target, fields }) => ({ epic, path: target, fields })),
+      slices: slices.map(({ card, epic, path: target, fields }) => ({ card, epic, path: target, fields })),
+      orphan_lines: orphanLines,
+    });
+  }, { staleMs: 60 * 60 * 1000 });
 }
 
 // Read-only supersession-depth probe: how many prior supersessions already lead
@@ -7277,6 +7415,7 @@ async function main() {
   else if (command === 'consume-ratification') result = await commandConsumeRatification(ctx, args);
   else if (command === 'discard') result = await commandDiscard(ctx, args);
   else if (command === 'supersession-depth') result = commandSupersessionDepth(ctx, args);
+  else if (command === 'heal-epic-bindings') result = await commandHealEpicBindings(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -7312,7 +7451,7 @@ async function main() {
       return deployed;
     }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7342,6 +7481,7 @@ module.exports = {
   commandSupersessionDepth,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
+  commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
