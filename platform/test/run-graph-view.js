@@ -149,27 +149,78 @@ function dOf(chunk) { return (chunk.match(/\sd="([^"]+)"/) || [])[1] || ''; }
 // replicated here so every expected width / x-offset / canvas width is COMPUTED
 // from the same math (never a magic literal). A mutation to the widget's
 // charPx / hPad / minCol / maxCol / colGap diverges from this replica → RED.
-const GVR2 = { charPx: 7, hPad: 18, minCol: 120, maxCol: 260, colGap: 28, pad: 12, rowH: 74, chipH: 56 };
+const GVR2 = {
+  charPx: 7, hPad: 18, minCol: 120, maxCol: 260, colGap: 28, pad: 12,
+  chipH: 56, rowGap: 18, titleLineH: 15, infoLineH: 13, padY: 7, contentGap: 3,
+  scrollbarAllowance: 14,
+};
 GVR2.maxCharsPerLine = Math.floor((GVR2.maxCol - GVR2.hPad) / GVR2.charPx); // 34
 function wrapLongest(text, maxChars) {
   const limit = Math.max(1, Number(maxChars) || 1);
   const words = String(text == null ? '' : text).split(/\s+/).filter(Boolean);
   const lines = [];
   let line = '';
-  for (const word of words) {
+  for (const sourceWord of words) {
+    let word = sourceWord;
+    if (word.length > limit) {
+      if (line) { lines.push(line); line = ''; }
+      while (word.length > limit) { lines.push(word.slice(0, limit)); word = word.slice(limit); }
+    }
     const candidate = line ? `${line} ${word}` : word;
     if (candidate.length <= limit || !line) line = candidate;
     else { lines.push(line); line = word; }
   }
   if (line) lines.push(line);
-  const clamped = lines.length > 2;
-  const longest = lines.slice(0, 2).reduce((max, entry) => Math.max(max, entry.length), 0);
-  return { longest, clamped };
+  const longest = lines.reduce((max, entry) => Math.max(max, entry.length), 0);
+  return { lines: lines.length ? lines : [''], longest };
 }
 function chipWidth(text) {
-  const { longest, clamped } = wrapLongest(text, GVR2.maxCharsPerLine);
-  const raw = clamped ? GVR2.maxCol : longest * GVR2.charPx + GVR2.hPad;
+  const { longest } = wrapLongest(text, GVR2.maxCharsPerLine);
+  const raw = longest * GVR2.charPx + GVR2.hPad;
   return Math.min(GVR2.maxCol, Math.max(GVR2.minCol, raw));
+}
+function titleText(card) {
+  const full = String(card || '').trim();
+  const id = full.match(/^([A-Z]+-[A-Za-z0-9]+)(?:\s+|$)/);
+  if (!id) return full;
+  return full.slice(id[0].length).replace(/\s+\(supersedes[^)]*\)\s*$/i, '').trim() || full;
+}
+function cardId(card) {
+  return String(card || '').trim().match(/^([A-Z]+-[A-Za-z0-9]+)(?:\s+|$)/)?.[1] || String(card || '').trim();
+}
+function waitText(node) {
+  const reason = String(node?.waitReason || '').replace(/\s+/g, ' ').trim();
+  const blocked = reason.match(/^waiting on:\s*(.+)$/i);
+  return blocked ? `needs ${cardId(blocked[1].split(',')[0])}` : reason;
+}
+function chipHeight(node, width) {
+  if (node?.isStub) return GVR2.chipH;
+  const parsedId = String(node?.card || '').trim().match(/^([A-Z]+-[A-Za-z0-9]+)(?:\s+|$)/)?.[1] || null;
+  const idBudget = parsedId ? parsedId.length * GVR2.charPx + 5 : 0;
+  const perLineChars = Math.max(1, Math.floor((width - GVR2.hPad - idBudget) / GVR2.charPx));
+  const titleLines = wrapLongest(titleText(node?.card), perLineChars).lines.length;
+  const wait = waitText(node);
+  const waitBudget = Math.max(8, perLineChars - 12);
+  const waitLines = wait ? Math.min(2, wrapLongest(wait, waitBudget).lines.length) : 1;
+  return Math.max(GVR2.chipH,
+    GVR2.padY * 2 + titleLines * GVR2.titleLineH + GVR2.contentGap + waitLines * GVR2.infoLineH);
+}
+function rowLayout(nodes, widthForNode, startY = GVR2.pad) {
+  const grouped = new Map();
+  for (const node of nodes) {
+    const row = Number(node?.row) || 0;
+    if (!grouped.has(row)) grouped.set(row, []);
+    grouped.get(row).push(node);
+  }
+  const tops = new Map();
+  const heights = new Map();
+  let cursor = startY;
+  for (const row of [...grouped.keys()].sort((a, b) => a - b)) {
+    const height = Math.max(...grouped.get(row).map((node) => chipHeight(node, widthForNode(node))));
+    tops.set(row, cursor); heights.set(row, height); cursor += height + GVR2.rowGap;
+  }
+  const last = [...grouped.keys()].sort((a, b) => a - b).at(-1);
+  return { tops, heights, bottom: last == null ? startY : tops.get(last) + heights.get(last) };
 }
 // rankMembers[r] = the card names in rank r → per-column widths, x-offsets, and
 // the clip-free canvas width (last column right edge + pad).
@@ -401,7 +452,7 @@ async function main() {
   // NEW per-rank auto-width geometry. Every value is COMPUTED from the shared
   // formula (chipWidth/columnLayout), not a literal:
   //   chip x = its rank column's x-offset (rank is the HORIZONTAL axis)
-  //   chip y = pad + row*rowH        (row is the VERTICAL axis)
+  //   chip y = the sum of preceding row maxima + rowGap (row is VERTICAL)
   //   chip w = its rank column's auto-width (widest content in the rank)
   // Known layout for this fixture:
   //   GV-E Stale (0,0)  GV-F Malformed (0,1)  GV-C Parked (0,2)
@@ -410,7 +461,7 @@ async function main() {
   // Every card here is short, so each column clamps to minCol (120px), the
   // columns advance by 120+colGap(28), and the canvas ends at the last column
   // right edge + pad — no clip.
-  const G = { rowH: GVR2.rowH, chipH: GVR2.chipH, pad: GVR2.pad };
+  const G = { chipH: GVR2.chipH, pad: GVR2.pad };
   const mainRankMembers = [
     ['GV-E Stale', 'GV-F Malformed', 'GV-C Parked', 'GV-A Base'],
     ['GV-B Widget', 'GV-G LongPark'],
@@ -421,16 +472,24 @@ async function main() {
     'case 11: every short-title column clamps to the 120px minimum');
   assert.deepStrictEqual(mainCols.offsets, [12, 160, 308],
     'case 11: column x-offsets accumulate prior column widths plus the inter-column gap');
-  const posOf = (rank, row) => ({ x: mainCols.offsets[rank], y: G.pad + row * G.rowH, w: mainCols.widths[rank] });
+  const mainNodes = new GraphLayout().layoutGraph(layoutCalls[0].slices, layoutCalls[0].options).nodes;
+  const mainRows = rowLayout(mainNodes, (node) => mainCols.widths[node.rank || 0]);
+  const posOf = (rank, row) => {
+    const node = mainNodes.find((entry) => (entry.rank || 0) === rank && (entry.row || 0) === row);
+    return {
+      x: mainCols.offsets[rank], y: mainRows.tops.get(row), w: mainCols.widths[rank],
+      h: chipHeight(node, mainCols.widths[rank]),
+    };
+  };
 
   // 11a — chip geometry: rank must land on the horizontal axis (its column
   // offset + width) and row on the vertical axis; a rank↔row transposition
-  // moves GV-A Base off (12,234).
+  // moves GV-A Base off its accumulated variable-height row.
   for (const [id, rank, row] of [['GV-A', 0, 3], ['GV-G', 1, 1], ['GV-D', 2, 0]]) {
-    const { x, y, w } = posOf(rank, row);
+    const { x, y, w, h } = posOf(rank, row);
     assert(chipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`)
-      && chipFor(id).style.cssText.includes(`width:${w}px`),
-    `case 11a: ${id} chip (rank ${rank}, row ${row}) sits at left:${x}px;top:${y}px;width:${w}px — rank horizontal, row vertical, auto-width column`);
+      && chipFor(id).style.cssText.includes(`width:${w}px;height:${h}px`),
+    `case 11a: ${id} chip sits at left:${x}px;top:${y}px;width:${w}px;height:${h}px — rank horizontal and row maxima vertical`);
   }
 
   // 11b — kind→endpoint binding + direction for the KNOWN depends edge
@@ -441,9 +500,9 @@ async function main() {
   const gvA = posOf(0, 3);
   const gvB = posOf(1, 0);
   const x1 = gvA.x + gvA.w;
-  const y1 = gvA.y + G.chipH / 2;
+  const y1 = gvA.y + gvA.h / 2;
   const x2 = gvB.x;
-  const y2 = gvB.y + G.chipH / 2;
+  const y2 = gvB.y + gvB.h / 2;
   const bend = Math.max(24, (x2 - x1) / 2);
   const dependsD = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
   const dependsEdge = dependsPaths.find((chunk) => dOf(chunk) === dependsD);
@@ -455,9 +514,9 @@ async function main() {
   // 11c — direction: the reversed drawing (dependent → prerequisite) of that
   // same edge must not exist anywhere in the SVG layer.
   const rx1 = gvB.x + gvB.w;
-  const ry1 = gvB.y + G.chipH / 2;
+  const ry1 = gvB.y + gvB.h / 2;
   const rx2 = gvA.x;
-  const ry2 = gvA.y + G.chipH / 2;
+  const ry2 = gvA.y + gvA.h / 2;
   const rbend = Math.max(24, (rx2 - rx1) / 2);
   const reversedD = `M ${rx1} ${ry1} C ${rx1 + rbend} ${ry1}, ${rx2 - rbend} ${ry2}, ${rx2} ${ry2}`;
   assert(!dependsPaths.some((chunk) => dOf(chunk) === reversedD)
@@ -471,10 +530,10 @@ async function main() {
   const gvE = posOf(0, 0);
   const gvF = posOf(0, 1);
   const orderX = gvE.x + gvE.w / 2;
-  const orderD = `M ${orderX} ${gvE.y + G.chipH} L ${orderX} ${gvF.y}`;
+  const orderD = `M ${orderX} ${gvE.y + gvE.h} L ${orderX} ${gvF.y}`;
   const orderEdge = orderPaths.find((chunk) => dOf(chunk) === orderD);
   assert(orderEdge,
-    `case 11d: the GV-E Stale→GV-F Malformed order path drops upper chip bottom (${orderX},${gvE.y + G.chipH}) → lower chip top (${orderX},${gvF.y})`);
+    `case 11d: the GV-E Stale→GV-F Malformed order path drops upper chip bottom (${orderX},${gvE.y + gvE.h}) → lower chip top (${orderX},${gvF.y})`);
   assert(orderEdge.includes('stroke-dasharray') && !orderEdge.includes('marker-end'),
     'case 11d: the GV-E Stale→GV-F Malformed element itself carries the dashed arrowless order markup');
 
@@ -485,12 +544,20 @@ async function main() {
     .find((node) => !node.className.split(/\s+/).includes('graph-view-project-canvas'));
   assert(mainCanvas && mainCanvas.style.cssText.includes(`width:${mainCols.canvasWidth}px`),
     `case 11e: canvas width == last column right edge + pad (${mainCols.canvasWidth}px) — no clip at rest`);
+  assert(mainCanvas.style.cssText.includes(`height:${mainRows.bottom + GVR2.pad}px`)
+    && mainCanvas.style.cssText.includes('margin-inline:auto'),
+  'case 11e: canvas height is last row bottom + pad, and CSS auto margins center only when spare width exists');
+  const mainScroller = byClass(root, 'graph-view-scroll')[0];
+  assert(mainScroller.style.cssText.includes('overflow-x:auto')
+    && mainScroller.style.cssText.includes('overflow-y:hidden')
+    && mainScroller.style.cssText.includes(`padding-bottom:${GVR2.scrollbarAllowance}px`),
+  'case 11e: horizontal overflow is scrollable, vertical overflow is hidden, and scrollbar allowance is fixed');
 
   // Case 5: the per-chip INFO LINE — a colored lifecycle status word (from the
   // shared presentation API, not a duplicated table) plus an inline wait reason:
-  // "needs <dep-id>" for a blocked slice, the resume_condition from its start
-  // for a parked slice (long reasons truncate, full text in the wait title
-  // attribute). Done / in-progress chips show the status word with no wait span.
+  // "needs <dep-id>" for a blocked slice, and the full resume_condition for a
+  // parked slice (CSS bounds the visible wait box to two lines). Done /
+  // in-progress chips show the status word with no wait span.
   const wordOf = (id) => byClass(chipFor(id), 'graph-view-status-word')[0];
   const glyphOf = (id) => byClass(chipFor(id), 'graph-view-status-glyph')[0];
   const waitOf = (id) => byClass(chipFor(id), 'graph-view-wait')[0];
@@ -499,9 +566,9 @@ async function main() {
   assert.strictEqual(waitOf('GV-D')?.textContent, 'needs GV-B',
     'case 5: a blocked slice info line names its unmet dependency id ("needs <dep-id>")');
   const longWait = waitOf('GV-G');
-  assert(longWait && longWait.textContent.length <= 48 && longWait.textContent.endsWith('…')
-    && longReason.startsWith(longWait.textContent.slice(0, -1)),
-  'case 5: a long parked resume reason truncates from its start');
+  assert(longWait && longWait.textContent === longReason
+    && longWait.style.cssText.includes('-webkit-line-clamp:2'),
+  'case 5: a long parked resume reason stays complete in the DOM and is visually capped at two lines');
   assert.strictEqual(longWait.attrs.title, longReason,
     'case 5: the wait span title attribute carries the full resume reason');
   // Status word colored via the SHARED lifecycle presentation (class + color),
@@ -1138,7 +1205,9 @@ async function main() {
   const mxBoardNote = `${mxBoard}/MX Epic-board.md`;
   const mxShort = 'MX-A Hi';
   const mxMiddling = 'MX-B This title is of a middling sort length';
-  const mxLong = 'MX-C An exceptionally long slice title that overflows well past two full lines of chip text';
+  const mxLongTitle = 'An exceptionally long slice title that overflows well past two full lines while retaining every final word in deterministic graph geometry';
+  assert(mxLongTitle.length >= 120, 'MX fixture carries a 120-character title payload');
+  const mxLong = `MX-C ${mxLongTitle}`;
   const mxParked = 'MX-D Park';
   const mxParkReason = 'Blocked on the upstream vendor SDK cut before this slice can resume in earnest';
   const mxOutcome = 'MX-A delivers the short deterministic path.';
@@ -1214,48 +1283,70 @@ async function main() {
   // MX-widths — per-rank auto-width: rank 0 = {MX-A short, MX-B middling},
   // rank 1 = {MX-C beyond-cap, MX-D short}. Rows sort alphabetically within a
   // rank (no laneOrder tie). Column width = widest content in the rank; the
-  // beyond-cap title caps at the 260px constant.
+  // long title keeps its deterministic full-wrap width within the shared cap.
   const mxCols = columnLayout([[mxShort, mxMiddling], [mxLong, mxParked]]);
   assert.strictEqual(mxCols.widths[0], 242,
     'MX: rank-0 column width equals the widest chip content (MX-B middling → 242px)');
-  assert.strictEqual(mxCols.widths[1], 260,
-    'MX: rank-1 column width caps at the 260px constant (MX-C overflows two lines)');
-  assert.strictEqual(mxCols.canvasWidth, 554, 'MX: the clip-free canvas width is deterministic (554px)');
+  assert.strictEqual(mxCols.widths[1], chipWidth(mxLong),
+    'MX: rank-1 column width comes from every wrapped line of the full MX-C title');
+  assert(mxCols.widths[1] <= GVR2.maxCol && mxCols.widths[1] > mxCols.widths[0],
+    'MX: the 120-character title widens its column without exceeding the shared cap');
+  assert.strictEqual(mxCols.canvasWidth,
+    mxCols.offsets[1] + mxCols.widths[1] + GVR2.pad,
+  'MX: clip-free canvas width is the last column right edge plus pad');
+  const mxNodes = [
+    { card: mxShort, rank: 0, row: 0 },
+    { card: mxMiddling, rank: 0, row: 1 },
+    { card: mxLong, rank: 1, row: 0, waitReason: `waiting on: ${mxShort}` },
+    { card: mxParked, rank: 1, row: 1, waitReason: mxParkReason },
+  ];
+  const mxRows = rowLayout(mxNodes, (node) => mxCols.widths[node.rank]);
   for (const [id, rank, row] of [['MX-A', 0, 0], ['MX-B', 0, 1], ['MX-C', 1, 0], ['MX-D', 1, 1]]) {
     const x = mxCols.offsets[rank];
-    const y = GVR2.pad + row * GVR2.rowH;
+    const y = mxRows.tops.get(row);
     const w = mxCols.widths[rank];
+    const h = chipHeight(mxNodes.find((node) => node.rank === rank && node.row === row), w);
     const chip = mxChipFor(id);
-    assert(chip.style.cssText.includes(`left:${x}px;top:${y}px`) && chip.style.cssText.includes(`width:${w}px`),
-      `MX: ${id} chip sits on its auto-width column (left:${x}px;top:${y}px;width:${w}px)`);
+    assert(chip.style.cssText.includes(`left:${x}px;top:${y}px`)
+      && chip.style.cssText.includes(`width:${w}px;height:${h}px`),
+    `MX: ${id} chip uses row-max geometry (left:${x}px;top:${y}px;width:${w}px;height:${h}px)`);
   }
 
   // MX-clip: the shared canvas is exactly the last column right edge + pad.
   const mxCanvas = byClass(mxRoot, 'graph-view-canvas')[0];
   assert(mxCanvas && mxCanvas.style.cssText.includes(`width:${mxCols.canvasWidth}px`),
     `MX: canvas width == last column right edge + pad (${mxCols.canvasWidth}px), no clip at rest`);
+  assert(mxCanvas.style.cssText.includes(`height:${mxRows.bottom + GVR2.pad}px`)
+    && mxCanvas.style.cssText.includes('margin-inline:auto'),
+  'MX: canvas ends at the last variable-height row plus pad and centers only through auto margins');
+  const mxScroller = byClass(mxRoot, 'graph-view-scroll')[0];
+  assert(mxScroller.style.cssText.includes('overflow-x:auto')
+    && mxScroller.style.cssText.includes('overflow-y:hidden')
+    && mxScroller.style.cssText.includes(`padding-bottom:${GVR2.scrollbarAllowance}px`),
+  'MX: scroller owns horizontal overflow and fixed bottom scrollbar allowance');
 
-  // MX-wrap: a beyond-cap title carries the two-line clamp marker and STILL
-  // keeps its full text in the DOM (CSS ellipsizes the second line only, no JS
-  // truncation); an in-cap two-line title carries no marker and renders fully.
+  // MX-wrap: titles never clamp. The 120-character title remains complete in
+  // the DOM and its deterministic line count expands the whole row.
   const mxTitleOf = (chip) => byClass(chip, 'graph-view-chip-name')[0];
   const mxLongChip = mxChipFor('MX-C');
   const mxMidChip = mxChipFor('MX-B');
-  assert(mxLongChip.className.split(/\s+/).includes('graph-view-chip-clamped'),
-    'MX: a title overflowing two lines carries the clamp marker (ellipsis on line two)');
-  assert(!mxMidChip.className.split(/\s+/).includes('graph-view-chip-clamped'),
-    'MX: a title fitting two lines carries no clamp marker (renders fully, no ellipsis)');
-  assert(mxTitleOf(mxLongChip).style.cssText.includes('-webkit-line-clamp:2')
-    && mxTitleOf(mxMidChip).style.cssText.includes('-webkit-line-clamp:2'),
-  'MX: the title element uses the two-line clamp box');
+  assert(!mxLongChip.className.split(/\s+/).includes('graph-view-chip-clamped')
+    && !mxMidChip.className.split(/\s+/).includes('graph-view-chip-clamped'),
+  'MX mutant: no title receives the retired clamp marker');
+  assert(!mxTitleOf(mxLongChip).style.cssText.includes('line-clamp')
+    && !mxTitleOf(mxMidChip).style.cssText.includes('line-clamp'),
+  'MX mutant: title CSS contains no line clamp');
+  assert(byClass(mxLongChip, 'graph-view-chip-title')[0].style.cssText.includes(`line-height:${GVR2.titleLineH}px`)
+    && byClass(mxLongChip, 'graph-view-chip-info')[0].style.cssText.includes(`line-height:${GVR2.infoLineH}px`),
+  'MX mutant: rendered title and info line boxes are bound to the exact height formula constants');
   assert.strictEqual(mxTitleOf(mxMidChip).textContent, 'This title is of a middling sort length',
     'MX: the in-cap two-line title renders its full text with no ellipsis character');
-  assert(mxTitleOf(mxLongChip).textContent === 'An exceptionally long slice title that overflows well past two full lines of chip text'
+  assert(mxTitleOf(mxLongChip).textContent === mxLongTitle
     && !mxTitleOf(mxLongChip).textContent.includes('…'),
-  'MX: even the clamped title keeps its full text in the DOM (CSS, not JS, ellipsizes)');
+  'MX: the 120-character title renders every word with no ellipsis');
 
   // MX-info: blocked → "needs <dep-id>"; parked → resume_condition from its
-  // start (truncated, full text in the wait title); status word shared-colored.
+  // start (full DOM text, visually capped at two CSS lines); status word shared-colored.
   const mxWaitOf = (id) => byClass(mxChipFor(id), 'graph-view-wait')[0];
   const mxWordOf = (id) => byClass(mxChipFor(id), 'graph-view-status-word')[0];
   assert.strictEqual(mxWaitOf('MX-C')?.textContent, 'needs MX-A',
@@ -1265,9 +1356,9 @@ async function main() {
     && mxWordOf('MX-C').className.includes('status-blocked'),
   'MX: the blocked status word carries the shared lifecycle color and class');
   const mxParkWait = mxWaitOf('MX-D');
-  assert(mxParkWait && mxParkWait.textContent.length <= 48 && mxParkWait.textContent.endsWith('…')
-    && mxParkReason.startsWith(mxParkWait.textContent.slice(0, -1)),
-  'MX: a parked slice info line shows the verbatim START of resume_condition (truncated)');
+  assert(mxParkWait && mxParkWait.textContent === mxParkReason
+    && mxParkWait.style.cssText.includes('-webkit-line-clamp:2'),
+  'MX: a parked wait preserves its full DOM text and caps only its visual box at two lines');
   assert.strictEqual(mxParkWait.attrs.title, mxParkReason,
     'MX: the parked wait span title carries the full resume_condition');
   assert(mxWordOf('MX-D').textContent === 'waiting'
@@ -1388,12 +1479,14 @@ async function main() {
   const epicDoneDir = `${projectDir}/tasks/Epic Done`;
   const epicBlockedDir = `${projectDir}/tasks/Epic Blocked`;
   const epicBoardlessDir = `${projectDir}/tasks/Epic Boardless`;
+  const projectTallTitle = 'Delta carries a deliberately long project-scope title whose complete wrapped geometry must move every later epic cluster';
+  const projectTallCard = `E2-2 ${projectTallTitle}`;
   const projectFiles = [
     file(projectBoardPath, 1),
     file(`${epicOneDir}/Epic One.md`, 2), file(`${epicOneDir}/board/Epic One-board.md`, 3),
     file(`${epicOneDir}/board/E1-1 Alpha.md`, 4), file(`${epicOneDir}/board/E1-2 Beta.md`, 5),
     file(`${epicTwoDir}/Epic Two.md`, 6), file(`${epicTwoDir}/board/Epic Two-board.md`, 7),
-    file(`${epicTwoDir}/board/E2-1 Gamma.md`, 8), file(`${epicTwoDir}/board/E2-2 Delta.md`, 9),
+    file(`${epicTwoDir}/board/E2-1 Gamma.md`, 8), file(`${epicTwoDir}/board/${projectTallCard}.md`, 9),
     file(`${epicDoneDir}/Epic Done.md`, 10), file(`${epicDoneDir}/board/Epic Done-board.md`, 11),
     file(`${epicDoneDir}/board/ED-1 Old.md`, 12),
     // GV-3b repair: a Blocked-lane epic with a full atlas + board + one slice —
@@ -1419,7 +1512,7 @@ async function main() {
     // E2-1's depends_on crosses INTO Epic One — a real edge, never a warning.
     [`${epicTwoDir}/board/E2-1 Gamma.md`, { type: 'slice', status: 'planning', depends_on: ['[[E1-2 Beta]]'] }],
     // E2-2's depends_on resolves in NO cluster — the dangling warning path.
-    [`${epicTwoDir}/board/E2-2 Delta.md`, { type: 'slice', status: 'planning', depends_on: ['[[Ghost Card]]'] }],
+    [`${epicTwoDir}/board/${projectTallCard}.md`, { type: 'slice', status: 'planning', depends_on: ['[[Ghost Card]]'] }],
     [`${epicDoneDir}/Epic Done.md`, { type: 'epic' }],
     [`${epicDoneDir}/board/Epic Done-board.md`, { type: 'kanban', 'kanban-plugin': 'board', board_role: 'epic' }],
     [`${epicDoneDir}/board/ED-1 Old.md`, { type: 'slice', status: 'completed', depends_on: [] }],
@@ -1458,7 +1551,7 @@ async function main() {
     ].join('\n')],
     [`${epicTwoDir}/board/Epic Two-board.md`, [
       '---', 'kanban-plugin: board', '---', '',
-      '## In Planning', '', '- [ ] [[E2-1 Gamma]]', '- [ ] [[E2-2 Delta]]', '',
+      '## In Planning', '', '- [ ] [[E2-1 Gamma]]', `- [ ] [[${projectTallCard}]]`, '',
     ].join('\n')],
     [`${epicDoneDir}/board/Epic Done-board.md`, [
       '---', 'kanban-plugin: board', '---', '',
@@ -1558,9 +1651,28 @@ async function main() {
   assert.deepStrictEqual(headers.map((header) => header.textContent),
     ['Epic Two', 'Epic One', 'Epic Blocked', 'Epic Boardless'],
     'P1: exactly the live epics render as clusters, in parent-board lane order (In Planning, In Progress, Blocked)');
-  assert(headers[0].style.cssText.includes('top:12px') && headers[1].style.cssText.includes('top:198px')
-    && headers[2].style.cssText.includes('top:310px') && headers[3].style.cssText.includes('top:422px'),
-  'P1: clusters stack vertically at the computed offsets');
+  const pGeometry = { chipW: 172, colW: 200, headerH: 30, clusterGap: 26 };
+  const pClusters = [
+    { nodes: [{ card: 'E2-1 Gamma', rank: 0, row: 0 }, { card: projectTallCard, rank: 0, row: 1 }] },
+    { nodes: [{ card: 'E1-1 Alpha', rank: 0, row: 0 }, { card: 'E1-2 Beta', rank: 1, row: 0 }] },
+    { nodes: [{ card: 'EB-1 Gate', rank: 0, row: 0 }] },
+    { nodes: [{ card: 'EX-1 Loose', rank: 0, row: 0 }] },
+  ];
+  let pCursor = GVR2.pad;
+  const pExpected = new Map();
+  for (const cluster of pClusters) {
+    cluster.headerY = pCursor;
+    cluster.rows = rowLayout(cluster.nodes, () => pGeometry.chipW, pCursor + pGeometry.headerH);
+    for (const node of cluster.nodes) pExpected.set(String(node.card).split(/\s+/)[0], {
+      x: GVR2.pad + node.rank * pGeometry.colW,
+      y: cluster.rows.tops.get(node.row),
+      h: chipHeight(node, pGeometry.chipW),
+    });
+    pCursor = cluster.rows.bottom + pGeometry.clusterGap;
+  }
+  const pHeight = pCursor - pGeometry.clusterGap + GVR2.pad;
+  assert(headers.every((header, index) => header.style.cssText.includes(`top:${pClusters[index].headerY}px`)),
+    'P1 mutant: each later cluster cursor follows the complete prior variable-height row geometry');
   const pChips = byClass(pRoot, 'graph-view-chip');
   assert.strictEqual(pChips.length, 6, 'P1: every live-epic slice renders exactly one chip');
   const pChipFor = (id) => pChips.find((chip) => flatten(chip)
@@ -1576,14 +1688,16 @@ async function main() {
     assert(info.children.indexOf(glyph) < info.children.indexOf(word),
       `BL2-PROJECT-GLYPH: ${id} glyph precedes its colored status word`);
   }
-  for (const [id, x, y] of [['E2-1', 12, 42], ['E2-2', 12, 116], ['E1-1', 12, 228], ['E1-2', 212, 228],
-    ['EB-1', 12, 340], ['EX-1', 12, 452]]) {
-    assert(pChipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`),
-      `P1: ${id} chip sits at its cluster-offset position left:${x}px;top:${y}px`);
+  for (const id of ['E2-1', 'E2-2', 'E1-1', 'E1-2', 'EB-1', 'EX-1']) {
+    const { x, y, h } = pExpected.get(id);
+    assert(pChipFor(id).style.cssText.includes(`left:${x}px;top:${y}px`)
+      && pChipFor(id).style.cssText.includes(`height:${h}px`),
+    `P1: ${id} chip sits at left:${x}px;top:${y}px;height:${h}px from project row maxima`);
   }
   const pCanvas = byClass(pRoot, 'graph-view-project-canvas')[0];
-  assert(pCanvas && pCanvas.style.cssText.includes('width:396px;height:520px'),
-    'P1: one shared canvas spans all clusters');
+  assert(pCanvas && pCanvas.style.cssText.includes(`width:396px;height:${pHeight}px`)
+    && pCanvas.style.cssText.includes('margin-inline:auto'),
+  'P1: one shared canvas spans the final cluster bottom + pad with conditional CSS centering');
 
   // BL-6 select-first cluster focus. Epic One's own chips plus its direct
   // partners on the incoming EB-1 → E1-2 and outgoing E1-2 → E2-1 edges stay
@@ -1716,19 +1830,30 @@ async function main() {
   // left-mid), and never as a dangling warning.
   const pDepends = svgPaths(pRoot, 'edge-depends');
   const crossPaths = pDepends.filter((chunk) => chunk.includes('edge-cross-epic'));
+  const projectEdgeD = (fromId, toId) => {
+    const from = pExpected.get(fromId); const to = pExpected.get(toId);
+    if (from.x === to.x) {
+      const x = from.x + pGeometry.chipW / 2;
+      return `M ${x} ${from.y + from.h} L ${x} ${to.y}`;
+    }
+    const x1 = from.x + pGeometry.chipW; const y1 = from.y + from.h / 2;
+    const x2 = to.x; const y2 = to.y + to.h / 2;
+    const bend = Math.max(24, (x2 - x1) / 2);
+    return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+  };
   assert.strictEqual(crossPaths.length, 2, 'P2: both cross-epic directions render');
   assert.deepStrictEqual(crossPaths.map(dOf).sort(), [
-    'M 184 368 C 208 368, 188 256, 212 256',
-    'M 384 256 C 408 256, -12 70, 12 70',
+    projectEdgeD('EB-1', 'E1-2'),
+    projectEdgeD('E1-2', 'E2-1'),
   ].sort(), 'P2: incoming and outgoing cross edges use the exact absolute endpoints');
   assert(crossPaths.every((chunk) => chunk.includes('marker-end') && !chunk.includes('stroke-dasharray')),
     'P2: both cross edges carry solid arrowed depends markup');
   const intraDepends = pDepends.filter((chunk) => !chunk.includes('edge-cross-epic'));
   assert.strictEqual(intraDepends.length, 1, 'P2: the one intra-cluster depends edge renders');
-  assert.strictEqual(dOf(intraDepends[0]), 'M 184 256 C 208 256, 188 256, 212 256',
+  assert.strictEqual(dOf(intraDepends[0]), projectEdgeD('E1-1', 'E1-2'),
     'P2: the Epic One intra-cluster edge is drawn at its cluster-offset positions');
   const pOrder = svgPaths(pRoot, 'edge-order');
-  assert.deepStrictEqual(pOrder.map(dOf), ['M 98 98 L 98 116'],
+  assert.deepStrictEqual(pOrder.map(dOf), [projectEdgeD('E2-1', 'E2-2')],
     'P2: the Epic Two ghost order edge is drawn at its cluster-offset positions');
 
   // P3: the card named in the Loop Station's own frontmatter `active` gets a
@@ -1781,7 +1906,7 @@ async function main() {
   const pDangling = byClass(pRoot, 'warning-dangling-dependency');
   assert.strictEqual(pDangling.length, 1, 'P: exactly one project-scope dangling warning renders');
   assert.strictEqual(pDangling[0].textContent,
-    "E2-2 Delta: depends on a card that doesn't exist: 'Ghost Card'",
+    `${projectTallCard}: depends on a card that doesn't exist: 'Ghost Card'`,
     'P: a target resolvable in no cluster is a dangling warning, not a cross edge');
 
   // BL-3 project scope extends (never repurposes) the established project
@@ -1810,7 +1935,7 @@ async function main() {
     .some((node) => node.textContent && node.textContent.startsWith('E1-2')));
   assert(flatten(crossE12).includes(crossBadges[0]),
     'BL3-PROJECT-BADGE: the cross-epic blast-radius badge lives on E1-2 only');
-  assert(crossE12.style.cssText.includes('left:212px;top:228px'),
+  assert(crossE12.style.cssText.includes(`left:${pExpected.get('E1-2').x}px;top:${pExpected.get('E1-2').y}px`),
     'BL3-PROJECT-GEOMETRY: the separate blocker render preserves E1-2 coordinates');
 
   // Mount contract: the Loop Station guard block passes { scope: "project" }
