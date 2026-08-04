@@ -884,8 +884,10 @@ function epicNativeForcedIntake() {
     const epicRoot = path.join(dir, 'tasks', epicTitle);
     const atlasRaw = fs.readFileSync(path.join(epicRoot, `${epicTitle}.md`), 'utf8');
     ok(/^type: epic$/m.test(atlasRaw), 'LOOP-EPIC-NATIVE scaffold writes a canonical epic atlas (type: epic)');
-    const atlasMounts = [...atlasRaw.matchAll(/\bdv\.view\s*\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class\s*:\s*["']([^"']+)["']\s*\}\s*\)/g)]
+    const atlasMountPattern = /\bdv\s*\.\s*view\s*\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*(?:class|["']class["'])\s*:\s*["']([^"']+)["']\s*,?\s*\}\s*\)/g;
+    const readAtlasMounts = (raw) => [...raw.matchAll(atlasMountPattern)]
       .map((match) => ({ className: match[1], index: match.index }));
+    const atlasMounts = readAtlasMounts(atlasRaw);
     const mountFor = (className) => atlasMounts.filter((mount) => mount.className === className);
     const atlasChromeAt = mountFor('ProjectChromeBar')[0]?.index ?? -1;
     const atlasGraphViewAt = mountFor('GraphView')[0]?.index ?? -1;
@@ -898,6 +900,15 @@ function epicNativeForcedIntake() {
       'VP-2d carried fixture: atlas scaffold mounts GraphView exactly once across whitespace variants');
     ok(mountFor('EpicDashboard').length === 1,
       'VP-2d carried fixture: atlas scaffold mounts EpicDashboard exactly once across whitespace variants');
+    for (const className of ['ProjectChromeBar', 'GraphView', 'EpicDashboard']) {
+      const carriedVariants = [
+        `await dv . view("ranch/views/customjs-guard", { class : "${className}" });`,
+        `await dv.view("ranch/views/customjs-guard", { "class": "${className}" });`,
+        `await dv.view("ranch/views/customjs-guard", { class: "${className}", });`,
+      ];
+      ok(carriedVariants.every((variant) => readAtlasMounts(variant)[0]?.className === className),
+        `VP-2d carried fixture: semantic parser recognizes executable ${className} spacing, quoted-key, and trailing-comma variants`);
+    }
     const epicBoardPath = path.join(epicRoot, 'board', `${epicTitle}-board.md`);
     ok(fs.existsSync(epicBoardPath), 'LOOP-EPIC-NATIVE scaffold writes the epic board');
     ok(fs.existsSync(path.join(epicRoot, 'board', `${childA.title}.md`))
