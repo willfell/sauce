@@ -1656,6 +1656,10 @@ async function main() {
     'VP-2 project scope owns the shared SectionLabel divider as its first child');
   assert.strictEqual(pRoot.children[1]?.className, 'shared-section-label',
     'VP-2 project scope renders the Dependency Graph title through SectionLabel');
+  assert.strictEqual(pRoot.children[1]?.textContent, 'Dependency Graph',
+    'VP-2 project scope labels the graph section Dependency Graph');
+  assert.strictEqual(pRoot.children[1]?.__sectionOptions?.top, true,
+    'VP-2 project scope reuses the owned divider instead of synthesizing a second one');
 
   // BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: project Outcomes exist only for
   // the selection panel. Missing/throwing GraphInsights disables that panel,
@@ -2033,6 +2037,10 @@ async function main() {
     'VP-2 missing SectionLabel falls back to plain text without throwing');
   assert.strictEqual(fallbackContainer.children[0]?.children[0]?.style?.cssText, '',
     'VP-2 fallback title carries no local section-label styling');
+  assert.strictEqual(fallbackContainer.children[0]?.children[0]?.className, '',
+    'VP-2 fallback title carries no local section-label class');
+  assert.deepStrictEqual(fallbackContainer.children[0]?.children[0]?.attrs, {},
+    'VP-2 fallback title carries no class or presentation attributes');
   global.customJS.SectionLabel = priorSectionLabel;
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
   assert.deepStrictEqual(persistenceMutations, [],
@@ -2052,8 +2060,8 @@ async function main() {
   const sectionChromeSource = widgetSource.match(/_renderSectionChrome\(dv, root\) \{[\s\S]*?\n  \}/)?.[0] || '';
   assert(sectionChromeSource.includes('SL.divider(root)') && sectionChromeSource.includes('SL.render('),
     'VP-2 section chrome delegates divider and title rendering to SectionLabel');
-  assert(!/style|cssText|className/.test(sectionChromeSource),
-    'VP-2 section chrome defines no local section-label styling');
+  assert(!/style|cssText|className|classList|cls\s*:|setAttribute\s*\(\s*["']class/.test(sectionChromeSource),
+    'VP-2 section chrome defines no local section-label styling or class channel');
 
   // Registration: manifest files[] + customjs_classes[], package.json script +
   // one preflight entry directly after run-graph-layout.js.

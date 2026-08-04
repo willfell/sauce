@@ -889,8 +889,12 @@ function epicNativeForcedIntake() {
     const atlasDashboardAt = atlasRaw.indexOf('await dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });');
     ok(atlasChromeAt >= 0 && atlasGraphViewAt > atlasChromeAt && atlasDashboardAt > atlasGraphViewAt,
       'VP-2 atlas scaffold preserves ChromeBar then mounts GraphView before EpicDashboard');
+    ok((atlasRaw.match(/class: "ProjectChromeBar"/g) || []).length === 1,
+      'VP-2 atlas scaffold mounts ProjectChromeBar exactly once');
     ok((atlasRaw.match(/class: "GraphView"/g) || []).length === 1,
-      'GV-2b atlas scaffold mounts GraphView exactly once');
+      'VP-2 atlas scaffold mounts GraphView exactly once');
+    ok((atlasRaw.match(/class: "EpicDashboard"/g) || []).length === 1,
+      'VP-2 atlas scaffold mounts EpicDashboard exactly once');
     const epicBoardPath = path.join(epicRoot, 'board', `${epicTitle}-board.md`);
     ok(fs.existsSync(epicBoardPath), 'LOOP-EPIC-NATIVE scaffold writes the epic board');
     ok(fs.existsSync(path.join(epicRoot, 'board', `${childA.title}.md`))
