@@ -33,7 +33,7 @@ For each eligible slice of the target epic, in coordinator order (its eligibilit
    ```
 
    Uncertain evidence is a refutation. Stop at the first refutation.
-5. **Refutation path**: ONE same-card repair, which invalidates the entire quorum — rerun Gate B and all three lenses from scratch. A second refutation → supersede via `/loop:intake` (`supersedes` + `carried_findings` + `binding_fixtures`) and execute the returned discard instruction through the coordinator; never a third patch.
+5. **Refutation path**: ONE same-card repair, which invalidates the entire quorum — rerun Gate B and all three lenses from scratch. A second refutation → first probe `node <coordinator> supersession-depth --card "<card>" --json`; if `at_limit`, do NOT supersede — the lineage has hit the depth ceiling without converging, so escalate to the Director to decompose the slice. Otherwise supersede via `/loop:intake` (`supersedes` + `carried_findings` + `binding_fixtures`) and execute the returned discard instruction through the coordinator; a discard returning `awaiting_user_decision` with `supersession_depth_exceeded` is a hard stop. Never a third patch.
 6. **Verify-gates + PR**: `node <coordinator> verify-gates --card "<card>" --lease-token <token> --json` (full preflight at exact head), then push, open the PR against main with the same conventional title, and `node <coordinator> record-pr --card "<card>" --lease-token <token> --pr <n> --json`. Never arm auto-merge yourself.
 7. **Advance**: `node <coordinator> advance --card "<card>" --lease-token <token> --lease-seconds 600 --jsonl` — the coordinator polls CI/merge/release/deploy per the binding's `execution_mode` and deploy list. Merge-only bindings (`policy.deploy_vaults: []`) complete when the feature PR merges with green checks — no release/tag/tap/brew/deploy chain exists, never wait for one. On `complete`, `node <coordinator> reconcile --card "<card>" --json`, then take the next eligible slice.
 8. **Blockers**: park only through the coordinator with explicit `--depends-on` + `--resume-condition` + `--lease-token <token>`; `fix-ci` → repair in the worktree and rerun the quorum; `blocked-external` → report the URL, no manual release escape hatches.
@@ -44,4 +44,4 @@ Batch ceilings apply in-session exactly as unattended (distinct-card and time bu
 
 ## NEVER
 
-Skip or reorder lenses · implement and review in the same context · hand-edit boards/cards/coordinator state · weaken a test to pass · continue past a second refutation · bypass claim for "just a quick fix".
+Skip or reorder lenses · implement and review in the same context · hand-edit boards/cards/coordinator state · weaken a test to pass · continue past a second refutation · supersede a lineage past its depth ceiling instead of escalating · bypass claim for "just a quick fix".

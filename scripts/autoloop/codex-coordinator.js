@@ -54,6 +54,7 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   ],
   'record-pr': ['json', 'card', 'pr', 'lease-token'],
   'break-lease': ['json', 'card', 'reason'],
+  'supersession-depth': ['json', 'card'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -1503,6 +1504,36 @@ function resolveSupersessionTail(dep, state) {
     hops.push(name);
     name = next;
   }
+}
+
+// Supersession-depth circuit-breaker: count how many prior supersessions already
+// lead INTO `card` by walking `superseded_by` backward through the ledger (the
+// predecessor of `card` is whatever record points its superseded_by at it). A
+// deep chain is the accreting-1:1 runaway (one slice spun 27 supersessions and
+// merged nothing) that the carried_findings breadth cap can't see — each hop
+// carries few findings but the lineage never converges.
+function supersessionChainDepth(card, state) {
+  const cards = (state && state.cards) || {};
+  let current = normalizeCardLink(card);
+  let depth = 0;
+  const seen = new Set();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const predecessor = Object.values(cards).find((record) => record
+      && record.superseded_by && normalizeCardLink(record.superseded_by) === current);
+    if (!predecessor) break;
+    depth += 1;
+    current = normalizeCardLink(predecessor.card);
+  }
+  return depth;
+}
+
+// Registry-sourced ceiling (policies.slice_scope_caps.supersession_depth). 0 or
+// absent disables the guard, so an unconfigured board degrades safely.
+function supersessionDepthLimit() {
+  const caps = delivery.registry.policies && delivery.registry.policies.slice_scope_caps;
+  const limit = caps && caps.supersession_depth;
+  return typeof limit === 'number' ? limit : 0;
 }
 
 function discardedDependencyProblem(dep, state) {
@@ -4381,6 +4412,21 @@ async function discardCardCore(ctx, operands, d) {
   };
 }
 
+// Read-only supersession-depth probe: how many prior supersessions already lead
+// into --card. Lets loop:run / loop:execute fail-fast at the second-refutation
+// step — escalate to the Director instead of minting a successor the discard
+// circuit-breaker would then refuse (which would leave an orphaned successor).
+function commandSupersessionDepth(ctx, args, deps = {}) {
+  const card = String(args.card || '').trim();
+  if (!card) throw new Error('supersession-depth requires --card');
+  const loadState = deps.readState || readState;
+  const depth = supersessionChainDepth(card, loadState(ctx));
+  const limit = supersessionDepthLimit();
+  return successReceipt('supersession-depth', {
+    no_op: true, card, depth, limit, at_limit: Boolean(limit) && depth >= limit,
+  });
+}
+
 async function commandDiscard(ctx, args, deps = {}) {
   // GA-OPS10 F2 precedent: the machine-readable contract is required before
   // any read or write, so refusal here precedes every lock and state load.
@@ -4390,6 +4436,24 @@ async function commandDiscard(ctx, args, deps = {}) {
   const gate = { card: operands.card, staleMs: 60 * 60 * 1000 };
   return d.transitionLock(ctx, 'selector',
     async () => withCardGateLock(ctx, operands.card, async () => {
+      // Supersession-depth circuit-breaker: a fresh supersession (--superseded-by)
+      // whose lineage is already at the registry ceiling is refused BEFORE any
+      // write. It escalates to the Director instead of minting the Nth successor,
+      // breaking the accreting-1:1 runaway. Only commandDiscard enforces this;
+      // reap discards call discardCardCore directly, so corpse cleanup of an
+      // already-settled deep chain is never blocked.
+      const depthLimit = supersessionDepthLimit();
+      if (operands.supersededBy && depthLimit) {
+        const depth = supersessionChainDepth(operands.card, d.loadState(ctx));
+        if (depth >= depthLimit) {
+          return {
+            action: 'awaiting_user_decision', card: operands.card, no_op: true,
+            reason: 'supersession_depth_exceeded',
+            supersession_depth: depth, supersession_depth_limit: depthLimit,
+            remediation: `${operands.card} sits at supersession depth ${depth} (>= ${depthLimit}); this lineage has been superseded ${depth}x without converging, so the slice is mis-scoped. Decompose it into independently mergeable slices, or make an explicit scope decision — do not supersede 1:1 again.`,
+          };
+        }
+      }
       const result = await discardCardCore(ctx, operands, d);
       if (result.no_op) return result;
       const station = await attemptLoopStationProjection(ctx, d.loadState(ctx), 'discard', {
@@ -7212,6 +7276,7 @@ async function main() {
   else if (command === 'backfill-ratifications') result = await commandBackfillRatifications(ctx, args);
   else if (command === 'consume-ratification') result = await commandConsumeRatification(ctx, args);
   else if (command === 'discard') result = await commandDiscard(ctx, args);
+  else if (command === 'supersession-depth') result = commandSupersessionDepth(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -7247,7 +7312,7 @@ async function main() {
       return deployed;
     }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7274,6 +7339,7 @@ module.exports = {
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandAmendPark, commandResume, commandBreakLease, commandDiscard, commandReap, commandRestructure,
+  commandSupersessionDepth,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
