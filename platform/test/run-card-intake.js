@@ -9,7 +9,7 @@ const {
   run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus,
 } = require('../../.agents/skills/card-intake/scripts/card-intake');
 const { parseDependsOn, selectCard } = require('../../scripts/autoloop/select-card');
-const { selectClaimCandidate } = require('../../scripts/autoloop/codex-coordinator');
+const { selectClaimCandidate, canonicalEpicProjection } = require('../../scripts/autoloop/codex-coordinator');
 const { prepareDeliveryCard } = require('../../scripts/autoloop/select-card');
 const delivery = require('../mechanisms/delivery');
 const { aggregateClaudeSurface, materializeClaudeSurface } = require('../install');
@@ -931,8 +931,86 @@ function epicNativeForcedIntake() {
   });
 }
 
+// A canonical vault fixture: <vault>/spice/projects/<slug>/ with the parent board
+// directly in the project root and cards under tasks/. This is the shape every
+// real consumer vault has, and the shape the coordinator's projection contract
+// (physicalProjectPrefix) requires. The run-card-intake fixtures elsewhere use a
+// deliberately NON-canonical tmp root, so they exercise the fallback path.
+function canonicalVaultCase(fn) {
+  const vault = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'card-intake-vault-'));
+  try {
+    const slug = 'demo-project';
+    const projectRoot = path.join(vault, 'spice', 'projects', slug);
+    fs.mkdirSync(path.join(projectRoot, 'tasks'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, `${slug}-board.md`), board());
+    fs.writeFileSync(path.join(projectRoot, 'Roadmap.md'), '# Roadmap\n');
+    fs.writeFileSync(path.join(projectRoot, 'Loop System with Codex.md'), '# Loop System with Codex\n');
+    const example = path.join(projectRoot, 'platform', 'example.js');
+    fs.mkdirSync(path.dirname(example), { recursive: true });
+    fs.writeFileSync(example, Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n'));
+    fn({ vault, slug, projectRoot, boardPath: path.join(projectRoot, `${slug}-board.md`), cardsRoot: path.join(projectRoot, 'tasks') });
+  } finally {
+    fs.rmSync(vault, { recursive: true, force: true });
+  }
+}
+
+function canonicalBoardBindings() {
+  console.log('\n--- BPX-CANONICAL-BINDINGS: mints bind vault-relative board paths ---');
+  canonicalVaultCase(({ slug, projectRoot, boardPath, cardsRoot }) => {
+    const epicTitle = 'Bindings Epic';
+    const sliceTitle = 'BE-1 First slice';
+    // Exactly what plugins/loop/skills/intake/SKILL.md passes: board_path is the
+    // ABSOLUTE config.board_path_abs, and no source_board is supplied at all.
+    const spec = {
+      mode: 'roadmap', classification: 'roadmap_theme', completion_mode: 'release', epic_native: true,
+      outcome: 'Mint a canonical epic whose bindings the coordinator can project.',
+      project_root: projectRoot, link_roots: [projectRoot], evidence_roots: [projectRoot],
+      board_path: boardPath, cards_root: cardsRoot,
+      created_at: '2026-08-03T12:00:00-06:00',
+      evidence: [{ path: 'platform/example.js', line: 12, note: 'verified behavior', source_identity: 'fixture repo', captured_at: '2026-08-03T12:00:00-06:00', revision: 'fixture-revision', claim: 'The bounded example behavior is verified.' }],
+      protected_cards: [],
+      roadmap_path: path.join(projectRoot, 'docs', 'roadmap', 'Bindings.md'),
+      roadmap_key: 'bindings', roadmap_section: '## Bindings plan\n\n1. Slice',
+      cards: [
+        { title: epicTitle, role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] },
+        execution(sliceTitle, { parent_title: epicTitle, slice: 'BE-1' }),
+      ],
+    };
+    const applied = run(spec, true);
+    ok(applied.ok, `BPX-CANONICAL-BINDINGS apply succeeds — ${JSON.stringify(applied.errors || [])}`);
+
+    const epicRoot = path.join(cardsRoot, epicTitle);
+    const atlasRaw = fs.readFileSync(path.join(epicRoot, `${epicTitle}.md`), 'utf8');
+    const field = (raw, key) => (raw.match(new RegExp(`^${key}: (.+)$`, 'm')) || [])[1].replace(/^"|"$/g, '');
+    const prefix = `spice/projects/${slug}`;
+    eq(field(atlasRaw, 'source_board'), `${prefix}/${slug}-board.md`,
+      'BPX-CANONICAL-BINDINGS atlas source_board is vault-relative, never the absolute caller input');
+    eq(field(atlasRaw, 'kanban_board'), `${prefix}/${slug}-board.md`,
+      'BPX-CANONICAL-BINDINGS atlas kanban_board is vault-relative');
+    eq(field(atlasRaw, 'epic_board'), `${prefix}/tasks/${epicTitle}/board/${epicTitle}-board.md`,
+      'BPX-CANONICAL-BINDINGS atlas epic_board is vault-relative, not project-relative');
+
+    const slicePath = path.join(epicRoot, 'board', `${sliceTitle}.md`);
+    const sliceRaw = fs.readFileSync(slicePath, 'utf8');
+    eq(field(sliceRaw, 'source_board'), `${prefix}/tasks/${epicTitle}/board/${epicTitle}-board.md`,
+      'BPX-CANONICAL-BINDINGS slice source_board is vault-relative');
+    eq(field(sliceRaw, 'task_parent'), `${prefix}/tasks/${epicTitle}/${epicTitle}.md`,
+      'BPX-CANONICAL-BINDINGS slice task_parent is vault-relative');
+
+    // The contract that actually matters: the coordinator must be able to project
+    // the freshly minted epic. Before this fix every mint was born un-projectable.
+    let projection = null;
+    let projectionError = null;
+    try {
+      projection = canonicalEpicProjection(sliceRaw, slicePath, boardPath, cardsRoot, { state: { cards: {} }, currentCard: sliceTitle });
+    } catch (error) { projectionError = error.message; }
+    ok(projection && projection.epic === epicTitle,
+      `BPX-CANONICAL-BINDINGS the freshly minted epic projects through the real coordinator contract — ${projectionError || 'ok'}`);
+  });
+}
+
 async function main() {
-  actualLegacyWriterPin(); installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); supersedeGovernance(); await exactHeadMaterialization();
+  actualLegacyWriterPin(); installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); canonicalBoardBindings(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

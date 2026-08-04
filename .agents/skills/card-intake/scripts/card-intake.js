@@ -146,9 +146,45 @@ function epicNameForCard(spec, card) {
   return card.parent_title || linkName(spec.epic);
 }
 
+// The vault-relative project prefix, derived from the ON-DISK cards root rather
+// than from caller input. Mirrors the coordinator's `physicalProjectPrefix`
+// (codex-coordinator.js) — which is the authority the projection contract checks
+// against — but returns '' for a non-canonical root instead of throwing, so
+// fixtures and non-vault roots keep the legacy caller-derived behavior.
+function physicalProjectPrefix(cardsRoot) {
+  if (!cardsRoot) return '';
+  let projectRoot;
+  try { projectRoot = path.dirname(fs.realpathSync(cardsRoot)).replace(/\\/g, '/'); }
+  catch (_) { return ''; }
+  const markerAt = projectRoot.lastIndexOf('/spice/projects/');
+  if (markerAt < 0) return '';
+  const relative = projectRoot.slice(markerAt + 1);
+  return /^spice\/projects\/[^/]+$/.test(relative) ? relative : '';
+}
+
+// The project prefix every emitted board reference is rooted at. Deriving it from
+// the physical cards root first is what keeps a mint projectable: the intake skill
+// passes `board_path = config.board_path_abs` (absolute) and no `source_board`, and
+// an absolute or absent input used to collapse this to '' — minting atlases with
+// absolute source boards and project-relative epic/slice backlinks that the
+// coordinator's vault-relative binding check then refused forever.
 function projectPrefix(spec) {
-  const source = normalizePath(spec.source_board || '');
-  return source && !path.isAbsolute(source) ? path.posix.dirname(source) : '';
+  return physicalProjectPrefix(spec.cards_root)
+    || (() => {
+      const source = normalizePath(spec.source_board || '');
+      return source && !path.isAbsolute(source) ? path.posix.dirname(source) : '';
+    })();
+}
+
+// The canonical vault-relative reference to the PARENT board. The coordinator
+// expects `<prefix>/<parent board basename>` and additionally requires the parent
+// board to sit directly in the project root, so the basename is the only part of
+// the caller's absolute path that survives.
+function parentBoardRef(spec) {
+  const prefix = physicalProjectPrefix(spec.cards_root);
+  const board = normalizePath(spec.board_path || '');
+  if (prefix && board) return path.posix.join(prefix, path.posix.basename(board));
+  return spec.source_board || spec.board_path;
 }
 
 function epicRoute(spec, epic) {
@@ -560,7 +596,7 @@ function validateSpec(spec, boardRaw = '', options = {}) {
 function renderCard(card, spec, options = {}) {
   const role = card.role || 'execution';
   const contract = role === 'execution' ? validateDeliveryContract(deliveryContract(card, spec, options)).card : null;
-  const boardRef = options.boardRef || spec.source_board || spec.board_path;
+  const boardRef = options.boardRef || parentBoardRef(spec);
   const noteType = options.epicNative && role === 'execution' ? 'slice' : 'task-hub';
   const structuredValue = (value) => delivery.encodeStructuredFrontmatterValue(value);
   const lines = ['---', `type: ${noteType}`, `created_at: ${quoted(spec.created_at || new Date().toISOString())}`, `source_board: ${quoted(boardRef)}`, `kanban_board: ${quoted(boardRef)}`, `kanban_column: ${quoted(card.lane)}`, `status: ${contract ? contract.status : (delivery.normalizeStatus(card.status || 'planning') || card.status)}`];
@@ -614,7 +650,7 @@ function renderCard(card, spec, options = {}) {
 function renderEpicAtlas(parent, spec, boardRaw, route, createdAt) {
   const projectName = scalarField(boardRaw, 'project_name');
   const projectSlug = scalarField(boardRaw, 'project_slug');
-  const sourceBoard = spec.source_board || spec.board_path;
+  const sourceBoard = parentBoardRef(spec);
   const lines = ['---', 'type: epic', `schema_version: ${EPIC_SCHEMA_VERSION}`, `created_at: ${quoted(createdAt)}`];
   if (projectName) lines.push(`project: ${quoted(`[[${projectName}]]`)}`);
   if (projectSlug) lines.push(`project_slug: ${projectSlug}`);
