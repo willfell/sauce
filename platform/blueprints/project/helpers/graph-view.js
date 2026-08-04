@@ -575,6 +575,8 @@ class GraphView {
             // and closure memberships. On the fail-soft path keep the visible
             // toolbar structurally unchanged, but make this toggle a no-op;
             // approximating from local statuses can hide connecting chains.
+            // BL5B-FAIL-SOFT-GUARD: the independent contract sentinel binds
+            // this authority boundary as well as the behavioral harness.
             if (key === "stuck" && !analysis) return;
             filters[key] = !filters[key];
             applyFilters();

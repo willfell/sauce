@@ -831,7 +831,9 @@ async function main() {
   'BL5-TOOLBAR-DEFAULT: both mobile-sized toggles render off by default');
   const bl5Chips = byClass(bl5Root, 'graph-view-chip');
   const bl5ChipFor = (id) => bl5Chips.find((chip) => textOf(chip).includes(id));
-  const bl5AtRest = domShape(bl5Root);
+  // Snapshot values, not the harness node's mutable attrs object: otherwise
+  // aria-pressed mutations can rewrite the supposed baseline by reference.
+  const bl5AtRest = JSON.parse(JSON.stringify(domShape(bl5Root)));
   assert(bl5Chips.every((chip) => !chip.className.includes('graph-view-dimmed')),
     'BL5-AT-REST: filters off leave every chip at full strength');
 
@@ -853,6 +855,16 @@ async function main() {
     && bl5ChipFor('BL5-F').className.includes('graph-view-dimmed')
     && !bl5ChipFor('BL5-D').className.includes('graph-view-dimmed'),
   'BL5-FILTER-UNION: Dim done composes with Stuck and never dims the parked root');
+
+  // BL5B-CROSS-INSTANCE-ACTIVE: render another widget while this one still
+  // has BOTH filters active. Turning the first widget off before this probe
+  // would let shared/module-level filter state survive unnoticed.
+  const bl5ActiveFreshRoot = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    bl5ActiveFreshRoot, { nodes: bl5Nodes, edges: bl5Edges }, lifecycleApi, epicPath, [],
+  );
+  assert.deepStrictEqual(domShape(bl5ActiveFreshRoot), bl5AtRest,
+    'BL5B-CROSS-INSTANCE-ACTIVE: a second render starts off while the first remains active');
 
   bubblingClick(bl5ChipFor('BL5-A'));
   assert(!bl5ChipFor('BL5-A').className.includes('graph-view-dimmed')
@@ -882,9 +894,44 @@ async function main() {
   assert.deepStrictEqual(domShape(bl5FreshRoot), bl5AtRest,
     'BL5-MUTANT-PERSISTENCE: a fresh render resets both ephemeral toggles to off');
 
+  // BL5B-CLOSURE-DIVERGENCE: drawn edges say A -> B -> C, while the injected
+  // GraphInsights authority says A -> G -> C. Stuck must follow the supplied
+  // memberships: G stays bright and B dims. Any widget-side traversal produces
+  // the opposite footprint and is therefore observable.
+  const bl5DivergentNodes = [...bl5Nodes,
+    { card: 'BL5-G Closure bridge', path: `${board}/BL5-G Closure bridge.md`, status: 'planning', rank: 1, row: 2 }];
+  const blankInsight = () => ({ upstream: [], downstream: [], gates: 0 });
+  const bl5DivergentPerNode = Object.fromEntries(bl5DivergentNodes.map((node) => [node.card, blankInsight()]));
+  bl5DivergentPerNode['BL5-A Root'].downstream = ['BL5-G Closure bridge', 'BL5-C Downstream stuck'];
+  bl5DivergentPerNode['BL5-C Downstream stuck'].upstream = ['BL5-A Root', 'BL5-G Closure bridge'];
+  const bl5DivergentInsights = {
+    analyzeGraph() {
+      return {
+        perNode: bl5DivergentPerNode,
+        summary: { stuckCount: 3, rootBlockers: ['BL5-A Root'], gatedTotal: 2 },
+      };
+    },
+  };
+  const bl5DivergentRoot = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: bl5DivergentInsights })._renderGraph(
+    bl5DivergentRoot, { nodes: bl5DivergentNodes, edges: bl5Edges }, lifecycleApi, epicPath, [],
+  );
+  byClass(bl5DivergentRoot, 'graph-view-filter-stuck')[0].listeners.click({ stopPropagation() {} });
+  const bl5DivergentChips = byClass(bl5DivergentRoot, 'graph-view-chip');
+  const bl5DivergentChipFor = (id) => bl5DivergentChips.find((chip) => textOf(chip).includes(id));
+  for (const id of ['BL5-A', 'BL5-C', 'BL5-D', 'BL5-G']) {
+    assert(!bl5DivergentChipFor(id).className.includes('graph-view-dimmed'),
+      `BL5B-CLOSURE-DIVERGENCE: authoritative keep member ${id} remains bright`);
+  }
+  for (const id of ['BL5-B', 'BL5-E', 'BL5-F']) {
+    assert(bl5DivergentChipFor(id).className.includes('graph-view-dimmed'),
+      `BL5B-CLOSURE-DIVERGENCE: non-member ${id} dims despite the drawn edge path`);
+  }
+
   // GraphInsights exclusively owns the root/closure semantics needed by
   // Stuck. Missing or throwing analysis must leave the toggle inert rather
   // than approximating a keep-set that drops the completed bridge.
+  // BL5B-FAIL-SOFT-MISSING BL5B-FAIL-SOFT-THROWING
   for (const [label, insights] of [
     ['missing', {}],
     ['throwing', { analyzeGraph() { throw new Error('BL5 insights unavailable'); } }],
@@ -1728,11 +1775,16 @@ async function main() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   assert.strictEqual(packageJson.scripts['test:graph-view'], 'node platform/test/run-graph-view.js',
     'focused script is wired');
+  assert.strictEqual(packageJson.scripts['test:graph-view-contract'],
+    'node platform/test/run-graph-view-contract.js',
+  'independent GraphView contract sentinel is wired');
   assert((packageJson.scripts['release:preflight'] || '').includes(
-    'node platform/test/run-graph-layout.js && node platform/test/run-graph-view.js'),
-  'release preflight runs the harness exactly once, directly after the layout core');
+    'node platform/test/run-graph-layout.js && node platform/test/run-graph-view.js && node platform/test/run-graph-view-contract.js'),
+  'release preflight runs the behavior and independent contract harnesses directly after the layout core');
   assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-view\.js/g) || []).length, 1,
     'release preflight registers the harness once');
+  assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-view-contract\.js/g) || []).length, 1,
+    'release preflight registers the independent contract sentinel once');
 
   // Atlas mounts: the intake scaffold and the install heal both emit the
   // GraphView customjs-guard block directly after the EpicDashboard block.
