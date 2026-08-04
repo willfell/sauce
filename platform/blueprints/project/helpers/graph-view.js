@@ -571,6 +571,11 @@ class GraphView {
             + "border:1px solid var(--background-modifier-border);background:var(--background-secondary);";
           button.addEventListener?.("click", (event) => {
             event?.stopPropagation?.();
+            // Stuck is meaningful only with GraphInsights' authoritative root
+            // and closure memberships. On the fail-soft path keep the visible
+            // toolbar structurally unchanged, but make this toggle a no-op;
+            // approximating from local statuses can hide connecting chains.
+            if (key === "stuck" && !analysis) return;
             filters[key] = !filters[key];
             applyFilters();
           });

@@ -882,6 +882,26 @@ async function main() {
   assert.deepStrictEqual(domShape(bl5FreshRoot), bl5AtRest,
     'BL5-MUTANT-PERSISTENCE: a fresh render resets both ephemeral toggles to off');
 
+  // GraphInsights exclusively owns the root/closure semantics needed by
+  // Stuck. Missing or throwing analysis must leave the toggle inert rather
+  // than approximating a keep-set that drops the completed bridge.
+  for (const [label, insights] of [
+    ['missing', {}],
+    ['throwing', { analyzeGraph() { throw new Error('BL5 insights unavailable'); } }],
+  ]) {
+    const failSoftRoot = element();
+    await new GraphView({ dashboard, lifecycleApi, insights })._renderGraph(
+      failSoftRoot, { nodes: bl5Nodes, edges: bl5Edges }, lifecycleApi, epicPath, [],
+    );
+    const before = domShape(failSoftRoot);
+    const toggle = byClass(failSoftRoot, 'graph-view-filter-stuck')[0];
+    toggle.listeners.click({ stopPropagation() {} });
+    assert.deepStrictEqual(domShape(failSoftRoot), before,
+      `BL5-FAIL-SOFT-${label.toUpperCase()}: Stuck is an exact no-op without authoritative GraphInsights`);
+    assert(byClass(failSoftRoot, 'graph-view-chip').every((chip) => !chip.className.includes('graph-view-dimmed')),
+      `BL5-MUTANT-${label.toUpperCase()}-INSIGHTS-BRIDGE: unavailable analysis never dims a connecting-chain chip`);
+  }
+
   // Fail-soft: a missing GraphLayout never blanks the note.
   const priorLayout = global.customJS.GraphLayout;
   delete global.customJS.GraphLayout;
