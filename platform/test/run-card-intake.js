@@ -884,12 +884,31 @@ function epicNativeForcedIntake() {
     const epicRoot = path.join(dir, 'tasks', epicTitle);
     const atlasRaw = fs.readFileSync(path.join(epicRoot, `${epicTitle}.md`), 'utf8');
     ok(/^type: epic$/m.test(atlasRaw), 'LOOP-EPIC-NATIVE scaffold writes a canonical epic atlas (type: epic)');
-    const atlasDashboardAt = atlasRaw.indexOf('await dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });');
-    const atlasGraphViewAt = atlasRaw.indexOf('await dv.view("ranch/views/customjs-guard", { class: "GraphView" });');
-    ok(atlasDashboardAt >= 0 && atlasGraphViewAt > atlasDashboardAt,
-      'GV-2b atlas scaffold mounts the GraphView customjs-guard block directly after EpicDashboard');
-    ok((atlasRaw.match(/class: "GraphView"/g) || []).length === 1,
-      'GV-2b atlas scaffold mounts GraphView exactly once');
+    const atlasMountPattern = /\bdv\s*\.\s*view\s*\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*(?:class|["']class["'])\s*:\s*["']([^"']+)["']\s*,?\s*\}\s*\)/g;
+    const readAtlasMounts = (raw) => [...raw.matchAll(atlasMountPattern)]
+      .map((match) => ({ className: match[1], index: match.index }));
+    const atlasMounts = readAtlasMounts(atlasRaw);
+    const mountFor = (className) => atlasMounts.filter((mount) => mount.className === className);
+    const atlasChromeAt = mountFor('ProjectChromeBar')[0]?.index ?? -1;
+    const atlasGraphViewAt = mountFor('GraphView')[0]?.index ?? -1;
+    const atlasDashboardAt = mountFor('EpicDashboard')[0]?.index ?? -1;
+    ok(atlasChromeAt >= 0 && atlasGraphViewAt > atlasChromeAt && atlasDashboardAt > atlasGraphViewAt,
+      'VP-2 atlas scaffold preserves ChromeBar then mounts GraphView before EpicDashboard');
+    ok(mountFor('ProjectChromeBar').length === 1,
+      'VP-2d carried fixture: atlas scaffold mounts ProjectChromeBar exactly once across whitespace variants');
+    ok(mountFor('GraphView').length === 1,
+      'VP-2d carried fixture: atlas scaffold mounts GraphView exactly once across whitespace variants');
+    ok(mountFor('EpicDashboard').length === 1,
+      'VP-2d carried fixture: atlas scaffold mounts EpicDashboard exactly once across whitespace variants');
+    for (const className of ['ProjectChromeBar', 'GraphView', 'EpicDashboard']) {
+      const carriedVariants = [
+        `await dv . view("ranch/views/customjs-guard", { class : "${className}" });`,
+        `await dv.view("ranch/views/customjs-guard", { "class": "${className}" });`,
+        `await dv.view("ranch/views/customjs-guard", { class: "${className}", });`,
+      ];
+      ok(carriedVariants.every((variant) => readAtlasMounts(variant)[0]?.className === className),
+        `VP-2d carried fixture: semantic parser recognizes executable ${className} spacing, quoted-key, and trailing-comma variants`);
+    }
     const epicBoardPath = path.join(epicRoot, 'board', `${epicTitle}-board.md`);
     ok(fs.existsSync(epicBoardPath), 'LOOP-EPIC-NATIVE scaffold writes the epic board');
     ok(fs.existsSync(path.join(epicRoot, 'board', `${childA.title}.md`))

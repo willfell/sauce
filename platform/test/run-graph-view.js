@@ -35,9 +35,10 @@ const GraphInsights = eval(`(${fs.readFileSync(INSIGHTS, 'utf8')})`); // eslint-
 const EpicDashboard = eval(`(${fs.readFileSync(DASHBOARD, 'utf8')})`); // eslint-disable-line no-eval
 
 function element(tag = 'div', options = {}) {
+  const optionAttrs = { ...(options.attr || {}), ...(options.attrs || {}) };
   const node = {
-    tag, className: options.cls || '', textContent: options.text || '', style: { cssText: '' },
-    innerHTML: '', attrs: {}, children: [], listeners: {}, removed: false, parent: null,
+    tag, className: options.cls || optionAttrs.class || '', textContent: options.text || '', style: { cssText: '' },
+    innerHTML: '', attrs: optionAttrs, children: [], listeners: {}, removed: false, parent: null,
     createEl(childTag, childOptions = {}) {
       const child = element(childTag, childOptions);
       child.parent = this;
@@ -55,7 +56,14 @@ function element(tag = 'div', options = {}) {
       return child;
     },
     addEventListener(name, fn) { this.listeners[name] = fn; },
-    setAttribute(name, value) { this.attrs[name] = value; },
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+      if (name === 'class') this.className = String(value);
+    },
+    setAttributeNS(_namespace, name, value) {
+      this.attrs[name] = value;
+      if (name === 'class') this.className = String(value);
+    },
     querySelector() { return null; },
     remove() {
       this.removed = true;
@@ -382,10 +390,24 @@ async function main() {
   };
   const dashboard = new EpicDashboard({ lifecycleApi });
   const currentPage = { file: { path: epicPath, folder: epicFolder } };
+  const sectionLabel = {
+    divider(target) {
+      const divider = (target.container || target).createEl('hr');
+      divider.className = 'shared-section-divider';
+      return divider;
+    },
+    render(dv, opts) {
+      const label = (dv.container || dv).createEl('div', { text: opts.text });
+      label.className = 'shared-section-label';
+      label.__sectionOptions = opts;
+      return label;
+    },
+  };
   global.customJS = {
     RenderSafe: { page: () => currentPage },
     GraphLayout: new GraphLayout(),
     EpicDashboard: dashboard,
+    SectionLabel: sectionLabel,
     Coordinator: coordinatorSentinel,
     DeliveryCoordinator: coordinatorSentinel,
   };
@@ -422,6 +444,14 @@ async function main() {
   await new GraphView().render({ container });
   const root = container.children.find((child) => child.className === 'graph-view-root');
   assert(root, 'render mounts one graph-view-root');
+  assert.strictEqual(root.children[0]?.className, 'shared-section-divider',
+    'VP-2 epic scope owns the shared SectionLabel divider as its first child');
+  assert.strictEqual(root.children[1]?.className, 'shared-section-label',
+    'VP-2 epic scope renders its section title through the shared SectionLabel primitive');
+  assert.strictEqual(root.children[1]?.textContent, 'Dependency Graph',
+    'VP-2 epic scope labels the graph section Dependency Graph');
+  assert.strictEqual(root.children[1]?.__sectionOptions?.top, true,
+    'VP-2 shared section label does not synthesize a second divider');
   bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0,
     'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');
 
@@ -1622,6 +1652,7 @@ async function main() {
     GraphLayout: new GraphLayout(),
     GraphInsights: new GraphInsights(),
     EpicDashboard: new EpicDashboard({ lifecycleApi }),
+    SectionLabel: sectionLabel,
     Coordinator: coordinatorSentinel,
     DeliveryCoordinator: coordinatorSentinel,
   };
@@ -1629,6 +1660,14 @@ async function main() {
   await new GraphView({ scope: 'project' }).render({ container: projectContainer });
   const pRoot = projectContainer.children.find((child) => child.className === 'graph-view-root');
   assert(pRoot, 'P: project scope mounts one graph-view-root');
+  assert.strictEqual(pRoot.children[0]?.className, 'shared-section-divider',
+    'VP-2 project scope owns the shared SectionLabel divider as its first child');
+  assert.strictEqual(pRoot.children[1]?.className, 'shared-section-label',
+    'VP-2 project scope renders the Dependency Graph title through SectionLabel');
+  assert.strictEqual(pRoot.children[1]?.textContent, 'Dependency Graph',
+    'VP-2 project scope labels the graph section Dependency Graph');
+  assert.strictEqual(pRoot.children[1]?.__sectionOptions?.top, true,
+    'VP-2 project scope reuses the owned divider instead of synthesizing a second one');
 
   // BL4-MISSING-INSIGHTS-ZERO-OUTCOME-READS: project Outcomes exist only for
   // the selection panel. Missing/throwing GraphInsights disables that panel,
@@ -1997,6 +2036,20 @@ async function main() {
   await new GraphView().render({ container: coldContainer });
   assert.strictEqual(coldContainer.children.length, 0, 'cold load is a render-safe no-op');
   global.customJS.RenderSafe = priorRenderSafe;
+  const priorSectionLabel = global.customJS.SectionLabel;
+  delete global.customJS.SectionLabel;
+  const fallbackContainer = element();
+  await new GraphView({ layout: { layoutGraph: () => ({ nodes: [], edges: [], warnings: [] }) } })
+    .render({ container: fallbackContainer });
+  assert.strictEqual(fallbackContainer.children[0]?.children[0]?.textContent, 'Dependency Graph',
+    'VP-2 missing SectionLabel falls back to plain text without throwing');
+  assert.strictEqual(fallbackContainer.children[0]?.children[0]?.style?.cssText, '',
+    'VP-2 fallback title carries no local section-label styling');
+  assert.strictEqual(fallbackContainer.children[0]?.children[0]?.className, '',
+    'VP-2 fallback title carries no local section-label class');
+  assert.deepStrictEqual(fallbackContainer.children[0]?.children[0]?.attrs, {},
+    'VP-2 fallback title carries no class or presentation attributes');
+  global.customJS.SectionLabel = priorSectionLabel;
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
   assert.deepStrictEqual(persistenceMutations, [],
     'BL4-BL5-ZERO-PERSISTENCE-SURFACES: selection and filters invoke no localStorage or coordinator mutation surface');
@@ -2012,6 +2065,17 @@ async function main() {
   // Widget grammar: RenderSafe-only current access, bare loadable class.
   assert(!widgetSource.includes('dv.current('), 'widget uses RenderSafe instead of raw dv.current');
   assert.ok(/^class GraphView\b/m.test(widgetSource), 'file is a bare customJS-loadable class');
+  const sectionChromeSource = widgetSource.match(/_renderSectionChrome\(dv, root\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert(sectionChromeSource.includes('SL.divider(root)') && sectionChromeSource.includes('SL.render('),
+    'VP-2 section chrome delegates divider and title rendering to SectionLabel');
+  const localChromeChannels = [
+    /\bstyle\b|\bcssText\b/,
+    /\bclassName\b|\bclassList\b|\bcls\s*:/,
+    /\bsetAttribute(?:NS)?\s*(?:\?\.)?\s*\([^)]*?["']class["']/,
+    /\battrs?\s*:\s*\{[\s\S]*?\bclass\s*:/,
+  ];
+  assert(localChromeChannels.every((channel) => !channel.test(sectionChromeSource)),
+    'VP-2d carried fixture: section chrome defines no local styling or class channel, including optional attribute APIs and createEl attr bags');
 
   // Registration: manifest files[] + customjs_classes[], package.json script +
   // one preflight entry directly after run-graph-layout.js.
@@ -2035,13 +2099,13 @@ async function main() {
   assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-view-contract\.js/g) || []).length, 1,
     'release preflight registers the independent contract sentinel once');
 
-  // Atlas mounts: the intake scaffold and the install heal both emit the
-  // GraphView customjs-guard block directly after the EpicDashboard block.
+  // Atlas mounts: fresh intake emits GraphView before EpicDashboard. Existing
+  // atlas migration remains a separately contracted installer slice.
   const intakeSource = fs.readFileSync(path.join(ROOT, '.agents/skills/card-intake/scripts/card-intake.js'), 'utf8');
   const dashboardMountAt = intakeSource.indexOf('{ class: "EpicDashboard" }');
   const graphMountAt = intakeSource.indexOf('{ class: "GraphView" }');
-  assert(dashboardMountAt >= 0 && graphMountAt > dashboardMountAt,
-    'card-intake atlas scaffold mounts GraphView after EpicDashboard');
+  assert(graphMountAt >= 0 && dashboardMountAt > graphMountAt,
+    'card-intake atlas scaffold mounts GraphView before EpicDashboard');
 
   const chromeOnlyAtlas = [
     '---', 'type: epic', 'schema_version: 1.1.0', '---', '',
@@ -2059,7 +2123,7 @@ async function main() {
     const healed = healAdapter.store.get(atlas);
     const dashboardAt = healed.indexOf('class: "EpicDashboard"');
     const graphAt = healed.indexOf('class: "GraphView"');
-    assert(dashboardAt >= 0 && graphAt > dashboardAt, `heal mounts GraphView after EpicDashboard on ${atlas}`);
+    assert(dashboardAt >= 0 && graphAt > dashboardAt, `legacy scaffold still mounts GraphView after EpicDashboard on ${atlas}`);
     assert.strictEqual((healed.match(/class: "EpicDashboard"/g) || []).length, 1,
       `heal keeps exactly one EpicDashboard block on ${atlas}`);
     assert.strictEqual((healed.match(/class: "GraphView"/g) || []).length, 1,

@@ -669,10 +669,10 @@ function renderEpicAtlas(parent, spec, boardRaw, route, createdAt) {
     'await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });',
     '```', '',
     '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });',
+    'await dv.view("ranch/views/customjs-guard", { class: "GraphView" });',
     '```', '',
     '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "GraphView" });',
+    'await dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });',
     '```', '',
   );
   return lines.join('\n');
