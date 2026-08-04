@@ -35,9 +35,10 @@ const GraphInsights = eval(`(${fs.readFileSync(INSIGHTS, 'utf8')})`); // eslint-
 const EpicDashboard = eval(`(${fs.readFileSync(DASHBOARD, 'utf8')})`); // eslint-disable-line no-eval
 
 function element(tag = 'div', options = {}) {
+  const optionAttrs = { ...(options.attr || {}), ...(options.attrs || {}) };
   const node = {
-    tag, className: options.cls || '', textContent: options.text || '', style: { cssText: '' },
-    innerHTML: '', attrs: {}, children: [], listeners: {}, removed: false, parent: null,
+    tag, className: options.cls || optionAttrs.class || '', textContent: options.text || '', style: { cssText: '' },
+    innerHTML: '', attrs: optionAttrs, children: [], listeners: {}, removed: false, parent: null,
     createEl(childTag, childOptions = {}) {
       const child = element(childTag, childOptions);
       child.parent = this;
@@ -55,7 +56,14 @@ function element(tag = 'div', options = {}) {
       return child;
     },
     addEventListener(name, fn) { this.listeners[name] = fn; },
-    setAttribute(name, value) { this.attrs[name] = value; },
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+      if (name === 'class') this.className = String(value);
+    },
+    setAttributeNS(_namespace, name, value) {
+      this.attrs[name] = value;
+      if (name === 'class') this.className = String(value);
+    },
     querySelector() { return null; },
     remove() {
       this.removed = true;
@@ -2060,8 +2068,14 @@ async function main() {
   const sectionChromeSource = widgetSource.match(/_renderSectionChrome\(dv, root\) \{[\s\S]*?\n  \}/)?.[0] || '';
   assert(sectionChromeSource.includes('SL.divider(root)') && sectionChromeSource.includes('SL.render('),
     'VP-2 section chrome delegates divider and title rendering to SectionLabel');
-  assert(!/style|cssText|className|classList|cls\s*:|setAttribute\s*\(\s*["']class/.test(sectionChromeSource),
-    'VP-2 section chrome defines no local section-label styling or class channel');
+  const localChromeChannels = [
+    /\bstyle\b|\bcssText\b/,
+    /\bclassName\b|\bclassList\b|\bcls\s*:/,
+    /\bsetAttribute(?:NS)?\s*(?:\?\.)?\s*\([^)]*?["']class["']/,
+    /\battrs?\s*:\s*\{[\s\S]*?\bclass\s*:/,
+  ];
+  assert(localChromeChannels.every((channel) => !channel.test(sectionChromeSource)),
+    'VP-2d carried fixture: section chrome defines no local styling or class channel, including optional attribute APIs and createEl attr bags');
 
   // Registration: manifest files[] + customjs_classes[], package.json script +
   // one preflight entry directly after run-graph-layout.js.

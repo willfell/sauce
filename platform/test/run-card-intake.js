@@ -884,17 +884,20 @@ function epicNativeForcedIntake() {
     const epicRoot = path.join(dir, 'tasks', epicTitle);
     const atlasRaw = fs.readFileSync(path.join(epicRoot, `${epicTitle}.md`), 'utf8');
     ok(/^type: epic$/m.test(atlasRaw), 'LOOP-EPIC-NATIVE scaffold writes a canonical epic atlas (type: epic)');
-    const atlasChromeAt = atlasRaw.indexOf('await dv.view("ranch/views/customjs-guard", { class: "ProjectChromeBar" });');
-    const atlasGraphViewAt = atlasRaw.indexOf('await dv.view("ranch/views/customjs-guard", { class: "GraphView" });');
-    const atlasDashboardAt = atlasRaw.indexOf('await dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });');
+    const atlasMounts = [...atlasRaw.matchAll(/\bdv\.view\s*\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class\s*:\s*["']([^"']+)["']\s*\}\s*\)/g)]
+      .map((match) => ({ className: match[1], index: match.index }));
+    const mountFor = (className) => atlasMounts.filter((mount) => mount.className === className);
+    const atlasChromeAt = mountFor('ProjectChromeBar')[0]?.index ?? -1;
+    const atlasGraphViewAt = mountFor('GraphView')[0]?.index ?? -1;
+    const atlasDashboardAt = mountFor('EpicDashboard')[0]?.index ?? -1;
     ok(atlasChromeAt >= 0 && atlasGraphViewAt > atlasChromeAt && atlasDashboardAt > atlasGraphViewAt,
       'VP-2 atlas scaffold preserves ChromeBar then mounts GraphView before EpicDashboard');
-    ok((atlasRaw.match(/class: "ProjectChromeBar"/g) || []).length === 1,
-      'VP-2 atlas scaffold mounts ProjectChromeBar exactly once');
-    ok((atlasRaw.match(/class: "GraphView"/g) || []).length === 1,
-      'VP-2 atlas scaffold mounts GraphView exactly once');
-    ok((atlasRaw.match(/class: "EpicDashboard"/g) || []).length === 1,
-      'VP-2 atlas scaffold mounts EpicDashboard exactly once');
+    ok(mountFor('ProjectChromeBar').length === 1,
+      'VP-2d carried fixture: atlas scaffold mounts ProjectChromeBar exactly once across whitespace variants');
+    ok(mountFor('GraphView').length === 1,
+      'VP-2d carried fixture: atlas scaffold mounts GraphView exactly once across whitespace variants');
+    ok(mountFor('EpicDashboard').length === 1,
+      'VP-2d carried fixture: atlas scaffold mounts EpicDashboard exactly once across whitespace variants');
     const epicBoardPath = path.join(epicRoot, 'board', `${epicTitle}-board.md`);
     ok(fs.existsSync(epicBoardPath), 'LOOP-EPIC-NATIVE scaffold writes the epic board');
     ok(fs.existsSync(path.join(epicRoot, 'board', `${childA.title}.md`))
