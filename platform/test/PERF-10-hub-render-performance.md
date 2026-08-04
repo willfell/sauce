@@ -1,6 +1,6 @@
 # PERF-10 hub render-performance measurement
 
-Measured 2026-08-03 on the workshop Node harness using the real `ProjectsHubCards`, `ProjectDashboard`, and `SpaceDailyDashboard` classes. The fixture contains 1,740 synthetic notes: 120 projects with six child docs each, 440 task notes, 180 meetings, 140 reader articles, 40 trips, and 100 activity notes. Dataview queries use chainable iterable fixtures and hub dependencies render into a lightweight DOM.
+Measured 2026-08-03 on the workshop Node harness using the real `ProjectsHubCards`, `ProjectDashboard`, and `SpaceDailyDashboard` classes. The fixture contains 1,740 synthetic notes: 120 projects with six child docs each, 440 task notes, 180 meetings, 140 reader articles, 40 trips, and 100 activity notes. Dataview queries use chainable iterable fixtures and hub dependencies render into a lightweight DOM. The receipt counts actual `BeaconCards` render-loop emissions—106 Projects cards and 180 Daily meeting cards—rather than trusting the eligible input arrays.
 
 | Hub | Warm median | Warm p95 |
 | --- | ---: | ---: |

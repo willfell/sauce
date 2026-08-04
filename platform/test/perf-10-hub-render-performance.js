@@ -193,9 +193,10 @@ async function samples(label, makeRun, count = 7) {
   global.window = { app, moment, customJS: null, localStorage };
   global.moment = moment; global.document = { body: element('body'), activeElement: null, createElement: (t) => element(t) };
 
-  const metrics = { beaconPages: 0, activityQueried: 0, activityRendered: 0 };
-  const resetMetrics = () => { metrics.beaconPages = 0; metrics.activityQueried = 0; metrics.activityRendered = 0; };
-  const BeaconCards = { render: async (dv, opts) => { metrics.beaconPages += (opts.pages || []).length; for (const p of opts.pages || []) {
+  const metrics = { beaconEmitted: 0, activityQueried: 0, activityRendered: 0 };
+  const resetMetrics = () => { metrics.beaconEmitted = 0; metrics.activityQueried = 0; metrics.activityRendered = 0; };
+  const BeaconCards = { render: async (dv, opts) => { for (const p of opts.pages || []) {
+    metrics.beaconEmitted += 1;
     const card = dv.container.createEl('div');
     if (opts.title) card.textContent = String(opts.title(p) || '');
     if (opts.meta) card.innerHTML = String(opts.meta(p) || '');
@@ -229,7 +230,7 @@ async function samples(label, makeRun, count = 7) {
     await hub.render(dv);
     requireMeasurement(hub._lookup && hub._lookup.size === 120, 'Projects hub did not enrich all 120 projects');
     requireMeasurement(hub._pages && hub._pages.length === 106, 'Projects hub did not render the exact 106 non-archived project cards');
-    requireMeasurement(metrics.beaconPages === 106, `Projects hub rendered ${metrics.beaconPages}, expected 106 cards`);
+    requireMeasurement(metrics.beaconEmitted === 106, `Projects hub emitted ${metrics.beaconEmitted}, expected 106 cards`);
     requireMeasurement((dv._queryCounts.get('spice/projects') || 0) === 1, 'Projects hub must query the project index exactly once');
     const projectFolderQueries = Array.from(dv._queryCounts.entries()).filter(([scope]) => /^spice\/projects\/project-\d+$/.test(scope));
     requireMeasurement(projectFolderQueries.length === 120 && projectFolderQueries.every(([, count]) => count === 1),
@@ -258,7 +259,7 @@ async function samples(label, makeRun, count = 7) {
       'Daily dashboard must query open and completed task scopes exactly once');
     requireMeasurement((dv._queryCounts.get('spice/reader') || 0) === 1 && (dv._queryCounts.get('spice/trips') || 0) === 2,
       'Daily dashboard must query reader once and trips for gating plus rendering');
-    requireMeasurement(metrics.beaconPages === 180, `Daily dashboard rendered ${metrics.beaconPages}, expected 180 meeting cards`);
+    requireMeasurement(metrics.beaconEmitted === 180, `Daily dashboard emitted ${metrics.beaconEmitted}, expected 180 meeting cards`);
     requireMeasurement(metrics.activityQueried === 100 && metrics.activityRendered === 112,
       `Daily activity must query 100 direct notes and render them with 12 reading articles; got ${metrics.activityQueried}/${metrics.activityRendered}`);
     requireMeasurement(classCount(dv.container, 'sauce-daily-task-row-content') === 360,
