@@ -657,7 +657,8 @@ class GraphView {
     this._renderLegend(root, nodes, api);
     const geometry = {
       chipH: 56, pad: 12, colGap: 28, rowGap: 18, chipW: 172,
-      charPx: 7, hPad: 18, minCol: 120, maxCol: 260,
+      widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+      hPad: 18, minCol: 120, maxCol: 260,
       titleLineH: 15, infoLineH: 13, padY: 7, contentGap: 3, scrollbarAllowance: 14,
       maxCharsPerLine: Math.floor((260 - 18) / 7),
     };
@@ -713,7 +714,7 @@ class GraphView {
   _chipContentWidth(node, geometry) {
     const text = node.isStub ? (node.stubLabel || node.card || "") : (node.card || "");
     const { longest } = this._wrapTitle(text, geometry.maxCharsPerLine);
-    const raw = longest * geometry.charPx + geometry.hPad;
+    const raw = longest * geometry.widthCharPx + geometry.hPad;
     return Math.min(geometry.maxCol, Math.max(geometry.minCol, raw));
   }
 
@@ -745,12 +746,17 @@ class GraphView {
   _chipHeight(node, chipW, geometry) {
     if (node?.isStub) return geometry.chipH;
     const parts = this._titleParts(node?.card);
-    const idBudget = parts.id ? parts.id.length * geometry.charPx + 5 : 0;
-    const perLineChars = Math.max(1, Math.floor((chipW - geometry.hPad - idBudget) / geometry.charPx));
+    // Height uses a deliberately conservative 13px glyph cell at an explicit
+    // 12px rendered font. This safely contains even repeated wide proportional
+    // glyphs (the width-sizing model remains the established 7px average).
+    const idBudget = parts.id ? parts.id.length * geometry.titleGlyphPx + 5 : 0;
+    const perLineChars = Math.max(1,
+      Math.floor((chipW - geometry.hPad - idBudget) / geometry.titleGlyphPx));
     const titleLines = this._wrapTitle(parts.title, perLineChars).lines.length;
     const waitText = this._waitInfo(node);
-    const waitBudget = Math.max(8, perLineChars - 12);
-    const waitLines = waitText ? Math.min(2, this._wrapTitle(waitText, waitBudget).lines.length) : 1;
+    // Any wait may visually occupy its full two-line clamp. Reserving both
+    // exact info line boxes avoids another average-glyph estimate entirely.
+    const waitLines = waitText ? 2 : 1;
     return Math.max(geometry.chipH,
       geometry.padY * 2 + titleLines * geometry.titleLineH
       + geometry.contentGap + waitLines * geometry.infoLineH);
@@ -903,12 +909,12 @@ class GraphView {
     // by _chipHeight, so the absolute chip box always contains every line.
     const title = titleRow.createEl("span", { text: parts.title });
     title.className = "graph-view-chip-name";
-    title.style.cssText = "min-width:0;font-size:0.78em;font-weight:600;white-space:normal;overflow-wrap:anywhere;";
+    title.style.cssText = `min-width:0;font-size:${geometry.titleFontPx}px;font-weight:600;white-space:normal;overflow-wrap:anywhere;`;
     // Info line: the shared lifecycle glyph + colored status WORD (no local
     // presentation table) plus the inline wait reason.
     const info = chip.createEl("div");
     info.className = "graph-view-chip-info";
-    info.style.cssText = `display:flex;align-items:flex-start;gap:5px;min-width:0;font-size:0.7em;line-height:${geometry.infoLineH}px;`;
+    info.style.cssText = `display:flex;align-items:flex-start;gap:5px;min-width:0;font-size:${geometry.infoFontPx}px;line-height:${geometry.infoLineH}px;`;
     const glyph = info.createEl("span", { text: presentation.glyph });
     glyph.className = `graph-view-status-glyph ${presentation.className}`;
     glyph.setAttribute?.("aria-hidden", "true");
@@ -1044,7 +1050,8 @@ class GraphView {
     // deterministic full-title / bounded-wait height formula as epic scope.
     const geometry = {
       colW: 200, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 26,
-      rowGap: 18, charPx: 7, hPad: 18, titleLineH: 15, infoLineH: 13,
+      rowGap: 18, widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+      hPad: 18, titleLineH: 15, infoLineH: 13,
       padY: 7, contentGap: 3, scrollbarAllowance: 14,
     };
     const positions = new Map();

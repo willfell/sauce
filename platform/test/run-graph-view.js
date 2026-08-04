@@ -148,13 +148,16 @@ function dOf(chunk) { return (chunk.match(/\sd="([^"]+)"/) || [])[1] || ''; }
 // GV-R2 deterministic geometry — the widget's per-rank auto-width formula,
 // replicated here so every expected width / x-offset / canvas width is COMPUTED
 // from the same math (never a magic literal). A mutation to the widget's
-// charPx / hPad / minCol / maxCol / colGap diverges from this replica → RED.
+// widthCharPx / titleGlyphPx / hPad / minCol / maxCol / colGap diverges from
+// this replica → RED. Height intentionally uses the conservative wide-glyph
+// cell, independently of the inherited average-width column model.
 const GVR2 = {
-  charPx: 7, hPad: 18, minCol: 120, maxCol: 260, colGap: 28, pad: 12,
+  widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+  hPad: 18, minCol: 120, maxCol: 260, colGap: 28, pad: 12,
   chipH: 56, rowGap: 18, titleLineH: 15, infoLineH: 13, padY: 7, contentGap: 3,
   scrollbarAllowance: 14,
 };
-GVR2.maxCharsPerLine = Math.floor((GVR2.maxCol - GVR2.hPad) / GVR2.charPx); // 34
+GVR2.maxCharsPerLine = Math.floor((GVR2.maxCol - GVR2.hPad) / GVR2.widthCharPx); // 34
 function wrapLongest(text, maxChars) {
   const limit = Math.max(1, Number(maxChars) || 1);
   const words = String(text == null ? '' : text).split(/\s+/).filter(Boolean);
@@ -176,7 +179,7 @@ function wrapLongest(text, maxChars) {
 }
 function chipWidth(text) {
   const { longest } = wrapLongest(text, GVR2.maxCharsPerLine);
-  const raw = longest * GVR2.charPx + GVR2.hPad;
+  const raw = longest * GVR2.widthCharPx + GVR2.hPad;
   return Math.min(GVR2.maxCol, Math.max(GVR2.minCol, raw));
 }
 function titleText(card) {
@@ -196,12 +199,11 @@ function waitText(node) {
 function chipHeight(node, width) {
   if (node?.isStub) return GVR2.chipH;
   const parsedId = String(node?.card || '').trim().match(/^([A-Z]+-[A-Za-z0-9]+)(?:\s+|$)/)?.[1] || null;
-  const idBudget = parsedId ? parsedId.length * GVR2.charPx + 5 : 0;
-  const perLineChars = Math.max(1, Math.floor((width - GVR2.hPad - idBudget) / GVR2.charPx));
+  const idBudget = parsedId ? parsedId.length * GVR2.titleGlyphPx + 5 : 0;
+  const perLineChars = Math.max(1, Math.floor((width - GVR2.hPad - idBudget) / GVR2.titleGlyphPx));
   const titleLines = wrapLongest(titleText(node?.card), perLineChars).lines.length;
   const wait = waitText(node);
-  const waitBudget = Math.max(8, perLineChars - 12);
-  const waitLines = wait ? Math.min(2, wrapLongest(wait, waitBudget).lines.length) : 1;
+  const waitLines = wait ? 2 : 1;
   return Math.max(GVR2.chipH,
     GVR2.padY * 2 + titleLines * GVR2.titleLineH + GVR2.contentGap + waitLines * GVR2.infoLineH);
 }
@@ -1205,8 +1207,8 @@ async function main() {
   const mxBoardNote = `${mxBoard}/MX Epic-board.md`;
   const mxShort = 'MX-A Hi';
   const mxMiddling = 'MX-B This title is of a middling sort length';
-  const mxLongTitle = 'An exceptionally long slice title that overflows well past two full lines while retaining every final word in deterministic graph geometry';
-  assert(mxLongTitle.length >= 120, 'MX fixture carries a 120-character title payload');
+  const mxLongTitle = 'W'.repeat(120);
+  assert.strictEqual(mxLongTitle.length, 120, 'MX fixture carries exactly 120 worst-case wide glyphs');
   const mxLong = `MX-C ${mxLongTitle}`;
   const mxParked = 'MX-D Park';
   const mxParkReason = 'Blocked on the upstream vendor SDK cut before this slice can resume in earnest';
@@ -1301,6 +1303,19 @@ async function main() {
     { card: mxParked, rank: 1, row: 1, waitReason: mxParkReason },
   ];
   const mxRows = rowLayout(mxNodes, (node) => mxCols.widths[node.rank]);
+  // Independent wide-glyph bound: a 12px proportional-font W occupies less
+  // than 12px in the measured native fixture. Prove the allocated title lines
+  // cover that pixel demand; changing only titleGlyphPx back to the inherited
+  // 7px average makes this inequality red even if the replica still executes.
+  const measuredWideGlyphPx = 12;
+  const renderedIdBudgetPx = 'MX-C'.length * 8 + 5;
+  const renderedTitleAreaPx = mxCols.widths[1] - GVR2.hPad - renderedIdBudgetPx;
+  const wideGlyphLinesNeeded = Math.ceil(mxLongTitle.length * measuredWideGlyphPx / renderedTitleAreaPx);
+  const allocatedWideGlyphLines = wrapLongest(mxLongTitle,
+    Math.floor((mxCols.widths[1] - GVR2.hPad - ('MX-C'.length * GVR2.titleGlyphPx + 5))
+      / GVR2.titleGlyphPx)).lines.length;
+  assert(allocatedWideGlyphLines >= wideGlyphLinesNeeded,
+    'MX average-width mutant: allocated title lines contain the independently measured 120-W pixel demand');
   for (const [id, rank, row] of [['MX-A', 0, 0], ['MX-B', 0, 1], ['MX-C', 1, 0], ['MX-D', 1, 1]]) {
     const x = mxCols.offsets[rank];
     const y = mxRows.tops.get(row);
@@ -1339,6 +1354,9 @@ async function main() {
   assert(byClass(mxLongChip, 'graph-view-chip-title')[0].style.cssText.includes(`line-height:${GVR2.titleLineH}px`)
     && byClass(mxLongChip, 'graph-view-chip-info')[0].style.cssText.includes(`line-height:${GVR2.infoLineH}px`),
   'MX mutant: rendered title and info line boxes are bound to the exact height formula constants');
+  assert(mxTitleOf(mxLongChip).style.cssText.includes(`font-size:${GVR2.titleFontPx}px`)
+    && GVR2.titleGlyphPx > GVR2.titleFontPx,
+  'MX mutant: repeated-W geometry uses an explicit title font and a strictly conservative wider glyph cell');
   assert.strictEqual(mxTitleOf(mxMidChip).textContent, 'This title is of a middling sort length',
     'MX: the in-cap two-line title renders its full text with no ellipsis character');
   assert(mxTitleOf(mxLongChip).textContent === mxLongTitle
@@ -1391,7 +1409,7 @@ async function main() {
     'BL4-MUTANT-FIRST-TAP-OPENS: first tap selects MX-C without navigation');
   const mxPanel = byClass(mxRoot, 'graph-view-detail-panel')[0];
   assert(mxPanel && textOf(mxPanel).includes('MX-C')
-    && textOf(mxPanel).includes('An exceptionally long slice title')
+    && textOf(mxPanel).includes(mxLongTitle)
     && textOf(mxPanel).includes('blocked')
     && textOf(mxPanel).includes('waiting on: MX-A Hi')
     && textOf(mxPanel).includes(`Outcome: ${mxLongOutcome}`)
@@ -1698,6 +1716,11 @@ async function main() {
   assert(pCanvas && pCanvas.style.cssText.includes(`width:396px;height:${pHeight}px`)
     && pCanvas.style.cssText.includes('margin-inline:auto'),
   'P1: one shared canvas spans the final cluster bottom + pad with conditional CSS centering');
+  const pScroller = byClass(pRoot, 'graph-view-scroll')[0];
+  assert(pScroller.style.cssText.includes('overflow-x:auto')
+    && pScroller.style.cssText.includes('overflow-y:hidden')
+    && pScroller.style.cssText.includes(`padding-bottom:${GVR2.scrollbarAllowance}px`),
+  'P1 mutants: project scroller independently binds horizontal scrolling, hidden vertical overflow, and bottom allowance');
 
   // BL-6 select-first cluster focus. Epic One's own chips plus its direct
   // partners on the incoming EB-1 → E1-2 and outgoing E1-2 → E2-1 edges stay
