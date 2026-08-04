@@ -23,6 +23,7 @@ const {
 } = require('./select-card');
 const {
   physicalProjectPrefix, canonicalWorkspacePath, epicBindingPaths, parentBoardRef,
+  resolveSliceAuthority, assertProjectableStatus,
 } = delivery.topology;
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
@@ -2249,7 +2250,6 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
   const findings = [];
   const slices = cards.map((name) => {
     const tracked = surface.state.cards && surface.state.cards[name];
-    const trackedMapping = tracked && projectionMapping(tracked.phase);
     const slicePath = path.join(path.dirname(surface.boardPath), `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
     const sliceRaw = fs.readFileSync(slicePath, 'utf8');
@@ -2260,49 +2260,48 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
       status,
       cross_epic_dependency: dependencies.some((dependency) => !siblings.has(dependency)),
     });
-    if (name === currentCard) {
-      if (currentStatus === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        findings.push(legacyCompletionFinding(surface, name, tracked));
-        return decorate('in_progress');
-      }
-      return decorate(currentStatus);
+    // The live claim's status overrides the ledger phase for that one card.
+    const hasRecord = name === currentCard || Boolean(tracked && projectionMapping(tracked.phase));
+    const ledgerStatus = name === currentCard
+      ? currentStatus
+      : (tracked && projectionMapping(tracked.phase) ? projectionMapping(tracked.phase).status : null);
+    const boardStatus = delivery.normalizeStatus(scalarField(sliceRaw, 'status') || 'planning')
+      || (scalarField(sliceRaw, 'status') || 'planning');
+    const verdict = resolveSliceAuthority({
+      hasRecord,
+      ledgerStatus,
+      boardStatus,
+      doneProven: successfulDeploymentReceipts(tracked),
+      boardIsSlice: true,
+    });
+    assertProjectableStatus(verdict);
+    if (verdict.demoted) {
+      findings.push(legacyCompletionFinding(surface, name, verdict.source === 'ledger' ? tracked : null));
     }
-    if (trackedMapping) {
-      if (trackedMapping.status === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        findings.push(legacyCompletionFinding(surface, name, tracked));
-        return decorate('in_progress');
-      }
-      return decorate(trackedMapping.status);
-    }
-    const status = scalarField(sliceRaw, 'status') || 'planning';
-    if (delivery.normalizeStatus(status) === 'completed') {
-      findings.push(legacyCompletionFinding(surface, name));
-      return decorate('in_progress');
-    }
-    return decorate(status);
+    return decorate(verdict.status);
   });
   return { ...delivery.deriveEpicLifecycle(slices), findings };
 }
 
 function noteProjectionMapping(raw, record = null) {
-  const tracked = record && projectionMapping(record.phase);
-  if (tracked) {
-    if (tracked.status === 'completed' && !successfulDeploymentReceipts(record)) {
-      return projectionMapping('implementing');
-    }
-    return tracked;
-  }
-  const status = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
-  if (status === 'completed' && scalarField(raw, 'type') === 'slice') {
-    return projectionMapping('implementing');
-  }
-  return {
+  const statusMap = {
     planning: { column: 'In Planning', complete: false, status: 'planning' },
     in_progress: { column: 'In Progress', complete: false, status: 'in_progress' },
     parked: { column: 'In Progress', complete: false, status: 'parked' },
     blocked: { column: 'Blocked', complete: false, status: 'blocked' },
     completed: { column: 'Completed', complete: true, status: 'completed' },
-  }[status];
+  };
+  const tracked = record && projectionMapping(record.phase);
+  const boardStatus = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+  const verdict = resolveSliceAuthority({
+    hasRecord: Boolean(tracked),
+    ledgerStatus: tracked ? tracked.status : null,
+    boardStatus,
+    doneProven: successfulDeploymentReceipts(record),
+    boardIsSlice: scalarField(raw, 'type') === 'slice',
+  });
+  assertProjectableStatus(verdict);
+  return statusMap[verdict.status];
 }
 
 function auditReconcileFinding(

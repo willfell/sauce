@@ -39,4 +39,43 @@ eq(b.boardRef, 'spice/projects/demo/tasks/Epic One/board/Epic One-board.md', 'bo
 eq(topo.parentBoardRef('spice/projects/demo', 'demo-board.md'),
   'spice/projects/demo/demo-board.md', 'parentBoardRef');
 
+// resolveSliceAuthority — ledger wins when present.
+let v = topo.resolveSliceAuthority({ hasRecord: true, ledgerStatus: 'in_progress', boardStatus: 'completed', doneProven: false, boardIsSlice: true });
+eq(v.source, 'ledger', 'record present => ledger source');
+eq(v.status, 'in_progress', 'ledger in_progress wins over board completed');
+eq(v.doneProven, false, 'not proven');
+
+// Ledger completed WITH receipts is done.
+v = topo.resolveSliceAuthority({ hasRecord: true, ledgerStatus: 'completed', boardStatus: 'planning', doneProven: true, boardIsSlice: true });
+eq(v.status, 'completed', 'proven completed stays completed');
+eq(v.doneProven, true, 'proven');
+ok(!v.demoted, 'not demoted');
+
+// Ledger completed WITHOUT receipts demotes.
+v = topo.resolveSliceAuthority({ hasRecord: true, ledgerStatus: 'completed', boardStatus: 'planning', doneProven: false, boardIsSlice: true });
+eq(v.status, 'in_progress', 'unproven ledger completion demotes');
+ok(v.demoted, 'demoted flagged');
+
+// No record: board slice declaration cannot assert done.
+v = topo.resolveSliceAuthority({ hasRecord: false, boardStatus: 'completed', boardIsSlice: true });
+eq(v.source, 'board', 'no record => board source');
+eq(v.status, 'in_progress', 'board slice completed demotes');
+eq(v.doneProven, false, 'board never proves done');
+
+// No record, non-slice: board status taken at face value (no demotion).
+v = topo.resolveSliceAuthority({ hasRecord: false, boardStatus: 'completed', boardIsSlice: false });
+eq(v.status, 'completed', 'non-slice board completed not demoted');
+
+// No record, board in_progress: pass-through.
+v = topo.resolveSliceAuthority({ hasRecord: false, boardStatus: 'blocked', boardIsSlice: true });
+eq(v.status, 'blocked', 'board non-completed passes through');
+
+// assertProjectableStatus: throws on the impossible-in-correct-code combination.
+throws(() => topo.assertProjectableStatus({ status: 'completed', doneProven: false }),
+  /projectable status invariant/, 'completed-without-proof assertion fires');
+// ...and accepts valid verdicts.
+topo.assertProjectableStatus({ status: 'completed', doneProven: true });
+topo.assertProjectableStatus({ status: 'in_progress', doneProven: false });
+count += 2;
+
 console.log(`DELIVERY-TOPOLOGY PASS (${count} assertions)`);
