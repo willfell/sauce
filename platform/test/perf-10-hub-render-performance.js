@@ -80,6 +80,18 @@ function nodeCount(root) {
   return count;
 }
 
+function propertyCount(root, key, value = true) {
+  let count = root && root[key] === value ? 1 : 0;
+  for (const child of (root && root.children) || []) count += propertyCount(child, key, value);
+  return count;
+}
+
+function classCount(root, cls) {
+  let count = String((root && root.className) || '').split(/\s+/).includes(cls) ? 1 : 0;
+  for (const child of (root && root.children) || []) count += classCount(child, cls);
+  return count;
+}
+
 function requireMeasurement(condition, message) {
   if (!condition) throw new Error(`PERF-10 invalid measurement: ${message}`);
 }
@@ -118,11 +130,14 @@ function fixture() {
 
 function dvFor(fx, current) {
   const container = element('div');
+  const queryCounts = new Map();
   return {
     container,
+    _queryCounts: queryCounts,
     current: () => current,
     pages(query) {
       const scope = String(query || '').replaceAll('"', '');
+      queryCounts.set(scope, (queryCounts.get(scope) || 0) + 1);
       if (!scope) return dataArray(fx.pages);
       if (scope === fx.currentFolder + '/docs') return dataArray(fx.byScope.get(fx.currentFolder) || []);
       if (scope === fx.currentFolder + '/tasks') return dataArray([]);
@@ -147,6 +162,20 @@ async function samples(label, makeRun, count = 7) {
 
 (async () => {
   const fx = fixture();
+  const exactScopes = {
+    'spice/projects': 120,
+    'spice/tasks': 360,
+    'spice/tasks/_done': 80,
+    'spice/meetings/notes': 180,
+    'spice/reader': 140,
+    'spice/trips': 40,
+    activity: 100,
+  };
+  requireMeasurement(fx.pages.length === 1740, `fixture must contain exactly 1,740 notes, got ${fx.pages.length}`);
+  for (const [scope, expected] of Object.entries(exactScopes)) {
+    requireMeasurement((fx.byScope.get(scope) || []).length === expected,
+      `${scope} fixture must contain exactly ${expected} notes`);
+  }
   const prior = { app: global.app, customJS: global.customJS, window: global.window, moment: global.moment, document: global.document,
     localStorageDescriptor: Object.getOwnPropertyDescriptor(global, 'localStorage') };
   const app = {
@@ -164,7 +193,9 @@ async function samples(label, makeRun, count = 7) {
   global.window = { app, moment, customJS: null, localStorage };
   global.moment = moment; global.document = { body: element('body'), activeElement: null, createElement: (t) => element(t) };
 
-  const BeaconCards = { render: async (dv, opts) => { for (const p of opts.pages || []) {
+  const metrics = { beaconPages: 0, activityQueried: 0, activityRendered: 0 };
+  const resetMetrics = () => { metrics.beaconPages = 0; metrics.activityQueried = 0; metrics.activityRendered = 0; };
+  const BeaconCards = { render: async (dv, opts) => { metrics.beaconPages += (opts.pages || []).length; for (const p of opts.pages || []) {
     const card = dv.container.createEl('div');
     if (opts.title) card.textContent = String(opts.title(p) || '');
     if (opts.meta) card.innerHTML = String(opts.meta(p) || '');
@@ -178,8 +209,8 @@ async function samples(label, makeRun, count = 7) {
   };
   const TaskTodayList = { renderInlineLinks: (el, text) => { el.textContent = text; }, markTaskRow() {} };
   const ActivityFeed = {
-    query: (dv) => { const selected = dv.pages('').where((p) => p.created_at && String(p.created_at).startsWith(fx.today)).array(); return { pages: selected, total: selected.length }; },
-    render: async (dv, opts) => { for (const p of opts.precomputed.pages) dv.container.createEl('div', { text: p.file.name }); },
+    query: (dv) => { const selected = dv.pages('').where((p) => p.created_at && String(p.created_at).startsWith(fx.today)).array(); metrics.activityQueried += selected.length; return { pages: selected, total: selected.length }; },
+    render: async (dv, opts) => { metrics.activityRendered += opts.precomputed.pages.length; for (const p of opts.precomputed.pages) dv.container.createEl('div', { text: p.file.name }); },
   };
   const customJS = { BeaconCards, SectionLabel, DocSearch, TaskEntity, TaskTodayList, ActivityFeed,
     RenderSafe: { page: (dv) => dv.current(), captureScroll() {} }, ProjectChromeBar: null, MenuPopover: { open() {} }, TaskDialog: { open() {} } };
@@ -193,27 +224,57 @@ async function samples(label, makeRun, count = 7) {
 
   const results = [];
   results.push(await samples('ProjectsHubCards.render', async () => {
+    resetMetrics();
     const dv = dvFor(fx, current); const hub = new ProjectsHubCards();
     await hub.render(dv);
     requireMeasurement(hub._lookup && hub._lookup.size === 120, 'Projects hub did not enrich all 120 projects');
+    requireMeasurement(hub._pages && hub._pages.length === 106, 'Projects hub did not render the exact 106 non-archived project cards');
+    requireMeasurement(metrics.beaconPages === 106, `Projects hub rendered ${metrics.beaconPages}, expected 106 cards`);
+    requireMeasurement((dv._queryCounts.get('spice/projects') || 0) === 1, 'Projects hub must query the project index exactly once');
+    const projectFolderQueries = Array.from(dv._queryCounts.entries()).filter(([scope]) => /^spice\/projects\/project-\d+$/.test(scope));
+    requireMeasurement(projectFolderQueries.length === 120 && projectFolderQueries.every(([, count]) => count === 1),
+      'Projects hub must query each of 120 project folders exactly once');
     requireMeasurement(nodeCount(dv.container) > 100, 'Projects hub did not construct its card DOM');
   }));
   results.push(await samples('ProjectDashboard.render', async () => {
+    resetMetrics();
     const dv = dvFor(fx, current); await new ProjectDashboard().render(dv);
     requireMeasurement(Boolean(dv.container.querySelector('.project-dashboard-root')), 'Project dashboard root was not rendered');
     requireMeasurement(nodeCount(dv.container) > 25, 'Project dashboard did not construct its sections');
+    requireMeasurement((dv._queryCounts.get(`${fx.currentFolder}/docs`) || 0) === 2, 'Project dashboard must query project docs for counts and recency');
+    requireMeasurement((dv._queryCounts.get('spice/meetings/notes') || 0) === 2, 'Project dashboard must query meetings for counts and recency');
+    requireMeasurement((dv._queryCounts.get('spice/tasks') || 0) === 1, 'Project dashboard must query project tasks exactly once');
+    requireMeasurement(propertyCount(dv.container, '__isRecentRow') === 6, 'Project dashboard must render 4 docs and 2 matching meeting rows');
   }));
   results.push(await samples('SpaceDailyDashboard.render', async () => {
+    resetMetrics();
     const dv = dvFor(fx, { file: { name: `Journal-${fx.today}`, path: `spice/daily/Journal-${fx.today}.md` } });
     const dashboard = new SpaceDailyDashboard(); dashboard._readSectionState = async () => ({}); dashboard._enrichMeeting = async (p) => ({ ...p, attendees: ['Ada'], hasNotes: true, openTasks: 1 });
     await dashboard.render(dv, { asOf: fx.today });
     requireMeasurement(Boolean(dv.container.querySelector('.space-daily-dashboard')), 'Daily dashboard root was not rendered');
     requireMeasurement(nodeCount(dv.container) > 100, 'Daily dashboard did not construct its large-fixture sections');
+    requireMeasurement((dv._queryCounts.get('spice/meetings/notes') || 0) === 1, 'Daily dashboard must query meetings exactly once');
+    requireMeasurement((dv._queryCounts.get('spice/tasks') || 0) === 1 && (dv._queryCounts.get('spice/tasks/_done') || 0) === 1,
+      'Daily dashboard must query open and completed task scopes exactly once');
+    requireMeasurement((dv._queryCounts.get('spice/reader') || 0) === 1 && (dv._queryCounts.get('spice/trips') || 0) === 2,
+      'Daily dashboard must query reader once and trips for gating plus rendering');
+    requireMeasurement(metrics.beaconPages === 180, `Daily dashboard rendered ${metrics.beaconPages}, expected 180 meeting cards`);
+    requireMeasurement(metrics.activityQueried === 100 && metrics.activityRendered === 112,
+      `Daily activity must query 100 direct notes and render them with 12 reading articles; got ${metrics.activityQueried}/${metrics.activityRendered}`);
+    requireMeasurement(classCount(dv.container, 'sauce-daily-task-row-content') === 360,
+      'Daily dashboard must render all 120 today and 240 overdue task rows');
   }));
 
   const budgetMs = 250;
+  const expectedLabels = ['ProjectsHubCards.render', 'ProjectDashboard.render', 'SpaceDailyDashboard.render'];
+  requireMeasurement(results.length === expectedLabels.length && results.every((result, index) => result.label === expectedLabels[index]),
+    'receipt must contain all three hubs in canonical order');
   const verdict = results.every((r) => r.median_ms <= budgetMs && r.p95_ms <= budgetMs * 2);
-  const receipt = { fixture_notes: fx.pages.length, samples_per_hub: 7, budget_median_ms: budgetMs, budget_p95_ms: budgetMs * 2, results, recommendation: verdict ? 'NO-GO: do not open EntityQuery epic yet' : 'GO: open EntityQuery epic', pass: verdict };
+  const expectedRecommendation = verdict ? 'NO-GO: do not open EntityQuery epic yet' : 'GO: open EntityQuery epic';
+  const receipt = { fixture_notes: fx.pages.length, samples_per_hub: 7, budget_median_ms: budgetMs, budget_p95_ms: budgetMs * 2, results, recommendation: expectedRecommendation, pass: verdict };
+  requireMeasurement(receipt.recommendation === (receipt.pass
+    ? 'NO-GO: do not open EntityQuery epic yet' : 'GO: open EntityQuery epic'),
+  'recommendation must be derived from the threshold verdict');
   console.log(JSON.stringify(receipt, null, 2));
 
   global.app = prior.app; global.customJS = prior.customJS; global.window = prior.window;

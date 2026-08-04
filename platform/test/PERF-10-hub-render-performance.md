@@ -4,9 +4,9 @@ Measured 2026-08-03 on the workshop Node harness using the real `ProjectsHubCard
 
 | Hub | Warm median | Warm p95 |
 | --- | ---: | ---: |
-| Projects hub | 0.86 ms | 1.41 ms |
-| Project dashboard | 0.15 ms | 0.27 ms |
-| Daily dashboard | 2.11 ms | 5.33 ms |
+| Projects hub | 0.63 ms | 0.98 ms |
+| Project dashboard | 0.17 ms | 0.32 ms |
+| Daily dashboard | 1.35 ms | 2.58 ms |
 
 Seven measured renders follow two warm-up renders per hub. The binding regression budget is 250 ms median and 500 ms p95. This is intentionally far above the observed Node time: it is a portable ceiling for catastrophic query/render regressions, not a promise about Obsidian wall-clock paint. A quarter-second median is the point where a hub interaction becomes perceptibly sluggish; the doubled p95 allowance absorbs CI and host variance.
 
