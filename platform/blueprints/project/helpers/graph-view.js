@@ -359,16 +359,17 @@ class GraphView {
       const to = positions.get(edge.to);
       if (!from || !to) continue;
       const fromW = from.w != null ? from.w : geometry.chipW;
-      const chipH = geometry.chipH;
+      const fromH = from.h != null ? from.h : geometry.chipH;
+      const toH = to.h != null ? to.h : geometry.chipH;
       let d;
       if (from.x === to.x) {
         const x = from.x + fromW / 2;
-        d = `M ${x} ${from.y + chipH} L ${x} ${to.y}`;
+        d = `M ${x} ${from.y + fromH} L ${x} ${to.y}`;
       } else {
         const x1 = from.x + fromW;
-        const y1 = from.y + chipH / 2;
+        const y1 = from.y + fromH / 2;
         const x2 = to.x;
-        const y2 = to.y + chipH / 2;
+        const y2 = to.y + toH / 2;
         const bend = Math.max(24, (x2 - x1) / 2);
         d = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
       }
@@ -643,11 +644,10 @@ class GraphView {
   // width is the widest chip content in that rank (deterministic text formula,
   // NOT a live-DOM measure — the harness is headless), clamped to [minCol,
   // maxCol]. Column x-offset accumulates prior column widths plus an inter-column
-  // gap; a chip's width is its column's width. The canvas is sized to the last
-  // column's right edge plus pad EXACTLY, so the final column never clips at
-  // rest — horizontal scroll engages only when the container is genuinely
-  // narrower than that width. rowH/chipH stay constant, so vertical edge math is
-  // unchanged; only the horizontal axis is auto-width now.
+  // gap; a chip's width is its column's width. Vertical geometry is also
+  // deterministic: each chip height comes from full title lines plus at most
+  // two wait lines, each row takes its tallest chip, and row tops accumulate
+  // those heights plus rowGap. No live DOM measurement participates.
   async _renderGraph(root, result, api, source, extraWarnings) {
     const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
     if (!nodes.length) return;
@@ -656,8 +656,10 @@ class GraphView {
     this._renderStuckSummary(root, analysis);
     this._renderLegend(root, nodes, api);
     const geometry = {
-      rowH: 74, chipH: 56, pad: 12, colGap: 28, chipW: 172,
-      charPx: 7, hPad: 18, minCol: 120, maxCol: 260,
+      chipH: 56, pad: 12, colGap: 28, rowGap: 18, chipW: 172,
+      widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+      hPad: 18, minCol: 120, maxCol: 260,
+      titleLineH: 15, infoLineH: 13, padY: 7, contentGap: 3, scrollbarAllowance: 14,
       maxCharsPerLine: Math.floor((260 - 18) / 7),
     };
     const ranks = [...new Set(nodes.map((node) => node.rank || 0))].sort((left, right) => left - right);
@@ -671,23 +673,23 @@ class GraphView {
     let cursorX = geometry.pad;
     for (const rank of ranks) { colX.set(rank, cursorX); cursorX += colWidth.get(rank) + geometry.colGap; }
     const lastRank = ranks[ranks.length - 1];
+    const rows = this._rowGeometry(nodes, (node) => colWidth.get(node.rank || 0), geometry, geometry.pad);
     const positions = new Map(nodes.map((node) => {
       const rank = node.rank || 0;
       return [node.card, {
-        x: colX.get(rank),
-        y: geometry.pad + (node.row || 0) * geometry.rowH,
-        w: colWidth.get(rank),
+        x: colX.get(rank), y: rows.tops.get(node.row || 0),
+        w: colWidth.get(rank), h: this._chipHeight(node, colWidth.get(rank), geometry),
       }];
     }));
     const width = colX.get(lastRank) + colWidth.get(lastRank) + geometry.pad;
-    const height = geometry.pad * 2 + (Math.max(...nodes.map((node) => node.row || 0)) * geometry.rowH) + geometry.chipH;
+    const height = rows.bottom + geometry.pad;
     const outcomes = await this._loadOutcomes(nodes);
     const scroller = root.createEl("div");
     scroller.className = "graph-view-scroll";
-    scroller.style.cssText = "overflow-x:auto;max-width:100%;";
+    scroller.style.cssText = `overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:${geometry.scrollbarAllowance}px;box-sizing:content-box;`;
     const canvas = scroller.createEl("div");
     canvas.className = "graph-view-canvas";
-    canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;`;
+    canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;margin-inline:auto;`;
     const edgeLayer = canvas.createEl("div");
     edgeLayer.className = "graph-view-edges";
     edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
@@ -706,41 +708,84 @@ class GraphView {
     }
   }
 
-  // Deterministic chip-content width (headless-safe): word-wrap the chip's text
-  // to at most two lines at the column's character budget, then size to the
-  // widest wrapped line. A title that overflows two lines caps at maxCol (its
-  // second line ellipsizes in the DOM); everything else is clamped to
-  // [minCol, maxCol]. Stubs size to their ghost label.
+  // Deterministic chip-content width (headless-safe): word-wrap the complete
+  // chip title at the maximum column budget and size to its longest line.
+  // Nothing is visually clamped; width alone remains bounded to [minCol,maxCol].
   _chipContentWidth(node, geometry) {
     const text = node.isStub ? (node.stubLabel || node.card || "") : (node.card || "");
-    const { longest, clamped } = this._wrapTitle(text, geometry.maxCharsPerLine);
-    const raw = clamped ? geometry.maxCol : (longest * geometry.charPx + geometry.hPad);
+    const { longest } = this._wrapTitle(text, geometry.maxCharsPerLine);
+    const raw = longest * geometry.widthCharPx + geometry.hPad;
     return Math.min(geometry.maxCol, Math.max(geometry.minCol, raw));
   }
 
-  // Greedy two-line word wrap. Returns the kept (≤2) lines, the longest line's
-  // character length, and whether the text overflowed two lines (clamped → the
-  // second line ellipsizes under CSS -webkit-line-clamp:2).
+  // Greedy full-title word wrap. Oversized words split at the same character
+  // budget as CSS overflow-wrap:anywhere, so geometry cannot undercount lines.
   _wrapTitle(text, maxChars) {
     const limit = Math.max(1, Number(maxChars) || 1);
     const words = String(text == null ? "" : text).split(/\s+/).filter(Boolean);
     const lines = [];
     let line = "";
-    for (const word of words) {
+    for (const sourceWord of words) {
+      let word = sourceWord;
+      if (word.length > limit) {
+        if (line) { lines.push(line); line = ""; }
+        while (word.length > limit) {
+          lines.push(word.slice(0, limit));
+          word = word.slice(limit);
+        }
+      }
       const candidate = line ? `${line} ${word}` : word;
       if (candidate.length <= limit || !line) line = candidate;
       else { lines.push(line); line = word; }
     }
     if (line) lines.push(line);
-    const clamped = lines.length > 2;
-    const kept = lines.slice(0, 2);
-    const longest = kept.reduce((max, entry) => Math.max(max, entry.length), 0);
-    return { lines: kept, longest, clamped };
+    const longest = lines.reduce((max, entry) => Math.max(max, entry.length), 0);
+    return { lines: lines.length ? lines : [""], longest };
+  }
+
+  _chipHeight(node, chipW, geometry) {
+    if (node?.isStub) return geometry.chipH;
+    const parts = this._titleParts(node?.card);
+    // Height uses a deliberately conservative 13px glyph cell at an explicit
+    // 12px rendered font. This safely contains even repeated wide proportional
+    // glyphs (the width-sizing model remains the established 7px average).
+    const idBudget = parts.id ? parts.id.length * geometry.titleGlyphPx + 5 : 0;
+    const perLineChars = Math.max(1,
+      Math.floor((chipW - geometry.hPad - idBudget) / geometry.titleGlyphPx));
+    const titleLines = this._wrapTitle(parts.title, perLineChars).lines.length;
+    const waitText = this._waitInfo(node);
+    // Any wait may visually occupy its full two-line clamp. Reserving both
+    // exact info line boxes avoids another average-glyph estimate entirely.
+    const waitLines = waitText ? 2 : 1;
+    return Math.max(geometry.chipH,
+      geometry.padY * 2 + titleLines * geometry.titleLineH
+      + geometry.contentGap + waitLines * geometry.infoLineH);
+  }
+
+  _rowGeometry(nodes, widthForNode, geometry, startY) {
+    const rowNodes = new Map();
+    for (const node of nodes || []) {
+      const row = Number(node?.row) || 0;
+      if (!rowNodes.has(row)) rowNodes.set(row, []);
+      rowNodes.get(row).push(node);
+    }
+    const tops = new Map();
+    const heights = new Map();
+    let cursor = startY;
+    for (const row of [...rowNodes.keys()].sort((left, right) => left - right)) {
+      const height = Math.max(...rowNodes.get(row).map((node) => this._chipHeight(node, widthForNode(node), geometry)));
+      tops.set(row, cursor);
+      heights.set(row, height);
+      cursor += height + geometry.rowGap;
+    }
+    const last = [...rowNodes.keys()].sort((left, right) => left - right).at(-1);
+    return { tops, heights, bottom: last == null ? startY : tops.get(last) + heights.get(last) };
   }
 
   // Info-line wait text: a blocked slice (waitReason "waiting on: X, Y") shows
-  // "needs <first-dep-id>"; a parked slice's waitReason is the resume_condition
-  // verbatim, shown from its start (truncated). Null when the node is neither.
+  // "needs <first-dep-id>"; a parked slice's waitReason is the complete
+  // resume_condition (visual wrapping is bounded in _renderChip). Null when
+  // the node is neither.
   _waitInfo(node) {
     const reason = node && node.waitReason;
     if (reason == null || String(reason).trim() === "") return null;
@@ -750,7 +795,7 @@ class GraphView {
       const firstDep = blocked[1].split(",")[0].trim();
       return `needs ${this._titleParts(firstDep).id || firstDep}`;
     }
-    return this._truncate(text, 48);
+    return text.replace(/\s+/g, " ").trim();
   }
 
   // Outcome tooltip source (epic scope, READ-ONLY, fail-soft): read each slice's
@@ -810,7 +855,7 @@ class GraphView {
     const chip = canvas.createEl("div");
     chip.className = "graph-view-chip graph-view-stub";
     chip.style.cssText =
-      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;min-height:${geometry.chipH}px;`
+      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;height:${at.h || geometry.chipH}px;`
       + "display:flex;flex-direction:column;gap:3px;justify-content:center;padding:7px 9px;border-radius:9px;"
       + "cursor:pointer;box-sizing:border-box;color:var(--text-muted);opacity:0.75;"
       + "border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);"
@@ -836,13 +881,11 @@ class GraphView {
     const active = activeCard != null && node.card === activeCard;
     const chipW = at && at.w != null ? at.w : geometry.chipW;
     const parts = this._titleParts(node.card);
-    const perLineChars = Math.max(1, Math.floor((chipW - geometry.hPad) / geometry.charPx));
-    const wrapped = this._wrapTitle(parts.title, perLineChars);
     const chip = canvas.createEl("div");
     chip.className = `graph-view-chip ${presentation.className}`
-      + `${active ? " graph-view-active" : ""}${wrapped.clamped ? " graph-view-chip-clamped" : ""}`;
+      + `${active ? " graph-view-active" : ""}`;
     chip.style.cssText =
-      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;min-height:${geometry.chipH}px;`
+      `position:absolute;left:${at.x}px;top:${at.y}px;width:${chipW}px;height:${at.h || this._chipHeight(node, chipW, geometry)}px;`
       + "display:flex;flex-direction:column;gap:3px;justify-content:center;padding:7px 9px;border-radius:9px;"
       + `cursor:pointer;box-sizing:border-box;color:${presentation.color};`
       + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
@@ -856,25 +899,22 @@ class GraphView {
       : this._open(node.path || node.card, source));
     const titleRow = chip.createEl("div");
     titleRow.className = "graph-view-chip-title";
-    titleRow.style.cssText = "display:flex;align-items:baseline;gap:5px;min-width:0;";
+    titleRow.style.cssText = `display:flex;align-items:baseline;gap:5px;min-width:0;line-height:${geometry.titleLineH}px;`;
     if (parts.id) {
       const id = titleRow.createEl("span", { text: parts.id });
       id.className = "graph-view-chip-id";
       id.style.cssText = "flex:none;font-family:var(--font-monospace);font-size:0.72em;font-weight:600;opacity:0.85;";
     }
-    // Title wraps to two lines before any ellipsis (-webkit-line-clamp:2); the
-    // full title stays in the DOM so nothing is lost — only the visual overflow
-    // ellipsizes on the second line.
+    // Title wraps in full. Its deterministic line count is the same input used
+    // by _chipHeight, so the absolute chip box always contains every line.
     const title = titleRow.createEl("span", { text: parts.title });
     title.className = "graph-view-chip-name";
-    title.style.cssText = "min-width:0;font-size:0.78em;font-weight:600;"
-      + "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;"
-      + "overflow:hidden;text-overflow:ellipsis;overflow-wrap:anywhere;";
+    title.style.cssText = `min-width:0;font-size:${geometry.titleFontPx}px;font-weight:600;white-space:normal;overflow-wrap:anywhere;`;
     // Info line: the shared lifecycle glyph + colored status WORD (no local
     // presentation table) plus the inline wait reason.
     const info = chip.createEl("div");
     info.className = "graph-view-chip-info";
-    info.style.cssText = "display:flex;align-items:baseline;gap:5px;min-width:0;font-size:0.7em;";
+    info.style.cssText = `display:flex;align-items:flex-start;gap:5px;min-width:0;font-size:${geometry.infoFontPx}px;line-height:${geometry.infoLineH}px;`;
     const glyph = info.createEl("span", { text: presentation.glyph });
     glyph.className = `graph-view-status-glyph ${presentation.className}`;
     glyph.setAttribute?.("aria-hidden", "true");
@@ -887,7 +927,8 @@ class GraphView {
       const wait = info.createEl("span", { text: waitText });
       wait.className = "graph-view-wait";
       wait.setAttribute?.("title", String(node.waitReason || ""));
-      wait.style.cssText = "min-width:0;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+      wait.style.cssText = "min-width:0;color:var(--text-muted);display:-webkit-box;-webkit-box-orient:vertical;"
+        + "-webkit-line-clamp:2;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;";
     }
     if (insight?.isRootBlocker === true) {
       const gates = Number.isFinite(Number(insight.gates)) ? Number(insight.gates) : 0;
@@ -1005,31 +1046,35 @@ class GraphView {
     }
 
     const activeCard = this._activeCard(current);
-    // Project-scope COLUMN geometry stays fixed (colW/rowH/chipW/chipH); charPx
-    // and hPad only feed the shared chip's two-line wrap calc.
-    const geometry = { colW: 200, rowH: 74, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 26, charPx: 7, hPad: 18 };
+    // Project columns stay fixed, but vertical geometry shares the same
+    // deterministic full-title / bounded-wait height formula as epic scope.
+    const geometry = {
+      colW: 200, chipW: 172, chipH: 56, pad: 12, headerH: 30, clusterGap: 26,
+      rowGap: 18, widthCharPx: 7, titleGlyphPx: 13, titleFontPx: 12, infoFontPx: 11,
+      hPad: 18, titleLineH: 15, infoLineH: 13,
+      padY: 7, contentGap: 3, scrollbarAllowance: 14,
+    };
     const positions = new Map();
     let cursorY = geometry.pad;
     let width = geometry.pad * 2 + geometry.chipW;
     for (const cluster of clusters) {
       cluster.headerY = cursorY;
       const chipTop = cursorY + geometry.headerH;
+      const rows = this._rowGeometry(cluster.nodes, () => geometry.chipW, geometry, chipTop);
       for (const node of cluster.nodes) {
         if (!positions.has(node.card)) {
           positions.set(node.card, {
             x: geometry.pad + node.rank * geometry.colW,
-            y: chipTop + node.row * geometry.rowH,
+            y: rows.tops.get(node.row || 0),
+            h: this._chipHeight(node, geometry.chipW, geometry),
           });
         }
       }
-      const clusterHeight = cluster.nodes.length
-        ? Math.max(...cluster.nodes.map((node) => node.row)) * geometry.rowH + geometry.chipH
-        : 0;
       if (cluster.nodes.length) {
         width = Math.max(width,
           geometry.pad * 2 + Math.max(...cluster.nodes.map((node) => node.rank)) * geometry.colW + geometry.chipW);
       }
-      cursorY = chipTop + clusterHeight + geometry.clusterGap;
+      cursorY = rows.bottom + geometry.clusterGap;
     }
     const height = clusters.length ? cursorY - geometry.clusterGap + geometry.pad : 0;
     const allNodes = clusters.flatMap((cluster) => cluster.nodes);
@@ -1045,10 +1090,10 @@ class GraphView {
       this._renderLegend(root, allNodes, api);
       const scroller = root.createEl("div");
       scroller.className = "graph-view-scroll";
-      scroller.style.cssText = "overflow-x:auto;max-width:100%;";
+      scroller.style.cssText = `overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:${geometry.scrollbarAllowance}px;box-sizing:content-box;`;
       const canvas = scroller.createEl("div");
       canvas.className = "graph-view-canvas graph-view-project-canvas";
-      canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;`;
+      canvas.style.cssText = `position:relative;width:${width}px;height:${height}px;margin-inline:auto;`;
       const edgeLayer = canvas.createEl("div");
       edgeLayer.className = "graph-view-edges";
       edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
