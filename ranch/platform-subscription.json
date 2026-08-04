@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.280.0",
+  "workshop_version": "0.280.1",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -12,7 +12,7 @@
     },
     {
       "name": "customjs-guard",
-      "version": "1.0.1"
+      "version": "1.0.2"
     },
     {
       "name": "validator",
@@ -124,7 +124,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.6.2"
+      "version": "0.6.3"
     },
     {
       "name": "chrome-bar",
@@ -138,7 +138,7 @@
     },
     {
       "name": "daily",
-      "version": "0.25.0"
+      "version": "0.25.1"
     },
     {
       "name": "meetings",
@@ -162,11 +162,11 @@
     },
     {
       "name": "wiki",
-      "version": "0.8.3"
+      "version": "0.8.4"
     },
     {
       "name": "home",
-      "version": "0.8.6"
+      "version": "0.8.7"
     },
     {
       "name": "reader",

@@ -3,7 +3,7 @@
   "mechanisms": [
     {
       "name": "customjs-guard",
-      "version": "1.0.1"
+      "version": "1.0.2"
     },
     {
       "name": "validator",
@@ -119,7 +119,7 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.6.2"
+      "version": "0.6.3"
     }
   ],
   "blueprints": [
@@ -133,7 +133,7 @@
     },
     {
       "name": "daily",
-      "version": "0.25.0"
+      "version": "0.25.1"
     },
     {
       "name": "meetings",
@@ -177,7 +177,7 @@
     },
     {
       "name": "wiki",
-      "version": "0.8.3"
+      "version": "0.8.4"
     },
     {
       "name": "reader",
