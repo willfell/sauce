@@ -40,6 +40,14 @@ check(controller.includes('const filters = { stuck: false, dimDone: false };')
 check(controller.includes('BL5B-FAIL-SOFT-GUARD')
   && controller.includes('if (key === "stuck" && !analysis) return;'),
   'BL5B-SENTINEL-FAIL-SOFT-GUARD: Stuck is inert without authoritative analysis');
+for (const [surface, pattern] of [
+  ['LOCAL-STORAGE', /\blocalStorage\b|\.setItem\s*\(|\.removeItem\s*\(/],
+  ['VAULT-MUTATOR', /\.vault\s*\.\s*(?:create|modify|delete|rename|trash)\s*\(/],
+  ['ADAPTER-MUTATOR', /\.adapter\s*\.\s*(?:write|append|remove|rename|process)\s*\(/],
+  ['FRONTMATTER-MUTATOR', /processFrontMatter\s*\(/],
+  ['COORDINATOR-MUTATOR', /\b(?:Coordinator|DeliveryCoordinator)\b/],
+]) check(!pattern.test(widget),
+  `BL5C-SENTINEL-NO-${surface}: GraphView contains no persistence surface`);
 
 for (const marker of [
   'BL5B-CROSS-INSTANCE-ACTIVE',
@@ -71,6 +79,8 @@ for (const [label, predicate] of [
   ['DIVERGENT-DIM', "assert(bl5DivergentChipFor(id).className.includes('graph-view-dimmed'), `BL5B-CLOSURE-DIVERGENCE: non-member ${id} dims despite the drawn edge path`);"],
   ['FAIL-SOFT-DOM', "assert.deepStrictEqual(domShape(failSoftRoot), before, `BL5-FAIL-SOFT-${label.toUpperCase()}: Stuck is an exact no-op without authoritative GraphInsights`);"],
   ['FAIL-SOFT-CHIPS', "assert(byClass(failSoftRoot, 'graph-view-chip').every((chip) => !chip.className.includes('graph-view-dimmed')), `BL5-MUTANT-${label.toUpperCase()}-INSIGHTS-BRIDGE: unavailable analysis never dims a connecting-chain chip`);"],
+  ['ZERO-VAULT-WRITES', "assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');"],
+  ['ZERO-PERSISTENCE-WRITES', "assert.deepStrictEqual(persistenceMutations, [], 'BL4-BL5-ZERO-PERSISTENCE-SURFACES: selection and filters invoke no localStorage or coordinator mutation surface');"],
 ]) check(compactBehavior.includes(predicate),
   `BL5C-SENTINEL-${label}-PREDICATE: executable behavioral predicate is exact`);
 check(!/\bassert(?:\.ok)?\s*\(\s*true\b/.test(behavior),
