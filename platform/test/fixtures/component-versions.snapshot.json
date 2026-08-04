@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.280.3",
+  "workshop_version": "0.281.0",
   "components": {
     "boards": "0.3.0",
     "cowork": "0.41.0",
@@ -50,6 +50,6 @@
     "menu-popover": "0.3.0",
     "chrome-bar": "0.4.3",
     "section-explorer": "0.6.3",
-    "delivery": "0.5.0"
+    "delivery": "0.6.0"
   }
 }
