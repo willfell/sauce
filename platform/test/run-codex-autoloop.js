@@ -8505,6 +8505,35 @@ const bhDeps = (fx, extra = {}) => ({
   eq(receipt.findings.lane_divergence.length, 2, 'BH-LANE one entry per interesting epic, none for healthy ones');
 }
 
+// BH-NOOP / BH-READONLY — a healthy fully-checked board is a no-op, and the
+// default invocation can never touch a vault: only the scheduled job passes
+// --write-note.
+{
+  const root = path.join(tmp, 'bh-noop');
+  const fx = bhScaffold(root, {
+    progress: ['Calm Epic'],
+    epics: { 'Calm Epic': {
+      lanes: { 'In Planning': ['CA-2'], 'In Progress': ['CA-1'] },
+      slices: { 'CA-1': 'in_progress', 'CA-2': 'planning' },
+    } },
+  });
+  const state = emptyState();
+  state.cards['CA-1'] = { card: 'CA-1', phase: 'implementing' };
+  let writes = 0;
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state, writeText: () => { writes++; } }));
+  eq(receipt.no_op, true, 'BH-NOOP a healthy fully-checked board is a no-op');
+  eq(receipt.ledger, 'present', 'BH-NOOP healthy means checked, not unchecked');
+  eq(receipt.findings, {
+    untracked_members: [], unprojectable_epics: [],
+    binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    lane_divergence: [], projection_errors: [],
+  }, 'BH-NOOP every finding class is empty');
+  eq(writes, 0, 'BH-READONLY the default invocation performs zero writes');
+  ok(!fs.existsSync(path.join(fx.projectRoot, 'Board Health.md')),
+    'BH-READONLY no vault note is created without --write-note');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {
