@@ -8477,6 +8477,34 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-CONTAINMENT check 3 still reports the frozen atlas drift');
 }
 
+// BH-LANE — derived state vs painted lane, including the agreeing case: the
+// "Retire ero_loop" shape LOOKED broken but was correct, and only showing
+// derived beside painted answers "is this wrong, or telling me something?".
+{
+  const root = path.join(tmp, 'bh-lane');
+  const fx = bhScaffold(root, {
+    planning: ['Stale Epic'], progress: ['Looks Broken Epic'],
+    epics: {
+      'Stale Epic': { lanes: { 'In Progress': ['ST-1'] }, slices: { 'ST-1': 'in_progress' } },
+      'Looks Broken Epic': {
+        lanes: { 'In Progress': ['LB-2'], Completed: ['LB-1'] },
+        slices: { 'LB-1': 'completed', 'LB-2': 'in_progress' },
+      },
+    },
+  });
+  const state = emptyState();
+  state.cards['ST-1'] = { card: 'ST-1', phase: 'implementing' };
+  state.cards['LB-2'] = { card: 'LB-2', phase: 'implementing' };
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  const byEpic = Object.fromEntries(receipt.findings.lane_divergence.map((f) => [f.epic, f]));
+  eq(byEpic['Stale Epic'], { epic: 'Stale Epic', derived: 'active', painted: 'In Planning', agrees: false },
+    'BH-LANE a stale parent lane is reported as disagreement');
+  eq(byEpic['Looks Broken Epic'], { epic: 'Looks Broken Epic', derived: 'active', painted: 'In Progress', agrees: true },
+    'BH-LANE an epic with untracked members reports its agreeing lane so it cannot be misread as broken');
+  eq(receipt.findings.lane_divergence.length, 2, 'BH-LANE one entry per interesting epic, none for healthy ones');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {

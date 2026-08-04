@@ -4591,6 +4591,7 @@ function collectBoardHealth(state, opts = {}) {
   const members = BOARD_HEALTH_LANES.flatMap((lane) => parsedParent[lane] || []);
   const untracked = [];
   const unprojectable = [];
+  const laneDivergence = [];
   let epicCount = 0;
   let sliceCount = 0;
   const untrackedCheck = (epic, name, notePath) => {
@@ -4635,7 +4636,26 @@ function collectBoardHealth(state, opts = {}) {
       const seed = sliceNames.find((name) => exists(path.join(boardDir, `${name}.md`)));
       if (seed) {
         const seedPath = path.join(boardDir, `${seed}.md`);
-        canonicalEpicProjection(readText(seedPath), seedPath, boardPath, cardsRoot, { state: { cards } });
+        const surface = canonicalEpicProjection(readText(seedPath), seedPath, boardPath, cardsRoot, { state: { cards } });
+        // Check 4 — derived slice roll-up vs painted parent lane. Ledger-driven,
+        // so an empty/absent ledger contributes nothing here. Agreement is
+        // reported too whenever the epic carries untracked members: a lane that
+        // LOOKS broken but is correct must say so, or the confusion survives.
+        if (ledger === 'present' && surface) {
+          const lifecycle = deriveEpicProjection(surface, null, null);
+          const mapping = epicProjectionMapping(lifecycle.state);
+          const painted = boardCardLocation(parentRaw, member);
+          const agrees = Boolean(painted && mapping
+            && painted.column === mapping.column && painted.checked === mapping.complete);
+          if (!agrees || untracked.some((finding) => finding.epic === member)) {
+            laneDivergence.push({
+              epic: member,
+              derived: lifecycle.state,
+              painted: painted ? painted.column : null,
+              agrees,
+            });
+          }
+        }
       }
     } catch (err) {
       unprojectable.push({ epic: member, error: err.message, remedy: BOARD_HEALTH_DRIFT_REMEDY });
@@ -4667,7 +4687,7 @@ function collectBoardHealth(state, opts = {}) {
     untracked_members: untracked,
     unprojectable_epics: unprojectable,
     binding_drift: bindingDrift,
-    lane_divergence: [],
+    lane_divergence: laneDivergence,
     projection_errors: projectionErrors,
   };
   const driftClean = !bindingDrift.error
