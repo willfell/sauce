@@ -10,7 +10,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 ## Current
 
 - **Workshop version:** `0.282.0` (closed 2026-08-04)
-- **Most recent narrated cycle:** board-health sweep — board-driven divergence detection (loop-integrity workstream 1): new report-only `board-health` coordinator verb + `Board Health.md` vault note + hourly launchd job. See `Docs/plans/2026-08-04-v0.282.0-board-health-sweep-result.md`. Many autoloop releases shipped between 0.229.0 and 0.281.7 without dedicated result docs — see `Docs/cycle-history.md` for the chain (notably v0.281.1 board-projection canonical bindings, 2026-08-03).
+- **Most recent cycle:** loop-integrity workstream 2 — one source of truth: canonical path derivation, board-vs-ledger authority, and the release bump each reduced to one physical implementation (`delivery.topology.*`, `resolveSliceAuthority`, PR-title bump gate). See `Docs/plans/2026-08-04-v0.282.1-ws2-one-source-of-truth-result.md`.
 
 ## Mechanisms (30)
 
@@ -74,7 +74,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Test harnesses
 
-140 harnesses under `platform/test/run-*.js`, one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
+171 harnesses under `platform/test/run-*.js`, one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
 
 ## In-flight / next-candidate queue
 
