@@ -19,7 +19,14 @@ class GraphInsights {
   _empty() {
     return {
       perNode: {},
-      summary: { stuckCount: 0, rootBlockers: [], gatedTotal: 0 },
+      summary: {
+        stuckCount: 0,
+        rootBlockers: [],
+        gatedTotal: 0,
+        readyCount: 0,
+        needsYouCount: 0,
+        blockedCount: 0,
+      },
     };
   }
 
@@ -29,15 +36,20 @@ class GraphInsights {
 
   _closure(start, adjacency, order) {
     const visited = new Set([start]);
-    const queue = [...(adjacency.get(start) || [])];
+    const queue = (adjacency.get(start) || []).map((card) => ({ card, hops: 1 }));
+    const depths = new Map();
     while (queue.length) {
-      const card = queue.shift();
+      const { card, hops } = queue.shift();
       if (visited.has(card)) continue;
       visited.add(card);
-      for (const next of adjacency.get(card) || []) queue.push(next);
+      depths.set(card, hops);
+      for (const next of adjacency.get(card) || []) queue.push({ card: next, hops: hops + 1 });
     }
     visited.delete(start);
-    return [...visited].sort((left, right) => order.get(left) - order.get(right));
+    depths.delete(start);
+    return [...depths]
+      .sort(([left], [right]) => order.get(left) - order.get(right))
+      .map(([card, hops]) => ({ card, hops }));
   }
 
   analyzeGraph(nodes, edges) {
@@ -87,11 +99,21 @@ class GraphInsights {
         && (record.status === "blocked" || record.status === "parked");
       const perNode = {};
       const rootBlockers = [];
+      const upstreamWithDepth = new Map();
       for (const record of records.values()) {
-        const above = this._closure(record.card, upstream, order);
-        const below = this._closure(record.card, downstream, order);
+        const aboveWithDepth = this._closure(record.card, upstream, order);
+        upstreamWithDepth.set(record.card, aboveWithDepth);
+        const belowWithDepth = this._closure(record.card, downstream, order);
+        const above = aboveWithDepth.map(({ card }) => card);
+        const below = belowWithDepth.map(({ card }) => card);
         const isRootBlocker = stuck(record) && !above.some((card) => stuck(records.get(card)));
         if (isRootBlocker) rootBlockers.push(record.card);
+        const isReady = eligible(record)
+          && !stuck(record)
+          && above.every((card) => {
+            const ancestor = records.get(card);
+            return ancestor && !ancestor.isStub && ancestor.status === "completed";
+          });
         Object.defineProperty(perNode, record.card, {
           configurable: true,
           enumerable: true,
@@ -101,8 +123,16 @@ class GraphInsights {
             downstream: below,
             gates: below.filter((card) => eligible(records.get(card))).length,
             isRootBlocker,
+            isReady,
+            rootCauses: [],
           },
         });
+      }
+
+      for (const record of records.values()) {
+        perNode[record.card].rootCauses = upstreamWithDepth.get(record.card)
+          .filter(({ card }) => perNode[card].isRootBlocker)
+          .map(({ card, hops }) => ({ card, hops }));
       }
 
       const gated = new Set();
@@ -117,6 +147,11 @@ class GraphInsights {
           stuckCount: [...records.values()].filter(stuck).length,
           rootBlockers,
           gatedTotal: gated.size,
+          readyCount: [...records.values()].filter((record) => perNode[record.card].isReady).length,
+          needsYouCount: [...records.values()]
+            .filter((record) => !record.isStub && record.status === "parked").length,
+          blockedCount: [...records.values()]
+            .filter((record) => !record.isStub && record.status === "blocked").length,
         },
       };
     } catch (_e) {
