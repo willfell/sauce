@@ -895,7 +895,7 @@ async function main() {
   const nullGateChip = byClass(nullGateRoot, 'graph-view-chip').find((chip) => textOf(chip).includes('BLN-A'));
   nullGateChip.listeners.click({ stopPropagation() {} });
   const nullGatePanel = byClass(nullGateRoot, 'graph-view-detail-panel')[0];
-  assert(textOf(nullGatePanel).includes('Gates 1 slice')
+  assert(byClass(nullGatePanel, 'graph-view-detail-gates-count')[0]?.textContent === '1 slice'
     && byClass(nullGatePanel, 'graph-view-detail-dependent').length === 1
     && textOf(byClass(nullGatePanel, 'graph-view-detail-dependent')[0]).includes('BLN-B'),
   'BL4-NULL-PROPAGATION: panel gates count/links exclude null-status propagation nodes exactly like GraphInsights');
@@ -904,6 +904,24 @@ async function main() {
   assert(!nullGateChipFor('BLN-U').className.includes('graph-view-dimmed')
     && !nullGateChipFor('BLN-B').className.includes('graph-view-dimmed'),
   'BL4-NULL-PROPAGATION-CHAIN: null-status U remains highlighted in A\'s transitive chain while excluded from gates');
+
+  const emptyFactRoot = element();
+  await new GraphView({ dashboard, lifecycleApi, insights: realInsights })._renderGraph(
+    emptyFactRoot,
+    { nodes: [{ card: 'VPE-1 Empty facts', path: `${board}/VPE-1 Empty facts.md`, status: 'planning', rank: 0, row: 0 }], edges: [] },
+    lifecycleApi, epicPath, [],
+  );
+  byClass(emptyFactRoot, 'graph-view-chip')[0].listeners.click({ stopPropagation() {} });
+  const emptyFactPanel = byClass(emptyFactRoot, 'graph-view-detail-panel')[0];
+  assert.strictEqual(byClass(emptyFactPanel, 'graph-view-detail-wait-row').length, 0,
+    'VP4-EMPTY-WAIT: a card with no wait reason omits the entire WAITING ON row');
+  assert.strictEqual(byClass(emptyFactPanel, 'graph-view-detail-needs').length, 0,
+    'VP4-EMPTY-NEEDS: a card with no unmet prerequisites omits the entire prerequisites row');
+  assert.strictEqual(byClass(emptyFactPanel, 'graph-view-detail-outcome').length, 0,
+    'VP4-EMPTY-OUTCOME: a card with no Outcome omits the entire Outcome row');
+  assert(byClass(emptyFactPanel, 'graph-view-detail-gates-count')[0]?.textContent === '0 slices'
+    && byClass(emptyFactPanel, 'graph-view-detail-dependent').length === 0,
+  'VP4-COUNT-ONLY-GATES: zero gates renders one exact count and no link artifact');
 
   // BL-3 calm/fail-soft posture. With no stuck nodes, real analysis must be
   // structurally byte-identical to GraphInsights missing. A throwing analyzer
@@ -1459,17 +1477,33 @@ async function main() {
     && textOf(mxPanel).includes(mxLongTitle)
     && textOf(mxPanel).includes('blocked')
     && textOf(mxPanel).includes('waiting on: MX-A Hi')
-    && textOf(mxPanel).includes(`Outcome: ${mxLongOutcome}`)
-    && textOf(mxPanel).includes('Gates 0 slices'),
+    && textOf(mxPanel).includes(mxLongOutcome)
+    && byClass(mxPanel, 'graph-view-detail-gates-count')[0]?.textContent === '0 slices',
   'BL4-PANEL: selected card identity, shared status, wait reason, Outcome, and gated count render inline');
+  const mxHeader = byClass(mxPanel, 'graph-view-detail-header')[0];
+  assert(mxHeader
+    && byClass(mxHeader, 'graph-view-detail-id')[0]?.textContent === 'MX-C'
+    && byClass(mxHeader, 'graph-view-detail-title')[0]?.textContent === mxLongTitle
+    && byClass(mxHeader, 'graph-view-detail-status').length === 1
+    && byClass(mxHeader, 'graph-view-detail-open').length === 1,
+  'VP4-HEADER: id, complete title, shared status chip, and Open card affordance share one header');
+  const mxLabels = byClass(mxPanel, 'graph-view-detail-label');
+  assert.deepStrictEqual(mxLabels.map((label) => label.textContent),
+    ['Waiting on', 'Unmet prerequisites', 'Outcome', 'Gates'],
+  'VP4-LABELED-ROWS: each present fact is introduced by its one semantic label in order');
+  assert(mxLabels.every((label) => label.style.cssText
+    === 'font-size:0.7em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);'),
+  'VP4-LABEL-STYLE: every fact label uses the exact small muted uppercase treatment');
+  assert.strictEqual(byClass(mxPanel, 'graph-view-detail-outcome-value')[0]?.textContent, mxLongOutcome,
+    'VP4-OUTCOME: the labeled Outcome value is complete and has no inline prefix');
   const mxScrollerIndex = mxRoot.children.findIndex((node) => node.className === 'graph-view-scroll');
   const mxLegendIndex = mxRoot.children.findIndex((node) => node.className === 'graph-view-legend');
   assert(mxScrollerIndex < mxLegendIndex && mxRoot.children.indexOf(mxPanel) === mxLegendIndex + 1,
     'VP3-PANEL-ORDER: epic detail panel occupies the slot after the below-canvas legend');
   assert.strictEqual(mxPanel.style.cssText,
-    'display:grid;gap:7px;margin-top:16px;padding:10px 12px;border:1px solid var(--background-modifier-border);'
+    'display:grid;gap:12px;margin-top:16px;padding:12px 14px;border:1px solid var(--background-modifier-border);'
       + 'border-radius:9px;background:var(--background-secondary);font-size:var(--font-ui-small);',
-    'VP3-PANEL-RHYTHM: the detail panel receives the exact roomier 16px separation');
+    'VP4-PANEL-RHYTHM: labeled rows use the exact internal rhythm while retaining the roomy outer separation');
   const mxOrderView = new GraphView();
   mxOrderView._renderWarnings(mxRoot, [{ code: 'render_error', card: 'VP3', detail: 'order fixture' }]);
   const mxOrderWarning = byClass(mxRoot, 'graph-view-warnings')[0];
@@ -1482,11 +1516,30 @@ async function main() {
   assert.strictEqual(mxPrereq.length, 1, 'BL4-PANEL: each immediate unmet prerequisite gets one jump link');
   assert(textOf(mxPrereq[0]).includes('MX-A') && textOf(mxPrereq[0]).includes('planning'),
     'BL4-PANEL: the prerequisite jump link carries its own shared status');
+  assert(mxPrereq[0].style.cssText
+    === 'display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;'
+      + 'padding:3px 8px;border:1px solid var(--background-modifier-border);border-radius:999px;'
+      + 'background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;'
+    && byClass(mxPrereq[0], 'graph-view-detail-link-status')[0]?.textContent.includes('planning'),
+  'VP4-PREREQUISITE-CHIP: unmet dependencies use the exact effective pill style and their own shared status word');
   const selectedGlyph = byClass(mxChipFor('MX-C'), 'graph-view-status-glyph')[0].textContent;
-  assert(textOf(byClass(mxPanel, 'graph-view-detail-status')[0]).startsWith(selectedGlyph),
-    'BL4-PANEL: the panel status uses the same shared glyph as the selected chip');
+  const mxPanelStatus = byClass(mxPanel, 'graph-view-detail-status')[0];
+  const mxExpectedStatus = dashboard._statusPresentation('blocked', lifecycleApi);
+  assert(textOf(mxPanelStatus) === `${mxExpectedStatus.glyph} ${mxExpectedStatus.label}`
+    && textOf(mxPanelStatus).startsWith(selectedGlyph)
+    && mxPanelStatus.style.cssText
+      === 'display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;'
+        + `color:${mxExpectedStatus.color};font-weight:650;white-space:nowrap;`
+        + `border:1px solid color-mix(in srgb, ${mxExpectedStatus.color} 40%, transparent);`
+        + `background:color-mix(in srgb, ${mxExpectedStatus.color} 10%, var(--background-primary));`,
+  'VP4-SHARED-STATUS: the header chip uses the exact shared glyph, word, color, and effective pill style');
   assert.strictEqual(byClass(mxPanel, 'graph-view-detail-open').length, 1,
     'BL4-PANEL: the selected card exposes an explicit Open card affordance');
+  const beforeOpenAffordance = mxOpened.length;
+  byClass(mxPanel, 'graph-view-detail-open')[0].listeners.click({ stopPropagation() {} });
+  assert(mxOpened.length === beforeOpenAffordance + 1
+    && JSON.stringify(mxOpened.at(-1)) === JSON.stringify([`${mxBoard}/${mxLong}`, mxEpicPath, false]),
+  'VP4-OPEN: the restyled non-stub Open card affordance opens the selected card exactly');
   for (const id of ['MX-A', 'MX-C']) {
     assert(!mxChipFor(id).className.includes('graph-view-dimmed'),
       `BL4-MUTANT-DIM-CLOSURE: chain member ${id} remains full strength`);
@@ -1509,7 +1562,7 @@ async function main() {
   assert.strictEqual(mxOpened.length, beforeDifferentCard,
     'BL4-DIFFERENT-TAP: tapping a different chip reselects without opening');
   const mxRootPanel = byClass(mxRoot, 'graph-view-detail-panel')[0];
-  assert(textOf(mxRootPanel).includes('Gates 1 slice')
+  assert(byClass(mxRootPanel, 'graph-view-detail-gates-count')[0]?.textContent === '1 slice'
     && byClass(mxRootPanel, 'graph-view-detail-dependent').length === 1,
   'BL4-GATES: downstream gated count and jump link are rendered from GraphInsights membership');
   byClass(mxRootPanel, 'graph-view-detail-dependent')[0].listeners.click({ stopPropagation() {} });
@@ -2128,6 +2181,10 @@ async function main() {
   ];
   assert(localChromeChannels.every((channel) => !channel.test(sectionChromeSource)),
     'VP-2d carried fixture: section chrome defines no local styling or class channel, including optional attribute APIs and createEl attr bags');
+  const panelSource = widgetSource.match(/_panelLink\(parent, node, api, source, className\) \{[\s\S]*?\n  \/\/ Stuck filtering/)?.[0] || '';
+  assert(panelSource.includes('this._statusPresentation(node.status, api)')
+    && !/var\(--color-(?:red|orange|yellow|green|cyan|blue|purple|pink)\)/.test(panelSource),
+  'VP4-SHARED-PRESENTATION: panel status glyphs, words, and colors have no local lifecycle palette');
 
   // Registration: manifest files[] + customjs_classes[], package.json script +
   // one preflight entry directly after run-graph-layout.js.
