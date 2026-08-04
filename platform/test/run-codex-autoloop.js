@@ -8534,6 +8534,62 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-READONLY no vault note is created without --write-note');
 }
 
+// BH-SCAFFOLD / BH-BODY — Loop Station's proven write discipline, inherited
+// verbatim: scaffold once, frontmatter-only thereafter, unchanged findings
+// write zero bytes, body-only notes fail closed without discarding findings.
+{
+  const root = path.join(tmp, 'bh-note');
+  const fx = bhScaffold(root, {
+    progress: ['Note Epic'],
+    epics: { 'Note Epic': { lanes: { Completed: ['NT-1'] }, slices: { 'NT-1': 'completed' } } },
+  });
+  const notePath = path.join(fx.projectRoot, 'Board Health.md');
+  const deps = bhDeps(fx, { readState: () => emptyState() });
+  const first = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(first.note.scaffolded, true, 'BH-SCAFFOLD an absent note is scaffolded once');
+  eq(first.note.path, notePath, 'BH-SCAFFOLD the note lands beside the board');
+  const raw = fs.readFileSync(notePath, 'utf8');
+  ok(/class: "BoardHealth"/.test(raw), 'BH-SCAFFOLD body is the stock BoardHealth customjs-guard block');
+  eq(testScalarField(raw, 'type'), 'board-health', 'BH-SCAFFOLD payload type is registered');
+  eq(testScalarField(raw, 'schema_version'), '1.0.0', 'BH-SCAFFOLD payload carries its schema version');
+  ok(!/checked_at|updated_at/.test(raw.split('---')[1]),
+    'BH-SCAFFOLD no timestamp field — zero-writes-when-unchanged is load-bearing');
+  ok(/untracked_members_overflow_count: 0/.test(raw),
+    'BH-SCAFFOLD capped lists carry explicit overflow counts');
+
+  const replay = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(replay.note.changed, false, 'BH-SCAFFOLD same findings twice writes nothing');
+  eq(fs.readFileSync(notePath, 'utf8'), raw, 'BH-NOOP unchanged findings leave the note byte-identical');
+
+  // Body preservation: a user edit below the frontmatter survives a changed sweep.
+  const customBody = `${raw}\nMy notes about this board.\n`;
+  fs.writeFileSync(notePath, customBody);
+  const epicBoardPath = path.join(fx.cardsRoot, 'Note Epic', 'board', 'Note Epic-board.md');
+  fs.writeFileSync(path.join(fx.cardsRoot, 'Note Epic', 'board', 'NT-2.md'),
+    fs.readFileSync(path.join(fx.cardsRoot, 'Note Epic', 'board', 'NT-1.md'), 'utf8').replaceAll('NT-1', 'NT-2'));
+  fs.writeFileSync(epicBoardPath, fs.readFileSync(epicBoardPath, 'utf8')
+    .replace('- [x] [[NT-1]]', '- [x] [[NT-1]]\n- [x] [[NT-2]]'));
+  const changed = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(changed.note.changed, true, 'BH-BODY changed findings patch the frontmatter');
+  const patched = fs.readFileSync(notePath, 'utf8');
+  ok(patched.endsWith('My notes about this board.\n'), 'BH-BODY the body is preserved byte-for-byte');
+  eq(changed.findings.untracked_members.map((f) => f.card), ['NT-1', 'NT-2'],
+    'BH-BODY the changed sweep reports the new member');
+
+  // Fail closed: a body-only note (no frontmatter) is never rewritten.
+  fs.writeFileSync(notePath, 'just a body, no frontmatter\n');
+  const failed = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(failed.ok, true, 'BH-BODY note failure does not fail the sweep');
+  ok(/without frontmatter/.test(failed.note_error),
+    'BH-BODY a body-only note fails closed with a visible note_error');
+  eq(failed.findings.untracked_members.length, 2, 'BH-BODY findings are never discarded by a note failure');
+  eq(fs.readFileSync(notePath, 'utf8'), 'just a body, no frontmatter\n', 'BH-BODY the body-only note is untouched');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {

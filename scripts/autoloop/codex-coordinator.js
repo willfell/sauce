@@ -4702,6 +4702,101 @@ function collectBoardHealth(state, opts = {}) {
   };
 }
 
+const BOARD_HEALTH_SCHEMA_VERSION = '1.0.0';
+const BOARD_HEALTH_LIST_CAP = 20;
+// Scaffold-if-absent body only: an existing Board Health body is NEVER
+// rewritten (same guarantee Loop Station carries). One writer per note: this
+// note belongs to the sweep alone, so it keeps working when projection is dead.
+const BOARD_HEALTH_BODY = [
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "BoardHealth" });',
+  '```',
+  '',
+].join('\n');
+
+// Deliberately NO timestamp field anywhere in the payload: the note's mtime
+// means "when board health last CHANGED". A checked_at would write on every
+// run and defeat the zero-writes-when-unchanged rule, which is what makes a
+// scheduled vault writer acceptable at all; last-run time is the job log's job.
+function buildBoardHealthPayload(core) {
+  const capped = (items) => ({
+    items: (items || []).slice(0, BOARD_HEALTH_LIST_CAP),
+    overflow: Math.max(0, (items || []).length - BOARD_HEALTH_LIST_CAP),
+  });
+  const untracked = capped(core.findings.untracked_members);
+  const unprojectable = capped(core.findings.unprojectable_epics);
+  const lane = capped(core.findings.lane_divergence);
+  const errors = capped(core.findings.projection_errors);
+  return {
+    type: 'board-health',
+    schema_version: BOARD_HEALTH_SCHEMA_VERSION,
+    project: core.project,
+    ledger: core.ledger,
+    no_op: core.no_op,
+    checked: core.checked,
+    untracked_members: untracked.items,
+    untracked_members_overflow_count: untracked.overflow,
+    unprojectable_epics: unprojectable.items,
+    unprojectable_epics_overflow_count: unprojectable.overflow,
+    binding_drift: core.findings.binding_drift,
+    lane_divergence: lane.items,
+    lane_divergence_overflow_count: lane.overflow,
+    projection_errors: errors.items,
+    projection_errors_overflow_count: errors.overflow,
+  };
+}
+
+function validateBoardHealthPayload(payload) {
+  const errors = [];
+  const lists = ['untracked_members', 'unprojectable_epics', 'lane_divergence', 'projection_errors'];
+  for (const key of ['type', 'schema_version', 'project', 'ledger', 'no_op', 'checked', 'binding_drift',
+    ...lists, ...lists.map((list) => `${list}_overflow_count`)]) {
+    if (!Object.prototype.hasOwnProperty.call(payload || {}, key)) errors.push(`missing ${key}`);
+  }
+  if (!payload || payload.type !== 'board-health') errors.push('type must be board-health');
+  if (!payload || payload.schema_version !== BOARD_HEALTH_SCHEMA_VERSION) {
+    errors.push(`schema_version must be ${BOARD_HEALTH_SCHEMA_VERSION}`);
+  }
+  if (!payload || !['present', 'empty', 'absent'].includes(payload.ledger)) {
+    errors.push('ledger must be present|empty|absent');
+  }
+  if (!payload || typeof payload.no_op !== 'boolean') errors.push('no_op must be boolean');
+  for (const list of lists) {
+    const value = payload && payload[list];
+    const overflow = payload && payload[`${list}_overflow_count`];
+    if (!Array.isArray(value)) errors.push(`${list} must be an array`);
+    else if (value.length > BOARD_HEALTH_LIST_CAP) errors.push(`${list} exceeds ${BOARD_HEALTH_LIST_CAP}`);
+    if (!Number.isInteger(overflow) || overflow < 0) errors.push(`${list}_overflow_count must be a non-negative integer`);
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+function writeBoardHealthNote(payload, notePath, deps = {}) {
+  const exists = deps.exists || fs.existsSync;
+  const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const writeText = deps.writeText || atomicWriteText;
+  const validation = validateBoardHealthPayload(payload);
+  if (!validation.ok) throw new Error(`Board Health payload is invalid: ${validation.errors.join('; ')}`);
+  const fields = loopStationFrontmatterFields(payload);
+  if (!exists(notePath)) {
+    if (deps.ensureDir) deps.ensureDir(path.dirname(notePath));
+    else fs.mkdirSync(path.dirname(notePath), { recursive: true });
+    writeText(notePath, patchFrontmatter(`---\n\n---${BOARD_HEALTH_BODY}`, fields));
+    return { path: notePath, changed: true, scaffolded: true };
+  }
+  const raw = readText(notePath);
+  if (!/^---\n[\s\S]*?\n---/.test(raw)) {
+    throw new Error('Board Health exists without frontmatter; refusing to rewrite its body');
+  }
+  const next = patchFrontmatter(raw, fields);
+  // Unchanged findings ⇒ the complete note is preserved byte-for-byte with
+  // ZERO writes — no mtime churn, no sync churn, no race surface.
+  if (next === raw) return { path: notePath, changed: false, scaffolded: false };
+  writeText(notePath, next);
+  return { path: notePath, changed: true, scaffolded: false };
+}
+
 async function commandBoardHealth(ctx, args, deps = {}) {
   if (args.json !== true) throw new Error('board-health requires --json for a machine-readable receipt');
   const boardPath = deps.boardPath || BOARD;
@@ -4721,7 +4816,22 @@ async function commandBoardHealth(ctx, args, deps = {}) {
     const { healthy, ...core } = collectBoardHealth(state, {
       boardPath, cardsRoot, ledger, exists, readText: deps.readText,
     });
-    return successReceipt('board-health', { no_op: healthy, ...core });
+    const receipt = successReceipt('board-health', { no_op: healthy, ...core });
+    if (args['write-note'] === true) {
+      const notePath = deps.notePath || path.join(path.dirname(boardPath), 'Board Health.md');
+      // Note-write failure never discards findings: the receipt carries them
+      // plus a visible note_error, mirroring transition loop_station receipts.
+      try {
+        receipt.note = writeBoardHealthNote(
+          buildBoardHealthPayload({ ...core, no_op: healthy }),
+          notePath,
+          { exists, readText: deps.readText, writeText: deps.writeText, ensureDir: deps.ensureDir },
+        );
+      } catch (err) {
+        receipt.note_error = err.message;
+      }
+    }
+    return receipt;
   }, { staleMs: 60 * 60 * 1000 });
 }
 
