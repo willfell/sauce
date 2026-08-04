@@ -4590,26 +4590,55 @@ function collectBoardHealth(state, opts = {}) {
   const parsedParent = parseBoard(parentRaw);
   const members = BOARD_HEALTH_LANES.flatMap((lane) => parsedParent[lane] || []);
   const untracked = [];
+  const unprojectable = [];
   let epicCount = 0;
   let sliceCount = 0;
+  const untrackedCheck = (epic, name, notePath) => {
+    if (tracked(name) || !exists(notePath)) return;
+    const status = delivery.normalizeStatus(scalarField(readText(notePath), 'status')) || 'planning';
+    if (BOARD_HEALTH_PROGRESS_STATUSES.has(status)) {
+      untracked.push(untrackedMemberFinding(epic, name, status));
+    }
+  };
   for (const member of members) {
     const epicRoot = path.join(cardsRoot, member);
     const atlasPath = path.join(epicRoot, `${member}.md`);
-    const isEpic = exists(atlasPath) && scalarField(readText(atlasPath), 'type') === 'epic';
-    if (!isEpic) continue;
-    epicCount++;
-    const boardDir = path.join(epicRoot, 'board');
-    const epicBoardRaw = readText(path.join(boardDir, `${member}-board.md`));
-    const parsedEpicBoard = parseBoard(epicBoardRaw);
-    const sliceNames = BOARD_HEALTH_LANES.flatMap((lane) => parsedEpicBoard[lane] || []);
-    sliceCount += sliceNames.length;
-    for (const name of sliceNames) {
-      const notePath = path.join(boardDir, `${name}.md`);
-      if (tracked(name) || !exists(notePath)) continue;
-      const status = delivery.normalizeStatus(scalarField(readText(notePath), 'status')) || 'planning';
-      if (BOARD_HEALTH_PROGRESS_STATUSES.has(status)) {
-        untracked.push(untrackedMemberFinding(member, name, status));
+    // Per-epic isolation: one epic that throws is a finding, not an abort — a
+    // malformed atlas in epic 7 must not hide epics 8..N. Check 1 runs BEFORE
+    // projection so an unprojectable epic's members stay reachable.
+    try {
+      const isEpic = exists(atlasPath) && scalarField(readText(atlasPath), 'type') === 'epic';
+      if (!isEpic) {
+        const flatNotePath = findCard(cardsRoot, member);
+        if (flatNotePath) {
+          sliceCount++;
+          untrackedCheck(null, member, flatNotePath);
+        } else {
+          epicCount++;
+          unprojectable.push({
+            epic: member,
+            error: 'board member has neither an epic scaffold nor a note',
+            remedy: BOARD_HEALTH_DRIFT_REMEDY,
+          });
+        }
+        continue;
       }
+      epicCount++;
+      const boardDir = path.join(epicRoot, 'board');
+      const epicBoardRaw = readText(path.join(boardDir, `${member}-board.md`));
+      const parsedEpicBoard = parseBoard(epicBoardRaw);
+      const sliceNames = BOARD_HEALTH_LANES.flatMap((lane) => parsedEpicBoard[lane] || []);
+      sliceCount += sliceNames.length;
+      for (const name of sliceNames) untrackedCheck(member, name, path.join(boardDir, `${name}.md`));
+      // Check 2 — the epic must project through the real contract, seeded with
+      // its first existing slice note (the projection validates every member).
+      const seed = sliceNames.find((name) => exists(path.join(boardDir, `${name}.md`)));
+      if (seed) {
+        const seedPath = path.join(boardDir, `${seed}.md`);
+        canonicalEpicProjection(readText(seedPath), seedPath, boardPath, cardsRoot, { state: { cards } });
+      }
+    } catch (err) {
+      unprojectable.push({ epic: member, error: err.message, remedy: BOARD_HEALTH_DRIFT_REMEDY });
     }
   }
   // Check 3 — binding drift + orphan sub-board lines, reused verbatim from the
@@ -4636,6 +4665,7 @@ function collectBoardHealth(state, opts = {}) {
     : [];
   const findings = {
     untracked_members: untracked,
+    unprojectable_epics: unprojectable,
     binding_drift: bindingDrift,
     lane_divergence: [],
     projection_errors: projectionErrors,

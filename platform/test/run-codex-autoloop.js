@@ -8430,6 +8430,53 @@ const bhDeps = (fx, extra = {}) => ({
   eq(absent.ledger, 'absent', 'BH-LEDGERLESS a missing state file reads as absent');
 }
 
+// BH-UNPROJECTABLE / BH-CONTAINMENT — one throwing epic is a finding, not an
+// abort; siblings are still fully checked. That containment is exactly what
+// was missing when one bad binding froze a whole board for days.
+{
+  const root = path.join(tmp, 'bh-unprojectable');
+  const boardAbs = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  const fx = bhScaffold(root, {
+    planning: ['Frozen Epic', 'Healthy Epic', 'Ghost Epic'],
+    epics: {
+      'Frozen Epic': {
+        atlasLines: [
+          `source_board: "${boardAbs}"`,
+          `kanban_board: "${boardAbs}"`,
+          'epic_board: "tasks/Frozen Epic/board/Frozen Epic-board.md"',
+        ],
+        lanes: { 'In Planning': ['FZ-1'], Completed: ['FZ-2'] },
+        slices: { 'FZ-1': 'planning', 'FZ-2': 'completed' },
+      },
+      'Healthy Epic': { lanes: { 'In Planning': ['HE-1'] }, slices: { 'HE-1': 'planning' } },
+    },
+  });
+  // A flat (non-epic) parent-board member with a completed note and no record
+  // is the same blind-spot class and must be reachable too.
+  fs.writeFileSync(path.join(fx.boardPath), fs.readFileSync(fx.boardPath, 'utf8')
+    .replace('- [ ] [[Ghost Epic]]', '- [ ] [[Ghost Epic]]\n- [ ] [[Flat Card]]'));
+  fs.writeFileSync(path.join(fx.cardsRoot, 'Flat Card.md'),
+    ['---', 'status: completed', '---', '', 'flat body', ''].join('\n'));
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => emptyState() }));
+  eq(receipt.findings.unprojectable_epics.map((f) => f.epic), ['Frozen Epic', 'Ghost Epic'],
+    'BH-UNPROJECTABLE the throwing epic and the scaffold-less member are findings, not aborts');
+  eq(receipt.findings.untracked_members.find((f) => f.card === 'Flat Card'), {
+    epic: null, card: 'Flat Card', note_status: 'completed',
+    issue: 'board member has no ledger record; a completed note is never counted done',
+    remedy: 'investigate: work completed outside the rail',
+  }, 'BH-UNPROJECTABLE a flat board member is still reachable by check 1');
+  ok(/does not bind its canonical parent board/.test(receipt.findings.unprojectable_epics[0].error),
+    'BH-UNPROJECTABLE carries the projection refusal verbatim');
+  eq(receipt.findings.unprojectable_epics[0].remedy, 'heal-epic-bindings --dry-run --json',
+    'BH-UNPROJECTABLE names the mechanical remedy');
+  eq(receipt.checked.epics, 3, 'BH-CONTAINMENT every parent member is visited');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['FZ-2', 'Flat Card'],
+    'BH-CONTAINMENT check 1 still reaches members of an unprojectable epic');
+  ok(receipt.findings.binding_drift.atlases >= 1,
+    'BH-CONTAINMENT check 3 still reports the frozen atlas drift');
+}
+
 // SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
 // successor the discard would then refuse (no orphaned successor left behind).
 {
