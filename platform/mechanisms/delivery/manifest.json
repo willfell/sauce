@@ -18,6 +18,10 @@
       "dest": "{{content_path}}/delivery/scripts/delivery-schema-cli.js"
     },
     {
+      "source": "scripts/delivery-topology.js",
+      "dest": "{{content_path}}/delivery/scripts/delivery-topology.js"
+    },
+    {
       "source": "index.js",
       "dest": "{{content_path}}/delivery/index.js"
     }
