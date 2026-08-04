@@ -15,6 +15,7 @@
 // real cross-epic edge — never a silently satisfied or silently dropped edge.
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -100,9 +101,12 @@ function byClass(root, className) {
 }
 function textOf(root) { return flatten(root).map((node) => node.textContent).filter(Boolean).join('\n'); }
 const bl6Receipts = [];
-function bl6Check(name, condition, message) {
-  assert(condition, message);
-  bl6Receipts.push(name);
+function bl6Check(name, predicate, message) {
+  assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`);
+  const predicateSource = Function.prototype.toString.call(predicate).replace(/\s+/g, ' ');
+  const digest = crypto.createHash('sha256').update(predicateSource).digest('hex');
+  assert(predicate(), message);
+  bl6Receipts.push({ name, digest });
 }
 function domShape(root) {
   return {
@@ -348,7 +352,7 @@ async function main() {
   await new GraphView().render({ container });
   const root = container.children.find((child) => child.className === 'graph-view-root');
   assert(root, 'render mounts one graph-view-root');
-  bl6Check('epic-noop', byClass(root, 'graph-view-cluster-header').length === 0,
+  bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0,
     'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');
 
   // Case 3: one chip per slice, chip is a clickable internal link to the card path.
@@ -1570,20 +1574,20 @@ async function main() {
   const clusterAtRest = JSON.parse(JSON.stringify(domShape(pRoot)));
   const clusterOpenCount = projectOpened.length;
   const firstClusterTap = bubblingClick(headers[1]);
-  bl6Check('first-tap', firstClusterTap.stopped && projectOpened.length === clusterOpenCount,
+  bl6Check('first-tap', () => firstClusterTap.stopped && projectOpened.length === clusterOpenCount,
     'BL6-FIRST-TAP: first cluster-header tap stops bubbling and performs no navigation');
   for (const id of ['E1-1', 'E1-2', 'E2-1', 'EB-1']) {
-    bl6Check(`partner-bright:${id}`, !pChipFor(id).className.includes('graph-view-dimmed'),
+    bl6Check(`partner-bright:${id}`, () => !pChipFor(id).className.includes('graph-view-dimmed'),
       `BL6-BIDIRECTIONAL-PARTNER: focused Epic One keeps ${id} full-strength`);
   }
   for (const id of ['E2-2', 'EX-1']) {
-    bl6Check(`unrelated-dim:${id}`, pChipFor(id).className.includes('graph-view-dimmed'),
+    bl6Check(`unrelated-dim:${id}`, () => pChipFor(id).className.includes('graph-view-dimmed'),
       `BL6-EXACT-FOOTPRINT: unrelated ${id} dims`);
   }
-  bl6Check('focused-header', headers[1].className.includes('graph-view-cluster-focused')
+  bl6Check('focused-header', () => headers[1].className.includes('graph-view-cluster-focused')
     && headers[1].attrs['aria-pressed'] === 'true',
   'BL6-FOCUSED-HEADER: focused cluster exposes class and pressed state');
-  bl6Check('strips-unaffected', !byClass(pRoot, 'graph-view-done-chip')[0].className.includes('graph-view-dimmed')
+  bl6Check('strips-unaffected', () => !byClass(pRoot, 'graph-view-done-chip')[0].className.includes('graph-view-dimmed')
     && byClass(pRoot, 'warning-missing-epic').every((row) => !row.className.includes('graph-view-dimmed')),
   'BL6-STRIPS-UNAFFECTED: done and warning strips remain outside cluster focus');
 
@@ -1592,31 +1596,31 @@ async function main() {
   // shared/module-level focusedCluster mutant to survive.
   const activeFocusFreshContainer = element();
   await new GraphView({ scope: 'project' }).render({ container: activeFocusFreshContainer });
-  bl6Check('active-instance', JSON.stringify(domShape(activeFocusFreshContainer.children[0])) === JSON.stringify(clusterAtRest),
+  bl6Check('active-instance', () => JSON.stringify(domShape(activeFocusFreshContainer.children[0])) === JSON.stringify(clusterAtRest),
     'BL6-CROSS-INSTANCE-ACTIVE: a second render starts unfocused while the first remains focused');
 
   bubblingClick(headers[1]);
-  bl6Check('second-tap', JSON.stringify(projectOpened.at(-1))
+  bl6Check('second-tap', () => JSON.stringify(projectOpened.at(-1))
     === JSON.stringify([`${epicOneDir}/Epic One`, stationPath, false]),
     'BL6-SECOND-TAP: second tap on the focused header opens its atlas');
   const opensAfterSecondTap = projectOpened.length;
   bubblingClick(headers[0]);
-  bl6Check('refocus-no-open', projectOpened.length === opensAfterSecondTap,
+  bl6Check('refocus-no-open', () => projectOpened.length === opensAfterSecondTap,
     'BL6-REFOCUS: tapping a different header refocuses instead of opening');
   for (const id of ['E2-1', 'E2-2', 'E1-2']) {
-    bl6Check(`refocus-bright:${id}`, !pChipFor(id).className.includes('graph-view-dimmed'),
+    bl6Check(`refocus-bright:${id}`, () => !pChipFor(id).className.includes('graph-view-dimmed'),
       `BL6-REFOCUS: Epic Two keeps ${id} full-strength`);
   }
   for (const id of ['E1-1', 'EB-1', 'EX-1']) {
-    bl6Check(`refocus-dim:${id}`, pChipFor(id).className.includes('graph-view-dimmed'),
+    bl6Check(`refocus-dim:${id}`, () => pChipFor(id).className.includes('graph-view-dimmed'),
       `BL6-REFOCUS: Epic Two dims unrelated ${id}`);
   }
   pCanvas.listeners.click();
-  bl6Check('canvas-clear', JSON.stringify(domShape(pRoot)) === JSON.stringify(clusterAtRest),
+  bl6Check('canvas-clear', () => JSON.stringify(domShape(pRoot)) === JSON.stringify(clusterAtRest),
     'BL6-EMPTY-CANVAS: empty canvas clears focus and restores exact at-rest DOM');
   const freshProjectContainer = element();
   await new GraphView({ scope: 'project' }).render({ container: freshProjectContainer });
-  bl6Check('fresh-render', JSON.stringify(domShape(freshProjectContainer.children[0])) === JSON.stringify(clusterAtRest),
+  bl6Check('fresh-render', () => JSON.stringify(domShape(freshProjectContainer.children[0])) === JSON.stringify(clusterAtRest),
     'BL6-FRESH-RENDER: a new widget instance has no persisted cluster focus');
   const pLegend = byClass(pRoot, 'graph-view-legend')[0];
   assert.deepStrictEqual(byClass(pLegend, 'graph-view-legend-label').map((node) => node.textContent).sort(),
@@ -1639,21 +1643,21 @@ async function main() {
   const projectDoneToggle = byClass(projectToolbar[0], 'graph-view-filter-done')[0];
   bubblingClick(headers[1]);
   projectDoneToggle.listeners.click({ stopPropagation() {} });
-  bl6Check('filter-composition', pChipFor('E1-1').className.includes('graph-view-dimmed')
+  bl6Check('filter-composition', () => pChipFor('E1-1').className.includes('graph-view-dimmed')
     && ['E2-2', 'EX-1'].every((id) => pChipFor(id).className.includes('graph-view-dimmed'))
     && ['E2-1', 'E1-2', 'EB-1'].every((id) => !pChipFor(id).className.includes('graph-view-dimmed')),
   'BL6-FILTER-COMPOSITION: cluster focus and Dim done compose as a dimming union');
   bubblingClick(pChipFor('E2-2'));
-  bl6Check('selection-precedence', !pChipFor('E2-2').className.includes('graph-view-dimmed')
+  bl6Check('selection-precedence', () => !pChipFor('E2-2').className.includes('graph-view-dimmed')
     && ['E2-1', 'E1-1', 'E1-2', 'EB-1', 'EX-1']
       .every((id) => pChipFor(id).className.includes('graph-view-dimmed')),
   'BL6-SELECTION-PRECEDENCE: chip selection wins wholesale over focus and filters');
   pCanvas.listeners.click();
-  bl6Check('clear-precedence', pChipFor('E1-1').className.includes('graph-view-dimmed')
+  bl6Check('clear-precedence', () => pChipFor('E1-1').className.includes('graph-view-dimmed')
     && ['E2-1', 'E2-2', 'E1-2', 'EB-1', 'EX-1'].every((id) => !pChipFor(id).className.includes('graph-view-dimmed')),
   'BL6-CLEAR-PRECEDENCE: empty canvas clears selection and focus but reapplies the active filter');
   projectDoneToggle.listeners.click({ stopPropagation() {} });
-  bl6Check('ephemeral-composition', JSON.stringify(domShape(pRoot)) === JSON.stringify(projectFilterAtRest),
+  bl6Check('ephemeral-composition', () => JSON.stringify(domShape(pRoot)) === JSON.stringify(projectFilterAtRest),
     'BL6-EPHEMERAL-COMPOSITION: clearing focus and toggling the filter off restores exact at-rest DOM');
 
   // BL-4 project scope uses the one merged graph, including the cross-epic
@@ -1815,7 +1819,7 @@ async function main() {
     'P8: project scope invokes no vault, adapter, frontmatter, or metadata mutator');
   assert.deepStrictEqual(projectMutations, [],
     'BL5-ZERO-VAULT-WRITES: all project filter interactions remain DOM-only');
-  bl6Check('zero-project-writes', projectMutations.length === 0,
+  bl6Check('zero-project-writes', () => projectMutations.length === 0,
     'BL6-ZERO-PROJECT-WRITES: focus invokes no vault, adapter, frontmatter, or metadata mutator');
   assert.strictEqual(projectOpened.length, 2, 'P8: only the explicit test clicks navigated');
   global.app = savedApp;
@@ -1831,7 +1835,7 @@ async function main() {
   assert.deepStrictEqual(mutations, [], 'every render across every case stayed write-free');
   assert.deepStrictEqual(persistenceMutations, [],
     'BL4-BL5-ZERO-PERSISTENCE-SURFACES: selection and filters invoke no localStorage or coordinator mutation surface');
-  bl6Check('zero-persistence-writes', persistenceMutations.length === 0,
+  bl6Check('zero-persistence-writes', () => persistenceMutations.length === 0,
     'BL6-ZERO-PERSISTENCE-WRITES: focus invokes no localStorage or coordinator mutation surface');
   if (savedLocalStorageDescriptor) Object.defineProperty(global, 'localStorage', savedLocalStorageDescriptor);
   else delete global.localStorage;
