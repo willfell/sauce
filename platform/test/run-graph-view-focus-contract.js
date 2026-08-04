@@ -66,16 +66,25 @@ function predicateSource(call) {
   return call.slice(start, end).replace(/\s+/g, ' ');
 }
 function digest(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
+function callSite(call) {
+  const argument = call.indexOf(', () =>');
+  const prefix = call.slice(0, argument + 1);
+  const at = source.indexOf(prefix);
+  assert(at >= 0, `BL6B-CALLSITE: missing exact source prefix ${prefix}`);
+  const before = source.slice(0, at);
+  return `${before.split(/\r?\n/).length}:${at - before.lastIndexOf('\n')}`;
+}
 const expectedReceipts = exactPredicates.flatMap(([label, call]) => {
   const predicateDigest = digest(predicateSource(call));
-  return receiptNames[label].map((name) => ({ name, digest: predicateDigest }));
+  const site = callSite(call);
+  return receiptNames[label].map((name) => ({ name, digest: predicateDigest, site }));
 });
 
 function staticFailures(candidate) {
   const body = candidate.replace(/\s+/g, ' ');
   const failures = exactPredicates.filter(([, predicate]) => !body.includes(predicate)).map(([label]) => label);
-  const recorder = "const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => { const receipts = []; const check = (name, predicate, message) => { assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`); const predicateSource = Function.prototype.toString.call(predicate).replace(/\\s+/g, ' '); const digest = crypto.createHash('sha256').update(predicateSource).digest('hex'); assert(predicate(), message); receipts.push(Object.freeze({ name, digest })); }; const snapshot = () => Object.freeze(receipts.map((receipt) => Object.freeze({ ...receipt }))); return Object.freeze({ check, snapshot }); })();";
-  if (!body.includes(recorder) || (candidate.match(/\breceipts\.push\(/g) || []).length !== 1) failures.push('receipt recorder');
+  const recorder = "const { check: bl6Check, snapshot: bl6ReceiptSnapshot } = (() => { let tail = null; let count = 0; const check = (name, predicate, message) => { assert.strictEqual(typeof predicate, 'function', `BL6 receipt ${name} requires a predicate function`); const predicateSource = Function.prototype.toString.call(predicate).replace(/\\s+/g, ' '); const digest = crypto.createHash('sha256').update(predicateSource).digest('hex'); const caller = String(new Error().stack || '').split(/\\r?\\n/)[2] || ''; const location = caller.match(/run-graph-view\\.js:(\\d+):(\\d+)\\)?$/); assert(location, `BL6 receipt ${name} requires an exact harness callsite`); assert(predicate(), message); tail = { previous: tail, receipt: { name, digest, site: `${location[1]}:${location[2]}` } }; count += 1; }; const snapshot = () => { const output = []; output.length = count; let cursor = tail; let index = count - 1; while (cursor) { output[index] = { ...cursor.receipt }; cursor = cursor.previous; index -= 1; } return output; }; return Object.freeze({ check, snapshot }); })();";
+  if (!body.includes(recorder) || /\breceipts?\.push\(/.test(candidate)) failures.push('receipt recorder');
   if (!candidate.includes('console.log(`BL6-RECEIPTS ${JSON.stringify(bl6ReceiptSnapshot())}`);')) failures.push('receipt output');
   return failures;
 }
@@ -114,9 +123,13 @@ const weakened = source.replace(
 assert(staticFailures(weakened).includes('first tap'),
   'BL6A-SELF-WEAKENED: a weaker nonliteral predicate fails the independent source contract');
 const forgedReceipts = expectedReceipts.map((receipt) => receipt.name === 'first-tap'
-  ? { name: receipt.name, digest: digest('() => Boolean(headers[1])') } : receipt);
+  ? { ...receipt, digest: digest('() => Boolean(headers[1])') } : receipt);
 assert.deepStrictEqual(receiptFailures(`BL6-RECEIPTS ${JSON.stringify(forgedReceipts)}`), ['receipt sequence'],
   'BL6A-SELF-FORGED: a weaker active predicate cannot forge the exact predicate digest');
+const shadowedReceipts = expectedReceipts.map((receipt) => receipt.name === 'first-tap'
+  ? { ...receipt, site: '999:9' } : receipt);
+assert.deepStrictEqual(receiptFailures(`BL6-RECEIPTS ${JSON.stringify(shadowedReceipts)}`), ['receipt sequence'],
+  'BL6B-SELF-SHADOWED: an exact predicate at a forged callsite cannot replace the real fixture');
 const directWriter = source.replace(
   "if (false) bl6Check('first-tap', () =>",
   "if (false) bl6Check('first-tap', () =>",
