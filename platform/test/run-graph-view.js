@@ -343,6 +343,8 @@ async function main() {
   await new GraphView().render({ container });
   const root = container.children.find((child) => child.className === 'graph-view-root');
   assert(root, 'render mounts one graph-view-root');
+  assert.strictEqual(byClass(root, 'graph-view-cluster-header').length, 0,
+    'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');
 
   // Case 3: one chip per slice, chip is a clickable internal link to the card path.
   const chips = byClass(root, 'graph-view-chip');
@@ -1560,7 +1562,7 @@ async function main() {
   // BL-6 select-first cluster focus. Epic One's own chips plus its direct
   // partners on the incoming EB-1 → E1-2 and outgoing E1-2 → E2-1 edges stay
   // full strength; every unrelated cluster chip dims by exact class footprint.
-  const clusterAtRest = domShape(pRoot);
+  const clusterAtRest = JSON.parse(JSON.stringify(domShape(pRoot)));
   const clusterOpenCount = projectOpened.length;
   const firstClusterTap = bubblingClick(headers[1]);
   assert(firstClusterTap.stopped && projectOpened.length === clusterOpenCount,
@@ -1579,6 +1581,14 @@ async function main() {
   assert(!byClass(pRoot, 'graph-view-done-chip')[0].className.includes('graph-view-dimmed')
     && byClass(pRoot, 'warning-missing-epic').every((row) => !row.className.includes('graph-view-dimmed')),
   'BL6-STRIPS-UNAFFECTED: done and warning strips remain outside cluster focus');
+
+  // BL6-CROSS-INSTANCE-ACTIVE: prove focus state is controller-local while the
+  // first instance remains focused. Clearing before this render would allow a
+  // shared/module-level focusedCluster mutant to survive.
+  const activeFocusFreshContainer = element();
+  await new GraphView({ scope: 'project' }).render({ container: activeFocusFreshContainer });
+  assert.deepStrictEqual(domShape(activeFocusFreshContainer.children[0]), clusterAtRest,
+    'BL6-CROSS-INSTANCE-ACTIVE: a second render starts unfocused while the first remains focused');
 
   bubblingClick(headers[1]);
   assert.deepStrictEqual(projectOpened.at(-1), [`${epicOneDir}/Epic One`, stationPath, false],
@@ -1949,6 +1959,24 @@ async function main() {
   assert(stationHistory.some((entry) => entry.event === 'info' && entry.step === 'loop_station_graph_heal'
     && entry.action === 'graph_view_injected' && entry.target === 'spice/projects/demo/Loop Station.md'),
   'station heal records one injection history event');
+
+  // BL6-PREDICATE-BINDINGS: mutation guards live after the behavior section
+  // and inspect only the source before this marker, so these expected strings
+  // cannot satisfy themselves. Deleting or weakening a carried BL-6 predicate
+  // therefore turns this same declared harness red.
+  const bl6HarnessSource = fs.readFileSync(__filename, 'utf8');
+  const bl6BindingAt = bl6HarnessSource.lastIndexOf('\n  // BL6-PREDICATE-BINDINGS');
+  const bl6BehaviorSource = bl6HarnessSource.slice(0, bl6BindingAt).replace(/\s+/g, ' ');
+  for (const [label, predicate] of [
+    ['EPIC-NOOP', "assert.strictEqual(byClass(root, 'graph-view-cluster-header').length, 0, 'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');"],
+    ['FIRST-TAP', "assert(firstClusterTap.stopped && projectOpened.length === clusterOpenCount, 'BL6-FIRST-TAP: first cluster-header tap stops bubbling and performs no navigation');"],
+    ['PARTNER', "assert(!pChipFor(id).className.includes('graph-view-dimmed'), `BL6-BIDIRECTIONAL-PARTNER: focused Epic One keeps ${id} full-strength`);"],
+    ['STRIPS', "assert(!byClass(pRoot, 'graph-view-done-chip')[0].className.includes('graph-view-dimmed') && byClass(pRoot, 'warning-missing-epic').every((row) => !row.className.includes('graph-view-dimmed')), 'BL6-STRIPS-UNAFFECTED: done and warning strips remain outside cluster focus');"],
+    ['CROSS-INSTANCE', "assert.deepStrictEqual(domShape(activeFocusFreshContainer.children[0]), clusterAtRest, 'BL6-CROSS-INSTANCE-ACTIVE: a second render starts unfocused while the first remains focused');"],
+  ]) {
+    assert(bl6BehaviorSource.includes(predicate),
+      `BL6-PREDICATE-BINDING-${label}: executable behavior predicate remains exact`);
+  }
 
   console.log('graph-view: all checks passed');
 }
