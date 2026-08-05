@@ -61,6 +61,7 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   'supersession-depth': ['json', 'card'],
   'heal-epic-bindings': ['json', 'apply', 'dry-run'],
   'board-health': ['json', 'write-note'],
+  adopt: ['json', 'card', 'pr', 'merge-sha', 'reason'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -4532,6 +4533,124 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   }, { staleMs: 60 * 60 * 1000 });
 }
 
+// --- adopt (workstream 3 of the loop-integrity program).
+// The sanctioned out-of-band completion. It exists because a real, sanctioned
+// writer — KanbanStatusSync at vault boot — can complete any slice with one
+// drag, and because a batch PR is sometimes genuinely the right shape for a
+// change. Adoption gives that move verified provenance instead of leaving it
+// as permanent, unreportable drift. It can ONLY ratify a declaration already
+// sitting unrecorded on the board: a card with a ledger record refuses, and a
+// note that does not declare completed refuses. Both guards are what keep this
+// from being a general-purpose "mark it done" backdoor.
+const ADOPT_SHA_RE = /^[0-9a-f]{40}$/;
+
+function adoptProvenance(args, deps, cwd) {
+  const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
+  const sha = String(args['merge-sha'] || '').trim().toLowerCase();
+  if (!ADOPT_SHA_RE.test(sha)) {
+    refuse('adopt-refused', 'adopt_sha_unreachable', `--merge-sha must be a 40-hex commit sha (got "${args['merge-sha']}")`);
+  }
+  try { runGit(['cat-file', '-e', `${sha}^{commit}`], cwd); }
+  catch (err) {
+    refuse('adopt-refused', 'adopt_sha_unreachable', `merge sha ${sha} does not resolve in this repo: ${err.message}`);
+  }
+  let defaultBranch = 'main';
+  try { defaultBranch = String(runGit(['rev-parse', '--abbrev-ref', 'origin/HEAD'], cwd) || '').trim() || 'origin/main'; }
+  catch (_) { defaultBranch = 'origin/main'; }
+  try { runGit(['merge-base', '--is-ancestor', sha, defaultBranch], cwd); }
+  catch (err) {
+    refuse('adopt-refused', 'adopt_sha_unreachable',
+      `merge sha ${sha} is not an ancestor of ${defaultBranch}: ${err.message}`);
+  }
+  // gh is the second, independent tier. Its absence degrades the recorded
+  // verification level; it never fails the verb and never passes silently as
+  // full verification.
+  const viewPr = deps.prView || prView;
+  let pr = null;
+  try { pr = viewPr(REPO, Number(args.pr), cwd); }
+  catch (_) { return { sha, verified: 'git', default_branch: defaultBranch }; }
+  if (!pr) return { sha, verified: 'git', default_branch: defaultBranch };
+  if (pr.state !== 'MERGED') {
+    refuse('adopt-refused', 'adopt_pr_not_merged', `PR ${args.pr} is ${pr.state}, not MERGED`);
+  }
+  const merged = String((pr.mergeCommit && pr.mergeCommit.oid) || '').toLowerCase();
+  if (merged !== sha) {
+    refuse('adopt-refused', 'adopt_pr_mismatch',
+      `PR ${args.pr} merge commit ${merged || '(none)'} != --merge-sha ${sha}`);
+  }
+  return { sha, verified: 'git+gh', default_branch: defaultBranch, pr_url: pr.url || null };
+}
+
+async function commandAdopt(ctx, args, deps = {}) {
+  requireOnlyOptions(args, 'adopt', STRICT_CLI_OPTIONS.adopt);
+  if (args.json !== true) throw new Error('adopt requires --json for a machine-readable receipt');
+  const card = args.card;
+  const number = Number(args.pr);
+  if (!card || !Number.isInteger(number)) {
+    usage('adopt-refused', 'invalid_arguments', 'adopt requires --card and numeric --pr');
+  }
+  const reason = String(args.reason || '').trim();
+  if (!reason) refuse('adopt-refused', 'adopt_reason_required', 'adopt requires a non-empty --reason');
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const loadState = deps.readState || readState;
+  const transitionLock = deps.withLock || withLock;
+  return transitionLock(ctx, 'selector', async () => {
+    const state = loadState(ctx);
+    const existing = (state.cards || {})[card];
+    if (existing && existing.adoption) {
+      const same = existing.adoption.pr === number
+        && existing.adoption.merge_sha === String(args['merge-sha'] || '').trim().toLowerCase()
+        && existing.adoption.reason === reason;
+      if (!same) {
+        refuse('adopt-refused', 'adopt_conflict',
+          `card ${card} was adopted from PR ${existing.adoption.pr}; adopt accepts only literal replay`);
+      }
+      return successReceipt('adopt', { no_op: true, card, adoption: existing.adoption });
+    }
+    if (existing) {
+      refuse('adopt-refused', 'adopt_record_exists',
+        `card ${card} already has a ledger record; adopt only ratifies unrecorded board members`);
+    }
+    const notePath = findCard(cardsRoot, card);
+    if (!notePath) {
+      refuse('adopt-refused', 'adopt_card_not_found', `card ${card} has no note under ${cardsRoot}`);
+    }
+    const raw = fs.readFileSync(notePath, 'utf8');
+    const noteStatus = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+    if (noteStatus !== 'completed') {
+      refuse('adopt-refused', 'adopt_not_declared_complete',
+        `card ${card} declares ${noteStatus}; adopt ratifies a completed declaration, it never invents one`);
+    }
+    const provenance = adoptProvenance(args, deps, ctx.root);
+    const now = deps.now || (() => new Date().toISOString());
+    const persist = deps.writeState || writeState;
+    const record = {
+      card,
+      parent_card: normalizeCardLink(scalarField(raw, 'epic')) || null,
+      slice: scalarField(raw, 'slice') || card,
+      phase: 'completed',
+      card_path: notePath,
+      touch_zones: listField(raw, 'touch_zones').map(normalizeZone),
+      dependencies: parseDependsOn(raw).map(normalizeCardLink),
+      deploy_subscriptions: deploymentField(raw) || null,
+      adoption: {
+        pr: number,
+        merge_sha: provenance.sha,
+        reason,
+        verified: provenance.verified,
+        adopted_at: now(),
+      },
+    };
+    state.cards ||= {};
+    state.cards[card] = record;
+    persist(ctx, state, record);
+    return successReceipt('adopt', {
+      no_op: false, card, phase: record.phase, adoption: record.adoption,
+      card_path: notePath, pr_url: provenance.pr_url || null,
+    });
+  });
+}
+
 // --- Board-health sweep (workstream 1 of the loop-integrity program).
 // Every check starts from the BOARD, not the ledger: the other checks in this
 // file iterate Object.values(state.cards), so a board member with no ledger
@@ -7715,6 +7834,7 @@ async function main() {
   else if (command === 'supersession-depth') result = commandSupersessionDepth(ctx, args);
   else if (command === 'heal-epic-bindings') result = await commandHealEpicBindings(ctx, args);
   else if (command === 'board-health') result = await commandBoardHealth(ctx, args);
+  else if (command === 'adopt') result = await commandAdopt(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -7750,7 +7870,7 @@ async function main() {
       return deployed;
     }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|board-health|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|adopt|board-health|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7781,7 +7901,7 @@ module.exports = {
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
-  commandBoardHealth, collectBoardHealth,
+  commandBoardHealth, collectBoardHealth, commandAdopt, adoptProvenance,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,

@@ -16,6 +16,7 @@ const {
   bumpLevel: releaseBumpLevel,
 } = require('../../scripts/release/lib/conventional');
 const { inc: incrementReleaseVersion } = require('../../scripts/release/lib/semver-inc');
+const deliveryTopology = require('../mechanisms/delivery/scripts/delivery-topology');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 const hadPriorImportedCoordinatorCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
@@ -11176,6 +11177,186 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
   } finally {
     fs.rmSync(resumeRoot, { recursive: true, force: true });
   }
+}
+
+// AD adopt: the sanctioned out-of-band completion. Every precondition refuses
+// BEFORE any ledger write; the verb can only ratify a declaration already
+// sitting unrecorded on the board, never invent one.
+const adScaffold = (root) => bhScaffold(root, {
+  progress: ['Retire ero loop'],
+  epics: {
+    'Retire ero loop': {
+      lanes: { Completed: ['EM-4'], 'In Progress': ['EM-7'] },
+      slices: { 'EM-4': 'completed', 'EM-7': 'in_progress' },
+    },
+  },
+});
+const AD_SHA = '9922ec4373e4a925829c7917912263e2c27a29e4';
+const adGit = (calls = []) => (args) => {
+  calls.push(args.join(' '));
+  if (args[0] === 'cat-file') return '';
+  if (args[0] === 'merge-base') return '';
+  if (args[0] === 'rev-parse') return 'main';
+  throw new Error(`unexpected git ${args.join(' ')}`);
+};
+const adPrView = (overrides = {}) => () => ({
+  number: 126, state: 'MERGED', mergeCommit: { oid: AD_SHA }, ...overrides,
+});
+const adDeps = (fx, state, extra = {}) => bhDeps(fx, {
+  readState: () => state,
+  writeState: () => {},
+  git: adGit(),
+  prView: adPrView(),
+  ...extra,
+});
+const adRefusal = async (fx, state, args, extra = {}) => {
+  try {
+    await coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+      { json: true, ...args }, adDeps(fx, state, extra));
+  } catch (err) { return err; }
+  return null;
+};
+
+{
+  const root = path.join(tmp, 'ad-refusals');
+  const fx = adScaffold(root);
+  const base = { card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
+
+  // --json is mandatory before any read or write, exactly like every other
+  // mutating verb.
+  await assert.rejects(
+    () => coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+      { ...base }, adDeps(fx, emptyState())),
+    /requires --json/, 'AD-JSON refusal: --json is mandatory');
+
+  // Unknown options are rejected by the shared CLI grammar before state access.
+  let r = await adRefusal(fx, emptyState(), { ...base, apply: true });
+  eq(r && r.code, 'unknown_option', 'AD-GRAMMAR rejects unknown options before reads or writes');
+
+  // A card that already has a ledger record is NOT adoptable — that is what
+  // stops adopt from becoming a general-purpose "mark it done" backdoor.
+  const tracked = emptyState();
+  tracked.cards['EM-4'] = { card: 'EM-4', phase: 'implementing' };
+  r = await adRefusal(fx, tracked, base);
+  eq(r && r.code, 'adopt_record_exists', 'AD-TRACKED a card with a record refuses');
+
+  // Adoption ratifies a declaration; it never invents one.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-7' });
+  eq(r && r.code, 'adopt_not_declared_complete', 'AD-DECLARED a non-completed note refuses');
+
+  // A board member with no note at all cannot be adopted.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-404' });
+  eq(r && r.code, 'adopt_card_not_found', 'AD-MISSING an unknown card refuses');
+
+  // Provenance operands are structurally validated first.
+  r = await adRefusal(fx, emptyState(), { ...base, 'merge-sha': 'deadbeef' });
+  eq(r && r.code, 'adopt_sha_unreachable', 'AD-SHA-SHAPE a non-40-hex sha refuses');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    git: (args) => { if (args[0] === 'cat-file') throw new Error('bad object'); return ''; },
+  });
+  eq(r && r.code, 'adopt_sha_unreachable', 'AD-SHA-ABSENT a sha git cannot resolve refuses');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    git: (args) => { if (args[0] === 'merge-base') throw new Error('not an ancestor'); if (args[0] === 'rev-parse') return 'main'; return ''; },
+  });
+  eq(r && r.code, 'adopt_sha_unreachable', 'AD-SHA-UNMERGED a sha off the default branch refuses');
+
+  r = await adRefusal(fx, emptyState(), base, { prView: adPrView({ state: 'OPEN' }) });
+  eq(r && r.code, 'adopt_pr_not_merged', 'AD-PR-OPEN an unmerged PR refuses');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    prView: adPrView({ mergeCommit: { oid: 'a'.repeat(40) } }),
+  });
+  eq(r && r.code, 'adopt_pr_mismatch', 'AD-PR-MISMATCH a PR whose merge commit is not the sha refuses');
+
+  r = await adRefusal(fx, emptyState(), { ...base, reason: '   ' });
+  eq(r && r.code, 'adopt_reason_required', 'AD-REASON an empty reason refuses');
+
+  r = await adRefusal(fx, emptyState(), { card: 'EM-4', pr: 'nope', 'merge-sha': AD_SHA, reason: 'x' });
+  eq(r && r.code, 'invalid_arguments', 'AD-PR-SHAPE a non-numeric --pr refuses');
+
+  // Every refusal renders a valid ok:false envelope.
+  eq(validateReceiptEnvelope(refusalReceipt(r.action, r.code, r.message)).ok, true,
+    'AD refusals render a valid ok:false envelope');
+}
+
+// AD-ADOPT — the successful path. One ledger record, verified provenance,
+// permanently labeled `adopted`, and an epic that can finally roll up.
+{
+  const root = path.join(tmp, 'ad-adopt');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const writes = [];
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const receipt = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR; per-slice was wrong here' },
+    adDeps(fx, state, { writeState: (_c, _s, rec) => writes.push(rec), now: () => '2026-08-04T12:00:00.000Z' }));
+
+  eq(receipt.action, 'adopt', 'AD-ADOPT reports the adopt action');
+  eq(receipt.ok, true, 'AD-ADOPT succeeds');
+  eq(receipt.no_op, false, 'AD-ADOPT a first adoption is never a no-op');
+  eq(receipt.card, 'EM-4', 'AD-ADOPT names the adopted card');
+  eq(receipt.adoption.pr, 126, 'AD-ADOPT records the PR number');
+  eq(receipt.adoption.merge_sha, AD_SHA, 'AD-ADOPT records the merge sha');
+  eq(receipt.adoption.reason, 'batch PR; per-slice was wrong here', 'AD-ADOPT records the reason verbatim');
+  eq(receipt.adoption.verified, 'git+gh', 'AD-ADOPT records the full verification tier');
+  eq(receipt.adoption.adopted_at, '2026-08-04T12:00:00.000Z', 'AD-ADOPT stamps the adoption');
+
+  const record = state.cards['EM-4'];
+  ok(record, 'AD-ADOPT writes exactly one ledger record');
+  eq(record.phase, 'completed', 'AD-ADOPT the adopted record is completed');
+  eq(record.adoption.verified, 'git+gh', 'AD-ADOPT provenance lives on the record, not only the receipt');
+  eq(record.card_path, path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md'),
+    'AD-ADOPT binds the record to the resolved note path');
+  eq(writes.length, 1, 'AD-ADOPT persists once');
+
+  // The adopted record projects as complete — this is the whole point: the
+  // epic can now roll up — while never claiming deployment proof.
+  const verdict = deliveryTopology.resolveSliceAuthority({
+    hasRecord: true, ledgerStatus: 'completed', boardStatus: 'completed',
+    doneProven: coordinator.successfulDeploymentReceipts(record),
+    boardIsSlice: true, adopted: Boolean(record.adoption),
+  });
+  eq(verdict.status, 'completed', 'AD-ADOPT an adopted record projects complete');
+  eq(verdict.source, 'adopted', 'AD-ADOPT the adopted source is visible to every consumer');
+  eq(verdict.doneProven, false, 'AD-ADOPT adoption never fabricates deployment proof');
+}
+
+// AD-REPLAY — literal replay is free; substituted operands refuse.
+{
+  const root = path.join(tmp, 'ad-replay');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const args = { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
+  await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
+  const replay = await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
+  eq(replay.no_op, true, 'AD-REPLAY identical replay is a no-op');
+  eq(replay.ok, true, 'AD-REPLAY identical replay still succeeds');
+
+  let conflict = null;
+  try {
+    await coordinator.commandAdopt(ctx, { ...args, pr: 999 }, adDeps(fx, state, {
+      prView: () => ({ number: 999, state: 'MERGED', mergeCommit: { oid: AD_SHA } }),
+    }));
+  } catch (err) { conflict = err; }
+  eq(conflict && conflict.code, 'adopt_conflict', 'AD-REPLAY substituted operands refuse');
+}
+
+// AD-DEGRADE — a gh outage lowers the recorded verification tier. It never
+// fails the verb and never passes silently as full verification.
+{
+  const root = path.join(tmp, 'ad-degrade');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const receipt = await coordinator.commandAdopt(
+    { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' },
+    adDeps(fx, state, { prView: () => { throw new Error('gh: not authenticated'); } }));
+  eq(receipt.adoption.verified, 'git', 'AD-DEGRADE a gh outage records the git-only tier');
+  eq(state.cards['EM-4'].adoption.verified, 'git', 'AD-DEGRADE the degrade is durable on the record');
+  eq(receipt.ok, true, 'AD-DEGRADE the verb still succeeds');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
