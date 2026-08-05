@@ -4558,8 +4558,13 @@ function planEpicBindingHeal(cardsRoot, parentBoardPath) {
 // the target state is derived entirely from the on-disk canonical form rather
 // than from operator-supplied operands, so recomputing at apply time is exactly
 // as safe as replaying a recorded intent, and the verb is idempotent by
-// construction. It touches ONLY the drifted frontmatter fields and the orphaned
-// board lines — never bodies, ledger state, worktrees, or lane placement.
+// construction. It touches ONLY the drifted frontmatter fields and the
+// orphaned board lines — never bodies, worktrees, or lane placement. It IS a
+// ledger writer: for each tracked slice it rewrites, it stamps that record's
+// `card_note_sha` to the healed bytes (so its own repair is never mistaken
+// for a foreign write on the next projection) and persists — but only when
+// it actually stamped something, so a run that touches nothing tracked, or
+// finds nothing drifted, stays a genuine no-op write.
 async function commandHealEpicBindings(ctx, args, deps = {}) {
   requireOnlyOptions(args, 'heal-epic-bindings', STRICT_CLI_OPTIONS['heal-epic-bindings']);
   if (args.json !== true) throw new Error('heal-epic-bindings requires --json for a machine-readable receipt');
@@ -4941,11 +4946,17 @@ function collectBoardHealth(state, opts = {}) {
   // it (KanbanStatusSync, Obsidian Sync, or any other writer that never
   // consults the selector lock). Ledger-driven by nature, so an empty/absent
   // ledger contributes zero findings (skipped, not failed) — same as check 5.
-  // projectCard clears a resolved finding on its next pass, so this only ever
-  // reports live conditions, never stale history.
+  // projectCard is the only thing that ever clears foreign_write, and it
+  // requires a phase with a board projection — `discarded`, `failed`, and
+  // `cancelled` have none. Without this gate, a foreign write detected on a
+  // card that is later discarded (or fails, or is cancelled) would be
+  // unclearable forever: no projection ever runs again for that phase, so
+  // no board-health sweep — hourly, unattended — would ever return to
+  // healthy for it. A finding no projection can ever resolve is not
+  // actionable, so it must not hold the board unhealthy.
   const foreignWrites = ledger === 'present'
     ? Object.values(cards)
-      .filter((record) => record.foreign_write)
+      .filter((record) => record.foreign_write && projectionMapping(record.phase))
       .map((record) => ({ card: record.card, phase: record.phase, foreign_write: record.foreign_write }))
     : [];
   const findings = {

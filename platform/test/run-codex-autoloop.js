@@ -11823,6 +11823,43 @@ const adNoMutation = (result, label) => {
   eq(resolved.findings.foreign_writes, [], 'FW-BOARD-HEALTH a resolved record reports nothing');
 }
 
+// FW-BOARD-HEALTH-TERMINAL — a foreign_write on a card whose phase has no
+// board projection (discarded, failed, cancelled) can never be cleared:
+// projectCard is the only thing that clears it, and none of those phases
+// ever run through projectCard again (reconcile returns `skipped: 'phase has
+// no board projection'`). Without the phase gate on check 6, detecting a
+// foreign write and then discarding the card would leave board-health
+// permanently unhealthy — the hourly-sweep-never-recovers failure Minor A
+// fixed, reached through a different route (code this task introduced, not a
+// pre-existing condition).
+{
+  const root = path.join(tmp, 'fw-board-health-terminal');
+  const fx = bhScaffold(root, {});
+  const state = emptyState();
+  const finding = { detected_at: '2026-08-04T12:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: 'b'.repeat(64) };
+  state.cards['FWT-1'] = { card: 'FWT-1', phase: 'discarded', foreign_write: finding };
+
+  const bh = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(bh.findings.foreign_writes, [],
+    'FW-BOARD-HEALTH-TERMINAL a discarded record with a foreign_write is not reported — no projection can ever clear it');
+  eq(bh.healthy, true, 'FW-BOARD-HEALTH-TERMINAL an otherwise-clean board stays healthy');
+
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  eq(receipt.no_op, true, 'FW-BOARD-HEALTH-TERMINAL commandBoardHealth still reports no_op: true');
+
+  // failed/cancelled are equally unclearable and must be gated the same way.
+  for (const phase of ['failed', 'cancelled']) {
+    state.cards['FWT-1'].phase = phase;
+    const swept = coordinator.collectBoardHealth(state, {
+      boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+    });
+    eq(swept.findings.foreign_writes, [], `FW-BOARD-HEALTH-TERMINAL phase ${phase} with a foreign_write is also not reported`);
+  }
+}
+
 // FW-RECONCILE-CLEAR-PERSIST — projectCard clears an in-memory
 // `foreign_write` the moment its sha resyncs, but that clear must reach
 // disk too, or a stale finding from an earlier detection survives forever:
