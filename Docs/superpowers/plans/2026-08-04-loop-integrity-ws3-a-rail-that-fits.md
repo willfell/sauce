@@ -10,6 +10,8 @@
 
 **Spec:** [`Docs/superpowers/specs/2026-08-04-loop-integrity-ws3-a-rail-that-fits-design.md`](../specs/2026-08-04-loop-integrity-ws3-a-rail-that-fits-design.md)
 
+> **Execution amendment (Director ruling, pre-flight):** Tasks 2 and 3 are executed as **one** deliverable — the complete `adopt` verb, perimeter and write path together. The plan as written had Task 2 end in a deliberate `throw new Error('adopt write path lands in Task 3')` so the refusal perimeter could be reviewed alone; a verb that can never succeed is not a reviewable deliverable, so the throw is never written. Everything else in both task sections stands verbatim: Task 2's refusal tests and Task 3's success, replay, and degrade tests all land, and Task 3's implementation code (including the replay branch placed *before* the `adopt_record_exists` refusal) is what `commandAdopt` ends with. Downstream task numbering in this file is unchanged.
+
 ## Global Constraints
 
 - **Branch:** `ws3-a-rail-that-fits`, already created off `main` with the spec committed. One workstream, one branch, one PR.
