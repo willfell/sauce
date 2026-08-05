@@ -9,8 +9,10 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.282.0` (closed 2026-08-04)
-- **Most recent cycle:** loop-integrity workstream 2 — one source of truth: canonical path derivation, board-vs-ledger authority, and the release bump each reduced to one physical implementation (`delivery.topology.*`, `resolveSliceAuthority`, PR-title bump gate). See `Docs/plans/2026-08-04-v0.282.1-ws2-one-source-of-truth-result.md`.
+- **Workshop version:** `0.282.1` (closed 2026-08-04)
+- **Most recent cycle:** loop-integrity workstream 3 — a rail that fits: the `adopt` verb (verified out-of-band completion carrying PR + merge-SHA provenance, new terminal `adopted` ledger phase, projection refresh), stamp-provenance classification of untracked board members in `board-health`, `card_note_sha`/`foreign_write` detection of non-coordinator card writes, and a stable `concurrent_modification` refusal across the bulk-rewrite verbs. See `Docs/plans/2026-08-04-v0.283.0-ws3-a-rail-that-fits-result.md`.
+
+- **Workshop version (previous):** `0.282.0` (closed 2026-08-04) — loop-integrity workstream 2 — one source of truth: canonical path derivation, board-vs-ledger authority, and the release bump each reduced to one physical implementation (`delivery.topology.*`, `resolveSliceAuthority`, PR-title bump gate). See `Docs/plans/2026-08-04-v0.282.1-ws2-one-source-of-truth-result.md`.
 
 ## Mechanisms (30)
 

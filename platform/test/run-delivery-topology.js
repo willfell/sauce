@@ -78,4 +78,28 @@ topo.assertProjectableStatus({ status: 'completed', doneProven: true });
 topo.assertProjectableStatus({ status: 'in_progress', doneProven: false });
 count += 2;
 
+// Adopted tier (WS3): an evidence-backed out-of-band completion is projectable
+// WITHOUT ever claiming deployment proof. doneProven keeps its exact meaning.
+v = topo.resolveSliceAuthority({ hasRecord: true, ledgerStatus: 'completed', boardStatus: 'completed', doneProven: false, boardIsSlice: true, adopted: true });
+eq(v.status, 'completed', 'adopted completion does not demote');
+eq(v.source, 'adopted', 'adopted completion reports the adopted source');
+eq(v.doneProven, false, 'adopted is never proven done');
+ok(!v.demoted, 'adopted completion is not flagged demoted');
+
+// adopted only rescues `completed`; any other ledger status is untouched by it.
+v = topo.resolveSliceAuthority({ hasRecord: true, ledgerStatus: 'in_progress', boardStatus: 'completed', doneProven: false, boardIsSlice: true, adopted: true });
+eq(v.status, 'in_progress', 'adopted does not promote a non-completed ledger status');
+eq(v.source, 'ledger', 'a non-completed adopted record still reports the ledger source');
+
+// adopted requires a record: it can never rescue a bare board declaration.
+v = topo.resolveSliceAuthority({ hasRecord: false, boardStatus: 'completed', boardIsSlice: true, adopted: true });
+eq(v.status, 'in_progress', 'adopted without a record cannot rescue a board declaration');
+eq(v.source, 'board', 'adopted without a record still reports the board source');
+
+// The backstop accepts adopted and still refuses unproven, unadopted completion.
+topo.assertProjectableStatus({ status: 'completed', doneProven: false, source: 'adopted' });
+throws(() => topo.assertProjectableStatus({ status: 'completed', doneProven: false, source: 'ledger' }),
+  /projectable status invariant/, 'unproven ledger completion still fails the backstop');
+count += 1;  // the bare accept-call above asserts by not throwing; `throws` counts itself
+
 console.log(`DELIVERY-TOPOLOGY PASS (${count} assertions)`);

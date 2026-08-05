@@ -51,10 +51,16 @@ function parentBoardRef(prefix, parentBoardBasename) {
 // never assert "done"; a completed status without proven deployment demotes to
 // in_progress. Callers supply already-normalized statuses + the doneProven
 // signal so this stays free of coordinator phase/receipt vocabulary.
-function resolveSliceAuthority({ hasRecord, ledgerStatus, boardStatus, doneProven, boardIsSlice } = {}) {
+function resolveSliceAuthority({ hasRecord, ledgerStatus, boardStatus, doneProven, boardIsSlice, adopted } = {}) {
   if (hasRecord) {
     const proven = doneProven === true;
     const base = ledgerStatus;
+    // An adopted record carries verified external provenance (PR + merge SHA)
+    // instead of deployment receipts. It is projectable but NEVER proven done:
+    // doneProven keeps meaning exactly "carries successful deployment receipts".
+    if (adopted === true && base === 'completed') {
+      return Object.freeze({ status: 'completed', doneProven: false, source: 'adopted', demoted: false });
+    }
     const status = base === 'completed' && !proven ? 'in_progress' : base;
     return Object.freeze({ status, doneProven: proven, source: 'ledger', demoted: status !== base });
   }
@@ -64,10 +70,12 @@ function resolveSliceAuthority({ hasRecord, ledgerStatus, boardStatus, doneProve
   return Object.freeze({ status, doneProven: false, source: 'board', demoted });
 }
 
-// Fail-closed backstop: a verdict projected as complete MUST be proven done.
-// Unreachable via resolveSliceAuthority; guards a future consumer bypassing it.
+// Fail-closed backstop: a verdict projected as complete MUST be proven done or
+// carry adopted provenance. Unreachable via resolveSliceAuthority; guards a
+// future consumer bypassing it.
 function assertProjectableStatus(verdict) {
-  if (verdict && verdict.status === 'completed' && verdict.doneProven !== true) {
+  if (verdict && verdict.status === 'completed'
+    && verdict.doneProven !== true && verdict.source !== 'adopted') {
     throw new Error('projectable status invariant: completed without proven deployment');
   }
 }

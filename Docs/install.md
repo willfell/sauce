@@ -1547,3 +1547,18 @@ brew update && brew upgrade sauce
 
 - Canonical board/atlas/slice path derivation and the board-vs-ledger authority rule now live once in the delivery mechanism (`delivery.topology.*`); the coordinator and card-intake both consume it. Projection behavior is byte-identical.
 - New `release:check-bump` gate (workshop-only) recomputes the release bump from the PR title vs branch commits so a mistitled squash-merge PR can no longer ship the wrong bump.
+
+## Upgrading from v0.282.1 to v0.283.0 — a rail that fits (no consumer-vault action)
+
+```bash
+brew update && brew upgrade sauce
+```
+
+**What changes:** coordinator behavior only (loop-integrity workstream 3). No blueprint surface changes, no migrations, no vault-file changes, no consumer-vault action required.
+
+- New verb `adopt --card <exact name> --pr <n> --merge-sha <40-hex> --reason <why> --json` — the sanctioned out-of-band completion. Use it when a slice was genuinely finished outside the rail (a batch PR, or a drag into *Completed* in Obsidian) and the ledger never saw it. It only ratifies a note that already declares `completed`; it never invents a completion, and `--pr`/`--merge-sha` are verified against git and `gh` before anything is written. It writes one ledger record in the new terminal phase `adopted`, then refreshes the epic projection, so the epic rolls up and the board stops diverging.
+- `board-health --json` now classifies each untracked board member by **who wrote its `status_changed_at`**: `provenance: "coordinator"` (the record lives in another clone's ledger — no action possible here) vs `provenance: "foreign"` (something outside the rail wrote it — `remedy: "adopt"`), plus an `untracked_members_by_provenance: {coordinator, foreign}` summary. Purely additive; `healthy` is unaffected.
+- New sixth `board-health` check, `foreign_writes`: the coordinator now records `card_note_sha` for every tracked card note it writes and reports a `foreign_write` when the bytes on disk diverge — a hand edit, `KanbanStatusSync` at vault boot, or Obsidian Sync from another machine. It reports and projects anyway; it never blocks the loop.
+- `heal-epic-bindings --apply` now refuses with `concurrent_modification` (zero vault and zero ledger writes) when any target changed after its plan was computed. `restructure` and `reconcile-metadata --parked-rebind --apply` emit the same code for the same condition.
+
+**Existing findings are not healed by this upgrade.** `adopt` is the tool; running it against your board is an operational decision. Start with `board-health --json` and read `untracked_members_by_provenance` before adopting anything.

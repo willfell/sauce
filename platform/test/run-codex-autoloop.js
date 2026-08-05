@@ -4232,8 +4232,16 @@ eq(viaGateLocks, [
   legacyCardGateLockName('A1'), cardGateLockName('A1'),
   'completion-projection',
 ], 'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes both legacy and tracked sibling identities before projection');
-eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
+// Projecting the tracked sibling (A1) legitimately adds `card_note_sha` —
+// foreign-write detection records the hash of what it wrote on every
+// projectCard pass with a record, additive and orthogonal to the race this
+// block is pinning. Strip it before the byte-for-byte comparison and assert
+// it separately.
+const { card_note_sha: viaGateRaceSha, ...viaGateRaceWithoutSha } = viaGateRaceState.cards.A1;
+eq(JSON.stringify(viaGateRaceWithoutSha), viaGateTransitionSnapshot,
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
+ok(/^[0-9a-f]{64}$/.test(viaGateRaceSha),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE projecting the tracked sibling records its card_note_sha');
 ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE retains the exact legacy finding after the concurrent sibling transition');
 
@@ -7650,6 +7658,26 @@ eq(mixedStateRebind.state.cards, mixedStateBefore,
   'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves every record unchanged');
 eq(fs.readFileSync(mixedStateRebind.boardPath, 'utf8'), mixedStateBoardBefore,
   'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves board bytes unchanged');
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a mixed expected/intended split
+// across targets is the same second-writer signature as a single target's
+// third state — machine-identifiable through the shared cli-kit code. The
+// mixed-state message names no single target (it spans the whole target
+// set), so this pins the "zero writes" fact instead, which is what today's
+// message states.
+{
+  let mixedStateCodeError = null;
+  try {
+    await commandReconcileMetadata(mixedStateRebind.ctx, mixedStateRebind.applyArgs, mixedStateRebind.deps);
+  } catch (err) { mixedStateCodeError = err; }
+  eq(mixedStateCodeError && mixedStateCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a mixed third ledger state refuses with the concurrent_modification code');
+  ok(mixedStateCodeError && /zero writes/.test(mixedStateCodeError.message),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mixed-state refusal still states zero writes');
+  eq(mixedStateRebind.state.cards, mixedStateBefore,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mixed-state refusal still leaves every record unchanged');
+  eq(mixedStateRebind.counts().ledgerWrites, 0,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION mixed-state refusal still performs zero ledger writes');
+}
 
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`phase-${phase}`);
@@ -7696,6 +7724,27 @@ fs.appendFileSync(thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].
 await assert.rejects(() => commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps),
   /third card hash/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a third card state before writes'); count++;
 eq(thirdStateRebind.counts().ledgerWrites, 0, 'third-state parked-rebind refusal performs zero ledger writes');
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a third card hash is a second
+// writer, not a crash — machine-identifiable through the shared cli-kit code
+// (same as heal-epic-bindings and restructure). Re-invokes the same refusal
+// (pure, zero-write) to capture the thrown error object directly; this
+// assertion fails against the unconverted `new Error(...)` throw.
+{
+  const thirdCardMutatedPath = thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path;
+  const thirdCardMutatedBytes = fs.readFileSync(thirdCardMutatedPath, 'utf8');
+  let thirdCardCodeError = null;
+  try {
+    await commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps);
+  } catch (err) { thirdCardCodeError = err; }
+  eq(thirdCardCodeError && thirdCardCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third card hash refuses with the concurrent_modification code');
+  ok(thirdCardCodeError && thirdCardCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed target card');
+  eq(fs.readFileSync(thirdCardMutatedPath, 'utf8'), thirdCardMutatedBytes,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal writes nothing to the mutated target');
+  eq(thirdStateRebind.counts().ledgerWrites, 0,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION third-card refusal still performs zero ledger writes');
+}
 for (const shape of ['missing', 'extra']) {
   const refusal = parkedRebindHarness(shape);
   const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -7810,6 +7859,21 @@ await assertParkedRefusalNoMutation(
   /third projected epic state/,
   'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP hash-matched malformed projected target',
 );
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a hash-matched but non-canonical
+// projected target is a second writer, not a crash — machine-identifiable
+// through the shared cli-kit code.
+{
+  let thirdProjectedCodeError = null;
+  try {
+    await commandReconcileMetadata(malformedProjectedRefusal.ctx, malformedProjectedRefusal.applyArgs, malformedProjectedRefusal.deps);
+  } catch (err) { thirdProjectedCodeError = err; }
+  eq(thirdProjectedCodeError && thirdProjectedCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third projected epic state refuses with the concurrent_modification code');
+  ok(thirdProjectedCodeError && thirdProjectedCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed projected target');
+  eq(fs.readFileSync(malformedProjectedPath, 'utf8'), malformedProjectedRaw,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the malformed projected target is left byte-untouched');
+}
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`write-seam-phase-${phase}`);
   const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -7846,6 +7910,21 @@ await assertParkedRefusalNoMutation(
   /third ledger epic state/,
   'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third ledger state',
 );
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a third ledger epic value is a
+// second writer, not a crash — machine-identifiable through the shared
+// cli-kit code.
+{
+  let thirdLedgerCodeError = null;
+  try {
+    await commandReconcileMetadata(thirdLedgerRefusal.ctx, thirdLedgerRefusal.applyArgs, thirdLedgerRefusal.deps);
+  } catch (err) { thirdLedgerCodeError = err; }
+  eq(thirdLedgerCodeError && thirdLedgerCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third ledger epic state refuses with the concurrent_modification code');
+  ok(thirdLedgerCodeError && thirdLedgerCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed ledger target');
+  eq(thirdLedgerRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic, '[[Third epic]]',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mutated ledger epic is left untouched');
+}
 for (const shape of ['missing', 'extra']) {
   const refusal = parkedRebindHarness(`write-seam-spec-${shape}`);
   const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -8074,6 +8153,55 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
 }
 
+// FW-DISCARD-PERSIST — scanDependentsForDiscard stamps a rewritten
+// dependent's card_note_sha only in memory; discardCardCore's own persist
+// (`persist(ctx, state, target)`) writes only the discarded card's own
+// record, so a tracked dependent's stamp needs a persist of its own. Real
+// on-disk ledger throughout: no readState/writeState overrides, so
+// commandDiscard exercises the module's real persistence, and the assertions
+// read the state file fresh from disk rather than the object passed in.
+{
+  const root = path.join(tmp, 'fw-discard-persist');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['FWD-4'], planning: ['FWD-5'] }));
+  const predPath = path.join(cardsRoot, 'FWD-4.md');
+  const depPath = path.join(cardsRoot, 'FWD-5.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  fs.writeFileSync(depPath, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[FWD-4]]"', '---', 'x'].join('\n'));
+
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  const seedState = emptyState();
+  seedState.cards['FWD-4'] = { card: 'FWD-4', phase: 'parked', card_path: predPath, gate_receipt: passingReceipt(DISCARD_HEAD) };
+  seedState.cards['FWD-4b'] = { card: 'FWD-4b', phase: 'discarded', superseded_by: 'FWD-4c' };
+  seedState.cards['FWD-4c'] = { card: 'FWD-4c', phase: 'deployed' };
+  // A stale placeholder sha, standing in for "the coordinator last wrote this
+  // dependent a while ago" — the discard-time repoint must advance it, and
+  // that advance must reach disk, not just the in-memory record.
+  seedState.cards['FWD-5'] = { card: 'FWD-5', phase: 'planning', card_path: depPath, card_note_sha: '0'.repeat(64) };
+  writeState(ctx, seedState);
+
+  const receipt = await commandDiscard(ctx, {
+    card: 'FWD-4', 'superseded-by': 'FWD-4b', reason: 'superseded to FWD-4c chain', json: true,
+  }, {
+    boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-05T00:00:00.000Z', writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(),
+    projectLoopStation: (_c, _s, u) => ({ action: 'loop-station-projected', no_op: false, updated_on: u }),
+  });
+  eq(receipt.dependency_rewrites, [{ card: 'FWD-5', from: 'FWD-4', to: 'FWD-4c', path: depPath }],
+    'FW-DISCARD-PERSIST the planning dependent is repointed to the live tail (precondition)');
+
+  const onDiskDependent = readOnDisk().cards['FWD-5'];
+  const healedBytes = fs.readFileSync(depPath, 'utf8');
+  ok(onDiskDependent.card_note_sha !== '0'.repeat(64),
+    'FW-DISCARD-PERSIST the ON-DISK dependent sha advances past its placeholder');
+  eq(onDiskDependent.card_note_sha, crypto.createHash('sha256').update(healedBytes).digest('hex'),
+    'FW-DISCARD-PERSIST the on-disk dependent sha equals sha256 of its repointed note');
+}
+
 // SD supersession-depth circuit-breaker — a lineage at the depth limit refuses
 // to supersede further and escalates to the Director instead of minting the Nth
 // successor (the runaway that spun one slice through 27 supersessions).
@@ -8278,8 +8406,11 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   eq(dry.slices.map((s) => s.card), ['BX-1'], 'BPX-HEAL dry-run names only the slice with a non-canonical task_parent');
   eq(dry.slices[0].fields.task_parent.to, `${prefix}/tasks/Broken Epic/Broken Epic.md`,
     'BPX-HEAL dry-run rewrites the slice task_parent to vault-relative');
-  eq(dry.orphan_lines, [{ board: path.join(brokenDir, 'Broken Epic-board.md'), epic: 'Broken Epic', card: 'BX-0 gone' }],
-    'BPX-HEAL dry-run names the orphaned sub-board line whose slice note is gone');
+  eq(dry.orphan_lines, [{
+    board: path.join(brokenDir, 'Broken Epic-board.md'), epic: 'Broken Epic', card: 'BX-0 gone',
+    preimage_sha: crypto.createHash('sha256')
+      .update(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')).digest('hex'),
+  }], 'BPX-HEAL dry-run names the orphaned sub-board line whose slice note is gone');
   eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), brokenSliceBefore,
     'BPX-HEAL dry-run writes nothing');
 
@@ -8303,6 +8434,102 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), healedSlice,
     'BPX-HEAL replay keeps every healed surface byte-stable');
   ok(soundDir.endsWith(path.join('Sound Epic', 'board')), 'BPX-HEAL fixture scaffolds the canonical control epic');
+}
+
+// FW-HEAL-INTERNAL — heal-epic-bindings is a coordinator-internal writer of a
+// tracked card's note (writeText(path, patchFrontmatter(raw, ...)), the exact
+// shape flagged in review). It must stamp card_note_sha itself AND persist
+// it, or the very next projection — in a fresh process, reading the ledger
+// fresh from disk — reports the coordinator's own repair as a foreign write.
+// This drives commandHealEpicBindings through a REAL on-disk ledger (real
+// readState/writeState, ctx carrying a real stateDir/statePath): an injected
+// `readState: () => state` returning the same live object the test mutated
+// cannot prove persistence, only that the object in memory changed — exactly
+// how round 1's version of this test passed against unpersisted code. BX-1
+// starts canonical (so the first projectCard call can succeed and establish
+// a baseline — canonicalEpicProjection refuses a non-canonical slice
+// outright, so there is no way to seed a baseline any other way), then
+// drifts exactly like BPX-HEAL's fixture (project-relative task_parent)
+// without going through the coordinator, and heal-epic-bindings repairs it.
+{
+  const root = path.join(tmp, 'fw-heal-internal');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Broken Epic'] }));
+  const boardDir = path.join(cardsRoot, 'Broken Epic', 'board');
+  fs.mkdirSync(boardDir, { recursive: true });
+  fs.mkdirSync(path.join(cardsRoot, 'Broken Epic', 'context', 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(cardsRoot, 'Broken Epic', 'Broken Epic.md'), [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+    `epic_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'status: planning', 'posture: claimable', '---', '', 'Broken Epic atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(boardDir, 'Broken Epic-board.md'), [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Broken Epic]]"', '---', '',
+    '## In Planning', '', '## In Progress', '- [ ] [[BX-1]]', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const notePath = path.join(boardDir, 'BX-1.md');
+  const canonicalTaskParent = `task_parent: ${prefix}/tasks/Broken Epic/Broken Epic.md`;
+  fs.writeFileSync(notePath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Broken Epic]]"',
+    canonicalTaskParent,
+    `source_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    `kanban_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'kanban_column: In Progress', 'status: in_progress', 'depends_on: []', '---', '', 'BX-1 body', '',
+  ].join('\n'));
+
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+
+  // Establish the coordinator's own baseline on a REAL on-disk ledger, the
+  // way production does: project the note (mutates a record in memory), then
+  // persist that record — exactly what attemptProjection/commandReconcile do
+  // — while the note is still canonical.
+  const seedRecord = {
+    card: 'BX-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  projectCard(notePath, boardPath, 'BX-1', 'implementing', {
+    record: seedRecord, state: { cards: { 'BX-1': seedRecord } }, cardsRoot,
+  });
+  writeState(ctx, { cards: { 'BX-1': seedRecord } }, seedRecord);
+  const preDriftSha = readOnDisk().cards['BX-1'].card_note_sha;
+  ok(/^[0-9a-f]{64}$/.test(preDriftSha), 'FW-HEAL-INTERNAL a baseline sha is established on disk before the drift');
+
+  // Drift the binding outside the coordinator, exactly like BPX-HEAL's
+  // fixture (project-relative task_parent) — the ledger's recorded sha is now
+  // stale relative to disk.
+  fs.writeFileSync(notePath, fs.readFileSync(notePath, 'utf8')
+    .replace(canonicalTaskParent, 'task_parent: tasks/Broken Epic/Broken Epic.md'));
+
+  // Real command, real ledger: no readState/writeState overrides, so this
+  // exercises the module's own persistence, not an injected stand-in.
+  const healed = await commandHealEpicBindings(ctx, { apply: true, json: true }, {
+    boardPath, cardsRoot, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(),
+  });
+  eq(healed.slices.map((s) => s.card), ['BX-1'], 'FW-HEAL-INTERNAL the heal actually rewrites the tracked slice (precondition)');
+
+  const healedBytes = fs.readFileSync(notePath, 'utf8');
+  const onDiskAfterHeal = readOnDisk().cards['BX-1'];
+  ok(onDiskAfterHeal.card_note_sha !== preDriftSha,
+    'FW-HEAL-INTERNAL the ON-DISK ledger sha advances past its pre-drift baseline');
+  eq(onDiskAfterHeal.card_note_sha, crypto.createHash('sha256').update(healedBytes).digest('hex'),
+    'FW-HEAL-INTERNAL the on-disk sha equals sha256 of the healed note');
+
+  // A subsequent projection, loading the record fresh from disk (not the
+  // object passed into the heal above), must not report the coordinator's
+  // own repair as a foreign write.
+  const freshRecord = readOnDisk().cards['BX-1'];
+  const reprojected = projectCard(notePath, boardPath, 'BX-1', 'implementing', {
+    record: freshRecord, state: { cards: { 'BX-1': freshRecord } }, cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-HEAL-INTERNAL the coordinator does not report its own repair as a foreign write');
 }
 
 // BH board-health: the board-driven divergence sweep. Every check starts from
@@ -8391,9 +8618,10 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-UNTRACKED reports exactly the board members the ledger has never heard of');
   eq(receipt.findings.untracked_members[0], {
     epic: 'Retire ero loop', card: 'EM-4', note_status: 'completed',
+    stamp: null, provenance: 'foreign',
     issue: 'board member has no ledger record; a completed note is never counted done',
-    remedy: 'investigate: work completed outside the rail',
-  }, 'BH-UNTRACKED finding carries the epic, note status, issue, and non-mechanical remedy');
+    remedy: 'adopt',
+  }, 'BH-UNTRACKED finding carries the epic, note status, stamp provenance, issue, and remedy');
   eq(receipt.checked, { epics: 1, slices: 6, records: 3 }, 'BH-UNTRACKED counts what it checked');
   ok(!receipt.findings.untracked_members.some((f) => ['EM-1', 'EM-2', 'EM-3'].includes(f.card)),
     'BH-UNTRACKED tracked members are not reported');
@@ -8463,8 +8691,9 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-UNPROJECTABLE the throwing epic and the scaffold-less member are findings, not aborts');
   eq(receipt.findings.untracked_members.find((f) => f.card === 'Flat Card'), {
     epic: null, card: 'Flat Card', note_status: 'completed',
+    stamp: null, provenance: 'foreign',
     issue: 'board member has no ledger record; a completed note is never counted done',
-    remedy: 'investigate: work completed outside the rail',
+    remedy: 'adopt',
   }, 'BH-UNPROJECTABLE a flat board member is still reachable by check 1');
   ok(/does not bind its canonical parent board/.test(receipt.findings.unprojectable_epics[0].error),
     'BH-UNPROJECTABLE carries the projection refusal verbatim');
@@ -8525,9 +8754,11 @@ const bhDeps = (fx, extra = {}) => ({
   eq(receipt.no_op, true, 'BH-NOOP a healthy fully-checked board is a no-op');
   eq(receipt.ledger, 'present', 'BH-NOOP healthy means checked, not unchecked');
   eq(receipt.findings, {
-    untracked_members: [], unprojectable_epics: [],
+    untracked_members: [],
+    untracked_members_by_provenance: { coordinator: 0, foreign: 0 },
+    unprojectable_epics: [],
     binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
-    lane_divergence: [], projection_errors: [],
+    lane_divergence: [], projection_errors: [], foreign_writes: [],
   }, 'BH-NOOP every finding class is empty');
   eq(writes, 0, 'BH-READONLY the default invocation performs zero writes');
   ok(!fs.existsSync(path.join(fx.projectRoot, 'Board Health.md')),
@@ -9982,10 +10213,20 @@ await assert.rejects(
 const mutatedPath = path.join(thirdState.cardsRoot, 'Card B1.md');
 fs.appendFileSync(mutatedPath, 'operator edit after the crash\n');
 const mutatedRaw = fs.readFileSync(mutatedPath, 'utf8');
-await assert.rejects(
-  () => commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, thirdState.deps),
-  /neither the recorded preimage nor the intended result/,
+let thirdStateError = null;
+try {
+  await commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, thirdState.deps);
+} catch (err) { thirdStateError = err; }
+ok(thirdStateError && /neither the recorded preimage nor the intended result/.test(thirdStateError.message),
   'BGR-RESTRUCTURE-RESUME a target in a third state fails closed with a machine-readable error');
+// BGR-RESTRUCTURE-CONCURRENT-MODIFICATION: a second writer (a target matching
+// neither the recorded preimage nor the intended result) is machine-identifiable
+// through the shared cli-kit code, same as heal-epic-bindings — this assertion
+// fails against the unconverted `new Error(...)` third-state throw.
+eq(thirdStateError && thirdStateError.code, 'concurrent_modification',
+  'BGR-RESTRUCTURE-CONCURRENT-MODIFICATION a target in a third state refuses with the concurrent_modification code');
+ok(thirdStateError && thirdStateError.message.includes('Card B1.md'),
+  'BGR-RESTRUCTURE-CONCURRENT-MODIFICATION the refusal names the changed member note');
 eq(fs.readFileSync(mutatedPath, 'utf8'), mutatedRaw,
   'BGR-RESTRUCTURE-RESUME the fail-closed rerun never deletes or rewrites the mutated note');
 ok(!fs.existsSync(path.join(thirdState.cardsRoot, 'Family B', 'board', 'Card B1.md')),
@@ -11176,6 +11417,1138 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
   } finally {
     fs.rmSync(resumeRoot, { recursive: true, force: true });
   }
+}
+
+// AD adopt: the sanctioned out-of-band completion. Every precondition refuses
+// BEFORE any ledger write; the verb can only ratify a declaration already
+// sitting unrecorded on the board, never invent one.
+const adScaffold = (root) => bhScaffold(root, {
+  progress: ['Retire ero loop'],
+  epics: {
+    'Retire ero loop': {
+      lanes: { Completed: ['EM-4'], 'In Progress': ['EM-7'] },
+      slices: { 'EM-4': 'completed', 'EM-7': 'in_progress' },
+    },
+  },
+});
+const AD_SHA = '9922ec4373e4a925829c7917912263e2c27a29e4';
+const adGit = () => (args) => {
+  if (args[0] === 'cat-file') return '';
+  if (args[0] === 'merge-base') return '';
+  if (args[0] === 'rev-parse') return 'main';
+  throw new Error(`unexpected git ${args.join(' ')}`);
+};
+const adPrView = (overrides = {}) => () => ({
+  number: 126, state: 'MERGED', mergeCommit: { oid: AD_SHA }, ...overrides,
+});
+const adDeps = (fx, state, extra = {}) => bhDeps(fx, {
+  readState: () => state,
+  writeState: () => {},
+  git: adGit(),
+  prView: adPrView(),
+  ...extra,
+});
+// Every refusal path must throw BEFORE any write and without mutating the
+// ledger it was handed — adRefusal threads a counting writeState through so
+// every AD-* assertion below can pin that, not just the refusal code.
+const adRefusal = async (fx, state, args, extra = {}) => {
+  const writes = [];
+  const before = JSON.stringify(state.cards);
+  let err = null;
+  try {
+    await coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+      { json: true, ...args }, adDeps(fx, state, { writeState: (_c, _s, rec) => writes.push(rec), ...extra }));
+  } catch (e) { err = e; }
+  return { err, writes, unchanged: JSON.stringify(state.cards) === before };
+};
+const adNoMutation = (result, label) => {
+  eq(result.writes.length, 0, `${label} refuses before any write`);
+  eq(result.unchanged, true, `${label} leaves ledger state byte-identical`);
+};
+
+{
+  const root = path.join(tmp, 'ad-refusals');
+  const fx = adScaffold(root);
+  const base = { card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
+
+  // --json is mandatory before any read or write, exactly like every other
+  // mutating verb.
+  const adJsonWrites = [];
+  await assert.rejects(
+    () => coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+      { ...base }, adDeps(fx, emptyState(), { writeState: (_c, _s, rec) => adJsonWrites.push(rec) })),
+    /requires --json/, 'AD-JSON refusal: --json is mandatory');
+  eq(adJsonWrites.length, 0, 'AD-JSON refuses before any write');
+
+  // Unknown options are rejected by the shared CLI grammar before state access.
+  let r = await adRefusal(fx, emptyState(), { ...base, apply: true });
+  eq(r.err && r.err.code, 'unknown_option', 'AD-GRAMMAR rejects unknown options before reads or writes');
+  adNoMutation(r, 'AD-GRAMMAR');
+
+  // A card that already has a ledger record is NOT adoptable — that is what
+  // stops adopt from becoming a general-purpose "mark it done" backdoor.
+  const tracked = emptyState();
+  tracked.cards['EM-4'] = { card: 'EM-4', phase: 'implementing' };
+  r = await adRefusal(fx, tracked, base);
+  eq(r.err && r.err.code, 'adopt_record_exists', 'AD-TRACKED a card with a record refuses');
+  adNoMutation(r, 'AD-TRACKED');
+
+  // Adoption ratifies a declaration; it never invents one.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-7' });
+  eq(r.err && r.err.code, 'adopt_not_declared_complete', 'AD-DECLARED a non-completed note refuses');
+  adNoMutation(r, 'AD-DECLARED');
+
+  // A board member with no note at all cannot be adopted.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-404' });
+  eq(r.err && r.err.code, 'adopt_card_not_found', 'AD-MISSING an unknown card refuses');
+  adNoMutation(r, 'AD-MISSING');
+
+  // Provenance operands are structurally validated first.
+  r = await adRefusal(fx, emptyState(), { ...base, 'merge-sha': 'deadbeef' });
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-SHAPE a non-40-hex sha refuses');
+  adNoMutation(r, 'AD-SHA-SHAPE');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    git: (args) => { if (args[0] === 'cat-file') throw new Error('bad object'); return ''; },
+  });
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-ABSENT a sha git cannot resolve refuses');
+  adNoMutation(r, 'AD-SHA-ABSENT');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    git: (args) => { if (args[0] === 'merge-base') throw new Error('not an ancestor'); if (args[0] === 'rev-parse') return 'main'; return ''; },
+  });
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-UNMERGED a sha off the default branch refuses');
+  adNoMutation(r, 'AD-SHA-UNMERGED');
+
+  r = await adRefusal(fx, emptyState(), base, { prView: adPrView({ state: 'OPEN' }) });
+  eq(r.err && r.err.code, 'adopt_pr_not_merged', 'AD-PR-OPEN an unmerged PR refuses');
+  adNoMutation(r, 'AD-PR-OPEN');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    prView: adPrView({ mergeCommit: { oid: 'a'.repeat(40) } }),
+  });
+  eq(r.err && r.err.code, 'adopt_pr_mismatch', 'AD-PR-MISMATCH a PR whose merge commit is not the sha refuses');
+  adNoMutation(r, 'AD-PR-MISMATCH');
+
+  // gh successfully resolving and reporting "no such PR" is a different
+  // signal than a gh outage: it must refuse, never durably record an
+  // unverifiable PR reference at a degraded tier.
+  r = await adRefusal(fx, emptyState(), base, {
+    prView: () => { throw new Error('GraphQL: Could not resolve to a PullRequest with the number of 126. (repository.pullRequest)'); },
+  });
+  eq(r.err && r.err.code, 'adopt_pr_not_found', 'AD-PR-NOTFOUND gh resolving "no such PR" refuses, not degrades');
+  adNoMutation(r, 'AD-PR-NOTFOUND');
+
+  r = await adRefusal(fx, emptyState(), { ...base, reason: '   ' });
+  eq(r.err && r.err.code, 'adopt_reason_required', 'AD-REASON an empty reason refuses');
+  adNoMutation(r, 'AD-REASON');
+
+  r = await adRefusal(fx, emptyState(), { card: 'EM-4', pr: 'nope', 'merge-sha': AD_SHA, reason: 'x' });
+  eq(r.err && r.err.code, 'invalid_arguments', 'AD-PR-SHAPE a non-numeric --pr refuses');
+  adNoMutation(r, 'AD-PR-SHAPE');
+
+  // Every refusal renders a valid ok:false envelope.
+  eq(validateReceiptEnvelope(refusalReceipt(r.err.action, r.err.code, r.err.message)).ok, true,
+    'AD refusals render a valid ok:false envelope');
+}
+
+// AD-ADOPT — the successful path. One ledger record, verified provenance,
+// permanently labeled `adopted`, and an epic that can finally roll up.
+{
+  const root = path.join(tmp, 'ad-adopt');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const writes = [];
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const receipt = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR; per-slice was wrong here' },
+    adDeps(fx, state, { writeState: (_c, _s, rec) => writes.push(rec), now: () => '2026-08-04T12:00:00.000Z' }));
+
+  eq(receipt.action, 'adopt', 'AD-ADOPT reports the adopt action');
+  eq(receipt.ok, true, 'AD-ADOPT succeeds');
+  eq(receipt.no_op, false, 'AD-ADOPT a first adoption is never a no-op');
+  eq(receipt.card, 'EM-4', 'AD-ADOPT names the adopted card');
+  eq(receipt.adoption.pr, 126, 'AD-ADOPT records the PR number');
+  eq(receipt.adoption.merge_sha, AD_SHA, 'AD-ADOPT records the merge sha');
+  eq(receipt.adoption.reason, 'batch PR; per-slice was wrong here', 'AD-ADOPT records the reason verbatim');
+  eq(receipt.adoption.verified, 'git+gh', 'AD-ADOPT records the full verification tier');
+  eq(receipt.adoption.adopted_at, '2026-08-04T12:00:00.000Z', 'AD-ADOPT stamps the adoption');
+
+  const record = state.cards['EM-4'];
+  ok(record, 'AD-ADOPT writes exactly one ledger record');
+  eq(record.phase, 'adopted', "AD-ADOPT the record's ledger phase is the terminal 'adopted' phase, not 'completed'");
+  eq(receipt.phase, 'adopted', 'AD-ADOPT the receipt reports the same adopted phase');
+  eq(record.adoption.verified, 'git+gh', 'AD-ADOPT provenance lives on the record, not only the receipt');
+  eq(record.card_path, path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md'),
+    'AD-ADOPT binds the record to the resolved note path');
+  // Two persists, deliberately, and in this order: the record first so the
+  // adopted phase is durable even if the projection then fails, and again
+  // afterwards so the projection's own record mutations
+  // (projection_reconciled_at, the card_note_sha baseline) reach disk. This is
+  // the same persist/project/persist discipline park, resume, amend-park and
+  // amend-contract already use; a single persist would silently drop the
+  // baseline that foreign-write detection depends on.
+  eq(writes.length, 2, 'AD-ADOPT persists the record, projects, then persists the projection mutations');
+  eq(writes.every((rec) => rec === record), true, 'AD-ADOPT both persists carry the one adopted record');
+  ok(record.projection_reconciled_at, 'AD-ADOPT the projection receipt lands on the record');
+  eq(record.card_note_sha, testSha256(fs.readFileSync(record.card_path, 'utf8')),
+    'AD-ADOPT adoption establishes the card_note_sha baseline from the bytes on disk');
+
+  // The adopted record projects as complete THROUGH THE REAL PRODUCTION
+  // PATH — noteProjectionMapping and canonicalEpicProjection/
+  // deriveEpicProjection, not a hand-fed resolveSliceAuthority call — which
+  // is the whole point: the epic can now roll up while never claiming
+  // deployment proof. (resolveSliceAuthority's own 'adopted' tier is unit
+  // tested in isolation by run-delivery-topology.js; re-asserting it here
+  // with hand-supplied hasRecord/adopted would be self-fulfilling and would
+  // pass even against an inert commandAdopt.)
+  const noteRaw = fs.readFileSync(record.card_path, 'utf8');
+  eq(coordinator.noteProjectionMapping(noteRaw, record),
+    { column: 'Completed', complete: true, status: 'completed' },
+    'AD-ADOPT the adopted note projects to Completed through the real per-note call site');
+
+  const surface = coordinator.canonicalEpicProjection(noteRaw, record.card_path, fx.boardPath, fx.cardsRoot, { state });
+  const lifecycle = coordinator.deriveEpicProjection(surface, null, null);
+  eq(lifecycle.counts.done, 1, 'AD-ADOPT the epic rollup counts the adopted slice done');
+  eq(lifecycle.findings, [], 'AD-ADOPT no legacy-completion finding fires for an adopted slice');
+}
+
+// AD-REPLAY — literal replay is free; substituted operands refuse.
+{
+  const root = path.join(tmp, 'ad-replay');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const args = { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
+  await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
+  const replay = await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
+  eq(replay.no_op, true, 'AD-REPLAY identical replay is a no-op');
+  eq(replay.ok, true, 'AD-REPLAY identical replay still succeeds');
+
+  // adopt_conflict refuses before adoptProvenance ever runs, so no prView
+  // override is needed here — the default (matching) mock is never called.
+  let conflict = null;
+  const conflictWrites = [];
+  try {
+    await coordinator.commandAdopt(ctx, { ...args, pr: 999 },
+      adDeps(fx, state, { writeState: (_c, _s, rec) => conflictWrites.push(rec) }));
+  } catch (err) { conflict = err; }
+  eq(conflict && conflict.code, 'adopt_conflict', 'AD-REPLAY substituted operands refuse');
+  eq(conflictWrites.length, 0, 'AD-REPLAY substituted operands write nothing before refusing');
+}
+
+// AD-DEGRADE — a gh outage lowers the recorded verification tier. It never
+// fails the verb and never passes silently as full verification.
+{
+  const root = path.join(tmp, 'ad-degrade');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const receipt = await coordinator.commandAdopt(
+    { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' },
+    adDeps(fx, state, { prView: () => { throw new Error('gh: not authenticated'); } }));
+  eq(receipt.adoption.verified, 'git', 'AD-DEGRADE a gh outage records the git-only tier');
+  eq(state.cards['EM-4'].adoption.verified, 'git', 'AD-DEGRADE the degrade is durable on the record');
+  eq(receipt.ok, true, 'AD-DEGRADE the verb still succeeds');
+}
+
+// AD-PROJECTION — effectiveProjectionMapping must exempt `adopted` the same
+// way resolveSliceAuthority already does. Before `adopted` became a real
+// ledger phase (fix round 1), projectionMapping('completed') returned null
+// and this demotion path was a silent no-op for every adopted record. Now
+// that it returns a real mapping, the demotion would fire on every read:
+// projectionBoardDrift/projectionMetadataProblem would report phantom drift
+// (which wedges batch-runner's readiness gate — it throws on either being
+// non-empty), and the advertised drift remedy — single-card reconcile via
+// projectCard — would rewrite the epic board line and note frontmatter back
+// to in-progress, permanently un-completing the adopted slice on every
+// repair pass. This block pins the exemption at all three surfaces.
+{
+  const root = path.join(tmp, 'ad-projection');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' },
+    adDeps(fx, state));
+  const record = state.cards['EM-4'];
+
+  // bhScaffold's slice template never stamps kanban_column (it wasn't built
+  // for projectCard-idempotency fixtures — every OTHER idempotency test in
+  // this suite hand-builds its own card with kanban_column present, see e.g.
+  // the BGR-RESTRUCTURE / drift fixtures above). Stamp it here so the note is
+  // metadata-canonical for an already-Completed slice, isolating the
+  // adoption exemption as the only variable under test. Likewise the atlas
+  // is always hardcoded to status:planning regardless of the epic's actual
+  // roll-up — with EM-4 done and EM-7 still in_progress the real epic
+  // lifecycle is 'active', so stamp that too, or the pre-existing atlas
+  // staleness (unrelated to adoption) would show up as unrelated drift.
+  fs.writeFileSync(record.card_path, patchFrontmatter(fs.readFileSync(record.card_path, 'utf8'), { kanban_column: 'Completed' }));
+  const atlasPath = path.join(fx.cardsRoot, 'Retire ero loop', 'Retire ero loop.md');
+  fs.writeFileSync(atlasPath, patchFrontmatter(fs.readFileSync(atlasPath, 'utf8'), { status: 'active' }));
+
+  const boardMd = fs.readFileSync(fx.boardPath, 'utf8');
+  eq(projectionBoardDrift(boardMd, record, { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, state }),
+    null, 'AD-PROJECTION an adopted record reports zero board drift');
+
+  const loadCard = (card) => {
+    const p = path.join(fx.cardsRoot, 'Retire ero loop', 'board', `${card}.md`);
+    return fs.existsSync(p) ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  };
+  const statusReceipt = commandStatus(ctx, {
+    state, boardMd, loadCard, cardsRoot: fx.cardsRoot, boardPath: fx.boardPath,
+  });
+  eq(statusReceipt.board_drift, [], 'AD-PROJECTION commandStatus reports zero board drift for an adopted record');
+  eq(statusReceipt.projection_problems, [], 'AD-PROJECTION commandStatus reports zero projection problems for an adopted record');
+
+  // The destructive-reconcile pin: projectCard is exactly what the advertised
+  // drift remedy (single-card reconcile) runs. board_changed/card_changed are
+  // the slice-level fields — the epic board line (`- [x]` on the EPIC board,
+  // not the project board) and the note's own `status: completed` frontmatter
+  // — which is precisely what the bug flipped back to in-progress. With the
+  // fixture now fully lifecycle-canonical (kanban_column + atlas stamped
+  // above), the aggregate `changed` is asserted too: nothing on this slice or
+  // its epic should move for an already-correct adopted record.
+  const projectWrites = [];
+  const projectResult = projectCard(record.card_path, fx.boardPath, 'EM-4', 'adopted', {
+    cardsRoot: fx.cardsRoot, record, writeText: (target, text) => projectWrites.push({ target, text }),
+  });
+  eq(projectResult.board_changed, false,
+    'AD-PROJECTION reconcile-style projectCard leaves the epic board line `- [x]` byte-identical');
+  eq(projectResult.card_changed, false,
+    "AD-PROJECTION reconcile-style projectCard leaves the note's `status: completed` byte-identical");
+  eq(projectResult.changed, false, 'AD-PROJECTION reconcile-style projectCard makes no change at all');
+  eq(projectWrites.length, 0, 'AD-PROJECTION an unchanged projection writes nothing');
+}
+
+// AD-KANBAN-DRAG — the motivating scenario, end to end, on a REAL ledger under
+// the REAL nested locks. A Director drags a slice into Completed in Obsidian:
+// KanbanStatusSync rewrites `status`/`status_prev`/`status_changed_at` and
+// nothing else — no `kanban_column`, no epic atlas, no parent board. If `adopt`
+// only wrote its record and returned (which is what it did, while three shipped
+// documents said it refreshed the projection), the very next read reported
+// `projectionMetadataProblem` expected_column "Completed" vs actual
+// "In Progress" AND `projectionBoardDrift` expected_status "done" vs actual
+// "active", and `batch-runner.js` `readiness()` THROWS on either being
+// non-empty. Using the verb exactly as documented stopped the unattended loop
+// until someone ran `reconcile`. This block pins the whole chain: the note, the
+// atlas, both status surfaces, and the durable `card_note_sha` baseline.
+//
+// Deliberately NOT using adDeps here: adDeps injects readState/writeState/
+// withLock stand-ins, and a projection asserted against an injected live object
+// under an injected lock proves neither durability nor lock safety (the exact
+// vacuous-test shape this cycle already shipped twice). Real state io, real
+// `withLock` — `commandAdopt` holds `selector` while `attemptProjection` takes
+// `completion-projection`, so this also pins that the nesting cannot deadlock.
+{
+  const root = path.join(tmp, 'ad-kanban-drag');
+  const fx = adScaffold(root);
+  const ctx = {
+    root: fx.projectRoot,
+    stateDir: path.join(fx.projectRoot, '.state'),
+    statePath: path.join(fx.projectRoot, '.state', 'state.json'),
+  };
+  const notePath = path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md');
+  const atlasPath = path.join(fx.cardsRoot, 'Retire ero loop', 'Retire ero loop.md');
+  // Exactly what a Kanban drag leaves behind: the status declaration flipped,
+  // a bare-date (non-coordinator) stamp, a STALE kanban_column, and an epic
+  // atlas nothing ever touched.
+  fs.writeFileSync(notePath, patchFrontmatter(fs.readFileSync(notePath, 'utf8'), {
+    kanban_column: 'In Progress', status_prev: 'in_progress', status_changed_at: '2026-07-31',
+  }));
+  eq(testScalarField(fs.readFileSync(atlasPath, 'utf8'), 'status'), 'planning',
+    'AD-KANBAN-DRAG precondition: the drag left the epic atlas untouched');
+  eq(testScalarField(fs.readFileSync(notePath, 'utf8'), 'kanban_column'), 'In Progress',
+    'AD-KANBAN-DRAG precondition: the drag left kanban_column stale');
+
+  const receipt = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'dragged to Completed in Obsidian' },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, git: adGit(), prView: adPrView(), now: () => '2026-08-05T09:00:00.000Z' });
+  eq(receipt.ok, true, 'AD-KANBAN-DRAG adopt succeeds');
+  eq(receipt.action, 'adopt', 'AD-KANBAN-DRAG a successful projection keeps the plain adopt action');
+  eq(receipt.projection && receipt.projection.ok, true,
+    'AD-KANBAN-DRAG the receipt surfaces the projection result the way park/resume/amend-contract do');
+
+  // The ledger read fresh from disk, not the object commandAdopt mutated.
+  const onDisk = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['EM-4'];
+  eq(onDisk.phase, 'adopted', 'AD-KANBAN-DRAG the on-disk record is adopted');
+  ok(onDisk.projection_reconciled_at, 'AD-KANBAN-DRAG the projection receipt is durable on the on-disk record');
+  eq(onDisk.card_note_sha, testSha256(fs.readFileSync(notePath, 'utf8')),
+    'AD-KANBAN-DRAG the on-disk card_note_sha baseline equals sha256 of the note bytes on disk');
+
+  // The vault surfaces the drag never touched.
+  eq(testScalarField(fs.readFileSync(notePath, 'utf8'), 'kanban_column'), 'Completed',
+    'AD-KANBAN-DRAG the stale kanban_column is refreshed to the projected column');
+  eq(testScalarField(fs.readFileSync(atlasPath, 'utf8'), 'status'), 'active',
+    'AD-KANBAN-DRAG the epic atlas rolls up (EM-4 adopted, EM-7 still in flight)');
+
+  // The two surfaces batch-runner's readiness() throws on.
+  const state = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  eq(projectionBoardDrift(fs.readFileSync(fx.boardPath, 'utf8'), onDisk,
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, state }),
+  null, 'AD-KANBAN-DRAG projectionBoardDrift is clean after adopt');
+  const loadCard = (card) => {
+    const p = path.join(fx.cardsRoot, 'Retire ero loop', 'board', `${card}.md`);
+    return fs.existsSync(p) ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  };
+  const statusReceipt = commandStatus(ctx, {
+    state, boardMd: fs.readFileSync(fx.boardPath, 'utf8'), loadCard,
+    cardsRoot: fx.cardsRoot, boardPath: fx.boardPath,
+  });
+  eq(statusReceipt.projection_problems, [], 'AD-KANBAN-DRAG commandStatus reports zero projection problems');
+  eq(statusReceipt.board_drift, [], 'AD-KANBAN-DRAG commandStatus reports zero board drift');
+
+  // Literal replay stays a zero-write no-op: the replay path must never
+  // project, or a replayed adopt would re-stamp status_changed_at forever.
+  const beforeReplay = fs.readFileSync(notePath, 'utf8');
+  const ledgerBeforeReplay = fs.readFileSync(ctx.statePath, 'utf8');
+  const replay = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'dragged to Completed in Obsidian' },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, git: adGit(), prView: adPrView() });
+  eq(replay.no_op, true, 'AD-KANBAN-DRAG literal replay is a no-op');
+  eq(fs.readFileSync(notePath, 'utf8'), beforeReplay, 'AD-KANBAN-DRAG replay leaves the note byte-identical');
+  eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBeforeReplay, 'AD-KANBAN-DRAG replay leaves the ledger byte-identical');
+}
+
+// FW-WRITERS — "card_note_sha is stamped at EVERY coordinator write of a
+// tracked card's note" is asserted absolutely in the spec, in
+// delivery-board.md, and in schemas-index.json ("so the coordinator never
+// mistakes its own repair for a foreign write"). Three writers did not honour
+// it, so running them over tracked projectable cards made the very next
+// projection report a foreign writer that was the coordinator itself.
+//
+// Every block below drives the REAL command against a REAL on-disk ledger
+// (no injected readState/writeState) and re-reads the record from disk after
+// the command — an assertion against the live object the command mutated
+// proves nothing about durability. Each seeds a genuine pre-write baseline
+// first, so an unstamped writer fails the way production fails: stale
+// baseline, divergent bytes, `foreign_write` on the next projection.
+const fwSeedLedger = (ctx, cards) => {
+  fs.mkdirSync(path.dirname(ctx.statePath), { recursive: true });
+  writeState(ctx, { schema_version: 1, cards });
+};
+const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256(fs.readFileSync(notePath, 'utf8')) });
+
+// FW-DEPS — reconcile-dependencies --apply is the direct sibling of the
+// discard dependent scan (scanDependentsForDiscard), which IS stamped: the
+// same rewriteDependsOn against the same tracked note, one stamped and one
+// not.
+{
+  const root = path.join(tmp, 'fw-reconcile-deps');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['FWD-1'] }));
+  const notePath = path.join(cardsRoot, 'FWD-1.md');
+  fs.writeFileSync(notePath, [
+    '---', 'type: task-hub', 'source_board: spice/projects/test/project-board.md',
+    'kanban_column: In Progress', 'status: in_progress',
+    'depends_on:', '  - "[[FWD-OLD]]"', '---', '', 'FWD-1 body', '',
+  ].join('\n'));
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  fwSeedLedger(ctx, {
+    'FWD-1': fwBaseline({
+      card: 'FWD-1', phase: 'feature_pr', card_path: notePath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, notePath),
+    'FWD-OLD': { card: 'FWD-OLD', phase: 'discarded', superseded_by: 'FWD-NEW' },
+    'FWD-NEW': { card: 'FWD-NEW', phase: 'planned' },
+  });
+
+  const applied = await coordinator.commandReconcileDependencies(ctx, {
+    all: true, apply: true, reason: 'heal supersession rot', json: true,
+  }, { boardPath, cardsRoot });
+  eq(applied.plan.map((entry) => [entry.card, entry.to]), [['FWD-1', 'FWD-NEW']],
+    'FW-DEPS precondition: the apply actually repoints the tracked dependent');
+  ok(/\[\[FWD-NEW\]\]/.test(fs.readFileSync(notePath, 'utf8')),
+    'FW-DEPS precondition: the note bytes on disk changed');
+
+  const fresh = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['FWD-1'];
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(notePath, 'utf8')),
+    'FW-DEPS the ON-DISK ledger sha equals sha256 of the repointed note bytes');
+  const reprojected = projectCard(notePath, boardPath, 'FWD-1', 'feature_pr', {
+    record: fresh, state: { cards: { 'FWD-1': fresh } }, cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-DEPS the coordinator does not report its own dependency repoint as a foreign write');
+}
+
+// FW-RESTAMP — reconcile-metadata --contract-frontmatter-restamp --apply
+// rewrites canonical card notes wholesale and never touched the ledger at all.
+{
+  const rs = restampHarness('foreign-write');
+  const restampBoard = path.join(reconcileRoot, 'fw-restamp-board.md');
+  fs.writeFileSync(restampBoard, liveBoard({ progress: ['Legacy Restamp A'] }));
+  fwSeedLedger(rs.ctx, {
+    'Legacy Restamp A': fwBaseline({
+      card: 'Legacy Restamp A', phase: 'implementing', card_path: rs.paths[0],
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, rs.paths[0]),
+  });
+  const plan = await commandRestampContractFrontmatter(rs.ctx, rs.dryRunArgs, rs.deps);
+  rs.setSpec(plan.spec);
+  const restamped = await commandRestampContractFrontmatter(rs.ctx, rs.applyArgs, rs.deps);
+  eq(restamped.changed_count, 2, 'FW-RESTAMP precondition: the apply actually rewrites both canonical notes');
+
+  const fresh = JSON.parse(fs.readFileSync(rs.ctx.statePath, 'utf8')).cards['Legacy Restamp A'];
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(rs.paths[0], 'utf8')),
+    'FW-RESTAMP the ON-DISK ledger sha equals sha256 of the restamped note bytes');
+  const reprojected = projectCard(rs.paths[0], restampBoard, 'Legacy Restamp A', 'implementing', {
+    record: fresh, state: { cards: { 'Legacy Restamp A': fresh } }, cardsRoot: rs.ctx.root,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-RESTAMP the coordinator does not report its own contract restamp as a foreign write');
+}
+
+// FW-RESTRUCTURE — restructure writes new note bytes at a NEW path and rebinds
+// card_path. Ordering is the whole difficulty: the stamp must describe the
+// bytes at the note's FINAL location, after the move and after the card_path
+// rebind, and it must ride restructure's own journal/persist discipline rather
+// than an extra bolted-on write.
+{
+  const fwR = makeRestructureFixture({ statuses: { 'Card A2': 'in_progress' } });
+  const fwCtx = {
+    root: fwR.root, stateDir: path.join(fwR.root, '.state'),
+    statePath: path.join(fwR.root, '.state', 'state.json'),
+  };
+  const oldPath = path.join(fwR.cardsRoot, 'Card A2.md');
+  fwSeedLedger(fwCtx, {
+    'Card A2': fwBaseline({
+      card: 'Card A2', phase: 'implementing', card_path: oldPath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, oldPath),
+  });
+  const receipt = await commandRestructure(fwCtx, { spec: fwR.specPath, json: true }, {
+    now: () => '2026-08-05T10:00:00.000Z',
+    journalPath: path.join(fwR.root, 'fw-restructure-journal.json'),
+  });
+  eq(receipt.no_op, false, 'FW-RESTRUCTURE precondition: the migration actually ran');
+  const newPath = path.join(fwR.cardsRoot, 'Family A', 'board', 'Card A2.md');
+  ok(fs.existsSync(newPath) && !fs.existsSync(oldPath),
+    'FW-RESTRUCTURE precondition: the tracked member moved to its epic board directory');
+
+  const fresh = JSON.parse(fs.readFileSync(fwCtx.statePath, 'utf8')).cards['Card A2'];
+  eq(fresh.card_path, newPath, 'FW-RESTRUCTURE the on-disk record is rebound to the final path');
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(newPath, 'utf8')),
+    'FW-RESTRUCTURE the ON-DISK ledger sha equals sha256 of the note bytes at the FINAL path');
+  const reprojected = projectCard(fresh.card_path, fwR.boardPath, 'Card A2', 'implementing', {
+    record: fresh, state: { cards: { 'Card A2': fresh } }, cardsRoot: fwR.cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-RESTRUCTURE the coordinator does not report its own migration as a foreign write');
+}
+
+// BHP board-health provenance: the aggregate untracked count is not a
+// rail-leaving rate. A coordinator-format stamp with no record in THIS clone
+// can only mean another clone's ledger holds it — legitimate, and not
+// actionable here. A foreign stamp means something outside the rail wrote it,
+// and THAT is what `adopt` exists for.
+{
+  const root = path.join(tmp, 'bhp-provenance');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const fx = bhScaffold(root, {
+    progress: ['Mixed provenance'],
+    epics: {
+      'Mixed provenance': {
+        lanes: { Completed: ['XC-1', 'FH-1', 'FH-2'] },
+        slices: { 'XC-1': 'completed', 'FH-1': 'completed', 'FH-2': 'completed' },
+      },
+    },
+  });
+  const stamp = (name, value) => {
+    const p = path.join(cardsRoot, 'Mixed provenance', 'board', `${name}.md`);
+    const raw = fs.readFileSync(p, 'utf8');
+    fs.writeFileSync(p, value === null
+      ? raw
+      : raw.replace(/^status: completed$/m, `status: completed\nstatus_changed_at: ${value}`));
+  };
+  // Real shapes, both observed on live boards:
+  stamp('XC-1', '2026-07-28T15:31:35.493Z');  // coordinator (GA-P1k)
+  stamp('FH-1', '2026-07-31');                // KanbanStatusSync bare date (EM-4/5/6)
+  stamp('FH-2', null);                        // no stamp at all (EM-5)
+
+  const receipt = await coordinator.commandBoardHealth(
+    { root, statePath: path.join(root, 'state.json') },
+    { json: true },
+    bhDeps({ boardPath: fx.boardPath, cardsRoot }, { readState: () => emptyState() }),
+  );
+  const byCard = Object.fromEntries(receipt.findings.untracked_members.map((f) => [f.card, f]));
+
+  eq(byCard['XC-1'].provenance, 'coordinator', 'BHP an ISO-ms stamp is coordinator-written');
+  eq(byCard['XC-1'].stamp, '2026-07-28T15:31:35.493Z', 'BHP the stamp is reported verbatim');
+  eq(byCard['XC-1'].remedy, 'cross-clone: no action in this clone',
+    'BHP a coordinator stamp with no local record is cross-clone residue, not drift');
+
+  eq(byCard['FH-1'].provenance, 'foreign', 'BHP a bare-date stamp is foreign-written');
+  eq(byCard['FH-1'].remedy, 'adopt', 'BHP foreign completions route to adopt');
+  eq(byCard['FH-2'].provenance, 'foreign', 'BHP an absent stamp is foreign-written');
+  eq(byCard['FH-2'].stamp, null, 'BHP an absent stamp reports null');
+
+  eq(receipt.findings.untracked_members_by_provenance, { coordinator: 1, foreign: 2 },
+    'BHP the receipt collapses the aggregate into a readable pair');
+  // collectBoardHealth's `healthy` is aliased into the receipt as `no_op`
+  // (see commandBoardHealth) — there is no separate `healthy` field to read.
+  eq(receipt.no_op, false, 'BHP classification is not a sixth check; health is unchanged');
+}
+
+// FW foreign-write detection. A repo-local lock cannot exclude KanbanStatusSync
+// (Obsidian, at vault boot) or Obsidian Sync (another machine). So the
+// coordinator does not pretend to exclude them — it detects them. For a
+// TRACKED card this is report-only on purpose: adoption does not apply to a
+// card that already has a record, and refusing here would wedge the autoloop
+// on a cosmetic Obsidian edit.
+{
+  const root = path.join(tmp, 'fw-detect');
+  const fx = bhScaffold(root, {
+    progress: ['Detect epic'],
+    epics: {
+      'Detect epic': { lanes: { 'In Progress': ['FW-1'] }, slices: { 'FW-1': 'in_progress' } },
+    },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Detect epic', 'board', 'FW-1.md');
+  const record = {
+    card: 'FW-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  const state = emptyState();
+  state.cards['FW-1'] = record;
+  const opts = { record, state, cardsRoot: fx.cardsRoot, now: () => '2026-08-04T12:00:00.000Z' };
+
+  // First projection has no prior sha to compare against: it establishes one.
+  const first = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(first.foreign_write, null, 'FW-1 a first projection cannot detect a foreign write');
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-1 projection records the sha of what it wrote');
+  const established = record.card_note_sha;
+
+  // Replay with the note untouched: no foreign write.
+  const replay = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(replay.foreign_write, null, 'FW-1 an untouched note reports no foreign write');
+  eq(record.card_note_sha, established, 'FW-1 an unchanged note keeps its recorded sha');
+
+  // Now simulate KanbanStatusSync: a bare-date stamp appended out of band.
+  const tampered = fs.readFileSync(notePath, 'utf8').replace(/^status: /m, 'status_changed_at: 2026-08-04\nstatus: ');
+  fs.writeFileSync(notePath, tampered);
+  const detected = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  ok(detected.foreign_write, 'FW-1 a note changed behind the coordinator is detected');
+  eq(detected.foreign_write.expected_sha, established, 'FW-1 the finding names the sha the coordinator wrote');
+  eq(detected.foreign_write.detected_at, '2026-08-04T12:00:00.000Z', 'FW-1 the finding is stamped');
+  ok(detected.foreign_write.actual_sha !== established, 'FW-1 the finding names the sha it actually found');
+  eq(record.foreign_write.expected_sha, established, 'FW-1 the finding is durable on the record');
+  ok(detected.changed !== undefined, 'FW-1 detection does not abort the projection');
+
+  // The detection call above already resynced record.card_note_sha to the
+  // tampered bytes on disk (stampCardNoteSha rereads unconditionally). A
+  // resolved condition must not leave a stale finding behind: the very next
+  // projection sees the sha already agrees and clears it.
+  const resolved = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(resolved.foreign_write, null, 'FW-1 the next projection resolves once the sha resyncs');
+  eq(record.foreign_write, undefined, 'FW-1 a resolved finding is cleared from the record, not left stale');
+}
+
+// FW-SKIPPED — the early-return path for a phase with no board projection
+// must still carry `foreign_write` (as `null`), so the result's shape is
+// uniform across every path projectCard can take, not just the ones that
+// reach detection.
+{
+  const skipped = coordinator.projectCard('/nonexistent/path.md', '/nonexistent/board.md', 'FW-SKIP', 'no-such-phase', {});
+  eq(skipped, { changed: false, skipped: true, foreign_write: null },
+    'FW-SKIPPED the skipped path carries foreign_write: null');
+}
+
+// FW-RECONCILE-PERSIST — a foreign write that produces no projection change
+// must still force persistence and reach the reconcile receipt. Before this
+// fix, `stateChanged` ignored `foreign_write` entirely, so the exact
+// canonical case this feature exists for — Obsidian's kanban mechanism
+// stamping status_changed_at while status/kanban_column are already correct
+// — would be detected and then thrown away: never persisted, never in the
+// receipt.
+{
+  const root = path.join(tmp, 'fw-reconcile-persist');
+  const fx = bhScaffold(root, {
+    progress: ['Persist epic'],
+    epics: { 'Persist epic': { lanes: { 'In Progress': ['FWP-1'] }, slices: { 'FWP-1': 'in_progress' } } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Persist epic', 'board', 'FWP-1.md');
+  const record = {
+    card: 'FWP-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  let state = emptyState();
+  state.cards['FWP-1'] = record;
+  let persistCount = 0;
+  const reconcileDeps = {
+    readState: () => state,
+    writeState: (_ctx, nextState) => { persistCount++; state = nextState; },
+    withLock: async (_c, _n, fn) => fn(),
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+    now: () => '2026-08-04T12:00:00.000Z',
+  };
+
+  // Seed pass: establishes the canonical baseline (kanban_column/status get
+  // stamped) and records the sha of exactly what real projectCard wrote.
+  const seed = await commandReconcile({ root: fx.projectRoot }, { card: 'FWP-1' }, reconcileDeps);
+  eq(seed.results[0].ok, true, 'FW-RECONCILE-PERSIST the seed reconcile succeeds');
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-RECONCILE-PERSIST the seed establishes a baseline sha');
+  const priorPersistCount = persistCount;
+
+  // Simulate KanbanStatusSync stamping status_changed_at with no semantic
+  // change: status/kanban_column already agree with the ledger, so the
+  // projection itself has nothing to do.
+  const tampered = fs.readFileSync(notePath, 'utf8').replace(/^status: /m, 'status_changed_at: 2026-08-04\nstatus: ');
+  fs.writeFileSync(notePath, tampered);
+
+  const result = await commandReconcile({ root: fx.projectRoot }, { card: 'FWP-1' }, reconcileDeps);
+  const entry = result.results[0];
+  ok(entry.foreign_write, 'FW-RECONCILE-PERSIST the receipt carries the foreign-write finding');
+  eq(entry.projection_changed, false, 'FW-RECONCILE-PERSIST the projection itself made no change (precondition)');
+  eq(entry.state_changed, true, 'FW-RECONCILE-PERSIST a foreign write with no projection change still forces persistence');
+  ok(persistCount > priorPersistCount, 'FW-RECONCILE-PERSIST the forced state change actually persisted');
+}
+
+// FW-BOARD-HEALTH — board-health surfaces the same finding, per the design
+// spec's §6.1 requirement that a foreign write show up "in the projection
+// receipt and in board-health." Ledger-driven exactly like check 5
+// (projection_errors): an empty/absent ledger contributes nothing, and a
+// resolved record reports nothing — live conditions only.
+{
+  const root = path.join(tmp, 'fw-board-health');
+  const fx = bhScaffold(root, {
+    progress: ['FWBH epic'],
+    epics: { 'FWBH epic': { lanes: { 'In Progress': ['FWBH-1'] }, slices: { 'FWBH-1': 'in_progress' } } },
+  });
+  const state = emptyState();
+  const finding = { detected_at: '2026-08-04T12:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: 'b'.repeat(64) };
+  state.cards['FWBH-1'] = { card: 'FWBH-1', phase: 'implementing', foreign_write: finding };
+
+  const withFinding = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(withFinding.findings.foreign_writes, [{ card: 'FWBH-1', phase: 'implementing', foreign_write: finding }],
+    'FW-BOARD-HEALTH a live foreign_write finding is surfaced');
+  eq(withFinding.healthy, false, 'FW-BOARD-HEALTH a live foreign-write finding is not a healthy board');
+
+  delete state.cards['FWBH-1'].foreign_write;
+  const resolved = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(resolved.findings.foreign_writes, [], 'FW-BOARD-HEALTH a resolved record reports nothing');
+}
+
+// FW-BOARD-HEALTH-TERMINAL — a foreign_write on a card whose phase has no
+// board projection (discarded, failed, cancelled) can never be cleared:
+// projectCard is the only thing that clears it, and none of those phases
+// ever run through projectCard again (reconcile returns `skipped: 'phase has
+// no board projection'`). Without the phase gate on check 6, detecting a
+// foreign write and then discarding the card would leave board-health
+// permanently unhealthy — the hourly-sweep-never-recovers failure Minor A
+// fixed, reached through a different route (code this task introduced, not a
+// pre-existing condition).
+{
+  const root = path.join(tmp, 'fw-board-health-terminal');
+  const fx = bhScaffold(root, {});
+  const state = emptyState();
+  const finding = { detected_at: '2026-08-04T12:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: 'b'.repeat(64) };
+  state.cards['FWT-1'] = { card: 'FWT-1', phase: 'discarded', foreign_write: finding };
+
+  const bh = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(bh.findings.foreign_writes, [],
+    'FW-BOARD-HEALTH-TERMINAL a discarded record with a foreign_write is not reported — no projection can ever clear it');
+  eq(bh.healthy, true, 'FW-BOARD-HEALTH-TERMINAL an otherwise-clean board stays healthy');
+
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  eq(receipt.no_op, true, 'FW-BOARD-HEALTH-TERMINAL commandBoardHealth still reports no_op: true');
+
+  // failed/cancelled are equally unclearable and must be gated the same way.
+  for (const phase of ['failed', 'cancelled']) {
+    state.cards['FWT-1'].phase = phase;
+    const swept = coordinator.collectBoardHealth(state, {
+      boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+    });
+    eq(swept.findings.foreign_writes, [], `FW-BOARD-HEALTH-TERMINAL phase ${phase} with a foreign_write is also not reported`);
+  }
+}
+
+// FW-RECONCILE-CLEAR-PERSIST — projectCard clears an in-memory
+// `foreign_write` the moment its sha resyncs, but that clear must reach
+// disk too, or a stale finding from an earlier detection survives forever:
+// the resolving pass's `projected.foreign_write` is null (nothing NEW),
+// `projected.changed` is false (nothing to project), and
+// `projection_reconciled_at` is already set — none of that trips
+// `stateChanged` unless the pre-call `foreign_write` is captured and OR'd
+// in. Real on-disk ledger throughout — no readState/writeState overrides —
+// so this can only pass if the clear genuinely reaches disk.
+{
+  const root = path.join(tmp, 'fw-reconcile-clear-persist');
+  const fx = bhScaffold(root, {
+    progress: ['Clear epic'],
+    epics: { 'Clear epic': { lanes: { 'In Progress': ['FWC-1'] }, slices: { 'FWC-1': 'in_progress' } } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Clear epic', 'board', 'FWC-1.md');
+  const ctx = {
+    root: fx.projectRoot,
+    stateDir: path.join(fx.projectRoot, '.state'),
+    statePath: path.join(fx.projectRoot, '.state', 'state.json'),
+  };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  const reconcileDeps = {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+    withLock: async (_c, _n, fn) => fn(), now: () => '2026-08-05T00:00:00.000Z',
+  };
+
+  const seedState = emptyState();
+  seedState.cards['FWC-1'] = {
+    card: 'FWC-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ctx, seedState);
+
+  // Seed pass: canonicalizes the note, board, and epic atlas through the
+  // real ledger, and records the sha of exactly what real projectCard wrote.
+  const seed = await commandReconcile(ctx, { card: 'FWC-1' }, reconcileDeps);
+  eq(seed.results[0].ok, true, 'FW-RECONCILE-CLEAR-PERSIST the seed reconcile succeeds');
+
+  // Simulate a previously-persisted detection: inject a stale foreign_write
+  // finding directly onto the on-disk record, WITHOUT touching the note file
+  // — card_note_sha stays the seed pass's own value, so nothing about the
+  // note or board has drifted; only the ledger record carries an old finding.
+  const seeded = readOnDisk().cards['FWC-1'];
+  seeded.foreign_write = {
+    detected_at: '2026-08-01T00:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: seeded.card_note_sha,
+  };
+  writeState(ctx, { cards: { 'FWC-1': seeded } }, seeded);
+
+  const before = coordinator.collectBoardHealth(readOnDisk(), {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(before.findings.foreign_writes.length, 1,
+    'FW-RECONCILE-CLEAR-PERSIST the seeded finding is visible on disk before the resolving pass (precondition)');
+
+  // Resolving pass: nothing on the note/board has changed since the seed, so
+  // the projection itself has nothing to do, and no NEW drift is detected.
+  const result = await commandReconcile(ctx, { card: 'FWC-1' }, reconcileDeps);
+  const entry = result.results[0];
+  eq(entry.projection_changed, false, 'FW-RECONCILE-CLEAR-PERSIST the projection itself makes no change (precondition)');
+  eq(entry.foreign_write, null, 'FW-RECONCILE-CLEAR-PERSIST the resolving pass detects no NEW foreign write');
+  eq(entry.state_changed, true, 'FW-RECONCILE-CLEAR-PERSIST the resolved finding still forces persistence');
+
+  const onDiskAfter = readOnDisk().cards['FWC-1'];
+  eq(onDiskAfter.foreign_write, undefined,
+    'FW-RECONCILE-CLEAR-PERSIST the ON-DISK record no longer carries the resolved finding');
+
+  const after = coordinator.collectBoardHealth(readOnDisk(), {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(after.findings.foreign_writes, [], 'FW-RECONCILE-CLEAR-PERSIST board-health reports nothing once resolved');
+  eq(after.healthy, true, 'FW-RECONCILE-CLEAR-PERSIST the board returns to healthy');
+
+  // No readState override here either — commandBoardHealth reads the real
+  // on-disk ledger through ctx's own stateDir/statePath.
+  const receipt = await coordinator.commandBoardHealth(ctx, { json: true }, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+  });
+  eq(receipt.no_op, true, 'FW-RECONCILE-CLEAR-PERSIST commandBoardHealth returns to no_op: true');
+}
+
+// CM concurrent-modification. delivery-board.md used to say "never run --apply
+// against a board with a live loop session or an active cross-machine sync".
+// A sentence is not a guard. The plan records what it read; apply refuses if
+// anything moved underneath it.
+{
+  const root = path.join(tmp, 'cm-heal');
+  const prefix = 'spice/projects/test';
+  const fx = bhScaffold(root, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        // Non-canonical atlas bindings, so the planner finds real drift.
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const plan = coordinator.planEpicBindingHeal(fx.cardsRoot, fx.boardPath);
+  ok(plan.atlases.length >= 1, 'CM the fixture presents real binding drift');
+  ok(/^[0-9a-f]{64}$/.test(plan.atlases[0].preimage_sha),
+    'CM the plan records the sha of every file it read');
+
+  // Clean apply against an untouched tree succeeds.
+  const cleanRoot = path.join(tmp, 'cm-heal-clean');
+  const cleanFx = bhScaffold(cleanRoot, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const applied = await coordinator.commandHealEpicBindings(
+    { root: cleanRoot }, { json: true, apply: true },
+    { boardPath: cleanFx.boardPath, cardsRoot: cleanFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(applied.ok, true, 'CM-CLEAN an untouched tree still applies');
+  eq(applied.applied, true, 'CM-CLEAN reports it applied');
+
+  // A second writer between plan and write is refused, with zero writes.
+  const atlasPath = path.join(fx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
+  const before = fs.readFileSync(atlasPath, 'utf8');
+  const atlasForeignWrite = `${before}\nappended by another writer\n`;
+  let refusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root }, { json: true, apply: true },
+      {
+        boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        // Simulate Obsidian Sync landing a change after the plan is computed.
+        planHook: () => fs.writeFileSync(atlasPath, atlasForeignWrite),
+      });
+  } catch (err) { refusal = err; }
+  eq(refusal && refusal.code, 'concurrent_modification',
+    'CM-RACE a target changed after planning refuses');
+  ok(/Drifted epic.md/.test(refusal.message), 'CM-RACE the refusal names the changed path');
+  // Exact-bytes equality, not a substring regex: patchFrontmatter preserves
+  // the body, so a regex for the appended marker would also match a HEALED
+  // file (the write would carry the marker forward too) — only byte-for-byte
+  // equality with the untouched foreign write proves nothing was written.
+  eq(fs.readFileSync(atlasPath, 'utf8'), atlasForeignWrite,
+    'CM-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-SLICE-RACE — the same guard, pinned on the SLICE class specifically. A
+// guard reduced to `for (const target of atlases)` alone would miss this: it
+// never reads a slice target's bytes, so a slice drifting underneath the
+// plan would be silently healed rather than refused.
+{
+  const sliceRoot = path.join(tmp, 'cm-heal-slice');
+  const prefix = 'spice/projects/test';
+  const sliceFx = bhScaffold(sliceRoot, {
+    progress: ['Slice epic'],
+    epics: { 'Slice epic': { lanes: { 'In Progress': ['SL-1'] }, slices: { 'SL-1': 'in_progress' } } },
+  });
+  const slicePath = path.join(sliceFx.cardsRoot, 'Slice epic', 'board', 'SL-1.md');
+  // Drift the slice's task_parent to project-relative (non-canonical), the
+  // same shape BPX-HEAL's fixture uses, so the planner finds real slice drift
+  // while the atlas stays fully canonical — isolates the slice branch.
+  fs.writeFileSync(slicePath, fs.readFileSync(slicePath, 'utf8')
+    .replace(`task_parent: ${prefix}/tasks/Slice epic/Slice epic.md`, 'task_parent: tasks/Slice epic/Slice epic.md'));
+
+  const slicePlan = coordinator.planEpicBindingHeal(sliceFx.cardsRoot, sliceFx.boardPath);
+  eq(slicePlan.atlases.length, 0, 'CM-SLICE-RACE the fixture atlas stays canonical (isolates the slice branch)');
+  ok(slicePlan.slices.length >= 1, 'CM-SLICE-RACE the fixture presents real slice-level drift');
+  ok(/^[0-9a-f]{64}$/.test(slicePlan.slices[0].preimage_sha),
+    'CM-SLICE-RACE the plan records the sha of the slice it read');
+
+  const sliceBefore = fs.readFileSync(slicePath, 'utf8');
+  const sliceForeignWrite = `${sliceBefore}\nappended by another writer\n`;
+  let sliceRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: sliceRoot }, { json: true, apply: true },
+      {
+        boardPath: sliceFx.boardPath, cardsRoot: sliceFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(slicePath, sliceForeignWrite),
+      });
+  } catch (err) { sliceRefusal = err; }
+  eq(sliceRefusal && sliceRefusal.code, 'concurrent_modification',
+    'CM-SLICE-RACE a slice changed after planning refuses');
+  ok(/SL-1\.md/.test(sliceRefusal.message), 'CM-SLICE-RACE the refusal names the changed slice path');
+  eq(fs.readFileSync(slicePath, 'utf8'), sliceForeignWrite,
+    'CM-SLICE-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-ORPHAN — the same guard, pinned on the ORPHAN-BOARD class specifically,
+// on a fixture where atlases and slices are both fully canonical so only the
+// orphan branch can produce the refusal. Multi-orphan (three lines sharing
+// one board file) so the dedup — one board file named once, not once per
+// orphan line — is pinned by a test rather than merely true today.
+{
+  const orphanEpicSpec = {
+    lanes: { 'In Progress': ['OR-1', 'OR-2', 'OR-3'] },
+    slices: { 'OR-1': null, 'OR-2': null, 'OR-3': null },
+  };
+
+  const orphanRoot = path.join(tmp, 'cm-heal-orphan');
+  const orphanFx = bhScaffold(orphanRoot, { progress: ['Orphan epic'], epics: { 'Orphan epic': orphanEpicSpec } });
+  const orphanBoardPath = path.join(orphanFx.cardsRoot, 'Orphan epic', 'board', 'Orphan epic-board.md');
+
+  const orphanPlan = coordinator.planEpicBindingHeal(orphanFx.cardsRoot, orphanFx.boardPath);
+  eq(orphanPlan.atlases.length, 0, 'CM-ORPHAN the fixture atlas stays canonical (isolates the orphan branch)');
+  eq(orphanPlan.slices.length, 0, 'CM-ORPHAN the fixture has no slice drift (isolates the orphan branch)');
+  eq(orphanPlan.orphanLines.length, 3, 'CM-ORPHAN the fixture presents three orphan lines sharing one board');
+  ok(orphanPlan.orphanLines.every((o) => o.board === orphanBoardPath),
+    'CM-ORPHAN all three orphan lines share the same board file');
+
+  // Clean multi-orphan apply heals and prunes every line.
+  const orphanCleanRoot = path.join(tmp, 'cm-heal-orphan-clean');
+  const orphanCleanFx = bhScaffold(orphanCleanRoot, {
+    progress: ['Orphan epic'], epics: { 'Orphan epic': orphanEpicSpec },
+  });
+  const orphanCleanBoardPath = path.join(orphanCleanFx.cardsRoot, 'Orphan epic', 'board', 'Orphan epic-board.md');
+  const orphanApplied = await coordinator.commandHealEpicBindings(
+    { root: orphanCleanRoot }, { json: true, apply: true },
+    { boardPath: orphanCleanFx.boardPath, cardsRoot: orphanCleanFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(orphanApplied.ok, true, 'CM-ORPHAN-CLEAN an untouched multi-orphan board still applies');
+  eq(orphanApplied.orphan_lines.map((o) => o.card).sort(), ['OR-1', 'OR-2', 'OR-3'],
+    'CM-ORPHAN-CLEAN the receipt names every orphan line');
+  const orphanCleanBoardAfter = fs.readFileSync(orphanCleanBoardPath, 'utf8');
+  for (const card of ['OR-1', 'OR-2', 'OR-3']) {
+    ok(!new RegExp(`\\[\\[${card}\\]\\]`).test(orphanCleanBoardAfter), `CM-ORPHAN-CLEAN ${card} is pruned from the board`);
+  }
+
+  // A second writer touching the shared orphan board between plan and apply
+  // is refused, the board is named exactly once, and nothing is written.
+  const orphanBoardBefore = fs.readFileSync(orphanBoardPath, 'utf8');
+  const orphanForeignWrite = `${orphanBoardBefore}\nappended by another writer\n`;
+  let orphanRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: orphanRoot }, { json: true, apply: true },
+      {
+        boardPath: orphanFx.boardPath, cardsRoot: orphanFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(orphanBoardPath, orphanForeignWrite),
+      });
+  } catch (err) { orphanRefusal = err; }
+  eq(orphanRefusal && orphanRefusal.code, 'concurrent_modification',
+    'CM-ORPHAN-RACE a shared orphan board changed after planning refuses');
+  const orphanBoardMentions = (orphanRefusal.message.match(/Orphan epic-board\.md/g) || []).length;
+  eq(orphanBoardMentions, 1, 'CM-ORPHAN-RACE the changed board is named exactly once, not once per orphan line');
+  eq(fs.readFileSync(orphanBoardPath, 'utf8'), orphanForeignWrite,
+    'CM-ORPHAN-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-LEDGER — a real on-disk ledger (real stateDir/statePath, no readState/
+// writeState overrides) with a real tracked record for the drifted slice, so
+// the stamp/persist tail commandHealEpicBindings grew since the brief was
+// written is actually exercised. CM-LEDGER-CONTROL proves the fixture is
+// live (unraced, it heals AND advances card_note_sha) — without that control
+// a "the ledger didn't change" assertion in the race case could pass against
+// an inert fixture that never touches the ledger either way.
+{
+  const ledgerEpicSpec = { lanes: { 'In Progress': ['LE-1'] }, slices: { 'LE-1': 'in_progress' } };
+  const prefix = 'spice/projects/test';
+  const driftTaskParent = (slicePath) => fs.writeFileSync(slicePath, fs.readFileSync(slicePath, 'utf8')
+    .replace(`task_parent: ${prefix}/tasks/Ledger epic/Ledger epic.md`, 'task_parent: tasks/Ledger epic/Ledger epic.md'));
+
+  // Control: unraced, real ledger, real tracked record.
+  const ledgerControlRoot = path.join(tmp, 'cm-heal-ledger-control');
+  const ledgerControlFx = bhScaffold(ledgerControlRoot, {
+    progress: ['Ledger epic'], epics: { 'Ledger epic': ledgerEpicSpec },
+  });
+  const ledgerControlSlicePath = path.join(ledgerControlFx.cardsRoot, 'Ledger epic', 'board', 'LE-1.md');
+  driftTaskParent(ledgerControlSlicePath);
+  const ledgerControlCtx = {
+    root: ledgerControlRoot, stateDir: path.join(ledgerControlRoot, '.state'),
+    statePath: path.join(ledgerControlRoot, '.state', 'state.json'),
+  };
+  const ledgerControlSeed = {
+    card: 'LE-1', phase: 'implementing', card_path: ledgerControlSlicePath,
+    touch_zones: [], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ledgerControlCtx, { cards: { 'LE-1': ledgerControlSeed } }, ledgerControlSeed);
+  const ledgerControlApplied = await coordinator.commandHealEpicBindings(
+    ledgerControlCtx, { json: true, apply: true },
+    { boardPath: ledgerControlFx.boardPath, cardsRoot: ledgerControlFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(ledgerControlApplied.ok, true, 'CM-LEDGER-CONTROL an untouched tracked slice still applies (fixture is live)');
+  const ledgerControlOnDisk = JSON.parse(fs.readFileSync(ledgerControlCtx.statePath, 'utf8'));
+  const ledgerControlHealedBytes = fs.readFileSync(ledgerControlSlicePath, 'utf8');
+  eq(ledgerControlOnDisk.cards['LE-1'].card_note_sha,
+    crypto.createHash('sha256').update(ledgerControlHealedBytes).digest('hex'),
+    'CM-LEDGER-CONTROL card_note_sha advances to the healed bytes — the stamp/persist tail is live');
+
+  // Race: identical fixture, but a writer lands on the tracked slice between
+  // plan and apply. The refused run must leave the ledger untouched in BOTH
+  // bytes and mtime, and card_note_sha must never advance past its seed.
+  const ledgerRaceRoot = path.join(tmp, 'cm-heal-ledger-race');
+  const ledgerRaceFx = bhScaffold(ledgerRaceRoot, {
+    progress: ['Ledger epic'], epics: { 'Ledger epic': ledgerEpicSpec },
+  });
+  const ledgerRaceSlicePath = path.join(ledgerRaceFx.cardsRoot, 'Ledger epic', 'board', 'LE-1.md');
+  driftTaskParent(ledgerRaceSlicePath);
+  const ledgerRaceCtx = {
+    root: ledgerRaceRoot, stateDir: path.join(ledgerRaceRoot, '.state'),
+    statePath: path.join(ledgerRaceRoot, '.state', 'state.json'),
+  };
+  const ledgerRaceSeed = {
+    card: 'LE-1', phase: 'implementing', card_path: ledgerRaceSlicePath,
+    touch_zones: [], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ledgerRaceCtx, { cards: { 'LE-1': ledgerRaceSeed } }, ledgerRaceSeed);
+  const ledgerBeforeBytes = fs.readFileSync(ledgerRaceCtx.statePath, 'utf8');
+  const ledgerBeforeMtime = fs.statSync(ledgerRaceCtx.statePath).mtimeMs;
+  const ledgerRaceSliceBefore = fs.readFileSync(ledgerRaceSlicePath, 'utf8');
+  const ledgerRaceForeignWrite = `${ledgerRaceSliceBefore}\nappended by another writer\n`;
+  let ledgerRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      ledgerRaceCtx, { json: true, apply: true },
+      {
+        boardPath: ledgerRaceFx.boardPath, cardsRoot: ledgerRaceFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(ledgerRaceSlicePath, ledgerRaceForeignWrite),
+      });
+  } catch (err) { ledgerRefusal = err; }
+  eq(ledgerRefusal && ledgerRefusal.code, 'concurrent_modification', 'CM-LEDGER-RACE a race on a tracked slice refuses');
+  eq(fs.readFileSync(ledgerRaceCtx.statePath, 'utf8'), ledgerBeforeBytes,
+    'CM-LEDGER-RACE the ledger is byte-for-byte unchanged after a refused apply');
+  eq(fs.statSync(ledgerRaceCtx.statePath).mtimeMs, ledgerBeforeMtime,
+    'CM-LEDGER-RACE the ledger mtime is unchanged after a refused apply — persist was never reached');
+  eq(JSON.parse(ledgerBeforeBytes).cards['LE-1'].card_note_sha, undefined,
+    'CM-LEDGER-RACE card_note_sha was never advanced past its unset seed value');
+  eq(fs.readFileSync(ledgerRaceSlicePath, 'utf8'), ledgerRaceForeignWrite,
+    'CM-LEDGER-RACE the foreign write on the slice itself is left intact too');
+}
+
+// CM-DELETE-RACE — a concurrent writer that deletes a target (a sync client
+// removing a note, exactly the case this verb exists to catch) must fail
+// closed through the SAME sanctioned refusal code, not bubble up as a raw
+// ENOENT that a caller branching on `code` would fail to recognize.
+{
+  const deleteRoot = path.join(tmp, 'cm-heal-delete');
+  const prefix = 'spice/projects/test';
+  const deleteFx = bhScaffold(deleteRoot, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const deleteAtlasPath = path.join(deleteFx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
+  let deleteRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: deleteRoot }, { json: true, apply: true },
+      {
+        boardPath: deleteFx.boardPath, cardsRoot: deleteFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.unlinkSync(deleteAtlasPath),
+      });
+  } catch (err) { deleteRefusal = err; }
+  eq(deleteRefusal && deleteRefusal.code, 'concurrent_modification',
+    'CM-DELETE-RACE a target deleted after planning refuses through the sanctioned code, not raw ENOENT');
+  ok(deleteRefusal && /Drifted epic\.md/.test(deleteRefusal.message),
+    'CM-DELETE-RACE the refusal names the deleted path');
+  ok(!fs.existsSync(deleteAtlasPath), 'CM-DELETE-RACE the deletion itself is left as the concurrent writer made it');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
