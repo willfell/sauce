@@ -2642,6 +2642,23 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   if (!mapping) return { changed: false, skipped: true };
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
+  // Cross-process write detection. The selector lock lives in this clone's
+  // .git and cannot constrain KanbanStatusSync (Obsidian, at vault boot) or
+  // Obsidian Sync (another machine) — writers that will never consult a lock.
+  // So compare against the exact bytes this coordinator last wrote. For a
+  // tracked card the finding is the deliverable: refusing here would wedge the
+  // loop on a cosmetic edit, and `adopt` does not apply to a card with a record.
+  const recordForSha = opts.record || null;
+  const observedSha = sha256Text(cardRaw);
+  let foreignWrite = null;
+  if (recordForSha && recordForSha.card_note_sha && recordForSha.card_note_sha !== observedSha) {
+    foreignWrite = {
+      detected_at: (opts.now || (() => new Date().toISOString()))(),
+      expected_sha: recordForSha.card_note_sha,
+      actual_sha: observedSha,
+    };
+    recordForSha.foreign_write = foreignWrite;
+  }
   const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, {
     ...opts,
     currentCard: card,
@@ -2725,12 +2742,14 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const writeText = opts.writeText || atomicWriteText;
   if (boardChanged) writeText(sliceBoardPath, boardNext);
   if (cardNext !== cardRaw) writeText(resolvedCardPath, cardNext);
+  if (recordForSha) recordForSha.card_note_sha = sha256Text(cardNext);
   if (epicBoardChanged) writeText(boardPath, parentNext);
   if (epicAtlasChanged) writeText(epicSurface.atlasPath, atlasNext);
   const result = {
     changed: boardChanged || cardNext !== cardRaw || epicBoardChanged || epicAtlasChanged,
     board_changed: boardChanged,
     card_changed: cardNext !== cardRaw,
+    foreign_write: foreignWrite,
   };
   if (epicSurface) Object.assign(result, {
     epic_board_changed: epicBoardChanged,

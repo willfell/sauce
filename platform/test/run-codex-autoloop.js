@@ -4232,8 +4232,16 @@ eq(viaGateLocks, [
   legacyCardGateLockName('A1'), cardGateLockName('A1'),
   'completion-projection',
 ], 'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes both legacy and tracked sibling identities before projection');
-eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
+// Projecting the tracked sibling (A1) legitimately adds `card_note_sha` —
+// foreign-write detection records the hash of what it wrote on every
+// projectCard pass with a record, additive and orthogonal to the race this
+// block is pinning. Strip it before the byte-for-byte comparison and assert
+// it separately.
+const { card_note_sha: viaGateRaceSha, ...viaGateRaceWithoutSha } = viaGateRaceState.cards.A1;
+eq(JSON.stringify(viaGateRaceWithoutSha), viaGateTransitionSnapshot,
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
+ok(/^[0-9a-f]{64}$/.test(viaGateRaceSha),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE projecting the tracked sibling records its card_note_sha');
 ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE retains the exact legacy finding after the concurrent sibling transition');
 
@@ -11525,6 +11533,52 @@ const adNoMutation = (result, label) => {
   // collectBoardHealth's `healthy` is aliased into the receipt as `no_op`
   // (see commandBoardHealth) — there is no separate `healthy` field to read.
   eq(receipt.no_op, false, 'BHP classification is not a sixth check; health is unchanged');
+}
+
+// FW foreign-write detection. A repo-local lock cannot exclude KanbanStatusSync
+// (Obsidian, at vault boot) or Obsidian Sync (another machine). So the
+// coordinator does not pretend to exclude them — it detects them. For a
+// TRACKED card this is report-only on purpose: adoption does not apply to a
+// card that already has a record, and refusing here would wedge the autoloop
+// on a cosmetic Obsidian edit.
+{
+  const root = path.join(tmp, 'fw-detect');
+  const fx = bhScaffold(root, {
+    progress: ['Detect epic'],
+    epics: {
+      'Detect epic': { lanes: { 'In Progress': ['FW-1'] }, slices: { 'FW-1': 'in_progress' } },
+    },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Detect epic', 'board', 'FW-1.md');
+  const record = {
+    card: 'FW-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  const state = emptyState();
+  state.cards['FW-1'] = record;
+  const opts = { record, state, cardsRoot: fx.cardsRoot, now: () => '2026-08-04T12:00:00.000Z' };
+
+  // First projection has no prior sha to compare against: it establishes one.
+  const first = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(first.foreign_write, null, 'FW-1 a first projection cannot detect a foreign write');
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-1 projection records the sha of what it wrote');
+  const established = record.card_note_sha;
+
+  // Replay with the note untouched: no foreign write.
+  const replay = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(replay.foreign_write, null, 'FW-1 an untouched note reports no foreign write');
+  eq(record.card_note_sha, established, 'FW-1 an unchanged note keeps its recorded sha');
+
+  // Now simulate KanbanStatusSync: a bare-date stamp appended out of band.
+  const tampered = fs.readFileSync(notePath, 'utf8').replace(/^status: /m, 'status_changed_at: 2026-08-04\nstatus: ');
+  fs.writeFileSync(notePath, tampered);
+  const detected = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  ok(detected.foreign_write, 'FW-1 a note changed behind the coordinator is detected');
+  eq(detected.foreign_write.expected_sha, established, 'FW-1 the finding names the sha the coordinator wrote');
+  eq(detected.foreign_write.detected_at, '2026-08-04T12:00:00.000Z', 'FW-1 the finding is stamped');
+  ok(detected.foreign_write.actual_sha !== established, 'FW-1 the finding names the sha it actually found');
+  eq(record.foreign_write.expected_sha, established, 'FW-1 the finding is durable on the record');
+  ok(detected.changed !== undefined, 'FW-1 detection does not abort the projection');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
