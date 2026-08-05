@@ -2637,9 +2637,24 @@ function durablePathBarrier(file, deps = {}) {
   flush(path.dirname(file));
 }
 
+// Stamp the ledger's belief about what's on disk for a tracked card note.
+// Always rereads the file after any write attempt, so the recorded hash
+// reflects bytes actually on disk — never merely intended bytes — regardless
+// of what the writeText implementation in scope actually did (a real write,
+// an atomic replace, or in a test double, a non-persisting capture). This is
+// the one place that knows how `card_note_sha` is derived and when it is
+// recorded; every coordinator write path that can touch a tracked card's
+// note calls it instead of hashing the intended bytes directly. No-ops when
+// there is no ledger record for the note — an untracked card has nothing to
+// stamp, deliberately, not by accident.
+function stampCardNoteSha(record, cardPath) {
+  if (!record) return;
+  record.card_note_sha = sha256Text(fs.readFileSync(cardPath, 'utf8'));
+}
+
 function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const mapping = projectionMapping(phase);
-  if (!mapping) return { changed: false, skipped: true };
+  if (!mapping) return { changed: false, skipped: true, foreign_write: null };
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
   // Cross-process write detection. The selector lock lives in this clone's
@@ -2651,13 +2666,20 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const recordForSha = opts.record || null;
   const observedSha = sha256Text(cardRaw);
   let foreignWrite = null;
-  if (recordForSha && recordForSha.card_note_sha && recordForSha.card_note_sha !== observedSha) {
-    foreignWrite = {
-      detected_at: (opts.now || (() => new Date().toISOString()))(),
-      expected_sha: recordForSha.card_note_sha,
-      actual_sha: observedSha,
-    };
-    recordForSha.foreign_write = foreignWrite;
+  if (recordForSha) {
+    if (recordForSha.card_note_sha && recordForSha.card_note_sha !== observedSha) {
+      foreignWrite = {
+        detected_at: (opts.now || (() => new Date().toISOString()))(),
+        expected_sha: recordForSha.card_note_sha,
+        actual_sha: observedSha,
+      };
+      recordForSha.foreign_write = foreignWrite;
+    } else {
+      // Comparison passed (or there is no prior baseline yet): any earlier
+      // finding is now stale. Clear it so the record reflects the current
+      // situation, not an old resolved one.
+      delete recordForSha.foreign_write;
+    }
   }
   const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, {
     ...opts,
@@ -2742,7 +2764,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const writeText = opts.writeText || atomicWriteText;
   if (boardChanged) writeText(sliceBoardPath, boardNext);
   if (cardNext !== cardRaw) writeText(resolvedCardPath, cardNext);
-  if (recordForSha) recordForSha.card_note_sha = sha256Text(cardNext);
+  stampCardNoteSha(recordForSha, resolvedCardPath);
   if (epicBoardChanged) writeText(boardPath, parentNext);
   if (epicAtlasChanged) writeText(epicSurface.atlasPath, atlasNext);
   const result = {
@@ -4308,6 +4330,7 @@ function scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d) {
       const rewritten = rewriteDependsOn(raw, predecessor, target);
       if (rewritten.changed) {
         d.writeText(full, rewritten.text);
+        stampCardNoteSha(record, full); // no-op when depName is untracked
         rewrites.push({ card: depName, from: predecessor, to: target, path: full });
       }
     }
@@ -4538,15 +4561,26 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const writeText = deps.writeText || atomicWriteText;
   const transitionLock = deps.withLock || withLock;
+  const loadState = deps.readState || readState;
   return transitionLock(ctx, 'selector', async () => {
     const plan = planEpicBindingHeal(cardsRoot, boardPath);
     const { atlases, slices, orphanLines } = plan;
     if (apply) {
+      // Ledger lookup for the card_note_sha stamp below is best-effort: this
+      // verb repairs frontmatter bindings from on-disk canonical form alone
+      // and has never required a ledger to run. A caller whose ctx carries no
+      // state location still heals; it just has nothing tracked to stamp.
+      let state;
+      try { state = loadState(ctx); } catch (_) { state = { cards: {} }; }
       for (const target of [...atlases, ...slices]) {
         const raw = fs.readFileSync(target.path, 'utf8');
         const patch = {};
         for (const [key, change] of Object.entries(target.fields)) patch[key] = JSON.stringify(change.to);
         writeText(target.path, patchFrontmatter(raw, patch));
+        // Atlas targets have no `.card` — an epic atlas is never a tracked
+        // ledger record. `slices` targets do; stampCardNoteSha no-ops on an
+        // untracked slice too, deliberately, not by accident.
+        if (target.card) stampCardNoteSha((state.cards || {})[target.card], target.path);
       }
       // Group by board so one board with several orphans is written once.
       const byBoard = new Map();
@@ -4882,6 +4916,18 @@ function collectBoardHealth(state, opts = {}) {
       .filter((record) => record.projection_error)
       .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }))
     : [];
+  // Check 6 — records carrying a live foreign_write finding: a tracked card's
+  // note changed on disk since the last bytes this coordinator recorded for
+  // it (KanbanStatusSync, Obsidian Sync, or any other writer that never
+  // consults the selector lock). Ledger-driven by nature, so an empty/absent
+  // ledger contributes zero findings (skipped, not failed) — same as check 5.
+  // projectCard clears a resolved finding on its next pass, so this only ever
+  // reports live conditions, never stale history.
+  const foreignWrites = ledger === 'present'
+    ? Object.values(cards)
+      .filter((record) => record.foreign_write)
+      .map((record) => ({ card: record.card, phase: record.phase, foreign_write: record.foreign_write }))
+    : [];
   const findings = {
     untracked_members: untracked,
     untracked_members_by_provenance: {
@@ -4892,6 +4938,7 @@ function collectBoardHealth(state, opts = {}) {
     binding_drift: bindingDrift,
     lane_divergence: laneDivergence,
     projection_errors: projectionErrors,
+    foreign_writes: foreignWrites,
   };
   const driftClean = !bindingDrift.error
     && !bindingDrift.atlases && !bindingDrift.slices && !bindingDrift.orphan_lines;
@@ -4931,6 +4978,7 @@ function buildBoardHealthPayload(core) {
   const unprojectable = capped(core.findings.unprojectable_epics);
   const lane = capped(core.findings.lane_divergence);
   const errors = capped(core.findings.projection_errors);
+  const foreignWrites = capped(core.findings.foreign_writes);
   return {
     type: 'board-health',
     schema_version: BOARD_HEALTH_SCHEMA_VERSION,
@@ -4948,12 +4996,14 @@ function buildBoardHealthPayload(core) {
     lane_divergence_overflow_count: lane.overflow,
     projection_errors: errors.items,
     projection_errors_overflow_count: errors.overflow,
+    foreign_writes: foreignWrites.items,
+    foreign_writes_overflow_count: foreignWrites.overflow,
   };
 }
 
 function validateBoardHealthPayload(payload) {
   const errors = [];
-  const lists = ['untracked_members', 'unprojectable_epics', 'lane_divergence', 'projection_errors'];
+  const lists = ['untracked_members', 'unprojectable_epics', 'lane_divergence', 'projection_errors', 'foreign_writes'];
   for (const key of ['type', 'schema_version', 'project', 'ledger', 'no_op', 'checked', 'binding_drift',
     ...lists, ...lists.map((list) => `${list}_overflow_count`)]) {
     if (!Object.prototype.hasOwnProperty.call(payload || {}, key)) errors.push(`missing ${key}`);
@@ -6792,7 +6842,11 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
               if (!findings.length) {
                 return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'legacy exact-card finding disappeared during reconciliation' };
               }
-              const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at || projected.changed);
+              // A detected foreign write must force persistence even when the
+              // projection itself made no change: it is a durable ledger
+              // finding (`via.foreign_write`), not merely a receipt annotation.
+              const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at
+                || projected.changed || projected.foreign_write);
               if (stateChanged) {
                 delete via.projection_error;
                 delete via.projection_failed_at;
@@ -6804,6 +6858,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
                 changed: Boolean(projected.changed || stateChanged),
                 projection_changed: Boolean(projected.changed), state_changed: stateChanged,
                 projection_findings: findings,
+                foreign_write: projected.foreign_write || null,
               };
             }, { card: via.card });
           }, { card: viaCandidate.card }, reconcileLock, legacyGateName);
@@ -6819,7 +6874,11 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
             const projected = project(record.card_path, boardPath, record.card, record.phase, {
               now, record, state, cardsRoot: deps.cardsRoot,
             });
-            const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
+            // A detected foreign write must force persistence even when the
+            // projection itself made no change: it is a durable ledger
+            // finding (`record.foreign_write`), not merely a receipt annotation.
+            const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at
+              || projected.changed || projected.foreign_write);
             if (stateChanged) {
               delete record.projection_error;
               delete record.projection_failed_at;
@@ -6831,6 +6890,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
               changed: Boolean(projected.changed || stateChanged),
               projection_changed: Boolean(projected.changed), state_changed: stateChanged,
               projection_findings: projected.projection_findings || [],
+              foreign_write: projected.foreign_write || null,
             };
           } catch (err) {
             const stateChanged = record.projection_error !== err.message || !record.projection_failed_at;
@@ -7715,6 +7775,7 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
         barrier(cardPath);
         const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
         if (verifiedSha256 !== pending.next_sha256) throw new Error('reconcile-metadata card replacement did not verify at the intended hash');
+        stampCardNoteSha(record, cardPath);
       } else if (rawSha256 !== pending.next_sha256) {
         throw new Error('reconcile-metadata pending intent found a third card hash; needs-inspection with zero writes');
       } else {
@@ -7769,6 +7830,7 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
     barrier(cardPath);
     const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
     if (verifiedSha256 !== plan.next_sha256) throw new Error('reconcile-metadata card replacement did not verify at the intended hash');
+    stampCardNoteSha(record, cardPath);
     const audit = finalizeMetadataReconciliation(ctx, state, record, intent, persist, barrier);
     const receipt = { ...plan };
     delete receipt.next;

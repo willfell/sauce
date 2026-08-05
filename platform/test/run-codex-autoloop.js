@@ -8313,6 +8313,79 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(soundDir.endsWith(path.join('Sound Epic', 'board')), 'BPX-HEAL fixture scaffolds the canonical control epic');
 }
 
+// FW-HEAL-INTERNAL — heal-epic-bindings is a coordinator-internal writer of a
+// tracked card's note (writeText(path, patchFrontmatter(raw, ...)), the exact
+// shape flagged in review). It must stamp card_note_sha itself, or the very
+// next projection reports the coordinator's own repair as a foreign write —
+// crying wolf on the system's own work. BX-1 starts canonical (so the first
+// projectCard call can succeed and establish a baseline — canonicalEpicProjection
+// refuses a non-canonical slice outright, so there is no way to seed a
+// baseline any other way), then drifts exactly like BPX-HEAL's fixture
+// (project-relative task_parent) without going through the coordinator, and
+// heal-epic-bindings repairs it.
+{
+  const root = path.join(tmp, 'fw-heal-internal');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Broken Epic'] }));
+  const boardDir = path.join(cardsRoot, 'Broken Epic', 'board');
+  fs.mkdirSync(boardDir, { recursive: true });
+  fs.mkdirSync(path.join(cardsRoot, 'Broken Epic', 'context', 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(cardsRoot, 'Broken Epic', 'Broken Epic.md'), [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+    `epic_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'status: planning', 'posture: claimable', '---', '', 'Broken Epic atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(boardDir, 'Broken Epic-board.md'), [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Broken Epic]]"', '---', '',
+    '## In Planning', '', '## In Progress', '- [ ] [[BX-1]]', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const notePath = path.join(boardDir, 'BX-1.md');
+  const canonicalTaskParent = `task_parent: ${prefix}/tasks/Broken Epic/Broken Epic.md`;
+  fs.writeFileSync(notePath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Broken Epic]]"',
+    canonicalTaskParent,
+    `source_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    `kanban_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'kanban_column: In Progress', 'status: in_progress', 'depends_on: []', '---', '', 'BX-1 body', '',
+  ].join('\n'));
+
+  const record = {
+    card: 'BX-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  const state = emptyState();
+  state.cards['BX-1'] = record;
+
+  // Establish the coordinator's own baseline the way a real projection would,
+  // while the note is still canonical.
+  projectCard(notePath, boardPath, 'BX-1', 'implementing', { record, state, cardsRoot });
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-HEAL-INTERNAL a baseline sha is established before the drift');
+  const preDriftSha = record.card_note_sha;
+
+  // Drift the binding outside the coordinator, exactly like BPX-HEAL's
+  // fixture (project-relative task_parent) — the ledger's recorded sha is now
+  // stale relative to disk.
+  fs.writeFileSync(notePath, fs.readFileSync(notePath, 'utf8')
+    .replace(canonicalTaskParent, 'task_parent: tasks/Broken Epic/Broken Epic.md'));
+
+  const healed = await commandHealEpicBindings({ root }, { apply: true, json: true }, {
+    boardPath, cardsRoot, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), readState: () => state,
+  });
+  eq(healed.slices.map((s) => s.card), ['BX-1'], 'FW-HEAL-INTERNAL the heal actually rewrites the tracked slice (precondition)');
+  ok(record.card_note_sha !== preDriftSha,
+    'FW-HEAL-INTERNAL the heal advances the ledger sha past its pre-drift baseline');
+
+  const reprojected = projectCard(notePath, boardPath, 'BX-1', 'implementing', { record, state, cardsRoot });
+  eq(reprojected.foreign_write, null,
+    'FW-HEAL-INTERNAL the coordinator does not report its own repair as a foreign write');
+}
+
 // BH board-health: the board-driven divergence sweep. Every check starts from
 // the BOARD, not the ledger — a board member with no ledger record must be
 // reachable, which is exactly what every Object.values(state.cards) check
@@ -8539,7 +8612,7 @@ const bhDeps = (fx, extra = {}) => ({
     untracked_members_by_provenance: { coordinator: 0, foreign: 0 },
     unprojectable_epics: [],
     binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
-    lane_divergence: [], projection_errors: [],
+    lane_divergence: [], projection_errors: [], foreign_writes: [],
   }, 'BH-NOOP every finding class is empty');
   eq(writes, 0, 'BH-READONLY the default invocation performs zero writes');
   ok(!fs.existsSync(path.join(fx.projectRoot, 'Board Health.md')),
@@ -11579,6 +11652,103 @@ const adNoMutation = (result, label) => {
   ok(detected.foreign_write.actual_sha !== established, 'FW-1 the finding names the sha it actually found');
   eq(record.foreign_write.expected_sha, established, 'FW-1 the finding is durable on the record');
   ok(detected.changed !== undefined, 'FW-1 detection does not abort the projection');
+
+  // The detection call above already resynced record.card_note_sha to the
+  // tampered bytes on disk (stampCardNoteSha rereads unconditionally). A
+  // resolved condition must not leave a stale finding behind: the very next
+  // projection sees the sha already agrees and clears it.
+  const resolved = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(resolved.foreign_write, null, 'FW-1 the next projection resolves once the sha resyncs');
+  eq(record.foreign_write, undefined, 'FW-1 a resolved finding is cleared from the record, not left stale');
+}
+
+// FW-SKIPPED — the early-return path for a phase with no board projection
+// must still carry `foreign_write` (as `null`), so the result's shape is
+// uniform across every path projectCard can take, not just the ones that
+// reach detection.
+{
+  const skipped = coordinator.projectCard('/nonexistent/path.md', '/nonexistent/board.md', 'FW-SKIP', 'no-such-phase', {});
+  eq(skipped, { changed: false, skipped: true, foreign_write: null },
+    'FW-SKIPPED the skipped path carries foreign_write: null');
+}
+
+// FW-RECONCILE-PERSIST — a foreign write that produces no projection change
+// must still force persistence and reach the reconcile receipt. Before this
+// fix, `stateChanged` ignored `foreign_write` entirely, so the exact
+// canonical case this feature exists for — Obsidian's kanban mechanism
+// stamping status_changed_at while status/kanban_column are already correct
+// — would be detected and then thrown away: never persisted, never in the
+// receipt.
+{
+  const root = path.join(tmp, 'fw-reconcile-persist');
+  const fx = bhScaffold(root, {
+    progress: ['Persist epic'],
+    epics: { 'Persist epic': { lanes: { 'In Progress': ['FWP-1'] }, slices: { 'FWP-1': 'in_progress' } } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Persist epic', 'board', 'FWP-1.md');
+  const record = {
+    card: 'FWP-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  let state = emptyState();
+  state.cards['FWP-1'] = record;
+  let persistCount = 0;
+  const reconcileDeps = {
+    readState: () => state,
+    writeState: (_ctx, nextState) => { persistCount++; state = nextState; },
+    withLock: async (_c, _n, fn) => fn(),
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+    now: () => '2026-08-04T12:00:00.000Z',
+  };
+
+  // Seed pass: establishes the canonical baseline (kanban_column/status get
+  // stamped) and records the sha of exactly what real projectCard wrote.
+  const seed = await commandReconcile({ root: fx.projectRoot }, { card: 'FWP-1' }, reconcileDeps);
+  eq(seed.results[0].ok, true, 'FW-RECONCILE-PERSIST the seed reconcile succeeds');
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-RECONCILE-PERSIST the seed establishes a baseline sha');
+  const priorPersistCount = persistCount;
+
+  // Simulate KanbanStatusSync stamping status_changed_at with no semantic
+  // change: status/kanban_column already agree with the ledger, so the
+  // projection itself has nothing to do.
+  const tampered = fs.readFileSync(notePath, 'utf8').replace(/^status: /m, 'status_changed_at: 2026-08-04\nstatus: ');
+  fs.writeFileSync(notePath, tampered);
+
+  const result = await commandReconcile({ root: fx.projectRoot }, { card: 'FWP-1' }, reconcileDeps);
+  const entry = result.results[0];
+  ok(entry.foreign_write, 'FW-RECONCILE-PERSIST the receipt carries the foreign-write finding');
+  eq(entry.projection_changed, false, 'FW-RECONCILE-PERSIST the projection itself made no change (precondition)');
+  eq(entry.state_changed, true, 'FW-RECONCILE-PERSIST a foreign write with no projection change still forces persistence');
+  ok(persistCount > priorPersistCount, 'FW-RECONCILE-PERSIST the forced state change actually persisted');
+}
+
+// FW-BOARD-HEALTH — board-health surfaces the same finding, per the design
+// spec's §6.1 requirement that a foreign write show up "in the projection
+// receipt and in board-health." Ledger-driven exactly like check 5
+// (projection_errors): an empty/absent ledger contributes nothing, and a
+// resolved record reports nothing — live conditions only.
+{
+  const root = path.join(tmp, 'fw-board-health');
+  const fx = bhScaffold(root, {
+    progress: ['FWBH epic'],
+    epics: { 'FWBH epic': { lanes: { 'In Progress': ['FWBH-1'] }, slices: { 'FWBH-1': 'in_progress' } } },
+  });
+  const state = emptyState();
+  const finding = { detected_at: '2026-08-04T12:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: 'b'.repeat(64) };
+  state.cards['FWBH-1'] = { card: 'FWBH-1', phase: 'implementing', foreign_write: finding };
+
+  const withFinding = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(withFinding.findings.foreign_writes, [{ card: 'FWBH-1', phase: 'implementing', foreign_write: finding }],
+    'FW-BOARD-HEALTH a live foreign_write finding is surfaced');
+  eq(withFinding.healthy, false, 'FW-BOARD-HEALTH a live foreign-write finding is not a healthy board');
+
+  delete state.cards['FWBH-1'].foreign_write;
+  const resolved = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(resolved.findings.foreign_writes, [], 'FW-BOARD-HEALTH a resolved record reports nothing');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
