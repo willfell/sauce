@@ -8082,6 +8082,55 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
 }
 
+// FW-DISCARD-PERSIST — scanDependentsForDiscard stamps a rewritten
+// dependent's card_note_sha only in memory; discardCardCore's own persist
+// (`persist(ctx, state, target)`) writes only the discarded card's own
+// record, so a tracked dependent's stamp needs a persist of its own. Real
+// on-disk ledger throughout: no readState/writeState overrides, so
+// commandDiscard exercises the module's real persistence, and the assertions
+// read the state file fresh from disk rather than the object passed in.
+{
+  const root = path.join(tmp, 'fw-discard-persist');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['FWD-4'], planning: ['FWD-5'] }));
+  const predPath = path.join(cardsRoot, 'FWD-4.md');
+  const depPath = path.join(cardsRoot, 'FWD-5.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  fs.writeFileSync(depPath, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[FWD-4]]"', '---', 'x'].join('\n'));
+
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  const seedState = emptyState();
+  seedState.cards['FWD-4'] = { card: 'FWD-4', phase: 'parked', card_path: predPath, gate_receipt: passingReceipt(DISCARD_HEAD) };
+  seedState.cards['FWD-4b'] = { card: 'FWD-4b', phase: 'discarded', superseded_by: 'FWD-4c' };
+  seedState.cards['FWD-4c'] = { card: 'FWD-4c', phase: 'deployed' };
+  // A stale placeholder sha, standing in for "the coordinator last wrote this
+  // dependent a while ago" — the discard-time repoint must advance it, and
+  // that advance must reach disk, not just the in-memory record.
+  seedState.cards['FWD-5'] = { card: 'FWD-5', phase: 'planning', card_path: depPath, card_note_sha: '0'.repeat(64) };
+  writeState(ctx, seedState);
+
+  const receipt = await commandDiscard(ctx, {
+    card: 'FWD-4', 'superseded-by': 'FWD-4b', reason: 'superseded to FWD-4c chain', json: true,
+  }, {
+    boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-05T00:00:00.000Z', writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(),
+    projectLoopStation: (_c, _s, u) => ({ action: 'loop-station-projected', no_op: false, updated_on: u }),
+  });
+  eq(receipt.dependency_rewrites, [{ card: 'FWD-5', from: 'FWD-4', to: 'FWD-4c', path: depPath }],
+    'FW-DISCARD-PERSIST the planning dependent is repointed to the live tail (precondition)');
+
+  const onDiskDependent = readOnDisk().cards['FWD-5'];
+  const healedBytes = fs.readFileSync(depPath, 'utf8');
+  ok(onDiskDependent.card_note_sha !== '0'.repeat(64),
+    'FW-DISCARD-PERSIST the ON-DISK dependent sha advances past its placeholder');
+  eq(onDiskDependent.card_note_sha, crypto.createHash('sha256').update(healedBytes).digest('hex'),
+    'FW-DISCARD-PERSIST the on-disk dependent sha equals sha256 of its repointed note');
+}
+
 // SD supersession-depth circuit-breaker — a lineage at the depth limit refuses
 // to supersede further and escalates to the Director instead of minting the Nth
 // successor (the runaway that spun one slice through 27 supersessions).
@@ -8315,14 +8364,19 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
 
 // FW-HEAL-INTERNAL — heal-epic-bindings is a coordinator-internal writer of a
 // tracked card's note (writeText(path, patchFrontmatter(raw, ...)), the exact
-// shape flagged in review). It must stamp card_note_sha itself, or the very
-// next projection reports the coordinator's own repair as a foreign write —
-// crying wolf on the system's own work. BX-1 starts canonical (so the first
-// projectCard call can succeed and establish a baseline — canonicalEpicProjection
-// refuses a non-canonical slice outright, so there is no way to seed a
-// baseline any other way), then drifts exactly like BPX-HEAL's fixture
-// (project-relative task_parent) without going through the coordinator, and
-// heal-epic-bindings repairs it.
+// shape flagged in review). It must stamp card_note_sha itself AND persist
+// it, or the very next projection — in a fresh process, reading the ledger
+// fresh from disk — reports the coordinator's own repair as a foreign write.
+// This drives commandHealEpicBindings through a REAL on-disk ledger (real
+// readState/writeState, ctx carrying a real stateDir/statePath): an injected
+// `readState: () => state` returning the same live object the test mutated
+// cannot prove persistence, only that the object in memory changed — exactly
+// how round 1's version of this test passed against unpersisted code. BX-1
+// starts canonical (so the first projectCard call can succeed and establish
+// a baseline — canonicalEpicProjection refuses a non-canonical slice
+// outright, so there is no way to seed a baseline any other way), then
+// drifts exactly like BPX-HEAL's fixture (project-relative task_parent)
+// without going through the coordinator, and heal-epic-bindings repairs it.
 {
   const root = path.join(tmp, 'fw-heal-internal');
   const projectRoot = path.join(root, 'spice', 'projects', 'test');
@@ -8354,18 +8408,23 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
     'kanban_column: In Progress', 'status: in_progress', 'depends_on: []', '---', '', 'BX-1 body', '',
   ].join('\n'));
 
-  const record = {
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+
+  // Establish the coordinator's own baseline on a REAL on-disk ledger, the
+  // way production does: project the note (mutates a record in memory), then
+  // persist that record — exactly what attemptProjection/commandReconcile do
+  // — while the note is still canonical.
+  const seedRecord = {
     card: 'BX-1', phase: 'implementing', card_path: notePath,
     touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
   };
-  const state = emptyState();
-  state.cards['BX-1'] = record;
-
-  // Establish the coordinator's own baseline the way a real projection would,
-  // while the note is still canonical.
-  projectCard(notePath, boardPath, 'BX-1', 'implementing', { record, state, cardsRoot });
-  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-HEAL-INTERNAL a baseline sha is established before the drift');
-  const preDriftSha = record.card_note_sha;
+  projectCard(notePath, boardPath, 'BX-1', 'implementing', {
+    record: seedRecord, state: { cards: { 'BX-1': seedRecord } }, cardsRoot,
+  });
+  writeState(ctx, { cards: { 'BX-1': seedRecord } }, seedRecord);
+  const preDriftSha = readOnDisk().cards['BX-1'].card_note_sha;
+  ok(/^[0-9a-f]{64}$/.test(preDriftSha), 'FW-HEAL-INTERNAL a baseline sha is established on disk before the drift');
 
   // Drift the binding outside the coordinator, exactly like BPX-HEAL's
   // fixture (project-relative task_parent) — the ledger's recorded sha is now
@@ -8373,15 +8432,28 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   fs.writeFileSync(notePath, fs.readFileSync(notePath, 'utf8')
     .replace(canonicalTaskParent, 'task_parent: tasks/Broken Epic/Broken Epic.md'));
 
-  const healed = await commandHealEpicBindings({ root }, { apply: true, json: true }, {
+  // Real command, real ledger: no readState/writeState overrides, so this
+  // exercises the module's own persistence, not an injected stand-in.
+  const healed = await commandHealEpicBindings(ctx, { apply: true, json: true }, {
     boardPath, cardsRoot, writeText: (p, t) => fs.writeFileSync(p, t),
-    withLock: async (_c, _n, fn) => fn(), readState: () => state,
+    withLock: async (_c, _n, fn) => fn(),
   });
   eq(healed.slices.map((s) => s.card), ['BX-1'], 'FW-HEAL-INTERNAL the heal actually rewrites the tracked slice (precondition)');
-  ok(record.card_note_sha !== preDriftSha,
-    'FW-HEAL-INTERNAL the heal advances the ledger sha past its pre-drift baseline');
 
-  const reprojected = projectCard(notePath, boardPath, 'BX-1', 'implementing', { record, state, cardsRoot });
+  const healedBytes = fs.readFileSync(notePath, 'utf8');
+  const onDiskAfterHeal = readOnDisk().cards['BX-1'];
+  ok(onDiskAfterHeal.card_note_sha !== preDriftSha,
+    'FW-HEAL-INTERNAL the ON-DISK ledger sha advances past its pre-drift baseline');
+  eq(onDiskAfterHeal.card_note_sha, crypto.createHash('sha256').update(healedBytes).digest('hex'),
+    'FW-HEAL-INTERNAL the on-disk sha equals sha256 of the healed note');
+
+  // A subsequent projection, loading the record fresh from disk (not the
+  // object passed into the heal above), must not report the coordinator's
+  // own repair as a foreign write.
+  const freshRecord = readOnDisk().cards['BX-1'];
+  const reprojected = projectCard(notePath, boardPath, 'BX-1', 'implementing', {
+    record: freshRecord, state: { cards: { 'BX-1': freshRecord } }, cardsRoot,
+  });
   eq(reprojected.foreign_write, null,
     'FW-HEAL-INTERNAL the coordinator does not report its own repair as a foreign write');
 }
@@ -11749,6 +11821,87 @@ const adNoMutation = (result, label) => {
     boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
   });
   eq(resolved.findings.foreign_writes, [], 'FW-BOARD-HEALTH a resolved record reports nothing');
+}
+
+// FW-RECONCILE-CLEAR-PERSIST — projectCard clears an in-memory
+// `foreign_write` the moment its sha resyncs, but that clear must reach
+// disk too, or a stale finding from an earlier detection survives forever:
+// the resolving pass's `projected.foreign_write` is null (nothing NEW),
+// `projected.changed` is false (nothing to project), and
+// `projection_reconciled_at` is already set — none of that trips
+// `stateChanged` unless the pre-call `foreign_write` is captured and OR'd
+// in. Real on-disk ledger throughout — no readState/writeState overrides —
+// so this can only pass if the clear genuinely reaches disk.
+{
+  const root = path.join(tmp, 'fw-reconcile-clear-persist');
+  const fx = bhScaffold(root, {
+    progress: ['Clear epic'],
+    epics: { 'Clear epic': { lanes: { 'In Progress': ['FWC-1'] }, slices: { 'FWC-1': 'in_progress' } } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Clear epic', 'board', 'FWC-1.md');
+  const ctx = {
+    root: fx.projectRoot,
+    stateDir: path.join(fx.projectRoot, '.state'),
+    statePath: path.join(fx.projectRoot, '.state', 'state.json'),
+  };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  const reconcileDeps = {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+    withLock: async (_c, _n, fn) => fn(), now: () => '2026-08-05T00:00:00.000Z',
+  };
+
+  const seedState = emptyState();
+  seedState.cards['FWC-1'] = {
+    card: 'FWC-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ctx, seedState);
+
+  // Seed pass: canonicalizes the note, board, and epic atlas through the
+  // real ledger, and records the sha of exactly what real projectCard wrote.
+  const seed = await commandReconcile(ctx, { card: 'FWC-1' }, reconcileDeps);
+  eq(seed.results[0].ok, true, 'FW-RECONCILE-CLEAR-PERSIST the seed reconcile succeeds');
+
+  // Simulate a previously-persisted detection: inject a stale foreign_write
+  // finding directly onto the on-disk record, WITHOUT touching the note file
+  // — card_note_sha stays the seed pass's own value, so nothing about the
+  // note or board has drifted; only the ledger record carries an old finding.
+  const seeded = readOnDisk().cards['FWC-1'];
+  seeded.foreign_write = {
+    detected_at: '2026-08-01T00:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: seeded.card_note_sha,
+  };
+  writeState(ctx, { cards: { 'FWC-1': seeded } }, seeded);
+
+  const before = coordinator.collectBoardHealth(readOnDisk(), {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(before.findings.foreign_writes.length, 1,
+    'FW-RECONCILE-CLEAR-PERSIST the seeded finding is visible on disk before the resolving pass (precondition)');
+
+  // Resolving pass: nothing on the note/board has changed since the seed, so
+  // the projection itself has nothing to do, and no NEW drift is detected.
+  const result = await commandReconcile(ctx, { card: 'FWC-1' }, reconcileDeps);
+  const entry = result.results[0];
+  eq(entry.projection_changed, false, 'FW-RECONCILE-CLEAR-PERSIST the projection itself makes no change (precondition)');
+  eq(entry.foreign_write, null, 'FW-RECONCILE-CLEAR-PERSIST the resolving pass detects no NEW foreign write');
+  eq(entry.state_changed, true, 'FW-RECONCILE-CLEAR-PERSIST the resolved finding still forces persistence');
+
+  const onDiskAfter = readOnDisk().cards['FWC-1'];
+  eq(onDiskAfter.foreign_write, undefined,
+    'FW-RECONCILE-CLEAR-PERSIST the ON-DISK record no longer carries the resolved finding');
+
+  const after = coordinator.collectBoardHealth(readOnDisk(), {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(after.findings.foreign_writes, [], 'FW-RECONCILE-CLEAR-PERSIST board-health reports nothing once resolved');
+  eq(after.healthy, true, 'FW-RECONCILE-CLEAR-PERSIST the board returns to healthy');
+
+  // No readState override here either — commandBoardHealth reads the real
+  // on-disk ledger through ctx's own stateDir/statePath.
+  const receipt = await coordinator.commandBoardHealth(ctx, { json: true }, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+  });
+  eq(receipt.no_op, true, 'FW-RECONCILE-CLEAR-PERSIST commandBoardHealth returns to no_op: true');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);

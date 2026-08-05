@@ -616,7 +616,7 @@
       "consumers": [
         "platform/test/run-codex-autoloop.js"
       ],
-      "notes": "Sweep-owned Board Health frontmatter projection at spice/projects/<slug>/Board Health.md, written only by the board-health coordinator verb (report-only, board-driven). Lists are capped at 20 with explicit overflow counts. The payload deliberately carries NO timestamp: unchanged findings preserve the note byte-for-byte with zero writes, so mtime means when board health last changed. Scaffold-once body (BoardHealth customjs-guard); thereafter frontmatter only; a body-only note fails closed into the receipt's note_error."
+      "notes": "Sweep-owned Board Health frontmatter projection at spice/projects/<slug>/Board Health.md, written only by the board-health coordinator verb (report-only, board-driven). Five capped lists, each with an explicit overflow count: untracked_members, unprojectable_epics, lane_divergence, projection_errors, and foreign_writes (records carrying a live foreign_write finding — a tracked card's note changed on disk since the coordinator's own recorded hash; ledger-driven, cleared once the projection resyncs). The payload deliberately carries NO timestamp: unchanged findings preserve the note byte-for-byte with zero writes, so mtime means when board health last changed. Scaffold-once body (BoardHealth customjs-guard); thereafter frontmatter only; a body-only note fails closed into the receipt's note_error."
     },
     {
       "id": "loop-plugin-binding-config",

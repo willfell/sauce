@@ -4435,6 +4435,15 @@ async function discardCardCore(ctx, operands, d) {
   let dependencyScan = { rewrites: [], reports: [] };
   if (supersededBy) {
     dependencyScan = scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d);
+    // The scan stamps card_note_sha on every tracked dependent it rewrites,
+    // in-memory on `state.cards`. The `persist(ctx, state, target)` call
+    // above only wrote `target` (the discarded card's own record) — a
+    // dependent's stamp needs its own persist, and the merge form (no
+    // changedRecord) covers however many dependents were touched in one
+    // write. Only when at least one rewritten dependent was actually tracked
+    // does this run, so an untracked-only scan stays a no-op write.
+    const stampedDependent = dependencyScan.rewrites.some((r) => state.cards[r.card]);
+    if (stampedDependent) persist(ctx, state);
   }
 
   const boardNext = removeBoardCard(boardRaw, card);
@@ -4562,6 +4571,7 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   const writeText = deps.writeText || atomicWriteText;
   const transitionLock = deps.withLock || withLock;
   const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   return transitionLock(ctx, 'selector', async () => {
     const plan = planEpicBindingHeal(cardsRoot, boardPath);
     const { atlases, slices, orphanLines } = plan;
@@ -4572,15 +4582,20 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
       // state location still heals; it just has nothing tracked to stamp.
       let state;
       try { state = loadState(ctx); } catch (_) { state = { cards: {} }; }
+      let stampedAny = false;
       for (const target of [...atlases, ...slices]) {
         const raw = fs.readFileSync(target.path, 'utf8');
         const patch = {};
         for (const [key, change] of Object.entries(target.fields)) patch[key] = JSON.stringify(change.to);
         writeText(target.path, patchFrontmatter(raw, patch));
         // Atlas targets have no `.card` — an epic atlas is never a tracked
-        // ledger record. `slices` targets do; stampCardNoteSha no-ops on an
-        // untracked slice too, deliberately, not by accident.
-        if (target.card) stampCardNoteSha((state.cards || {})[target.card], target.path);
+        // ledger record. `slices` targets do; a missing record means an
+        // untracked slice, deliberately, not by accident — nothing to stamp.
+        const record = target.card ? (state.cards || {})[target.card] : null;
+        if (record) {
+          stampCardNoteSha(record, target.path);
+          stampedAny = true;
+        }
       }
       // Group by board so one board with several orphans is written once.
       const byBoard = new Map();
@@ -4593,6 +4608,11 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
         for (const card of cards) raw = removeBoardCard(raw, card);
         writeText(board, raw);
       }
+      // A stamp that never reaches disk is not a stamp — persist whatever
+      // records this pass touched (the merge form: an unbounded number of
+      // slices can be healed in one run). A no-op run (nothing tracked, or
+      // nothing drifted) touches nothing here and stays a no-op.
+      if (stampedAny) persist(ctx, state);
     }
     return successReceipt('heal-epic-bindings', {
       no_op: !atlases.length && !slices.length && !orphanLines.length,
@@ -6835,6 +6855,12 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
             return reconcileLock(ctx, 'completion-projection', async () => {
               const priorError = via.projection_error || null;
               const priorFailedAt = via.projection_failed_at || null;
+              // Captured before project() runs: project() clears a resolved
+              // finding in-memory on `via` as part of the same call, so
+              // `via.foreign_write` after the call can never tell "newly
+              // detected" and "just resolved" apart from "never had one" —
+              // both a fresh detection and a clear must force persistence.
+              const hadForeignWrite = Boolean(via.foreign_write);
               const projected = project(via.card_path, boardPath, via.card, via.phase, {
                 now, record: via, state: lockedState, cardsRoot,
               });
@@ -6842,11 +6868,12 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
               if (!findings.length) {
                 return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'legacy exact-card finding disappeared during reconciliation' };
               }
-              // A detected foreign write must force persistence even when the
-              // projection itself made no change: it is a durable ledger
-              // finding (`via.foreign_write`), not merely a receipt annotation.
+              // A detected (or just-resolved) foreign write must force
+              // persistence even when the projection itself made no change:
+              // it is a durable ledger finding (`via.foreign_write`), not
+              // merely a receipt annotation.
               const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at
-                || projected.changed || projected.foreign_write);
+                || projected.changed || projected.foreign_write || hadForeignWrite);
               if (stateChanged) {
                 delete via.projection_error;
                 delete via.projection_failed_at;
@@ -6870,15 +6897,22 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
         return reconcileLock(ctx, 'completion-projection', async () => {
           const priorError = record.projection_error || null;
           const priorFailedAt = record.projection_failed_at || null;
+          // Captured before project() runs — see the twin comment on the
+          // legacy-via-sibling branch above: project() clears a resolved
+          // finding on `record` as part of the same call, so only the
+          // pre-call value can distinguish "just resolved" from "never had
+          // one".
+          const hadForeignWrite = Boolean(record.foreign_write);
           try {
             const projected = project(record.card_path, boardPath, record.card, record.phase, {
               now, record, state, cardsRoot: deps.cardsRoot,
             });
-            // A detected foreign write must force persistence even when the
-            // projection itself made no change: it is a durable ledger
-            // finding (`record.foreign_write`), not merely a receipt annotation.
+            // A detected (or just-resolved) foreign write must force
+            // persistence even when the projection itself made no change: it
+            // is a durable ledger finding (`record.foreign_write`), not
+            // merely a receipt annotation.
             const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at
-              || projected.changed || projected.foreign_write);
+              || projected.changed || projected.foreign_write || hadForeignWrite);
             if (stateChanged) {
               delete record.projection_error;
               delete record.projection_failed_at;
