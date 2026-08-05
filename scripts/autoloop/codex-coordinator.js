@@ -4744,8 +4744,10 @@ async function commandAdopt(ctx, args, deps = {}) {
   const reason = String(args.reason || '').trim();
   if (!reason) refuse('adopt-refused', 'adopt_reason_required', 'adopt requires a non-empty --reason');
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const boardPath = deps.boardPath || BOARD;
   const loadState = deps.readState || readState;
   const transitionLock = deps.withLock || withLock;
+  const project = deps.projectCard || projectCard;
   return transitionLock(ctx, 'selector', async () => {
     const state = loadState(ctx);
     state.cards ||= {};
@@ -4758,6 +4760,10 @@ async function commandAdopt(ctx, args, deps = {}) {
         refuse('adopt-refused', 'adopt_conflict',
           `card ${card} was adopted from PR ${existing.adoption.pr}; adopt accepts only literal replay`);
       }
+      // Literal replay is a ZERO-write no-op and therefore never projects: a
+      // replaying adopt that re-projected would re-stamp `status_changed_at`
+      // on the note (and re-baseline `card_note_sha`) on every replay, turning
+      // a free idempotent call into an unbounded vault writer.
       return successReceipt('adopt', { no_op: true, card, adoption: existing.adoption });
     }
     if (existing) {
@@ -4807,10 +4813,40 @@ async function commandAdopt(ctx, args, deps = {}) {
     };
     state.cards[card] = record;
     persist(ctx, state, record);
-    return successReceipt('adopt', {
+    // The projection refresh is not optional garnish — it is what makes the
+    // verb usable. The motivating gesture is a Director dragging a slice into
+    // Completed in Obsidian, and `KanbanStatusSync` rewrites only
+    // status/status_prev/status_changed_at: it never writes `kanban_column`,
+    // never touches the epic atlas, and never touches the parent board. Record
+    // alone, and the very next read reports both `projectionMetadataProblem`
+    // (stale kanban_column) and `projectionBoardDrift` (stale atlas) — and
+    // batch-runner's readiness() THROWS on either, so the documented verb
+    // would stop the unattended loop until someone ran `reconcile`.
+    //
+    // Same shape as park / resume / amend-contract: persist the record first
+    // so the phase change is durable even if the projection fails, then
+    // persist again so the projection's own record mutations
+    // (projection_reconciled_at and the card_note_sha baseline — an adopted
+    // record has no baseline at all until this runs) reach disk too.
+    //
+    // Nested lock acquisition is the established pattern: this verb holds
+    // `selector` while attemptProjection takes `completion-projection`. They
+    // are distinct lock directories, exactly as in commandClaim /
+    // commandConsumeRatification, so the nesting cannot self-deadlock.
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: transitionLock, projectCard: project, now, state, cardsRoot,
+    });
+    persist(ctx, state, record);
+    const receipt = successReceipt(projection.ok ? 'adopt' : 'adopt-projection-failed', {
       no_op: false, card, phase: record.phase, adoption: record.adoption,
       card_path: notePath, pr_url: provenance.pr_url || null,
+      projection,
     });
+    if (!projection.ok) {
+      receipt.projection_error = projection.error;
+      receipt.reconcile = reconcileRoute(card);
+    }
+    return receipt;
   });
 }
 

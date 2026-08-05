@@ -11581,7 +11581,18 @@ const adNoMutation = (result, label) => {
   eq(record.adoption.verified, 'git+gh', 'AD-ADOPT provenance lives on the record, not only the receipt');
   eq(record.card_path, path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md'),
     'AD-ADOPT binds the record to the resolved note path');
-  eq(writes.length, 1, 'AD-ADOPT persists once');
+  // Two persists, deliberately, and in this order: the record first so the
+  // adopted phase is durable even if the projection then fails, and again
+  // afterwards so the projection's own record mutations
+  // (projection_reconciled_at, the card_note_sha baseline) reach disk. This is
+  // the same persist/project/persist discipline park, resume, amend-park and
+  // amend-contract already use; a single persist would silently drop the
+  // baseline that foreign-write detection depends on.
+  eq(writes.length, 2, 'AD-ADOPT persists the record, projects, then persists the projection mutations');
+  eq(writes.every((rec) => rec === record), true, 'AD-ADOPT both persists carry the one adopted record');
+  ok(record.projection_reconciled_at, 'AD-ADOPT the projection receipt lands on the record');
+  eq(record.card_note_sha, testSha256(fs.readFileSync(record.card_path, 'utf8')),
+    'AD-ADOPT adoption establishes the card_note_sha baseline from the bytes on disk');
 
   // The adopted record projects as complete THROUGH THE REAL PRODUCTION
   // PATH — noteProjectionMapping and canonicalEpicProjection/
@@ -11708,6 +11719,95 @@ const adNoMutation = (result, label) => {
     "AD-PROJECTION reconcile-style projectCard leaves the note's `status: completed` byte-identical");
   eq(projectResult.changed, false, 'AD-PROJECTION reconcile-style projectCard makes no change at all');
   eq(projectWrites.length, 0, 'AD-PROJECTION an unchanged projection writes nothing');
+}
+
+// AD-KANBAN-DRAG — the motivating scenario, end to end, on a REAL ledger under
+// the REAL nested locks. A Director drags a slice into Completed in Obsidian:
+// KanbanStatusSync rewrites `status`/`status_prev`/`status_changed_at` and
+// nothing else — no `kanban_column`, no epic atlas, no parent board. If `adopt`
+// only wrote its record and returned (which is what it did, while three shipped
+// documents said it refreshed the projection), the very next read reported
+// `projectionMetadataProblem` expected_column "Completed" vs actual
+// "In Progress" AND `projectionBoardDrift` expected_status "done" vs actual
+// "active", and `batch-runner.js` `readiness()` THROWS on either being
+// non-empty. Using the verb exactly as documented stopped the unattended loop
+// until someone ran `reconcile`. This block pins the whole chain: the note, the
+// atlas, both status surfaces, and the durable `card_note_sha` baseline.
+//
+// Deliberately NOT using adDeps here: adDeps injects readState/writeState/
+// withLock stand-ins, and a projection asserted against an injected live object
+// under an injected lock proves neither durability nor lock safety (the exact
+// vacuous-test shape this cycle already shipped twice). Real state io, real
+// `withLock` — `commandAdopt` holds `selector` while `attemptProjection` takes
+// `completion-projection`, so this also pins that the nesting cannot deadlock.
+{
+  const root = path.join(tmp, 'ad-kanban-drag');
+  const fx = adScaffold(root);
+  const ctx = {
+    root: fx.projectRoot,
+    stateDir: path.join(fx.projectRoot, '.state'),
+    statePath: path.join(fx.projectRoot, '.state', 'state.json'),
+  };
+  const notePath = path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md');
+  const atlasPath = path.join(fx.cardsRoot, 'Retire ero loop', 'Retire ero loop.md');
+  // Exactly what a Kanban drag leaves behind: the status declaration flipped,
+  // a bare-date (non-coordinator) stamp, a STALE kanban_column, and an epic
+  // atlas nothing ever touched.
+  fs.writeFileSync(notePath, patchFrontmatter(fs.readFileSync(notePath, 'utf8'), {
+    kanban_column: 'In Progress', status_prev: 'in_progress', status_changed_at: '2026-07-31',
+  }));
+  eq(testScalarField(fs.readFileSync(atlasPath, 'utf8'), 'status'), 'planning',
+    'AD-KANBAN-DRAG precondition: the drag left the epic atlas untouched');
+  eq(testScalarField(fs.readFileSync(notePath, 'utf8'), 'kanban_column'), 'In Progress',
+    'AD-KANBAN-DRAG precondition: the drag left kanban_column stale');
+
+  const receipt = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'dragged to Completed in Obsidian' },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, git: adGit(), prView: adPrView(), now: () => '2026-08-05T09:00:00.000Z' });
+  eq(receipt.ok, true, 'AD-KANBAN-DRAG adopt succeeds');
+  eq(receipt.action, 'adopt', 'AD-KANBAN-DRAG a successful projection keeps the plain adopt action');
+  eq(receipt.projection && receipt.projection.ok, true,
+    'AD-KANBAN-DRAG the receipt surfaces the projection result the way park/resume/amend-contract do');
+
+  // The ledger read fresh from disk, not the object commandAdopt mutated.
+  const onDisk = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['EM-4'];
+  eq(onDisk.phase, 'adopted', 'AD-KANBAN-DRAG the on-disk record is adopted');
+  ok(onDisk.projection_reconciled_at, 'AD-KANBAN-DRAG the projection receipt is durable on the on-disk record');
+  eq(onDisk.card_note_sha, testSha256(fs.readFileSync(notePath, 'utf8')),
+    'AD-KANBAN-DRAG the on-disk card_note_sha baseline equals sha256 of the note bytes on disk');
+
+  // The vault surfaces the drag never touched.
+  eq(testScalarField(fs.readFileSync(notePath, 'utf8'), 'kanban_column'), 'Completed',
+    'AD-KANBAN-DRAG the stale kanban_column is refreshed to the projected column');
+  eq(testScalarField(fs.readFileSync(atlasPath, 'utf8'), 'status'), 'active',
+    'AD-KANBAN-DRAG the epic atlas rolls up (EM-4 adopted, EM-7 still in flight)');
+
+  // The two surfaces batch-runner's readiness() throws on.
+  const state = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  eq(projectionBoardDrift(fs.readFileSync(fx.boardPath, 'utf8'), onDisk,
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, state }),
+  null, 'AD-KANBAN-DRAG projectionBoardDrift is clean after adopt');
+  const loadCard = (card) => {
+    const p = path.join(fx.cardsRoot, 'Retire ero loop', 'board', `${card}.md`);
+    return fs.existsSync(p) ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  };
+  const statusReceipt = commandStatus(ctx, {
+    state, boardMd: fs.readFileSync(fx.boardPath, 'utf8'), loadCard,
+    cardsRoot: fx.cardsRoot, boardPath: fx.boardPath,
+  });
+  eq(statusReceipt.projection_problems, [], 'AD-KANBAN-DRAG commandStatus reports zero projection problems');
+  eq(statusReceipt.board_drift, [], 'AD-KANBAN-DRAG commandStatus reports zero board drift');
+
+  // Literal replay stays a zero-write no-op: the replay path must never
+  // project, or a replayed adopt would re-stamp status_changed_at forever.
+  const beforeReplay = fs.readFileSync(notePath, 'utf8');
+  const ledgerBeforeReplay = fs.readFileSync(ctx.statePath, 'utf8');
+  const replay = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'dragged to Completed in Obsidian' },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, git: adGit(), prView: adPrView() });
+  eq(replay.no_op, true, 'AD-KANBAN-DRAG literal replay is a no-op');
+  eq(fs.readFileSync(notePath, 'utf8'), beforeReplay, 'AD-KANBAN-DRAG replay leaves the note byte-identical');
+  eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBeforeReplay, 'AD-KANBAN-DRAG replay leaves the ledger byte-identical');
 }
 
 // BHP board-health provenance: the aggregate untracked count is not a
