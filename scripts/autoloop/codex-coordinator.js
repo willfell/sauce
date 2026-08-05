@@ -1971,8 +1971,19 @@ function effectiveProjectionMapping(record, raw = '') {
   const mapping = record && projectionMapping(record.phase);
   const canonicalSlice = scalarField(raw, 'type') === 'slice'
     && Boolean(normalizeCardLink(scalarField(raw, 'epic')));
+  // A legacy `completed` phase with no deployment receipts is unproven and
+  // demotes. An `adopted` phase is ALSO `completed`-status with no deployment
+  // receipts by construction (adoption records PR/merge-sha provenance, never
+  // fabricates deployment proof) — but it is proven a different way, and
+  // resolveSliceAuthority already carries this exact exemption for its own
+  // callers. Without it here too, `adopted` — freshly a real, projectable
+  // phase — would get demoted right back to `implementing` on every read:
+  // commandStatus would wedge on phantom board_drift/projection_problems, and
+  // the advertised drift remedy (single-card reconcile) would rewrite the
+  // board line and note frontmatter back to in-progress, permanently
+  // un-completing an adopted slice on every repair pass.
   if (mapping && canonicalSlice && mapping.status === 'completed'
-    && !successfulDeploymentReceipts(record)) {
+    && !successfulDeploymentReceipts(record) && !(record && record.adoption)) {
     return projectionMapping('implementing');
   }
   return mapping;
@@ -4551,18 +4562,21 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
 // from being a general-purpose "mark it done" backdoor.
 const ADOPT_SHA_RE = /^[0-9a-f]{40}$/;
 
-// Distinguishes a genuine gh CLI outage (missing binary, not authenticated,
-// spawn failure) from gh successfully running and reporting that the operand
-// is invalid. Only the former is safe to treat as "no independent
-// verification available right now" — the latter means the operator handed
-// adopt a PR reference gh itself says is wrong, which must refuse rather than
-// durably record an unverifiable reference at a degraded tier.
+// Distinguishes the narrow set of gh-unreachable signals (binary missing —
+// `sh` spawns via execFileSync with no shell, so a missing binary is always
+// ENOENT, never a shell "command not found" string — or gh reporting it
+// isn't logged in) from everything else. ONLY those two degrade to
+// `verified: 'git'`; every other failure — network errors, rate limits, an
+// HTTP 401, EACCES, a JSON.parse failure inside ghJson, or gh resolving and
+// reporting the PR itself is invalid — refuses via adopt_pr_not_found rather
+// than durably recording an unverifiable reference at a degraded tier.
+// Fail-closed is deliberate: an unrecognized gh failure is treated as "this
+// PR reference could not be verified," not as "gh must be down."
 function ghUnavailable(err) {
   if (!err) return false;
   if (err.code === 'ENOENT') return true;
   const text = `${err.message || ''} ${err.stderr || ''}`;
-  return /not authenticated|gh auth login|command not found|is not recognized as an internal or external command/i
-    .test(text);
+  return /not authenticated|gh auth login/i.test(text);
 }
 
 function adoptProvenance(args, deps, cwd) {
@@ -4659,9 +4673,11 @@ async function commandAdopt(ctx, args, deps = {}) {
       // 'adopted', never 'completed': 'completed' is a card-status vocabulary
       // word, not a ledger phase (see the comment on verify-gates' chain
       // check). 'adopted' is a genuine TERMINAL, projectable ledger phase —
-      // see TERMINAL and projectionMapping above — so the record is visible
-      // to activeRecords()/claim selection and to every resolveSliceAuthority
-      // call site without either one needing to special-case adoption.
+      // see TERMINAL and projectionMapping above — so the record is EXCLUDED
+      // from activeRecords() (it never blocks sibling-slice claims or counts
+      // against MAX_ACTIVE, same as 'deployed') and is visible to every
+      // resolveSliceAuthority call site without either one needing to
+      // special-case adoption.
       phase: 'adopted',
       card_path: notePath,
       touch_zones: listField(raw, 'touch_zones').map(normalizeZone),

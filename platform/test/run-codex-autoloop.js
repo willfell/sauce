@@ -11232,10 +11232,12 @@ const adNoMutation = (result, label) => {
 
   // --json is mandatory before any read or write, exactly like every other
   // mutating verb.
+  const adJsonWrites = [];
   await assert.rejects(
     () => coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
-      { ...base }, adDeps(fx, emptyState())),
+      { ...base }, adDeps(fx, emptyState(), { writeState: (_c, _s, rec) => adJsonWrites.push(rec) })),
     /requires --json/, 'AD-JSON refusal: --json is mandatory');
+  eq(adJsonWrites.length, 0, 'AD-JSON refuses before any write');
 
   // Unknown options are rejected by the shared CLI grammar before state access.
   let r = await adRefusal(fx, emptyState(), { ...base, apply: true });
@@ -11374,10 +11376,13 @@ const adNoMutation = (result, label) => {
   // adopt_conflict refuses before adoptProvenance ever runs, so no prView
   // override is needed here — the default (matching) mock is never called.
   let conflict = null;
+  const conflictWrites = [];
   try {
-    await coordinator.commandAdopt(ctx, { ...args, pr: 999 }, adDeps(fx, state));
+    await coordinator.commandAdopt(ctx, { ...args, pr: 999 },
+      adDeps(fx, state, { writeState: (_c, _s, rec) => conflictWrites.push(rec) }));
   } catch (err) { conflict = err; }
   eq(conflict && conflict.code, 'adopt_conflict', 'AD-REPLAY substituted operands refuse');
+  eq(conflictWrites.length, 0, 'AD-REPLAY substituted operands write nothing before refusing');
 }
 
 // AD-DEGRADE — a gh outage lowers the recorded verification tier. It never
@@ -11393,6 +11398,75 @@ const adNoMutation = (result, label) => {
   eq(receipt.adoption.verified, 'git', 'AD-DEGRADE a gh outage records the git-only tier');
   eq(state.cards['EM-4'].adoption.verified, 'git', 'AD-DEGRADE the degrade is durable on the record');
   eq(receipt.ok, true, 'AD-DEGRADE the verb still succeeds');
+}
+
+// AD-PROJECTION — effectiveProjectionMapping must exempt `adopted` the same
+// way resolveSliceAuthority already does. Before `adopted` became a real
+// ledger phase (fix round 1), projectionMapping('completed') returned null
+// and this demotion path was a silent no-op for every adopted record. Now
+// that it returns a real mapping, the demotion would fire on every read:
+// projectionBoardDrift/projectionMetadataProblem would report phantom drift
+// (which wedges batch-runner's readiness gate — it throws on either being
+// non-empty), and the advertised drift remedy — single-card reconcile via
+// projectCard — would rewrite the epic board line and note frontmatter back
+// to in-progress, permanently un-completing the adopted slice on every
+// repair pass. This block pins the exemption at all three surfaces.
+{
+  const root = path.join(tmp, 'ad-projection');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' },
+    adDeps(fx, state));
+  const record = state.cards['EM-4'];
+
+  // bhScaffold's slice template never stamps kanban_column (it wasn't built
+  // for projectCard-idempotency fixtures — every OTHER idempotency test in
+  // this suite hand-builds its own card with kanban_column present, see e.g.
+  // the BGR-RESTRUCTURE / drift fixtures above). Stamp it here so the note is
+  // metadata-canonical for an already-Completed slice, isolating the
+  // adoption exemption as the only variable under test. Likewise the atlas
+  // is always hardcoded to status:planning regardless of the epic's actual
+  // roll-up — with EM-4 done and EM-7 still in_progress the real epic
+  // lifecycle is 'active', so stamp that too, or the pre-existing atlas
+  // staleness (unrelated to adoption) would show up as unrelated drift.
+  fs.writeFileSync(record.card_path, patchFrontmatter(fs.readFileSync(record.card_path, 'utf8'), { kanban_column: 'Completed' }));
+  const atlasPath = path.join(fx.cardsRoot, 'Retire ero loop', 'Retire ero loop.md');
+  fs.writeFileSync(atlasPath, patchFrontmatter(fs.readFileSync(atlasPath, 'utf8'), { status: 'active' }));
+
+  const boardMd = fs.readFileSync(fx.boardPath, 'utf8');
+  eq(projectionBoardDrift(boardMd, record, { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, state }),
+    null, 'AD-PROJECTION an adopted record reports zero board drift');
+
+  const loadCard = (card) => {
+    const p = path.join(fx.cardsRoot, 'Retire ero loop', 'board', `${card}.md`);
+    return fs.existsSync(p) ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  };
+  const statusReceipt = commandStatus(ctx, {
+    state, boardMd, loadCard, cardsRoot: fx.cardsRoot, boardPath: fx.boardPath,
+  });
+  eq(statusReceipt.board_drift, [], 'AD-PROJECTION commandStatus reports zero board drift for an adopted record');
+  eq(statusReceipt.projection_problems, [], 'AD-PROJECTION commandStatus reports zero projection problems for an adopted record');
+
+  // The destructive-reconcile pin: projectCard is exactly what the advertised
+  // drift remedy (single-card reconcile) runs. board_changed/card_changed are
+  // the slice-level fields — the epic board line (`- [x]` on the EPIC board,
+  // not the project board) and the note's own `status: completed` frontmatter
+  // — which is precisely what the bug flipped back to in-progress. With the
+  // fixture now fully lifecycle-canonical (kanban_column + atlas stamped
+  // above), the aggregate `changed` is asserted too: nothing on this slice or
+  // its epic should move for an already-correct adopted record.
+  const projectWrites = [];
+  const projectResult = projectCard(record.card_path, fx.boardPath, 'EM-4', 'adopted', {
+    cardsRoot: fx.cardsRoot, record, writeText: (target, text) => projectWrites.push({ target, text }),
+  });
+  eq(projectResult.board_changed, false,
+    'AD-PROJECTION reconcile-style projectCard leaves the epic board line `- [x]` byte-identical');
+  eq(projectResult.card_changed, false,
+    "AD-PROJECTION reconcile-style projectCard leaves the note's `status: completed` byte-identical");
+  eq(projectResult.changed, false, 'AD-PROJECTION reconcile-style projectCard makes no change at all');
+  eq(projectWrites.length, 0, 'AD-PROJECTION an unchanged projection writes nothing');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
