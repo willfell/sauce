@@ -21,6 +21,10 @@ const {
   parseBoard, parseCheckedColumn, parseDependsOn, parseCardStatus, parseBatchPolicy,
   delivery, prepareDeliveryCard, validationReason,
 } = require('./select-card');
+const {
+  physicalProjectPrefix, canonicalWorkspacePath, epicBindingPaths, parentBoardRef,
+  resolveSliceAuthority, assertProjectableStatus,
+} = delivery.topology;
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
@@ -2045,26 +2049,6 @@ function atomicWriteText(file, value) {
   fs.renameSync(tmp, file);
 }
 
-function canonicalWorkspacePath(value, expected) {
-  const raw = String(value || '').trim().replace(/\\/g, '/');
-  const parts = raw.split('/');
-  return Boolean(raw) && !raw.startsWith('/') && !/^[A-Za-z]:\//.test(raw)
-    && !parts.some((part) => !part || part === '.' || part === '..')
-    && raw === expected;
-}
-
-function physicalProjectPrefix(cardsRoot) {
-  const projectRoot = path.dirname(fs.realpathSync(cardsRoot)).replace(/\\/g, '/');
-  const marker = '/spice/projects/';
-  const markerAt = projectRoot.lastIndexOf(marker);
-  if (markerAt < 0) throw new Error('canonical cards root is outside spice/projects');
-  const relative = projectRoot.slice(markerAt + 1);
-  if (!/^spice\/projects\/[^/]+$/.test(relative)) {
-    throw new Error('canonical cards root is not one project directly under spice/projects');
-  }
-  return { prefix: relative, root: projectRoot };
-}
-
 function physicalDescendant(root, target, label) {
   const physicalRoot = fs.realpathSync(root);
   const physicalTarget = fs.realpathSync(target);
@@ -2189,14 +2173,13 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   const parentKanbanBoard = scalarField(atlasRaw, 'kanban_board');
   const physicalProject = physicalProjectPrefix(cardsRoot);
   const projectPrefix = physicalProject.prefix;
-  const expectedParentBoardPath = path.posix.join(projectPrefix, path.basename(parentBoardPath));
+  const expectedParentBoardPath = parentBoardRef(projectPrefix, path.basename(parentBoardPath));
   if (parentSourceBoard !== parentKanbanBoard
     || !canonicalWorkspacePath(parentSourceBoard, expectedParentBoardPath)
     || path.dirname(fs.realpathSync(parentBoardPath)).replace(/\\/g, '/') !== physicalProject.root) {
     throw new Error(`epic atlas ${epic} does not bind its canonical parent board`);
   }
-  const expectedAtlasPath = path.posix.join(projectPrefix, 'tasks', epic, `${epic}.md`);
-  const expectedBoardPath = path.posix.join(projectPrefix, 'tasks', epic, 'board', `${epic}-board.md`);
+  const { atlasRef: expectedAtlasPath, boardRef: expectedBoardPath } = epicBindingPaths(projectPrefix, epic);
   const backlink = scalarField(atlasRaw, 'epic_board');
   if (!canonicalWorkspacePath(backlink, expectedBoardPath)) {
     throw new Error(`epic atlas ${epic} does not bind its canonical board`);
@@ -2267,7 +2250,6 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
   const findings = [];
   const slices = cards.map((name) => {
     const tracked = surface.state.cards && surface.state.cards[name];
-    const trackedMapping = tracked && projectionMapping(tracked.phase);
     const slicePath = path.join(path.dirname(surface.boardPath), `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
     const sliceRaw = fs.readFileSync(slicePath, 'utf8');
@@ -2278,49 +2260,48 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
       status,
       cross_epic_dependency: dependencies.some((dependency) => !siblings.has(dependency)),
     });
-    if (name === currentCard) {
-      if (currentStatus === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        findings.push(legacyCompletionFinding(surface, name, tracked));
-        return decorate('in_progress');
-      }
-      return decorate(currentStatus);
+    // The live claim's status overrides the ledger phase for that one card.
+    const hasRecord = name === currentCard || Boolean(tracked && projectionMapping(tracked.phase));
+    const ledgerStatus = name === currentCard
+      ? currentStatus
+      : (tracked && projectionMapping(tracked.phase) ? projectionMapping(tracked.phase).status : null);
+    const boardStatus = delivery.normalizeStatus(scalarField(sliceRaw, 'status') || 'planning')
+      || (scalarField(sliceRaw, 'status') || 'planning');
+    const verdict = resolveSliceAuthority({
+      hasRecord,
+      ledgerStatus,
+      boardStatus,
+      doneProven: successfulDeploymentReceipts(tracked),
+      boardIsSlice: true,
+    });
+    assertProjectableStatus(verdict);
+    if (verdict.demoted) {
+      findings.push(legacyCompletionFinding(surface, name, verdict.source === 'ledger' ? tracked : null));
     }
-    if (trackedMapping) {
-      if (trackedMapping.status === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        findings.push(legacyCompletionFinding(surface, name, tracked));
-        return decorate('in_progress');
-      }
-      return decorate(trackedMapping.status);
-    }
-    const status = scalarField(sliceRaw, 'status') || 'planning';
-    if (delivery.normalizeStatus(status) === 'completed') {
-      findings.push(legacyCompletionFinding(surface, name));
-      return decorate('in_progress');
-    }
-    return decorate(status);
+    return decorate(verdict.status);
   });
   return { ...delivery.deriveEpicLifecycle(slices), findings };
 }
 
 function noteProjectionMapping(raw, record = null) {
-  const tracked = record && projectionMapping(record.phase);
-  if (tracked) {
-    if (tracked.status === 'completed' && !successfulDeploymentReceipts(record)) {
-      return projectionMapping('implementing');
-    }
-    return tracked;
-  }
-  const status = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
-  if (status === 'completed' && scalarField(raw, 'type') === 'slice') {
-    return projectionMapping('implementing');
-  }
-  return {
+  const statusMap = {
     planning: { column: 'In Planning', complete: false, status: 'planning' },
     in_progress: { column: 'In Progress', complete: false, status: 'in_progress' },
     parked: { column: 'In Progress', complete: false, status: 'parked' },
     blocked: { column: 'Blocked', complete: false, status: 'blocked' },
     completed: { column: 'Completed', complete: true, status: 'completed' },
-  }[status];
+  };
+  const tracked = record && projectionMapping(record.phase);
+  const boardStatus = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+  const verdict = resolveSliceAuthority({
+    hasRecord: Boolean(tracked),
+    ledgerStatus: tracked ? tracked.status : null,
+    boardStatus,
+    doneProven: successfulDeploymentReceipts(record),
+    boardIsSlice: scalarField(raw, 'type') === 'slice',
+  });
+  assertProjectableStatus(verdict);
+  return statusMap[verdict.status];
 }
 
 function auditReconcileFinding(
@@ -4447,9 +4428,9 @@ async function discardCardCore(ctx, operands, d) {
 function canonicalEpicBindings(epic, cardsRoot, parentBoardPath) {
   const { prefix } = physicalProjectPrefix(cardsRoot);
   return {
-    parentBoard: path.posix.join(prefix, path.basename(parentBoardPath)),
-    atlas: path.posix.join(prefix, 'tasks', epic, `${epic}.md`),
-    board: path.posix.join(prefix, 'tasks', epic, 'board', `${epic}-board.md`),
+    parentBoard: parentBoardRef(prefix, path.basename(parentBoardPath)),
+    atlas: epicBindingPaths(prefix, epic).atlasRef,
+    board: epicBindingPaths(prefix, epic).boardRef,
   };
 }
 

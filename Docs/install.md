@@ -1536,3 +1536,14 @@ brew update && brew upgrade sauce
 - `board-health --json` (read-only, the default) sweeps the bound board board-first: untracked members, unprojectable epics, binding drift, lane divergence, `projection_error` records.
 - `board-health --write-note --json` additionally maintains `spice/projects/<slug>/Board Health.md` (frontmatter payload `sauce.board-health.v1`; zero writes when findings are unchanged).
 - Optional hourly schedule per loop-bound repo: `node "$(brew --prefix sauce)/libexec/scripts/autoloop/board-health-launchd.js" install <repo>` (or run from the workshop clone).
+
+## Upgrading from v0.282.0 to v0.282.1 — one source of truth (no consumer-vault action)
+
+```bash
+brew update && brew upgrade sauce
+```
+
+**What changes:** internal single-sourcing only (loop-integrity workstream 2). No blueprint surface changes, no migrations, no consumer-vault action required.
+
+- Canonical board/atlas/slice path derivation and the board-vs-ledger authority rule now live once in the delivery mechanism (`delivery.topology.*`); the coordinator and card-intake both consume it. Projection behavior is byte-identical.
+- New `release:check-bump` gate (workshop-only) recomputes the release bump from the PR title vs branch commits so a mistitled squash-merge PR can no longer ship the wrong bump.

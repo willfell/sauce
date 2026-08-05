@@ -68,6 +68,17 @@ The mutating operations below require `--json` (refused before any read or write
 
 **`backfill-ratifications --json` / `consume-ratification --card <exact name> --json [--artifact <vault-relative.md>]`** — transition projections and the explicit idempotent backfill scaffold missing ratification inbox notes under `spice/projects/sauce/ratifications/` with the canonical card identity and the ledger’s exact 40-hex gate HEAD; existing notes are never overwritten. Consumption physically contains one coordinator-scaffolded Markdown artifact before reading state, validates one exact Delivery receipt section, stores its artifact/section SHA-256 provenance, flips the note to `state: consumed`, and resumes only when capacity, dependencies, touch zones, the preserved worktree, and the card's lease (live lease requires the matching `--lease-token`) are ready. Invalid or incomplete artifacts return every validation error with zero state change. An identical successful replay is `no_op: true`; substituted operands refuse. A crash between the authoritative ledger receipt and the consumed-state flip is completed by literal replay.
 
+## Board vs ledger authority
+
+One rule, one implementation (`delivery.topology.resolveSliceAuthority`, v0.282.1):
+
+1. **A ledger record present → the ledger wins** (`source: 'ledger'`). The slice is *proven done* only when the record carries successful deployment receipts; a ledger `completed` without them demotes to `in_progress` (the legacy-completion finding).
+2. **No ledger record → the board slice frontmatter is a declaration only** (`source: 'board'`). A board-declared `completed` on a slice is never proven done and demotes the same way — the board cannot mark itself done.
+
+`deriveEpicProjection` and `noteProjectionMapping` (and therefore board-health's lane-divergence check) all route through this resolver; `delivery.topology.assertProjectableStatus` is the fail-closed backstop that throws if any future consumer tries to project a `completed` verdict that is not proven done. Do not re-derive the rule per consumer.
+
+Path derivation is single-sourced the same way: `delivery.topology.physicalProjectPrefix` / `epicBindingPaths` / `parentBoardRef` are the only implementation of canonical board/atlas/slice paths — `canonicalEpicProjection` validates against them, `heal-epic-bindings` writes from them, and card-intake mints from them, so the three can no longer drift (the v0.281.1 freeze class is structurally gone).
+
 ## Loop Station projection
 
 The coordinator is the sole writer of `spice/projects/sauce/Loop Station.md`. On a meaningful lifecycle transition it patches the note's frontmatter with the schema-registered `sauce.loop-station.v1` payload: a mobile headline and exact action, the active card, Director-visible escalations with plain-language reasons, genuine concurrency/deploy waits, the peek-only retroactive digest, recent releases, tombstone residue, and unbounded totals. Every projected list is capped at 20 and carries its own overflow count.
