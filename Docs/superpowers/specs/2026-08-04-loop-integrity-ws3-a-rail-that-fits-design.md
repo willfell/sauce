@@ -313,9 +313,13 @@ Test-driven, red→green per task, against the existing harnesses.
 - One workstream, one branch (`ws3-a-rail-that-fits`), one PR.
 - `npm run release:check-bump` dogfooded before the PR is opened; the PR title
   decides the bump under squash-merge.
-- **No vault writes in this cycle at all** — the live-writer hazard does not
-  arise. `board-health --write-note` remains the only vault writer and is not
-  invoked by this work.
+- **No vault writes during this cycle's execution** — the live-writer hazard did
+  not arise while building it. Note the shipped surface is different: the fix
+  wave made `adopt` perform the epic projection refresh this spec always
+  promised (§4.2), so **`adopt` is a vault writer when run** — it rewrites the
+  slice note's `kanban_column` / `status` / `status_changed_at`, the slice board
+  line, the parent board line, and the epic atlas. `board-health --write-note`
+  is no longer the only one. Neither is invoked by this branch's own work.
 - No hand-versioning, no hand-tags, no tap edits.
 - `platform/test/run-sticky-notes-render-guards.js` remains flaky on `main`
   (~50%); re-run to confirm the flake, do not fold a fix into this cycle.
