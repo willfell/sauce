@@ -16,7 +16,6 @@ const {
   bumpLevel: releaseBumpLevel,
 } = require('../../scripts/release/lib/conventional');
 const { inc: incrementReleaseVersion } = require('../../scripts/release/lib/semver-inc');
-const deliveryTopology = require('../mechanisms/delivery/scripts/delivery-topology');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 const hadPriorImportedCoordinatorCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
@@ -11192,8 +11191,7 @@ const adScaffold = (root) => bhScaffold(root, {
   },
 });
 const AD_SHA = '9922ec4373e4a925829c7917912263e2c27a29e4';
-const adGit = (calls = []) => (args) => {
-  calls.push(args.join(' '));
+const adGit = () => (args) => {
   if (args[0] === 'cat-file') return '';
   if (args[0] === 'merge-base') return '';
   if (args[0] === 'rev-parse') return 'main';
@@ -11209,12 +11207,22 @@ const adDeps = (fx, state, extra = {}) => bhDeps(fx, {
   prView: adPrView(),
   ...extra,
 });
+// Every refusal path must throw BEFORE any write and without mutating the
+// ledger it was handed — adRefusal threads a counting writeState through so
+// every AD-* assertion below can pin that, not just the refusal code.
 const adRefusal = async (fx, state, args, extra = {}) => {
+  const writes = [];
+  const before = JSON.stringify(state.cards);
+  let err = null;
   try {
     await coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
-      { json: true, ...args }, adDeps(fx, state, extra));
-  } catch (err) { return err; }
-  return null;
+      { json: true, ...args }, adDeps(fx, state, { writeState: (_c, _s, rec) => writes.push(rec), ...extra }));
+  } catch (e) { err = e; }
+  return { err, writes, unchanged: JSON.stringify(state.cards) === before };
+};
+const adNoMutation = (result, label) => {
+  eq(result.writes.length, 0, `${label} refuses before any write`);
+  eq(result.unchanged, true, `${label} leaves ledger state byte-identical`);
 };
 
 {
@@ -11231,53 +11239,73 @@ const adRefusal = async (fx, state, args, extra = {}) => {
 
   // Unknown options are rejected by the shared CLI grammar before state access.
   let r = await adRefusal(fx, emptyState(), { ...base, apply: true });
-  eq(r && r.code, 'unknown_option', 'AD-GRAMMAR rejects unknown options before reads or writes');
+  eq(r.err && r.err.code, 'unknown_option', 'AD-GRAMMAR rejects unknown options before reads or writes');
+  adNoMutation(r, 'AD-GRAMMAR');
 
   // A card that already has a ledger record is NOT adoptable — that is what
   // stops adopt from becoming a general-purpose "mark it done" backdoor.
   const tracked = emptyState();
   tracked.cards['EM-4'] = { card: 'EM-4', phase: 'implementing' };
   r = await adRefusal(fx, tracked, base);
-  eq(r && r.code, 'adopt_record_exists', 'AD-TRACKED a card with a record refuses');
+  eq(r.err && r.err.code, 'adopt_record_exists', 'AD-TRACKED a card with a record refuses');
+  adNoMutation(r, 'AD-TRACKED');
 
   // Adoption ratifies a declaration; it never invents one.
   r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-7' });
-  eq(r && r.code, 'adopt_not_declared_complete', 'AD-DECLARED a non-completed note refuses');
+  eq(r.err && r.err.code, 'adopt_not_declared_complete', 'AD-DECLARED a non-completed note refuses');
+  adNoMutation(r, 'AD-DECLARED');
 
   // A board member with no note at all cannot be adopted.
   r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-404' });
-  eq(r && r.code, 'adopt_card_not_found', 'AD-MISSING an unknown card refuses');
+  eq(r.err && r.err.code, 'adopt_card_not_found', 'AD-MISSING an unknown card refuses');
+  adNoMutation(r, 'AD-MISSING');
 
   // Provenance operands are structurally validated first.
   r = await adRefusal(fx, emptyState(), { ...base, 'merge-sha': 'deadbeef' });
-  eq(r && r.code, 'adopt_sha_unreachable', 'AD-SHA-SHAPE a non-40-hex sha refuses');
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-SHAPE a non-40-hex sha refuses');
+  adNoMutation(r, 'AD-SHA-SHAPE');
 
   r = await adRefusal(fx, emptyState(), base, {
     git: (args) => { if (args[0] === 'cat-file') throw new Error('bad object'); return ''; },
   });
-  eq(r && r.code, 'adopt_sha_unreachable', 'AD-SHA-ABSENT a sha git cannot resolve refuses');
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-ABSENT a sha git cannot resolve refuses');
+  adNoMutation(r, 'AD-SHA-ABSENT');
 
   r = await adRefusal(fx, emptyState(), base, {
     git: (args) => { if (args[0] === 'merge-base') throw new Error('not an ancestor'); if (args[0] === 'rev-parse') return 'main'; return ''; },
   });
-  eq(r && r.code, 'adopt_sha_unreachable', 'AD-SHA-UNMERGED a sha off the default branch refuses');
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-UNMERGED a sha off the default branch refuses');
+  adNoMutation(r, 'AD-SHA-UNMERGED');
 
   r = await adRefusal(fx, emptyState(), base, { prView: adPrView({ state: 'OPEN' }) });
-  eq(r && r.code, 'adopt_pr_not_merged', 'AD-PR-OPEN an unmerged PR refuses');
+  eq(r.err && r.err.code, 'adopt_pr_not_merged', 'AD-PR-OPEN an unmerged PR refuses');
+  adNoMutation(r, 'AD-PR-OPEN');
 
   r = await adRefusal(fx, emptyState(), base, {
     prView: adPrView({ mergeCommit: { oid: 'a'.repeat(40) } }),
   });
-  eq(r && r.code, 'adopt_pr_mismatch', 'AD-PR-MISMATCH a PR whose merge commit is not the sha refuses');
+  eq(r.err && r.err.code, 'adopt_pr_mismatch', 'AD-PR-MISMATCH a PR whose merge commit is not the sha refuses');
+  adNoMutation(r, 'AD-PR-MISMATCH');
+
+  // gh successfully resolving and reporting "no such PR" is a different
+  // signal than a gh outage: it must refuse, never durably record an
+  // unverifiable PR reference at a degraded tier.
+  r = await adRefusal(fx, emptyState(), base, {
+    prView: () => { throw new Error('GraphQL: Could not resolve to a PullRequest with the number of 126. (repository.pullRequest)'); },
+  });
+  eq(r.err && r.err.code, 'adopt_pr_not_found', 'AD-PR-NOTFOUND gh resolving "no such PR" refuses, not degrades');
+  adNoMutation(r, 'AD-PR-NOTFOUND');
 
   r = await adRefusal(fx, emptyState(), { ...base, reason: '   ' });
-  eq(r && r.code, 'adopt_reason_required', 'AD-REASON an empty reason refuses');
+  eq(r.err && r.err.code, 'adopt_reason_required', 'AD-REASON an empty reason refuses');
+  adNoMutation(r, 'AD-REASON');
 
   r = await adRefusal(fx, emptyState(), { card: 'EM-4', pr: 'nope', 'merge-sha': AD_SHA, reason: 'x' });
-  eq(r && r.code, 'invalid_arguments', 'AD-PR-SHAPE a non-numeric --pr refuses');
+  eq(r.err && r.err.code, 'invalid_arguments', 'AD-PR-SHAPE a non-numeric --pr refuses');
+  adNoMutation(r, 'AD-PR-SHAPE');
 
   // Every refusal renders a valid ok:false envelope.
-  eq(validateReceiptEnvelope(refusalReceipt(r.action, r.code, r.message)).ok, true,
+  eq(validateReceiptEnvelope(refusalReceipt(r.err.action, r.err.code, r.err.message)).ok, true,
     'AD refusals render a valid ok:false envelope');
 }
 
@@ -11305,22 +11333,30 @@ const adRefusal = async (fx, state, args, extra = {}) => {
 
   const record = state.cards['EM-4'];
   ok(record, 'AD-ADOPT writes exactly one ledger record');
-  eq(record.phase, 'completed', 'AD-ADOPT the adopted record is completed');
+  eq(record.phase, 'adopted', "AD-ADOPT the record's ledger phase is the terminal 'adopted' phase, not 'completed'");
+  eq(receipt.phase, 'adopted', 'AD-ADOPT the receipt reports the same adopted phase');
   eq(record.adoption.verified, 'git+gh', 'AD-ADOPT provenance lives on the record, not only the receipt');
   eq(record.card_path, path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md'),
     'AD-ADOPT binds the record to the resolved note path');
   eq(writes.length, 1, 'AD-ADOPT persists once');
 
-  // The adopted record projects as complete — this is the whole point: the
-  // epic can now roll up — while never claiming deployment proof.
-  const verdict = deliveryTopology.resolveSliceAuthority({
-    hasRecord: true, ledgerStatus: 'completed', boardStatus: 'completed',
-    doneProven: coordinator.successfulDeploymentReceipts(record),
-    boardIsSlice: true, adopted: Boolean(record.adoption),
-  });
-  eq(verdict.status, 'completed', 'AD-ADOPT an adopted record projects complete');
-  eq(verdict.source, 'adopted', 'AD-ADOPT the adopted source is visible to every consumer');
-  eq(verdict.doneProven, false, 'AD-ADOPT adoption never fabricates deployment proof');
+  // The adopted record projects as complete THROUGH THE REAL PRODUCTION
+  // PATH — noteProjectionMapping and canonicalEpicProjection/
+  // deriveEpicProjection, not a hand-fed resolveSliceAuthority call — which
+  // is the whole point: the epic can now roll up while never claiming
+  // deployment proof. (resolveSliceAuthority's own 'adopted' tier is unit
+  // tested in isolation by run-delivery-topology.js; re-asserting it here
+  // with hand-supplied hasRecord/adopted would be self-fulfilling and would
+  // pass even against an inert commandAdopt.)
+  const noteRaw = fs.readFileSync(record.card_path, 'utf8');
+  eq(coordinator.noteProjectionMapping(noteRaw, record),
+    { column: 'Completed', complete: true, status: 'completed' },
+    'AD-ADOPT the adopted note projects to Completed through the real per-note call site');
+
+  const surface = coordinator.canonicalEpicProjection(noteRaw, record.card_path, fx.boardPath, fx.cardsRoot, { state });
+  const lifecycle = coordinator.deriveEpicProjection(surface, null, null);
+  eq(lifecycle.counts.done, 1, 'AD-ADOPT the epic rollup counts the adopted slice done');
+  eq(lifecycle.findings, [], 'AD-ADOPT no legacy-completion finding fires for an adopted slice');
 }
 
 // AD-REPLAY — literal replay is free; substituted operands refuse.
@@ -11335,11 +11371,11 @@ const adRefusal = async (fx, state, args, extra = {}) => {
   eq(replay.no_op, true, 'AD-REPLAY identical replay is a no-op');
   eq(replay.ok, true, 'AD-REPLAY identical replay still succeeds');
 
+  // adopt_conflict refuses before adoptProvenance ever runs, so no prView
+  // override is needed here — the default (matching) mock is never called.
   let conflict = null;
   try {
-    await coordinator.commandAdopt(ctx, { ...args, pr: 999 }, adDeps(fx, state, {
-      prView: () => ({ number: 999, state: 'MERGED', mergeCommit: { oid: AD_SHA } }),
-    }));
+    await coordinator.commandAdopt(ctx, { ...args, pr: 999 }, adDeps(fx, state));
   } catch (err) { conflict = err; }
   eq(conflict && conflict.code, 'adopt_conflict', 'AD-REPLAY substituted operands refuse');
 }

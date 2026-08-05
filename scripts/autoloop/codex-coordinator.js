@@ -128,7 +128,7 @@ const AMEND_CONTRACT_OPTIONS = new Set([
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
   'expected-batch-policy', 'desired-batch-policy',
 ]);
-const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled', 'discarded']);
+const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled', 'discarded', 'adopted']);
 const RECOVER_DEPLOYED_PHASES = new Set([
   'feature_pr', 'feature_merged', 'release_pr', 'release_merged', 'tagged',
   'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'blocked', 'needs-inspection',
@@ -1959,6 +1959,11 @@ function projectionMapping(phase) {
     blocked: { column: 'Blocked', status: 'blocked', complete: false },
     'needs-inspection': { column: 'Blocked', status: 'blocked', complete: false },
     deployed: { column: 'Completed', status: 'completed', complete: true },
+    // The verified out-of-band completion (see commandAdopt). Terminal and
+    // projectable exactly like `deployed`, but it carries PR/merge-sha
+    // provenance instead of deployment receipts — resolveSliceAuthority's
+    // `adopted` source is how consumers tell the two apart.
+    adopted: { column: 'Completed', status: 'completed', complete: true },
   }[phase] || null;
 }
 
@@ -2274,6 +2279,7 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
       boardStatus,
       doneProven: successfulDeploymentReceipts(tracked),
       boardIsSlice: true,
+      adopted: Boolean(tracked && tracked.adoption),
     });
     assertProjectableStatus(verdict);
     if (verdict.demoted) {
@@ -2300,6 +2306,7 @@ function noteProjectionMapping(raw, record = null) {
     boardStatus,
     doneProven: successfulDeploymentReceipts(record),
     boardIsSlice: scalarField(raw, 'type') === 'slice',
+    adopted: Boolean(record && record.adoption),
   });
   assertProjectableStatus(verdict);
   return statusMap[verdict.status];
@@ -4544,32 +4551,49 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
 // from being a general-purpose "mark it done" backdoor.
 const ADOPT_SHA_RE = /^[0-9a-f]{40}$/;
 
+// Distinguishes a genuine gh CLI outage (missing binary, not authenticated,
+// spawn failure) from gh successfully running and reporting that the operand
+// is invalid. Only the former is safe to treat as "no independent
+// verification available right now" — the latter means the operator handed
+// adopt a PR reference gh itself says is wrong, which must refuse rather than
+// durably record an unverifiable reference at a degraded tier.
+function ghUnavailable(err) {
+  if (!err) return false;
+  if (err.code === 'ENOENT') return true;
+  const text = `${err.message || ''} ${err.stderr || ''}`;
+  return /not authenticated|gh auth login|command not found|is not recognized as an internal or external command/i
+    .test(text);
+}
+
 function adoptProvenance(args, deps, cwd) {
   const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
   const sha = String(args['merge-sha'] || '').trim().toLowerCase();
   if (!ADOPT_SHA_RE.test(sha)) {
     refuse('adopt-refused', 'adopt_sha_unreachable', `--merge-sha must be a 40-hex commit sha (got "${args['merge-sha']}")`);
   }
-  try { runGit(['cat-file', '-e', `${sha}^{commit}`], cwd); }
+  try { runGit(['cat-file', '-e', `${sha}^{commit}`]); }
   catch (err) {
     refuse('adopt-refused', 'adopt_sha_unreachable', `merge sha ${sha} does not resolve in this repo: ${err.message}`);
   }
-  let defaultBranch = 'main';
-  try { defaultBranch = String(runGit(['rev-parse', '--abbrev-ref', 'origin/HEAD'], cwd) || '').trim() || 'origin/main'; }
+  let defaultBranch;
+  try { defaultBranch = String(runGit(['rev-parse', '--abbrev-ref', 'origin/HEAD']) || '').trim() || 'origin/main'; }
   catch (_) { defaultBranch = 'origin/main'; }
-  try { runGit(['merge-base', '--is-ancestor', sha, defaultBranch], cwd); }
+  try { runGit(['merge-base', '--is-ancestor', sha, defaultBranch]); }
   catch (err) {
     refuse('adopt-refused', 'adopt_sha_unreachable',
       `merge sha ${sha} is not an ancestor of ${defaultBranch}: ${err.message}`);
   }
-  // gh is the second, independent tier. Its absence degrades the recorded
-  // verification level; it never fails the verb and never passes silently as
-  // full verification.
+  // gh is the second, independent tier. A genuine outage degrades the
+  // recorded verification level; it never fails the verb and never passes
+  // silently as full verification.
   const viewPr = deps.prView || prView;
   let pr = null;
   try { pr = viewPr(REPO, Number(args.pr), cwd); }
-  catch (_) { return { sha, verified: 'git', default_branch: defaultBranch }; }
-  if (!pr) return { sha, verified: 'git', default_branch: defaultBranch };
+  catch (err) {
+    if (ghUnavailable(err)) return { sha, verified: 'git' };
+    refuse('adopt-refused', 'adopt_pr_not_found', `PR ${args.pr} could not be verified via gh: ${err.message}`);
+  }
+  if (!pr) return { sha, verified: 'git' };
   if (pr.state !== 'MERGED') {
     refuse('adopt-refused', 'adopt_pr_not_merged', `PR ${args.pr} is ${pr.state}, not MERGED`);
   }
@@ -4578,7 +4602,7 @@ function adoptProvenance(args, deps, cwd) {
     refuse('adopt-refused', 'adopt_pr_mismatch',
       `PR ${args.pr} merge commit ${merged || '(none)'} != --merge-sha ${sha}`);
   }
-  return { sha, verified: 'git+gh', default_branch: defaultBranch, pr_url: pr.url || null };
+  return { sha, verified: 'git+gh', pr_url: pr.url || null };
 }
 
 async function commandAdopt(ctx, args, deps = {}) {
@@ -4596,7 +4620,8 @@ async function commandAdopt(ctx, args, deps = {}) {
   const transitionLock = deps.withLock || withLock;
   return transitionLock(ctx, 'selector', async () => {
     const state = loadState(ctx);
-    const existing = (state.cards || {})[card];
+    state.cards ||= {};
+    const existing = state.cards[card];
     if (existing && existing.adoption) {
       const same = existing.adoption.pr === number
         && existing.adoption.merge_sha === String(args['merge-sha'] || '').trim().toLowerCase()
@@ -4621,6 +4646,9 @@ async function commandAdopt(ctx, args, deps = {}) {
       refuse('adopt-refused', 'adopt_not_declared_complete',
         `card ${card} declares ${noteStatus}; adopt ratifies a completed declaration, it never invents one`);
     }
+    // Every check above must run BEFORE this line: adoptProvenance is the
+    // last gate, and nothing mutates `state` until every refusal path above
+    // it has already had the chance to throw.
     const provenance = adoptProvenance(args, deps, ctx.root);
     const now = deps.now || (() => new Date().toISOString());
     const persist = deps.writeState || writeState;
@@ -4628,7 +4656,13 @@ async function commandAdopt(ctx, args, deps = {}) {
       card,
       parent_card: normalizeCardLink(scalarField(raw, 'epic')) || null,
       slice: scalarField(raw, 'slice') || card,
-      phase: 'completed',
+      // 'adopted', never 'completed': 'completed' is a card-status vocabulary
+      // word, not a ledger phase (see the comment on verify-gates' chain
+      // check). 'adopted' is a genuine TERMINAL, projectable ledger phase —
+      // see TERMINAL and projectionMapping above — so the record is visible
+      // to activeRecords()/claim selection and to every resolveSliceAuthority
+      // call site without either one needing to special-case adoption.
+      phase: 'adopted',
       card_path: notePath,
       touch_zones: listField(raw, 'touch_zones').map(normalizeZone),
       dependencies: parseDependsOn(raw).map(normalizeCardLink),
@@ -4641,7 +4675,6 @@ async function commandAdopt(ctx, args, deps = {}) {
         adopted_at: now(),
       },
     };
-    state.cards ||= {};
     state.cards[card] = record;
     persist(ctx, state, record);
     return successReceipt('adopt', {
@@ -6881,7 +6914,11 @@ async function commandCutover(ctx, args, deps = {}) {
       const satisfied = [];
       for (const [name, record] of declared) {
         if (!record) missing.push({ card: name, problem: 'not tracked in the coordinator ledger' });
-        // Ledger PHASES only — 'completed' is a card status vocabulary word, never a ledger phase, hence not listed.
+        // Ledger PHASES only — 'completed' is a card status vocabulary word, never a
+        // ledger phase, hence not listed. 'adopted' IS a ledger phase (the verified
+        // out-of-band completion; see commandAdopt) but is deliberately absent from
+        // the satisfied set below: this check verifies the release chain actually
+        // reached Homebrew, which adoption's PR/merge-sha provenance does not prove.
         else if (record.phase === 'deployed' || record.phase === 'discarded') satisfied.push({ card: name, phase: record.phase });
         else missing.push({ card: name, phase: record.phase, problem: "phase is neither 'deployed' nor tombstoned 'discarded'" });
       }
@@ -7899,7 +7936,7 @@ module.exports = {
   commandAmendContract, commandPark, commandAmendPark, commandResume, commandBreakLease, commandDiscard, commandReap, commandRestructure,
   commandSupersessionDepth,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  canonicalEpicProjection,
+  canonicalEpicProjection, deriveEpicProjection, noteProjectionMapping,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
   commandBoardHealth, collectBoardHealth, commandAdopt, adoptProvenance,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
