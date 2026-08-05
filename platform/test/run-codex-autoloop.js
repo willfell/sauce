@@ -11810,6 +11810,135 @@ const adNoMutation = (result, label) => {
   eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBeforeReplay, 'AD-KANBAN-DRAG replay leaves the ledger byte-identical');
 }
 
+// FW-WRITERS — "card_note_sha is stamped at EVERY coordinator write of a
+// tracked card's note" is asserted absolutely in the spec, in
+// delivery-board.md, and in schemas-index.json ("so the coordinator never
+// mistakes its own repair for a foreign write"). Three writers did not honour
+// it, so running them over tracked projectable cards made the very next
+// projection report a foreign writer that was the coordinator itself.
+//
+// Every block below drives the REAL command against a REAL on-disk ledger
+// (no injected readState/writeState) and re-reads the record from disk after
+// the command — an assertion against the live object the command mutated
+// proves nothing about durability. Each seeds a genuine pre-write baseline
+// first, so an unstamped writer fails the way production fails: stale
+// baseline, divergent bytes, `foreign_write` on the next projection.
+const fwSeedLedger = (ctx, cards) => {
+  fs.mkdirSync(path.dirname(ctx.statePath), { recursive: true });
+  writeState(ctx, { schema_version: 1, cards });
+};
+const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256(fs.readFileSync(notePath, 'utf8')) });
+
+// FW-DEPS — reconcile-dependencies --apply is the direct sibling of the
+// discard dependent scan (scanDependentsForDiscard), which IS stamped: the
+// same rewriteDependsOn against the same tracked note, one stamped and one
+// not.
+{
+  const root = path.join(tmp, 'fw-reconcile-deps');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['FWD-1'] }));
+  const notePath = path.join(cardsRoot, 'FWD-1.md');
+  fs.writeFileSync(notePath, [
+    '---', 'type: task-hub', 'source_board: spice/projects/test/project-board.md',
+    'kanban_column: In Progress', 'status: in_progress',
+    'depends_on:', '  - "[[FWD-OLD]]"', '---', '', 'FWD-1 body', '',
+  ].join('\n'));
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  fwSeedLedger(ctx, {
+    'FWD-1': fwBaseline({
+      card: 'FWD-1', phase: 'feature_pr', card_path: notePath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, notePath),
+    'FWD-OLD': { card: 'FWD-OLD', phase: 'discarded', superseded_by: 'FWD-NEW' },
+    'FWD-NEW': { card: 'FWD-NEW', phase: 'planned' },
+  });
+
+  const applied = await coordinator.commandReconcileDependencies(ctx, {
+    all: true, apply: true, reason: 'heal supersession rot', json: true,
+  }, { boardPath, cardsRoot });
+  eq(applied.plan.map((entry) => [entry.card, entry.to]), [['FWD-1', 'FWD-NEW']],
+    'FW-DEPS precondition: the apply actually repoints the tracked dependent');
+  ok(/\[\[FWD-NEW\]\]/.test(fs.readFileSync(notePath, 'utf8')),
+    'FW-DEPS precondition: the note bytes on disk changed');
+
+  const fresh = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['FWD-1'];
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(notePath, 'utf8')),
+    'FW-DEPS the ON-DISK ledger sha equals sha256 of the repointed note bytes');
+  const reprojected = projectCard(notePath, boardPath, 'FWD-1', 'feature_pr', {
+    record: fresh, state: { cards: { 'FWD-1': fresh } }, cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-DEPS the coordinator does not report its own dependency repoint as a foreign write');
+}
+
+// FW-RESTAMP — reconcile-metadata --contract-frontmatter-restamp --apply
+// rewrites canonical card notes wholesale and never touched the ledger at all.
+{
+  const rs = restampHarness('foreign-write');
+  const restampBoard = path.join(reconcileRoot, 'fw-restamp-board.md');
+  fs.writeFileSync(restampBoard, liveBoard({ progress: ['Legacy Restamp A'] }));
+  fwSeedLedger(rs.ctx, {
+    'Legacy Restamp A': fwBaseline({
+      card: 'Legacy Restamp A', phase: 'implementing', card_path: rs.paths[0],
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, rs.paths[0]),
+  });
+  const plan = await commandRestampContractFrontmatter(rs.ctx, rs.dryRunArgs, rs.deps);
+  rs.setSpec(plan.spec);
+  const restamped = await commandRestampContractFrontmatter(rs.ctx, rs.applyArgs, rs.deps);
+  eq(restamped.changed_count, 2, 'FW-RESTAMP precondition: the apply actually rewrites both canonical notes');
+
+  const fresh = JSON.parse(fs.readFileSync(rs.ctx.statePath, 'utf8')).cards['Legacy Restamp A'];
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(rs.paths[0], 'utf8')),
+    'FW-RESTAMP the ON-DISK ledger sha equals sha256 of the restamped note bytes');
+  const reprojected = projectCard(rs.paths[0], restampBoard, 'Legacy Restamp A', 'implementing', {
+    record: fresh, state: { cards: { 'Legacy Restamp A': fresh } }, cardsRoot: rs.ctx.root,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-RESTAMP the coordinator does not report its own contract restamp as a foreign write');
+}
+
+// FW-RESTRUCTURE — restructure writes new note bytes at a NEW path and rebinds
+// card_path. Ordering is the whole difficulty: the stamp must describe the
+// bytes at the note's FINAL location, after the move and after the card_path
+// rebind, and it must ride restructure's own journal/persist discipline rather
+// than an extra bolted-on write.
+{
+  const fwR = makeRestructureFixture({ statuses: { 'Card A2': 'in_progress' } });
+  const fwCtx = {
+    root: fwR.root, stateDir: path.join(fwR.root, '.state'),
+    statePath: path.join(fwR.root, '.state', 'state.json'),
+  };
+  const oldPath = path.join(fwR.cardsRoot, 'Card A2.md');
+  fwSeedLedger(fwCtx, {
+    'Card A2': fwBaseline({
+      card: 'Card A2', phase: 'implementing', card_path: oldPath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, oldPath),
+  });
+  const receipt = await commandRestructure(fwCtx, { spec: fwR.specPath, json: true }, {
+    now: () => '2026-08-05T10:00:00.000Z',
+    journalPath: path.join(fwR.root, 'fw-restructure-journal.json'),
+  });
+  eq(receipt.no_op, false, 'FW-RESTRUCTURE precondition: the migration actually ran');
+  const newPath = path.join(fwR.cardsRoot, 'Family A', 'board', 'Card A2.md');
+  ok(fs.existsSync(newPath) && !fs.existsSync(oldPath),
+    'FW-RESTRUCTURE precondition: the tracked member moved to its epic board directory');
+
+  const fresh = JSON.parse(fs.readFileSync(fwCtx.statePath, 'utf8')).cards['Card A2'];
+  eq(fresh.card_path, newPath, 'FW-RESTRUCTURE the on-disk record is rebound to the final path');
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(newPath, 'utf8')),
+    'FW-RESTRUCTURE the ON-DISK ledger sha equals sha256 of the note bytes at the FINAL path');
+  const reprojected = projectCard(fresh.card_path, fwR.boardPath, 'Card A2', 'implementing', {
+    record: fresh, state: { cards: { 'Card A2': fresh } }, cardsRoot: fwR.cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-RESTRUCTURE the coordinator does not report its own migration as a foreign write');
+}
+
 // BHP board-health provenance: the aggregate untracked count is not a
 // rail-leaving rate. A coordinator-format stamp with no record in THIS clone
 // can only mean another clone's ledger holds it — legitimate, and not

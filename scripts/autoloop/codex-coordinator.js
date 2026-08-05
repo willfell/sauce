@@ -5872,6 +5872,11 @@ function physicalDescendantTarget(root, target, label) {
   return resolved;
 }
 
+// Scaffold writes only. Every op here is a freshly created epic surface — the
+// atlas, the epic board, the context `.keep` files — and the guard below
+// refuses outright rather than overwriting anything that already exists, so an
+// op target can never be an existing tracked card's note. Nothing to stamp:
+// member notes move through applyIntendedMove/rebindTrackedCardPath.
 function applyIntendedWrite(op, journal, d) {
   physicalDescendantTarget(journal.cards_root, op.path, `restructure scaffold target ${path.basename(op.path)}`);
   const current = fs.existsSync(op.path) ? fs.readFileSync(op.path, 'utf8') : null;
@@ -5882,14 +5887,27 @@ function applyIntendedWrite(op, journal, d) {
   return true;
 }
 
+// The single ledger-touching step of a member move, and therefore the only
+// correct place to stamp `card_note_sha` for restructure. Both callers below
+// invoke it once the intended bytes are already at `move.to`, so the stamp
+// describes the note's FINAL location after the move and after the card_path
+// rebind — stamping earlier (at the write, or against move.from) would record
+// a path the ledger no longer points at. It also rides restructure's existing
+// journal/persist discipline rather than adding a second write path: same card
+// gate lock, same d.persist, one ledger write per member.
 async function rebindTrackedCardPath(ctx, move, d) {
   if (!move.tracked) return;
   await withCardGateLock(ctx, move.card, async () => {
     const state = d.loadState(ctx);
     const record = state.cards[move.card];
     if (!record) throw new Error(`restructure fail-closed: tracked member ${move.card} record disappeared mid-pass`);
-    if (record.card_path === move.to) return;
+    const priorPath = record.card_path;
+    const priorSha = record.card_note_sha;
     record.card_path = move.to;
+    stampCardNoteSha(record, move.to);
+    // Crash-resume replay reaches here with the rebind already durable; stay a
+    // genuine zero-write no-op unless something actually changed.
+    if (priorPath === move.to && priorSha === record.card_note_sha) return;
     d.persist(ctx, state, record);
   }, { card: move.card, staleMs: RESTRUCTURE_STALE_MS }, d.transitionLock);
 }
@@ -7783,6 +7801,8 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
   }
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const lock = deps.withLock || withLock;
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   const writeText = deps.atomicWriteText || atomicWriteText;
   const barrier = deps.durablePathBarrier || durablePathBarrier;
   const readSpec = deps.readSpec || ((file) => fs.readFileSync(file, 'utf8'));
@@ -7843,12 +7863,35 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
         throw new Error(`contract frontmatter restamp intended state is not canonical for ${entry.path}; zero writes`);
       }
     }
-    for (const pending of pendingWrites) {
-      writeText(pending.file, pending.next);
-      barrier(pending.file);
-      if (sha256Text(fs.readFileSync(pending.file, 'utf8')) !== pending.entry.intended_sha256) {
-        throw new Error(`contract frontmatter restamp write did not verify for ${pending.entry.path}`);
+    // This verb rewrites canonical card notes wholesale, so every tracked
+    // target must be re-baselined or the next projection reports the
+    // coordinator's own restamp as a foreign write. Ledger lookup is
+    // best-effort for the same reason heal-epic-bindings' is: the restamp is
+    // derived entirely from on-disk canonical form and has never required a
+    // ledger to run. A caller whose ctx carries no state location still
+    // restamps; it just has nothing tracked to stamp.
+    let ledger;
+    try { ledger = loadState(ctx); } catch (_) { ledger = { cards: {} }; }
+    let stampedAny = false;
+    try {
+      for (const pending of pendingWrites) {
+        writeText(pending.file, pending.next);
+        barrier(pending.file);
+        if (sha256Text(fs.readFileSync(pending.file, 'utf8')) !== pending.entry.intended_sha256) {
+          throw new Error(`contract frontmatter restamp write did not verify for ${pending.entry.path}`);
+        }
+        const record = (ledger.cards || {})[pending.entry.card];
+        if (record) {
+          stampCardNoteSha(record, pending.file);
+          stampedAny = true;
+        }
       }
+    } finally {
+      // Persist whatever this pass earned even when a later target fails to
+      // verify: the earlier files ARE rewritten, and a partial run whose
+      // stamps were discarded would leave every one of them reporting a
+      // foreign write on its next projection.
+      if (stampedAny) persist(ctx, ledger);
     }
     return {
       action: 'restamped-contract-frontmatter',
@@ -7990,11 +8033,23 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
   const toName = args.to ? normalizeCardLink(String(args.to)) : null;
   if (toName !== null && clearName === null) throw new Error('reconcile-dependencies --to requires --clear to name the dead pointer');
   const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   const writeText = deps.writeText || atomicWriteText;
   const lock = deps.withLock || withLock;
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   return lock(ctx, 'selector', async () => {
     const state = loadState(ctx);
+    // Same shape as scanDependentsForDiscard, this verb's direct sibling: it
+    // rewrites a tracked card's depends_on through rewriteDependsOn, so it
+    // must re-baseline that record or the next projection reports the
+    // coordinator's own repoint as a foreign write. No-op for an untracked
+    // dependent — there is nothing to stamp, deliberately, not by accident.
+    let stampedAny = false;
+    const stampDependent = (record, file) => {
+      if (!record) return;
+      stampCardNoteSha(record, file);
+      stampedAny = true;
+    };
     // A dangling dependency is one that resolves to NO live card. "Live" must be
     // judged against the board — the same honest gather GraphView uses — not just
     // the coordinator ledger: the ledger only holds cards it has TRACKED
@@ -8065,11 +8120,11 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
               // Director-directed repoint: target must be a live card and never the dependent itself.
               if (!isLive(toName) || toName === normalizeCardLink(depName)) { needsDecision.push({ card: depName, from: ref }); continue; }
               plan.push({ card: depName, from: ref, to: toName, classification: 'repoint', path: full });
-              if (apply) { const w = rewriteDependsOn(raw, ref, toName); if (w.changed) { raw = w.text; writeText(full, raw); } }
+              if (apply) { const w = rewriteDependsOn(raw, ref, toName); if (w.changed) { raw = w.text; writeText(full, raw); stampDependent(record, full); } }
               continue;
             }
             plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
-            if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }
+            if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); stampDependent(record, full); } }
             continue;
           }
           if (isLive(ref)) continue; // resolves to a real card (tracked or on-disk planning note) — not dangling
@@ -8077,10 +8132,14 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
           const to = resolveTarget(ref);
           if (!to) { needsDecision.push({ card: depName, from: ref }); continue; } // genuinely never-minted / orphaned
           plan.push({ card: depName, from: ref, to, classification: 'repoint', path: full });
-          if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); } }
+          if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); stampDependent(record, full); } }
         }
       }
     }
+    // A stamp that never reaches disk is not a stamp. One merge-form write
+    // for however many dependents this pass rewrote; a pass that stamped
+    // nothing stays a genuine zero-ledger-write run.
+    if (stampedAny) persist(ctx, state);
     return successReceipt('reconcile-dependencies', {
       apply, no_op: apply ? plan.length === 0 : true, reason,
       plan: plan.map(({ path: _p, ...rest }) => rest),
