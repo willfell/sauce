@@ -243,12 +243,19 @@ it itself. A still-diverged note therefore reports **once** and is then
 re-baselined, not continuously.
 
 `card_note_sha` is stamped through one shared helper (`stampCardNoteSha`) at
-*every* coordinator write of a tracked card's note — `projectCard`,
-`heal-epic-bindings --apply`, the discard dependent scan, and
-`reconcile-metadata` — so the coordinator never reports its own repair as a
+*every* coordinator write of a tracked card's note — the complete list is
+`projectCard` (including the refresh `adopt` runs), `heal-epic-bindings
+--apply`, the discard dependent scan, `reconcile-metadata` (single-card and
+`--contract-frontmatter-restamp --apply`), `reconcile-dependencies --apply`,
+and `restructure` — so the coordinator never reports its own repair as a
 foreign write. `heal-epic-bindings` is therefore a ledger writer, which its own
-docstring previously denied. A detected `foreign_write` forces ledger
-persistence and appears on `commandReconcile`'s receipt.
+docstring previously denied; so, now, are `reconcile-dependencies --apply` and
+the contract-frontmatter restamp. `restructure` stamps inside its `card_path`
+rebind, the one ledger-touching step of a member move, so the recorded hash
+describes the bytes at the note's **final** path after the move; its scaffold
+writes are exempt by construction, since they refuse any pre-existing target
+and therefore only ever create fresh epic surfaces. A detected `foreign_write`
+forces ledger persistence and appears on `commandReconcile`'s receipt.
 
 board-health's `foreign_writes` check reports **only projectable phases**.
 `projectCard` is the only thing that clears the finding and it requires a phase
@@ -336,11 +343,21 @@ rewritten.
    at a degraded tier. `adopt_card_not_found` covers a named card with no note.
 3. **§6.1** gained the edge-/level-triggered detection semantics, the
    projectable-phases-only rule for the new sixth board-health check, and the
-   single-helper `card_note_sha` stamping across all four coordinator write
-   paths (above).
+   single-helper `card_note_sha` stamping across every coordinator write path
+   (above). *Amended 2026-08-05:* the first version of this note said "all four
+   write paths" and named four. It was wrong — three further writers
+   (`reconcile-dependencies --apply`, `reconcile-metadata
+   --contract-frontmatter-restamp --apply`, and `restructure`) also write a
+   tracked card's note and were not stamping, so running any of them made the
+   next projection report the coordinator's own repair as a foreign write. All
+   three now stamp through the same helper; §6.1 above carries the complete
+   list.
 4. **§6.2** is narrower than it reads for two of the three verbs: `restructure`
    and `reconcile-metadata --parked-rebind` already detected a second writer
-   correctly. What changed is only the **error shape** — their third-state
+   correctly. Note the exact operand: it is `reconcile-metadata
+   --parked-rebind --apply` that emits `concurrent_modification`. Plain
+   `reconcile-metadata --apply` does not — its two genuine second-writer
+   conditions still throw a bare `Error`. What changed is only the **error shape** — their third-state
    failures now refuse with `concurrent_modification` under
    `restructure-refused` / `reconcile-metadata-refused` instead of throwing a
    bare `Error`. Crash-recovery resume paths are byte-for-byte unchanged, and
