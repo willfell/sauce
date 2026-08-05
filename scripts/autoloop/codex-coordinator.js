@@ -4713,17 +4713,35 @@ const BOARD_HEALTH_LANES = ['In Planning', 'In Progress', 'Blocked', 'Completed'
 const BOARD_HEALTH_PROGRESS_STATUSES = new Set(['in_progress', 'parked', 'blocked', 'completed']);
 const BOARD_HEALTH_DRIFT_REMEDY = 'heal-epic-bindings --dry-run --json';
 
-function untrackedMemberFinding(epic, cardName, noteStatus) {
+// The coordinator is the only writer that emits this exact stamp shape. A
+// note carrying it with NO record in this clone can therefore only mean the
+// record lives in another clone's ledger (local-per-clone state) — legitimate,
+// and not actionable here. Any other shape, or none, means a writer outside
+// the rail: KanbanStatusSync at vault boot, a retired project loop, a hand
+// edit. That is the class `adopt` exists for.
+const COORDINATOR_STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const ADOPT_REMEDY = 'adopt';
+const CROSS_CLONE_REMEDY = 'cross-clone: no action in this clone';
+
+function untrackedMemberProvenance(stamp) {
+  return stamp && COORDINATOR_STAMP_RE.test(stamp) ? 'coordinator' : 'foreign';
+}
+
+function untrackedMemberFinding(epic, cardName, noteStatus, stamp = null) {
+  const provenance = untrackedMemberProvenance(stamp);
   return {
     epic,
     card: cardName,
     note_status: noteStatus,
+    stamp: stamp || null,
+    provenance,
     issue: noteStatus === 'completed'
       ? 'board member has no ledger record; a completed note is never counted done'
       : `board member has no ledger record; the note claims ${noteStatus} with no coordinator history`,
-    // Deliberately non-mechanical: fabricating ledger records is exactly the
-    // drift the reconciler exists to flag.
-    remedy: 'investigate: work completed outside the rail',
+    // Class-specific: cross-clone residue has no local remedy, and fabricating
+    // ledger records for it is exactly the drift the reconciler exists to flag.
+    // A foreign-written completion is what `adopt` ratifies.
+    remedy: provenance === 'coordinator' ? CROSS_CLONE_REMEDY : ADOPT_REMEDY,
   };
 }
 
@@ -4757,9 +4775,10 @@ function collectBoardHealth(state, opts = {}) {
   let sliceCount = 0;
   const untrackedCheck = (epic, name, notePath) => {
     if (tracked(name) || !exists(notePath)) return;
-    const status = delivery.normalizeStatus(scalarField(readText(notePath), 'status')) || 'planning';
+    const raw = readText(notePath);
+    const status = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
     if (BOARD_HEALTH_PROGRESS_STATUSES.has(status)) {
-      untracked.push(untrackedMemberFinding(epic, name, status));
+      untracked.push(untrackedMemberFinding(epic, name, status, scalarField(raw, 'status_changed_at')));
     }
   };
   for (const member of members) {
@@ -4846,6 +4865,10 @@ function collectBoardHealth(state, opts = {}) {
     : [];
   const findings = {
     untracked_members: untracked,
+    untracked_members_by_provenance: {
+      coordinator: untracked.filter((f) => f.provenance === 'coordinator').length,
+      foreign: untracked.filter((f) => f.provenance === 'foreign').length,
+    },
     unprojectable_epics: unprojectable,
     binding_drift: bindingDrift,
     lane_divergence: laneDivergence,
@@ -4859,7 +4882,7 @@ function collectBoardHealth(state, opts = {}) {
     checked: { epics: epicCount, slices: sliceCount, records: Object.keys(cards).length },
     findings,
     healthy: driftClean && Object.entries(findings)
-      .every(([key, value]) => key === 'binding_drift' || !value.length),
+      .every(([key, value]) => key === 'binding_drift' || key === 'untracked_members_by_provenance' || !value.length),
   };
 }
 
@@ -4898,6 +4921,7 @@ function buildBoardHealthPayload(core) {
     checked: core.checked,
     untracked_members: untracked.items,
     untracked_members_overflow_count: untracked.overflow,
+    untracked_members_by_provenance: core.findings.untracked_members_by_provenance,
     unprojectable_epics: unprojectable.items,
     unprojectable_epics_overflow_count: unprojectable.overflow,
     binding_drift: core.findings.binding_drift,

@@ -8391,9 +8391,10 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-UNTRACKED reports exactly the board members the ledger has never heard of');
   eq(receipt.findings.untracked_members[0], {
     epic: 'Retire ero loop', card: 'EM-4', note_status: 'completed',
+    stamp: null, provenance: 'foreign',
     issue: 'board member has no ledger record; a completed note is never counted done',
-    remedy: 'investigate: work completed outside the rail',
-  }, 'BH-UNTRACKED finding carries the epic, note status, issue, and non-mechanical remedy');
+    remedy: 'adopt',
+  }, 'BH-UNTRACKED finding carries the epic, note status, stamp provenance, issue, and remedy');
   eq(receipt.checked, { epics: 1, slices: 6, records: 3 }, 'BH-UNTRACKED counts what it checked');
   ok(!receipt.findings.untracked_members.some((f) => ['EM-1', 'EM-2', 'EM-3'].includes(f.card)),
     'BH-UNTRACKED tracked members are not reported');
@@ -8463,8 +8464,9 @@ const bhDeps = (fx, extra = {}) => ({
     'BH-UNPROJECTABLE the throwing epic and the scaffold-less member are findings, not aborts');
   eq(receipt.findings.untracked_members.find((f) => f.card === 'Flat Card'), {
     epic: null, card: 'Flat Card', note_status: 'completed',
+    stamp: null, provenance: 'foreign',
     issue: 'board member has no ledger record; a completed note is never counted done',
-    remedy: 'investigate: work completed outside the rail',
+    remedy: 'adopt',
   }, 'BH-UNPROJECTABLE a flat board member is still reachable by check 1');
   ok(/does not bind its canonical parent board/.test(receipt.findings.unprojectable_epics[0].error),
     'BH-UNPROJECTABLE carries the projection refusal verbatim');
@@ -8525,7 +8527,9 @@ const bhDeps = (fx, extra = {}) => ({
   eq(receipt.no_op, true, 'BH-NOOP a healthy fully-checked board is a no-op');
   eq(receipt.ledger, 'present', 'BH-NOOP healthy means checked, not unchecked');
   eq(receipt.findings, {
-    untracked_members: [], unprojectable_epics: [],
+    untracked_members: [],
+    untracked_members_by_provenance: { coordinator: 0, foreign: 0 },
+    unprojectable_epics: [],
     binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
     lane_divergence: [], projection_errors: [],
   }, 'BH-NOOP every finding class is empty');
@@ -11467,6 +11471,60 @@ const adNoMutation = (result, label) => {
     "AD-PROJECTION reconcile-style projectCard leaves the note's `status: completed` byte-identical");
   eq(projectResult.changed, false, 'AD-PROJECTION reconcile-style projectCard makes no change at all');
   eq(projectWrites.length, 0, 'AD-PROJECTION an unchanged projection writes nothing');
+}
+
+// BHP board-health provenance: the aggregate untracked count is not a
+// rail-leaving rate. A coordinator-format stamp with no record in THIS clone
+// can only mean another clone's ledger holds it — legitimate, and not
+// actionable here. A foreign stamp means something outside the rail wrote it,
+// and THAT is what `adopt` exists for.
+{
+  const root = path.join(tmp, 'bhp-provenance');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const fx = bhScaffold(root, {
+    progress: ['Mixed provenance'],
+    epics: {
+      'Mixed provenance': {
+        lanes: { Completed: ['XC-1', 'FH-1', 'FH-2'] },
+        slices: { 'XC-1': 'completed', 'FH-1': 'completed', 'FH-2': 'completed' },
+      },
+    },
+  });
+  const stamp = (name, value) => {
+    const p = path.join(cardsRoot, 'Mixed provenance', 'board', `${name}.md`);
+    const raw = fs.readFileSync(p, 'utf8');
+    fs.writeFileSync(p, value === null
+      ? raw
+      : raw.replace(/^status: completed$/m, `status: completed\nstatus_changed_at: ${value}`));
+  };
+  // Real shapes, both observed on live boards:
+  stamp('XC-1', '2026-07-28T15:31:35.493Z');  // coordinator (GA-P1k)
+  stamp('FH-1', '2026-07-31');                // KanbanStatusSync bare date (EM-4/5/6)
+  stamp('FH-2', null);                        // no stamp at all (EM-5)
+
+  const receipt = await coordinator.commandBoardHealth(
+    { root, statePath: path.join(root, 'state.json') },
+    { json: true },
+    bhDeps({ boardPath: fx.boardPath, cardsRoot }, { readState: () => emptyState() }),
+  );
+  const byCard = Object.fromEntries(receipt.findings.untracked_members.map((f) => [f.card, f]));
+
+  eq(byCard['XC-1'].provenance, 'coordinator', 'BHP an ISO-ms stamp is coordinator-written');
+  eq(byCard['XC-1'].stamp, '2026-07-28T15:31:35.493Z', 'BHP the stamp is reported verbatim');
+  eq(byCard['XC-1'].remedy, 'cross-clone: no action in this clone',
+    'BHP a coordinator stamp with no local record is cross-clone residue, not drift');
+
+  eq(byCard['FH-1'].provenance, 'foreign', 'BHP a bare-date stamp is foreign-written');
+  eq(byCard['FH-1'].remedy, 'adopt', 'BHP foreign completions route to adopt');
+  eq(byCard['FH-2'].provenance, 'foreign', 'BHP an absent stamp is foreign-written');
+  eq(byCard['FH-2'].stamp, null, 'BHP an absent stamp reports null');
+
+  eq(receipt.findings.untracked_members_by_provenance, { coordinator: 1, foreign: 2 },
+    'BHP the receipt collapses the aggregate into a readable pair');
+  // collectBoardHealth's `healthy` is aliased into the receipt as `no_op`
+  // (see commandBoardHealth) — there is no separate `healthy` field to read.
+  eq(receipt.no_op, false, 'BHP classification is not a sixth check; health is unchanged');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
