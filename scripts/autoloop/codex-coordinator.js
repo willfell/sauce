@@ -4533,13 +4533,15 @@ function planEpicBindingHeal(cardsRoot, parentBoardPath) {
     const atlasFields = drift(atlasRaw, [
       ['source_board', want.parentBoard], ['kanban_board', want.parentBoard], ['epic_board', want.board],
     ]);
-    if (Object.keys(atlasFields).length) atlases.push({ epic, path: atlasPath, fields: atlasFields });
+    if (Object.keys(atlasFields).length) {
+      atlases.push({ epic, path: atlasPath, fields: atlasFields, preimage_sha: sha256Text(atlasRaw) });
+    }
     const boardRaw = fs.readFileSync(epicBoardPath, 'utf8');
     const parsed = parseBoard(boardRaw);
     for (const name of ['In Planning', 'In Progress', 'Blocked', 'Completed'].flatMap((c) => parsed[c] || [])) {
       const notePath = path.join(boardDir, `${name}.md`);
       if (!fs.existsSync(notePath)) {
-        orphanLines.push({ board: epicBoardPath, epic, card: name });
+        orphanLines.push({ board: epicBoardPath, epic, card: name, preimage_sha: sha256Text(boardRaw) });
         continue;
       }
       const sliceRaw = fs.readFileSync(notePath, 'utf8');
@@ -4547,7 +4549,9 @@ function planEpicBindingHeal(cardsRoot, parentBoardPath) {
       const sliceFields = drift(sliceRaw, [
         ['task_parent', want.atlas], ['source_board', want.board], ['kanban_board', want.board],
       ]);
-      if (Object.keys(sliceFields).length) slices.push({ card: name, epic, path: notePath, fields: sliceFields });
+      if (Object.keys(sliceFields).length) {
+        slices.push({ card: name, epic, path: notePath, fields: sliceFields, preimage_sha: sha256Text(sliceRaw) });
+      }
     }
   }
   return { atlases, slices, orphanLines };
@@ -4580,7 +4584,29 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   return transitionLock(ctx, 'selector', async () => {
     const plan = planEpicBindingHeal(cardsRoot, boardPath);
     const { atlases, slices, orphanLines } = plan;
+    // Test-only seam: lets a test simulate a second writer landing on disk in
+    // the window between planning and the concurrent-modification check below.
+    if (deps.planHook) deps.planHook();
     if (apply) {
+      // The plan was computed from bytes on disk. If anything moved underneath
+      // it — a live loop session, Obsidian Sync, a Codex session — apply is
+      // refused with zero writes rather than silently clobbering the other
+      // writer. This is the enforced form of what delivery-board.md used to
+      // only warn about. Must run before any write, and before the stamp/
+      // persist below — a refused run leaves both the vault and the ledger
+      // completely untouched.
+      const changed = [];
+      for (const target of [...atlases, ...slices]) {
+        if (sha256Text(fs.readFileSync(target.path, 'utf8')) !== target.preimage_sha) changed.push(target.path);
+      }
+      for (const board of new Set(orphanLines.map((o) => o.board))) {
+        const expected = orphanLines.find((o) => o.board === board).preimage_sha;
+        if (sha256Text(fs.readFileSync(board, 'utf8')) !== expected) changed.push(board);
+      }
+      if (changed.length) {
+        refuse('heal-epic-bindings-refused', 'concurrent_modification',
+          `targets changed after planning; another writer is active: ${[...new Set(changed)].join(', ')}`);
+      }
       // Ledger lookup for the card_note_sha stamp below is best-effort: this
       // verb repairs frontmatter bindings from on-disk canonical form alone
       // and has never required a ledger to run. A caller whose ctx carries no

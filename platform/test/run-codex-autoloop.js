@@ -8335,8 +8335,11 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   eq(dry.slices.map((s) => s.card), ['BX-1'], 'BPX-HEAL dry-run names only the slice with a non-canonical task_parent');
   eq(dry.slices[0].fields.task_parent.to, `${prefix}/tasks/Broken Epic/Broken Epic.md`,
     'BPX-HEAL dry-run rewrites the slice task_parent to vault-relative');
-  eq(dry.orphan_lines, [{ board: path.join(brokenDir, 'Broken Epic-board.md'), epic: 'Broken Epic', card: 'BX-0 gone' }],
-    'BPX-HEAL dry-run names the orphaned sub-board line whose slice note is gone');
+  eq(dry.orphan_lines, [{
+    board: path.join(brokenDir, 'Broken Epic-board.md'), epic: 'Broken Epic', card: 'BX-0 gone',
+    preimage_sha: crypto.createHash('sha256')
+      .update(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')).digest('hex'),
+  }], 'BPX-HEAL dry-run names the orphaned sub-board line whose slice note is gone');
   eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), brokenSliceBefore,
     'BPX-HEAL dry-run writes nothing');
 
@@ -11939,6 +11942,74 @@ const adNoMutation = (result, label) => {
     boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
   });
   eq(receipt.no_op, true, 'FW-RECONCILE-CLEAR-PERSIST commandBoardHealth returns to no_op: true');
+}
+
+// CM concurrent-modification. delivery-board.md used to say "never run --apply
+// against a board with a live loop session or an active cross-machine sync".
+// A sentence is not a guard. The plan records what it read; apply refuses if
+// anything moved underneath it.
+{
+  const root = path.join(tmp, 'cm-heal');
+  const prefix = 'spice/projects/test';
+  const fx = bhScaffold(root, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        // Non-canonical atlas bindings, so the planner finds real drift.
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const plan = coordinator.planEpicBindingHeal(fx.cardsRoot, fx.boardPath);
+  ok(plan.atlases.length >= 1, 'CM the fixture presents real binding drift');
+  ok(/^[0-9a-f]{64}$/.test(plan.atlases[0].preimage_sha),
+    'CM the plan records the sha of every file it read');
+
+  // Clean apply against an untouched tree succeeds.
+  const cleanRoot = path.join(tmp, 'cm-heal-clean');
+  const cleanFx = bhScaffold(cleanRoot, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const applied = await coordinator.commandHealEpicBindings(
+    { root: cleanRoot }, { json: true, apply: true },
+    { boardPath: cleanFx.boardPath, cardsRoot: cleanFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(applied.ok, true, 'CM-CLEAN an untouched tree still applies');
+  eq(applied.applied, true, 'CM-CLEAN reports it applied');
+
+  // A second writer between plan and write is refused, with zero writes.
+  const atlasPath = path.join(fx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
+  const before = fs.readFileSync(atlasPath, 'utf8');
+  let refusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root }, { json: true, apply: true },
+      {
+        boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        // Simulate Obsidian Sync landing a change after the plan is computed.
+        planHook: () => fs.writeFileSync(atlasPath, `${before}\nappended by another writer\n`),
+      });
+  } catch (err) { refusal = err; }
+  eq(refusal && refusal.code, 'concurrent_modification',
+    'CM-RACE a target changed after planning refuses');
+  ok(/Drifted epic.md/.test(refusal.message), 'CM-RACE the refusal names the changed path');
+  ok(/appended by another writer/.test(fs.readFileSync(atlasPath, 'utf8')),
+    'CM-RACE the foreign write is left intact — the refusal wrote nothing');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
