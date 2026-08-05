@@ -157,11 +157,19 @@ The degrade is visible in the receipt and in the ledger record — never silent.
 
 ### 4.2 Write
 
-One ledger record for the card: `phase: 'completed'`, plus
+One ledger record for the card: **`phase: 'adopted'`** *(corrected 2026-08-05 —
+see § Post-implementation corrections; the spec originally said
+`phase: 'completed'`)*, plus
 `adoption: { pr, merge_sha, reason, verified, adopted_at }` and the contract
 fields derivable from the note (`card_path`, `epic`, `slice`, `touch_zones`,
 `deploy_subscriptions`). Then the standard epic projection refresh, so the epic
 can finally roll up.
+
+`adopted` is a genuine new ledger phase: added to `TERMINAL` and to
+`projectionMapping` as `{column: 'Completed', status: 'completed', complete: true}`,
+so an adopted record is excluded from `activeRecords()` exactly like `deployed`.
+`effectiveProjectionMapping` exempts records carrying `adoption` from its
+legacy-completion demotion.
 
 Literal replay of an identical successful adopt returns `no_op: true`. Different
 operands against an already-adopted card refuse (`adopt_conflict`).
@@ -227,6 +235,27 @@ cosmetic Obsidian edit — a typo fix in a card body, a tag added — would wedg
 the autoloop mid-flight. The coordinator remains authoritative for tracked
 cards; the finding is the deliverable.
 
+**Detection semantics** *(added 2026-08-05, post-implementation)*. The finding
+is **edge-triggered on detection but level-triggered within the ledger for a
+window**: it is written when a divergence is observed, lives on the record
+until the next projection of that card clears it, and board-health never clears
+it itself. A still-diverged note therefore reports **once** and is then
+re-baselined, not continuously.
+
+`card_note_sha` is stamped through one shared helper (`stampCardNoteSha`) at
+*every* coordinator write of a tracked card's note — `projectCard`,
+`heal-epic-bindings --apply`, the discard dependent scan, and
+`reconcile-metadata` — so the coordinator never reports its own repair as a
+foreign write. `heal-epic-bindings` is therefore a ledger writer, which its own
+docstring previously denied. A detected `foreign_write` forces ledger
+persistence and appears on `commandReconcile`'s receipt.
+
+board-health's `foreign_writes` check reports **only projectable phases**.
+`projectCard` is the only thing that clears the finding and it requires a phase
+with a board projection, so a finding on a `discarded`/`failed`/`cancelled`
+record could never be cleared and would hold an hourly unattended sweep
+unhealthy forever.
+
 ### 6.2 Bulk verbs — fail closed
 
 `heal-epic-bindings --apply`, `restructure`, and `reconcile-metadata --apply`
@@ -283,3 +312,38 @@ Test-driven, red→green per task, against the existing harnesses.
 - No hand-versioning, no hand-tags, no tap edits.
 - `platform/test/run-sticky-notes-render-guards.js` remains flaky on `main`
   (~50%); re-run to confirm the flake, do not fold a fix into this cycle.
+
+---
+
+## Post-implementation corrections (2026-08-05)
+
+This spec is a living document; the notes below record where the **shipped
+code** diverged from the design as written, so future work reading it is not
+misled and so the record of what was originally specified is not silently
+rewritten.
+
+1. **§4.2 `phase: 'completed'` → `phase: 'adopted'`** (Director ruling). The
+   original value was unshippable. `completed` is a card-status vocabulary
+   word, not a ledger phase: a record carrying it is invisible to
+   `projectionMapping` (so the adoption never reaches the board) while
+   simultaneously counting as permanently active in `activeRecords()` (so it
+   blocks sibling claims and wedges the loop at `MAX_ACTIVE`). The fix is a
+   genuine new ledger phase, `adopted`, terminal and projectable.
+2. **§4.1 refusal set** gained `adopt_pr_not_found`, for gh answering
+   successfully that no such PR exists. The degrade to `verified: 'git'` is
+   reserved for genuine gh unavailability (spawn `ENOENT`, not-authenticated);
+   a present-but-wrong PR reference always refuses rather than being recorded
+   at a degraded tier. `adopt_card_not_found` covers a named card with no note.
+3. **§6.1** gained the edge-/level-triggered detection semantics, the
+   projectable-phases-only rule for the new sixth board-health check, and the
+   single-helper `card_note_sha` stamping across all four coordinator write
+   paths (above).
+4. **§6.2** is narrower than it reads for two of the three verbs: `restructure`
+   and `reconcile-metadata --parked-rebind` already detected a second writer
+   correctly. What changed is only the **error shape** — their third-state
+   failures now refuse with `concurrent_modification` under
+   `restructure-refused` / `reconcile-metadata-refused` instead of throwing a
+   bare `Error`. Crash-recovery resume paths are byte-for-byte unchanged, and
+   containment guards, operand validation, and literal-replay refusals were
+   deliberately not converted. Only `heal-epic-bindings` gained genuinely new
+   detection.
