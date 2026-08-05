@@ -11994,6 +11994,7 @@ const adNoMutation = (result, label) => {
   // A second writer between plan and write is refused, with zero writes.
   const atlasPath = path.join(fx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
   const before = fs.readFileSync(atlasPath, 'utf8');
+  const atlasForeignWrite = `${before}\nappended by another writer\n`;
   let refusal = null;
   try {
     await coordinator.commandHealEpicBindings(
@@ -12002,14 +12003,242 @@ const adNoMutation = (result, label) => {
         boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
         withLock: async (_c, _n, fn) => fn(),
         // Simulate Obsidian Sync landing a change after the plan is computed.
-        planHook: () => fs.writeFileSync(atlasPath, `${before}\nappended by another writer\n`),
+        planHook: () => fs.writeFileSync(atlasPath, atlasForeignWrite),
       });
   } catch (err) { refusal = err; }
   eq(refusal && refusal.code, 'concurrent_modification',
     'CM-RACE a target changed after planning refuses');
   ok(/Drifted epic.md/.test(refusal.message), 'CM-RACE the refusal names the changed path');
-  ok(/appended by another writer/.test(fs.readFileSync(atlasPath, 'utf8')),
+  // Exact-bytes equality, not a substring regex: patchFrontmatter preserves
+  // the body, so a regex for the appended marker would also match a HEALED
+  // file (the write would carry the marker forward too) — only byte-for-byte
+  // equality with the untouched foreign write proves nothing was written.
+  eq(fs.readFileSync(atlasPath, 'utf8'), atlasForeignWrite,
     'CM-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-SLICE-RACE — the same guard, pinned on the SLICE class specifically. A
+// guard reduced to `for (const target of atlases)` alone would miss this: it
+// never reads a slice target's bytes, so a slice drifting underneath the
+// plan would be silently healed rather than refused.
+{
+  const sliceRoot = path.join(tmp, 'cm-heal-slice');
+  const prefix = 'spice/projects/test';
+  const sliceFx = bhScaffold(sliceRoot, {
+    progress: ['Slice epic'],
+    epics: { 'Slice epic': { lanes: { 'In Progress': ['SL-1'] }, slices: { 'SL-1': 'in_progress' } } },
+  });
+  const slicePath = path.join(sliceFx.cardsRoot, 'Slice epic', 'board', 'SL-1.md');
+  // Drift the slice's task_parent to project-relative (non-canonical), the
+  // same shape BPX-HEAL's fixture uses, so the planner finds real slice drift
+  // while the atlas stays fully canonical — isolates the slice branch.
+  fs.writeFileSync(slicePath, fs.readFileSync(slicePath, 'utf8')
+    .replace(`task_parent: ${prefix}/tasks/Slice epic/Slice epic.md`, 'task_parent: tasks/Slice epic/Slice epic.md'));
+
+  const slicePlan = coordinator.planEpicBindingHeal(sliceFx.cardsRoot, sliceFx.boardPath);
+  eq(slicePlan.atlases.length, 0, 'CM-SLICE-RACE the fixture atlas stays canonical (isolates the slice branch)');
+  ok(slicePlan.slices.length >= 1, 'CM-SLICE-RACE the fixture presents real slice-level drift');
+  ok(/^[0-9a-f]{64}$/.test(slicePlan.slices[0].preimage_sha),
+    'CM-SLICE-RACE the plan records the sha of the slice it read');
+
+  const sliceBefore = fs.readFileSync(slicePath, 'utf8');
+  const sliceForeignWrite = `${sliceBefore}\nappended by another writer\n`;
+  let sliceRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: sliceRoot }, { json: true, apply: true },
+      {
+        boardPath: sliceFx.boardPath, cardsRoot: sliceFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(slicePath, sliceForeignWrite),
+      });
+  } catch (err) { sliceRefusal = err; }
+  eq(sliceRefusal && sliceRefusal.code, 'concurrent_modification',
+    'CM-SLICE-RACE a slice changed after planning refuses');
+  ok(/SL-1\.md/.test(sliceRefusal.message), 'CM-SLICE-RACE the refusal names the changed slice path');
+  eq(fs.readFileSync(slicePath, 'utf8'), sliceForeignWrite,
+    'CM-SLICE-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-ORPHAN — the same guard, pinned on the ORPHAN-BOARD class specifically,
+// on a fixture where atlases and slices are both fully canonical so only the
+// orphan branch can produce the refusal. Multi-orphan (three lines sharing
+// one board file) so the dedup — one board file named once, not once per
+// orphan line — is pinned by a test rather than merely true today.
+{
+  const orphanEpicSpec = {
+    lanes: { 'In Progress': ['OR-1', 'OR-2', 'OR-3'] },
+    slices: { 'OR-1': null, 'OR-2': null, 'OR-3': null },
+  };
+
+  const orphanRoot = path.join(tmp, 'cm-heal-orphan');
+  const orphanFx = bhScaffold(orphanRoot, { progress: ['Orphan epic'], epics: { 'Orphan epic': orphanEpicSpec } });
+  const orphanBoardPath = path.join(orphanFx.cardsRoot, 'Orphan epic', 'board', 'Orphan epic-board.md');
+
+  const orphanPlan = coordinator.planEpicBindingHeal(orphanFx.cardsRoot, orphanFx.boardPath);
+  eq(orphanPlan.atlases.length, 0, 'CM-ORPHAN the fixture atlas stays canonical (isolates the orphan branch)');
+  eq(orphanPlan.slices.length, 0, 'CM-ORPHAN the fixture has no slice drift (isolates the orphan branch)');
+  eq(orphanPlan.orphanLines.length, 3, 'CM-ORPHAN the fixture presents three orphan lines sharing one board');
+  ok(orphanPlan.orphanLines.every((o) => o.board === orphanBoardPath),
+    'CM-ORPHAN all three orphan lines share the same board file');
+
+  // Clean multi-orphan apply heals and prunes every line.
+  const orphanCleanRoot = path.join(tmp, 'cm-heal-orphan-clean');
+  const orphanCleanFx = bhScaffold(orphanCleanRoot, {
+    progress: ['Orphan epic'], epics: { 'Orphan epic': orphanEpicSpec },
+  });
+  const orphanCleanBoardPath = path.join(orphanCleanFx.cardsRoot, 'Orphan epic', 'board', 'Orphan epic-board.md');
+  const orphanApplied = await coordinator.commandHealEpicBindings(
+    { root: orphanCleanRoot }, { json: true, apply: true },
+    { boardPath: orphanCleanFx.boardPath, cardsRoot: orphanCleanFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(orphanApplied.ok, true, 'CM-ORPHAN-CLEAN an untouched multi-orphan board still applies');
+  eq(orphanApplied.orphan_lines.map((o) => o.card).sort(), ['OR-1', 'OR-2', 'OR-3'],
+    'CM-ORPHAN-CLEAN the receipt names every orphan line');
+  const orphanCleanBoardAfter = fs.readFileSync(orphanCleanBoardPath, 'utf8');
+  for (const card of ['OR-1', 'OR-2', 'OR-3']) {
+    ok(!new RegExp(`\\[\\[${card}\\]\\]`).test(orphanCleanBoardAfter), `CM-ORPHAN-CLEAN ${card} is pruned from the board`);
+  }
+
+  // A second writer touching the shared orphan board between plan and apply
+  // is refused, the board is named exactly once, and nothing is written.
+  const orphanBoardBefore = fs.readFileSync(orphanBoardPath, 'utf8');
+  const orphanForeignWrite = `${orphanBoardBefore}\nappended by another writer\n`;
+  let orphanRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: orphanRoot }, { json: true, apply: true },
+      {
+        boardPath: orphanFx.boardPath, cardsRoot: orphanFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(orphanBoardPath, orphanForeignWrite),
+      });
+  } catch (err) { orphanRefusal = err; }
+  eq(orphanRefusal && orphanRefusal.code, 'concurrent_modification',
+    'CM-ORPHAN-RACE a shared orphan board changed after planning refuses');
+  const orphanBoardMentions = (orphanRefusal.message.match(/Orphan epic-board\.md/g) || []).length;
+  eq(orphanBoardMentions, 1, 'CM-ORPHAN-RACE the changed board is named exactly once, not once per orphan line');
+  eq(fs.readFileSync(orphanBoardPath, 'utf8'), orphanForeignWrite,
+    'CM-ORPHAN-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-LEDGER — a real on-disk ledger (real stateDir/statePath, no readState/
+// writeState overrides) with a real tracked record for the drifted slice, so
+// the stamp/persist tail commandHealEpicBindings grew since the brief was
+// written is actually exercised. CM-LEDGER-CONTROL proves the fixture is
+// live (unraced, it heals AND advances card_note_sha) — without that control
+// a "the ledger didn't change" assertion in the race case could pass against
+// an inert fixture that never touches the ledger either way.
+{
+  const ledgerEpicSpec = { lanes: { 'In Progress': ['LE-1'] }, slices: { 'LE-1': 'in_progress' } };
+  const prefix = 'spice/projects/test';
+  const driftTaskParent = (slicePath) => fs.writeFileSync(slicePath, fs.readFileSync(slicePath, 'utf8')
+    .replace(`task_parent: ${prefix}/tasks/Ledger epic/Ledger epic.md`, 'task_parent: tasks/Ledger epic/Ledger epic.md'));
+
+  // Control: unraced, real ledger, real tracked record.
+  const ledgerControlRoot = path.join(tmp, 'cm-heal-ledger-control');
+  const ledgerControlFx = bhScaffold(ledgerControlRoot, {
+    progress: ['Ledger epic'], epics: { 'Ledger epic': ledgerEpicSpec },
+  });
+  const ledgerControlSlicePath = path.join(ledgerControlFx.cardsRoot, 'Ledger epic', 'board', 'LE-1.md');
+  driftTaskParent(ledgerControlSlicePath);
+  const ledgerControlCtx = {
+    root: ledgerControlRoot, stateDir: path.join(ledgerControlRoot, '.state'),
+    statePath: path.join(ledgerControlRoot, '.state', 'state.json'),
+  };
+  const ledgerControlSeed = {
+    card: 'LE-1', phase: 'implementing', card_path: ledgerControlSlicePath,
+    touch_zones: [], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ledgerControlCtx, { cards: { 'LE-1': ledgerControlSeed } }, ledgerControlSeed);
+  const ledgerControlApplied = await coordinator.commandHealEpicBindings(
+    ledgerControlCtx, { json: true, apply: true },
+    { boardPath: ledgerControlFx.boardPath, cardsRoot: ledgerControlFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(ledgerControlApplied.ok, true, 'CM-LEDGER-CONTROL an untouched tracked slice still applies (fixture is live)');
+  const ledgerControlOnDisk = JSON.parse(fs.readFileSync(ledgerControlCtx.statePath, 'utf8'));
+  const ledgerControlHealedBytes = fs.readFileSync(ledgerControlSlicePath, 'utf8');
+  eq(ledgerControlOnDisk.cards['LE-1'].card_note_sha,
+    crypto.createHash('sha256').update(ledgerControlHealedBytes).digest('hex'),
+    'CM-LEDGER-CONTROL card_note_sha advances to the healed bytes — the stamp/persist tail is live');
+
+  // Race: identical fixture, but a writer lands on the tracked slice between
+  // plan and apply. The refused run must leave the ledger untouched in BOTH
+  // bytes and mtime, and card_note_sha must never advance past its seed.
+  const ledgerRaceRoot = path.join(tmp, 'cm-heal-ledger-race');
+  const ledgerRaceFx = bhScaffold(ledgerRaceRoot, {
+    progress: ['Ledger epic'], epics: { 'Ledger epic': ledgerEpicSpec },
+  });
+  const ledgerRaceSlicePath = path.join(ledgerRaceFx.cardsRoot, 'Ledger epic', 'board', 'LE-1.md');
+  driftTaskParent(ledgerRaceSlicePath);
+  const ledgerRaceCtx = {
+    root: ledgerRaceRoot, stateDir: path.join(ledgerRaceRoot, '.state'),
+    statePath: path.join(ledgerRaceRoot, '.state', 'state.json'),
+  };
+  const ledgerRaceSeed = {
+    card: 'LE-1', phase: 'implementing', card_path: ledgerRaceSlicePath,
+    touch_zones: [], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ledgerRaceCtx, { cards: { 'LE-1': ledgerRaceSeed } }, ledgerRaceSeed);
+  const ledgerBeforeBytes = fs.readFileSync(ledgerRaceCtx.statePath, 'utf8');
+  const ledgerBeforeMtime = fs.statSync(ledgerRaceCtx.statePath).mtimeMs;
+  const ledgerRaceSliceBefore = fs.readFileSync(ledgerRaceSlicePath, 'utf8');
+  const ledgerRaceForeignWrite = `${ledgerRaceSliceBefore}\nappended by another writer\n`;
+  let ledgerRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      ledgerRaceCtx, { json: true, apply: true },
+      {
+        boardPath: ledgerRaceFx.boardPath, cardsRoot: ledgerRaceFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(ledgerRaceSlicePath, ledgerRaceForeignWrite),
+      });
+  } catch (err) { ledgerRefusal = err; }
+  eq(ledgerRefusal && ledgerRefusal.code, 'concurrent_modification', 'CM-LEDGER-RACE a race on a tracked slice refuses');
+  eq(fs.readFileSync(ledgerRaceCtx.statePath, 'utf8'), ledgerBeforeBytes,
+    'CM-LEDGER-RACE the ledger is byte-for-byte unchanged after a refused apply');
+  eq(fs.statSync(ledgerRaceCtx.statePath).mtimeMs, ledgerBeforeMtime,
+    'CM-LEDGER-RACE the ledger mtime is unchanged after a refused apply — persist was never reached');
+  eq(JSON.parse(ledgerBeforeBytes).cards['LE-1'].card_note_sha, undefined,
+    'CM-LEDGER-RACE card_note_sha was never advanced past its unset seed value');
+  eq(fs.readFileSync(ledgerRaceSlicePath, 'utf8'), ledgerRaceForeignWrite,
+    'CM-LEDGER-RACE the foreign write on the slice itself is left intact too');
+}
+
+// CM-DELETE-RACE — a concurrent writer that deletes a target (a sync client
+// removing a note, exactly the case this verb exists to catch) must fail
+// closed through the SAME sanctioned refusal code, not bubble up as a raw
+// ENOENT that a caller branching on `code` would fail to recognize.
+{
+  const deleteRoot = path.join(tmp, 'cm-heal-delete');
+  const prefix = 'spice/projects/test';
+  const deleteFx = bhScaffold(deleteRoot, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const deleteAtlasPath = path.join(deleteFx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
+  let deleteRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: deleteRoot }, { json: true, apply: true },
+      {
+        boardPath: deleteFx.boardPath, cardsRoot: deleteFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.unlinkSync(deleteAtlasPath),
+      });
+  } catch (err) { deleteRefusal = err; }
+  eq(deleteRefusal && deleteRefusal.code, 'concurrent_modification',
+    'CM-DELETE-RACE a target deleted after planning refuses through the sanctioned code, not raw ENOENT');
+  ok(deleteRefusal && /Drifted epic\.md/.test(deleteRefusal.message),
+    'CM-DELETE-RACE the refusal names the deleted path');
+  ok(!fs.existsSync(deleteAtlasPath), 'CM-DELETE-RACE the deletion itself is left as the concurrent writer made it');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);

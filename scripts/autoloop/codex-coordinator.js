@@ -4595,13 +4595,23 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
       // only warn about. Must run before any write, and before the stamp/
       // persist below — a refused run leaves both the vault and the ledger
       // completely untouched.
+      // A read failure (deleted or renamed out from under the plan — exactly
+      // what a sync client does) is itself evidence of a concurrent writer,
+      // not a separate failure mode: it must fail closed through this same
+      // sanctioned refusal, never bubble up as a raw ENOENT.
       const changed = [];
       for (const target of [...atlases, ...slices]) {
-        if (sha256Text(fs.readFileSync(target.path, 'utf8')) !== target.preimage_sha) changed.push(target.path);
+        let raw;
+        try { raw = fs.readFileSync(target.path, 'utf8'); }
+        catch (_) { changed.push(target.path); continue; }
+        if (sha256Text(raw) !== target.preimage_sha) changed.push(target.path);
       }
       for (const board of new Set(orphanLines.map((o) => o.board))) {
         const expected = orphanLines.find((o) => o.board === board).preimage_sha;
-        if (sha256Text(fs.readFileSync(board, 'utf8')) !== expected) changed.push(board);
+        let raw;
+        try { raw = fs.readFileSync(board, 'utf8'); }
+        catch (_) { changed.push(board); continue; }
+        if (sha256Text(raw) !== expected) changed.push(board);
       }
       if (changed.length) {
         refuse('heal-epic-bindings-refused', 'concurrent_modification',
