@@ -7658,6 +7658,26 @@ eq(mixedStateRebind.state.cards, mixedStateBefore,
   'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves every record unchanged');
 eq(fs.readFileSync(mixedStateRebind.boardPath, 'utf8'), mixedStateBoardBefore,
   'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves board bytes unchanged');
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a mixed expected/intended split
+// across targets is the same second-writer signature as a single target's
+// third state — machine-identifiable through the shared cli-kit code. The
+// mixed-state message names no single target (it spans the whole target
+// set), so this pins the "zero writes" fact instead, which is what today's
+// message states.
+{
+  let mixedStateCodeError = null;
+  try {
+    await commandReconcileMetadata(mixedStateRebind.ctx, mixedStateRebind.applyArgs, mixedStateRebind.deps);
+  } catch (err) { mixedStateCodeError = err; }
+  eq(mixedStateCodeError && mixedStateCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a mixed third ledger state refuses with the concurrent_modification code');
+  ok(mixedStateCodeError && /zero writes/.test(mixedStateCodeError.message),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mixed-state refusal still states zero writes');
+  eq(mixedStateRebind.state.cards, mixedStateBefore,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mixed-state refusal still leaves every record unchanged');
+  eq(mixedStateRebind.counts().ledgerWrites, 0,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION mixed-state refusal still performs zero ledger writes');
+}
 
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`phase-${phase}`);
@@ -7704,6 +7724,27 @@ fs.appendFileSync(thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].
 await assert.rejects(() => commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps),
   /third card hash/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a third card state before writes'); count++;
 eq(thirdStateRebind.counts().ledgerWrites, 0, 'third-state parked-rebind refusal performs zero ledger writes');
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a third card hash is a second
+// writer, not a crash — machine-identifiable through the shared cli-kit code
+// (same as heal-epic-bindings and restructure). Re-invokes the same refusal
+// (pure, zero-write) to capture the thrown error object directly; this
+// assertion fails against the unconverted `new Error(...)` throw.
+{
+  const thirdCardMutatedPath = thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path;
+  const thirdCardMutatedBytes = fs.readFileSync(thirdCardMutatedPath, 'utf8');
+  let thirdCardCodeError = null;
+  try {
+    await commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps);
+  } catch (err) { thirdCardCodeError = err; }
+  eq(thirdCardCodeError && thirdCardCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third card hash refuses with the concurrent_modification code');
+  ok(thirdCardCodeError && thirdCardCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed target card');
+  eq(fs.readFileSync(thirdCardMutatedPath, 'utf8'), thirdCardMutatedBytes,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal writes nothing to the mutated target');
+  eq(thirdStateRebind.counts().ledgerWrites, 0,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION third-card refusal still performs zero ledger writes');
+}
 for (const shape of ['missing', 'extra']) {
   const refusal = parkedRebindHarness(shape);
   const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -7818,6 +7859,21 @@ await assertParkedRefusalNoMutation(
   /third projected epic state/,
   'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP hash-matched malformed projected target',
 );
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a hash-matched but non-canonical
+// projected target is a second writer, not a crash — machine-identifiable
+// through the shared cli-kit code.
+{
+  let thirdProjectedCodeError = null;
+  try {
+    await commandReconcileMetadata(malformedProjectedRefusal.ctx, malformedProjectedRefusal.applyArgs, malformedProjectedRefusal.deps);
+  } catch (err) { thirdProjectedCodeError = err; }
+  eq(thirdProjectedCodeError && thirdProjectedCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third projected epic state refuses with the concurrent_modification code');
+  ok(thirdProjectedCodeError && thirdProjectedCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed projected target');
+  eq(fs.readFileSync(malformedProjectedPath, 'utf8'), malformedProjectedRaw,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the malformed projected target is left byte-untouched');
+}
 for (const phase of ['implementing', 'deployed']) {
   const refusal = parkedRebindHarness(`write-seam-phase-${phase}`);
   const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -7854,6 +7910,21 @@ await assertParkedRefusalNoMutation(
   /third ledger epic state/,
   'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third ledger state',
 );
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a third ledger epic value is a
+// second writer, not a crash — machine-identifiable through the shared
+// cli-kit code.
+{
+  let thirdLedgerCodeError = null;
+  try {
+    await commandReconcileMetadata(thirdLedgerRefusal.ctx, thirdLedgerRefusal.applyArgs, thirdLedgerRefusal.deps);
+  } catch (err) { thirdLedgerCodeError = err; }
+  eq(thirdLedgerCodeError && thirdLedgerCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third ledger epic state refuses with the concurrent_modification code');
+  ok(thirdLedgerCodeError && thirdLedgerCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed ledger target');
+  eq(thirdLedgerRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic, '[[Third epic]]',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mutated ledger epic is left untouched');
+}
 for (const shape of ['missing', 'extra']) {
   const refusal = parkedRebindHarness(`write-seam-spec-${shape}`);
   const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
@@ -10142,10 +10213,20 @@ await assert.rejects(
 const mutatedPath = path.join(thirdState.cardsRoot, 'Card B1.md');
 fs.appendFileSync(mutatedPath, 'operator edit after the crash\n');
 const mutatedRaw = fs.readFileSync(mutatedPath, 'utf8');
-await assert.rejects(
-  () => commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, thirdState.deps),
-  /neither the recorded preimage nor the intended result/,
+let thirdStateError = null;
+try {
+  await commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, thirdState.deps);
+} catch (err) { thirdStateError = err; }
+ok(thirdStateError && /neither the recorded preimage nor the intended result/.test(thirdStateError.message),
   'BGR-RESTRUCTURE-RESUME a target in a third state fails closed with a machine-readable error');
+// BGR-RESTRUCTURE-CONCURRENT-MODIFICATION: a second writer (a target matching
+// neither the recorded preimage nor the intended result) is machine-identifiable
+// through the shared cli-kit code, same as heal-epic-bindings — this assertion
+// fails against the unconverted `new Error(...)` third-state throw.
+eq(thirdStateError && thirdStateError.code, 'concurrent_modification',
+  'BGR-RESTRUCTURE-CONCURRENT-MODIFICATION a target in a third state refuses with the concurrent_modification code');
+ok(thirdStateError && thirdStateError.message.includes('Card B1.md'),
+  'BGR-RESTRUCTURE-CONCURRENT-MODIFICATION the refusal names the changed member note');
 eq(fs.readFileSync(mutatedPath, 'utf8'), mutatedRaw,
   'BGR-RESTRUCTURE-RESUME the fail-closed rerun never deletes or rewrites the mutated note');
 ok(!fs.existsSync(path.join(thirdState.cardsRoot, 'Family B', 'board', 'Card B1.md')),

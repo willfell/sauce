@@ -5805,8 +5805,14 @@ function planRestructure(spec, env) {
   };
 }
 
+// A target that is neither the recorded preimage nor the intended result is
+// a second writer, not a crash — refuse through the shared cli-kit code so
+// callers can machine-identify the condition (same code as heal-epic-bindings).
+// refuse() throws internally and never returns, so every call site below is a
+// bare statement, not a `throw` expression.
 function restructureThirdState(target) {
-  return new Error(`restructure fail-closed: ${target} is neither the recorded preimage nor the intended result`);
+  refuse('restructure-refused', 'concurrent_modification',
+    `restructure fail-closed: ${target} is neither the recorded preimage nor the intended result`);
 }
 
 // Containment for journal-supplied TARGET paths, symmetric with the
@@ -5834,7 +5840,7 @@ function applyIntendedWrite(op, journal, d) {
   physicalDescendantTarget(journal.cards_root, op.path, `restructure scaffold target ${path.basename(op.path)}`);
   const current = fs.existsSync(op.path) ? fs.readFileSync(op.path, 'utf8') : null;
   if (current === op.content) return false;
-  if (current !== null) throw restructureThirdState(op.path);
+  if (current !== null) restructureThirdState(op.path);
   fs.mkdirSync(path.dirname(op.path), { recursive: true });
   d.writeText(op.path, op.content);
   return true;
@@ -5861,7 +5867,7 @@ async function applyIntendedMove(ctx, move, journal, d) {
     }
     physicalDescendant(journal.cards_root, move.from, `restructure member note ${move.card}`);
     const raw = fs.readFileSync(move.from, 'utf8');
-    if (sha256Text(raw) !== move.preimage_sha256) throw restructureThirdState(move.from);
+    if (sha256Text(raw) !== move.preimage_sha256) restructureThirdState(move.from);
     return raw;
   };
   const targetCurrent = fs.existsSync(move.to) ? fs.readFileSync(move.to, 'utf8') : null;
@@ -5875,8 +5881,8 @@ async function applyIntendedMove(ctx, move, journal, d) {
     await rebindTrackedCardPath(ctx, move, d);
     return;
   }
-  if (targetCurrent !== null) throw restructureThirdState(move.to);
-  if (!fs.existsSync(move.from)) throw restructureThirdState(move.from);
+  if (targetCurrent !== null) restructureThirdState(move.to);
+  if (!fs.existsSync(move.from)) restructureThirdState(move.from);
   guardSourceIsPreimage();
   fs.mkdirSync(path.dirname(move.to), { recursive: true });
   d.writeText(move.to, move.content);
@@ -5888,7 +5894,7 @@ function applyParentStage(journal, index, d) {
   const stage = journal.epics[index].parent_stage;
   const current = fs.readFileSync(journal.board, 'utf8');
   if (current === stage.content) return;
-  if (sha256Text(current) !== stage.prior_sha256) throw restructureThirdState(journal.board);
+  if (sha256Text(current) !== stage.prior_sha256) restructureThirdState(journal.board);
   d.writeText(journal.board, stage.content);
 }
 
@@ -7489,25 +7495,35 @@ async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
       }
       const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
       const currentSha256 = sha256Text(raw);
+      // Neither the recorded preimage nor the intended result: a second
+      // writer, not a crash — refuse through the shared cli-kit code so
+      // callers can machine-identify the condition (same code as
+      // heal-epic-bindings and restructure).
       if (currentSha256 !== entry.expected_card_sha256
         && currentSha256 !== entry.intended_next_sha256) {
-        throw new Error(`parked metadata rebind found a third card hash for ${entry.card}; zero writes`);
+        refuse('reconcile-metadata-refused', 'concurrent_modification',
+          `parked metadata rebind found a third card hash for ${entry.card}; zero writes`);
       }
       const prepared = prepareDeliveryCard(raw, entry.card);
       if (!prepared.ok || prepared.card.epic !== entry.intended_ledger_epic) {
-        throw new Error(`parked metadata rebind found a third projected epic state for ${entry.card}; zero writes`);
+        refuse('reconcile-metadata-refused', 'concurrent_modification',
+          `parked metadata rebind found a third projected epic state for ${entry.card}; zero writes`);
       }
       const ledgerEpic = record.delivery_contract.epic;
       if (ledgerEpic !== entry.expected_ledger_epic && ledgerEpic !== entry.intended_ledger_epic) {
-        throw new Error(`parked metadata rebind found a third ledger epic state for ${entry.card}; zero writes`);
+        refuse('reconcile-metadata-refused', 'concurrent_modification',
+          `parked metadata rebind found a third ledger epic state for ${entry.card}; zero writes`);
       }
       records.push(record);
       states.push(ledgerEpic === entry.expected_ledger_epic ? 'expected' : 'intended');
     }
     const allExpected = states.every((stateName) => stateName === 'expected');
     const allIntended = states.every((stateName) => stateName === 'intended');
+    // A mixed expected/intended split across targets is the same second-writer
+    // signature as a single target's third state — refuse with the shared code.
     if (!allExpected && !allIntended) {
-      throw new Error('parked metadata rebind found a mixed third state; zero writes');
+      refuse('reconcile-metadata-refused', 'concurrent_modification',
+        'parked metadata rebind found a mixed third state; zero writes');
     }
     if (allIntended) {
       if (!parkedMetadataRebindReplayMatches(records, request, spec)) {
