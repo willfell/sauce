@@ -142,9 +142,17 @@ const widgets = [
     { name: 'JournalChromeBar', path: 'platform/blueprints/journal/helpers/journal-chrome-bar.js' },
 ];
 
+// `cold` marks the variants that drive `_pollForDayArg` all the way through its
+// 40-iteration retry. That loop sleeps 50ms per iteration by construction, so
+// each DayList cold-load guard costs a fixed 2000ms of pure wall-clock waiting
+// — four of them accounted for 8.1s of this harness's 8.3s runtime against a
+// 10s watchdog, a 1.2x margin that any load tipped over. Collapsing the sleeps
+// keeps every one of the 40 iterations executing; only the waiting is removed.
+// Poll *semantics* are pinned separately by PERF7-DELAYED-INDEX-RECOVERY, which
+// asserts `polls === 3` using this same technique.
 const variants = [
-    { label: 'normal container, dv.current()=undefined (cold-load)', embed: false, current: undefined },
-    { label: 'normal container, dv.current()=null (cold-load)', embed: false, current: null },
+    { label: 'normal container, dv.current()=undefined (cold-load)', embed: false, current: undefined, cold: true },
+    { label: 'normal container, dv.current()=null (cold-load)', embed: false, current: null, cold: true },
     { label: '.markdown-embed context', embed: true, current: undefined },
 ];
 
@@ -155,8 +163,14 @@ const variants = [
         catch (e) { await guard(`STICKYGUARD-load ${w.name}`, () => { throw e; }); continue; }
         for (const v of variants) {
             await guard(`STICKYGUARD ${w.name} — ${v.label}`, async () => {
-                const inst = new WidgetClass();
-                await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
+                const savedTimeout = global.setTimeout;
+                try {
+                    if (v.cold) global.setTimeout = (fn) => { fn(); return 0; };
+                    const inst = new WidgetClass();
+                    await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
+                } finally {
+                    global.setTimeout = savedTimeout;
+                }
             });
         }
     }
