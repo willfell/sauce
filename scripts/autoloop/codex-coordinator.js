@@ -37,10 +37,6 @@ const {
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
-// SAUCE_LOOP_REPO (loop-plugin bindings): the GitHub repo record-pr/advance
-// query. Derived by the resolver from the bound repo's origin remote; absent
-// env keeps the historical sauce default.
-const REPO = process.env.SAUCE_LOOP_REPO || 'willfell/sauce';
 const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
 const LEASE_TTL_MS = 2 * 60 * 60 * 1000; // per-card session lease: generous, time-based only —
@@ -104,7 +100,15 @@ function resolveBoundDefaults(cwd) {
     if (c.env && c.env.SAUCE_LOOP_VAULTS) {
       try { vaults = JSON.parse(c.env.SAUCE_LOOP_VAULTS); } catch (_) { vaults = null; }
     }
-    return { board: c.board_path_abs, cardsRoot: c.cards_root_abs, vaults };
+    return {
+      board: c.board_path_abs,
+      cardsRoot: c.cards_root_abs,
+      vaults,
+      // The resolver derives this from the bound repo's origin remote. It is
+      // part of the same binding, so it must self-resolve on the same terms as
+      // board/cardsRoot — see REPO below.
+      repo: (c.env && c.env.SAUCE_LOOP_REPO) || null,
+    };
   } catch (_) { return null; }
 }
 const LOOP_BINDING = loopBindingEnv();
@@ -112,9 +116,23 @@ const LOOP_BINDING = loopBindingEnv();
 // committed .loop/config.json (process.cwd()) so the coordinator's board, cards
 // root and vault list track the binding rather than a machine-specific literal.
 // The ~/obsidian/<vault> literals below are the last resort for an unbound cwd.
-const BOUND_DEFAULTS = (LOOP_BINDING.board && LOOP_BINDING.cardsRoot && LOOP_BINDING.vaults)
+// SAUCE_LOOP_REPO is part of this same guard: resolving only when board/cards/
+// vaults are all env-supplied would leave REPO on the sauce default for a repo
+// that set the vault seam explicitly but not the repo slug.
+const BOUND_DEFAULTS = (LOOP_BINDING.board && LOOP_BINDING.cardsRoot && LOOP_BINDING.vaults
+  && process.env.SAUCE_LOOP_REPO)
   ? null
   : resolveBoundDefaults(process.cwd());
+// SAUCE_LOOP_REPO (loop-plugin bindings): the GitHub repo that record-pr,
+// advance and adopt query. Explicit env wins; otherwise it self-resolves from
+// the bound repo's origin remote exactly as BOARD/CARDS_ROOT self-resolve from
+// the same .loop/config.json; an unbound cwd keeps the historical sauce
+// default. Env-only resolution was a real defect: `adopt` run from a bound repo
+// found the right card in the right vault and then verified --pr against
+// willfell/sauce, checking an unrelated repository's PR of the same number.
+const REPO = process.env.SAUCE_LOOP_REPO
+  || (BOUND_DEFAULTS && BOUND_DEFAULTS.repo)
+  || 'willfell/sauce';
 // Contract vocabulary vs deployment binding: a card's deploy_subscriptions map
 // always carries the contract's required_vaults keys; the BINDING's vault list
 // (SAUCE_LOOP_VAULTS) decides which vaults this board actually deploys to. An
@@ -4386,7 +4404,14 @@ async function discardCardCore(ctx, operands, d) {
     throw new Error(`card ${card} is already discarded with different operands; replay must be literal`);
   }
   if (record && record.phase !== 'parked' && !['blocked', 'failed', 'cancelled'].includes(record.phase)) {
-    throw new Error(`discard refuses ${record.phase === 'deployed' ? 'deployed' : 'active in-flight'} work; ${card} is ${record.phase}`);
+    // `deployed` and `adopted` are TERMINAL — finished work, not work in
+    // flight. Both refuse, but describing a completed card as "active
+    // in-flight" misreports the state to whoever has to act on it, and a bare
+    // Error left every case in this class indistinguishable from any other
+    // `command_failed` to a machine caller.
+    const completed = ['deployed', 'adopted'].includes(record.phase);
+    refuse('discard-refused', completed ? 'discard_completed_work' : 'discard_active_work',
+      `discard refuses ${completed ? 'completed' : 'active in-flight'} work; ${card} is ${record.phase}`);
   }
   const cardPath = resolveCardPath(record ? record.card_path : null, card, cardsRoot);
   const noteExists = Boolean(cardPath && fs.existsSync(cardPath));
@@ -4733,6 +4758,32 @@ function adoptProvenance(args, deps, cwd) {
   return { sha, verified: 'git+gh', pr_url: pr.url || null };
 }
 
+// Adoption ratifies a declaration sitting on the BOARD, so a note under
+// cards_root is not sufficient evidence on its own. A slice detached from its
+// epic board has no line to project onto: the record would be written, the
+// projection would fail, and nothing could ever repair it — board-health's
+// board-driven check 1 cannot see a non-member at all, check 5 would report its
+// projection_error on every hourly sweep, and the advertised `reconcile --card`
+// remedy fails identically every time. Refuse before the record exists.
+function assertAdoptBoardMembership(card, notePath, boardPath) {
+  const boardDir = path.dirname(notePath);
+  const epicBoard = path.join(boardDir, `${path.basename(path.dirname(boardDir))}-board.md`);
+  // An epic-nested slice answers to its epic sub-board; a flat card answers to
+  // the parent project board.
+  const owning = fs.existsSync(epicBoard) ? epicBoard : boardPath;
+  let lanes;
+  try { lanes = parseBoard(fs.readFileSync(owning, 'utf8')); }
+  catch (err) {
+    refuse('adopt-refused', 'adopt_card_not_on_board',
+      `card ${card} cannot be checked for board membership: ${owning} is unreadable (${err.message})`);
+  }
+  if (!BOARD_HEALTH_LANES.some((lane) => (lanes[lane] || []).includes(card))) {
+    refuse('adopt-refused', 'adopt_card_not_on_board',
+      `card ${card} has a note but no line on ${path.basename(owning)}; `
+      + 'adopt ratifies a board declaration, and a detached slice has nothing to project onto');
+  }
+}
+
 async function commandAdopt(ctx, args, deps = {}) {
   requireOnlyOptions(args, 'adopt', STRICT_CLI_OPTIONS.adopt);
   if (args.json !== true) throw new Error('adopt requires --json for a machine-readable receipt');
@@ -4774,6 +4825,7 @@ async function commandAdopt(ctx, args, deps = {}) {
     if (!notePath) {
       refuse('adopt-refused', 'adopt_card_not_found', `card ${card} has no note under ${cardsRoot}`);
     }
+    assertAdoptBoardMembership(card, notePath, boardPath);
     const raw = fs.readFileSync(notePath, 'utf8');
     const noteStatus = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
     if (noteStatus !== 'completed') {
@@ -4837,10 +4889,19 @@ async function commandAdopt(ctx, args, deps = {}) {
       withLock: transitionLock, projectCard: project, now, state, cardsRoot,
     });
     persist(ctx, state, record);
+    // Same duty every other transition verb carries: leave the station view
+    // agreeing with the ledger. An adoption can be the only activity on a board
+    // for days, so skipping it left Loop Station showing ratified work as still
+    // outstanding until some unrelated verb happened to run. No extra lock —
+    // this runs inside the selector lock adopt already holds, exactly as in
+    // park/resume.
+    const station = await attemptLoopStationProjection(ctx, state, 'adopt', {
+      projectLoopStation: deps.projectLoopStation, boardPath, cardsRoot,
+    });
     const receipt = successReceipt(projection.ok ? 'adopt' : 'adopt-projection-failed', {
       no_op: false, card, phase: record.phase, adoption: record.adoption,
       card_path: notePath, pr_url: provenance.pr_url || null,
-      projection,
+      projection, loop_station: station.receipt,
     });
     if (!projection.ok) {
       receipt.projection_error = projection.error;
@@ -4872,6 +4933,11 @@ const BOARD_HEALTH_DRIFT_REMEDY = 'heal-epic-bindings --dry-run --json';
 const COORDINATOR_STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ADOPT_REMEDY = 'adopt';
 const CROSS_CLONE_REMEDY = 'cross-clone: no action in this clone';
+// A remedy names a command the operator is meant to run, so it must be one the
+// verb will accept. `adopt` ratifies a COMPLETED declaration and refuses every
+// other status with adopt_not_declared_complete; advertising it on a foreign
+// `blocked`/`in_progress` finding hands over a command that cannot succeed.
+const NO_MECHANICAL_REMEDY = 'no mechanical remedy: adopt ratifies only a completed declaration';
 
 function untrackedMemberProvenance(stamp) {
   return stamp && COORDINATOR_STAMP_RE.test(stamp) ? 'coordinator' : 'foreign';
@@ -4891,7 +4957,9 @@ function untrackedMemberFinding(epic, cardName, noteStatus, stamp = null) {
     // Class-specific: cross-clone residue has no local remedy, and fabricating
     // ledger records for it is exactly the drift the reconciler exists to flag.
     // A foreign-written completion is what `adopt` ratifies.
-    remedy: provenance === 'coordinator' ? CROSS_CLONE_REMEDY : ADOPT_REMEDY,
+    remedy: provenance === 'coordinator'
+      ? CROSS_CLONE_REMEDY
+      : (noteStatus === 'completed' ? ADOPT_REMEDY : NO_MECHANICAL_REMEDY),
   };
 }
 

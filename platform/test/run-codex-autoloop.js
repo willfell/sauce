@@ -9460,7 +9460,8 @@ await assert.rejects(() => commandDiscard({ root: discardRoot }, {
 
 // BGR-DISCARD-ACTIVE-REFUSED: active claim and every in-flight phase refuse with zero writes.
 for (const phase of ['claimed', 'implementing', 'feature_pr', 'feature_merged', 'release_pr',
-  'release_merged', 'tagged', 'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'needs-inspection', 'deployed']) {
+  'release_merged', 'tagged', 'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'needs-inspection',
+  'deployed', 'adopted']) {
   const activeState = emptyState();
   activeState.cards.Active = { card: 'Active', phase, card_path: path.join(discardCardsRoot, 'missing.md') };
   let activeWrites = 0;
@@ -9471,6 +9472,30 @@ for (const phase of ['claimed', 'implementing', 'feature_pr', 'feature_merged', 
   }), /discard refuses/, `BGR-DISCARD-ACTIVE-REFUSED refuses phase ${phase}`);
   eq(activeWrites, 0, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal performs zero writes`);
   eq(activeState.cards.Active.phase, phase, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal preserves the record`);
+}
+
+// BGR-DISCARD-TERMINAL-WORDING: the refusal is right for every phase above, but
+// a TERMINAL record is not "active in-flight work" — `adopted` and `deployed`
+// are finished. Calling them in-flight misdescribes the state to whoever has to
+// act on it, and a bare Error leaves callers machine-classifying the whole class
+// as `command_failed`. Both classes now carry a stable code.
+for (const [phase, code, wording] of [
+  ['adopted', 'discard_completed_work', /discard refuses completed work/],
+  ['deployed', 'discard_completed_work', /discard refuses completed work/],
+  ['implementing', 'discard_active_work', /discard refuses active in-flight work/],
+]) {
+  const st = emptyState();
+  st.cards.Active = { card: 'Active', phase, card_path: path.join(discardCardsRoot, 'missing.md') };
+  let writes = 0;
+  let err = null;
+  try {
+    await commandDiscard({ root: discardRoot }, { card: 'Active', reason: 'r', json: true },
+      { ...discardDeps, readState: () => st, writeState: () => { writes++; } });
+  } catch (e) { err = e; }
+  eq(err && err.code, code, `BGR-DISCARD-TERMINAL-WORDING ${phase} refuses with ${code}`);
+  eq(wording.test(err && err.message), true,
+    `BGR-DISCARD-TERMINAL-WORDING ${phase} describes the state correctly (${err && err.message})`);
+  eq(writes, 0, `BGR-DISCARD-TERMINAL-WORDING ${phase} refusal performs zero writes`);
 }
 
 // BGR-DISCARD-TOMBSTONE-UNCLAIMABLE: a hand-added board line with a tombstoned name is never claimed.
@@ -11427,7 +11452,10 @@ const adScaffold = (root) => bhScaffold(root, {
   epics: {
     'Retire ero loop': {
       lanes: { Completed: ['EM-4'], 'In Progress': ['EM-7'] },
-      slices: { 'EM-4': 'completed', 'EM-7': 'in_progress' },
+      // EM-ORPHAN has a note that declares `completed` but appears in NO lane —
+      // a slice detached from its epic board. `findCard` finds it, so without a
+      // membership gate `adopt` records it and then cannot project it, forever.
+      slices: { 'EM-4': 'completed', 'EM-7': 'in_progress', 'EM-ORPHAN': 'completed' },
     },
   },
 });
@@ -11503,6 +11531,17 @@ const adNoMutation = (result, label) => {
   eq(r.err && r.err.code, 'adopt_card_not_found', 'AD-MISSING an unknown card refuses');
   adNoMutation(r, 'AD-MISSING');
 
+  // A note under cards_root is NOT sufficient: adoption ratifies a declaration
+  // sitting on the BOARD, and a slice detached from its epic board has no board
+  // line to project onto. Without this gate adopt returned ok:true, wrote a
+  // durable `adopted` record with no card_note_sha baseline (so foreign-write
+  // detection never arms for it), and left a projection_error that check 1
+  // cannot see, check 5 reports forever, and `reconcile --card` can never clear
+  // — a permanently unhealthy hourly sweep with an unusable remedy.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-ORPHAN' });
+  eq(r.err && r.err.code, 'adopt_card_not_on_board', 'AD-ORPHAN a note detached from its epic board refuses');
+  adNoMutation(r, 'AD-ORPHAN');
+
   // Provenance operands are structurally validated first.
   r = await adRefusal(fx, emptyState(), { ...base, 'merge-sha': 'deadbeef' });
   eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-SHAPE a non-40-hex sha refuses');
@@ -11560,9 +11599,17 @@ const adNoMutation = (result, label) => {
   const state = emptyState();
   const writes = [];
   const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const adStation = [];
   const receipt = await coordinator.commandAdopt(ctx,
     { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR; per-slice was wrong here' },
-    adDeps(fx, state, { writeState: (_c, _s, rec) => writes.push(rec), now: () => '2026-08-04T12:00:00.000Z' }));
+    adDeps(fx, state, {
+      writeState: (_c, _s, rec) => writes.push(rec),
+      now: () => '2026-08-04T12:00:00.000Z',
+      projectLoopStation: (_c, _s, updatedOn) => {
+        adStation.push(updatedOn);
+        return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+      },
+    }));
 
   eq(receipt.action, 'adopt', 'AD-ADOPT reports the adopt action');
   eq(receipt.ok, true, 'AD-ADOPT succeeds');
@@ -11588,6 +11635,15 @@ const adNoMutation = (result, label) => {
   // the same persist/project/persist discipline park, resume, amend-park and
   // amend-contract already use; a single persist would silently drop the
   // baseline that foreign-write detection depends on.
+  // Every other transition verb (park, resume, discard, reap, claim, cutover,
+  // consume-ratification) refreshes Loop Station so the station view matches the
+  // ledger. adopt did not, so an adoption — which can be the ONLY activity on a
+  // board for days — left the station stale indefinitely, showing work as
+  // outstanding after it had been ratified.
+  eq(adStation, ['adopt'], 'AD-ADOPT refreshes Loop Station under its own updated_on');
+  eq(receipt.loop_station && receipt.loop_station.action, 'loop-station-projected',
+    'AD-ADOPT the station result rides the receipt, as it does for park/resume');
+
   eq(writes.length, 2, 'AD-ADOPT persists the record, projects, then persists the projection mutations');
   eq(writes.every((rec) => rec === record), true, 'AD-ADOPT both persists carry the one adopted record');
   ok(record.projection_reconciled_at, 'AD-ADOPT the projection receipt lands on the record');
@@ -11621,9 +11677,16 @@ const adNoMutation = (result, label) => {
   const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
   const args = { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
   await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
-  const replay = await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
+  // A no-op must be a no-op all the way down: the replay path returns before
+  // the card projection precisely so it cannot re-stamp status_changed_at, and
+  // the Loop Station refresh added alongside it must sit behind the same guard
+  // or an idempotent call becomes an unbounded vault writer again.
+  const replay = await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state, {
+    projectLoopStation: () => { throw new Error('literal adopt replay must not project Loop Station'); },
+  }));
   eq(replay.no_op, true, 'AD-REPLAY identical replay is a no-op');
   eq(replay.ok, true, 'AD-REPLAY identical replay still succeeds');
+  eq('loop_station' in replay, false, 'AD-REPLAY a no-op replay carries no station projection');
 
   // adopt_conflict refuses before adoptProvenance ever runs, so no prView
   // override is needed here — the default (matching) mock is never called.
@@ -11952,8 +12015,8 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
     progress: ['Mixed provenance'],
     epics: {
       'Mixed provenance': {
-        lanes: { Completed: ['XC-1', 'FH-1', 'FH-2'] },
-        slices: { 'XC-1': 'completed', 'FH-1': 'completed', 'FH-2': 'completed' },
+        lanes: { Completed: ['XC-1', 'FH-1', 'FH-2'], Blocked: ['FH-3'] },
+        slices: { 'XC-1': 'completed', 'FH-1': 'completed', 'FH-2': 'completed', 'FH-3': 'blocked' },
       },
     },
   });
@@ -11986,7 +12049,17 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
   eq(byCard['FH-2'].provenance, 'foreign', 'BHP an absent stamp is foreign-written');
   eq(byCard['FH-2'].stamp, null, 'BHP an absent stamp reports null');
 
-  eq(receipt.findings.untracked_members_by_provenance, { coordinator: 1, foreign: 2 },
+  // A remedy is a mechanical instruction, so it must be one the named verb will
+  // actually accept. `adopt` ratifies a COMPLETED declaration and refuses
+  // anything else with adopt_not_declared_complete — so routing a foreign
+  // `blocked`/`in_progress` finding to `adopt` hands the operator a command
+  // that cannot succeed. Observed live: 2 of 100 foreign findings.
+  eq(byCard['FH-3'].provenance, 'foreign', 'BHP a foreign non-completion is still foreign');
+  eq(byCard['FH-3'].note_status, 'blocked', 'BHP the non-completion status is reported');
+  eq(byCard['FH-3'].remedy, 'no mechanical remedy: adopt ratifies only a completed declaration',
+    'BHP a foreign finding adopt would refuse does not advertise adopt');
+
+  eq(receipt.findings.untracked_members_by_provenance, { coordinator: 1, foreign: 3 },
     'BHP the receipt collapses the aggregate into a readable pair');
   // collectBoardHealth's `healthy` is aliased into the receipt as `no_op`
   // (see commandBoardHealth) — there is no separate `healthy` field to read.

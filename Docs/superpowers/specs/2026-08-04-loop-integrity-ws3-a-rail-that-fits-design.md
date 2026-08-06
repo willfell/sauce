@@ -45,10 +45,12 @@ hatch, and it emphatically does not justify batch-claim.
 
 `platform/mechanisms/kanban-status-sync/kanban-status-sync.js:120` —
 `KanbanStatusSyncInit` runs at **vault boot in all three consumer vaults**,
-discovers every note carrying `kanban-plugin: board`, and rewrites `status`,
-`status_prev`, and `status_changed_at` (bare date) through
-`processFrontMatter` whenever a card's column changed. The delivery epic boards
-do carry `kanban-plugin: board`.
+discovers every note carrying `kanban-plugin: board`, and rewrites
+`kanban_board`, `kanban_column`, `status`, `status_prev`, and
+`status_changed_at` (bare date) through `processFrontMatter` whenever a card's
+column changed. The delivery epic boards do carry `kanban-plugin: board`.
+*(Amended 2026-08-06: `kanban_board`/`kanban_column` were missing from this
+list — see § Post-implementation corrections item 5.)*
 
 So dragging a slice card into *Completed* in Obsidian is a completion the ledger
 never sees, produced by shipped, sanctioned platform code, on a path the
@@ -368,3 +370,36 @@ rewritten.
    containment guards, operand validation, and literal-replay refusals were
    deliberately not converted. Only `heal-epic-bindings` gained genuinely new
    detection.
+
+### Real-data validation corrections (2026-08-06)
+
+The shipped surface was exercised against live boards, live vaults and live
+`git`/`gh` for the first time after v0.283.0. Six defects were found; all are
+fixed, and the notes below record what the spec itself got wrong.
+
+5. **§1.1 understated what `KanbanStatusSync` writes.** It rewrites
+   `kanban_board` and `kanban_column` as well
+   (`kanban-status-sync.js:113-119`). The result doc and `delivery-board.md`
+   went further and asserted it *never* writes `kanban_column`, which was used
+   to justify the projection refresh. Confirmed wrong on live data: EM-4/5/6
+   already carried `kanban_column: Completed` from the drag, and adopt's
+   projection reported `card_changed: false` for all three. **The conclusion
+   survives** — the epic atlas and parent board line were genuinely stale and
+   only the refresh rolled the epic up — but the stated reason did not.
+6. **§4.1 gains `adopt_card_not_on_board`.** `adopt` checked only that a note
+   existed under `cards_root`, never that the card was a board member.
+   Adopting a detached slice returned `ok: true`, wrote a durable `adopted`
+   record with no `card_note_sha` baseline, and left a `projection_error` that
+   board-health's board-driven check 1 cannot see, check 5 reports forever, and
+   `reconcile --card` can never clear.
+7. **`REPO` was env-only and is now binding-derived.** `adopt` run from a bound
+   repo verified `--pr` against `willfell/sauce` while `BOARD`/`CARDS_ROOT`
+   correctly self-resolved, so it checked an unrelated repository's PR of the
+   same number and refused `adopt_pr_mismatch`. The verb could not complete its
+   own motivating case (§4.3) as documented on any non-`sauce` repo.
+8. **§5's remedy is now gated on `note_status`.** A foreign finding that is not
+   `completed` advertised `adopt`, which refuses it (`adopt_not_declared_complete`).
+9. **`adopt` now refreshes Loop Station**, as every other transition verb does;
+   and `discard`'s refusal for a terminal record no longer calls it "active
+   in-flight work", emitting `discard_completed_work` / `discard_active_work`
+   instead of a bare `Error`.

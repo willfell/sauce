@@ -25,7 +25,6 @@ const HARD_MAX_INFRA_RETRIES = 1;
 const HARD_MAX_CODE_REPAIRS = 1;
 const DEFAULT_MAX_CARDS = 2;
 const LOCK_STALE_MS = 30 * 60 * 1000;
-const TERMINAL_CARD_PHASES = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
 const EFFECT_KINDS = new Set(['claim', 'retry', 'pr', 'release', 'promotion', 'deployment', 'projection']);
 const MAXBUF = 64 * 1024 * 1024;
 
