@@ -30,6 +30,14 @@ const CALLSITE_DIRS = [
 const SKIP_PATTERNS = [
     /node_modules\//,
     /\.git\//,
+    // Nested git worktrees are full checkouts of THIS repo living inside it, so
+    // walking the `.claude` callsite root descends into another commit's entire
+    // tree — including its `Docs/`, which is deliberately not a callsite root
+    // here. That reports historical plan prose as live contract violations and
+    // makes preflight fail for whichever branch happens to be checked out in a
+    // worktree. Skip them: only the tree under test is the tree under test.
+    /(^|\/)\.claude\/worktrees\//,
+    /(^|\/)\.worktrees\//,
     /\.sauce-backup\//,
     /\.sauce-prev\//,
     /platform\/test\/seed-vault\//,
