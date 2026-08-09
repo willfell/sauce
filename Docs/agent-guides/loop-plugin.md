@@ -61,7 +61,7 @@ Five knobs every fresh binding should know:
 
 Two derived/repair facts:
 
-- **GitHub repo derivation** — the resolver reads the bound repo's `origin` remote and emits `SAUCE_LOOP_REPO` (owner/name) so `record-pr`/`advance` query the RIGHT repository's PRs; no remote → the coordinator's sauce default. Nothing to configure.
+- **GitHub repo derivation** — the resolver reads the bound repo's `origin` remote and emits `SAUCE_LOOP_REPO` (owner/name) so every gh-backed verb (`record-pr`, `advance`, `adopt`) queries the RIGHT repository's PRs; no remote → the coordinator's sauce default. Nothing to configure. **The coordinator self-resolves this the same way `BOARD`/`CARDS_ROOT` do**, so a bare CLI invocation with no env is correct too — it does not depend on being launched through the plugin. That mattered: while `REPO` was env-only, `adopt` (which has no plugin-mediated invocation path) found the right card in the right vault and then verified `--pr` against `willfell/sauce`, checking an unrelated repository's PR of the same number.
 - **`amend-park`** — bounded supervised repair when a parked card's recorded metadata is wrong (e.g. parked on a dependency that later proves impossible or already satisfied upstream): `amend-park --card "<exact>" --expected-head <preserved 40-hex HEAD> --reason "<audit>" (--clear-dependencies | --depends-on "<card>"...) [--resume-condition "<text>"] --json`. Parked cards only; compare-and-swap on the preserved HEAD; appends an audit record; literal replay is `no_op`; never touches receipts, worktrees, or any non-parked card. Discard/supersession remains the only path that deletes work.
 
 ## The skill surface

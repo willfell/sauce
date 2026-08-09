@@ -9,6 +9,7 @@
  * Zero-dep.
  */
 'use strict';
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
@@ -33,7 +34,9 @@ function nodeEval(script, env) {
 // Empty-string env vars are falsy for the seam, but delete them for clean runs.
 function cleanEnv(extra = {}) {
   const env = { ...process.env, ...extra };
-  for (const k of ['SAUCE_LOOP_BOARD', 'SAUCE_LOOP_CARDS_ROOT', 'SAUCE_LOOP_VAULTS']) {
+  // SAUCE_LOOP_REPO belongs in this list: it is part of the same seam, and an
+  // ambient value would silently mask whether REPO self-resolves at all.
+  for (const k of ['SAUCE_LOOP_BOARD', 'SAUCE_LOOP_CARDS_ROOT', 'SAUCE_LOOP_VAULTS', 'SAUCE_LOOP_REPO']) {
     if (!(k in extra)) delete env[k];
   }
   return env;
@@ -111,6 +114,55 @@ const HOME = os.homedir();
   ok('LB-6 default REPO unchanged', def === 'willfell/sauce');
   const bound = nodeEvalClean(`console.log(require(${JSON.stringify(COORD)}).REPO);`, { SAUCE_LOOP_REPO: 'willfell/ero-copilot-iac' });
   ok('LB-6 REPO override honored', bound === 'willfell/ero-copilot-iac');
+}
+
+// LB-7: REPO must be BINDING-derived, not env-only — the same seam as BOARD and
+// CARDS_ROOT. Found in real-data validation: `adopt` run from a bound repo with
+// no env verified `--pr` against willfell/sauce (the coordinator default) while
+// BOARD/CARDS_ROOT correctly self-resolved to that repo's board, so it checked a
+// completely unrelated repository's PR of the same number and refused
+// `adopt_pr_mismatch`. `adopt` has no plugin-mediated invocation path, so the
+// documented CLI form never had the env var set.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-binding-repo-'));
+  const vault = path.join(tmp, 'vault');
+  fs.mkdirSync(path.join(vault, 'spice', 'projects', 'probe', 'tasks'), { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: tmp });
+  execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:willfell/probe-repo.git'], { cwd: tmp });
+  fs.mkdirSync(path.join(tmp, '.loop'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, '.loop', 'config.json'), JSON.stringify({
+    schema_version: '1.0.0',
+    project: { slug: 'probe', name: 'Probe' },
+    vault: { root: vault },
+    board: {
+      project_root: 'spice/projects/probe',
+      board_path: 'spice/projects/probe/probe-board.md',
+      cards_root: 'spice/projects/probe/tasks',
+    },
+    ids: { default_prefix: 'PB' },
+    policy: { batch_policy: 'continue', execution_mode: 'release', deploy_subscriptions: [], deploy_vaults: [], verify_commands: [] },
+    coordinator: { resolve: 'brew' },
+  }, null, 2));
+  const read = (script) => execFileSync(process.execPath, ['-e', script], {
+    encoding: 'utf8', cwd: tmp, env: cleanEnv(),
+  }).trim();
+  const out = JSON.parse(read(
+    `const c = require(${JSON.stringify(COORD)}); console.log(JSON.stringify({ repo: c.REPO, board: c.BOARD }));`));
+  ok('LB-7 REPO self-resolves from the bound repo origin remote', out.repo === 'willfell/probe-repo',
+    `got ${out.repo}`);
+  ok('LB-7 BOARD still self-resolves for the same binding', out.board === path.join(vault, 'spice/projects/probe/probe-board.md'),
+    `got ${out.board}`);
+  // Env still wins over the binding, for both fields.
+  const overridden = execFileSync(process.execPath, ['-e', `console.log(require(${JSON.stringify(COORD)}).REPO);`], {
+    encoding: 'utf8', cwd: tmp, env: cleanEnv({ SAUCE_LOOP_REPO: 'willfell/explicit' }),
+  }).trim();
+  ok('LB-7 explicit SAUCE_LOOP_REPO still overrides the binding', overridden === 'willfell/explicit');
+  // An UNBOUND cwd keeps the historical sauce default rather than guessing.
+  const unbound = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-unbound-'));
+  const bare = execFileSync(process.execPath, ['-e', `console.log(require(${JSON.stringify(COORD)}).REPO);`], {
+    encoding: 'utf8', cwd: unbound, env: cleanEnv(),
+  }).trim();
+  ok('LB-7 unbound cwd falls back to the sauce default', bare === 'willfell/sauce');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
