@@ -192,15 +192,16 @@ function assertLegacyPillRules(coreSource, dailySource) {
     ".sauce-section-open-pill",
     ".sauce-section-overdue-pill",
     ".sauce-section-done-pill",
+    ".sauce-section-count-pill",
   ];
   const dailyRules = selectorBoundRuleBytes(
     dailySource,
     (rule) => dailyFragments.some((fragment) => rule.selector.includes(fragment)),
   );
-  assert.strictEqual(dailyRules.length, 11, "legacy Daily count-pill rule family changed");
+  assert.strictEqual(dailyRules.length, 12, "legacy Daily count-pill rule family changed");
   assert.strictEqual(
     sha256(dailyRules.join("\n")),
-    "5d36e5b8597e8c993f0f1794edd35323a1bd085611704414a853afcd1ddff33d",
+    "1b2fbfaac8bf29927b3495db087ca06962f7290a4344b937521ff08e8fc45718",
     "legacy Daily count-pill selector/declaration bytes changed",
   );
 }
@@ -214,9 +215,13 @@ function assertTogglePillContract(source) {
   const active = parsed.find((rule) => (
     rule.selector === "body .sauce-pill-toggle.is-active.sauce-pill-toggle.sauce-pill-toggle"
   ));
+  const focusVisible = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible"
+  ));
   assert.ok(group, "missing exact .sauce-pill-group selector");
   assert.ok(toggle, "missing specificity-bound .sauce-pill-toggle selector");
   assert.ok(active, "missing specificity-bound .sauce-pill-toggle.is-active selector");
+  assert.ok(focusVisible, "missing specificity-bound .sauce-pill-toggle:focus-visible selector");
   assert.match(group.declarations, /display:\s*inline-flex/);
   assert.match(group.declarations, /gap:\s*var\(--size-4-1,\s*4px\)/);
 
@@ -239,6 +244,12 @@ function assertTogglePillContract(source) {
   ]) {
     assert.ok(active.declarations.includes(contract), "toggle active state lost " + contract);
   }
+  assert.ok(
+    focusVisible.declarations.includes("outline: 2px solid var(--interactive-accent, #7c3aed)"),
+    "toggle focus-visible state lost its accent outline",
+  );
+  assert.ok(focusVisible.declarations.includes("outline-offset: 2px"),
+    "toggle focus-visible state lost its outline offset");
   assert.ok(compareSpecificity(specificity(active.selector), specificity(toggle.selector)) > 0,
     "active toggle selector must outrank the base toggle selector");
   const baselineButtons = rules(theme).filter((rule) => rule.selector.includes("button:where("));
@@ -442,6 +453,17 @@ test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primit
     /missing specificity-bound \.sauce-pill-toggle selector/,
     "weak base selector must turn the focused fixture red",
   );
+
+  const weakenedFocus = css.replace(
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {",
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus {",
+  );
+  assert.notStrictEqual(weakenedFocus, css, "focus-visible mutation did not reach its fixture");
+  assert.throws(
+    () => assertTogglePillContract(weakenedFocus),
+    /missing specificity-bound \.sauce-pill-toggle:focus-visible selector/,
+    "a weakened focus-visible selector must turn the focused fixture red",
+  );
 });
 
 test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", () => {
@@ -467,6 +489,17 @@ test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", (
     () => assertLegacyPillRules(css, dailyPseudoMutation),
     /legacy Daily count-pill selector\/declaration bytes changed/,
     "a Daily count-pill pseudo-selector mutation must turn the focused fixture red",
+  );
+
+  const neutralCountMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-count-pill {",
+    "body .space-daily-dashboard .sauce-section-count-pill {",
+  );
+  assert.notStrictEqual(neutralCountMutation, dailyCss, "neutral count-pill mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, neutralCountMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a neutral count-pill selector mutation must turn the focused fixture red",
   );
 });
 
