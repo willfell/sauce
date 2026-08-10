@@ -146,20 +146,14 @@ function epicNameForCard(spec, card) {
   return card.parent_title || linkName(spec.epic);
 }
 
-// The vault-relative project prefix, derived from the ON-DISK cards root rather
-// than from caller input. Mirrors the coordinator's `physicalProjectPrefix`
-// (codex-coordinator.js) — which is the authority the projection contract checks
-// against — but returns '' for a non-canonical root instead of throwing, so
-// fixtures and non-vault roots keep the legacy caller-derived behavior.
-function physicalProjectPrefix(cardsRoot) {
+// Non-throwing wrapper over the shared canonical authority
+// (delivery.topology.physicalProjectPrefix). Returns '' for a non-vault /
+// fixture root instead of throwing, so fixtures keep legacy caller-derived
+// behavior; the canonical logic itself is no longer duplicated here.
+function safePhysicalProjectPrefix(cardsRoot) {
   if (!cardsRoot) return '';
-  let projectRoot;
-  try { projectRoot = path.dirname(fs.realpathSync(cardsRoot)).replace(/\\/g, '/'); }
+  try { return delivery.topology.physicalProjectPrefix(cardsRoot).prefix; }
   catch (_) { return ''; }
-  const markerAt = projectRoot.lastIndexOf('/spice/projects/');
-  if (markerAt < 0) return '';
-  const relative = projectRoot.slice(markerAt + 1);
-  return /^spice\/projects\/[^/]+$/.test(relative) ? relative : '';
 }
 
 // The project prefix every emitted board reference is rooted at. Deriving it from
@@ -169,7 +163,7 @@ function physicalProjectPrefix(cardsRoot) {
 // absolute source boards and project-relative epic/slice backlinks that the
 // coordinator's vault-relative binding check then refused forever.
 function projectPrefix(spec) {
-  return physicalProjectPrefix(spec.cards_root)
+  return safePhysicalProjectPrefix(spec.cards_root)
     || (() => {
       const source = normalizePath(spec.source_board || '');
       return source && !path.isAbsolute(source) ? path.posix.dirname(source) : '';
@@ -181,22 +175,23 @@ function projectPrefix(spec) {
 // board to sit directly in the project root, so the basename is the only part of
 // the caller's absolute path that survives.
 function parentBoardRef(spec) {
-  const prefix = physicalProjectPrefix(spec.cards_root);
+  const prefix = safePhysicalProjectPrefix(spec.cards_root);
   const board = normalizePath(spec.board_path || '');
-  if (prefix && board) return path.posix.join(prefix, path.posix.basename(board));
+  if (prefix && board) return delivery.topology.parentBoardRef(prefix, path.posix.basename(board));
   return spec.source_board || spec.board_path;
 }
 
 function epicRoute(spec, epic) {
   const prefix = projectPrefix(spec);
+  const canonical = prefix && prefix !== '.' ? delivery.topology.epicBindingPaths(prefix, epic) : null;
   const relative = (...parts) => normalizePath(path.posix.join(prefix === '.' ? '' : prefix, 'tasks', epic, ...parts));
   return {
     epic,
     root: path.join(spec.cards_root, epic),
     atlas_path: path.join(spec.cards_root, epic, `${epic}.md`),
     board_path: path.join(spec.cards_root, epic, 'board', `${epic}-board.md`),
-    atlas_ref: relative(`${epic}.md`),
-    board_ref: relative('board', `${epic}-board.md`),
+    atlas_ref: canonical ? canonical.atlasRef : relative(`${epic}.md`),
+    board_ref: canonical ? canonical.boardRef : relative('board', `${epic}-board.md`),
   };
 }
 

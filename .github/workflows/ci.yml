@@ -48,6 +48,26 @@ jobs:
         run: |
           rm -rf "$RUNNER_TEMP/sauce-ci-vault" 2>/dev/null || true
 
+  pr-title-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sauce repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Gate PR-title bump against branch commits
+        run: node scripts/release/check-title-bump.js --title "$PR_TITLE" --base "origin/$BASE_REF"
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+
   released-formula-smoke:
     name: released formula smoke (non-required)
     if: github.event_name != 'pull_request'

@@ -696,12 +696,13 @@ check('DEL-MAN-2 registry is installed in a non-loader content tree',
   && [...installed.values()].every((dest) => !dest.startsWith('{{scripts_path}}/')
     && !dest.startsWith('{{templater_scripts_path}}/')));
 check('DEL-MAN-3 public API and semantic scripts are installed together', [
-  'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js',
+  'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js', 'scripts/delivery-topology.js',
 ].every((source) => installed.has(source)));
 eq('DEL-MAN-3a every installed source has its exact non-loader destination', Object.fromEntries(installed), {
   'data/delivery-schema.json': '{{content_path}}/delivery/data/delivery-schema.json',
   'scripts/delivery-contract.js': '{{content_path}}/delivery/scripts/delivery-contract.js',
   'scripts/delivery-schema-cli.js': '{{content_path}}/delivery/scripts/delivery-schema-cli.js',
+  'scripts/delivery-topology.js': '{{content_path}}/delivery/scripts/delivery-topology.js',
   'index.js': '{{content_path}}/delivery/index.js',
 });
 const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-contract-install-'));

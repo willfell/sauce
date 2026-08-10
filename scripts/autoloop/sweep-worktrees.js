@@ -13,7 +13,14 @@ const { execFileSync, spawnSync } = require('child_process');
 
 const MAXBUF = 64 * 1024 * 1024;
 const LOCK_NAMES = ['worktree-sweep', 'selector', 'homebrew-promotion'];
-const TERMINAL_PHASES = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
+// Terminal phases whose records never own a live worktree. `adopted` is
+// currently unreachable here — the caller short-circuits on `!record.worktree`
+// first, and adopt refuses any card that already has a record, so an adoption
+// and a claim-created worktree cannot coexist — but a terminal-phase set that
+// silently omits a terminal phase is a trap for the next change. `discarded` is
+// deliberately still absent: a discarded record's worktree is reap's business,
+// not this sweep's.
+const TERMINAL_PHASES = new Set(['deployed', 'adopted', 'blocked', 'failed', 'cancelled']);
 const REPORT_KEYS = [
   'safe_to_remove', 'removed', 'dirty', 'unmerged', 'locked',
   'active_or_in_use', 'detached', 'outside_managed_roots', 'needs_inspection',

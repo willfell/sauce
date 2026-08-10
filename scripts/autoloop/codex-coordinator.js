@@ -21,6 +21,10 @@ const {
   parseBoard, parseCheckedColumn, parseDependsOn, parseCardStatus, parseBatchPolicy,
   delivery, prepareDeliveryCard, validationReason,
 } = require('./select-card');
+const {
+  physicalProjectPrefix, canonicalWorkspacePath, epicBindingPaths, parentBoardRef,
+  resolveSliceAuthority, assertProjectableStatus,
+} = delivery.topology;
 const { cmpVersion } = require('./deploy');
 const { gateVerdict } = require('./gate');
 const { parseCommit, bumpLevel } = require('../release/lib/conventional');
@@ -33,10 +37,6 @@ const {
 
 const execFileAsync = promisify(execFile);
 const MAXBUF = 64 * 1024 * 1024;
-// SAUCE_LOOP_REPO (loop-plugin bindings): the GitHub repo record-pr/advance
-// query. Derived by the resolver from the bound repo's origin remote; absent
-// env keeps the historical sauce default.
-const REPO = process.env.SAUCE_LOOP_REPO || 'willfell/sauce';
 const TAP_REPO = 'willfell/homebrew-sauce';
 const MAX_ACTIVE = 3;
 const LEASE_TTL_MS = 2 * 60 * 60 * 1000; // per-card session lease: generous, time-based only —
@@ -56,6 +56,8 @@ const STRICT_CLI_OPTIONS = Object.freeze({
   'break-lease': ['json', 'card', 'reason'],
   'supersession-depth': ['json', 'card'],
   'heal-epic-bindings': ['json', 'apply', 'dry-run'],
+  'board-health': ['json', 'write-note'],
+  adopt: ['json', 'card', 'pr', 'merge-sha', 'reason'],
 });
 // Loop-binding env seam (loop plugin `.loop/config.json` → loop-config.js
 // resolver → SAUCE_LOOP_* env). With no SAUCE_LOOP_* set, every derived value
@@ -98,7 +100,15 @@ function resolveBoundDefaults(cwd) {
     if (c.env && c.env.SAUCE_LOOP_VAULTS) {
       try { vaults = JSON.parse(c.env.SAUCE_LOOP_VAULTS); } catch (_) { vaults = null; }
     }
-    return { board: c.board_path_abs, cardsRoot: c.cards_root_abs, vaults };
+    return {
+      board: c.board_path_abs,
+      cardsRoot: c.cards_root_abs,
+      vaults,
+      // The resolver derives this from the bound repo's origin remote. It is
+      // part of the same binding, so it must self-resolve on the same terms as
+      // board/cardsRoot — see REPO below.
+      repo: (c.env && c.env.SAUCE_LOOP_REPO) || null,
+    };
   } catch (_) { return null; }
 }
 const LOOP_BINDING = loopBindingEnv();
@@ -106,9 +116,23 @@ const LOOP_BINDING = loopBindingEnv();
 // committed .loop/config.json (process.cwd()) so the coordinator's board, cards
 // root and vault list track the binding rather than a machine-specific literal.
 // The ~/obsidian/<vault> literals below are the last resort for an unbound cwd.
-const BOUND_DEFAULTS = (LOOP_BINDING.board && LOOP_BINDING.cardsRoot && LOOP_BINDING.vaults)
+// SAUCE_LOOP_REPO is part of this same guard: resolving only when board/cards/
+// vaults are all env-supplied would leave REPO on the sauce default for a repo
+// that set the vault seam explicitly but not the repo slug.
+const BOUND_DEFAULTS = (LOOP_BINDING.board && LOOP_BINDING.cardsRoot && LOOP_BINDING.vaults
+  && process.env.SAUCE_LOOP_REPO)
   ? null
   : resolveBoundDefaults(process.cwd());
+// SAUCE_LOOP_REPO (loop-plugin bindings): the GitHub repo that record-pr,
+// advance and adopt query. Explicit env wins; otherwise it self-resolves from
+// the bound repo's origin remote exactly as BOARD/CARDS_ROOT self-resolve from
+// the same .loop/config.json; an unbound cwd keeps the historical sauce
+// default. Env-only resolution was a real defect: `adopt` run from a bound repo
+// found the right card in the right vault and then verified --pr against
+// willfell/sauce, checking an unrelated repository's PR of the same number.
+const REPO = process.env.SAUCE_LOOP_REPO
+  || (BOUND_DEFAULTS && BOUND_DEFAULTS.repo)
+  || 'willfell/sauce';
 // Contract vocabulary vs deployment binding: a card's deploy_subscriptions map
 // always carries the contract's required_vaults keys; the BINDING's vault list
 // (SAUCE_LOOP_VAULTS) decides which vaults this board actually deploys to. An
@@ -122,7 +146,7 @@ const AMEND_CONTRACT_OPTIONS = new Set([
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
   'expected-batch-policy', 'desired-batch-policy',
 ]);
-const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled', 'discarded']);
+const TERMINAL = new Set(['deployed', 'blocked', 'failed', 'cancelled', 'discarded', 'adopted']);
 const RECOVER_DEPLOYED_PHASES = new Set([
   'feature_pr', 'feature_merged', 'release_pr', 'release_merged', 'tagged',
   'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'blocked', 'needs-inspection',
@@ -1953,6 +1977,11 @@ function projectionMapping(phase) {
     blocked: { column: 'Blocked', status: 'blocked', complete: false },
     'needs-inspection': { column: 'Blocked', status: 'blocked', complete: false },
     deployed: { column: 'Completed', status: 'completed', complete: true },
+    // The verified out-of-band completion (see commandAdopt). Terminal and
+    // projectable exactly like `deployed`, but it carries PR/merge-sha
+    // provenance instead of deployment receipts — resolveSliceAuthority's
+    // `adopted` source is how consumers tell the two apart.
+    adopted: { column: 'Completed', status: 'completed', complete: true },
   }[phase] || null;
 }
 
@@ -1960,8 +1989,19 @@ function effectiveProjectionMapping(record, raw = '') {
   const mapping = record && projectionMapping(record.phase);
   const canonicalSlice = scalarField(raw, 'type') === 'slice'
     && Boolean(normalizeCardLink(scalarField(raw, 'epic')));
+  // A legacy `completed` phase with no deployment receipts is unproven and
+  // demotes. An `adopted` phase is ALSO `completed`-status with no deployment
+  // receipts by construction (adoption records PR/merge-sha provenance, never
+  // fabricates deployment proof) — but it is proven a different way, and
+  // resolveSliceAuthority already carries this exact exemption for its own
+  // callers. Without it here too, `adopted` — freshly a real, projectable
+  // phase — would get demoted right back to `implementing` on every read:
+  // commandStatus would wedge on phantom board_drift/projection_problems, and
+  // the advertised drift remedy (single-card reconcile) would rewrite the
+  // board line and note frontmatter back to in-progress, permanently
+  // un-completing an adopted slice on every repair pass.
   if (mapping && canonicalSlice && mapping.status === 'completed'
-    && !successfulDeploymentReceipts(record)) {
+    && !successfulDeploymentReceipts(record) && !(record && record.adoption)) {
     return projectionMapping('implementing');
   }
   return mapping;
@@ -2042,26 +2082,6 @@ function atomicWriteText(file, value) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, value);
   fs.renameSync(tmp, file);
-}
-
-function canonicalWorkspacePath(value, expected) {
-  const raw = String(value || '').trim().replace(/\\/g, '/');
-  const parts = raw.split('/');
-  return Boolean(raw) && !raw.startsWith('/') && !/^[A-Za-z]:\//.test(raw)
-    && !parts.some((part) => !part || part === '.' || part === '..')
-    && raw === expected;
-}
-
-function physicalProjectPrefix(cardsRoot) {
-  const projectRoot = path.dirname(fs.realpathSync(cardsRoot)).replace(/\\/g, '/');
-  const marker = '/spice/projects/';
-  const markerAt = projectRoot.lastIndexOf(marker);
-  if (markerAt < 0) throw new Error('canonical cards root is outside spice/projects');
-  const relative = projectRoot.slice(markerAt + 1);
-  if (!/^spice\/projects\/[^/]+$/.test(relative)) {
-    throw new Error('canonical cards root is not one project directly under spice/projects');
-  }
-  return { prefix: relative, root: projectRoot };
 }
 
 function physicalDescendant(root, target, label) {
@@ -2188,14 +2208,13 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   const parentKanbanBoard = scalarField(atlasRaw, 'kanban_board');
   const physicalProject = physicalProjectPrefix(cardsRoot);
   const projectPrefix = physicalProject.prefix;
-  const expectedParentBoardPath = path.posix.join(projectPrefix, path.basename(parentBoardPath));
+  const expectedParentBoardPath = parentBoardRef(projectPrefix, path.basename(parentBoardPath));
   if (parentSourceBoard !== parentKanbanBoard
     || !canonicalWorkspacePath(parentSourceBoard, expectedParentBoardPath)
     || path.dirname(fs.realpathSync(parentBoardPath)).replace(/\\/g, '/') !== physicalProject.root) {
     throw new Error(`epic atlas ${epic} does not bind its canonical parent board`);
   }
-  const expectedAtlasPath = path.posix.join(projectPrefix, 'tasks', epic, `${epic}.md`);
-  const expectedBoardPath = path.posix.join(projectPrefix, 'tasks', epic, 'board', `${epic}-board.md`);
+  const { atlasRef: expectedAtlasPath, boardRef: expectedBoardPath } = epicBindingPaths(projectPrefix, epic);
   const backlink = scalarField(atlasRaw, 'epic_board');
   if (!canonicalWorkspacePath(backlink, expectedBoardPath)) {
     throw new Error(`epic atlas ${epic} does not bind its canonical board`);
@@ -2266,7 +2285,6 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
   const findings = [];
   const slices = cards.map((name) => {
     const tracked = surface.state.cards && surface.state.cards[name];
-    const trackedMapping = tracked && projectionMapping(tracked.phase);
     const slicePath = path.join(path.dirname(surface.boardPath), `${name}.md`);
     if (!fs.existsSync(slicePath)) throw new Error(`epic slice ${name} note is missing`);
     const sliceRaw = fs.readFileSync(slicePath, 'utf8');
@@ -2277,49 +2295,50 @@ function deriveEpicProjection(surface, currentCard, currentStatus) {
       status,
       cross_epic_dependency: dependencies.some((dependency) => !siblings.has(dependency)),
     });
-    if (name === currentCard) {
-      if (currentStatus === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        findings.push(legacyCompletionFinding(surface, name, tracked));
-        return decorate('in_progress');
-      }
-      return decorate(currentStatus);
+    // The live claim's status overrides the ledger phase for that one card.
+    const hasRecord = name === currentCard || Boolean(tracked && projectionMapping(tracked.phase));
+    const ledgerStatus = name === currentCard
+      ? currentStatus
+      : (tracked && projectionMapping(tracked.phase) ? projectionMapping(tracked.phase).status : null);
+    const boardStatus = delivery.normalizeStatus(scalarField(sliceRaw, 'status') || 'planning')
+      || (scalarField(sliceRaw, 'status') || 'planning');
+    const verdict = resolveSliceAuthority({
+      hasRecord,
+      ledgerStatus,
+      boardStatus,
+      doneProven: successfulDeploymentReceipts(tracked),
+      boardIsSlice: true,
+      adopted: Boolean(tracked && tracked.adoption),
+    });
+    assertProjectableStatus(verdict);
+    if (verdict.demoted) {
+      findings.push(legacyCompletionFinding(surface, name, verdict.source === 'ledger' ? tracked : null));
     }
-    if (trackedMapping) {
-      if (trackedMapping.status === 'completed' && !successfulDeploymentReceipts(tracked)) {
-        findings.push(legacyCompletionFinding(surface, name, tracked));
-        return decorate('in_progress');
-      }
-      return decorate(trackedMapping.status);
-    }
-    const status = scalarField(sliceRaw, 'status') || 'planning';
-    if (delivery.normalizeStatus(status) === 'completed') {
-      findings.push(legacyCompletionFinding(surface, name));
-      return decorate('in_progress');
-    }
-    return decorate(status);
+    return decorate(verdict.status);
   });
   return { ...delivery.deriveEpicLifecycle(slices), findings };
 }
 
 function noteProjectionMapping(raw, record = null) {
-  const tracked = record && projectionMapping(record.phase);
-  if (tracked) {
-    if (tracked.status === 'completed' && !successfulDeploymentReceipts(record)) {
-      return projectionMapping('implementing');
-    }
-    return tracked;
-  }
-  const status = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
-  if (status === 'completed' && scalarField(raw, 'type') === 'slice') {
-    return projectionMapping('implementing');
-  }
-  return {
+  const statusMap = {
     planning: { column: 'In Planning', complete: false, status: 'planning' },
     in_progress: { column: 'In Progress', complete: false, status: 'in_progress' },
     parked: { column: 'In Progress', complete: false, status: 'parked' },
     blocked: { column: 'Blocked', complete: false, status: 'blocked' },
     completed: { column: 'Completed', complete: true, status: 'completed' },
-  }[status];
+  };
+  const tracked = record && projectionMapping(record.phase);
+  const boardStatus = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+  const verdict = resolveSliceAuthority({
+    hasRecord: Boolean(tracked),
+    ledgerStatus: tracked ? tracked.status : null,
+    boardStatus,
+    doneProven: successfulDeploymentReceipts(record),
+    boardIsSlice: scalarField(raw, 'type') === 'slice',
+    adopted: Boolean(record && record.adoption),
+  });
+  assertProjectableStatus(verdict);
+  return statusMap[verdict.status];
 }
 
 function auditReconcileFinding(
@@ -2636,11 +2655,50 @@ function durablePathBarrier(file, deps = {}) {
   flush(path.dirname(file));
 }
 
+// Stamp the ledger's belief about what's on disk for a tracked card note.
+// Always rereads the file after any write attempt, so the recorded hash
+// reflects bytes actually on disk — never merely intended bytes — regardless
+// of what the writeText implementation in scope actually did (a real write,
+// an atomic replace, or in a test double, a non-persisting capture). This is
+// the one place that knows how `card_note_sha` is derived and when it is
+// recorded; every coordinator write path that can touch a tracked card's
+// note calls it instead of hashing the intended bytes directly. No-ops when
+// there is no ledger record for the note — an untracked card has nothing to
+// stamp, deliberately, not by accident.
+function stampCardNoteSha(record, cardPath) {
+  if (!record) return;
+  record.card_note_sha = sha256Text(fs.readFileSync(cardPath, 'utf8'));
+}
+
 function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const mapping = projectionMapping(phase);
-  if (!mapping) return { changed: false, skipped: true };
+  if (!mapping) return { changed: false, skipped: true, foreign_write: null };
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
+  // Cross-process write detection. The selector lock lives in this clone's
+  // .git and cannot constrain KanbanStatusSync (Obsidian, at vault boot) or
+  // Obsidian Sync (another machine) — writers that will never consult a lock.
+  // So compare against the exact bytes this coordinator last wrote. For a
+  // tracked card the finding is the deliverable: refusing here would wedge the
+  // loop on a cosmetic edit, and `adopt` does not apply to a card with a record.
+  const recordForSha = opts.record || null;
+  const observedSha = sha256Text(cardRaw);
+  let foreignWrite = null;
+  if (recordForSha) {
+    if (recordForSha.card_note_sha && recordForSha.card_note_sha !== observedSha) {
+      foreignWrite = {
+        detected_at: (opts.now || (() => new Date().toISOString()))(),
+        expected_sha: recordForSha.card_note_sha,
+        actual_sha: observedSha,
+      };
+      recordForSha.foreign_write = foreignWrite;
+    } else {
+      // Comparison passed (or there is no prior baseline yet): any earlier
+      // finding is now stale. Clear it so the record reflects the current
+      // situation, not an old resolved one.
+      delete recordForSha.foreign_write;
+    }
+  }
   const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, {
     ...opts,
     currentCard: card,
@@ -2724,12 +2782,14 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const writeText = opts.writeText || atomicWriteText;
   if (boardChanged) writeText(sliceBoardPath, boardNext);
   if (cardNext !== cardRaw) writeText(resolvedCardPath, cardNext);
+  stampCardNoteSha(recordForSha, resolvedCardPath);
   if (epicBoardChanged) writeText(boardPath, parentNext);
   if (epicAtlasChanged) writeText(epicSurface.atlasPath, atlasNext);
   const result = {
     changed: boardChanged || cardNext !== cardRaw || epicBoardChanged || epicAtlasChanged,
     board_changed: boardChanged,
     card_changed: cardNext !== cardRaw,
+    foreign_write: foreignWrite,
   };
   if (epicSurface) Object.assign(result, {
     epic_board_changed: epicBoardChanged,
@@ -4288,6 +4348,7 @@ function scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d) {
       const rewritten = rewriteDependsOn(raw, predecessor, target);
       if (rewritten.changed) {
         d.writeText(full, rewritten.text);
+        stampCardNoteSha(record, full); // no-op when depName is untracked
         rewrites.push({ card: depName, from: predecessor, to: target, path: full });
       }
     }
@@ -4343,7 +4404,14 @@ async function discardCardCore(ctx, operands, d) {
     throw new Error(`card ${card} is already discarded with different operands; replay must be literal`);
   }
   if (record && record.phase !== 'parked' && !['blocked', 'failed', 'cancelled'].includes(record.phase)) {
-    throw new Error(`discard refuses ${record.phase === 'deployed' ? 'deployed' : 'active in-flight'} work; ${card} is ${record.phase}`);
+    // `deployed` and `adopted` are TERMINAL — finished work, not work in
+    // flight. Both refuse, but describing a completed card as "active
+    // in-flight" misreports the state to whoever has to act on it, and a bare
+    // Error left every case in this class indistinguishable from any other
+    // `command_failed` to a machine caller.
+    const completed = ['deployed', 'adopted'].includes(record.phase);
+    refuse('discard-refused', completed ? 'discard_completed_work' : 'discard_active_work',
+      `discard refuses ${completed ? 'completed' : 'active in-flight'} work; ${card} is ${record.phase}`);
   }
   const cardPath = resolveCardPath(record ? record.card_path : null, card, cardsRoot);
   const noteExists = Boolean(cardPath && fs.existsSync(cardPath));
@@ -4392,6 +4460,15 @@ async function discardCardCore(ctx, operands, d) {
   let dependencyScan = { rewrites: [], reports: [] };
   if (supersededBy) {
     dependencyScan = scanDependentsForDiscard(card, supersededBy, state, cardsRoot, d);
+    // The scan stamps card_note_sha on every tracked dependent it rewrites,
+    // in-memory on `state.cards`. The `persist(ctx, state, target)` call
+    // above only wrote `target` (the discarded card's own record) — a
+    // dependent's stamp needs its own persist, and the merge form (no
+    // changedRecord) covers however many dependents were touched in one
+    // write. Only when at least one rewritten dependent was actually tracked
+    // does this run, so an untracked-only scan stays a no-op write.
+    const stampedDependent = dependencyScan.rewrites.some((r) => state.cards[r.card]);
+    if (stampedDependent) persist(ctx, state);
   }
 
   const boardNext = removeBoardCard(boardRaw, card);
@@ -4446,9 +4523,9 @@ async function discardCardCore(ctx, operands, d) {
 function canonicalEpicBindings(epic, cardsRoot, parentBoardPath) {
   const { prefix } = physicalProjectPrefix(cardsRoot);
   return {
-    parentBoard: path.posix.join(prefix, path.basename(parentBoardPath)),
-    atlas: path.posix.join(prefix, 'tasks', epic, `${epic}.md`),
-    board: path.posix.join(prefix, 'tasks', epic, 'board', `${epic}-board.md`),
+    parentBoard: parentBoardRef(prefix, path.basename(parentBoardPath)),
+    atlas: epicBindingPaths(prefix, epic).atlasRef,
+    board: epicBindingPaths(prefix, epic).boardRef,
   };
 }
 
@@ -4481,13 +4558,15 @@ function planEpicBindingHeal(cardsRoot, parentBoardPath) {
     const atlasFields = drift(atlasRaw, [
       ['source_board', want.parentBoard], ['kanban_board', want.parentBoard], ['epic_board', want.board],
     ]);
-    if (Object.keys(atlasFields).length) atlases.push({ epic, path: atlasPath, fields: atlasFields });
+    if (Object.keys(atlasFields).length) {
+      atlases.push({ epic, path: atlasPath, fields: atlasFields, preimage_sha: sha256Text(atlasRaw) });
+    }
     const boardRaw = fs.readFileSync(epicBoardPath, 'utf8');
     const parsed = parseBoard(boardRaw);
     for (const name of ['In Planning', 'In Progress', 'Blocked', 'Completed'].flatMap((c) => parsed[c] || [])) {
       const notePath = path.join(boardDir, `${name}.md`);
       if (!fs.existsSync(notePath)) {
-        orphanLines.push({ board: epicBoardPath, epic, card: name });
+        orphanLines.push({ board: epicBoardPath, epic, card: name, preimage_sha: sha256Text(boardRaw) });
         continue;
       }
       const sliceRaw = fs.readFileSync(notePath, 'utf8');
@@ -4495,7 +4574,9 @@ function planEpicBindingHeal(cardsRoot, parentBoardPath) {
       const sliceFields = drift(sliceRaw, [
         ['task_parent', want.atlas], ['source_board', want.board], ['kanban_board', want.board],
       ]);
-      if (Object.keys(sliceFields).length) slices.push({ card: name, epic, path: notePath, fields: sliceFields });
+      if (Object.keys(sliceFields).length) {
+        slices.push({ card: name, epic, path: notePath, fields: sliceFields, preimage_sha: sha256Text(sliceRaw) });
+      }
     }
   }
   return { atlases, slices, orphanLines };
@@ -4506,8 +4587,13 @@ function planEpicBindingHeal(cardsRoot, parentBoardPath) {
 // the target state is derived entirely from the on-disk canonical form rather
 // than from operator-supplied operands, so recomputing at apply time is exactly
 // as safe as replaying a recorded intent, and the verb is idempotent by
-// construction. It touches ONLY the drifted frontmatter fields and the orphaned
-// board lines — never bodies, ledger state, worktrees, or lane placement.
+// construction. It touches ONLY the drifted frontmatter fields and the
+// orphaned board lines — never bodies, worktrees, or lane placement. It IS a
+// ledger writer: for each tracked slice it rewrites, it stamps that record's
+// `card_note_sha` to the healed bytes (so its own repair is never mistaken
+// for a foreign write on the next projection) and persists — but only when
+// it actually stamped something, so a run that touches nothing tracked, or
+// finds nothing drifted, stays a genuine no-op write.
 async function commandHealEpicBindings(ctx, args, deps = {}) {
   requireOnlyOptions(args, 'heal-epic-bindings', STRICT_CLI_OPTIONS['heal-epic-bindings']);
   if (args.json !== true) throw new Error('heal-epic-bindings requires --json for a machine-readable receipt');
@@ -4518,15 +4604,64 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const writeText = deps.writeText || atomicWriteText;
   const transitionLock = deps.withLock || withLock;
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   return transitionLock(ctx, 'selector', async () => {
     const plan = planEpicBindingHeal(cardsRoot, boardPath);
     const { atlases, slices, orphanLines } = plan;
+    // Test-only seam: lets a test simulate a second writer landing on disk in
+    // the window between planning and the concurrent-modification check below.
+    if (deps.planHook) deps.planHook();
     if (apply) {
+      // The plan was computed from bytes on disk. If anything moved underneath
+      // it — a live loop session, Obsidian Sync, a Codex session — apply is
+      // refused with zero writes rather than silently clobbering the other
+      // writer. This is the enforced form of what delivery-board.md used to
+      // only warn about. Must run before any write, and before the stamp/
+      // persist below — a refused run leaves both the vault and the ledger
+      // completely untouched.
+      // A read failure (deleted or renamed out from under the plan — exactly
+      // what a sync client does) is itself evidence of a concurrent writer,
+      // not a separate failure mode: it must fail closed through this same
+      // sanctioned refusal, never bubble up as a raw ENOENT.
+      const changed = [];
+      for (const target of [...atlases, ...slices]) {
+        let raw;
+        try { raw = fs.readFileSync(target.path, 'utf8'); }
+        catch (_) { changed.push(target.path); continue; }
+        if (sha256Text(raw) !== target.preimage_sha) changed.push(target.path);
+      }
+      for (const board of new Set(orphanLines.map((o) => o.board))) {
+        const expected = orphanLines.find((o) => o.board === board).preimage_sha;
+        let raw;
+        try { raw = fs.readFileSync(board, 'utf8'); }
+        catch (_) { changed.push(board); continue; }
+        if (sha256Text(raw) !== expected) changed.push(board);
+      }
+      if (changed.length) {
+        refuse('heal-epic-bindings-refused', 'concurrent_modification',
+          `targets changed after planning; another writer is active: ${[...new Set(changed)].join(', ')}`);
+      }
+      // Ledger lookup for the card_note_sha stamp below is best-effort: this
+      // verb repairs frontmatter bindings from on-disk canonical form alone
+      // and has never required a ledger to run. A caller whose ctx carries no
+      // state location still heals; it just has nothing tracked to stamp.
+      let state;
+      try { state = loadState(ctx); } catch (_) { state = { cards: {} }; }
+      let stampedAny = false;
       for (const target of [...atlases, ...slices]) {
         const raw = fs.readFileSync(target.path, 'utf8');
         const patch = {};
         for (const [key, change] of Object.entries(target.fields)) patch[key] = JSON.stringify(change.to);
         writeText(target.path, patchFrontmatter(raw, patch));
+        // Atlas targets have no `.card` — an epic atlas is never a tracked
+        // ledger record. `slices` targets do; a missing record means an
+        // untracked slice, deliberately, not by accident — nothing to stamp.
+        const record = target.card ? (state.cards || {})[target.card] : null;
+        if (record) {
+          stampCardNoteSha(record, target.path);
+          stampedAny = true;
+        }
       }
       // Group by board so one board with several orphans is written once.
       const byBoard = new Map();
@@ -4539,6 +4674,11 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
         for (const card of cards) raw = removeBoardCard(raw, card);
         writeText(board, raw);
       }
+      // A stamp that never reaches disk is not a stamp — persist whatever
+      // records this pass touched (the merge form: an unbounded number of
+      // slices can be healed in one run). A no-op run (nothing tracked, or
+      // nothing drifted) touches nothing here and stays a no-op.
+      if (stampedAny) persist(ctx, state);
     }
     return successReceipt('heal-epic-bindings', {
       no_op: !atlases.length && !slices.length && !orphanLines.length,
@@ -4548,6 +4688,596 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
       orphan_lines: orphanLines,
     });
   }, { staleMs: 60 * 60 * 1000 });
+}
+
+// --- adopt (workstream 3 of the loop-integrity program).
+// The sanctioned out-of-band completion. It exists because a real, sanctioned
+// writer — KanbanStatusSync at vault boot — can complete any slice with one
+// drag, and because a batch PR is sometimes genuinely the right shape for a
+// change. Adoption gives that move verified provenance instead of leaving it
+// as permanent, unreportable drift. It can ONLY ratify a declaration already
+// sitting unrecorded on the board: a card with a ledger record refuses, and a
+// note that does not declare completed refuses. Both guards are what keep this
+// from being a general-purpose "mark it done" backdoor.
+const ADOPT_SHA_RE = /^[0-9a-f]{40}$/;
+
+// Distinguishes the narrow set of gh-unreachable signals (binary missing —
+// `sh` spawns via execFileSync with no shell, so a missing binary is always
+// ENOENT, never a shell "command not found" string — or gh reporting it
+// isn't logged in) from everything else. ONLY those two degrade to
+// `verified: 'git'`; every other failure — network errors, rate limits, an
+// HTTP 401, EACCES, a JSON.parse failure inside ghJson, or gh resolving and
+// reporting the PR itself is invalid — refuses via adopt_pr_not_found rather
+// than durably recording an unverifiable reference at a degraded tier.
+// Fail-closed is deliberate: an unrecognized gh failure is treated as "this
+// PR reference could not be verified," not as "gh must be down."
+function ghUnavailable(err) {
+  if (!err) return false;
+  if (err.code === 'ENOENT') return true;
+  const text = `${err.message || ''} ${err.stderr || ''}`;
+  return /not authenticated|gh auth login/i.test(text);
+}
+
+function adoptProvenance(args, deps, cwd) {
+  const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
+  const sha = String(args['merge-sha'] || '').trim().toLowerCase();
+  if (!ADOPT_SHA_RE.test(sha)) {
+    refuse('adopt-refused', 'adopt_sha_unreachable', `--merge-sha must be a 40-hex commit sha (got "${args['merge-sha']}")`);
+  }
+  try { runGit(['cat-file', '-e', `${sha}^{commit}`]); }
+  catch (err) {
+    refuse('adopt-refused', 'adopt_sha_unreachable', `merge sha ${sha} does not resolve in this repo: ${err.message}`);
+  }
+  let defaultBranch;
+  try { defaultBranch = String(runGit(['rev-parse', '--abbrev-ref', 'origin/HEAD']) || '').trim() || 'origin/main'; }
+  catch (_) { defaultBranch = 'origin/main'; }
+  try { runGit(['merge-base', '--is-ancestor', sha, defaultBranch]); }
+  catch (err) {
+    refuse('adopt-refused', 'adopt_sha_unreachable',
+      `merge sha ${sha} is not an ancestor of ${defaultBranch}: ${err.message}`);
+  }
+  // gh is the second, independent tier. A genuine outage degrades the
+  // recorded verification level; it never fails the verb and never passes
+  // silently as full verification.
+  const viewPr = deps.prView || prView;
+  let pr = null;
+  try { pr = viewPr(REPO, Number(args.pr), cwd); }
+  catch (err) {
+    if (ghUnavailable(err)) return { sha, verified: 'git' };
+    refuse('adopt-refused', 'adopt_pr_not_found', `PR ${args.pr} could not be verified via gh: ${err.message}`);
+  }
+  if (!pr) return { sha, verified: 'git' };
+  if (pr.state !== 'MERGED') {
+    refuse('adopt-refused', 'adopt_pr_not_merged', `PR ${args.pr} is ${pr.state}, not MERGED`);
+  }
+  const merged = String((pr.mergeCommit && pr.mergeCommit.oid) || '').toLowerCase();
+  if (merged !== sha) {
+    refuse('adopt-refused', 'adopt_pr_mismatch',
+      `PR ${args.pr} merge commit ${merged || '(none)'} != --merge-sha ${sha}`);
+  }
+  return { sha, verified: 'git+gh', pr_url: pr.url || null };
+}
+
+// Adoption ratifies a declaration sitting on the BOARD, so a note under
+// cards_root is not sufficient evidence on its own. A slice detached from its
+// epic board has no line to project onto: the record would be written, the
+// projection would fail, and nothing could ever repair it — board-health's
+// board-driven check 1 cannot see a non-member at all, check 5 would report its
+// projection_error on every hourly sweep, and the advertised `reconcile --card`
+// remedy fails identically every time. Refuse before the record exists.
+function assertAdoptBoardMembership(card, notePath, boardPath) {
+  const boardDir = path.dirname(notePath);
+  const epicBoard = path.join(boardDir, `${path.basename(path.dirname(boardDir))}-board.md`);
+  // An epic-nested slice answers to its epic sub-board; a flat card answers to
+  // the parent project board.
+  const owning = fs.existsSync(epicBoard) ? epicBoard : boardPath;
+  let lanes;
+  try { lanes = parseBoard(fs.readFileSync(owning, 'utf8')); }
+  catch (err) {
+    refuse('adopt-refused', 'adopt_card_not_on_board',
+      `card ${card} cannot be checked for board membership: ${owning} is unreadable (${err.message})`);
+  }
+  if (!BOARD_HEALTH_LANES.some((lane) => (lanes[lane] || []).includes(card))) {
+    refuse('adopt-refused', 'adopt_card_not_on_board',
+      `card ${card} has a note but no line on ${path.basename(owning)}; `
+      + 'adopt ratifies a board declaration, and a detached slice has nothing to project onto');
+  }
+}
+
+async function commandAdopt(ctx, args, deps = {}) {
+  requireOnlyOptions(args, 'adopt', STRICT_CLI_OPTIONS.adopt);
+  if (args.json !== true) throw new Error('adopt requires --json for a machine-readable receipt');
+  const card = args.card;
+  const number = Number(args.pr);
+  if (!card || !Number.isInteger(number)) {
+    usage('adopt-refused', 'invalid_arguments', 'adopt requires --card and numeric --pr');
+  }
+  const reason = String(args.reason || '').trim();
+  if (!reason) refuse('adopt-refused', 'adopt_reason_required', 'adopt requires a non-empty --reason');
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const boardPath = deps.boardPath || BOARD;
+  const loadState = deps.readState || readState;
+  const transitionLock = deps.withLock || withLock;
+  const project = deps.projectCard || projectCard;
+  return transitionLock(ctx, 'selector', async () => {
+    const state = loadState(ctx);
+    state.cards ||= {};
+    const existing = state.cards[card];
+    if (existing && existing.adoption) {
+      const same = existing.adoption.pr === number
+        && existing.adoption.merge_sha === String(args['merge-sha'] || '').trim().toLowerCase()
+        && existing.adoption.reason === reason;
+      if (!same) {
+        refuse('adopt-refused', 'adopt_conflict',
+          `card ${card} was adopted from PR ${existing.adoption.pr}; adopt accepts only literal replay`);
+      }
+      // Literal replay is a ZERO-write no-op and therefore never projects: a
+      // replaying adopt that re-projected would re-stamp `status_changed_at`
+      // on the note (and re-baseline `card_note_sha`) on every replay, turning
+      // a free idempotent call into an unbounded vault writer.
+      return successReceipt('adopt', { no_op: true, card, adoption: existing.adoption });
+    }
+    if (existing) {
+      refuse('adopt-refused', 'adopt_record_exists',
+        `card ${card} already has a ledger record; adopt only ratifies unrecorded board members`);
+    }
+    const notePath = findCard(cardsRoot, card);
+    if (!notePath) {
+      refuse('adopt-refused', 'adopt_card_not_found', `card ${card} has no note under ${cardsRoot}`);
+    }
+    assertAdoptBoardMembership(card, notePath, boardPath);
+    const raw = fs.readFileSync(notePath, 'utf8');
+    const noteStatus = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+    if (noteStatus !== 'completed') {
+      refuse('adopt-refused', 'adopt_not_declared_complete',
+        `card ${card} declares ${noteStatus}; adopt ratifies a completed declaration, it never invents one`);
+    }
+    // Every check above must run BEFORE this line: adoptProvenance is the
+    // last gate, and nothing mutates `state` until every refusal path above
+    // it has already had the chance to throw.
+    const provenance = adoptProvenance(args, deps, ctx.root);
+    const now = deps.now || (() => new Date().toISOString());
+    const persist = deps.writeState || writeState;
+    const record = {
+      card,
+      parent_card: normalizeCardLink(scalarField(raw, 'epic')) || null,
+      slice: scalarField(raw, 'slice') || card,
+      // 'adopted', never 'completed': 'completed' is a card-status vocabulary
+      // word, not a ledger phase (see the comment on verify-gates' chain
+      // check). 'adopted' is a genuine TERMINAL, projectable ledger phase —
+      // see TERMINAL and projectionMapping above — so the record is EXCLUDED
+      // from activeRecords() (it never blocks sibling-slice claims or counts
+      // against MAX_ACTIVE, same as 'deployed') and is visible to every
+      // resolveSliceAuthority call site without either one needing to
+      // special-case adoption.
+      phase: 'adopted',
+      card_path: notePath,
+      touch_zones: listField(raw, 'touch_zones').map(normalizeZone),
+      dependencies: parseDependsOn(raw).map(normalizeCardLink),
+      deploy_subscriptions: deploymentField(raw) || null,
+      adoption: {
+        pr: number,
+        merge_sha: provenance.sha,
+        reason,
+        verified: provenance.verified,
+        adopted_at: now(),
+      },
+    };
+    state.cards[card] = record;
+    persist(ctx, state, record);
+    // The projection refresh is not optional garnish — it is what makes the
+    // verb usable. The motivating gesture is a Director dragging a slice into
+    // Completed in Obsidian, and `KanbanStatusSync` rewrites only
+    // status/status_prev/status_changed_at: it never writes `kanban_column`,
+    // never touches the epic atlas, and never touches the parent board. Record
+    // alone, and the very next read reports both `projectionMetadataProblem`
+    // (stale kanban_column) and `projectionBoardDrift` (stale atlas) — and
+    // batch-runner's readiness() THROWS on either, so the documented verb
+    // would stop the unattended loop until someone ran `reconcile`.
+    //
+    // Same shape as park / resume / amend-contract: persist the record first
+    // so the phase change is durable even if the projection fails, then
+    // persist again so the projection's own record mutations
+    // (projection_reconciled_at and the card_note_sha baseline — an adopted
+    // record has no baseline at all until this runs) reach disk too.
+    //
+    // Nested lock acquisition is the established pattern: this verb holds
+    // `selector` while attemptProjection takes `completion-projection`. They
+    // are distinct lock directories, exactly as in commandClaim /
+    // commandConsumeRatification, so the nesting cannot self-deadlock.
+    const projection = await attemptProjection(ctx, record, boardPath, {
+      withLock: transitionLock, projectCard: project, now, state, cardsRoot,
+    });
+    persist(ctx, state, record);
+    // Same duty every other transition verb carries: leave the station view
+    // agreeing with the ledger. An adoption can be the only activity on a board
+    // for days, so skipping it left Loop Station showing ratified work as still
+    // outstanding until some unrelated verb happened to run. No extra lock —
+    // this runs inside the selector lock adopt already holds, exactly as in
+    // park/resume.
+    const station = await attemptLoopStationProjection(ctx, state, 'adopt', {
+      projectLoopStation: deps.projectLoopStation, boardPath, cardsRoot,
+    });
+    const receipt = successReceipt(projection.ok ? 'adopt' : 'adopt-projection-failed', {
+      no_op: false, card, phase: record.phase, adoption: record.adoption,
+      card_path: notePath, pr_url: provenance.pr_url || null,
+      projection, loop_station: station.receipt,
+    });
+    if (!projection.ok) {
+      receipt.projection_error = projection.error;
+      receipt.reconcile = reconcileRoute(card);
+    }
+    return receipt;
+  });
+}
+
+// --- Board-health sweep (workstream 1 of the loop-integrity program).
+// Every check starts from the BOARD, not the ledger: the other checks in this
+// file iterate Object.values(state.cards), so a board member with no ledger
+// record is unreachable by them — that blind spot is why this verb exists.
+// Report-only: it never blocks, never heals, and never changes completion
+// semantics; heal-epic-bindings and reconcile remain the explicit remedies.
+
+const BOARD_HEALTH_LANES = ['In Planning', 'In Progress', 'Blocked', 'Completed'];
+// Pre-claim `planning` is the one note status the ledger legitimately has no
+// record for; anything else on an untracked member is work outside the rail.
+const BOARD_HEALTH_PROGRESS_STATUSES = new Set(['in_progress', 'parked', 'blocked', 'completed']);
+const BOARD_HEALTH_DRIFT_REMEDY = 'heal-epic-bindings --dry-run --json';
+
+// The coordinator is the only writer that emits this exact stamp shape. A
+// note carrying it with NO record in this clone can therefore only mean the
+// record lives in another clone's ledger (local-per-clone state) — legitimate,
+// and not actionable here. Any other shape, or none, means a writer outside
+// the rail: KanbanStatusSync at vault boot, a retired project loop, a hand
+// edit. That is the class `adopt` exists for.
+const COORDINATOR_STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const ADOPT_REMEDY = 'adopt';
+const CROSS_CLONE_REMEDY = 'cross-clone: no action in this clone';
+// A remedy names a command the operator is meant to run, so it must be one the
+// verb will accept. `adopt` ratifies a COMPLETED declaration and refuses every
+// other status with adopt_not_declared_complete; advertising it on a foreign
+// `blocked`/`in_progress` finding hands over a command that cannot succeed.
+const NO_MECHANICAL_REMEDY = 'no mechanical remedy: adopt ratifies only a completed declaration';
+
+function untrackedMemberProvenance(stamp) {
+  return stamp && COORDINATOR_STAMP_RE.test(stamp) ? 'coordinator' : 'foreign';
+}
+
+function untrackedMemberFinding(epic, cardName, noteStatus, stamp = null) {
+  const provenance = untrackedMemberProvenance(stamp);
+  return {
+    epic,
+    card: cardName,
+    note_status: noteStatus,
+    stamp: stamp || null,
+    provenance,
+    issue: noteStatus === 'completed'
+      ? 'board member has no ledger record; a completed note is never counted done'
+      : `board member has no ledger record; the note claims ${noteStatus} with no coordinator history`,
+    // Class-specific: cross-clone residue has no local remedy, and fabricating
+    // ledger records for it is exactly the drift the reconciler exists to flag.
+    // A foreign-written completion is what `adopt` ratifies.
+    remedy: provenance === 'coordinator'
+      ? CROSS_CLONE_REMEDY
+      : (noteStatus === 'completed' ? ADOPT_REMEDY : NO_MECHANICAL_REMEDY),
+  };
+}
+
+function collectBoardHealth(state, opts = {}) {
+  const boardPath = opts.boardPath || BOARD;
+  const cardsRoot = opts.cardsRoot || CARDS_ROOT;
+  const exists = opts.exists || fs.existsSync;
+  const readText = opts.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const ledger = opts.ledger || 'present';
+  // Sweep-level failure is loud: an unresolvable cards root or unreadable
+  // board refuses with a stable code, never a quietly-clean receipt.
+  let project;
+  try { project = physicalProjectPrefix(cardsRoot); }
+  catch (err) {
+    refuse('board-health-refused', 'cards_root_invalid',
+      `cards root cannot resolve one canonical project: ${err.message}`);
+  }
+  let parentRaw;
+  try { parentRaw = readText(boardPath); }
+  catch (err) {
+    refuse('board-health-refused', 'board_unreadable', `board is unreadable: ${err.message}`);
+  }
+  const cards = (state && state.cards) || {};
+  const tracked = (name) => Object.prototype.hasOwnProperty.call(cards, name);
+  const parsedParent = parseBoard(parentRaw);
+  const members = BOARD_HEALTH_LANES.flatMap((lane) => parsedParent[lane] || []);
+  const untracked = [];
+  const unprojectable = [];
+  const laneDivergence = [];
+  let epicCount = 0;
+  let sliceCount = 0;
+  const untrackedCheck = (epic, name, notePath) => {
+    if (tracked(name) || !exists(notePath)) return;
+    const raw = readText(notePath);
+    const status = delivery.normalizeStatus(scalarField(raw, 'status')) || 'planning';
+    if (BOARD_HEALTH_PROGRESS_STATUSES.has(status)) {
+      untracked.push(untrackedMemberFinding(epic, name, status, scalarField(raw, 'status_changed_at')));
+    }
+  };
+  for (const member of members) {
+    const epicRoot = path.join(cardsRoot, member);
+    const atlasPath = path.join(epicRoot, `${member}.md`);
+    // Per-epic isolation: one epic that throws is a finding, not an abort — a
+    // malformed atlas in epic 7 must not hide epics 8..N. Check 1 runs BEFORE
+    // projection so an unprojectable epic's members stay reachable.
+    try {
+      const isEpic = exists(atlasPath) && scalarField(readText(atlasPath), 'type') === 'epic';
+      if (!isEpic) {
+        const flatNotePath = findCard(cardsRoot, member);
+        if (flatNotePath) {
+          sliceCount++;
+          untrackedCheck(null, member, flatNotePath);
+        } else {
+          epicCount++;
+          unprojectable.push({
+            epic: member,
+            error: 'board member has neither an epic scaffold nor a note',
+            remedy: BOARD_HEALTH_DRIFT_REMEDY,
+          });
+        }
+        continue;
+      }
+      epicCount++;
+      const boardDir = path.join(epicRoot, 'board');
+      const epicBoardRaw = readText(path.join(boardDir, `${member}-board.md`));
+      const parsedEpicBoard = parseBoard(epicBoardRaw);
+      const sliceNames = BOARD_HEALTH_LANES.flatMap((lane) => parsedEpicBoard[lane] || []);
+      sliceCount += sliceNames.length;
+      for (const name of sliceNames) untrackedCheck(member, name, path.join(boardDir, `${name}.md`));
+      // Check 2 — the epic must project through the real contract, seeded with
+      // its first existing slice note (the projection validates every member).
+      const seed = sliceNames.find((name) => exists(path.join(boardDir, `${name}.md`)));
+      if (seed) {
+        const seedPath = path.join(boardDir, `${seed}.md`);
+        const surface = canonicalEpicProjection(readText(seedPath), seedPath, boardPath, cardsRoot, { state: { cards } });
+        // Check 4 — derived slice roll-up vs painted parent lane. Ledger-driven,
+        // so an empty/absent ledger contributes nothing here. Agreement is
+        // reported too whenever the epic carries untracked members: a lane that
+        // LOOKS broken but is correct must say so, or the confusion survives.
+        if (ledger === 'present' && surface) {
+          const lifecycle = deriveEpicProjection(surface, null, null);
+          const mapping = epicProjectionMapping(lifecycle.state);
+          const painted = boardCardLocation(parentRaw, member);
+          const agrees = Boolean(painted && mapping
+            && painted.column === mapping.column && painted.checked === mapping.complete);
+          if (!agrees || untracked.some((finding) => finding.epic === member)) {
+            laneDivergence.push({
+              epic: member,
+              derived: lifecycle.state,
+              painted: painted ? painted.column : null,
+              agrees,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      unprojectable.push({ epic: member, error: err.message, remedy: BOARD_HEALTH_DRIFT_REMEDY });
+    }
+  }
+  // Check 3 — binding drift + orphan sub-board lines, reused verbatim from the
+  // heal planner so the sweep and the remedy can never disagree. A throw here
+  // is itself a finding: the sweep's own failures must never look like health.
+  let bindingDrift;
+  try {
+    const plan = planEpicBindingHeal(cardsRoot, boardPath);
+    bindingDrift = {
+      atlases: plan.atlases.length,
+      slices: plan.slices.length,
+      orphan_lines: plan.orphanLines.length,
+      remedy: BOARD_HEALTH_DRIFT_REMEDY,
+    };
+  } catch (err) {
+    bindingDrift = { error: `binding-drift plan is unreadable: ${err.message}`, remedy: BOARD_HEALTH_DRIFT_REMEDY };
+  }
+  // Check 5 — records carrying projection_error. Ledger-driven by nature, so
+  // an empty/absent ledger contributes zero findings (skipped, not failed).
+  const projectionErrors = ledger === 'present'
+    ? Object.values(cards)
+      .filter((record) => record.projection_error)
+      .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }))
+    : [];
+  // Check 6 — records carrying a live foreign_write finding: a tracked card's
+  // note changed on disk since the last bytes this coordinator recorded for
+  // it (KanbanStatusSync, Obsidian Sync, or any other writer that never
+  // consults the selector lock). Ledger-driven by nature, so an empty/absent
+  // ledger contributes zero findings (skipped, not failed) — same as check 5.
+  // projectCard is the only thing that ever clears foreign_write, and it
+  // requires a phase with a board projection — `discarded`, `failed`, and
+  // `cancelled` have none. Without this gate, a foreign write detected on a
+  // card that is later discarded (or fails, or is cancelled) would be
+  // unclearable forever: no projection ever runs again for that phase, so
+  // no board-health sweep — hourly, unattended — would ever return to
+  // healthy for it. A finding no projection can ever resolve is not
+  // actionable, so it must not hold the board unhealthy.
+  const foreignWrites = ledger === 'present'
+    ? Object.values(cards)
+      .filter((record) => record.foreign_write && projectionMapping(record.phase))
+      .map((record) => ({ card: record.card, phase: record.phase, foreign_write: record.foreign_write }))
+    : [];
+  const findings = {
+    untracked_members: untracked,
+    untracked_members_by_provenance: {
+      coordinator: untracked.filter((f) => f.provenance === 'coordinator').length,
+      foreign: untracked.filter((f) => f.provenance === 'foreign').length,
+    },
+    unprojectable_epics: unprojectable,
+    binding_drift: bindingDrift,
+    lane_divergence: laneDivergence,
+    projection_errors: projectionErrors,
+    foreign_writes: foreignWrites,
+  };
+  const driftClean = !bindingDrift.error
+    && !bindingDrift.atlases && !bindingDrift.slices && !bindingDrift.orphan_lines;
+  return {
+    project: path.posix.basename(project.prefix),
+    ledger,
+    checked: { epics: epicCount, slices: sliceCount, records: Object.keys(cards).length },
+    findings,
+    healthy: driftClean && Object.entries(findings)
+      .every(([key, value]) => key === 'binding_drift' || key === 'untracked_members_by_provenance' || !value.length),
+  };
+}
+
+const BOARD_HEALTH_SCHEMA_VERSION = '1.0.0';
+const BOARD_HEALTH_LIST_CAP = 20;
+// Scaffold-if-absent body only: an existing Board Health body is NEVER
+// rewritten (same guarantee Loop Station carries). One writer per note: this
+// note belongs to the sweep alone, so it keeps working when projection is dead.
+const BOARD_HEALTH_BODY = [
+  '',
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "BoardHealth" });',
+  '```',
+  '',
+].join('\n');
+
+// Deliberately NO timestamp field anywhere in the payload: the note's mtime
+// means "when board health last CHANGED". A checked_at would write on every
+// run and defeat the zero-writes-when-unchanged rule, which is what makes a
+// scheduled vault writer acceptable at all; last-run time is the job log's job.
+function buildBoardHealthPayload(core) {
+  const capped = (items) => ({
+    items: (items || []).slice(0, BOARD_HEALTH_LIST_CAP),
+    overflow: Math.max(0, (items || []).length - BOARD_HEALTH_LIST_CAP),
+  });
+  const untracked = capped(core.findings.untracked_members);
+  const unprojectable = capped(core.findings.unprojectable_epics);
+  const lane = capped(core.findings.lane_divergence);
+  const errors = capped(core.findings.projection_errors);
+  const foreignWrites = capped(core.findings.foreign_writes);
+  return {
+    type: 'board-health',
+    schema_version: BOARD_HEALTH_SCHEMA_VERSION,
+    project: core.project,
+    ledger: core.ledger,
+    no_op: core.no_op,
+    checked: core.checked,
+    untracked_members: untracked.items,
+    untracked_members_overflow_count: untracked.overflow,
+    untracked_members_by_provenance: core.findings.untracked_members_by_provenance,
+    unprojectable_epics: unprojectable.items,
+    unprojectable_epics_overflow_count: unprojectable.overflow,
+    binding_drift: core.findings.binding_drift,
+    lane_divergence: lane.items,
+    lane_divergence_overflow_count: lane.overflow,
+    projection_errors: errors.items,
+    projection_errors_overflow_count: errors.overflow,
+    foreign_writes: foreignWrites.items,
+    foreign_writes_overflow_count: foreignWrites.overflow,
+  };
+}
+
+function validateBoardHealthPayload(payload) {
+  const errors = [];
+  const lists = ['untracked_members', 'unprojectable_epics', 'lane_divergence', 'projection_errors', 'foreign_writes'];
+  for (const key of ['type', 'schema_version', 'project', 'ledger', 'no_op', 'checked', 'binding_drift',
+    ...lists, ...lists.map((list) => `${list}_overflow_count`)]) {
+    if (!Object.prototype.hasOwnProperty.call(payload || {}, key)) errors.push(`missing ${key}`);
+  }
+  if (!payload || payload.type !== 'board-health') errors.push('type must be board-health');
+  if (!payload || payload.schema_version !== BOARD_HEALTH_SCHEMA_VERSION) {
+    errors.push(`schema_version must be ${BOARD_HEALTH_SCHEMA_VERSION}`);
+  }
+  if (!payload || !['present', 'empty', 'absent'].includes(payload.ledger)) {
+    errors.push('ledger must be present|empty|absent');
+  }
+  if (!payload || typeof payload.no_op !== 'boolean') errors.push('no_op must be boolean');
+  for (const list of lists) {
+    const value = payload && payload[list];
+    const overflow = payload && payload[`${list}_overflow_count`];
+    if (!Array.isArray(value)) errors.push(`${list} must be an array`);
+    else if (value.length > BOARD_HEALTH_LIST_CAP) errors.push(`${list} exceeds ${BOARD_HEALTH_LIST_CAP}`);
+    if (!Number.isInteger(overflow) || overflow < 0) errors.push(`${list}_overflow_count must be a non-negative integer`);
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+function writeBoardHealthNote(payload, notePath, deps = {}) {
+  const exists = deps.exists || fs.existsSync;
+  const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
+  const writeText = deps.writeText || atomicWriteText;
+  const validation = validateBoardHealthPayload(payload);
+  if (!validation.ok) throw new Error(`Board Health payload is invalid: ${validation.errors.join('; ')}`);
+  const fields = loopStationFrontmatterFields(payload);
+  if (!exists(notePath)) {
+    if (deps.ensureDir) deps.ensureDir(path.dirname(notePath));
+    else fs.mkdirSync(path.dirname(notePath), { recursive: true });
+    writeText(notePath, patchFrontmatter(`---\n\n---${BOARD_HEALTH_BODY}`, fields));
+    return { path: notePath, changed: true, scaffolded: true };
+  }
+  const raw = readText(notePath);
+  if (!/^---\n[\s\S]*?\n---/.test(raw)) {
+    throw new Error('Board Health exists without frontmatter; refusing to rewrite its body');
+  }
+  const next = patchFrontmatter(raw, fields);
+  // Unchanged findings ⇒ the complete note is preserved byte-for-byte with
+  // ZERO writes — no mtime churn, no sync churn, no race surface.
+  if (next === raw) return { path: notePath, changed: false, scaffolded: false };
+  writeText(notePath, next);
+  return { path: notePath, changed: true, scaffolded: false };
+}
+
+async function commandBoardHealth(ctx, args, deps = {}) {
+  requireOnlyOptions(args, 'board-health', STRICT_CLI_OPTIONS['board-health']);
+  if (args.json !== true) throw new Error('board-health requires --json for a machine-readable receipt');
+  const boardPath = deps.boardPath || BOARD;
+  const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  const exists = deps.exists || fs.existsSync;
+  const loadState = deps.readState || readState;
+  const transitionLock = deps.withLock || withLock;
+  const sweep = async () => {
+    let state;
+    try { state = loadState(ctx); }
+    catch (err) {
+      refuse('board-health-refused', 'state_unreadable', `ledger is unreadable: ${err.message}`);
+    }
+    const records = Object.keys((state && state.cards) || {}).length;
+    // Tri-state so a clean ledgerless run can never be mistaken for a fully
+    // checked board: present ⇒ checks 4–5 ran; empty/absent ⇒ they were
+    // skipped, not failed.
+    const ledger = records > 0
+      ? 'present'
+      : (ctx.statePath && exists(ctx.statePath) ? 'empty' : 'absent');
+    const { healthy, ...core } = collectBoardHealth(state, {
+      boardPath, cardsRoot, ledger, exists, readText: deps.readText,
+    });
+    const receipt = successReceipt('board-health', { no_op: healthy, ...core });
+    if (args['write-note'] === true) {
+      const notePath = deps.notePath || path.join(path.dirname(boardPath), 'Board Health.md');
+      // Note-write failure never discards findings: the receipt carries them
+      // plus a visible note_error, mirroring transition loop_station receipts.
+      try {
+        receipt.note = writeBoardHealthNote(
+          buildBoardHealthPayload({ ...core, no_op: healthy }),
+          notePath,
+          { exists, readText: deps.readText, writeText: deps.writeText, ensureDir: deps.ensureDir },
+        );
+      } catch (err) {
+        receipt.note_error = err.message;
+      }
+    }
+    return receipt;
+  };
+  try {
+    return await transitionLock(ctx, 'selector', sweep, { staleMs: 60 * 60 * 1000 });
+  } catch (err) {
+    // Lock contention is a skip, not a crash: a live loop session must never
+    // produce a spurious alarm. The skip carries no findings so it cannot be
+    // misread as "checked and clean"; hourly means the next check is soon.
+    if (err && err.code === 'LOCKED') {
+      return {
+        action: 'board-health', ok: true, no_op: true, skipped: true,
+        reason: 'selector lock held; board busy — skipped without checking',
+        lock_owner: err.owner || null,
+      };
+    }
+    throw err;
+  }
 }
 
 // Read-only supersession-depth probe: how many prior supersessions already lead
@@ -5179,8 +5909,14 @@ function planRestructure(spec, env) {
   };
 }
 
+// A target that is neither the recorded preimage nor the intended result is
+// a second writer, not a crash — refuse through the shared cli-kit code so
+// callers can machine-identify the condition (same code as heal-epic-bindings).
+// refuse() throws internally and never returns, so every call site below is a
+// bare statement, not a `throw` expression.
 function restructureThirdState(target) {
-  return new Error(`restructure fail-closed: ${target} is neither the recorded preimage nor the intended result`);
+  refuse('restructure-refused', 'concurrent_modification',
+    `restructure fail-closed: ${target} is neither the recorded preimage nor the intended result`);
 }
 
 // Containment for journal-supplied TARGET paths, symmetric with the
@@ -5204,24 +5940,42 @@ function physicalDescendantTarget(root, target, label) {
   return resolved;
 }
 
+// Scaffold writes only. Every op here is a freshly created epic surface — the
+// atlas, the epic board, the context `.keep` files — and the guard below
+// refuses outright rather than overwriting anything that already exists, so an
+// op target can never be an existing tracked card's note. Nothing to stamp:
+// member notes move through applyIntendedMove/rebindTrackedCardPath.
 function applyIntendedWrite(op, journal, d) {
   physicalDescendantTarget(journal.cards_root, op.path, `restructure scaffold target ${path.basename(op.path)}`);
   const current = fs.existsSync(op.path) ? fs.readFileSync(op.path, 'utf8') : null;
   if (current === op.content) return false;
-  if (current !== null) throw restructureThirdState(op.path);
+  if (current !== null) restructureThirdState(op.path);
   fs.mkdirSync(path.dirname(op.path), { recursive: true });
   d.writeText(op.path, op.content);
   return true;
 }
 
+// The single ledger-touching step of a member move, and therefore the only
+// correct place to stamp `card_note_sha` for restructure. Both callers below
+// invoke it once the intended bytes are already at `move.to`, so the stamp
+// describes the note's FINAL location after the move and after the card_path
+// rebind — stamping earlier (at the write, or against move.from) would record
+// a path the ledger no longer points at. It also rides restructure's existing
+// journal/persist discipline rather than adding a second write path: same card
+// gate lock, same d.persist, one ledger write per member.
 async function rebindTrackedCardPath(ctx, move, d) {
   if (!move.tracked) return;
   await withCardGateLock(ctx, move.card, async () => {
     const state = d.loadState(ctx);
     const record = state.cards[move.card];
     if (!record) throw new Error(`restructure fail-closed: tracked member ${move.card} record disappeared mid-pass`);
-    if (record.card_path === move.to) return;
+    const priorPath = record.card_path;
+    const priorSha = record.card_note_sha;
     record.card_path = move.to;
+    stampCardNoteSha(record, move.to);
+    // Crash-resume replay reaches here with the rebind already durable; stay a
+    // genuine zero-write no-op unless something actually changed.
+    if (priorPath === move.to && priorSha === record.card_note_sha) return;
     d.persist(ctx, state, record);
   }, { card: move.card, staleMs: RESTRUCTURE_STALE_MS }, d.transitionLock);
 }
@@ -5235,7 +5989,7 @@ async function applyIntendedMove(ctx, move, journal, d) {
     }
     physicalDescendant(journal.cards_root, move.from, `restructure member note ${move.card}`);
     const raw = fs.readFileSync(move.from, 'utf8');
-    if (sha256Text(raw) !== move.preimage_sha256) throw restructureThirdState(move.from);
+    if (sha256Text(raw) !== move.preimage_sha256) restructureThirdState(move.from);
     return raw;
   };
   const targetCurrent = fs.existsSync(move.to) ? fs.readFileSync(move.to, 'utf8') : null;
@@ -5249,8 +6003,8 @@ async function applyIntendedMove(ctx, move, journal, d) {
     await rebindTrackedCardPath(ctx, move, d);
     return;
   }
-  if (targetCurrent !== null) throw restructureThirdState(move.to);
-  if (!fs.existsSync(move.from)) throw restructureThirdState(move.from);
+  if (targetCurrent !== null) restructureThirdState(move.to);
+  if (!fs.existsSync(move.from)) restructureThirdState(move.from);
   guardSourceIsPreimage();
   fs.mkdirSync(path.dirname(move.to), { recursive: true });
   d.writeText(move.to, move.content);
@@ -5262,7 +6016,7 @@ function applyParentStage(journal, index, d) {
   const stage = journal.epics[index].parent_stage;
   const current = fs.readFileSync(journal.board, 'utf8');
   if (current === stage.content) return;
-  if (sha256Text(current) !== stage.prior_sha256) throw restructureThirdState(journal.board);
+  if (sha256Text(current) !== stage.prior_sha256) restructureThirdState(journal.board);
   d.writeText(journal.board, stage.content);
 }
 
@@ -6276,6 +7030,12 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
             return reconcileLock(ctx, 'completion-projection', async () => {
               const priorError = via.projection_error || null;
               const priorFailedAt = via.projection_failed_at || null;
+              // Captured before project() runs: project() clears a resolved
+              // finding in-memory on `via` as part of the same call, so
+              // `via.foreign_write` after the call can never tell "newly
+              // detected" and "just resolved" apart from "never had one" —
+              // both a fresh detection and a clear must force persistence.
+              const hadForeignWrite = Boolean(via.foreign_write);
               const projected = project(via.card_path, boardPath, via.card, via.phase, {
                 now, record: via, state: lockedState, cardsRoot,
               });
@@ -6283,7 +7043,12 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
               if (!findings.length) {
                 return { card, epic, via_card: via.card, phase: null, ok: false, changed: false, error: 'legacy exact-card finding disappeared during reconciliation' };
               }
-              const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at || projected.changed);
+              // A detected (or just-resolved) foreign write must force
+              // persistence even when the projection itself made no change:
+              // it is a durable ledger finding (`via.foreign_write`), not
+              // merely a receipt annotation.
+              const stateChanged = Boolean(priorError || priorFailedAt || !via.projection_reconciled_at
+                || projected.changed || projected.foreign_write || hadForeignWrite);
               if (stateChanged) {
                 delete via.projection_error;
                 delete via.projection_failed_at;
@@ -6295,6 +7060,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
                 changed: Boolean(projected.changed || stateChanged),
                 projection_changed: Boolean(projected.changed), state_changed: stateChanged,
                 projection_findings: findings,
+                foreign_write: projected.foreign_write || null,
               };
             }, { card: via.card });
           }, { card: viaCandidate.card }, reconcileLock, legacyGateName);
@@ -6306,11 +7072,22 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
         return reconcileLock(ctx, 'completion-projection', async () => {
           const priorError = record.projection_error || null;
           const priorFailedAt = record.projection_failed_at || null;
+          // Captured before project() runs — see the twin comment on the
+          // legacy-via-sibling branch above: project() clears a resolved
+          // finding on `record` as part of the same call, so only the
+          // pre-call value can distinguish "just resolved" from "never had
+          // one".
+          const hadForeignWrite = Boolean(record.foreign_write);
           try {
             const projected = project(record.card_path, boardPath, record.card, record.phase, {
               now, record, state, cardsRoot: deps.cardsRoot,
             });
-            const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at || projected.changed);
+            // A detected (or just-resolved) foreign write must force
+            // persistence even when the projection itself made no change: it
+            // is a durable ledger finding (`record.foreign_write`), not
+            // merely a receipt annotation.
+            const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at
+              || projected.changed || projected.foreign_write || hadForeignWrite);
             if (stateChanged) {
               delete record.projection_error;
               delete record.projection_failed_at;
@@ -6322,6 +7099,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
               changed: Boolean(projected.changed || stateChanged),
               projection_changed: Boolean(projected.changed), state_changed: stateChanged,
               projection_findings: projected.projection_findings || [],
+              foreign_write: projected.foreign_write || null,
             };
           } catch (err) {
             const stateChanged = record.projection_error !== err.message || !record.projection_failed_at;
@@ -6464,7 +7242,11 @@ async function commandCutover(ctx, args, deps = {}) {
       const satisfied = [];
       for (const [name, record] of declared) {
         if (!record) missing.push({ card: name, problem: 'not tracked in the coordinator ledger' });
-        // Ledger PHASES only — 'completed' is a card status vocabulary word, never a ledger phase, hence not listed.
+        // Ledger PHASES only — 'completed' is a card status vocabulary word, never a
+        // ledger phase, hence not listed. 'adopted' IS a ledger phase (the verified
+        // out-of-band completion; see commandAdopt) but is deliberately absent from
+        // the satisfied set below: this check verifies the release chain actually
+        // reached Homebrew, which adoption's PR/merge-sha provenance does not prove.
         else if (record.phase === 'deployed' || record.phase === 'discarded') satisfied.push({ card: name, phase: record.phase });
         else missing.push({ card: name, phase: record.phase, problem: "phase is neither 'deployed' nor tombstoned 'discarded'" });
       }
@@ -6835,25 +7617,35 @@ async function commandRebindParkedMetadata(ctx, args = {}, deps = {}) {
       }
       const raw = fs.readFileSync(resolveCardPath(record.card_path, record.card, cardsRoot), 'utf8');
       const currentSha256 = sha256Text(raw);
+      // Neither the recorded preimage nor the intended result: a second
+      // writer, not a crash — refuse through the shared cli-kit code so
+      // callers can machine-identify the condition (same code as
+      // heal-epic-bindings and restructure).
       if (currentSha256 !== entry.expected_card_sha256
         && currentSha256 !== entry.intended_next_sha256) {
-        throw new Error(`parked metadata rebind found a third card hash for ${entry.card}; zero writes`);
+        refuse('reconcile-metadata-refused', 'concurrent_modification',
+          `parked metadata rebind found a third card hash for ${entry.card}; zero writes`);
       }
       const prepared = prepareDeliveryCard(raw, entry.card);
       if (!prepared.ok || prepared.card.epic !== entry.intended_ledger_epic) {
-        throw new Error(`parked metadata rebind found a third projected epic state for ${entry.card}; zero writes`);
+        refuse('reconcile-metadata-refused', 'concurrent_modification',
+          `parked metadata rebind found a third projected epic state for ${entry.card}; zero writes`);
       }
       const ledgerEpic = record.delivery_contract.epic;
       if (ledgerEpic !== entry.expected_ledger_epic && ledgerEpic !== entry.intended_ledger_epic) {
-        throw new Error(`parked metadata rebind found a third ledger epic state for ${entry.card}; zero writes`);
+        refuse('reconcile-metadata-refused', 'concurrent_modification',
+          `parked metadata rebind found a third ledger epic state for ${entry.card}; zero writes`);
       }
       records.push(record);
       states.push(ledgerEpic === entry.expected_ledger_epic ? 'expected' : 'intended');
     }
     const allExpected = states.every((stateName) => stateName === 'expected');
     const allIntended = states.every((stateName) => stateName === 'intended');
+    // A mixed expected/intended split across targets is the same second-writer
+    // signature as a single target's third state — refuse with the shared code.
     if (!allExpected && !allIntended) {
-      throw new Error('parked metadata rebind found a mixed third state; zero writes');
+      refuse('reconcile-metadata-refused', 'concurrent_modification',
+        'parked metadata rebind found a mixed third state; zero writes');
     }
     if (allIntended) {
       if (!parkedMetadataRebindReplayMatches(records, request, spec)) {
@@ -7077,6 +7869,8 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
   }
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const lock = deps.withLock || withLock;
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   const writeText = deps.atomicWriteText || atomicWriteText;
   const barrier = deps.durablePathBarrier || durablePathBarrier;
   const readSpec = deps.readSpec || ((file) => fs.readFileSync(file, 'utf8'));
@@ -7137,12 +7931,35 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
         throw new Error(`contract frontmatter restamp intended state is not canonical for ${entry.path}; zero writes`);
       }
     }
-    for (const pending of pendingWrites) {
-      writeText(pending.file, pending.next);
-      barrier(pending.file);
-      if (sha256Text(fs.readFileSync(pending.file, 'utf8')) !== pending.entry.intended_sha256) {
-        throw new Error(`contract frontmatter restamp write did not verify for ${pending.entry.path}`);
+    // This verb rewrites canonical card notes wholesale, so every tracked
+    // target must be re-baselined or the next projection reports the
+    // coordinator's own restamp as a foreign write. Ledger lookup is
+    // best-effort for the same reason heal-epic-bindings' is: the restamp is
+    // derived entirely from on-disk canonical form and has never required a
+    // ledger to run. A caller whose ctx carries no state location still
+    // restamps; it just has nothing tracked to stamp.
+    let ledger;
+    try { ledger = loadState(ctx); } catch (_) { ledger = { cards: {} }; }
+    let stampedAny = false;
+    try {
+      for (const pending of pendingWrites) {
+        writeText(pending.file, pending.next);
+        barrier(pending.file);
+        if (sha256Text(fs.readFileSync(pending.file, 'utf8')) !== pending.entry.intended_sha256) {
+          throw new Error(`contract frontmatter restamp write did not verify for ${pending.entry.path}`);
+        }
+        const record = (ledger.cards || {})[pending.entry.card];
+        if (record) {
+          stampCardNoteSha(record, pending.file);
+          stampedAny = true;
+        }
       }
+    } finally {
+      // Persist whatever this pass earned even when a later target fails to
+      // verify: the earlier files ARE rewritten, and a partial run whose
+      // stamps were discarded would leave every one of them reporting a
+      // foreign write on its next projection.
+      if (stampedAny) persist(ctx, ledger);
     }
     return {
       action: 'restamped-contract-frontmatter',
@@ -7202,6 +8019,7 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
         barrier(cardPath);
         const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
         if (verifiedSha256 !== pending.next_sha256) throw new Error('reconcile-metadata card replacement did not verify at the intended hash');
+        stampCardNoteSha(record, cardPath);
       } else if (rawSha256 !== pending.next_sha256) {
         throw new Error('reconcile-metadata pending intent found a third card hash; needs-inspection with zero writes');
       } else {
@@ -7256,6 +8074,7 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
     barrier(cardPath);
     const verifiedSha256 = crypto.createHash('sha256').update(fs.readFileSync(cardPath, 'utf8')).digest('hex');
     if (verifiedSha256 !== plan.next_sha256) throw new Error('reconcile-metadata card replacement did not verify at the intended hash');
+    stampCardNoteSha(record, cardPath);
     const audit = finalizeMetadataReconciliation(ctx, state, record, intent, persist, barrier);
     const receipt = { ...plan };
     delete receipt.next;
@@ -7282,11 +8101,23 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
   const toName = args.to ? normalizeCardLink(String(args.to)) : null;
   if (toName !== null && clearName === null) throw new Error('reconcile-dependencies --to requires --clear to name the dead pointer');
   const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
   const writeText = deps.writeText || atomicWriteText;
   const lock = deps.withLock || withLock;
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   return lock(ctx, 'selector', async () => {
     const state = loadState(ctx);
+    // Same shape as scanDependentsForDiscard, this verb's direct sibling: it
+    // rewrites a tracked card's depends_on through rewriteDependsOn, so it
+    // must re-baseline that record or the next projection reports the
+    // coordinator's own repoint as a foreign write. No-op for an untracked
+    // dependent — there is nothing to stamp, deliberately, not by accident.
+    let stampedAny = false;
+    const stampDependent = (record, file) => {
+      if (!record) return;
+      stampCardNoteSha(record, file);
+      stampedAny = true;
+    };
     // A dangling dependency is one that resolves to NO live card. "Live" must be
     // judged against the board — the same honest gather GraphView uses — not just
     // the coordinator ledger: the ledger only holds cards it has TRACKED
@@ -7357,11 +8188,11 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
               // Director-directed repoint: target must be a live card and never the dependent itself.
               if (!isLive(toName) || toName === normalizeCardLink(depName)) { needsDecision.push({ card: depName, from: ref }); continue; }
               plan.push({ card: depName, from: ref, to: toName, classification: 'repoint', path: full });
-              if (apply) { const w = rewriteDependsOn(raw, ref, toName); if (w.changed) { raw = w.text; writeText(full, raw); } }
+              if (apply) { const w = rewriteDependsOn(raw, ref, toName); if (w.changed) { raw = w.text; writeText(full, raw); stampDependent(record, full); } }
               continue;
             }
             plan.push({ card: depName, from: ref, to: null, classification: 'clear', path: full });
-            if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); } }
+            if (apply) { const w = rewriteDependsOn(raw, ref, null); if (w.changed) { raw = w.text; writeText(full, raw); stampDependent(record, full); } }
             continue;
           }
           if (isLive(ref)) continue; // resolves to a real card (tracked or on-disk planning note) — not dangling
@@ -7369,10 +8200,14 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
           const to = resolveTarget(ref);
           if (!to) { needsDecision.push({ card: depName, from: ref }); continue; } // genuinely never-minted / orphaned
           plan.push({ card: depName, from: ref, to, classification: 'repoint', path: full });
-          if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); } }
+          if (apply) { const w = rewriteDependsOn(raw, ref, to); if (w.changed) { raw = w.text; writeText(full, raw); stampDependent(record, full); } }
         }
       }
     }
+    // A stamp that never reaches disk is not a stamp. One merge-form write
+    // for however many dependents this pass rewrote; a pass that stamped
+    // nothing stays a genuine zero-ledger-write run.
+    if (stampedAny) persist(ctx, state);
     return successReceipt('reconcile-dependencies', {
       apply, no_op: apply ? plan.length === 0 : true, reason,
       plan: plan.map(({ path: _p, ...rest }) => rest),
@@ -7416,6 +8251,8 @@ async function main() {
   else if (command === 'discard') result = await commandDiscard(ctx, args);
   else if (command === 'supersession-depth') result = commandSupersessionDepth(ctx, args);
   else if (command === 'heal-epic-bindings') result = await commandHealEpicBindings(ctx, args);
+  else if (command === 'board-health') result = await commandBoardHealth(ctx, args);
+  else if (command === 'adopt') result = await commandAdopt(ctx, args);
   else if (command === 'reap') result = await commandReap(ctx, args);
   else if (command === 'restructure') result = await commandRestructure(ctx, args);
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
@@ -7451,7 +8288,7 @@ async function main() {
       return deployed;
     }, { card: args.card, staleMs: 60 * 60 * 1000 });
   } else if (command === 'recover') result = commandRecover(ctx);
-  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
+  else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|adopt|board-health|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
   console.log(JSON.stringify(result, null, 2));
   if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
 }
@@ -7480,8 +8317,9 @@ module.exports = {
   commandAmendContract, commandPark, commandAmendPark, commandResume, commandBreakLease, commandDiscard, commandReap, commandRestructure,
   commandSupersessionDepth,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
-  canonicalEpicProjection,
+  canonicalEpicProjection, deriveEpicProjection, noteProjectionMapping,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
+  commandBoardHealth, collectBoardHealth, commandAdopt, adoptProvenance,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
