@@ -55,6 +55,36 @@ function strictRealm() {
   vm.createContext(realm, { codeGeneration: { strings: false, wasm: false } });
   return { realm, reads };
 }
+function executableSource(candidate) {
+  return candidate
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+    .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '')
+    .replace(/`(?:\\.|[^`\\])*`/g, '');
+}
+function assertPropertyAuthorities(candidate) {
+  const authorityStart = candidate.indexOf('const status =');
+  const authorityEnd = candidate.indexOf('      }\n\n      const downstream', authorityStart);
+  assert.ok(authorityStart >= 0 && authorityEnd > authorityStart,
+    'the canonical node-record authority block must be present');
+  assert.strictEqual(candidate.slice(authorityStart, authorityEnd).trim(), [
+    'const status = node.status === null ? null : node.status.trim().toLowerCase();',
+    '        if (status === "") return empty;',
+    '        const record = { card, status, isStub: node.isStub === true || status === null };',
+    '        order.set(card, order.size);',
+    '        records.set(card, record);',
+  ].join('\n'), 'status normalization and record order have one canonical input-only authority');
+
+  const intrinsicUsages = [...executableSource(candidate)
+    .matchAll(/\b(?:Object|Array|Map|Set)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*/g)]
+    .map((match) => match[0]);
+  assert.deepStrictEqual(intrinsicUsages, [
+    'Set', 'Map',
+    'Array.isArray', 'Array.isArray', 'Map', 'Map', 'Array.isArray',
+    'Object.prototype.hasOwnProperty.call',
+    'Map', 'Map', 'Set', 'Array.isArray', 'Map', 'Object.defineProperty', 'Set',
+  ], 'production intrinsic reads are limited to the exact required operations in source order');
+}
 const GraphInsights = eval(`(${source})`); // eslint-disable-line no-eval
 const insights = new GraphInsights();
 const empty = {
@@ -519,6 +549,28 @@ test('case 12: required behavioral mutants are executable and turn red', () => {
   const dateMutant = mutateSource('try {', 'try {\n      Date["n" + "ow"]();');
   assert.strictEqual(PURITY_FORBIDDEN.some((pattern) => pattern.test(dateMutant)), true,
     'computed Date.now access must be rejected by the purity source contract');
+
+  for (const [label, mutant] of [
+    [
+      'remap an arbitrary normalized status to completed',
+      mutateSource(
+        'const status = node.status === null ? null : node.status.trim().toLowerCase();',
+        'let status = node.status === null ? null : node.status.trim().toLowerCase();\n'
+          + '        if (status === "zebra") status = "completed";',
+      ),
+    ],
+    [
+      'derive record order from an arbitrary node attribute',
+      mutateSource('order.set(card, order.size);', 'order.set(card, node.priority ?? order.size);'),
+    ],
+    [
+      'read mutable state from a permitted intrinsic prototype',
+      mutateSource('try {', 'try {\n      if (Object.prototype.__graphInsightsForceEmpty) return empty;'),
+    ],
+  ]) {
+    assert.throws(() => assertPropertyAuthorities(mutant), assert.AssertionError,
+      `${label} must violate the property-authority source contract`);
+  }
 });
 
 test('case 13: readiness, triage counts, and direct root attribution are exact', () => {
@@ -993,6 +1045,21 @@ test('case 43: production executes with an exact global intrinsic allowlist', ()
   assert.strictEqual(result.perNode.T.isReady, true);
   assert.deepStrictEqual([...new Set(reads)].sort(), ['Array', 'Map', 'Object', 'Set'],
     'production reads only its four explicitly allowed global intrinsics');
+});
+
+test('case 44: status, record order, and intrinsic operations have exact authorities', () => {
+  assertPropertyAuthorities(source);
+
+  const roots = [
+    node('FIRST', 'blocked', { priority: 999, order: 2, rank: -10, arbitrary: 'z' }),
+    node('SECOND', 'parked', { priority: -999, order: 1, rank: 10, arbitrary: 'a' }),
+  ];
+  const result = insights.analyzeGraph([...roots, node('TARGET', 'planning')], [
+    depends('FIRST', 'TARGET'), depends('SECOND', 'TARGET'),
+  ]);
+  assert.deepStrictEqual(result.perNode.TARGET.rootCauses, [
+    { card: 'FIRST', hops: 1 }, { card: 'SECOND', hops: 1 },
+  ], 'arbitrary node attributes cannot replace input record order');
 });
 
 let failures = 0;
