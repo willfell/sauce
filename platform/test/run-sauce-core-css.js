@@ -193,15 +193,17 @@ function assertLegacyPillRules(coreSource, dailySource) {
     ".sauce-section-overdue-pill",
     ".sauce-section-done-pill",
     ".sauce-section-count-pill",
+    ".sauce-section-pill-label",
+    ".sauce-section-counts",
   ];
   const dailyRules = selectorBoundRuleBytes(
     dailySource,
     (rule) => dailyFragments.some((fragment) => rule.selector.includes(fragment)),
   );
-  assert.strictEqual(dailyRules.length, 12, "legacy Daily count-pill rule family changed");
+  assert.strictEqual(dailyRules.length, 16, "legacy Daily count-pill rule family changed");
   assert.strictEqual(
     sha256(dailyRules.join("\n")),
-    "1b2fbfaac8bf29927b3495db087ca06962f7290a4344b937521ff08e8fc45718",
+    "3147a92dd70cbc7eeaf158cff328873db73ff8d8ba79f664b6c4592464deb887",
     "legacy Daily count-pill selector/declaration bytes changed",
   );
 }
@@ -500,6 +502,28 @@ test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", (
     () => assertLegacyPillRules(css, neutralCountMutation),
     /legacy Daily count-pill selector\/declaration bytes changed/,
     "a neutral count-pill selector mutation must turn the focused fixture red",
+  );
+
+  const mobileLabelMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-pill-label { display: none; }",
+    "body .space-daily-dashboard .sauce-section-pill-label { display: none; }",
+  );
+  assert.notStrictEqual(mobileLabelMutation, dailyCss, "mobile count-pill label mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, mobileLabelMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a mobile count-pill label selector mutation must turn the focused fixture red",
+  );
+
+  const mobileGapMutation = dailyCss.replace(
+    "  .space-daily-dashboard .sauce-section-counts { gap: 4px; }",
+    "  body .space-daily-dashboard .sauce-section-counts { gap: 4px; }",
+  );
+  assert.notStrictEqual(mobileGapMutation, dailyCss, "mobile count-pill gap mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, mobileGapMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a mobile count-pill gap selector mutation must turn the focused fixture red",
   );
 });
 
