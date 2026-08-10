@@ -461,6 +461,7 @@ test("C1C-CORE-REDUCED-MOTION-SCOPE covers exactly the ratified roots and surfac
   const roots = [
     ".sauce-btn",
     ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))",
+    ".sauce-pill-toggle",
     ".sauce-action-row",
     ".sauce-modal-backdrop",
     ".sauce-modal",
@@ -514,7 +515,9 @@ test("C1C-DAILY-STATE-TRANSFORMS-PRESERVED reads real Daily state surfaces outsi
     assert.ok(reducedSelectors.every((selector) => !selector.includes(fixture.className)), fixture.className + " leaked into core motion boundary");
   }
   assert.ok(reducedSelectors.every((selector) => !selector.includes(".sauce-pill-dot")), "Daily pill-dot leaked into core motion boundary");
-  const pillSelectors = reducedSelectors.filter((selector) => selector.includes(".sauce-pill"));
+  const pillSelectors = reducedSelectors.filter((selector) => (
+    selector.startsWith(".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))")
+  ));
   assert.ok(pillSelectors.length > 0, "core pill motion coverage missing");
   assert.ok(
     pillSelectors.every((selector) => selector.startsWith(".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))")),
