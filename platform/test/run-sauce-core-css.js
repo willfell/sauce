@@ -158,6 +158,53 @@ function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
+function selectorBoundRuleBytes(source, predicate) {
+  const masked = source.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  return [...masked.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((match) => {
+      const leadingWhitespace = match[0].match(/^\s*/)[0].length;
+      return {
+        selector: match[1].trim(),
+        raw: source.slice(match.index + leadingWhitespace, match.index + match[0].length),
+      };
+    })
+    .filter(predicate)
+    .map((rule) => rule.raw);
+}
+
+function assertLegacyPillRules(coreSource, dailySource) {
+  const coreSelectors = new Set([
+    ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))",
+    ".sauce-pill.sauce-pill-accent",
+    ".sauce-pill.sauce-pill-danger",
+  ]);
+  const coreRules = selectorBoundRuleBytes(coreSource, (rule) => coreSelectors.has(rule.selector));
+  assert.strictEqual(coreRules.length, 3, "legacy sauce-core pill rule family changed");
+  assert.strictEqual(
+    sha256(coreRules.join("\n")),
+    "1a75c446986c4081d7d7e061ab683a99afb3be9e920a68eb0b6173689adb082b",
+    "legacy sauce-core pill selector/declaration bytes changed",
+  );
+
+  const dailyFragments = [
+    ".sauce-pill",
+    ".sauce-pill-dot",
+    ".sauce-section-open-pill",
+    ".sauce-section-overdue-pill",
+    ".sauce-section-done-pill",
+  ];
+  const dailyRules = selectorBoundRuleBytes(
+    dailySource,
+    (rule) => dailyFragments.some((fragment) => rule.selector.includes(fragment)),
+  );
+  assert.strictEqual(dailyRules.length, 11, "legacy Daily count-pill rule family changed");
+  assert.strictEqual(
+    sha256(dailyRules.join("\n")),
+    "5d36e5b8597e8c993f0f1794edd35323a1bd085611704414a853afcd1ddff33d",
+    "legacy Daily count-pill selector/declaration bytes changed",
+  );
+}
+
 function assertTogglePillContract(source) {
   const parsed = rules(source);
   const group = parsed.find((rule) => rule.selector === ".sauce-pill-group");
@@ -398,19 +445,29 @@ test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primit
 });
 
 test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", () => {
-  const snapshots = [
-    [css, ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))", "fa6d266b196f35f806b7cd05b14710ef27946441004b76aad8fcd650f8b09a6d"],
-    [css, ".sauce-pill.sauce-pill-accent", "69486aed998b800fd5711d7e58e02fad71bb736e619771eb298976b33ac96d2f"],
-    [css, ".sauce-pill.sauce-pill-danger", "5863a62636bbd789b1a8e3cf848bafeb6ecf199aba9fc689a40c0eca5ad88d54"],
-    [dailyCss, ".space-daily-dashboard .sauce-pill", "b18199d91da92bf12e67dac0f84b661798a186bc753c5cf8e18efc2b66118d0f"],
-    [dailyCss, ".space-daily-dashboard .sauce-section-open-pill", "8ae88faaf6cb6a3917cc2b44ac97551113184eaca2a334844f9f361591b56c12"],
-    [dailyCss, ".space-daily-dashboard .sauce-section-overdue-pill", "a3fd38569763c766e903740c342f3a6ac742c286fb3922f278b65fc14e39ee6d"],
-    [dailyCss, ".space-daily-dashboard .sauce-section-done-pill", "f2ce75ae48d485aa66a43ef5d9e81f1da2f17c0402e712e40904e1c46f85196d"],
-  ];
-  for (const [source, selector, expected] of snapshots) {
-    assert.strictEqual(sha256(blockAfter(source, selector)), expected,
-      selector + " changed outside the TV-1 additive contract");
-  }
+  assertLegacyPillRules(css, dailyCss);
+
+  const coreSelectorMutation = css.replace(
+    ".sauce-pill.sauce-pill-accent {",
+    "body .sauce-pill.sauce-pill-accent {",
+  );
+  assert.notStrictEqual(coreSelectorMutation, css, "core selector mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(coreSelectorMutation, dailyCss),
+    /legacy sauce-core pill (?:rule family|selector\/declaration bytes) changed/,
+    "a core pill selector-specificity mutation must turn the focused fixture red",
+  );
+
+  const dailyPseudoMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-open-pill::before {",
+    ".foo .space-daily-dashboard .sauce-section-open-pill::before {",
+  );
+  assert.notStrictEqual(dailyPseudoMutation, dailyCss, "Daily pseudo-selector mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, dailyPseudoMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a Daily count-pill pseudo-selector mutation must turn the focused fixture red",
+  );
 });
 
 test("C1C-390PX-TWO-UP computes two and only two minimum actions at 390px", () => {
