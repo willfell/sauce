@@ -229,10 +229,13 @@ function assertTogglePillContract(source) {
 
   const minHeight = Number(toggle.declarations.match(/min-height:\s*(\d+)px/)[1]);
   const padding = toggle.declarations.match(/padding:\s*(\d+)px\s+(\d+)px/);
-  assert.ok(minHeight <= 20, `toggle min-height ${minHeight}px must stay lean`);
-  assert.ok(Number(padding[1]) < 2 && Number(padding[2]) <= 8,
-    `toggle padding ${padding.slice(1).join("px ")}px must be tighter than 2px 8px`);
+  assert.strictEqual(minHeight, 20, "toggle min-height must remain the intended lean 20px");
+  assert.deepStrictEqual(padding.slice(1).map(Number), [1, 8],
+    "toggle padding must remain the intended lean 1px 8px");
   for (const contract of [
+    "display: inline-flex",
+    "align-items: center",
+    "justify-content: center",
     "border: 1px solid var(--sauce-hairline)",
     "border-radius: var(--sauce-radius-pill)",
     "background: var(--background-primary, #fff)",
@@ -466,6 +469,25 @@ test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primit
     /missing specificity-bound \.sauce-pill-toggle:focus-visible selector/,
     "a weakened focus-visible selector must turn the focused fixture red",
   );
+
+  for (const [needle, replacement, message] of [
+    ["display: inline-flex", "display: block", "block display"],
+    ["align-items: center", "align-items: start", "off-center alignment"],
+    ["justify-content: center", "justify-content: start", "off-center justification"],
+    ["min-height: 20px", "min-height: 0px", "degenerate height"],
+    ["padding: 1px 8px", "padding: 0px 0px", "degenerate padding"],
+  ]) {
+    const toggleMarker = "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {";
+    const toggleBlock = blockAfter(css, toggleMarker);
+    const mutatedBlock = toggleBlock.replace(needle, replacement);
+    assert.notStrictEqual(mutatedBlock, toggleBlock, message + " mutation did not reach its fixture");
+    const geometryMutation = css.replace(toggleBlock, mutatedBlock);
+    assert.throws(
+      () => assertTogglePillContract(geometryMutation),
+      undefined,
+      message + " must turn the focused fixture red",
+    );
+  }
 });
 
 test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", () => {
