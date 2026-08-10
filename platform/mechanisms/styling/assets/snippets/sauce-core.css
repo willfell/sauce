@@ -182,6 +182,43 @@ body .sauce-btn.sauce-btn.sauce-btn.sauce-btn-danger {
   background: var(--background-primary, #fff);
 }
 
+.sauce-pill-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--size-4-1, 4px);
+}
+
+body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid var(--sauce-hairline);
+  border-radius: var(--sauce-radius-pill);
+  background: var(--background-primary, #fff);
+  color: var(--text-muted, #666);
+  font: inherit;
+  font-size: 0.76em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+body .sauce-pill-toggle.is-active.sauce-pill-toggle.sauce-pill-toggle {
+  border-color: var(--interactive-accent, #7c3aed);
+  background: var(--interactive-accent, #7c3aed);
+  color: var(--text-on-accent, #fff);
+}
+
+body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
+  outline: 2px solid var(--interactive-accent, #7c3aed);
+  outline-offset: 2px;
+}
+
 /* Action rows preserve the established _mobilize two-up grammar. */
 .sauce-action-row {
   display: flex;

@@ -158,6 +158,50 @@ function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
+function assertTogglePillContract(source) {
+  const parsed = rules(source);
+  const group = parsed.find((rule) => rule.selector === ".sauce-pill-group");
+  const toggle = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle"
+  ));
+  const active = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.is-active.sauce-pill-toggle.sauce-pill-toggle"
+  ));
+  assert.ok(group, "missing exact .sauce-pill-group selector");
+  assert.ok(toggle, "missing specificity-bound .sauce-pill-toggle selector");
+  assert.ok(active, "missing specificity-bound .sauce-pill-toggle.is-active selector");
+  assert.match(group.declarations, /display:\s*inline-flex/);
+  assert.match(group.declarations, /gap:\s*var\(--size-4-1,\s*4px\)/);
+
+  const minHeight = Number(toggle.declarations.match(/min-height:\s*(\d+)px/)[1]);
+  const padding = toggle.declarations.match(/padding:\s*(\d+)px\s+(\d+)px/);
+  assert.ok(minHeight <= 20, `toggle min-height ${minHeight}px must stay lean`);
+  assert.ok(Number(padding[1]) < 2 && Number(padding[2]) <= 8,
+    `toggle padding ${padding.slice(1).join("px ")}px must be tighter than 2px 8px`);
+  for (const contract of [
+    "border: 1px solid var(--sauce-hairline)",
+    "border-radius: var(--sauce-radius-pill)",
+    "background: var(--background-primary, #fff)",
+  ]) {
+    assert.ok(toggle.declarations.includes(contract), "toggle base lost " + contract);
+  }
+  for (const contract of [
+    "border-color: var(--interactive-accent, #7c3aed)",
+    "background: var(--interactive-accent, #7c3aed)",
+    "color: var(--text-on-accent, #fff)",
+  ]) {
+    assert.ok(active.declarations.includes(contract), "toggle active state lost " + contract);
+  }
+  assert.ok(compareSpecificity(specificity(active.selector), specificity(toggle.selector)) > 0,
+    "active toggle selector must outrank the base toggle selector");
+  const baselineButtons = rules(theme).filter((rule) => rule.selector.includes("button:where("));
+  assert.ok(baselineButtons.length >= 5, "expected Baseline generic and input-mode button fixtures");
+  for (const baseline of baselineButtons) {
+    assert.ok(compareSpecificity(specificity(toggle.selector), specificity(baseline.selector)) > 0,
+      `toggle ${toggle.selector} must outrank Baseline ${baseline.selector}`);
+  }
+}
+
 test("parent-card public tokens exist on body with exact names and fallbacks", () => {
   assert.match(css, /body\s*\{/);
   const nativeFallbackTokens = [
@@ -336,6 +380,37 @@ test("C1C-PILL-VARIANT-CASCADE preserves the parent API and Daily pre-adoption",
   assert.match(body(dangerSelector), /--color-red/);
   assert.ok(compareSpecificity(specificity(accentSelector), specificity(baseSelector)) > 0, "accent pill must win over base declarations");
   assert.ok(compareSpecificity(specificity(dangerSelector), specificity(baseSelector)) > 0, "danger pill must win over base declarations");
+});
+
+test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primitives", () => {
+  assertTogglePillContract(css);
+
+  const weakened = css.replace(
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {",
+    ".sauce-pill-toggle {",
+  );
+  assert.notStrictEqual(weakened, css, "weak-selector mutation did not reach the base toggle rule");
+  assert.throws(
+    () => assertTogglePillContract(weakened),
+    /missing specificity-bound \.sauce-pill-toggle selector/,
+    "weak base selector must turn the focused fixture red",
+  );
+});
+
+test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", () => {
+  const snapshots = [
+    [css, ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))", "fa6d266b196f35f806b7cd05b14710ef27946441004b76aad8fcd650f8b09a6d"],
+    [css, ".sauce-pill.sauce-pill-accent", "69486aed998b800fd5711d7e58e02fad71bb736e619771eb298976b33ac96d2f"],
+    [css, ".sauce-pill.sauce-pill-danger", "5863a62636bbd789b1a8e3cf848bafeb6ecf199aba9fc689a40c0eca5ad88d54"],
+    [dailyCss, ".space-daily-dashboard .sauce-pill", "b18199d91da92bf12e67dac0f84b661798a186bc753c5cf8e18efc2b66118d0f"],
+    [dailyCss, ".space-daily-dashboard .sauce-section-open-pill", "8ae88faaf6cb6a3917cc2b44ac97551113184eaca2a334844f9f361591b56c12"],
+    [dailyCss, ".space-daily-dashboard .sauce-section-overdue-pill", "a3fd38569763c766e903740c342f3a6ac742c286fb3922f278b65fc14e39ee6d"],
+    [dailyCss, ".space-daily-dashboard .sauce-section-done-pill", "f2ce75ae48d485aa66a43ef5d9e81f1da2f17c0402e712e40904e1c46f85196d"],
+  ];
+  for (const [source, selector, expected] of snapshots) {
+    assert.strictEqual(sha256(blockAfter(source, selector)), expected,
+      selector + " changed outside the TV-1 additive contract");
+  }
 });
 
 test("C1C-390PX-TWO-UP computes two and only two minimum actions at 390px", () => {
