@@ -99,8 +99,10 @@ async function main() {
     failing.results.find((r) => r.id === 'bad').code === 3);
   ok('RUN-8 the failing step captures stderr',
     failing.results.find((r) => r.id === 'bad').output.includes('boom-bad'));
-  ok('RUN-9 no new step is dispatched after a failure',
-    !failing.results.some((r) => r.id === 'after' && r.status === 'pass'));
+  ok('RUN-9 undispatched steps are marked skipped',
+    failing.results.find((r) => r.id === 'after').status === 'skipped');
+  ok('RUN-9b exactly one step ran before the halt',
+    failing.results.length === 2);
 
   // --- runManifest: serial lane runs before parallel lane ---
   const laneOrder = await runManifest({
@@ -115,10 +117,12 @@ async function main() {
   ok('SUM-1 the summary names every step',
     summary.includes('a') && summary.includes('b'));
   ok('SUM-2 the summary reports the total count',
-    /2/.test(summary));
+    summary.includes('(2/2)'));
   const failSummary = formatSummary(failing.results);
   ok('SUM-3 the summary marks failures',
     /FAIL/.test(failSummary));
+  ok('SUM-4 the summary shows skipped steps roll-up',
+    failSummary.includes('SKIP') && failSummary.includes('(0/2)'));
 
   // --- resolveJobs ---
   ok('JOBS-1 --jobs is parsed from argv',

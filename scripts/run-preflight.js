@@ -135,6 +135,17 @@ async function runManifest(manifest, opts = {}) {
   await runLane(lanes.serial, 1, cwd, onResult, () => halted);
   if (!halted) await runLane(lanes.parallel, jobs, cwd, onResult, () => halted);
 
+  // Append skipped results for any step that was never dispatched.
+  const resultIds = new Set(results.map((r) => r.id));
+  for (const step of manifest.steps) {
+    if (!resultIds.has(step.id)) {
+      results.push({
+        id: step.id, cmd: step.cmd, status: 'skipped', code: null,
+        durationMs: 0, output: '',
+      });
+    }
+  }
+
   return { ok: !results.some((r) => r.status === 'fail'), results };
 }
 
@@ -149,12 +160,17 @@ function renderStep(r) {
 
 function formatSummary(results) {
   const passed = results.filter((r) => r.status === 'pass').length;
+  const skipped = results.filter((r) => r.status === 'skipped').length;
   const lines = [''];
   lines.push('preflight summary');
   lines.push('-'.repeat(60));
   for (const r of results) {
+    if (r.status === 'skipped') continue;
     const secs = (r.durationMs / 1000).toFixed(1).padStart(7);
     lines.push(`${(r.status === 'pass' ? 'PASS' : 'FAIL').padEnd(5)}${secs}s  ${r.id}`);
+  }
+  if (skipped > 0) {
+    lines.push(`SKIP  ${skipped} steps not dispatched after the failure`);
   }
   lines.push('-'.repeat(60));
   const failedIds = results.filter((r) => r.status === 'fail').map((r) => r.id);
