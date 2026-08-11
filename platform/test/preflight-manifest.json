@@ -1,6 +1,5 @@
 {
   "schema_version": "1.0.0",
-  "_comment": "Preflight step list. Authored heaviest-first; see Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md",
   "steps": [
     {
       "id": "version-sync",
