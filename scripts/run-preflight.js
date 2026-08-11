@@ -28,6 +28,14 @@ const DEFAULT_JOBS = os.availableParallelism ? os.availableParallelism() : os.cp
 
 const LANES = ['serial', 'parallel'];
 
+// Per-step timeout. Generous — ~20x the longest real step (~46s) — but a hung
+// step must not hang the run forever, and with groups it would otherwise wedge
+// its whole group. 15 minutes.
+const STEP_TIMEOUT_MS = 900000;
+
+// Grace period between SIGTERM and SIGKILL for a step that doesn't exit promptly.
+const KILL_GRACE_MS = 5000;
+
 function loadManifest(manifestPath) {
   const raw = fs.readFileSync(manifestPath, 'utf8');
   return JSON.parse(raw);
@@ -74,22 +82,58 @@ function planLanes(steps) {
   };
 }
 
-function runStep(step, cwd) {
+function runStep(step, cwd, timeoutMs = STEP_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const started = Date.now();
     const child = spawn(step.cmd[0], step.cmd.slice(1), {
       cwd, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';
+    let settled = false;
+    let timedOut = false;
+    let killTimer = null;
+
     child.stdout.on('data', (d) => { output += d; });
     child.stderr.on('data', (d) => { output += d; });
+
+    // Fires once at timeoutMs: send SIGTERM, then SIGKILL if the child hasn't
+    // exited within KILL_GRACE_MS. The 'close' handler below always resolves
+    // the step — this timer only ever nudges the child toward exiting so
+    // 'close' can fire; it never resolves directly.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch (e) { /* already dead */ }
+      killTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch (e) { /* already dead */ }
+      }, KILL_GRACE_MS);
+    }, timeoutMs);
+
+    const clearTimers = () => {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    };
+
     child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
       resolve({
         id: step.id, cmd: step.cmd, status: 'fail', code: null,
         durationMs: Date.now() - started, output: `${output}${err.message}`,
       });
     });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      if (timedOut) {
+        resolve({
+          id: step.id, cmd: step.cmd, status: 'fail', code,
+          durationMs: Date.now() - started,
+          output: `${output}\nFAIL — step "${step.id}" timed out after ${(timeoutMs / 1000).toFixed(1)}s\n`,
+        });
+        return;
+      }
       resolve({
         id: step.id, cmd: step.cmd, status: code === 0 ? 'pass' : 'fail',
         code, durationMs: Date.now() - started, output,
@@ -109,7 +153,7 @@ function runStep(step, cwd) {
 // busy polls rather than blocking, so other workers can keep draining
 // ungrouped/other-group work in the meantime. Releasing a group happens in a
 // `finally` so a step that throws never wedges its group forever.
-async function runLane(steps, jobs, cwd, onResult, isHalted) {
+async function runLane(steps, jobs, cwd, onResult, isHalted, timeoutMs = STEP_TIMEOUT_MS) {
   const queue = steps.map((step) => step);
   const busy = new Set();
   let failed = false;
@@ -134,7 +178,7 @@ async function runLane(steps, jobs, cwd, onResult, isHalted) {
       const g = step.group;
       if (g) busy.add(g);
       try {
-        const result = await runStep(step, cwd);
+        const result = await runStep(step, cwd, timeoutMs);
         onResult(result);
         if (result.status === 'fail') failed = true;
       } finally {
@@ -149,6 +193,7 @@ async function runLane(steps, jobs, cwd, onResult, isHalted) {
 async function runManifest(manifest, opts = {}) {
   const jobs = Math.max(1, opts.jobs || DEFAULT_JOBS);
   const cwd = opts.cwd || ROOT;
+  const timeoutMs = opts.timeoutMs || STEP_TIMEOUT_MS;
   const lanes = planLanes(manifest.steps);
   const results = [];
   let halted = false;
@@ -161,8 +206,8 @@ async function runManifest(manifest, opts = {}) {
   // The serial lane runs single-file and to completion first. check-version-sync
   // lives here so a version mismatch still fails on the very first line, the way
   // the old chain did.
-  await runLane(lanes.serial, 1, cwd, onResult, () => halted);
-  if (!halted) await runLane(lanes.parallel, jobs, cwd, onResult, () => halted);
+  await runLane(lanes.serial, 1, cwd, onResult, () => halted, timeoutMs);
+  if (!halted) await runLane(lanes.parallel, jobs, cwd, onResult, () => halted, timeoutMs);
 
   // Append skipped results for any step that was never dispatched.
   const resultIds = new Set(results.map((r) => r.id));
@@ -237,12 +282,14 @@ async function main() {
   const { ok, results } = await runManifest(manifest, { jobs });
   console.log(formatSummary(results));
   console.log(`total ${((Date.now() - started) / 1000).toFixed(1)}s`);
-  process.exit(ok ? 0 : 1);
+  // process.exitCode (not process.exit) so queued stdout isn't truncated when
+  // stdout is a pipe — exactly how the coordinator invokes this (stdio: 'pipe').
+  process.exitCode = ok ? 0 : 1;
 }
 
 module.exports = {
-  loadManifest, validateManifest, planLanes, runManifest,
-  formatSummary, resolveJobs, DEFAULT_JOBS,
+  loadManifest, validateManifest, planLanes, runManifest, runStep,
+  formatSummary, resolveJobs, DEFAULT_JOBS, STEP_TIMEOUT_MS,
 };
 
 if (require.main === module) {

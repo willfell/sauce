@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  loadManifest, validateManifest, planLanes, runManifest, formatSummary, resolveJobs,
+  loadManifest, validateManifest, planLanes, runManifest, runStep, formatSummary, resolveJobs,
 } = require('../../scripts/run-preflight.js');
 
 const results = [];
@@ -101,7 +101,7 @@ async function main() {
     failing.results.find((r) => r.id === 'bad').output.includes('boom-bad'));
   ok('RUN-9 undispatched steps are marked skipped',
     failing.results.find((r) => r.id === 'after').status === 'skipped');
-  ok('RUN-9b exactly one step ran before the halt',
+  ok('RUN-9b results include the ran step plus the skipped one',
     failing.results.length === 2);
 
   // --- runManifest: serial lane runs before parallel lane ---
@@ -313,6 +313,41 @@ async function main() {
   ok('VALID-8 an empty-string group is rejected',
     validateManifest({ schema_version: '1.0.0', steps: [{ id: 'a', cmd: ['node', '-e', '0'], group: '' }] })
       .some((m) => m.includes('group')));
+
+  // --- per-step timeout ---
+  // A step that hangs well past its timeout must be killed and recorded as a
+  // normal failed result, never left to hang the run forever — a real
+  // subprocess and a real timer, with timeoutMs overridden low so the test
+  // doesn't wait for STEP_TIMEOUT_MS's production value of 15 minutes.
+  // Guarded with an outer timeout so a regression (runStep hanging instead of
+  // killing) fails the assertion instead of hanging this whole test file.
+  const TIMEOUT_TEST_MS = 300;
+  const hangStep = { id: 'hang', cmd: ['node', '-e', 'setTimeout(() => {}, 60000)'] };
+  const timeoutRunGuard = await timeoutGuard(
+    runManifest({ schema_version: '1.0.0', steps: [hangStep] }, { jobs: 1, timeoutMs: TIMEOUT_TEST_MS }),
+    15000,
+  );
+  ok('TIMEOUT-1 a hung step is killed instead of hanging the run', timeoutRunGuard.timedOut === false);
+  if (!timeoutRunGuard.timedOut) {
+    const timeoutRun = timeoutRunGuard.value;
+    ok('TIMEOUT-2 the run reports ok === false', timeoutRun.ok === false);
+    const hangResult = timeoutRun.results.find((r) => r.id === 'hang');
+    ok('TIMEOUT-3 the timed-out step resolves as a normal fail result',
+      !!hangResult && hangResult.status === 'fail');
+    ok('TIMEOUT-4 the output names the step and mentions the timeout',
+      !!hangResult && /timed out/i.test(hangResult.output) && hangResult.output.includes('hang'));
+  }
+
+  // runStep itself must also resolve (never reject) on timeout, since runLane's
+  // group release and halt/skip-padding logic depend on that.
+  let runStepRejected = false;
+  const directTimeoutGuard = await timeoutGuard(
+    runStep({ id: 'hang2', cmd: ['node', '-e', 'setTimeout(() => {}, 60000)'] }, process.cwd(), TIMEOUT_TEST_MS)
+      .catch(() => { runStepRejected = true; return null; }),
+    15000,
+  );
+  ok('TIMEOUT-5 runStep resolves (never rejects) on timeout',
+    directTimeoutGuard.timedOut === false && runStepRejected === false);
 
   fs.rmSync(tmp, { recursive: true, force: true });
 
