@@ -14,10 +14,9 @@
 //   --dry-run  print to stdout instead of writing
 //   --help     usage
 //
-// After scaffold: manually wire into `package.json`'s `release:preflight`
-// chain (one Edit tool call) so CI fires the new harness. The script
-// intentionally does NOT auto-edit `package.json` to avoid corrupting
-// the long single-line script field.
+// After scaffold: add a step to `platform/test/preflight-manifest.json` so CI
+// fires the new harness. Step shape: { "id": "<short-id>", "cmd": ["node", "platform/test/run-<name>.js"], "lane": "parallel" }.
+// Use "serial" lane only for steps that must not run concurrently; "parallel" is the default.
 
 const fs = require("fs");
 const path = require("path");
@@ -44,7 +43,7 @@ Flags:
   --dry-run     print to stdout instead of writing the file
   --help, -h    show this message
 
-After scaffold, wire into package.json release:preflight script chain.
+After scaffold, add a step to platform/test/preflight-manifest.json.
 `);
 }
 
@@ -85,8 +84,7 @@ const template = `// ${fileName} — ${cycleId} behavioral test harness (scaffol
 //   Section 2 — <topic> contract / migration → CONTRACT-1..M
 //
 // Pattern matches run-v01103-monthly-overview.js (zero-dep; inline DOM stub;
-// Dataview-proxy stub; verdict footer). Wire into release:preflight in
-// package.json after this file is populated with cases.
+// Dataview-proxy stub; verdict footer). Add to platform/test/preflight-manifest.json after this file is populated with cases.
 
 const fs = require("fs");
 const path = require("path");
@@ -332,5 +330,4 @@ if (DRY_RUN) {
 fs.writeFileSync(target, template);
 const lc = template.split("\n").length;
 process.stdout.write(`scaffold-behavioral-harness: wrote ${path.relative(WORKSHOP, target)} (${lc} lines)\n`);
-process.stdout.write(`   next: wire into package.json release:preflight, then populate Sections 1 + 2.\n`);
-process.exit(0);
+process.stdout.write(`   next: add to platform/test/preflight-manifest.json ({ "id": "<short-id>", "cmd": ["node", "platform/test/run-<name>.js"], "lane": "parallel" }), then populate Sections 1 + 2.\n`);
