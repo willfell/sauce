@@ -6552,8 +6552,17 @@ function commandStatus(ctx, opts = {}) {
     readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
     loadEpicCard: opts.loadEpicCard,
   }), nowMs);
+  // Gated to projectable phases for the same reason board-health check 5 is
+  // (and reusing the same helper projectionMetadataProblem below already
+  // uses): discard's own epic-rollup step can set projection_error on the
+  // very record it just discarded, and discarded/failed/cancelled never run
+  // through a projection again — only a successful projection clears
+  // projection_error. This is what readiness() actually reads (via
+  // coordinatorSnapshot -> commandStatus), so leaving this filter unguarded
+  // permanently blocks batch-runner's readiness() even after the board-health
+  // check is fixed — they are separate computations, not shared code.
   const savedProjectionProblems = Object.values(state.cards || {})
-    .filter((record) => record.projection_error)
+    .filter((record) => record.projection_error && projectionMapping(record.phase))
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
   const detectedMetadataProblems = Object.values(state.cards || {})
     .map((record) => projectionMetadataProblem(record, cardsRoot))
