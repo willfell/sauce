@@ -11,8 +11,10 @@ const delivery = require('../mechanisms/delivery');
 const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
 // These fixtures intentionally exercise the coordinator's flat-board selection
 // seam unless a case opts into a binding through withFreshCoordinator below.
-// A live loop exports epic topology while running release:preflight, so keep
-// that ambient binding from changing the module-level fixture semantics.
+// A live loop exports epic topology while running release:preflight (dispatched
+// as a manifest step via scripts/run-preflight.js, transitively from package.json's
+// release:preflight script), so keep that ambient binding from changing the
+// module-level fixture semantics.
 const inheritedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 let coordinator;
 try {

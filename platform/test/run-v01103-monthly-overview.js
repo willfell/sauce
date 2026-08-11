@@ -10,9 +10,11 @@
 //   MonthlyOverview math + DOM behavior  → MO-B-1..14
 //   _injectMonthlyBand anchor tiers      → MIG-B-1..8
 //
-// Wiring: invoked from release:preflight via package.json after the
-// run-v0109-projects-overhaul harness. Pattern + stubs lifted from
-// run-v0109-projects-overhaul.js for consistency.
+// Wiring: registered as a step in platform/test/preflight-manifest.json after
+// the run-v0109-projects-overhaul harness; invoked from release:preflight via
+// package.json only transitively (via scripts/run-preflight.js reading the
+// manifest). Pattern + stubs lifted from run-v0109-projects-overhaul.js for
+// consistency.
 
 const fs = require("fs");
 const path = require("path");

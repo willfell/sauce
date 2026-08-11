@@ -112,7 +112,7 @@ For cycles that ship a new helper / shared primitive / non-trivial render dispat
 npm run scaffold-harness -- v01200 workshop-tooling   # or: node scripts/scaffold-behavioral-harness.js v01200 workshop-tooling
 ```
 
-Generates `platform/test/run-v01200-workshop-tooling.js` with the canonical zero-dep template (DOM stub + Dataview-proxy stubs + verdict footer). Wire into `package.json release:preflight` manually after populating sections (the script doesn't auto-edit the long single-line scripts field).
+Generates `platform/test/run-v01200-workshop-tooling.js` with the canonical zero-dep template (DOM stub + Dataview-proxy stubs + verdict footer). Wire into `platform/test/preflight-manifest.json` manually after populating sections, adding a step of the shape `{ "id": "<short-id>", "cmd": ["node", "platform/test/run-<name>.js"], "lane": "parallel" }` (the scaffold script doesn't auto-edit the manifest). Add an optional `"group": "<name>"` if the harness must not run concurrently with another step (e.g. both write the same fixture file) — at most one step per group runs at a time in the parallel lane. See [`Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md`](../superpowers/specs/2026-08-10-parallel-preflight-design.md) for the full group contract.
 
 Flags:
 - `--force` — overwrite existing target.

@@ -663,7 +663,7 @@
         "scripts/check-orphan-harnesses.js",
         "platform/test/run-preflight-runner.js"
       ],
-      "notes": "Preflight step list \u2014 id/cmd/lane per step, authored heaviest-first. Replaces the release:preflight && chain. Lane is serial or parallel; the serial lane runs first."
+      "notes": "Preflight step list \u2014 id/cmd/lane/group per step, authored heaviest-first. Replaces the release:preflight && chain. Lane is serial or parallel; the serial lane runs first. group is optional; at most one step per group runs at a time in the parallel lane."
     }
   ]
 }
