@@ -291,6 +291,13 @@
   gap: 10px;
 }
 
+/* TV-2: shared lean toggle pills trail the Tasks counts in the summary. */
+.space-daily-dashboard .sauce-daily-task-sort {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
 /* Open-tasks pill — orange tint + soft glow. Used in the Tasks section header. */
 .space-daily-dashboard .sauce-section-open-pill {
   display: inline-flex;
@@ -459,5 +466,4 @@
   }
   .space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; }
 }
-
 

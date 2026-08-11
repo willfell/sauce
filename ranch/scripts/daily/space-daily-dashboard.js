@@ -620,11 +620,21 @@ class SpaceDailyDashboard {
       if (overdueCount > 0)     tasksRightHtml += `<span class="sauce-section-overdue-pill"><span class="sauce-section-pill-n">${overdueCount}</span><span class="sauce-section-pill-label"> Overdue</span></span>`;
       if (doneCount > 0)        tasksRightHtml += `<span class="sauce-section-done-pill"><span class="sauce-section-pill-n">${doneCount}</span><span class="sauce-section-pill-label"> Done</span></span>`;
 
+      let taskSortControl = null;
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
         iconHtml: icons.checkSquare,
         titleHtml: '<span class="sauce-section-title-link">Tasks</span>',
         rightHtml: tasksRightHtml,
+        renderRight: (countsHost) => {
+          taskSortControl = countsHost.createEl("span");
+          taskSortControl.className = "sauce-daily-task-sort sauce-pill-group";
+          taskSortControl.setAttribute("role", "group");
+          taskSortControl.setAttribute("aria-label", "Sort daily tasks");
+          taskSortControl.addEventListener("click", (event) => {
+            try { event.stopPropagation(); } catch (_e) {}
+          });
+        },
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:tasks",
         sectionState,
@@ -651,15 +661,7 @@ class SpaceDailyDashboard {
 
         // Client-only sort control. The preference never enters the vault:
         // localStorage is the sole persistence rail and every access is guarded.
-        const sortControl = tasksBody.createEl("div");
-        sortControl.className = "sauce-daily-task-sort";
-        sortControl.style.cssText = "display:flex; align-items:center; gap:4px; margin:0 0 8px; font-size:0.78em;";
-        sortControl.setAttribute("role", "group");
-        sortControl.setAttribute("aria-label", "Sort daily tasks");
-
-        const sortLabel = sortControl.createEl("span");
-        sortLabel.textContent = "Sort";
-        sortLabel.style.cssText = "margin-right:2px; color:var(--text-muted);";
+        const sortControl = taskSortControl;
 
         const sortButtons = {};
         const updateSortButtonState = () => {
@@ -667,10 +669,7 @@ class SpaceDailyDashboard {
             const active = mode === taskSortMode;
             const button = sortButtons[mode];
             button.setAttribute("aria-pressed", active ? "true" : "false");
-            button.style.cssText = "border:1px solid var(--background-modifier-border); border-radius:999px; padding:2px 8px; font:inherit; cursor:pointer;"
-              + (active
-                ? " background:var(--interactive-accent); color:var(--text-on-accent);"
-                : " background:transparent; color:var(--text-muted);");
+            button.className = `sauce-pill-toggle${active ? " is-active" : ""}`;
           }
         };
 
@@ -771,11 +770,13 @@ class SpaceDailyDashboard {
         for (const mode of ["due", "priority"]) {
           const button = sortControl.createEl("button");
           sortButtons[mode] = button;
+          button.className = "sauce-pill-toggle";
           button.textContent = mode === "due" ? "Due" : "Priority";
           button.setAttribute("type", "button");
           button.setAttribute("aria-label", `Sort daily tasks by ${mode}`);
           button.addEventListener("click", (event) => {
             try { event.preventDefault(); } catch (_e) {}
+            try { event.stopPropagation(); } catch (_e) {}
             taskSortMode = SpaceDailyDashboard.writeTaskSortMode(taskSortStorage, mode);
             updateSortButtonState();
             renderTaskLists();
@@ -1460,7 +1461,7 @@ class SpaceDailyDashboard {
    * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
    * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
    */
-  _renderSection(container, { accent, iconHtml, title, titleHtml, rightHtml, defaultOpen, stateKey, sectionState }) {
+  _renderSection(container, { accent, iconHtml, title, titleHtml, rightHtml, renderRight, defaultOpen, stateKey, sectionState }) {
     const section = container.createEl("div");
     section.className = "sauce-section";
     section.dataset.accent = accent;
@@ -1481,14 +1482,22 @@ class SpaceDailyDashboard {
     // right-aligned .sauce-section-counts container between the title and the
     // chevron, used for the Tasks open/done pills and the Meetings/Activity
     // neutral count pills. Same XSS trust boundary: integers only.
-    const rightMarkup = (typeof rightHtml === "string" && rightHtml.length > 0)
-      ? `<span class="sauce-section-counts">${rightHtml}</span>`
-      : "";
-    summary.innerHTML =
-      `<span class="sauce-section-icon">${iconHtml}</span>` +
-      `<span>${titleHtml ? titleHtml : this._escapeHtml(title)}</span>` +
-      rightMarkup +
-      `<span class="sauce-section-chevron">${this._CHEVRON_SVG}</span>`;
+    const icon = summary.createEl("span");
+    icon.className = "sauce-section-icon";
+    icon.innerHTML = iconHtml;
+    const titleNode = summary.createEl("span");
+    if (titleHtml) titleNode.innerHTML = titleHtml;
+    else titleNode.textContent = title;
+    if ((typeof rightHtml === "string" && rightHtml.length > 0)
+        || typeof renderRight === "function") {
+      const counts = summary.createEl("span");
+      counts.className = "sauce-section-counts";
+      if (typeof rightHtml === "string") counts.innerHTML = rightHtml;
+      if (typeof renderRight === "function") renderRight(counts);
+    }
+    const chevron = summary.createEl("span");
+    chevron.className = "sauce-section-chevron";
+    chevron.innerHTML = this._CHEVRON_SVG;
     const body = details.createEl("div");
     body.className = "sauce-section-body";
     if (stateKey) {
