@@ -2709,6 +2709,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   }
   const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, {
     ...opts,
+    state: opts.state,
     currentCard: card,
   });
   const record = opts.record || null;

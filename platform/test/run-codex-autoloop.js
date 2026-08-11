@@ -4487,6 +4487,32 @@ ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.r
 const coordinatorLockSource = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
 eq((coordinatorLockSource.match(/`gates-\$\{slugify\(/g) || []).length, 1,
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN keeps the shipping slug spelling in one compatibility helper only');
+// EPIC-SURFACE-LEDGER — every construction of an epic surface must declare its
+// ledger intent. Landmine #33: gate every copy, not just the one in the bug
+// report. Runtime fail-closed cannot catch a callsite no test exercises.
+{
+  const source = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
+  const callsites = [];
+  const needle = 'canonicalEpicProjection(';
+  for (let index = source.indexOf(needle); index !== -1; index = source.indexOf(needle, index + 1)) {
+    if (/[\w.]/.test(source[index - 1] || '')) continue;
+    if (source.slice(Math.max(0, index - 9), index) === 'function ') continue;
+    let depth = 0;
+    let end = index + needle.length - 1;
+    for (; end < source.length; end++) {
+      if (source[end] === '(') depth++;
+      else if (source[end] === ')' && --depth === 0) break;
+    }
+    callsites.push({
+      line: source.slice(0, index).split('\n').length,
+      args: source.slice(index, end + 1),
+    });
+  }
+  ok(callsites.length >= 6, 'EPIC-SURFACE-LEDGER finds the epic-surface callsites');
+  const stateless = callsites.filter((site) => !/\bstate\b/.test(site.args) && !/topologyOnly:\s*true/.test(site.args));
+  eq(stateless.map((site) => site.line), [],
+    'EPIC-SURFACE-LEDGER every epic-surface callsite passes a ledger or declares topologyOnly');
+}
 eq(collisionReconcile.results[0].via_card, 'Lock-Alias',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves legacy-to-via routing through the exact tracked sibling');
 ok(collisionReconcile.results[0].projection_findings[0].card === 'Lock Alias',
