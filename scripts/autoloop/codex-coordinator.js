@@ -2940,7 +2940,13 @@ function projectionMetadataProblemFromRaw(record, raw, opts = {}) {
       const dependencies = parseDependsOn(raw).map(normalizeCardLink);
       const expected = Array.isArray(record.dependencies) ? record.dependencies.map(normalizeCardLink) : [];
       const condition = typeof record.resume_condition === 'string' ? record.resume_condition.trim() : '';
-      differs = differs || !expected.length || !condition
+      // Empty dependencies are legitimate when a park amendment cleared them
+      // (the upstream shipped). parkDependenciesClearedByAudit is the same
+      // escape hatch commandResume and parkedAmendmentProblem already honor;
+      // without it this finding is unclearable by construction, since it reads
+      // only record.dependencies while `reconcile` — the remedy its own error
+      // names — rewrites the card note.
+      differs = differs || (!expected.length && !parkDependenciesClearedByAudit(record)) || !condition
         || JSON.stringify(dependencies) !== JSON.stringify(expected)
         || scalarField(raw, 'resume_condition') !== condition;
     }
