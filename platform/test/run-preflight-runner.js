@@ -140,6 +140,67 @@ async function main() {
   ok('JOBS-7 zero and negative values clamp to 1',
     resolveJobs(['--jobs', '0'], {}) === 1 && resolveJobs(['--jobs', '-3'], {}) === 1);
 
+  // --- concurrency is actually bounded ---
+  // Each step appends "+" on start and "-" on end to a shared log, sleeping in
+  // between. Replaying the log gives the true peak overlap. Real subprocesses,
+  // real clock: the spawn seam is the thing under test and must not be faked.
+  const logPath = path.join(tmp, 'concurrency.log');
+  const overlapStep = (id) => ({
+    id,
+    cmd: ['node', '-e',
+      `const fs=require("fs");fs.appendFileSync(${JSON.stringify(logPath)},"+");`
+      + `const t=Date.now();while(Date.now()-t<150);`
+      + `fs.appendFileSync(${JSON.stringify(logPath)},"-")`],
+  });
+  const peakFromLog = (p) => {
+    let cur = 0; let peak = 0;
+    for (const ch of fs.readFileSync(p, 'utf8')) {
+      if (ch === '+') { cur += 1; peak = Math.max(peak, cur); } else { cur -= 1; }
+    }
+    return peak;
+  };
+  const overlapSteps = Array.from({ length: 8 }, (_, i) => overlapStep(`o${i}`));
+
+  fs.writeFileSync(logPath, '');
+  await runManifest({ schema_version: '1.0.0', steps: overlapSteps }, { jobs: 1 });
+  ok('CONC-1 jobs=1 never overlaps two steps', peakFromLog(logPath) === 1);
+
+  fs.writeFileSync(logPath, '');
+  await runManifest({ schema_version: '1.0.0', steps: overlapSteps }, { jobs: 4 });
+  const peak4 = peakFromLog(logPath);
+  ok('CONC-2 jobs=4 actually runs steps concurrently', peak4 > 1);
+  ok('CONC-3 jobs=4 never exceeds its bound', peak4 <= 4);
+
+  fs.writeFileSync(logPath, '');
+  const conc = await runManifest({ schema_version: '1.0.0', steps: overlapSteps }, { jobs: 4 });
+  ok('CONC-4 every step still completes under concurrency',
+    conc.ok === true && conc.results.length === 8);
+
+  // The serial lane must not overlap even when jobs is high.
+  fs.writeFileSync(logPath, '');
+  await runManifest({
+    schema_version: '1.0.0',
+    steps: overlapSteps.map((s) => ({ ...s, lane: 'serial' })),
+  }, { jobs: 8 });
+  ok('CONC-5 the serial lane ignores jobs and never overlaps',
+    peakFromLog(logPath) === 1);
+
+  // Output must stay contiguous per step, never interleaved.
+  const chatty = (id) => ({
+    id,
+    cmd: ['node', '-e',
+      `for(let i=0;i<50;i++)process.stdout.write("${id}:"+i+"\\n")`],
+  });
+  const chattyRun = await runManifest(
+    { schema_version: '1.0.0', steps: [chatty('x'), chatty('y'), chatty('z')] },
+    { jobs: 3 },
+  );
+  ok('CONC-6 each step captures only its own output',
+    chattyRun.results.every((r) => {
+      const lines = r.output.trim().split('\n');
+      return lines.length === 50 && lines.every((l) => l.startsWith(`${r.id}:`));
+    }));
+
   fs.rmSync(tmp, { recursive: true, force: true });
 
   const failed = results.filter(([, passed]) => !passed);
