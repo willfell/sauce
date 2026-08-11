@@ -819,9 +819,23 @@ async function visualContract() {
             assert.strictEqual(marker.destinations, "spice/projects/sauce/Sauce.md|spice/projects/sauce/sauce-board.md|spice/projects/sauce/docs/Docs.md|spice/projects/sauce/Project Map.md|spice/projects/sauce/Sauce To-Do.md|spice/projects/sauce/Links Hub.md");
             assert.strictEqual(marker.rows, "2"); assert.strictEqual(marker.buttons, "6");
             assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker["modal-title"], "Add link");
-            const first = path.join(temp, `${theme}-${width}-a.png`); const second = path.join(temp, `${theme}-${width}-b.png`);
-            runChrome(executable, [...common, `--screenshot=${first}`, url]); runChrome(executable, [...common, `--screenshot=${second}`, url]);
-            const a = fs.readFileSync(first); const b = fs.readFileSync(second);
+            // Two INDEPENDENT browser launches must paint identical pixels — the
+            // property this assertion has always been for. What changed is WHEN
+            // each one shoots. `--screenshot` with `--virtual-time-budget` fires
+            // when the budget expires, not when the fixture finishes: this
+            // fixture's async IIFE instantiates the real helpers, renders three
+            // action rows and clicks buttons, so on a loaded runner the two
+            // processes captured different paint states and the assertion failed
+            // for a reason that had nothing to do with styling. The `--dump-dom`
+            // pass above already proves the completion signal exists
+            // (`#fixture-results`); capture through the same settle-then-shoot
+            // path the action-row contract below uses, which polls for exactly
+            // that marker before its first frame. Same property, no race.
+            const shotA = await exactViewportCapture(executable, url, width, 900);
+            const shotB = await exactViewportCapture(executable, url, width, 900);
+            assert(!shotA.marker.error && !shotB.marker.error,
+                `screenshot fixture is error-free: ${shotA.marker.error || shotB.marker.error || ""}`);
+            const a = shotA.first; const b = shotB.first;
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
 
