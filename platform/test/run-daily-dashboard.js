@@ -284,18 +284,33 @@ async function renderDailyTaskFixture(today, options) {
       .filter((node) => String(node.className || '').split(/\s+/).includes(cls));
     try {
       const controls = byClass('sauce-daily-task-sort');
-      assert(controls.length === 1, 'one always-present sort control renders at Tasks top');
+      assert(controls.length === 1, 'one always-present sort control renders for Tasks');
+      const countsHost = controls[0].parentNode;
+      const summary = countsHost && countsHost.parentNode;
+      assert(countsHost && countsHost.className === 'sauce-section-counts'
+          && summary && summary.className === 'sauce-section-summary',
+        'sort control renders in the Tasks header count cluster, not the section body');
+      assert(countsHost.innerHTML.includes('sauce-section-open-pill')
+          && countsHost.innerHTML.includes('sauce-section-overdue-pill'),
+        'Open/Overdue counts remain before the trailing sort control');
       assert(controls[0].attributes.role === 'group'
           && controls[0].attributes['aria-label'] === 'Sort daily tasks',
         'control has accessible group semantics: ' + JSON.stringify(controls[0].attributes));
+      assert(!fixture.allNodes(controls[0]).some((node) => node.textContent === 'Sort'),
+        'header control omits the redundant Sort label');
       const buttons = controls[0]._children.filter((node) => node._tag === 'button');
       assert(buttons.length === 2 && buttons.map((b) => b.textContent).join(',') === 'Due,Priority',
         'control exposes labeled Due/Priority buttons');
       const dueButton = buttons.find((b) => b.textContent === 'Due');
       const priorityButton = buttons.find((b) => b.textContent === 'Priority');
+      assert(buttons.every((button) => String(button.className).split(/\s+/).includes('sauce-pill-toggle')
+          && button.style.cssText === ''),
+        'buttons consume the shared lean toggle-pill primitive without fat inline styling');
       assert(dueButton.attributes['aria-pressed'] === 'true'
-          && priorityButton.attributes['aria-pressed'] === 'false',
-        'Due is the default pressed state');
+          && priorityButton.attributes['aria-pressed'] === 'false'
+          && String(dueButton.className).split(/\s+/).includes('is-active')
+          && !String(priorityButton.className).split(/\s+/).includes('is-active'),
+        'Due is the default accessible and visual active state');
 
       let todayLists = byClass('sauce-daily-task-today-list');
       let overdueLists = byClass('sauce-section-overdue-list');
@@ -315,12 +330,19 @@ async function renderDailyTaskFixture(today, options) {
       assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
         'render performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
 
+      const details = summary && summary.parentNode;
+      const detailsOpenBeforeSort = details && details.open;
+      let stoppedSortPropagation = 0;
       await priorityButton._fire('click', {
-        target: priorityButton, preventDefault() {}, stopPropagation() {},
+        target: priorityButton, preventDefault() {}, stopPropagation() { stoppedSortPropagation++; },
       });
       assert(dueButton.attributes['aria-pressed'] === 'false'
-          && priorityButton.attributes['aria-pressed'] === 'true',
-        'selection updates accessible pressed state');
+          && priorityButton.attributes['aria-pressed'] === 'true'
+          && !String(dueButton.className).split(/\s+/).includes('is-active')
+          && String(priorityButton.className).split(/\s+/).includes('is-active'),
+        'selection updates accessible and visual active state');
+      assert(stoppedSortPropagation === 1 && details.open === detailsOpenBeforeSort,
+        'sort click is isolated from the Tasks details disclosure');
       assert(data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
         'selection persists Priority in namespaced localStorage');
       assert(byClass('sauce-daily-task-sort').length === 1,
