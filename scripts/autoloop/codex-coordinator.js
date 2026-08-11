@@ -5076,9 +5076,16 @@ function collectBoardHealth(state, opts = {}) {
   }
   // Check 5 — records carrying projection_error. Ledger-driven by nature, so
   // an empty/absent ledger contributes zero findings (skipped, not failed).
+  // Gated to projectable phases for the same reason check 6 is (see its
+  // comment below): discard's own epic-rollup step can set projection_error
+  // on the very record it just discarded (e.g. a sibling slice note is
+  // already gone), and `discarded`/`failed`/`cancelled` never run through a
+  // projection again — nothing could ever clear the finding. A finding no
+  // projection can ever resolve is not actionable, so it must not hold the
+  // board unhealthy.
   const projectionErrors = ledger === 'present'
     ? Object.values(cards)
-      .filter((record) => record.projection_error)
+      .filter((record) => record.projection_error && projectionMapping(record.phase))
       .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }))
     : [];
   // Check 6 — records carrying a live foreign_write finding: a tracked card's
