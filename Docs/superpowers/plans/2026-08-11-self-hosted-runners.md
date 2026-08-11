@@ -97,7 +97,7 @@ spec:
           spec:
             containers:
               - name: runner
-                image: ghcr.io/actions/actions-runner:latest
+                image: ghcr.io/actions/actions-runner:2.336.0
                 command: ["/home/runner/run.sh"]
                 resources:
                   requests:
