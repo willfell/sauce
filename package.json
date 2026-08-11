@@ -112,7 +112,8 @@
     "test:loop-config": "node platform/test/run-loop-config.js",
     "test:loop-binding": "node platform/test/run-loop-binding.js",
     "test:loop-plugin-surface": "node platform/test/run-loop-plugin-surface.js",
-    "test:loop-codex-routers": "node platform/test/run-loop-codex-routers.js"
+    "test:loop-codex-routers": "node platform/test/run-loop-codex-routers.js",
+    "test:preflight-runner": "node platform/test/run-preflight-runner.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
