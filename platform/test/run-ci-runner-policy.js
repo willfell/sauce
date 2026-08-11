@@ -9,6 +9,7 @@ const WORKFLOW_DIR = path.join(ROOT, ".github/workflows");
 
 const GITHUB_HOSTED = /^(?:ubuntu|macos|windows)-/i;
 const ALLOWED_LABELS = new Set(["sauce", "self-hosted", "macOS", "ARM64"]);
+const RAW_HOSTED = /(ubuntu|macos|windows)-(latest|\d)/i;
 
 let passed = 0;
 let failed = 0;
@@ -48,6 +49,7 @@ function runnerLabels(source) {
 
     if (raw === "") {
       for (let j = i + 1; j < lines.length; j += 1) {
+        if (/^\s*$/.test(lines[j])) continue;
         const item = /^\s*-\s+(.+)$/.exec(lines[j]);
         if (!item) break;
         push(item[1], j + 1);
@@ -63,6 +65,20 @@ function runnerLabels(source) {
     push(raw, i + 1);
   }
   return found;
+}
+
+// Belt-and-braces raw-text scan of the whole file, independent of the
+// structured runs-on/runner parse above. Catches shapes the structured parse
+// cannot see -- an `os:`-keyed matrix resolved through `runs-on: ${{ matrix.os }}`,
+// or a `runs-on: {group: ..., labels: ubuntu-latest}` mapping -- because those
+// resolve to zero or an opaque expression under runnerLabels().
+function rawHostedHits(source) {
+  const lines = String(source).split("\n");
+  const hits = [];
+  lines.forEach((line, index) => {
+    if (RAW_HOSTED.test(line)) hits.push({ line: index + 1, text: line.trim() });
+  });
+  return hits;
 }
 
 console.log("\n--- CI runner policy: no GitHub-hosted runners ---");
@@ -90,6 +106,13 @@ for (const file of files) {
     unknown.length === 0,
     `${file} uses only known self-hosted labels`,
     unknown.map((entry) => `line ${entry.line}: ${entry.value}`).join("; ")
+  );
+
+  const rawHits = rawHostedHits(source);
+  check(
+    rawHits.length === 0,
+    `${file} contains no GitHub-hosted runner token anywhere in the file`,
+    rawHits.map((hit) => `line ${hit.line}: ${hit.text}`).join("; ")
   );
 }
 

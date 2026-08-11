@@ -275,6 +275,16 @@ if (candidateBaseline.length === 0 && releasedBaseline.length === 0) {
     "candidate bootstrap cannot leave the required macOS matrix arm"
   );
 
+  const hostedLinuxLeg = replaceOnce(
+    workflow,
+    "            runner: sauce",
+    "            runner: ubuntu-latest"
+  );
+  check(
+    candidateErrors(hostedLinuxLeg).length > 0,
+    "required preflight matrix cannot drift the linux leg back onto a GitHub-hosted runner"
+  );
+
   const formulaInRequired = replaceOnce(
     workflow,
     '          test -f "$SAUCE_CANDIDATE_CLI"',

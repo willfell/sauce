@@ -132,7 +132,7 @@ Direct-push to `origin/main` remains possible (admin override) but the preferred
 
 1. Branch off `origin/main`: `git switch -c cycle/v0.X.Y-<topic>` (or use a worktree under `.worktrees/`).
 2. Cycle stages commit normally; push to the branch instead of main: `git push -u origin cycle/v0.X.Y-<topic>`.
-3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on `macos-latest` + `ubuntu-latest`. The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
+3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on both self-hosted pools (`preflight (linux)` + `preflight (macos)`). The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
 4. CI red → merge blocked (once branch protection is on; see below).
 5. Merge to main via the PR.
 6. On merge to `main`, the **release pipeline takes over automatically** — it bumps every version record, opens + auto-merges the release PR, tags `v<X.Y.Z>`, and ships to brew (§ Release workflow). You do **not** bump / tag by hand. The seed vault is **not** auto-rebaselined — that's a manual, reviewed action (§ Seed-vault rebaseline).
@@ -151,19 +151,19 @@ The `seed-vault-prev/` snapshot is the one-cycle-back safety net referenced in l
 
 ### Branch protection setup (one-time, manual; user approval required)
 
-Branch protection on `main` is **enabled** (required `preflight (macos-latest)` + `preflight (ubuntu-latest)` CI checks, strict; `enforce_admins=false` so the owner / `RELEASE_PAT` can bypass for the automated tag + seed pushes). The auto-merge pipeline depends on it — required checks are what the release PR's auto-merge waits for. It was set via the call below (changes to the rule still require user approval per `asking-before-acting.md` § Git):
+Branch protection on `main` is **enabled** (required `preflight (linux)` + `preflight (macos)` CI checks, strict; `enforce_admins=false` so the owner / `RELEASE_PAT` can bypass for the automated tag + seed pushes). The auto-merge pipeline depends on it — required checks are what the release PR's auto-merge waits for. It was set via the call below (changes to the rule still require user approval per `asking-before-acting.md` § Git):
 
 ```
 gh api -X PUT repos/willfell/sauce/branches/main/protection \
   --field required_status_checks[strict]=true \
-  --field 'required_status_checks[contexts][]=preflight (macos-latest)' \
-  --field 'required_status_checks[contexts][]=preflight (ubuntu-latest)' \
+  --field 'required_status_checks[contexts][]=preflight (linux)' \
+  --field 'required_status_checks[contexts][]=preflight (macos)' \
   --field enforce_admins=false \
   --field required_pull_request_reviews=null \
   --field restrictions=null
 ```
 
-Already in place. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
+Already in place under the old `preflight (macos-latest)` / `preflight (ubuntu-latest)` contexts; the rule itself is updated to the names above in a separate, human-gated step once the self-hosted-runner migration merges. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
 
 ### Self-hosted runner pools
 

@@ -211,7 +211,7 @@ The release pipeline is gated. A tag push only ships a Formula bump if preflight
    ```
    Must exit 0. Includes 14 harnesses + integration smoke (~30s end-to-end).
 
-3. **Commit + push to `main`.** Wait for `ci` workflow green on both `macos-latest` and `ubuntu-latest`.
+3. **Commit + push to `main`.** Wait for `ci` workflow green on both `preflight (linux)` and `preflight (macos)`.
 
 4. **Tag + push.**
    ```bash
@@ -247,8 +247,8 @@ These are flipped on manually in the GitHub UI under **Settings → Branches →
 
 - ☑ **Require a pull request before merging** (skip if single-developer; current workflow is direct push to main).
 - ☑ **Require status checks to pass before merging:**
-  - `preflight (macos-latest)`
-  - `preflight (ubuntu-latest)`
+  - `preflight (linux)`
+  - `preflight (macos)`
   - Toggle "Require branches to be up to date before merging".
 - ☑ **Require linear history** (matches the project's no-merge-commits convention).
 - ☑ **Restrict who can push to matching branches** — limit to your account.
