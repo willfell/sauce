@@ -55,12 +55,18 @@ vs
 When workshop ships a new version, consumer vaults need to re-pin and re-install:
 
 ```bash
+brew upgrade sauce         # serve the newly released version locally
 cd /Users/willfell/obsidian/<vault-name>
-sauce update --bump-pins   # rewrites ranch/platform-subscription.json pins
-sauce install              # runs the installer against the new pin map
+sauce update --bump-pins   # rewrites ranch/platform-subscription.json pins AND re-runs the installer
 ```
 
-The `sauce update --bump-pins` command preserves explicit version pins (anything not at `latest`) but advances `latest` pins to the workshop's current version. After install, run `sauce status` from inside the consumer vault to confirm drift is gone.
+The `sauce update --bump-pins` command preserves explicit version pins (anything not at `latest`) but advances `latest` pins to the workshop's current version, then runs the installer itself. After it finishes, run `sauce status` from inside the consumer vault to confirm drift is gone.
+
+**There is no `sauce install` verb.** The CLI's full verb list is `bootstrap|update|status|wizard|migrate|audit|seed|help` (`sauce help`) — `sauce install` and `sauce reinstall --all` do not exist and never have. To run the installer directly against a vault without going through `update` (the usual dogfood / heal-verification path, and what you want when the workshop is a local clone rather than the brew copy):
+
+```bash
+node /opt/homebrew/opt/sauce/libexec/platform/install.js --vault <vault-path> --auto-approve
+```
 
 **`scripts/dev-sync.sh`** automates this across multiple consumer vaults — see § dev-sync below.
 
@@ -131,7 +137,7 @@ End-of-cycle multi-consumer sync:
 
 Runs:
 1. Workshop sanity (clean tree, up-to-date with origin/main, harness PASS).
-2. For each consumer vault in the `CONSUMERS` array: `sauce update --bump-pins` + `sauce install` + `sauce status`.
+2. For each consumer vault in the `CONSUMERS` array: `sauce update --bump-pins` (which re-runs the installer itself) + `sauce status`, then greps the status output for `Drift: none`.
 
 Edit `CONSUMERS` in the script to include/exclude vaults. Default covers headspace + accuris.
 
