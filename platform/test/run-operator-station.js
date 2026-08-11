@@ -679,8 +679,11 @@ async function main() {
   const packageJson = JSON.parse(read('package.json'));
   assert.strictEqual(packageJson.scripts['test:operator-station'], 'node platform/test/run-operator-station.js',
     'package exposes the focused harness');
-  assert.strictEqual((packageJson.scripts['release:preflight']
-    .match(/node platform\/test\/run-operator-station\.js/g) || []).length, 1,
+  // The release:preflight registration surface moved from a package.json chain
+  // string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+  // cutover); count manifest steps whose command invokes this harness instead.
+  const preflightManifest = JSON.parse(read('platform/test/preflight-manifest.json'));
+  assert.strictEqual(preflightManifest.steps.filter((s) => s.cmd.join(' ').includes('platform/test/run-operator-station.js')).length, 1,
   'release preflight registers the harness exactly once');
 
   const visual = fs.readFileSync(VISUAL, 'utf8');

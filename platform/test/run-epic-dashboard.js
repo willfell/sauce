@@ -1555,7 +1555,11 @@ async function main() {
 
   const packageJson = JSON.parse(read('package.json'));
   assert.strictEqual(packageJson.scripts['test:epic-dashboard'], 'node platform/test/run-epic-dashboard.js', 'focused script is wired');
-  assert.strictEqual((packageJson.scripts['release:preflight'].match(/node platform\/test\/run-epic-dashboard\.js/g) || []).length, 1,
+  // The release:preflight registration surface moved from a package.json chain
+  // string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+  // cutover); count manifest steps whose command invokes this harness instead.
+  const preflightManifest = JSON.parse(read('platform/test/preflight-manifest.json'));
+  assert.strictEqual(preflightManifest.steps.filter((s) => s.cmd.join(' ').includes('platform/test/run-epic-dashboard.js')).length, 1,
     'release preflight runs the harness exactly once');
   const source = fs.readFileSync(HELPER, 'utf8');
   assert(source.includes('api.deriveEpicLifecycle(slices)'), 'production rendering calls the Delivery public API');

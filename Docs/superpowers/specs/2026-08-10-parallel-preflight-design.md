@@ -93,6 +93,16 @@ Steps are authored **heaviest-first** — `codex-autoloop` (66s), `seed-migratio
 - **Output is buffered per step** and printed as one contiguous block on completion. Never interleaved.
 - **`--jobs 1`** reproduces today's serial behavior exactly. This is both the debugging contract and the rollout mechanism.
 
+### Mutual-exclusion groups
+
+A step may carry an optional `group` field (a non-empty string). At most one step per group runs at a time within the parallel lane; different groups, and ungrouped steps, still overlap freely around each other. A worker that finds every remaining step's group busy polls rather than blocking, so other workers keep draining ungrouped/other-group work in the meantime. Releasing a group happens in a `finally`, so a step that throws never wedges its group forever.
+
+Two groups are in use:
+- `chrome` — five harnesses (`epic-dashboard`, `cross-blueprint-style-adoption`, `operator-station`, `finance-style-adoption`, `finance-modal-adoption`) that contend on headless Chrome and were flaky when they ran concurrently with each other.
+- `bootstrap` — two harnesses (`integration-smoke`, `cli`) that collide writing the shared `<repo>/Scripts/activate.sh`.
+
+`group` is a manifest-authoring concern, not a scheduling optimization: reach for it only when two steps genuinely cannot run side by side, since every grouped step trades away concurrency with its groupmates.
+
 ### Failure semantics
 
 Deliberately conservative, because the highest-stakes consumer is an unattended merge gate. A flaky gate is worse than a slow gate.
