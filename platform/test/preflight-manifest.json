@@ -794,7 +794,7 @@
         "node",
         "platform/test/run-finance-modal-adoption.js"
       ],
-      "lane": "parallel"
+      "lane": "serial"
     },
     {
       "id": "finance-style-adoption",
