@@ -165,6 +165,41 @@ gh api -X PUT repos/willfell/sauce/branches/main/protection \
 
 Already in place. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
 
+### Self-hosted runner pools
+
+Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). App ID and installation ID live in the `arc-github-app` Kubernetes Secret in namespace `arc-runners`; pull them with `kubectl get secret arc-github-app -n arc-runners -o jsonpath='{.data.github_app_id}' | base64 -d` (swap `github_app_installation_id`, `github_app_private_key` for the others). Don't hardcode those values here — this file is public.
+
+**Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image pinned to `ghcr.io/actions/actions-runner:2.336.0`, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
+
+**Pool B — Tartelet ephemeral macOS VMs.** macOS runners on the Mac mini, label set `[self-hosted, macOS, ARM64]`. This pool is a GUI app (Tartelet) plus a Keychain-held credential — outside Argo CD's reach entirely, so its config is **not** reconciled from git. This section is the reproduction runbook after a machine rebuild.
+
+Install Tart and pull the base VM image:
+
+```bash
+brew install cirruslabs/cli/tart
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sauce-macos-base
+```
+
+`macos-sequoia-base` publishes only a mutable `latest` tag (the `-vanilla` variant has pinned version tags but lacks the Homebrew this pool needs, so `-base:latest` is the only viable choice). Resolve and record the digest at pull time with `crane digest ghcr.io/cirruslabs/macos-sequoia-base:latest` since the tag itself floats:
+
+- Image: `ghcr.io/cirruslabs/macos-sequoia-base:latest`
+- Digest at last pull: `sha256:3f4d14a5ffb9efd3bda2ae0184fd4bc2773d924ff8b7565f958761420ec41a0c`
+- Local VM name: `sauce-macos-base`
+
+Download the latest Tartelet release from <https://github.com/framna-dk/tartelet/releases> (`gh release download <version> --repo framna-dk/tartelet --pattern "Tartelet.zip"`) and move `Tartelet.app` into `/Applications`. Then configure it through its own GUI — this step cannot be scripted, since the private key is deliberately handed to the macOS Keychain via Tartelet's own flow rather than written to disk by an agent:
+
+| Tab | Setting | Value |
+| --- | --- | --- |
+| GitHub | Runner Scope | Repository (personal account) |
+| GitHub | Owner / account | `willfell` |
+| GitHub | Repository | `sauce` |
+| GitHub | App ID | from `arc-github-app` Secret, `github_app_id` key |
+| GitHub | Private key | PEM extracted from `arc-github-app` Secret's `github_app_private_key` key, stored in Keychain by Tartelet, then deleted from disk |
+| Virtual Machine | VM | `sauce-macos-base` |
+| Virtual Machine | Number of VMs | 2 (Apple's hard cap) |
+
+Add Tartelet to System Settings → General → Login Items so the pool survives a reboot. Verify a runner registered with `gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, os, status, labels: [.labels[].name]}'` — expect `status: online` and labels including `self-hosted`, `macOS`, `ARM64`.
+
 ## Cycle-close artifacts
 
 Every cycle close MUST produce (canonical list from `Docs/prompts/SESSION-START.md`):
