@@ -2175,6 +2175,13 @@ function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlas
 
 function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, opts = {}) {
   if (scalarField(cardRaw, 'type') !== 'slice') return null;
+  // A ledger is the authority for sibling slice status. Defaulting it to an
+  // empty map made every sibling look untracked, which demoted any completed
+  // sibling and invented drift no command could clear. Callers that only need
+  // topology (members/paths) say so explicitly instead.
+  if (!opts.state && opts.topologyOnly !== true) {
+    throw new Error('canonical epic projection requires an explicit ledger, or topologyOnly: true');
+  }
   const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
   if (!epic) throw new Error('canonical slice is missing its epic backlink');
   const currentCard = normalizeCardLink(opts.currentCard);
@@ -2248,7 +2255,7 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   return {
     epic, atlasPath, atlasRaw, boardPath: epicBoardPath,
     boardRaw, parentRaw, members, expectedAtlasPath, expectedBoardPath,
-    cardsRoot: root, physicalBoardDir, state: opts.state || { cards: {} },
+    cardsRoot: root, physicalBoardDir, state: opts.state || null,
   };
 }
 
@@ -2272,6 +2279,7 @@ function legacyCompletionFinding(surface, card, record = null) {
 }
 
 function deriveEpicProjection(surface, currentCard, currentStatus) {
+  if (!surface.state) throw new Error('epic roll-up requires an explicit ledger');
   const cards = canonicalEpicMembers(
     surface.boardRaw,
     path.dirname(surface.boardPath),
@@ -2701,6 +2709,7 @@ function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   }
   const epicSurface = canonicalEpicProjection(cardRaw, resolvedCardPath, boardPath, opts.cardsRoot || CARDS_ROOT, {
     ...opts,
+    state: opts.state,
     currentCard: card,
   });
   const record = opts.record || null;
@@ -2806,7 +2815,13 @@ async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   const projectionLock = opts.withLock || withLock;
   try {
     return await projectionLock(ctx, 'completion-projection', async () => {
-      const state = opts.state || { cards: {} };
+      // No empty-ledger default. `{ cards: {} }` is truthy, so it sailed past
+      // canonicalEpicProjection's fail-closed ledger guard and built an epic
+      // surface in which every sibling looked untracked — the same blindness
+      // the guard exists to stop, one layer up. Every transition verb already
+      // has the loaded ledger in hand; a caller that does not must say so.
+      const state = opts.state;
+      if (!state) throw new Error('projection requires the loaded ledger');
       state.cards ||= {};
       state.cards[record.card] = record;
       const result = project(record.card_path, boardPath, record.card, record.phase, {
@@ -2891,6 +2906,16 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
     }
   }
   return null;
+}
+
+// Board-drift findings come in two shapes: most carry a prose `issue`, but the
+// plain column/checked mismatch carries only expected/actual fields. A refusal
+// that names neither is a dead end for the operator.
+function describeBoardDriftFinding(finding) {
+  const card = finding.card || '(unknown card)';
+  if (finding.issue) return `${card}: ${finding.issue}`;
+  return `${card}: board placement differs (expected ${finding.expected_column}/${finding.expected_checked}, `
+    + `actual ${finding.actual_column}/${finding.actual_checked})`;
 }
 
 function expectedProjectedContract(record, mapping) {
@@ -3769,8 +3794,14 @@ async function commandAmendContract(ctx, args, deps = {}) {
     let boardRaw;
     try { boardRaw = fs.readFileSync(boardPath, 'utf8'); }
     catch (err) { throw new Error(`target board projection is unreadable: ${err.message}`); }
-    const boardProblem = projectionBoardDrift(boardRaw, record);
-    if (boardProblem) throw new Error('target board projection must be reconciled before amendment');
+    const boardProblem = projectionBoardDrift(boardRaw, record, {
+      boardPath, cardsRoot: deps.cardsRoot || CARDS_ROOT, state, allFindings: true,
+    });
+    if (boardProblem) {
+      const findings = Array.isArray(boardProblem) ? boardProblem : [boardProblem];
+      throw new Error('target board projection must be reconciled before amendment: '
+        + findings.map(describeBoardDriftFinding).join('; '));
+    }
 
     const newTouchZones = [...oldTouchZones];
     for (const zone of additions) if (!newTouchZones.includes(zone)) newTouchZones.push(zone);
@@ -5807,7 +5838,8 @@ function restructureEpicApplied(epicSpec, boardPath, cardsRoot, parentRaw) {
   if (!boardCardLocation(parentRaw, epic)) return false;
   try {
     const surface = canonicalEpicProjection(
-      fs.readFileSync(firstTarget, 'utf8'), firstTarget, boardPath, cardsRoot, { currentCard: members[0] },
+      fs.readFileSync(firstTarget, 'utf8'), firstTarget, boardPath, cardsRoot,
+      { currentCard: members[0], topologyOnly: true },
     );
     return Boolean(surface) && members.every((member) => surface.members.includes(member));
   } catch (_) { return false; }
@@ -6047,7 +6079,7 @@ async function executeRestructure(ctx, journal, d, opts = {}) {
     try {
       surface = canonicalEpicProjection(
         fs.readFileSync(firstMove.to, 'utf8'), firstMove.to, journal.board, journal.cards_root,
-        { currentCard: firstMove.card },
+        { currentCard: firstMove.card, topologyOnly: true },
       );
     } catch (err) {
       throw new Error(`restructure fail-closed: built epic ${plan.epic} is not canonical: ${err.message}`);
@@ -7382,7 +7414,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
     persist(ctx, state, record);
     const projection = await project(ctx, record, deps.boardPath || BOARD, {
       projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
-      cardsRoot: deps.cardsRoot, now,
+      cardsRoot: deps.cardsRoot, now, state,
     });
     persist(ctx, state, record);
     return {

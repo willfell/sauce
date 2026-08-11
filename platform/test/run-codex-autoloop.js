@@ -4487,6 +4487,41 @@ ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.r
 const coordinatorLockSource = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
 eq((coordinatorLockSource.match(/`gates-\$\{slugify\(/g) || []).length, 1,
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN keeps the shipping slug spelling in one compatibility helper only');
+// EPIC-SURFACE-LEDGER — a purely TEXTUAL sweep: every construction of an epic
+// surface must spell out its ledger intent at the callsite. Landmine #33: gate
+// every copy, not just the one in the bug report, because a runtime fail-closed
+// cannot fire on a callsite no test exercises.
+//
+// Be precise about the reach of this check. Matching argument text cannot tell
+// `state: opts.state` (which forwards whatever the caller supplied, possibly
+// nothing) from a genuinely loaded ledger. Run against the pre-fix tree it would
+// have been GREEN, because commandAmendContract reached the surface through
+// projectionBoardDrift, whose own callsite already spelled `state: opts.state`.
+// So this pins an adjacent invariant — no callsite silently omits the argument —
+// and canonicalEpicProjection's runtime throw remains the real enforcement.
+{
+  const source = coordinatorLockSource;
+  const callsites = [];
+  const needle = 'canonicalEpicProjection(';
+  for (let index = source.indexOf(needle); index !== -1; index = source.indexOf(needle, index + 1)) {
+    if (/[\w.]/.test(source[index - 1] || '')) continue;
+    if (source.slice(Math.max(0, index - 9), index) === 'function ') continue;
+    let depth = 0;
+    let end = index + needle.length - 1;
+    for (; end < source.length; end++) {
+      if (source[end] === '(') depth++;
+      else if (source[end] === ')' && --depth === 0) break;
+    }
+    callsites.push({
+      line: source.slice(0, index).split('\n').length,
+      args: source.slice(index, end + 1),
+    });
+  }
+  ok(callsites.length >= 6, 'EPIC-SURFACE-LEDGER finds the epic-surface callsites');
+  const stateless = callsites.filter((site) => !/\bstate\b/.test(site.args) && !/topologyOnly:\s*true/.test(site.args));
+  eq(stateless.map((site) => site.line), [],
+    'EPIC-SURFACE-LEDGER every epic-surface callsite textually names a state argument or declares topologyOnly (the runtime guard, not this sweep, proves the ledger is real)');
+}
 eq(collisionReconcile.results[0].via_card, 'Lock-Alias',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves legacy-to-via routing through the exact tracked sibling');
 ok(collisionReconcile.results[0].projection_findings[0].card === 'Lock Alias',
@@ -5414,6 +5449,121 @@ function makeAmendFixture(opts = {}) {
   return fixture;
 }
 
+// makeAmendFixture's card carries no `type: slice`, so amend-contract never
+// builds an epic surface for it — exactly why the blind-ledger bug shipped
+// untested. This helper combines makeAmendFixture's execution-contract
+// shape with makeEpicProjectionFixture's epic topology so amend-contract
+// judges board drift against a real epic surface.
+function makeEpicAmendFixture(opts = {}) {
+  const root = path.join(tmp, `epic-amend-${++amendFixtureId}`);
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const epicRoot = path.join(cardsRoot, 'Epic A');
+  const epicBoardDir = path.join(epicRoot, 'board');
+  const parentBoardPath = path.join(projectRoot, 'project-board.md');
+  const atlasPath = path.join(epicRoot, 'Epic A.md');
+  const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
+  const cardPath = path.join(epicBoardDir, 'A1.md');
+  const worktree = path.join(root, 'target-worktree');
+  fs.mkdirSync(epicBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(epicRoot, 'context', 'runs'), { recursive: true });
+  fs.mkdirSync(worktree, { recursive: true });
+  fs.writeFileSync(path.join(worktree, 'protected.txt'), 'target worktree must never change\n');
+  fs.mkdirSync(path.join(worktree, 'nested'));
+  fs.writeFileSync(path.join(worktree, 'nested/second.txt'), 'second protected file\n');
+  fs.writeFileSync(parentBoardPath, [
+    '## In Planning', '- [ ] [[Epic B]]', '',
+    '## In Progress', '- [ ] [[Epic A]]', '', '## Blocked', '',
+    '## Completed', '',
+  ].join('\n'));
+  fs.writeFileSync(atlasPath, [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    'source_board: spice/projects/test/project-board.md',
+    'kanban_board: spice/projects/test/project-board.md',
+    'status: active',
+    'epic_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(epicBoardPath, [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '',
+    '## In Progress', '- [ ] [[A1]]', '', '## Blocked', '', '## Completed', '- [x] [[A2]]', '',
+  ].join('\n'));
+  fs.writeFileSync(cardPath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: In Progress', 'status: in_progress', 'model_profile: heavy', 'execution_mode: release',
+    opts.batchPolicyLine || 'batch_policy: supervised_only',
+    'parent_card: "[[Epic A]]"', 'slice: A1', 'depends_on: []',
+    'touch_zones:', '  - platform/mechanisms/delivery', '  - platform/schemas-index.json',
+    'deploy_subscriptions:', '  headspace:', '    - delivery', '  accuris:', '    - delivery', '  ero:', '    - delivery',
+    '---', '', '## Protected active contract', '',
+    'Protected active work.', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicBoardDir, 'A2.md'), [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: Completed', 'status: completed', 'depends_on: []', '---', 'A2 body', '',
+  ].join('\n'));
+  const record = {
+    card: 'A1', phase: 'implementing', card_path: cardPath,
+    branch: 'codex-autoloop/a1', worktree,
+    projection_reconciled_at: '2026-07-15T00:00:00.000Z',
+    touch_zones: ['platform/mechanisms/delivery', 'platform/schemas-index.json'],
+    deploy_subscriptions: deepCopy(legacyDeployments),
+    ...opts.record,
+  };
+  const fixture = {
+    root, cardsRoot, parentBoardPath, epicBoardPath, atlasPath, cardPath, worktree,
+    state: { schema_version: 1, updated_at: '2026-07-16T00:00:00.000Z', cards: {
+      A1: record,
+      A2: {
+        card: 'A2', phase: 'adopted', parent_card: 'Epic A',
+        card_path: path.join(epicBoardDir, 'A2.md'),
+        adoption: {
+          pr: 4, merge_sha: 'abc123', reason: 'shipped outside the loop',
+          verified: 'git', adopted_at: '2026-08-01T00:00:00.000Z',
+        },
+      },
+    } },
+    writes: 0, locks: [], gitCalls: [], dirty: opts.dirty || '',
+  };
+  fixture.args = {
+    _: ['amend-contract'], json: true, card: 'A1',
+    'expected-head': AMEND_HEAD, 'expected-origin-main': AMEND_MAIN,
+    reason: 'add the omitted catalogue zone and type legacy deployment additions',
+    'add-touch-zone': ['./platform/manifest.json/', 'platform/manifest.json'],
+    'expected-deployment': JSON.stringify(legacyDeployments),
+    'desired-deployment': JSON.stringify(typedDeployments),
+    'expected-batch-policy': 'null',
+    'desired-batch-policy': 'supervised_only',
+  };
+  fixture.deps = {
+    readState: () => deepCopy(fixture.state),
+    writeState: (_ctx, _state, changedRecord) => {
+      fixture.writes++;
+      fixture.state.cards[changedRecord.card] = deepCopy(changedRecord);
+    },
+    withLock: async (_ctx, name, fn) => { fixture.locks.push(name); return fn(); },
+    worktreeExists: () => opts.worktreeExists !== false,
+    sh: (cmd, argv, options = {}) => {
+      fixture.gitCalls.push({ cmd, argv: [...argv], cwd: options.cwd, stdio: options.stdio || null });
+      if (argv[0] === 'fetch') return '';
+      if (argv[0] === 'rev-parse') return argv[1] === 'HEAD' ? (opts.actualHead || AMEND_HEAD) : (opts.actualMain || AMEND_MAIN);
+      if (argv[0] === 'branch') return opts.actualBranch || record.branch;
+      if (argv[0] === 'status') return fixture.dirty;
+      throw new Error(`unexpected git fixture call ${argv.join(' ')}`);
+    },
+    boardPath: parentBoardPath, cardsRoot,
+    now: () => '2026-07-16T18:00:00.000Z',
+  };
+  return fixture;
+}
+
 const amend = makeAmendFixture();
 const amendUnrelatedBefore = deepCopy(amend.state.cards.Unrelated);
 const amendProtectedBefore = Object.fromEntries([
@@ -5799,6 +5949,56 @@ eq(afterProjectionRecovery.results[0].state_changed, true, 'after-projection rec
 eq(afterProjectionCrash.state.cards[AMEND_CARD].projection_reconciled_at, '2026-07-16T18:00:00.000Z', 'after-projection recovery records a post-amendment projection receipt');
 eq(afterProjectionCrash.state.cards[AMEND_CARD].contract_amendments.length, 1, 'after-projection recovery never duplicates authority');
 eq(snapshotDirectory(afterProjectionCrash.worktree), afterProjectionCrash.worktreeSnapshot, 'every crash boundary preserves the complete target worktree tree and bytes');
+
+// AMEND-EPIC-LEDGER — amend-contract must judge board drift against the real
+// ledger. Building the epic surface statelessly demoted the completed sibling
+// A2 to a legacy completion and refused an amendment on a board that `status`
+// reported, at the same instant, as clean.
+{
+  const fx = makeEpicAmendFixture();
+  const result = await commandAmendContract({ root: fx.root }, fx.args, fx.deps);
+  eq(result.action, 'contract-amended',
+    'AMEND-EPIC-LEDGER an epic-native card amends against a converged epic surface');
+  ok(result.touch_zones.includes('platform/manifest.json'),
+    'AMEND-EPIC-LEDGER the requested zone lands in the amended contract');
+}
+
+// The opposite direction: real drift still refuses, and the refusal now names
+// the finding instead of discarding it.
+{
+  const drifted = makeEpicAmendFixture();
+  const board = fs.readFileSync(drifted.epicBoardPath, 'utf8');
+  fs.writeFileSync(drifted.epicBoardPath, board.replace('- [ ] [[A1]]', '- [x] [[A1]]'));
+  const driftedStateBefore = JSON.stringify(drifted.state);
+  await assert.rejects(
+    () => commandAmendContract({ root: drifted.root }, drifted.args, drifted.deps),
+    /target board projection must be reconciled before amendment: A1: /,
+    'AMEND-EPIC-LEDGER real drift still refuses and the refusal names the finding',
+  );
+  eq(drifted.writes, 0, 'AMEND-EPIC-LEDGER a drift refusal performs no ledger write');
+  eq(JSON.stringify(drifted.state), driftedStateBefore,
+    'AMEND-EPIC-LEDGER a drift refusal leaves the ledger byte-identical');
+}
+
+// The refusal has two shapes and only one of them was covered above. That case
+// lands on the plain column/checked mismatch; the shape that CAUSED the shipped
+// bug carries a prose `issue` from a demoted sibling. Mis-keying A2's ledger
+// entry reproduces exactly what the blind empty ledger did to every sibling, so
+// this pins that the operator is told the real cause and not just a card name.
+{
+  const demoted = makeEpicAmendFixture();
+  demoted.state.cards.A2X = demoted.state.cards.A2;
+  delete demoted.state.cards.A2;
+  const demotedStateBefore = JSON.stringify(demoted.state);
+  await assert.rejects(
+    () => commandAmendContract({ root: demoted.root }, demoted.args, demoted.deps),
+    /target board projection must be reconciled before amendment: A2: legacy completion lacks successful deployment receipts and is not counted done/,
+    'AMEND-EPIC-LEDGER a demoted sibling refusal names the sibling and the actual cause',
+  );
+  eq(demoted.writes, 0, 'AMEND-EPIC-LEDGER a demoted-sibling refusal performs no ledger write');
+  eq(JSON.stringify(demoted.state), demotedStateBefore,
+    'AMEND-EPIC-LEDGER a demoted-sibling refusal leaves the ledger byte-identical');
+}
 
 const parkRoot = path.join(tmp, 'park');
 fs.mkdirSync(parkRoot, { recursive: true });
@@ -6458,6 +6658,7 @@ const automaticProjection = await attemptProjection({ root: reconcileRoot }, aut
   withLock: async (_ctx, name, fn) => { automaticProjectionLock = name; return fn(); },
   projectCard: () => { throw new Error('automatic completion projection denied'); },
   now: () => '2026-07-15T15:00:30.000Z',
+  state: emptyState(),
 });
 eq(automaticProjectionLock, 'completion-projection', 'automatic completion projection uses the shared board lock');
 eq(automaticProjection.ok, false, 'deployment-time projection failure is returned');
@@ -6734,6 +6935,96 @@ const parkedRecoveryRefusalState = { ...emptyState(), cards: { [parkedRecoveryRe
 await assert.rejects(() => commandRecoverDeployed(
   { root: reconcileRoot }, recoveryArgs, { ...recoveryDeps, readState: () => parkedRecoveryRefusalState },
 ), /parked and pre-PR cards are never recovery targets/, 'parked recovery is unconditionally refused'); count++;
+
+// RECOVER-EPIC-LEDGER — the recovery fixture above is a FLAT card, so
+// canonicalEpicProjection returns null and recover-deployed's projection never
+// touches the epic path. That blind spot is why recover-deployed shipped
+// calling attemptProjection without the loaded ledger: with an empty ledger the
+// adopted sibling A2 looks untracked, demotes to a legacy completion, and the
+// verb WRITES an unchecked parent lane plus an active/claimable atlas over a
+// genuinely done epic. This fixture is epic-native so the write is observable.
+{
+  const epicRecoveryRoot = path.join(tmp, 'epic-recovery');
+  const epicRecoveryProject = path.join(epicRecoveryRoot, 'spice', 'projects', 'test');
+  const epicRecoveryCardsRoot = path.join(epicRecoveryProject, 'tasks');
+  const epicRecoveryBoardDir = path.join(epicRecoveryCardsRoot, 'Epic A', 'board');
+  const epicRecoveryParentBoard = path.join(epicRecoveryProject, 'project-board.md');
+  const epicRecoveryAtlas = path.join(epicRecoveryCardsRoot, 'Epic A', 'Epic A.md');
+  const epicRecoveryCardPath = path.join(epicRecoveryBoardDir, 'A1.md');
+  fs.mkdirSync(epicRecoveryBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(epicRecoveryCardsRoot, 'Epic A', 'context', 'runs'), { recursive: true });
+  fs.writeFileSync(epicRecoveryParentBoard, [
+    '## In Planning', '- [ ] [[Epic B]]', '',
+    '## In Progress', '- [ ] [[Epic A]]', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  fs.writeFileSync(epicRecoveryAtlas, [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    'source_board: spice/projects/test/project-board.md',
+    'kanban_board: spice/projects/test/project-board.md',
+    'status: active',
+    'epic_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicRecoveryBoardDir, 'Epic A-board.md'), [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '', '## In Progress', '- [ ] [[A1]]', '',
+    '## Blocked', '', '## Completed', '- [x] [[A2]]', '',
+  ].join('\n'));
+  fs.writeFileSync(epicRecoveryCardPath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: In Progress', 'status: in_progress', 'depends_on: []', '---', 'A1 body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicRecoveryBoardDir, 'A2.md'), [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: Completed', 'status: completed', 'depends_on: []', '---', 'A2 body', '',
+  ].join('\n'));
+  const epicRecoveryState = emptyState();
+  epicRecoveryState.cards.A1 = {
+    ...deepCopy(recoveryRecord), card: 'A1', card_path: epicRecoveryCardPath,
+    gate_receipt: { status: 'pass', head_sha: RECOVERY_HEAD },
+    reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy']
+      .map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
+  };
+  epicRecoveryState.cards.A2 = {
+    card: 'A2', phase: 'adopted', parent_card: 'Epic A',
+    card_path: path.join(epicRecoveryBoardDir, 'A2.md'),
+    adoption: {
+      pr: 4, merge_sha: 'abc123', reason: 'shipped outside the loop',
+      verified: 'git', adopted_at: '2026-08-01T00:00:00.000Z',
+    },
+  };
+  const epicRecovered = await commandRecoverDeployed(
+    { root: epicRecoveryRoot },
+    { card: 'A1', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', apply: true },
+    {
+      readState: () => epicRecoveryState,
+      writeState: () => {},
+      withLock: async (_ctx, _name, fn) => fn(),
+      collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
+      boardPath: epicRecoveryParentBoard,
+      cardsRoot: epicRecoveryCardsRoot,
+      now: () => '2026-07-20T19:03:00.000Z',
+      projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+    },
+  );
+  eq(epicRecovered.action, 'recovered-deployed',
+    'RECOVER-EPIC-LEDGER an epic-native recovery reaches authoritative deployed');
+  eq(epicRecovered.projection.projection_findings, [],
+    'RECOVER-EPIC-LEDGER the adopted sibling stays tracked instead of demoting to a legacy completion');
+  eq(epicRecovered.projection.epic_state, 'done',
+    'RECOVER-EPIC-LEDGER the roll-up sees every sibling done');
+  ok(/## Completed[\s\S]*- \[x\] \[\[Epic A\]\]/.test(fs.readFileSync(epicRecoveryParentBoard, 'utf8')),
+    'RECOVER-EPIC-LEDGER recovery writes the completed epic lane to the parent board');
+  const epicRecoveryAtlasRaw = fs.readFileSync(epicRecoveryAtlas, 'utf8');
+  ok(/status: done/.test(epicRecoveryAtlasRaw) && /posture: done/.test(epicRecoveryAtlasRaw),
+    'RECOVER-EPIC-LEDGER recovery writes the done atlas state');
+}
 
 // GA-OPS12-METADATA-ONLY-RECONCILE: card-only CAS, audit, and exact replay.
 const metadataCardPath = path.join(reconcileRoot, 'Metadata drift.md');
@@ -10154,7 +10445,7 @@ eq(noteBody(fs.readFileSync(path.join(happy.cardsRoot, 'Bystander card.md'), 'ut
 eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-HAPPY untracked flat cards trigger zero ledger writes');
 for (const [epic, member] of [['Family A', 'Card A1'], ['Family B', 'Card B2']]) {
   const target = path.join(happy.cardsRoot, epic, 'board', `${member}.md`);
-  const surface = canonicalEpicProjection(fs.readFileSync(target, 'utf8'), target, happy.boardPath, happy.cardsRoot, { currentCard: member });
+  const surface = canonicalEpicProjection(fs.readFileSync(target, 'utf8'), target, happy.boardPath, happy.cardsRoot, { currentCard: member, topologyOnly: true });
   eq(surface.epic, epic, `BGR-RESTRUCTURE-HAPPY canonicalEpicProjection accepts the built ${epic} surface`);
 }
 const happyResolved = resolveEpicBoardSet({ parentBoardMd: happyParent, cardsRoot: happy.cardsRoot });
@@ -11757,6 +12048,31 @@ const adNoMutation = (result, label) => {
   eq(lifecycle.findings, [], 'AD-ADOPT no legacy-completion finding fires for an adopted slice');
 }
 
+// EPIC-LEDGER-FAIL-CLOSED — a surface built without an explicit ledger must
+// refuse to roll up rather than silently treating every sibling as untracked
+// (which demotes completed siblings and invents drift). See
+// Docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md.
+{
+  const fx = makeEpicProjectionFixture('ledger-fail-closed');
+  const noteRaw = fs.readFileSync(fx.cardPath, 'utf8');
+  assert.throws(
+    () => coordinator.canonicalEpicProjection(noteRaw, fx.cardPath, fx.parentBoardPath, fx.cardsRoot, {}),
+    /requires an explicit ledger/,
+    'EPIC-LEDGER-FAIL-CLOSED canonicalEpicProjection refuses a stateless build',
+  );
+  const topology = coordinator.canonicalEpicProjection(
+    noteRaw, fx.cardPath, fx.parentBoardPath, fx.cardsRoot, { topologyOnly: true },
+  );
+  ok(topology && topology.members.includes('A1'),
+    'EPIC-LEDGER-FAIL-CLOSED topologyOnly still reads members');
+  eq(topology.state, null, 'EPIC-LEDGER-FAIL-CLOSED topologyOnly carries no ledger');
+  assert.throws(
+    () => coordinator.deriveEpicProjection(topology, null, null),
+    /requires an explicit ledger/,
+    'EPIC-LEDGER-FAIL-CLOSED the roll-up refuses a stateless surface',
+  );
+}
+
 // AD-REPLAY — literal replay is free; substituted operands refuse.
 {
   const root = path.join(tmp, 'ad-replay');
@@ -11862,7 +12178,7 @@ const adNoMutation = (result, label) => {
   // its epic should move for an already-correct adopted record.
   const projectWrites = [];
   const projectResult = projectCard(record.card_path, fx.boardPath, 'EM-4', 'adopted', {
-    cardsRoot: fx.cardsRoot, record, writeText: (target, text) => projectWrites.push({ target, text }),
+    cardsRoot: fx.cardsRoot, record, state, writeText: (target, text) => projectWrites.push({ target, text }),
   });
   eq(projectResult.board_changed, false,
     'AD-PROJECTION reconcile-style projectCard leaves the epic board line `- [x]` byte-identical');
