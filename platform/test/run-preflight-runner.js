@@ -133,12 +133,13 @@ async function main() {
     resolveJobs([], { SAUCE_PREFLIGHT_JOBS: '5' }) === 5);
   ok('JOBS-4 argv beats the environment',
     resolveJobs(['--jobs', '2'], { SAUCE_PREFLIGHT_JOBS: '9' }) === 2);
-  ok('JOBS-5 the default is 1 until the soak flips it',
-    resolveJobs([], {}) === 1);
+  const dflt = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
+  ok('JOBS-5 the default is the machine parallelism',
+    resolveJobs([], {}) === dflt);
   ok('JOBS-6 a non-numeric value falls back to the default',
-    resolveJobs(['--jobs', 'lots'], {}) === 1);
-  ok('JOBS-7 zero and negative values clamp to 1',
-    resolveJobs(['--jobs', '0'], {}) === 1 && resolveJobs(['--jobs', '-3'], {}) === 1);
+    resolveJobs(['--jobs', 'lots'], {}) === dflt);
+  ok('JOBS-7 zero and negative values clamp to the default',
+    resolveJobs(['--jobs', '0'], {}) === dflt && resolveJobs(['--jobs', '-3'], {}) === dflt);
 
   // --- concurrency is actually bounded ---
   // Each step appends "+" on start and "-" on end to a shared log, sleeping in

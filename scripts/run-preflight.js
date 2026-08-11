@@ -8,8 +8,9 @@
 // The `serial` lane runs to completion first, then the `parallel` lane runs
 // through a bounded work queue.
 //
-// Concurrency ships defaulted OFF (--jobs 1, behaviour-identical to the old
-// chain). See Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md.
+// Concurrency defaults to the machine's parallelism (see the plan's final
+// task, which soaked ten consecutive full-concurrency runs before flipping
+// this). See Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md.
 //
 // Usage: node scripts/run-preflight.js [--jobs N]
 // Env:   SAUCE_PREFLIGHT_JOBS=N   (argv wins)
@@ -22,9 +23,8 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const MANIFEST_PATH = path.join(ROOT, 'platform', 'test', 'preflight-manifest.json');
 
-// Default concurrency. Flipped to availableParallelism only after the soak
-// (see the plan's final task) so the rollout stays one revertible line.
-const DEFAULT_JOBS = 1;
+// Default concurrency: the machine's available parallelism.
+const DEFAULT_JOBS = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
 
 const LANES = ['serial', 'parallel'];
 
@@ -195,10 +195,6 @@ function resolveJobs(argv, env) {
   return n;
 }
 
-function defaultJobCount() {
-  return os.availableParallelism ? os.availableParallelism() : os.cpus().length;
-}
-
 async function main() {
   const manifest = loadManifest(MANIFEST_PATH);
   const errors = validateManifest(manifest);
@@ -217,7 +213,7 @@ async function main() {
 
 module.exports = {
   loadManifest, validateManifest, planLanes, runManifest,
-  formatSummary, resolveJobs, defaultJobCount, DEFAULT_JOBS,
+  formatSummary, resolveJobs, DEFAULT_JOBS,
 };
 
 if (require.main === module) {
