@@ -167,7 +167,7 @@ Already in place under the old `preflight (macos-latest)` / `preflight (ubuntu-l
 
 ### Self-hosted runner pools
 
-Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). App ID and installation ID live in the `arc-github-app` Kubernetes Secret in namespace `arc-runners`; pull them with `kubectl get secret arc-github-app -n arc-runners -o jsonpath='{.data.github_app_id}' | base64 -d` (swap `github_app_installation_id`, `github_app_private_key` for the others). Don't hardcode those values here — this file is public.
+Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). The source of truth for its credentials is 1Password, vault `Lab`, item `arc-github-app`, fields `app-id` / `installation-id` / `private-key` — read them with `op read "op://Lab/arc-github-app/private-key"` (swap the field name for the others). The `arc-github-app` Kubernetes Secret in namespace `arc-runners` is *materialized from* those references by the `lab` repo's `k8s/secrets/registry.yaml`; it is a derivative, not the source. Recover from 1Password rather than from the cluster — a machine rebuild is precisely the moment the cluster does not exist yet. Don't hardcode any of these values here: this file is public.
 
 **Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image pinned to `ghcr.io/actions/actions-runner:2.336.0`, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
 
@@ -193,8 +193,8 @@ Download the latest Tartelet release from <https://github.com/framna-dk/tartelet
 | GitHub | Runner Scope | Repository (personal account) |
 | GitHub | Owner / account | `willfell` |
 | GitHub | Repository | `sauce` |
-| GitHub | App ID | from `arc-github-app` Secret, `github_app_id` key |
-| GitHub | Private key | PEM extracted from `arc-github-app` Secret's `github_app_private_key` key, stored in Keychain by Tartelet, then deleted from disk |
+| GitHub | App ID | `op read "op://Lab/arc-github-app/app-id"` |
+| GitHub | Private key | `op read "op://Lab/arc-github-app/private-key" > ~/Desktop/tartelet-app.pem`, `chmod 600`, point Tartelet's picker at it; Tartelet stores it in the Keychain, then delete the file |
 | Virtual Machine | VM | `sauce-macos-base` |
 | Virtual Machine | Number of VMs | 2 (Apple's hard cap) |
 
