@@ -27,6 +27,16 @@ function loadClass(relPath, className) {
 
 const TripEntryList = loadClass('platform/blueprints/trips/helpers/trip-entry-list.js', 'TripEntryList');
 
+// Dataview DataArrays are iterable but are not guaranteed to be Arrays.
+{
+    const dataArray = { [Symbol.iterator]: function* () { yield { item: 'Passport' }; } };
+    const normalized = TripEntryList._asArray(dataArray);
+    const added = TripEntryList.addEntry(dataArray, { item: 'Wallet' });
+    ok('DATA-1 iterable DataArray normalizes without mutating its source',
+        normalized.length === 1 && normalized[0].item === 'Passport'
+        && added.list.length === 2 && added.list[1].item === 'Wallet');
+}
+
 // ---------- addEntry ----------
 {
     const src = [];

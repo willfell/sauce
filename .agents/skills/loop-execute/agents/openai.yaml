@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Execute"
+  short_description: "Loop execute via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-execute — follow .agents/skills/loop-execute/SKILL.md."

@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
+const chromeBarSource = fs.readFileSync(path.join(ROOT, 'platform/mechanisms/chrome-bar/chrome-bar.js'), 'utf8');
 function loadClass(relPath, className) {
   const src = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
   return new Function(`${src}\nreturn ${className};`)();
@@ -21,7 +22,32 @@ const inst = new ChromeBar();
 // Minimal element supporting createEl (Obsidian) + appendChild/createElement +
 // querySelector/getBoundingClientRect. Mirrors run-project-chrome-bar.js makeEl.
 function makeEl(tag) {
-  const el = { tag, textContent: '', innerHTML: '', className: '', style: { cssText: '', setProperty() {} }, children: [], onclick: null, disabled: false };
+  const classes = new Set();
+  const styleWrites = [];
+  const style = new Proxy({
+    cssText: '',
+    __writes: styleWrites,
+    setProperty(name, value) { styleWrites.push([String(name), value]); },
+  }, {
+    set(target, property, value) {
+      if (property !== 'cssText' && property !== '__writes') styleWrites.push([String(property), value]);
+      target[property] = value;
+      return true;
+    },
+  });
+  const el = { tag, textContent: '', innerHTML: '', style, children: [], onclick: null, disabled: false };
+  Object.defineProperty(el, 'className', {
+    get: () => [...classes].join(' '),
+    set: (value) => {
+      classes.clear();
+      for (const name of String(value || '').split(/\s+/).filter(Boolean)) classes.add(name);
+    },
+  });
+  el.classList = {
+    add: (...names) => { for (const name of names) classes.add(name); },
+    remove: (...names) => { for (const name of names) classes.delete(name); },
+    contains: (name) => classes.has(name),
+  };
   el.createEl = (t, opts) => { const c = makeEl(t); if (opts && opts.cls) c.className = opts.cls; if (opts && opts.text) c.textContent = opts.text; el.children.push(c); return c; };
   el.appendChild = (c) => { el.children.push(c); return c; };
   el.querySelector = () => null;
@@ -178,26 +204,39 @@ async function cbVaultEmpty() {
   global.app = prevApp; global.customJS = prevCJS;
   ok('CB-VAULT-5 no registry / no sources → [] (no Vault marker)', Array.isArray(entries) && entries.length === 0);
 }
-// ── CB-BTN-1..5 — renderChromeButton: caller-supplied cls, icon-only vs labeled,
-// onClick wiring, hover/press motion handlers.
+// ── CB-BTN-1..5 — renderChromeButton: caller markers + sauce-core classes,
+// icon-only vs labeled, onClick wiring, and class-owned interaction state.
 {
   const parent = makeEl('div');
   let clicked = 0;
   const btn = inst.renderChromeButton(parent, { cls: 'pcb-btn pcb-btn-go', icon: '<svg id="i"/>', onClick: () => { clicked += 1; } });
-  ok('CB-BTN-1 button carries the caller-supplied cls verbatim', btn.className === 'pcb-btn pcb-btn-go');
+  ok('CB-BTN-1 button retains caller markers and adds sauce-core icon classes',
+    btn.classList.contains('pcb-btn') && btn.classList.contains('pcb-btn-go') &&
+    btn.classList.contains('sauce-btn') && btn.classList.contains('sauce-chrome-btn') &&
+    btn.classList.contains('sauce-btn-icon'));
   ok('CB-BTN-2 icon-only (no label) → innerHTML has the icon, no label span',
     (btn.innerHTML || '').indexOf('<svg id="i"/>') >= 0 && (btn.innerHTML || '').indexOf('<span') < 0);
   if (typeof btn.onclick === 'function') btn.onclick();
   ok('CB-BTN-3 onClick is wired to btn.onclick', clicked === 1);
-  ok('CB-BTN-4 wires hover-lift + press-scale handlers + a CSS transition',
+  ok('CB-BTN-4 wires class-owned hover/press handlers with no inline presentation',
     typeof btn.onmouseenter === 'function' && typeof btn.onmouseleave === 'function' &&
     typeof btn.onmousedown === 'function' && typeof btn.onmouseup === 'function' &&
-    /transition:/.test(btn.style.cssText || ''));
+    btn.style.cssText === '' && btn.style.__writes.length === 0);
+  btn.onmouseenter(); btn.onmousedown();
+  const entered = btn.classList.contains('is-hovered') && btn.classList.contains('is-pressed');
+  btn.onmouseup(); btn.onmouseleave();
+  ok('CB-BTN-4b interaction handlers toggle only sauce-core state classes', entered &&
+    !btn.classList.contains('is-hovered') && !btn.classList.contains('is-pressed') &&
+    btn.style.cssText === '' && btn.style.__writes.length === 0);
+  ok('CB-BTN-4c production interaction handlers contain no direct style writes',
+    !/\bbtn\.style(?:\.|\[)/.test(chromeBarSource));
 }
 {
   const parent = makeEl('div');
   const btn = inst.renderChromeButton(parent, { cls: 'pcb-btn pcb-btn-primary', label: 'New Task', icon: '<svg/>', onClick: () => {} });
-  ok('CB-BTN-5 labeled button renders the label inside a span', (btn.innerHTML || '').indexOf('New Task') >= 0 && (btn.innerHTML || '').indexOf('<span') >= 0);
+  ok('CB-BTN-5 labeled button renders the label without the icon-only modifier',
+    (btn.innerHTML || '').indexOf('New Task') >= 0 && (btn.innerHTML || '').indexOf('<span') >= 0 &&
+    !btn.classList.contains('sauce-btn-icon'));
 }
 
 // ── CB-DAYNAV-1..3 — adapter.dayNav(dv) overrides the breadcrumb left-slot

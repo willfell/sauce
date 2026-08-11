@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Init"
+  short_description: "Loop init via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-init — follow .agents/skills/loop-init/SKILL.md."

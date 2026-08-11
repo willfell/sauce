@@ -13,9 +13,111 @@ const registry = deepFreeze(sourceRegistry);
 const CONTRACT_VERSION = registry.contract.version;
 const MINIMUM_COMPATIBLE_VERSION = registry.contract.minimum_compatible_version;
 const REQUIRED_VAULTS = registry.policies.required_vaults;
+const STRUCTURED_FRONTMATTER_FIELDS = Object.freeze({
+  evidence: 'array',
+  deploy_subscriptions: 'object',
+});
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function jsonDuplicateStatus(raw) {
+  let index = 0; let duplicate = false;
+  const skip = () => { while (/\s/.test(raw[index] || '')) index += 1; };
+  const string = () => {
+    const start = index;
+    if (raw[index] !== '"') throw new Error('string');
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === '\\') { index += 2; continue; }
+      if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      }
+      index += 1;
+    }
+    throw new Error('unterminated');
+  };
+  const value = () => {
+    skip();
+    if (raw[index] === '{') {
+      index += 1; skip();
+      const keys = new Set();
+      if (raw[index] === '}') { index += 1; return; }
+      while (index < raw.length) {
+        const key = string();
+        if (keys.has(key)) duplicate = true;
+        keys.add(key); skip();
+        if (raw[index] !== ':') throw new Error('colon');
+        index += 1; value(); skip();
+        if (raw[index] === '}') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1; skip();
+      }
+      throw new Error('object');
+    }
+    if (raw[index] === '[') {
+      index += 1; skip();
+      if (raw[index] === ']') { index += 1; return; }
+      while (index < raw.length) {
+        value(); skip();
+        if (raw[index] === ']') { index += 1; return; }
+        if (raw[index] !== ',') throw new Error('comma');
+        index += 1;
+      }
+      throw new Error('array');
+    }
+    if (raw[index] === '"') { string(); return; }
+    const token = raw.slice(index).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
+    if (!token) throw new Error('value');
+    index += token[0].length;
+  };
+  try {
+    value(); skip();
+    return index === raw.length ? duplicate : null;
+  } catch (_) { return null; }
+}
+
+function decodeStructuredContractFields(card) {
+  const decoded = clone(card && typeof card === 'object' && !Array.isArray(card) ? card : {});
+  const errors = [];
+  for (const [field, expected] of Object.entries(STRUCTURED_FRONTMATTER_FIELDS)) {
+    if (typeof decoded[field] !== 'string') continue;
+    const raw = decoded[field].trim();
+    const duplicate = jsonDuplicateStatus(raw);
+    if (!raw || duplicate === null) {
+      errors.push({
+        code: 'invalid-structured-json', field,
+        message: `${field} JSON string is malformed`,
+      });
+      continue;
+    }
+    if (duplicate) {
+      errors.push({
+        code: 'duplicate-structured-json-key', field,
+        message: `${field} JSON string contains a duplicate object key`,
+      });
+      continue;
+    }
+    const parsed = JSON.parse(raw);
+    const expectedShape = expected === 'array'
+      ? Array.isArray(parsed)
+      : parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+    if (!expectedShape) {
+      errors.push({
+        code: 'invalid-structured-json-shape', field,
+        message: `${field} JSON string must encode one ${expected}`,
+      });
+      continue;
+    }
+    decoded[field] = parsed;
+  }
+  return { card: decoded, errors };
+}
+
+function encodeStructuredFrontmatterValue(value) {
+  return JSON.stringify(JSON.stringify(value));
 }
 
 function compareVersions(left, right) {
@@ -134,7 +236,7 @@ function normalizeZoneEntry(zone, defaultRoot = 'workshop') {
 }
 
 function normalizeCard(card) {
-  const out = clone(card && typeof card === 'object' ? card : {});
+  const out = decodeStructuredContractFields(card).card;
   for (const key of ['card', 'parent_card', 'slice', 'epic', 'context_pack']) {
     if (Object.prototype.hasOwnProperty.call(out, key)) out[key] = key === 'parent_card'
       ? normalizeIdentity(out[key]) : String(out[key] == null ? '' : out[key]).trim();
@@ -199,9 +301,10 @@ function derivePolicy(card) {
 function validateCard(card, mode = 'current') {
   const historical = (typeof mode === 'string' ? mode : mode.mode) === 'historical';
   const opts = typeof mode === 'object' && mode ? mode : {};
-  const raw = card && typeof card === 'object' && !Array.isArray(card) ? card : {};
+  const decoded = decodeStructuredContractFields(card);
+  const raw = decoded.card;
   const normalized = normalizeCard(raw);
-  const errors = [];
+  const errors = [...decoded.errors];
   const warnings = [];
   const fields = registry.types['execution-card'].fields;
   const historicalOptional = new Set(['schema_version', 'batch_policy', 'evidence']);
@@ -450,11 +553,15 @@ function sliceStatus(slice) {
 
 function deriveEpicLifecycle(slices, options = {}) {
   const list = Array.isArray(slices) ? slices : [];
-  const normalized = list.map((slice, index) => ({ ...slice, _index: index, _status: sliceStatus(slice) }));
-  const counts = { planned: 0, active: 0, blocked: 0, done: 0, total: normalized.length };
+  // BGR redesign 2026-07-25: discarded slices are tombstones — excluded from the rollup entirely.
+  const normalized = list.map((slice, index) => ({ ...slice, _index: index, _status: sliceStatus(slice) }))
+    .filter((slice) => slice._status !== 'discarded');
+  const counts = { planned: 0, active: 0, waiting: 0, blocked: 0, done: 0, total: normalized.length };
   for (const slice of normalized) {
     if (slice._status === 'completed') counts.done += 1;
-    else if (slice._status === 'in_progress' || slice._status === 'parked') counts.active += 1;
+    else if (slice._status === 'in_progress') counts.active += 1;
+    // BGR redesign 2026-07-25: a parked slice is a wait (concurrency/deploy), not progress — it never counts as active.
+    else if (slice._status === 'parked') counts.waiting += 1;
     else if (slice._status === 'blocked') counts.blocked += 1;
     else counts.planned += 1;
   }
@@ -465,6 +572,9 @@ function deriveEpicLifecycle(slices, options = {}) {
   let state = 'planned';
   if (normalized.length > 0 && counts.done === normalized.length) state = 'done';
   else if (counts.active > 0) state = 'active';
+  // BGR redesign 2026-07-25: waiting rolls up like blocked — a parked slice is a
+  // wait (concurrency/deploy), not progress, and a claimable sibling must not hide it.
+  else if (counts.waiting > 0) state = 'blocked';
   else if (counts.blocked > 0 && !explicitlyClaimable) state = 'blocked';
   const pending = normalized.filter((slice) => slice._status !== 'completed');
   const crossEpic = pending.some((slice) => slice.cross_epic_dependency === true)
@@ -852,6 +962,8 @@ module.exports = {
   normalizeStatus,
   parseDependencyField,
   normalizeEvidenceClaim,
+  decodeStructuredContractFields,
+  encodeStructuredFrontmatterValue,
   normalizeCard,
   validateCard,
   validateEpic,

@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.257.1",
+  "workshop_version": "0.284.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -49,7 +49,7 @@
     },
     {
       "name": "customjs-guard",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "path": "mechanisms/customjs-guard"
     },
     {
@@ -134,7 +134,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.9.1",
+      "version": "0.9.2",
       "path": "mechanisms/entity-create"
     },
     {
@@ -149,7 +149,7 @@
     },
     {
       "name": "styling",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "path": "mechanisms/styling"
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "name": "platform-claude",
-      "version": "0.4.0",
+      "version": "0.6.0",
       "path": "mechanisms/platform-claude"
     },
     {
@@ -169,7 +169,7 @@
     },
     {
       "name": "render-safe",
-      "version": "0.2.2",
+      "version": "0.3.1",
       "path": "mechanisms/render-safe"
     },
     {
@@ -179,7 +179,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.15.5",
+      "version": "0.16.1",
       "path": "mechanisms/task-entity"
     },
     {
@@ -194,17 +194,17 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "path": "mechanisms/chrome-bar"
     },
     {
       "name": "section-explorer",
-      "version": "0.6.1",
+      "version": "0.6.3",
       "path": "mechanisms/section-explorer"
     },
     {
       "name": "delivery",
-      "version": "0.3.0",
+      "version": "0.7.0",
       "path": "mechanisms/delivery"
     }
   ],
@@ -221,12 +221,12 @@
     },
     {
       "name": "daily",
-      "version": "0.23.2",
+      "version": "0.25.1",
       "path": "blueprints/daily"
     },
     {
       "name": "meetings",
-      "version": "0.19.2",
+      "version": "0.19.4",
       "path": "blueprints/meetings"
     },
     {
@@ -241,32 +241,32 @@
     },
     {
       "name": "project",
-      "version": "1.56.1",
+      "version": "1.62.8",
       "path": "blueprints/project"
     },
     {
       "name": "to-do",
-      "version": "0.26.1",
+      "version": "0.26.2",
       "path": "blueprints/to-do"
     },
     {
       "name": "journal",
-      "version": "0.5.1",
+      "version": "0.5.3",
       "path": "blueprints/journal"
     },
     {
       "name": "trips",
-      "version": "0.10.1",
+      "version": "0.10.3",
       "path": "blueprints/trips"
     },
     {
       "name": "finance",
-      "version": "0.23.0",
+      "version": "0.23.2",
       "path": "blueprints/finance"
     },
     {
       "name": "sticky-notes",
-      "version": "0.11.4",
+      "version": "0.11.6",
       "path": "blueprints/sticky-notes"
     },
     {
@@ -276,17 +276,17 @@
     },
     {
       "name": "wiki",
-      "version": "0.8.2",
+      "version": "0.8.4",
       "path": "blueprints/wiki"
     },
     {
       "name": "home",
-      "version": "0.8.6",
+      "version": "0.8.7",
       "path": "blueprints/home"
     },
     {
       "name": "reader",
-      "version": "0.6.0",
+      "version": "0.6.3",
       "path": "blueprints/reader"
     }
   ]

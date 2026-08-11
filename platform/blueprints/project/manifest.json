@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.56.1",
+  "version": "1.62.8",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -97,6 +97,10 @@
     "ProjectCommandsInit",
     "ProjectDashboard",
     "EpicDashboard",
+    "GraphLayout",
+    "GraphInsights",
+    "GraphView",
+    "OperatorStation",
     "EpicCreateAction"
   ],
   "pre_install": [
@@ -261,6 +265,22 @@
     {
       "source": "helpers/epic-dashboard.js",
       "dest": "{{scripts_path}}/project/epic-dashboard.js"
+    },
+    {
+      "source": "helpers/graph-layout.js",
+      "dest": "{{scripts_path}}/project/graph-layout.js"
+    },
+    {
+      "source": "helpers/graph-insights.js",
+      "dest": "{{scripts_path}}/project/graph-insights.js"
+    },
+    {
+      "source": "helpers/graph-view.js",
+      "dest": "{{scripts_path}}/project/graph-view.js"
+    },
+    {
+      "source": "helpers/operator-station.js",
+      "dest": "{{scripts_path}}/project/operator-station.js"
     },
     {
       "source": "helpers/epic-create-action.js",

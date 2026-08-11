@@ -75,6 +75,10 @@ global.__mpCalls = [];
 global.customJS.MenuPopover = {
     open: (entries, opts) => { global.__mpCalls.push({ entries, opts }); return { __navClose: () => {} }; },
 };
+global.__pswCalls = [];
+global.customJS.ProjectStatusWidget = {
+    _openPicker: (...args) => { global.__pswCalls.push(args); },
+};
 global.customJS.SectionLabel = {
     render: (dv, opts) => {
         const c = dv.container || dv;
@@ -242,7 +246,7 @@ function makeApp(files) {
 }
 
 // ============================================================================
-// PROJDASH-5 — _renderHeader (status pill + MenuPopover)
+// PROJDASH-5 — _renderHeader (status pill + failure-recoverable status picker)
 // ============================================================================
 {
     const dash = new ProjectDashboard();
@@ -254,16 +258,16 @@ function makeApp(files) {
         file: currentPage.file,
     };
 
-    global.__mpCalls = [];
+    global.__pswCalls = [];
     dash._renderHeader(container, ctx);
 
     const pill = container.__descendants().find(el => el.__isStatusPill);
     ok('PROJDASH-5a pill rendered', !!pill && pill.textContent.toLowerCase() === 'in-progress');
     if (pill) pill.click();
-    ok('PROJDASH-5b click opens MenuPopover', global.__mpCalls.length === 1);
-    ok('PROJDASH-5c popover has 8 entries',
-        global.__mpCalls[0] && global.__mpCalls[0].entries.filter(e => e.label).length === 8,
-        global.__mpCalls[0] ? String(global.__mpCalls[0].entries.length) : 'no call');
+    ok('PROJDASH-5b click opens the shared recoverable status picker', global.__pswCalls.length === 1);
+    ok('PROJDASH-5c picker has 8 statuses',
+        global.__pswCalls[0] && global.__pswCalls[0][3].length === 8,
+        global.__pswCalls[0] ? String(global.__pswCalls[0][3].length) : 'no call');
 }
 
 // ============================================================================

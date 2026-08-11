@@ -17,6 +17,7 @@ const TREE_SRC  = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', '
 const MOVE_SRC  = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-move.js');
 const LEAF_SRC  = path.join(ROOT, 'platform', 'blueprints', 'wiki', 'helpers', 'wiki-leaf-actions.js');
 const SE_SRC    = path.join(ROOT, 'platform', 'mechanisms', 'section-explorer', 'section-explorer.js');
+const CONVENTIONS_SRC = path.join(ROOT, 'Docs', 'agent-guides', 'code-conventions.md');
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -758,6 +759,8 @@ const pages = [
   // W21a — move block shape.
   ok('W21a move block: root/sectionType/rootLabel present',
      cfg.move && cfg.move.root === 'spice/wiki' && cfg.move.sectionType === 'wiki-section' && cfg.move.rootLabel === 'Wiki (root)');
+  ok('W21a2 structural owner identity binds ChromeBar gestures to this WikiTree note',
+     cfg.structural === true && cfg.structuralOwnerKey === cur.file.path);
   ok('W21b move.rewriteOnDocMove() === null (folder-is-truth)',
      typeof cfg.move.rewriteOnDocMove === 'function' && cfg.move.rewriteOnDocMove('spice/wiki/x', 'spice/wiki/y/D.md') === null);
   ok('W21c move.rewriteOnSectionMove() === null',
@@ -796,7 +799,34 @@ const pages = [
   ok('W21i canDelete false when section has no hubPath',
      cfg.canDelete({ folder: 'spice/wiki/cooking/sauces' }) === false);
 
-  global.app = _prevApp;
+global.app = _prevApp;
+}
+
+// PERF8-LEDGER — the shipped scorecard is part of the correctness contract,
+// not prose that may drift back to a stale finding after the implementation
+// changes. Pin the four dimensions for every row this slice owns while keeping
+// PERF-10 as Daily's sole remaining query-budget gap.
+{
+  const ledger = fs.readFileSync(CONVENTIONS_SRC, 'utf8');
+  const rows = ledger.split(/\r?\n/).filter((line) => /^\| (Wiki|Home|Daily) \|/.test(line));
+  const cells = (row) => row.split('|').slice(1, -1).map((cell) => cell.trim());
+  const byHelper = (blueprint, needle) => cells(rows.find((row) =>
+    row.startsWith(`| ${blueprint} |`) && row.includes(needle)) || '');
+  const wikiTree = byHelper('Wiki', '`WikiTree`');
+  const wikiChrome = byHelper('Wiki', '`WikiChromeBar`');
+  const home = byHelper('Home', '`SpaceHome`');
+  const daily = byHelper('Daily', '`SpaceDailyDashboard`');
+  ok('PERF8-LEDGER WikiTree closes structural, rollback, cold-load, and query columns',
+    wikiTree.length === 6 && wikiTree.slice(2).every((cell) => cell.startsWith('**OK')));
+  ok('PERF8-LEDGER WikiChromeBar records inherited receipt lifecycle and guarded query shape',
+    wikiChrome.length === 6 && wikiChrome[2].startsWith('**OK/inherited**')
+      && wikiChrome.slice(3).every((cell) => cell.startsWith('**OK')));
+  ok('PERF8-LEDGER SpaceHome closes all four columns and preserves clock-only rollover language',
+    home.length === 6 && home.slice(2).every((cell) => cell.startsWith('**OK'))
+      && home[2].includes('clock-driven day-rollover'));
+  ok('PERF8-LEDGER Daily closes structural/rollback/cold-load and leaves only PERF-10 query debt',
+    daily.length === 6 && daily.slice(2, 5).every((cell) => cell.startsWith('**OK'))
+      && daily[5].startsWith('**GAP PERF-10**') && !daily[5].includes('PERF-8'));
 }
 
 // ---------------------------------------------------------------------------

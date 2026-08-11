@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Review"
+  short_description: "Loop review via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-review — follow .agents/skills/loop-review/SKILL.md."

@@ -22,15 +22,31 @@ const ROOT = path.resolve(__dirname, '..', '..');
 
 // Obsidian-ish element stub: createEl(tag, {text, href}) + setAttr + style.
 function makeEl(tag) {
-  const el = { tag, textContent: '', href: undefined, attrs: {}, style: { cssText: '' }, children: [] };
+  const el = { tag, textContent: '', href: undefined, attrs: {}, style: { cssText: '' }, children: [], className: '', dataset: {} };
+  Object.defineProperty(el, 'childNodes', { get: () => el.children });
   el.createEl = (t, opts) => {
     const c = makeEl(t);
     if (opts && opts.text != null) c.textContent = opts.text;
     if (opts && opts.href != null) c.href = opts.href;
+    if (opts && opts.cls != null) c.className = opts.cls;
+    c.parentNode = el;
     el.children.push(c);
     return c;
   };
   el.setAttr = (k, v) => { el.attrs[k] = v; };
+  el.replaceChildren = (...nodes) => { el.children = nodes; for (const node of nodes) node.parentNode = el; };
+  el.appendChild = (node) => { node.parentNode = el; el.children.push(node); return node; };
+  el.querySelector = (selector) => {
+    const cls = selector.startsWith('.') ? selector.slice(1) : null;
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        if (cls && String(child.className || '').split(/\s+/).includes(cls)) return child;
+        const nested = walk(child); if (nested) return nested;
+      }
+      return null;
+    };
+    return walk(el);
+  };
   return el;
 }
 
@@ -257,6 +273,83 @@ const dvFor = (name, p) => ({ current: () => ({ file: { name, path: p } }) });
   ok('PLP-S3 no folder -> []', Array.isArray(noFolder) && noFolder.length === 0);
 }
 
-const allPass = results.every(([, p]) => p);
-console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
-process.exit(allPass ? 0 : 1);
+async function structuralRollbackCase() {
+  const PLM = loadClass('platform/blueprints/project/helpers/project-links-manager.js', 'ProjectLinksManager');
+  const manager = new PLM();
+  const originalLinks = [];
+  const page = { type: 'links-hub', file: { name: 'Links Hub', path: 'spice/projects/x/Links Hub.md' }, links: originalLinks };
+  const noteView = makeEl('div');
+  const chromeContainer = makeEl('div');
+  const panelContainer = makeEl('div');
+  noteView.appendChild(chromeContainer);
+  noteView.appendChild(panelContainer);
+  chromeContainer.closest = () => noteView;
+  panel.render({ container: panelContainer, current: () => page });
+  const dv = { container: chromeContainer, current: () => page };
+  let rejectWrite = false;
+  const optimistic = [];
+  let focusRestored = false;
+  const priorDocument = global.document;
+  const priorRenderSafe = global.customJS.RenderSafe;
+  const priorPanel = global.customJS.ProjectLinksPanel;
+  const priorApp = global.app;
+  global.document = { activeElement: { focus: () => { focusRestored = true; } } };
+  global.customJS.RenderSafe = {
+    page: () => page,
+    mutateStructure: async (opts) => {
+      const receipt = opts.apply();
+      const visibleGrid = panelContainer.querySelector('.project-links-grid');
+      optimistic.push({
+        links: page.links.slice(),
+        visibleGrid,
+        nodes: visibleGrid ? [...visibleGrid.children] : [],
+        chromeGrid: chromeContainer.querySelector('.project-links-grid'),
+      });
+      try { await opts.write(); return { ok: true, receipt }; }
+      catch (error) { await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+    },
+  };
+  global.customJS.ProjectLinksPanel = panel;
+  const file = { path: page.file.path, fm: { links: [] } };
+  global.app = {
+    vault: { getAbstractFileByPath: () => file },
+    fileManager: { processFrontMatter: async (target, mutate) => {
+      if (rejectWrite) throw new Error('fixture write failure');
+      mutate(target.fm);
+    } },
+    commands: { executeCommandById: () => { throw new Error('global refresh forbidden'); } },
+  };
+  try {
+    const added = await manager._write(dv, [{ url: 'https://new.example', text: 'New' }]);
+    const grid = panelContainer.querySelector('.project-links-grid');
+    const committedLinks = page.links;
+    const committedNodes = [...grid.children];
+    ok('PLM-13 split-block add applies to the visible panel before persistence',
+      added === true && optimistic[0].links[0].url === 'https://new.example'
+        && optimistic[0].visibleGrid === grid && optimistic[0].nodes.length === 1);
+    ok('PLM-14 split-block add never fabricates a chrome-local grid',
+      optimistic[0].chromeGrid === null && chromeContainer.querySelector('.project-links-grid') === null
+        && grid.parentNode === panelContainer);
+    rejectWrite = true;
+    const deleted = await manager._write(dv, []);
+    ok('PLM-15 split-block delete is optimistic before rejected persistence',
+      optimistic[1].links.length === 0 && optimistic[1].visibleGrid === grid
+        && optimistic[1].nodes.length === 0 && optimistic[1].chromeGrid === null);
+    ok('PLM-16 rejected split-block write restores exact links value + card node identities',
+      deleted === false && page.links === committedLinks
+        && grid.children.length === committedNodes.length
+        && grid.children.every((node, index) => node === committedNodes[index]));
+    ok('PLM-17 rejected split-block write restores focus without global refresh', focusRestored);
+  } finally {
+    global.document = priorDocument;
+    global.customJS.RenderSafe = priorRenderSafe;
+    global.customJS.ProjectLinksPanel = priorPanel;
+    global.app = priorApp;
+  }
+}
+
+structuralRollbackCase().then(() => {
+  const allPass = results.every(([, p]) => p);
+  console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
+  process.exit(allPass ? 0 : 1);
+}).catch((error) => { console.error(error && error.stack || error); process.exit(1); });

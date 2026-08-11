@@ -12,8 +12,8 @@ const fs = require('fs');
 const path = require('path');
 
 let passes = 0; let fails = 0;
-function ok(name, fn) {
-    try { fn(); console.log('ok ' + name); passes++; }
+async function ok(name, fn) {
+    try { await fn(); console.log('ok ' + name); passes++; }
     catch (e) { console.error('FAIL ' + name + ': ' + (e && e.message)); fails++; }
 }
 
@@ -34,6 +34,14 @@ const widgets = [
     { name: 'DocLeafActions',             path: 'platform/blueprints/project/helpers/doc-leaf-actions.js' },
     { name: 'DocBulkMoveActions',         path: 'platform/blueprints/project/helpers/doc-bulk-move.js' },
     { name: 'ProjectLinksManager',        path: 'platform/blueprints/project/helpers/project-links-manager.js' },
+    { name: 'ProjectStatusWidget',        path: 'platform/blueprints/project/helpers/project-status-widget.js' },
+    { name: 'ProjectDocsCards',           path: 'platform/blueprints/project/helpers/project-docs-cards.js' },
+    { name: 'ProjectDocsSections',        path: 'platform/blueprints/project/helpers/project-docs-sections.js' },
+    { name: 'ProjectDocsIndex',           path: 'platform/blueprints/project/helpers/project-docs-index.js' },
+    { name: 'SectionHub',                 path: 'platform/blueprints/project/helpers/section-hub.js' },
+    { name: 'ProjectMeetingsPanel',       path: 'platform/blueprints/project/helpers/project-meetings-panel.js' },
+    { name: 'ProjectDashboard',           path: 'platform/blueprints/project/helpers/project-dashboard.js' },
+    { name: 'ProjectChromeBar',           path: 'platform/blueprints/project/helpers/project-chrome-bar.js' },
 ];
 
 // dv stub variants the guards must tolerate.
@@ -68,17 +76,14 @@ global.customJS = Object.assign(global.customJS || {}, { RenderSafe: new RenderS
     for (const w of widgets) {
         let WidgetClass;
         try { WidgetClass = loadWidget(w.path, w.name); }
-        catch (e) { ok(`PROJGUARD-load ${w.name}`, () => { throw e; }); continue; }
+        catch (e) { await ok(`PROJGUARD-load ${w.name}`, () => { throw e; }); continue; }
 
         for (const v of dvVariants) {
-            await new Promise((resolve) => {
-                ok(`PROJGUARD ${w.name} — ${v.label}`, async () => {
-                    const widget = new WidgetClass();
-                    // render() MUST return without throwing.
-                    // Some helpers are async, some are sync — Promise.resolve handles both.
-                    await Promise.resolve().then(() => widget.render(v.stub));
-                });
-                resolve();
+            await ok(`PROJGUARD ${w.name} — ${v.label}`, async () => {
+                const widget = new WidgetClass();
+                // render() MUST return without throwing.
+                // Some helpers are async, some are sync — Promise.resolve handles both.
+                await Promise.resolve().then(() => widget.render(v.stub));
             });
         }
     }

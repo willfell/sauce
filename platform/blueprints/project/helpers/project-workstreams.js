@@ -89,7 +89,7 @@ class ProjectWorkstreams {
             return `<span style="display:inline-block; padding: 1px 8px; border-radius: 4px; font-size: 0.72em; font-weight: 500; background: ${cfg.bg}; color: ${cfg.text}; white-space: nowrap;">${cfg.label}</span>`;
         };
 
-        const showMoveModal = (page) => {
+        const showMoveModal = (page, taskRow) => {
             const overlay = document.createElement("div");
             overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
             const dialog = document.createElement("div");
@@ -109,10 +109,34 @@ class ProjectWorkstreams {
                     item.createEl("span", { text: w.description }).style.cssText = "font-size: 0.8em; color: var(--text-muted); margin-left: auto;";
                 }
                 item.onclick = async () => {
-                    document.body.removeChild(overlay);
                     const tFile = app.vault.getAbstractFileByPath(page.file.path);
-                    if (tFile) {
-                        await app.fileManager.processFrontMatter(tFile, fm => { fm.workstream = w.id; });
+                    const renderSafe = globalThis.customJS?.RenderSafe;
+                    if (tFile && renderSafe && typeof renderSafe.mutateStructure === "function") {
+                        const result = await renderSafe.mutateStructure({
+                            app,
+                            dv,
+                            path: tFile.path,
+                            failureMessage: "Could not assign workstream",
+                            apply: () => {
+                                const owned = Object.prototype.hasOwnProperty.call(page, "workstream");
+                                const priorValue = page.workstream;
+                                const parent = taskRow && taskRow.parentNode;
+                                const nextSibling = taskRow && taskRow.nextSibling;
+                                const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+                                page.workstream = w.id;
+                                taskRow?.remove?.();
+                                return { page, owned, priorValue, parent, taskRow, nextSibling, focusTarget };
+                            },
+                            rollback: (receipt) => {
+                                if (receipt.owned) receipt.page.workstream = receipt.priorValue;
+                                else delete receipt.page.workstream;
+                                receipt.parent?.insertBefore?.(receipt.taskRow, receipt.nextSibling || null);
+                                try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+                            },
+                            write: () => app.fileManager.processFrontMatter(tFile, fm => { fm.workstream = w.id; }),
+                        });
+                        if (!result.ok) { try { item.focus(); } catch (_e) {} return; }
+                        document.body.removeChild(overlay);
                         new Notice(`Moved "${page.file.name}" to ${w.name}`);
                     }
                 };
@@ -145,7 +169,7 @@ class ProjectWorkstreams {
                 moveBtn.style.cssText = "padding: 2px 6px; border-radius: 4px; cursor: pointer; background: transparent; border: 1px solid var(--background-modifier-border); color: var(--text-muted); display: inline-flex; align-items: center; flex-shrink: 0;";
                 moveBtn.onmouseenter = () => { moveBtn.style.borderColor = "var(--interactive-accent)"; moveBtn.style.color = "var(--interactive-accent)"; };
                 moveBtn.onmouseleave = () => { moveBtn.style.borderColor = "var(--background-modifier-border)"; moveBtn.style.color = "var(--text-muted)"; };
-                moveBtn.onclick = (e) => { e.stopPropagation(); showMoveModal(page); };
+                moveBtn.onclick = (e) => { e.stopPropagation(); showMoveModal(page, row); };
             }
 
             row.onclick = () => { app.workspace.openLinkText(page.file.path, ""); };

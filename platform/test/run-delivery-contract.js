@@ -33,7 +33,8 @@ check('DEL-API-1 public API exposes the semantic surface', [
   'validateCard', 'resolveDependencies', 'completionProof', 'zoneConflicts',
   'derivePolicy', 'classifyFailure', 'posture', 'migrate', 'describe',
   'batchEligibility', 'normalizeCard', 'normalizeStatus', 'parseDependencyField', 'compareVersions',
-  'normalizeEvidenceClaim', 'validateEpic', 'validateSlice', 'deriveEpicLifecycle',
+  'normalizeEvidenceClaim', 'decodeStructuredContractFields', 'encodeStructuredFrontmatterValue',
+  'validateEpic', 'validateSlice', 'deriveEpicLifecycle',
   'deriveEpicState', 'deriveEpicPosture', 'validateRatificationReceipt', 'parseRatificationArtifact',
 ].every((name) => typeof api[name] === 'function'));
 eq('DEL-API-2 public contract version matches the registry', api.CONTRACT_VERSION, api.registry.contract.version);
@@ -51,6 +52,54 @@ check('DEL-API-3 registry is deeply frozen', Object.isFrozen(api.registry)
 eq('DEL-API-4 base fixture pins Delivery deployment for all authoritative vaults',
   api.registry.fixtures.base_execution_card.deploy_subscriptions,
   { headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'] });
+const legacyStructuredCard = fixtureCard({});
+const stringStructuredCard = {
+  ...legacyStructuredCard,
+  evidence: JSON.stringify(legacyStructuredCard.evidence),
+  deploy_subscriptions: JSON.stringify(legacyStructuredCard.deploy_subscriptions),
+};
+const legacyStructuredVerdict = api.validateCard(legacyStructuredCard);
+const stringStructuredVerdict = api.validateCard(stringStructuredCard);
+check('BGR-OBSY-READERS-BOTH-ENCODINGS Delivery validator accepts legacy objects and JSON strings',
+  legacyStructuredVerdict.ok && stringStructuredVerdict.ok);
+eq('BGR-OBSY-READERS-BOTH-ENCODINGS Delivery validator returns byte-equivalent evidence',
+  stringStructuredVerdict.card.evidence, legacyStructuredVerdict.card.evidence);
+eq('BGR-OBSY-READERS-BOTH-ENCODINGS Delivery validator returns byte-equivalent deployment maps',
+  stringStructuredVerdict.card.deploy_subscriptions, legacyStructuredVerdict.card.deploy_subscriptions);
+eq('BGR-OBSY-WRITER-STRING-ENCODING helper emits one YAML text scalar containing exact JSON',
+  JSON.parse(api.encodeStructuredFrontmatterValue(legacyStructuredCard.evidence)),
+  JSON.stringify(legacyStructuredCard.evidence));
+const malformedStructuredVerdict = api.validateCard({
+  ...legacyStructuredCard,
+  evidence: '[{"source_identity":"unterminated"}',
+});
+check('BGR-OBSY-READERS-BOTH-ENCODINGS malformed JSON string refuses loudly',
+  !malformedStructuredVerdict.ok
+    && malformedStructuredVerdict.errors.some((issue) => issue.code === 'invalid-structured-json' && issue.field === 'evidence'));
+const duplicateStructuredVerdict = api.validateCard({
+  ...legacyStructuredCard,
+  deploy_subscriptions: '{"headspace":[],"headspace":[],"accuris":[],"ero":[]}',
+});
+check('BGR-OBSY-READERS-BOTH-ENCODINGS duplicate JSON object keys refuse loudly',
+  !duplicateStructuredVerdict.ok
+    && duplicateStructuredVerdict.errors.some((issue) => issue.code === 'duplicate-structured-json-key'));
+const wrongShapeStructuredCard = {
+  ...legacyStructuredCard,
+  evidence: '{"not":"an-array"}',
+  deploy_subscriptions: '[]',
+};
+const wrongShapeStructuredPreimage = JSON.stringify(wrongShapeStructuredCard);
+const wrongShapeStructuredVerdict = api.validateCard(wrongShapeStructuredCard);
+check('GA-OPS20A2-STRUCTURED-WRONG-SHAPE-UNBOUND refuses both field-specific wrong JSON shapes',
+  !wrongShapeStructuredVerdict.ok
+    && wrongShapeStructuredVerdict.errors.some((issue) => (
+      issue.code === 'invalid-structured-json-shape' && issue.field === 'evidence'
+    ))
+    && wrongShapeStructuredVerdict.errors.some((issue) => (
+      issue.code === 'invalid-structured-json-shape' && issue.field === 'deploy_subscriptions'
+    )));
+eq('GA-OPS20A2-STRUCTURED-WRONG-SHAPE-UNBOUND validation leaves the caller preimage byte-equivalent',
+  JSON.stringify(wrongShapeStructuredCard), wrongShapeStructuredPreimage);
 
 for (const fixture of api.registry.fixtures.valid) {
   const verdict = api.validateCard(fixtureCard(fixture), fixture.mode || 'current');
@@ -122,7 +171,8 @@ const lifecycleCases = [
   ['empty board is planned', [], 'planned', 'claimable'],
   ['single planned slice is planned', [{ card: 'A', status: 'planning' }], 'planned', 'claimable'],
   ['one implementing slice is active', [{ card: 'A', status: 'in_progress' }], 'active', 'claimable'],
-  ['all parked slices remain active', [{ card: 'A', status: 'parked' }, { card: 'B', status: 'parked' }], 'active', 'claimable'],
+  // BGR redesign 2026-07-25: parked slices count as waiting and roll up like blocked, never active.
+  ['all parked slices wait as blocked', [{ card: 'A', status: 'parked' }, { card: 'B', status: 'parked' }], 'blocked', 'blocked_by_dependencies'],
   ['blocked frontier with nothing claimable is blocked', [{ card: 'A', status: 'blocked' }], 'blocked', 'blocked_by_dependencies'],
   ['a claimable planned sibling outranks a blocked slice', [{ card: 'A', status: 'blocked' }, { card: 'B', status: 'planning' }], 'planned', 'claimable'],
   ['every completed slice is done', [{ card: 'A', status: 'completed' }, { card: 'B', phase: 'deployed' }], 'done', 'done'],
@@ -137,6 +187,28 @@ for (const [label, slices, expectedState, expectedPosture] of lifecycleCases) {
   eq(`DEL-EPIC-STATE-WRAPPER ${label}`, api.deriveEpicState(slices), expectedState);
   eq(`DEL-EPIC-POSTURE-WRAPPER ${label}`, api.deriveEpicPosture(slices), expectedPosture);
 }
+
+// BGR redesign 2026-07-25 — discarded slices are tombstones (excluded from the rollup
+// entirely) and parked slices wait on a decision (waiting bucket, rolls up like blocked).
+const discardedLifecycle = api.deriveEpicLifecycle([
+  { card: 'A', status: 'completed' }, { card: 'B', status: 'discarded' }, { card: 'C', status: 'discarded' },
+]);
+eq('BGR-CONTRACT-DISCARDED-EXCLUDED discarded slices vanish from the rollup entirely', {
+  state: discardedLifecycle.state,
+  done: discardedLifecycle.counts.done,
+  has_discarded_bucket: Object.prototype.hasOwnProperty.call(discardedLifecycle.counts, 'discarded'),
+}, { state: 'done', done: 1, has_discarded_bucket: false });
+const waitingLifecycle = api.deriveEpicLifecycle([{ status: 'parked' }, { status: 'planning' }]);
+eq('BGR-CONTRACT-PARKED-IS-WAITING parked counts as waiting and rolls up like blocked', {
+  waiting: waitingLifecycle.counts.waiting,
+  active: waitingLifecycle.counts.active,
+  state: waitingLifecycle.state,
+}, { waiting: 1, active: 0, state: 'blocked' });
+eq('BGR-CONTRACT-ALL-DISCARDED-IS-PLANNED an epic emptied by discards is planned, not done',
+  api.deriveEpicLifecycle([{ status: 'discarded' }]).state, 'planned');
+const discardedSliceVerdict = api.validateSlice({ ...api.registry.fixtures.slice.base, status: 'discarded' });
+check('BGR-CONTRACT-STATUS-ENUM the contract accepts a discarded slice as valid',
+  discardedSliceVerdict.ok, JSON.stringify(discardedSliceVerdict.errors));
 
 const ratificationPayload = {
   schema_version: api.CONTRACT_VERSION,
@@ -250,7 +322,7 @@ const fullReceipt = {
     headspace: ['mechanism:delivery'], accuris: ['mechanism:delivery'], ero: ['mechanism:delivery'],
   },
   release_ancestry_receipt: {
-    ok: true, receipt_id: 'ancestry-receipt-1', repository: 'willfellhoelter/sauce',
+    ok: true, receipt_id: 'ancestry-receipt-1', repository: 'willfell/sauce',
     checked_at: '2026-07-16T17:51:05Z', verifier_revision: 'c'.repeat(40),
     feature_pr: 9, feature_merge_sha: 'a'.repeat(40),
     release_pr: 10, release_merge_sha: 'b'.repeat(40), tag: 'v1.2.3',
@@ -624,12 +696,13 @@ check('DEL-MAN-2 registry is installed in a non-loader content tree',
   && [...installed.values()].every((dest) => !dest.startsWith('{{scripts_path}}/')
     && !dest.startsWith('{{templater_scripts_path}}/')));
 check('DEL-MAN-3 public API and semantic scripts are installed together', [
-  'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js',
+  'index.js', 'scripts/delivery-contract.js', 'scripts/delivery-schema-cli.js', 'scripts/delivery-topology.js',
 ].every((source) => installed.has(source)));
 eq('DEL-MAN-3a every installed source has its exact non-loader destination', Object.fromEntries(installed), {
   'data/delivery-schema.json': '{{content_path}}/delivery/data/delivery-schema.json',
   'scripts/delivery-contract.js': '{{content_path}}/delivery/scripts/delivery-contract.js',
   'scripts/delivery-schema-cli.js': '{{content_path}}/delivery/scripts/delivery-schema-cli.js',
+  'scripts/delivery-topology.js': '{{content_path}}/delivery/scripts/delivery-topology.js',
   'index.js': '{{content_path}}/delivery/index.js',
 });
 const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-contract-install-'));

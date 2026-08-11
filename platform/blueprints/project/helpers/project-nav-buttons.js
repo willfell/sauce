@@ -398,7 +398,7 @@ class ProjectNavButtons {
         });
     }
 
-    _openWorkstreamPicker(workstreams, currentWsId, filePath) {
+    _openWorkstreamPicker(workstreams, currentWsId, filePath, dv = null, currentPage = null) {
         const modal = (typeof globalThis !== "undefined" && globalThis.customJS)
             ? globalThis.customJS.SauceModal : null;
         if (!modal || typeof modal.open !== "function") {
@@ -409,17 +409,46 @@ class ProjectNavButtons {
         const choose = async (handle, workstream) => {
             if (selected) return false;
             selected = true;
-            handle.close("selection");
-            if (workstream && workstream.id === currentWsId) return true;
-            const cardFile = app.vault.getAbstractFileByPath(filePath);
-            if (!cardFile) return false;
-            if (workstream) {
-                await app.fileManager.processFrontMatter(cardFile, (fm) => { fm.workstream = workstream.id; });
-                new Notice("Workstream: " + workstream.name);
-            } else {
-                await app.fileManager.processFrontMatter(cardFile, (fm) => { delete fm.workstream; });
-                new Notice("Workstream removed");
+            if (workstream && workstream.id === currentWsId) {
+                handle.close("selection");
+                return true;
             }
+            const cardFile = app.vault.getAbstractFileByPath(filePath);
+            const renderSafe = globalThis.customJS?.RenderSafe;
+            const page = currentPage || renderSafe?.page?.(dv);
+            if (!cardFile || !page || !renderSafe || typeof renderSafe.mutateStructure !== "function") {
+                selected = false;
+                try { new Notice("Could not update workstream: RenderSafe is unavailable.", 6000); } catch (_e) {}
+                return false;
+            }
+            const nextId = workstream ? workstream.id : null;
+            const result = await renderSafe.mutateStructure({
+                app,
+                dv,
+                path: cardFile.path,
+                failureMessage: "Could not update workstream",
+                apply: () => {
+                    const owned = Object.prototype.hasOwnProperty.call(page, "workstream");
+                    const priorValue = page.workstream;
+                    const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+                    if (nextId) page.workstream = nextId;
+                    else delete page.workstream;
+                    return { page, owned, priorValue, focusTarget };
+                },
+                rollback: (receipt) => {
+                    if (receipt.owned) receipt.page.workstream = receipt.priorValue;
+                    else delete receipt.page.workstream;
+                    try { receipt.focusTarget && receipt.focusTarget.focus?.(); } catch (_e) {}
+                },
+                write: () => app.fileManager.processFrontMatter(cardFile, (fm) => {
+                    if (nextId) fm.workstream = nextId;
+                    else delete fm.workstream;
+                }),
+            });
+            if (!result.ok) { selected = false; return false; }
+            handle.close("selection");
+            if (workstream) new Notice("Workstream: " + workstream.name);
+            else new Notice("Workstream removed");
             return true;
         };
         return modal.open({
@@ -894,7 +923,7 @@ class ProjectNavButtons {
             if (workstreams.length > 0) {
                 const changeBtn = wsRow.createEl("button", { cls: "sauce-btn", text: matched ? "Change" : "Assign" });
                 changeBtn.style.marginLeft = "auto";
-                changeBtn.onclick = () => this._openWorkstreamPicker(workstreams, currentWsId, filePath);
+                changeBtn.onclick = () => this._openWorkstreamPicker(workstreams, currentWsId, filePath, dv, page);
             }
         }
 

@@ -10,12 +10,12 @@ Run ONE round of the Sauce pipeline. Full design rationale: `Docs/plans/2026-05-
 A round is 5 phases. **Always** execute them in order A → B → C → D → E. Never skip; never re-order.
 
 **Repo + path facts:**
-- Workshop repo (this repo, git-tracked): `~/projects/repos/sauce/`
-- Consumer vault (NOT git-tracked, synced by Obsidian Sync): `~/notes/sauce/headspace-sauce/`
-- Project board: `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md`
-- Workstream sub-board: `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Workstream>-board.md`
-- Card file: `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Card>/<Card>.md`
-- Handoff archive: `~/projects/repos/sauce/Docs/prompts/sauce-pipeline-*-handoff.md`
+- Workshop repo (this repo, git-tracked): `~/Documents/GitHub/sauce/`
+- Consumer vault (NOT git-tracked, synced by Obsidian Sync): `~/obsidian/headspace-sauce/`
+- Project board: `~/obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md`
+- Workstream sub-board: `~/obsidian/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Workstream>-board.md`
+- Card file: `~/obsidian/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Card>/<Card>.md`
+- Handoff archive: `~/Documents/GitHub/sauce/Docs/prompts/sauce-pipeline-*-handoff.md`
 
 ---
 
@@ -23,12 +23,12 @@ A round is 5 phases. **Always** execute them in order A → B → C → D → E.
 
 1. Find the most recent handoff:
    ```bash
-   ls -t ~/projects/repos/sauce/Docs/prompts/sauce-pipeline-*-handoff.md 2>/dev/null | head -1
+   ls -t ~/Documents/GitHub/sauce/Docs/prompts/sauce-pipeline-*-handoff.md 2>/dev/null | head -1
    ```
    - If empty: this is the first round. No prior handoff exists. Note this; do not error.
    - Otherwise: Read the file. Extract the "Recommended next" card (if present) — that's the proposed pick for Phase B.
-2. Read the project board: `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md`. Parse columns: In Planning, In Progress, Blocked, Completed.
-3. Read the project root: `~/notes/sauce/headspace-sauce/spice/projects/sauce/Sauce.md`. Extract `status:` and the `workstreams:` list from frontmatter.
+2. Read the project board: `~/obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md`. Parse columns: In Planning, In Progress, Blocked, Completed.
+3. Read the project root: `~/obsidian/headspace-sauce/spice/projects/sauce/Sauce.md`. Extract `status:` and the `workstreams:` list from frontmatter.
 4. If In Progress is non-empty (carry-over from a prior round that did not close cleanly): FLAG to the user — say "the In Progress column is non-empty: [card list]; this usually means a prior round didn't close. Resume that card or move it back to Planning manually before continuing." Then exit without scheduling a wake-up.
 5. Otherwise proceed to Phase B.
 
@@ -62,7 +62,7 @@ A round is 5 phases. **Always** execute them in order A → B → C → D → E.
      - "Pause for user to add smaller cards via Obsidian" — description: "End the round cleanly. Add smaller cards in Obsidian, then restart the loop."
      - "Pick something smaller" — description: "Re-loop to the pick prompt."
    - On "Pause for user to add smaller cards via Obsidian": **the pipeline does NOT create new cards programmatically.** The supported card-creation path is obsidian-kanban's "+ Add a card" UI, which delegates to Templater + the v0.48.0 `ProjectTaskCreateListener` + the v0.49.2 vault-scan source-board detection — all interactive Obsidian flows. The pipeline bypassing them would either skip the listener wiring (creating out-of-shape cards) or fire the listener with no human at the workstream-picker dialog. Instead:
-     a. Write a paused-for-scope handoff at `~/projects/repos/sauce/Docs/prompts/YYYY-MM-DD-sauce-pipeline-paused-for-scope-handoff.md`. Use Phase E's handoff format but with a `## Status: PAUSED FOR SCOPE` block at the top, the originally-picked card name, and the user-described sub-task scopes (captured via `AskUserQuestion` free-form). Footer: "## Next action: add cards via Obsidian, then `/loop /sauce-pipeline`".
+     a. Write a paused-for-scope handoff at `~/Documents/GitHub/sauce/Docs/prompts/YYYY-MM-DD-sauce-pipeline-paused-for-scope-handoff.md`. Use Phase E's handoff format but with a `## Status: PAUSED FOR SCOPE` block at the top, the originally-picked card name, and the user-described sub-task scopes (captured via `AskUserQuestion` free-form). Footer: "## Next action: add cards via Obsidian, then `/loop /sauce-pipeline`".
      b. Commit + push the handoff (single workshop commit).
      c. Output to the user: "Paused for scope. Open Obsidian, add smaller cards to the project board's In Planning column via '+ Add a card'. v0.49.2's source-board detection will route them correctly under `tasks/<Workstream>/board/`. Restart with `/loop /sauce-pipeline`."
      d. **Do NOT call `ScheduleWakeup`.** Exit.
@@ -70,9 +70,9 @@ A round is 5 phases. **Always** execute them in order A → B → C → D → E.
    - **Note:** the picked card has NOT been moved to In Progress yet at this point — Step 7's board writes happen AFTER this sanity check. So no rollback is needed for the pause-for-scope or pick-smaller branches.
 
 7. **Move the picked card on the boards.** Three edits:
-   a. Top-level project board: edit `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md`. Find the line `- [ ] [[<Card name>]]` under `## In Planning` and remove it. Add the line at the END of the `## In Progress` section (before the blank line that precedes `## Blocked`).
-   b. Workstream sub-board: read the card frontmatter's `source_board:` field. The path encodes the workstream — e.g. `spice/projects/sauce/tasks/Projects Blueprint/board/Wiki Area.md` → workstream = "Projects Blueprint". Edit the corresponding sub-board file at `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<W>-board.md` — same column move (under that sub-board's `## Planning` → `## In Progress`).
-   c. Card frontmatter: edit `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md`. Set `status: in_progress` and `status_changed_at: <ISO 8601 timestamp now, in user's local timezone, e.g. "2026-05-15 17:30">`.
+   a. Top-level project board: edit `~/obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md`. Find the line `- [ ] [[<Card name>]]` under `## In Planning` and remove it. Add the line at the END of the `## In Progress` section (before the blank line that precedes `## Blocked`).
+   b. Workstream sub-board: read the card frontmatter's `source_board:` field. The path encodes the workstream — e.g. `spice/projects/sauce/tasks/Projects Blueprint/board/Wiki Area.md` → workstream = "Projects Blueprint". Edit the corresponding sub-board file at `~/obsidian/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<W>-board.md` — same column move (under that sub-board's `## Planning` → `## In Progress`).
+   c. Card frontmatter: edit `~/obsidian/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md`. Set `status: in_progress` and `status_changed_at: <ISO 8601 timestamp now, in user's local timezone, e.g. "2026-05-15 17:30">`.
 
 8. Phase B done. Vault writes are file-level only (vault is not a git repo, so no commit step). Workshop is unchanged.
 
@@ -121,7 +121,7 @@ The card body describes WHAT to build. Execute a full Sauce cycle:
 
    ---
    **Completed:** YYYY-MM-DD in `v<NEW_VERSION>`
-   **Result:** `~/projects/repos/sauce/Docs/plans/YYYY-MM-DD-v<NEW_VERSION>-result.md`
+   **Result:** `~/Documents/GitHub/sauce/Docs/plans/YYYY-MM-DD-v<NEW_VERSION>-result.md`
    ```
 5. Phase D done. Vault writes only; no commit (vault is not git-tracked).
 
@@ -135,7 +135,7 @@ The card body describes WHAT to build. Execute a full Sauce cycle:
    **Date:** YYYY-MM-DD
    **Workshop version shipped:** v<NEW_VERSION>
    **Card completed:** [[<Card name>]]
-   **Result doc:** `~/projects/repos/sauce/Docs/plans/YYYY-MM-DD-v<NEW_VERSION>-result.md`
+   **Result doc:** `~/Documents/GitHub/sauce/Docs/plans/YYYY-MM-DD-v<NEW_VERSION>-result.md`
 
    ## Board snapshot (after this round)
 
@@ -164,7 +164,7 @@ The card body describes WHAT to build. Execute a full Sauce cycle:
 
 2. **Determine the round number N.** Count existing files matching `Docs/prompts/sauce-pipeline-v*-handoff.md` and add 1. (Round 1 = no prior handoffs.)
 
-3. **Write the handoff to** `~/projects/repos/sauce/Docs/prompts/YYYY-MM-DD-sauce-pipeline-v<NEW_VERSION>-handoff.md`. (YYYY-MM-DD = today's date, ISO format.)
+3. **Write the handoff to** `~/Documents/GitHub/sauce/Docs/prompts/YYYY-MM-DD-sauce-pipeline-v<NEW_VERSION>-handoff.md`. (YYYY-MM-DD = today's date, ISO format.)
 
 4. **Commit + push the handoff.**
    ```bash

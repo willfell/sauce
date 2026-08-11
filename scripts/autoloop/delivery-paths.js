@@ -8,11 +8,18 @@
  */
 'use strict';
 
+const os = require('os');
+const path = require('path');
+
+// Home-relative so the username change across machines needs no edit; the
+// DELIVERY_* env overrides (set by the loop resolver) supersede these for any
+// bound repo. Last-resort literals target this machine's workshop layout.
+const HOME = os.homedir();
 const DEFAULTS = {
-  repoRoot: '/Users/willfellhoelter/projects/repos/sauce',
+  repoRoot: path.join(HOME, 'Documents/GitHub/sauce'),
   coordinator: '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js',
-  fid: '/Users/willfellhoelter/notes/sauce/headspace-sauce/spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md',
-  statePath: '/Users/willfellhoelter/projects/repos/sauce/.git/sauce-autoloop/state.json',
+  fid: path.join(HOME, 'obsidian/headspace-sauce/spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md'),
+  statePath: path.join(HOME, 'Documents/GitHub/sauce/.git/sauce-autoloop/state.json'),
 };
 
 function deliveryPaths(env) {

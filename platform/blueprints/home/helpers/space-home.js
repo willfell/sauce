@@ -285,9 +285,7 @@ class SpaceHome {
    * host injection); the composer resolves its own live `today`/`hour`.
    */
   async render(dv, params) {
-    // Capture `this` for the async re-render after an inline task capture (the
-    // input/Add handlers await createQuick then call self.render to refresh).
-    const self = this;
+    if (!dv || !dv.container || typeof dv.el !== "function") return;
 
     // Cold-start reflow guard: on the FIRST render of any app session, wait for
     // Obsidian's workspace layout (panes/sidebars) to finish restoring before
@@ -360,6 +358,94 @@ class SpaceHome {
       }
     } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
 
+    // Surface-owned state survives CustomJS helper replacement and Dataview
+    // re-execution because the container, rather than this render closure or
+    // class identity, owns mutation and nested-mount authority.
+    let surface;
+    try {
+      surface = dv.container.__sauceHomeSurface;
+      if (!surface || typeof surface !== "object") {
+        surface = {
+          signature: null,
+          generation: 0,
+          capture: { pending: false, token: null, controls: null },
+          dashboard: { mounted: false, key: null, nodes: [], token: null, generation: 0 },
+        };
+        dv.container.__sauceHomeSurface = surface;
+      }
+    } catch (_e) {
+      surface = {
+        signature: null,
+        generation: 0,
+        capture: { pending: false, token: null, controls: null },
+        dashboard: { mounted: false, key: null, nodes: [], token: null, generation: 0 },
+      };
+    }
+    const mountDashboard = async () => {
+      const dashboard = surface.dashboard;
+      const children = () => Array.from((dv && dv.container && dv.container.children) || []);
+      const liveNodes = () => (Array.isArray(dashboard.nodes) ? dashboard.nodes : [])
+        .filter((node) => children().includes(node));
+      if (dashboard.mounted && dashboard.key === today && liveNodes().length) return;
+      if (dashboard.mounted && dashboard.key !== today) {
+        for (const node of liveNodes()) {
+          try { node.remove?.(); } catch (_e) {}
+        }
+      }
+      dashboard.mounted = false;
+      dashboard.key = null;
+      dashboard.nodes = [];
+      if (dashboard.token) {
+        await dashboard.token.promise;
+        return mountDashboard();
+      }
+      if (!dv || typeof dv.view !== "function") return;
+      const token = {
+        generation: dashboard.generation,
+        receipt: { ok: false, node: null },
+        guardReceipt: { status: "pending", node: null },
+        promise: null,
+      };
+      dashboard.token = token;
+      token.promise = (async () => {
+        try {
+          await dv.view("ranch/views/customjs-guard", {
+            class: "SpaceDailyDashboard",
+            guardReceipt: token.guardReceipt,
+            args: [{ asOf: today, live: true, mountReceipt: token.receipt }],
+          });
+          if (dashboard.token === token) {
+            const mountedNode = token.receipt.ok === true && children().includes(token.receipt.node)
+              ? token.receipt.node
+              : null;
+            dashboard.nodes = mountedNode ? [mountedNode] : [];
+            dashboard.mounted = !!mountedNode;
+            dashboard.key = dashboard.mounted ? today : null;
+            if (!dashboard.mounted) {
+              // The guard owns unavailable diagnostics and returns their exact
+              // identity. Remove only that receipt so retries do not accumulate
+              // placeholders; never infer ownership from text or a DOM diff.
+              const unavailable = token.guardReceipt.status === "unavailable"
+                ? token.guardReceipt.node
+                : null;
+              if (unavailable && children().includes(unavailable)) {
+                try { unavailable.remove?.(); } catch (_e) {}
+              }
+            }
+          }
+        } catch (_e) {
+          if (dashboard.token === token) {
+            dashboard.mounted = false;
+            dashboard.key = null;
+            dashboard.nodes = [];
+          }
+        } finally {
+          if (dashboard.token === token) dashboard.token = null;
+        }
+      })();
+      await token.promise;
+    };
+
     // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
     // (the reported "reloading every time" feel) and is wasted work whenever
     // NOTHING actually changed since the last render in THIS render() call —
@@ -370,19 +456,31 @@ class SpaceHome {
     // Dataview's OWN periodic re-execution of the whole block, which clears
     // dv.container itself before calling render() again — this guard only
     // short-circuits redundant work WE would otherwise do within one still-
-    // live container.
+    // live container. A failed or unavailable nested dashboard is deliberately
+    // retried before returning from an otherwise identical render.
     const sig = today + "|" + JSON.stringify(counts);
-    try {
-      const w = (typeof window !== "undefined" && window) || null;
-      if (w && w.__sauceHomeLastSig === sig && dv.container.querySelector(".sauce-home")) {
-        return;
-      }
-      if (w) w.__sauceHomeLastSig = sig;
-    } catch (_e) { /* never throw — fall through to a normal rebuild */ }
+    const prior = dv.container.querySelector(".sauce-home");
+    if (prior && surface.signature === sig) {
+      await mountDashboard();
+      return;
+    }
+    if (!prior && !surface.dashboard.token) {
+      // Dataview cleared this container. A settled mount was removed and must
+      // be retried. An in-flight mount, however, remains the sole authority:
+      // invalidating it cannot cancel its eventual DOM write and would permit
+      // a duplicate replacement mount. Pending capture authority is likewise
+      // preserved until its persistence receipt settles.
+      surface.dashboard.generation += 1;
+      surface.dashboard.mounted = false;
+      surface.dashboard.key = null;
+      surface.dashboard.nodes = [];
+    }
+    surface.signature = sig;
+    surface.generation += 1;
+    const renderGeneration = surface.generation;
 
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.
-    const prior = dv.container.querySelector(".sauce-home");
     if (prior) prior.remove();
 
     const home = dv.el("div", "", { cls: "sauce-home" });
@@ -470,9 +568,11 @@ class SpaceHome {
       setMenu(!menuOpen);
     };
 
-    // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
-    // guarded; then close the menu + re-render so the Tasks panel + glance chip
-    // reflect the new task). NO autofocus — opening the menu (via "+") must
+    // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick)
+    // through the shared structural seam. The exact input/menu/focus receipt is
+    // restored on rejection; success closes the menu and leaves authoritative
+    // reconciliation to Dataview instead of recursively self-rendering. NO
+    // autofocus — opening the menu (via "+") must
     // never pop the mobile keyboard; the user taps the input to type.
     const captureRow = menu.createEl("div", { cls: "sauce-home-add-input-row" });
     const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
@@ -481,27 +581,95 @@ class SpaceHome {
     const addTaskBtn = captureRow.createEl("button", { cls: "sauce-home-capture-add" });
     addTaskBtn.setAttribute("type", "button");
     addTaskBtn.textContent = "Add";
+    const captureState = surface.capture;
+    addTaskBtn.disabled = !!captureState.pending;
+    captureState.controls = { generation: renderGeneration, addTaskBtn };
     const submitCapture = async () => {
+      if (captureState.pending) return;
       const text = input.value;
       if (!(typeof text === "string" && text.trim())) return;
       const cjsNow = (typeof customJS !== "undefined" && customJS)
         || (typeof window !== "undefined" && window.customJS)
         || null;
       const td = cjsNow && cjsNow.TaskDialog;
+      const renderSafe = cjsNow && cjsNow.RenderSafe;
+      if (!td || typeof td.createQuick !== "function"
+          || !renderSafe || typeof renderSafe.mutateStructure !== "function") return;
+      const captureToken = { generation: renderGeneration };
+      captureState.pending = true;
+      captureState.token = captureToken;
+      let optimisticReceipt = null;
+      let result;
       try {
-        if (td && typeof td.createQuick === "function") {
-          await td.createQuick({ title: text, source: "daily" });
+        result = await renderSafe.mutateStructure({
+        dv,
+        app: (typeof app !== "undefined" && app) || null,
+        failureMessage: "Could not add task",
+        apply: () => {
+          const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+          const value = input.value;
+          const selectionStart = input.selectionStart;
+          const selectionEnd = input.selectionEnd;
+          const disabled = !!addTaskBtn.disabled;
+          const node = captureRow.createEl("span", { cls: "sauce-home-capture-preview is-optimistic" });
+          node.textContent = text.trim();
+          input.value = "";
+          addTaskBtn.disabled = true;
+          optimisticReceipt = { parent: captureRow, node, nextSibling: node.nextSibling || null, focusTarget,
+            input, value, selectionStart, selectionEnd, disabled, menuWasOpen: menuOpen };
+          return optimisticReceipt;
+        },
+        rollback: (receipt) => {
+          if (!receipt) return;
+          if (receipt.node && typeof receipt.node.remove === "function") receipt.node.remove();
+          else receipt.parent?.removeChild?.(receipt.node);
+          if (captureState.token !== captureToken || surface.generation !== renderGeneration) return;
+          receipt.input.value = receipt.value;
+          receipt.input.setSelectionRange?.(receipt.selectionStart, receipt.selectionEnd);
+          addTaskBtn.disabled = receipt.disabled;
+          setMenu(receipt.menuWasOpen);
+          try {
+            const active = docRef && docRef.activeElement;
+            const userMoved = active && active !== receipt.focusTarget && active !== docRef.body
+              && active.isConnected !== false;
+            if (!userMoved) receipt.focusTarget?.focus?.();
+          } catch (_e) {}
+        },
+        write: async () => {
+          const created = await td.createQuick({ title: text, source: "daily", reconcile: false });
+          if (!created || created.ok !== true) {
+            const reason = created && (created.reason || created.error?.message);
+            throw new Error(reason || "task create did not commit");
+          }
+          return created;
+        },
+        });
+        if (result && result.ok === true) {
+          if (optimisticReceipt?.node && typeof optimisticReceipt.node.remove === "function") {
+            optimisticReceipt.node.remove();
+          } else {
+            optimisticReceipt?.parent?.removeChild?.(optimisticReceipt.node);
+          }
+          if (captureState.token === captureToken && surface.generation === renderGeneration) {
+            addTaskBtn.disabled = optimisticReceipt ? optimisticReceipt.disabled : false;
+            setMenu(false);
+          }
         }
-      } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
-      setMenu(false);
-      await self.render(dv, params);
+      } finally {
+        if (captureState.token === captureToken) {
+          captureState.pending = false;
+          captureState.token = null;
+          const controls = captureState.controls;
+          if (controls && controls.generation !== renderGeneration) controls.addTaskBtn.disabled = false;
+        }
+      }
     };
-    addTaskBtn.onclick = () => { submitCapture(); };
+    addTaskBtn.onclick = () => submitCapture();
     input.addEventListener("keydown", (ev) => {
       if (ev && ev.key === "Enter" && !ev.isComposing) {
         if (typeof ev.preventDefault === "function") ev.preventDefault();
         if (typeof ev.stopPropagation === "function") ev.stopPropagation();
-        submitCapture();
+        return submitCapture();
       }
     });
 
@@ -585,10 +753,7 @@ class SpaceHome {
     // Injected via the DRY seam so Home always shows THIS calendar day's agenda,
     // independent of any note's filename date. Mounts AFTER greeting + capture so
     // it appends below them, into dv.container (the guard renders there).
-    await dv.view("ranch/views/customjs-guard", {
-      class: "SpaceDailyDashboard",
-      args: [{ asOf: today, live: true }],
-    });
+    await mountDashboard();
   }
 
   /**

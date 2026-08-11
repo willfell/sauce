@@ -39,6 +39,33 @@ sauce install                 # equivalent via CLI (after brew install)
 
 The platform non-negotiable: workshop dogfoods every release **and every push** (~4 seconds, ~82 history entries; catches manifest entry order, materialization paths, and path-resolution drift that preflight misses).
 
+For deploy-bound loop slices, `verify-gates` performs this dogfood check against
+the **computed release state**, not the raw claimed source records. The coordinator
+creates a detached disposable worktree and synthesizes the exact squash that the
+release rail is expected to receive: its tree is the exact feature HEAD, its
+parent is the exact fetched `origin/main`, and its title is the exact feature
+HEAD subject. It runs the real `node scripts/release/compute-release.js --write`
+and real installer against that one synthetic commit. Multi-commit branch
+history therefore cannot inflate the prospective release plan.
+
+The combined gate receipt persists that prospective title. `record-pr` accepts
+the PR only when its current title is byte-for-byte identical, and coordinator
+advance rechecks the binding so a later title edit invalidates the gates. Cleanup
+removes only the disposable worktree's exact registration; it never globally
+prunes worktree registrations. The disposable target is resolved to its physical
+path while it still exists, so macOS's lexical `/var` and Git-canonical
+`/private/var` names cannot split registration inspection from exact-target
+removal or filesystem cleanup. Realpath and placeholder removal share the same
+guarded lifecycle: before Git add succeeds, the lexical `mkdtemp` path remains
+the exact cleanup/retry authority and setup failures are aggregated loudly.
+The claimed worktree/HEAD remains untouched.
+This is required when one release raises a component's dependency floor to the
+version another commit in that same release will mint: raw source pins are
+intentionally still at the prior release, while the computed state is the
+coherent state consumers will receive. Compute, install, registration
+inspection, exact-target cleanup, and title-provenance failures all fail the
+gate loudly.
+
 ## CLI
 
 ```bash
@@ -58,6 +85,7 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 ### What Claude does (and does NOT do)
 
 - **DO** write conventional-commit messages — `feat(scope):` / `fix(scope):` / `feat(scope)!:` / `BREAKING CHANGE:`. They are the *only* input the version bumper reads. (Attribution is path-based off the manifest `path` field, so a mis-scoped commit still bumps the right component — but the type still classifies the bump level, so get the type right.)
+- **DO make the PR TITLE carry the highest commit type on the branch.** PRs land by **squash**-merge, so the branch collapses into one commit whose subject is the **PR title** — that title is the only conventional commit the bumper ever sees. Branch-local commit types are discarded at merge. A branch with `feat(coordinator):` + `fix(intake):` behind a PR titled `fix(loop): …` releases as a **patch**, not a minor, and `npm run release:plan` will not warn you: run locally it reads the branch's individual commits and reports the *pre-squash* answer. Check the title before merging; the version is not correctable afterward (never hand-tag or re-version to fix it). Incident: v0.281.1 — a release adding a new CLI verb shipped as a patch for exactly this reason.
 - **DO NOT** bump `workshop_version` / `package.json` / per-component manifest versions / `ranch/platform-subscription.json` pins / the **seed-vault** subscription pins by hand. The bumper writes all of them.
 - **DO NOT** merge (or even open) the release PR — it **auto-merges** once its required checks pass. Don't `--admin`-merge it.
 - **DO NOT** create or push git tags.

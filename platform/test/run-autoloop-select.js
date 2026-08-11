@@ -17,7 +17,7 @@ const { lockState, pidAlive } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'turn-lock.js'));
 const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
-const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck } =
+const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck, matchesGlob, parseGateConfig } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
 const { renderBlockedSection, parseBlockedResponse } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'block-note.js'));
@@ -469,6 +469,22 @@ const sdCov = splitDiff(['platform/test/coverage-matrix.json', 'autoloop-queue.m
 ok('SD-6 generated coverage-matrix.json excluded from source (matrix-only refresh is non-behavioral)', sdCov.sourceFiles.length === 0);
 const sdCovMixed = splitDiff(['scripts/autoloop/gate.js', 'platform/test/run-autoloop-select.js', 'platform/test/coverage-matrix.json']);
 ok('SD-7 matrix rides alongside real source without inflating the behavioral set', sdCovMixed.sourceFiles.length === 1 && sdCovMixed.sourceFiles[0] === 'scripts/autoloop/gate.js' && sdCovMixed.testFiles.length === 1);
+// ---- splitDiff gate config (SD-CFG-*): repo-agnostic bindings classify by
+// their own globs; absent config keeps the sauce rules byte-identical.
+const pyConfig = { test_globs: ['tests/**'], exclude_globs: ['docs/**', '*.md'] };
+const sdPy = splitDiff(['src/ero_loop/ratify.py', 'tests/loop/test_ratify.py', 'docs/adr/0001.md', 'README.md'], pyConfig);
+ok('SD-CFG-1 configured test glob classifies python tests', sdPy.testFiles.length === 1 && sdPy.testFiles[0] === 'tests/loop/test_ratify.py');
+ok('SD-CFG-2 configured source classification keeps python source behavioral', sdPy.sourceFiles.length === 1 && sdPy.sourceFiles[0] === 'src/ero_loop/ratify.py');
+ok('SD-CFG-3 configured exclude globs drop docs', !sdPy.sourceFiles.some((f) => f.includes('docs/') || f.endsWith('.md')));
+const sdDefaultAgain = splitDiff(['scripts/autoloop/select-card.js', 'platform/test/run-foo.js', 'Docs/x.md', 'autoloop-queue.md'], null);
+ok('SD-CFG-4 null config is byte-identical to legacy rules', JSON.stringify(sdDefaultAgain) === JSON.stringify(sd));
+ok('SD-CFG-5 matchesGlob shapes', matchesGlob('tests/a/b.py', 'tests/**') && matchesGlob('x/y.md', '*.md') === true && !matchesGlob('src/a.py', 'tests/**'));
+let cfgErr = null;
+try { parseGateConfig('{not json'); } catch (e) { cfgErr = e.message; }
+ok('SD-CFG-6 malformed gate config fails loud', /not valid JSON/.test(cfgErr || ''));
+let cfgErr2 = null;
+try { parseGateConfig(JSON.stringify({ test_command: 'pytest -q' })); } catch (e) { cfgErr2 = e.message; }
+ok('SD-CFG-7 test_command without {test} fails loud', /\{test\} placeholder/.test(cfgErr2 || ''));
 // ---- adequacyVerdict (AV-*) ----
 ok('AV-1 no test → inadequate', adequacyVerdict({ hasTest: false }).adequate === false);
 ok('AV-2 passes without source → inadequate', adequacyVerdict({ hasTest: true, redWithoutSource: false, greenWithSource: true }).adequate === false);

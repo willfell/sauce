@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Status"
+  short_description: "Loop status via the shared sauce loop plugin body"
+  default_prompt: "Use $loop-status — follow .agents/skills/loop-status/SKILL.md."

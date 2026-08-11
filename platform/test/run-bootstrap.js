@@ -17,6 +17,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const https = require("https");
+const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
 let _passed = 0;
 let _failed = 0;
@@ -145,6 +146,23 @@ function seedConfig(vaultPath, overrides) {
 
 function readJson(p) {
     return JSON.parse(fs.readFileSync(p, "utf8"));
+}
+
+function selectModalTaskInstallIndices(history, componentVersions = VERSION_SNAPSHOT.components) {
+    const modalVersion = componentVersions.modal;
+    const taskEntityVersion = componentVersions["task-entity"];
+    return {
+        modalInstall: history.findIndex((item) =>
+            item.event === "install" &&
+            item.name === "modal" &&
+            item.version === modalVersion
+        ),
+        taskEntityInstall: history.findIndex((item) =>
+            item.event === "install" &&
+            item.name === "task-entity" &&
+            item.version === taskEntityVersion
+        )
+    };
 }
 
 // ============================================================
@@ -1386,8 +1404,12 @@ https.get = function (url, opts, callback) {
             const logPath = path.join(vaultPath, "ranch/bootstrap-last-install.log");
             const installed = readJson(installedPath);
             const history = installed.history || [];
-            const modalInstall = history.findIndex((item) => item.event === "install" && item.name === "modal" && item.version === "0.2.0");
-            const taskEntityInstall = history.findIndex((item) => item.event === "install" && item.name === "task-entity" && item.version === "0.15.5");
+            let realHistorySelectorCalls = 0;
+            const selectRealInstallIndices = (...args) => {
+                realHistorySelectorCalls += 1;
+                return selectModalTaskInstallIndices(...args);
+            };
+            const { modalInstall, taskEntityInstall } = selectRealInstallIndices(history);
             const dependencyFailures = history.filter((item) =>
                 (item.event === "error" || item.event === "skip") &&
                 (item.name === "modal" || item.name === "task-entity" || /modal|task-entity/i.test(item.reason || item.message || ""))
@@ -1399,6 +1421,8 @@ https.get = function (url, opts, callback) {
                 `${label}: real installer records released modal before task-entity`);
             assertTrue(dependencyFailures.length === 0,
                 `${label}: real installer history has no modal/task-entity dependency skip or error`);
+            assertTrue(realHistorySelectorCalls === 1,
+                `${label}: real installer history uses shared version-snapshot selector exactly once`);
             assertTrue(/clean run — exit 0/.test(cleanLog),
                 `${label}: runBootstrap installer log records clean completion`);
 
@@ -1432,6 +1456,31 @@ https.get = function (url, opts, callback) {
     });
 }
 
+function caseBS22FutureModalInstallerHistorySelector() {
+    const label = "GA-OPS11-FUTURE-MODAL-INSTALLER-HISTORY";
+    const syntheticVersions = {
+        ...VERSION_SNAPSHOT.components,
+        modal: "9.9.9",
+        "task-entity": VERSION_SNAPSHOT.components["task-entity"]
+    };
+    const history = [
+        { event: "install", name: "modal", version: "0.2.0" },
+        { event: "install", name: "customjs-guard", version: "1.0.0" },
+        { event: "install", name: "modal", version: syntheticVersions.modal },
+        { event: "install", name: "task-entity", version: syntheticVersions["task-entity"] }
+    ];
+    const futureModalIndex = 2;
+    const { modalInstall, taskEntityInstall } =
+        selectModalTaskInstallIndices(history, syntheticVersions);
+
+    assertTrue(modalInstall === futureModalIndex,
+        `${label}: selector chooses injected future modal instead of stale 0.2.0 history`);
+    assertTrue(taskEntityInstall === 3,
+        `${label}: selector chooses injected task-entity version`);
+    assertTrue(modalInstall >= 0 && taskEntityInstall > modalInstall,
+        `${label}: injected future modal remains before task-entity`);
+}
+
 // ============================================================
 // Runner
 // ============================================================
@@ -1453,6 +1502,7 @@ const cases = {
         caseBS13ActivationAtomicAndBackup,
         caseBS20DefaultMechanismDependencyClosure,
         caseBS21FreshVaultInstallerHistory,
+        caseBS22FutureModalInstallerHistorySelector,
         // v0.26.1 P1-1: 4 new foundational plugins
         caseBS14FetchesFourNewFoundationalPlugins,
         // v0.26.1 P1-3c: wizard auto-add convenience helper

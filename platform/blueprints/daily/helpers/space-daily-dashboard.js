@@ -111,6 +111,78 @@
  *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
+  static get _TASK_SORT_STORAGE_KEY() {
+    return "sauce-daily-dashboard:task-sort-mode";
+  }
+
+  /**
+   * Daily task sort policy. These comparators intentionally return zero for
+   * equal values; sortTasks decorates with the source index so ties stay stable
+   * even in hosts whose Array#sort stability differs.
+   */
+  static compareTasksByDue(a, b) {
+    const due = (task) => String(task && task.due != null ? task.due : "").trim();
+    const ad = due(a);
+    const bd = due(b);
+    if (ad === bd) return 0;
+    if (!ad) return 1;
+    if (!bd) return -1;
+    return ad < bd ? -1 : 1;
+  }
+
+  static compareTasksByPriority(a, b) {
+    const ranks = { highest: 4, high: 3, medium: 2, low: 1 };
+    const rank = (task) => ranks[String(task && task.priority || "").trim().toLowerCase()] || 0;
+    const byPriority = rank(b) - rank(a);
+    return byPriority || SpaceDailyDashboard.compareTasksByDue(a, b);
+  }
+
+  static normalizeTaskSortMode(value) {
+    return String(value == null ? "" : value).trim().toLowerCase() === "priority"
+      ? "priority"
+      : "due";
+  }
+
+  static sortTasks(tasks, mode) {
+    const comparator = SpaceDailyDashboard.normalizeTaskSortMode(mode) === "priority"
+      ? SpaceDailyDashboard.compareTasksByPriority
+      : SpaceDailyDashboard.compareTasksByDue;
+    const source = Array.isArray(tasks) ? tasks : [];
+    return source
+      .map((task, index) => ({ task, index }))
+      .sort((a, b) => comparator(a.task, b.task) || a.index - b.index)
+      .map((entry) => entry.task);
+  }
+
+  static readTaskSortMode(storage) {
+    try {
+      if (!storage || typeof storage.getItem !== "function") return "due";
+      return SpaceDailyDashboard.normalizeTaskSortMode(
+        storage.getItem(SpaceDailyDashboard._TASK_SORT_STORAGE_KEY)
+      );
+    } catch (_e) {
+      return "due";
+    }
+  }
+
+  static writeTaskSortMode(storage, mode) {
+    const normalized = SpaceDailyDashboard.normalizeTaskSortMode(mode);
+    try {
+      if (storage && typeof storage.setItem === "function") {
+        storage.setItem(SpaceDailyDashboard._TASK_SORT_STORAGE_KEY, normalized);
+      }
+    } catch (_e) { /* client-only preference persistence is best-effort */ }
+    return normalized;
+  }
+
+  static taskSortStorage() {
+    try {
+      return (typeof window !== "undefined" && window) ? window.localStorage : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
   /**
    * Note-per-task migration: SELECT the task-notes for the dashboard's at-a-glance
    * task panel. Pure + Node-testable (dv-stub + a real TaskEntity ref) — the
@@ -393,6 +465,10 @@ class SpaceDailyDashboard {
   }
 
   async render(dv, params) {
+    let mountReceipt = null;
+    let mountedContainer = null;
+    try {
+    if (!dv || !dv.container || typeof dv.el !== "function" || typeof dv.pages !== "function") return;
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
       checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
@@ -496,6 +572,8 @@ class SpaceDailyDashboard {
     if (existing) existing.remove();
 
     const container = dv.el("div", "", { cls: "space-daily-dashboard" });
+    mountedContainer = container;
+    mountReceipt = params && params.mountReceipt;
     // v0.2.6: prevent horizontal scroll at narrow widths.
     // - box-sizing: border-box → padding folds into width, not adds to it
     // - max-width: 100% → can't exceed parent width
@@ -520,6 +598,10 @@ class SpaceDailyDashboard {
       const empty = container.createEl("div");
       empty.className = "sauce-empty-state";
       empty.innerHTML = `${icons.activity}<span>No activity recorded yet</span>`;
+      if (mountReceipt && typeof mountReceipt === "object") {
+        mountReceipt.ok = true;
+        mountReceipt.node = container;
+      }
       return;
     }
 
@@ -554,7 +636,7 @@ class SpaceDailyDashboard {
       if (tasksTitleLink) {
         tasksTitleLink.addEventListener("click", (event) => {
           event.stopPropagation();
-          this._openTodayToDo(today);
+          this._openTodayToDo(today, { dv, host: tasksBody, trigger: tasksTitleLink });
         });
       }
 
@@ -563,7 +645,38 @@ class SpaceDailyDashboard {
       // at the bottom, each overdue row carrying its own red "Overdue" pill.
       // Done tasks stay surfaced via header count only; their notes stay in
       // spice/tasks/_done/.
-      if (openTasks.length > 0 || overdueCount > 0) {
+      {
+        const taskSortStorage = SpaceDailyDashboard.taskSortStorage();
+        let taskSortMode = SpaceDailyDashboard.readTaskSortMode(taskSortStorage);
+
+        // Client-only sort control. The preference never enters the vault:
+        // localStorage is the sole persistence rail and every access is guarded.
+        const sortControl = tasksBody.createEl("div");
+        sortControl.className = "sauce-daily-task-sort";
+        sortControl.style.cssText = "display:flex; align-items:center; gap:4px; margin:0 0 8px; font-size:0.78em;";
+        sortControl.setAttribute("role", "group");
+        sortControl.setAttribute("aria-label", "Sort daily tasks");
+
+        const sortLabel = sortControl.createEl("span");
+        sortLabel.textContent = "Sort";
+        sortLabel.style.cssText = "margin-right:2px; color:var(--text-muted);";
+
+        const sortButtons = {};
+        const updateSortButtonState = () => {
+          for (const mode of ["due", "priority"]) {
+            const active = mode === taskSortMode;
+            const button = sortButtons[mode];
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+            button.style.cssText = "border:1px solid var(--background-modifier-border); border-radius:999px; padding:2px 8px; font:inherit; cursor:pointer;"
+              + (active
+                ? " background:var(--interactive-accent); color:var(--text-on-accent);"
+                : " background:transparent; color:var(--text-muted);");
+          }
+        };
+
+        const taskLists = tasksBody.createEl("div");
+        taskLists.className = "sauce-daily-task-lists";
+
         // Deterministic inline-link renderer from the task-entity mechanism — real
         // <a> for [[wl]] / [md](url) / bare URLs (task titles can carry links). NOT
         // MarkdownRenderer (absent in the customJS eval context → raw text). Falls
@@ -578,9 +691,18 @@ class SpaceDailyDashboard {
         // "Overdue" pill after the title.
         const renderTaskRow = (list, task, overdue) => {
           const li = list.createEl("li");
-          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
+          if (TTL && typeof TTL.markTaskRow === "function") TTL.markTaskRow(li, task);
+          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere; display:list-item;";
 
-          const titleSpan = li.createEl("span");
+          // Keep flex off the li itself: changing a list item to display:flex
+          // suppresses its bullet marker. The child owns horizontal alignment
+          // while the li remains the stable click + rollback identity.
+          const rowContent = li.createEl("div");
+          rowContent.className = "sauce-daily-task-row-content";
+          rowContent.style.cssText = "display:flex; align-items:center; gap:8px; width:100%; min-width:0;";
+
+          const titleSpan = rowContent.createEl("span");
+          titleSpan.style.cssText = "flex:1 1 auto; min-width:0;";
           const titleText = (task && task.title) || "(untitled)";
           if (TTL && typeof TTL.renderInlineLinks === "function") {
             TTL.renderInlineLinks(titleSpan, titleText, task.path);
@@ -589,32 +711,78 @@ class SpaceDailyDashboard {
           }
 
           if (overdue) {
-            const badge = li.createEl("span");
+            const badge = rowContent.createEl("span");
             badge.textContent = "Overdue";
             badge.style.cssText = "margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 0.72em; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; background: color-mix(in srgb, var(--color-red) 13%, transparent); color: var(--color-red); border: 1px solid color-mix(in srgb, var(--color-red) 45%, transparent);";
           }
 
+          // TD-1a3: this dashboard owns a private row renderer, so it needs its
+          // own visible action control. The mutation itself stays canonical in
+          // TaskTodayList.rescheduleTomorrow. Pass the VIEWED daily-note date,
+          // not wall-clock today; cold load / missing TaskDialog is a no-op.
+          if (task && task.status === "open"
+              && TTL && typeof TTL.rescheduleTomorrow === "function") {
+            const tomorrow = rowContent.createEl("button");
+            tomorrow.className = "sauce-daily-task-tomorrow";
+            tomorrow.style.cssText = "display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:28px; height:24px; padding:0; border:none; border-radius:var(--radius-s, 4px); background:transparent; color:var(--text-faint); cursor:pointer;";
+            tomorrow.setAttribute("type", "button");
+            tomorrow.setAttribute("aria-label", "Move to tomorrow");
+            tomorrow.setAttribute("title", "Move to tomorrow");
+            tomorrow.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m12 14 2 2-2 2"/><path d="M9 16h5"/></svg>';
+            tomorrow.addEventListener("click", async (event) => {
+              try { event.stopPropagation(); } catch (_e) {}
+              await TTL.rescheduleTomorrow(li, task, today);
+            });
+          }
+
           li.onclick = (e) => {
-            if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
+            if (e.target && (e.target.tagName === "A" || e.target.tagName === "BUTTON"
+                || (e.target.closest && (e.target.closest("a") || e.target.closest("button"))))) return;
             if (task && task.path) app.workspace.openLinkText(task.path, "");
           };
         };
 
-        if (openTasks.length > 0) {
-          const tasksList = tasksBody.createEl("ul");
-          tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-          for (const task of openTasks) renderTaskRow(tasksList, task, false);
-        }
+        const renderTaskLists = () => {
+          // Clear only the row host: the control and its listeners remain singular
+          // across mode changes. sortTasks always returns a fresh array, so the
+          // TaskEntity/queryToday source bands are never mutated.
+          taskLists.textContent = "";
+          const sortedOpen = SpaceDailyDashboard.sortTasks(openTasks, taskSortMode);
+          const sortedOverdue = SpaceDailyDashboard.sortTasks(overdueTasks, taskSortMode);
 
-        if (overdueCount > 0) {
-          // Same list style as the open list (no left bar) so open + overdue read
-          // as one continuous list, overdue at the bottom, each overdue row
-          // tagged with its own red "Overdue" pill.
-          const overdueList = tasksBody.createEl("ul");
-          overdueList.className = "sauce-section-overdue-list";
-          overdueList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-          for (const task of overdueTasks) renderTaskRow(overdueList, task, true);
+          if (sortedOpen.length > 0) {
+            const tasksList = taskLists.createEl("ul");
+            tasksList.className = "sauce-daily-task-today-list";
+            tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+            for (const task of sortedOpen) renderTaskRow(tasksList, task, false);
+          }
+
+          if (sortedOverdue.length > 0) {
+            // Same list style as the open list (no left bar) so open + overdue read
+            // as one continuous list, overdue at the bottom, each overdue row
+            // tagged with its own red "Overdue" pill.
+            const overdueList = taskLists.createEl("ul");
+            overdueList.className = "sauce-section-overdue-list";
+            overdueList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+            for (const task of sortedOverdue) renderTaskRow(overdueList, task, true);
+          }
+        };
+
+        for (const mode of ["due", "priority"]) {
+          const button = sortControl.createEl("button");
+          sortButtons[mode] = button;
+          button.textContent = mode === "due" ? "Due" : "Priority";
+          button.setAttribute("type", "button");
+          button.setAttribute("aria-label", `Sort daily tasks by ${mode}`);
+          button.addEventListener("click", (event) => {
+            try { event.preventDefault(); } catch (_e) {}
+            taskSortMode = SpaceDailyDashboard.writeTaskSortMode(taskSortStorage, mode);
+            updateSortButtonState();
+            renderTaskLists();
+          });
         }
+        updateSortButtonState();
+        renderTaskLists();
       }
     }
 
@@ -760,6 +928,20 @@ class SpaceDailyDashboard {
         const warn = activityBody.createEl("p");
         warn.style.cssText = "color: var(--text-muted); font-style: italic; margin: 0.5em 0;";
         warn.textContent = "ActivityFeed mechanism unavailable.";
+      }
+    }
+    if (mountReceipt && typeof mountReceipt === "object") {
+      mountReceipt.ok = true;
+      mountReceipt.node = container;
+    }
+    } catch (_e) {
+      // Cold-load and partial Dataview state never reject, but a partial root
+      // is not a successful mount receipt. Remove it so the same Home surface
+      // can retry once the missing child mechanism registers.
+      try { mountedContainer?.remove?.(); } catch (_removeError) {}
+      if (mountReceipt && typeof mountReceipt === "object") {
+        mountReceipt.ok = false;
+        mountReceipt.node = null;
       }
     }
   }
@@ -1435,52 +1617,96 @@ class SpaceDailyDashboard {
    * `today` (the day being VIEWED, not necessarily the real today — matches
    * every other date computation in this file).
    */
-  async _openTodayToDo(dateStr) {
-    const m = moment(dateStr, "YYYY-MM-DD");
-    const folder = `spice/to-do/${m.format("YYYY/MM-MMMM")}`;
-    const filenameNoExt = `ToDo-${m.format("YYYY-MM-DD")}`;
-    const path = `${folder}/${filenameNoExt}.md`;
-
-    const existing = app.vault.getAbstractFileByPath(path);
-    if (existing) {
-      app.workspace.openLinkText(path, "");
-      return;
-    }
-
-    const tpPlugin = app.plugins.plugins["templater-obsidian"];
-    if (!tpPlugin || !tpPlugin.templater) {
-      new Notice("SpaceDailyDashboard: Templater plugin not enabled", 8000);
-      return;
-    }
-
-    if (!app.vault.getAbstractFileByPath(folder)) {
-      try {
-        await app.vault.createFolder(folder);
-      } catch (folderErr) {
-        if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) {
-          new Notice(`SpaceDailyDashboard: cannot create folder ${folder} — ${folderErr.message}`, 8000);
-          return;
-        }
-      }
-    }
-
-    const templateSource = "ranch/templates/Today To-Do.md";
-    const templateFile = app.vault.getAbstractFileByPath(templateSource);
-    if (!templateFile) {
-      new Notice(`SpaceDailyDashboard: template not found at ${templateSource}`, 8000);
-      return;
-    }
-
+  async _openTodayToDo(dateStr, opts) {
     try {
-      await tpPlugin.templater.create_new_note_from_template(templateFile, folder, filenameNoExt, true);
-    } catch (err) {
-      const msg = (err && err.message) || "";
-      if (!/already exists|exists/i.test(msg)) {
-        new Notice(`SpaceDailyDashboard: Templater create failed for ${path} — ${msg}`, 8000);
-        return;
+      const appRef = (typeof globalThis !== "undefined" && globalThis.app) || null;
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || null;
+      const momentRef = (typeof globalThis !== "undefined" && globalThis.moment) || null;
+      if (!appRef || !momentRef) return { ok: false };
+      const m = momentRef(dateStr, "YYYY-MM-DD");
+      const folder = `spice/to-do/${m.format("YYYY/MM-MMMM")}`;
+      const filenameNoExt = `ToDo-${m.format("YYYY-MM-DD")}`;
+      const path = `${folder}/${filenameNoExt}.md`;
+
+      const existing = appRef.vault.getAbstractFileByPath(path);
+      if (existing) {
+        appRef.workspace.openLinkText(path, "");
+        return { ok: true, no_op: true };
       }
-      app.workspace.openLinkText(path, "");
-    }
+
+      const tpPlugin = appRef.plugins && appRef.plugins.plugins
+        ? appRef.plugins.plugins["templater-obsidian"] : null;
+      if (!tpPlugin || !tpPlugin.templater) {
+        if (typeof Notice === "function") new Notice("SpaceDailyDashboard: Templater plugin not enabled", 8000);
+        return { ok: false };
+      }
+
+      const templateSource = "ranch/templates/Today To-Do.md";
+      const templateFile = appRef.vault.getAbstractFileByPath(templateSource);
+      if (!templateFile) {
+        if (typeof Notice === "function") new Notice(`SpaceDailyDashboard: template not found at ${templateSource}`, 8000);
+        return { ok: false };
+      }
+      const renderSafe = cjs && cjs.RenderSafe;
+      if (!renderSafe || typeof renderSafe.mutateStructure !== "function") return { ok: false };
+      let folderCreated = false;
+      return await renderSafe.mutateStructure({
+        app: appRef,
+        dv: opts && opts.dv,
+        path,
+        failureMessage: `Could not create ${filenameNoExt}`,
+        apply: () => {
+          const host = opts && opts.host;
+          const focusTarget = (typeof document !== "undefined") ? document.activeElement : (opts && opts.trigger);
+          if (!host || typeof host.createEl !== "function") return { focusTarget, kind: "none" };
+          const node = host.createEl("div", { cls: "sauce-daily-todo-preview is-optimistic" });
+          node.textContent = `Creating ${filenameNoExt}…`;
+          return { parent: host, node, nextSibling: node.nextSibling || null, focusTarget, kind: "preview" };
+        },
+        rollback: async (receipt) => {
+          if (receipt && receipt.node) {
+            if (typeof receipt.node.remove === "function") receipt.node.remove();
+            else receipt.parent?.removeChild?.(receipt.node);
+          }
+          if (folderCreated && !appRef.vault.getAbstractFileByPath(path)) {
+            try {
+              const createdFolder = appRef.vault.getAbstractFileByPath(folder);
+              const empty = createdFolder && Array.isArray(createdFolder.children)
+                && createdFolder.children.length === 0;
+              if (empty && appRef.fileManager && typeof appRef.fileManager.trashFile === "function") {
+                await appRef.fileManager.trashFile(createdFolder);
+              }
+            } catch (_e) {}
+          }
+          try {
+            const doc = (typeof document !== "undefined") ? document : null;
+            const active = doc && doc.activeElement;
+            const target = receipt && receipt.focusTarget;
+            const userMoved = active && active !== target && active !== doc.body
+              && active.isConnected !== false;
+            if (!userMoved) target?.focus?.();
+          } catch (_e) {}
+        },
+        write: async () => {
+          if (!appRef.vault.getAbstractFileByPath(folder)) {
+            try { await appRef.vault.createFolder(folder); folderCreated = true; }
+            catch (folderErr) {
+              if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) throw folderErr;
+            }
+          }
+          try {
+            return await tpPlugin.templater.create_new_note_from_template(templateFile, folder, filenameNoExt, true);
+          } catch (err) {
+            const msg = (err && err.message) || "";
+            if (/already exists|exists/i.test(msg)) {
+              appRef.workspace.openLinkText(path, "");
+              return appRef.vault.getAbstractFileByPath(path);
+            }
+            throw err;
+          }
+        },
+      });
+    } catch (_e) { return { ok: false, error: _e }; }
   }
 
   /**

@@ -12,8 +12,9 @@
 // there IS at least one meeting linked to the project.
 class ProjectMeetingsPanel {
   async render(dv, opts = {}) {
-    const currentPath = dv.current()?.file?.path;
-    const projectName = dv.current()?.file?.name;
+    const current = globalThis.customJS?.RenderSafe?.page?.(dv);
+    const currentPath = current?.file?.path;
+    const projectName = current?.file?.name;
     if (!currentPath || !projectName) return;
 
     const meetings = dv.pages('"spice/meetings/notes"')

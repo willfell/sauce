@@ -9,6 +9,8 @@ const { execFileSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "../..");
 const CSS_PATH = path.join(ROOT, "platform/mechanisms/styling/assets/snippets/sauce-core.css");
+const CHROME_BAR_PATH = path.join(ROOT, "platform/mechanisms/chrome-bar/chrome-bar.js");
+const CHROME_BAR_MANIFEST_PATH = path.join(ROOT, "platform/mechanisms/chrome-bar/manifest.json");
 const MANIFEST_PATH = path.join(ROOT, "platform/mechanisms/styling/manifest.json");
 const THEME_PATH = path.join(ROOT, "platform/mechanisms/styling/assets/themes/Baseline/theme.css");
 const DAILY_CSS_PATH = path.join(ROOT, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
@@ -18,6 +20,9 @@ const css = fs.readFileSync(CSS_PATH, "utf8");
 const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
 const theme = fs.readFileSync(THEME_PATH, "utf8");
 const dailyCss = fs.readFileSync(DAILY_CSS_PATH, "utf8");
+const chromeBarSource = fs.readFileSync(CHROME_BAR_PATH, "utf8");
+const ChromeBar = new Function(`${chromeBarSource}\nreturn ChromeBar;`)();
+const chromeBarManifest = JSON.parse(fs.readFileSync(CHROME_BAR_MANIFEST_PATH, "utf8"));
 
 let passed = 0;
 let failed = 0;
@@ -89,6 +94,52 @@ function compareSpecificity(a, b) {
   return 0;
 }
 
+function assertChromeModifierOutranksBase(source) {
+  const parsed = rules(source);
+  const base = parsed.find((rule) => rule.selector === "body .sauce-btn.sauce-btn.sauce-btn");
+  const chrome = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn")
+    && rule.declarations.includes("height: 32px")
+    && rule.declarations.includes("padding: 0 16px")
+  ));
+  assert.ok(base, "missing triple-class sauce button base selector");
+  assert.ok(chrome, "missing ChromeBar geometry modifier selector");
+  assert.ok(
+    compareSpecificity(specificity(chrome.selector), specificity(base.selector)) > 0,
+    `ChromeBar modifier ${chrome.selector} must outrank base ${base.selector}`,
+  );
+}
+
+function assertChromeInteractionPresentation(source) {
+  const parsed = rules(source);
+  const chrome = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn")
+    && rule.declarations.includes("height: 32px")
+  ));
+  const hover = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn:hover")
+    && rule.selector.includes(".sauce-chrome-btn.is-hovered")
+  ));
+  const pressed = parsed.find((rule) => (
+    rule.selector.includes(".sauce-chrome-btn:active")
+    && rule.selector.includes(".sauce-chrome-btn.is-pressed")
+  ));
+  assert.ok(chrome, "missing ChromeBar presentation rule");
+  for (const transition of ["background 0.15s", "color 0.15s", "border-color 0.15s", "box-shadow 0.15s", "transform 0.15s"]) {
+    assert.ok(chrome.declarations.includes(transition), "ChromeBar transition lost " + transition);
+  }
+  assert.ok(hover, "missing ChromeBar hover and is-hovered presentation rule");
+  for (const declaration of [
+    "border-color: var(--interactive-accent)",
+    "background: var(--interactive-accent)",
+    "color: var(--text-on-accent)",
+    "box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14)",
+  ]) {
+    assert.ok(hover.declarations.includes(declaration), "ChromeBar hover lost " + declaration);
+  }
+  assert.ok(pressed && pressed.declarations.includes("transform: scale(0.94)"), "ChromeBar pressed presentation is missing");
+}
+
 function blockAfter(source, marker) {
   const markerIndex = source.indexOf(marker);
   assert.ok(markerIndex >= 0, "missing block " + marker);
@@ -105,6 +156,113 @@ function blockAfter(source, marker) {
 
 function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
+}
+
+function selectorBoundRuleBytes(source, predicate) {
+  const masked = source.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  return [...masked.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((match) => {
+      const leadingWhitespace = match[0].match(/^\s*/)[0].length;
+      return {
+        selector: match[1].trim(),
+        raw: source.slice(match.index + leadingWhitespace, match.index + match[0].length),
+      };
+    })
+    .filter(predicate)
+    .map((rule) => rule.raw);
+}
+
+function assertLegacyPillRules(coreSource, dailySource) {
+  const coreSelectors = new Set([
+    ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))",
+    ".sauce-pill.sauce-pill-accent",
+    ".sauce-pill.sauce-pill-danger",
+  ]);
+  const coreRules = selectorBoundRuleBytes(coreSource, (rule) => coreSelectors.has(rule.selector));
+  assert.strictEqual(coreRules.length, 3, "legacy sauce-core pill rule family changed");
+  assert.strictEqual(
+    sha256(coreRules.join("\n")),
+    "1a75c446986c4081d7d7e061ab683a99afb3be9e920a68eb0b6173689adb082b",
+    "legacy sauce-core pill selector/declaration bytes changed",
+  );
+
+  const dailyFragments = [
+    ".sauce-pill",
+    ".sauce-pill-dot",
+    ".sauce-section-open-pill",
+    ".sauce-section-overdue-pill",
+    ".sauce-section-done-pill",
+    ".sauce-section-count-pill",
+    ".sauce-section-pill-label",
+    ".sauce-section-counts",
+  ];
+  const dailyRules = selectorBoundRuleBytes(
+    dailySource,
+    (rule) => dailyFragments.some((fragment) => rule.selector.includes(fragment)),
+  );
+  assert.strictEqual(dailyRules.length, 16, "legacy Daily count-pill rule family changed");
+  assert.strictEqual(
+    sha256(dailyRules.join("\n")),
+    "3147a92dd70cbc7eeaf158cff328873db73ff8d8ba79f664b6c4592464deb887",
+    "legacy Daily count-pill selector/declaration bytes changed",
+  );
+}
+
+function assertTogglePillContract(source) {
+  const parsed = rules(source);
+  const group = parsed.find((rule) => rule.selector === ".sauce-pill-group");
+  const toggle = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle"
+  ));
+  const active = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.is-active.sauce-pill-toggle.sauce-pill-toggle"
+  ));
+  const focusVisible = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible"
+  ));
+  assert.ok(group, "missing exact .sauce-pill-group selector");
+  assert.ok(toggle, "missing specificity-bound .sauce-pill-toggle selector");
+  assert.ok(active, "missing specificity-bound .sauce-pill-toggle.is-active selector");
+  assert.ok(focusVisible, "missing specificity-bound .sauce-pill-toggle:focus-visible selector");
+  assert.match(group.declarations, /display:\s*inline-flex/);
+  assert.match(group.declarations, /gap:\s*var\(--size-4-1,\s*4px\)/);
+
+  const minHeight = Number(toggle.declarations.match(/min-height:\s*(\d+)px/)[1]);
+  const padding = toggle.declarations.match(/padding:\s*(\d+)px\s+(\d+)px/);
+  assert.strictEqual(minHeight, 20, "toggle min-height must remain the intended lean 20px");
+  assert.deepStrictEqual(padding.slice(1).map(Number), [1, 8],
+    "toggle padding must remain the intended lean 1px 8px");
+  for (const contract of [
+    "display: inline-flex",
+    "align-items: center",
+    "justify-content: center",
+    "border: 1px solid var(--sauce-hairline)",
+    "border-radius: var(--sauce-radius-pill)",
+    "background: var(--background-primary, #fff)",
+  ]) {
+    assert.ok(toggle.declarations.includes(contract), "toggle base lost " + contract);
+  }
+  for (const contract of [
+    "border-color: var(--interactive-accent, #7c3aed)",
+    "background: var(--interactive-accent, #7c3aed)",
+    "color: var(--text-on-accent, #fff)",
+  ]) {
+    assert.ok(active.declarations.includes(contract), "toggle active state lost " + contract);
+  }
+  assert.ok(
+    focusVisible.declarations.includes("outline: 2px solid var(--interactive-accent, #7c3aed)"),
+    "toggle focus-visible state lost its accent outline",
+  );
+  assert.ok(focusVisible.declarations.includes("outline-offset: 2px"),
+    "toggle focus-visible state lost its outline offset");
+  assert.ok(compareSpecificity(specificity(active.selector), specificity(toggle.selector)) > 0,
+    "active toggle selector must outrank the base toggle selector");
+  const baselineButtons = rules(theme).filter((rule) => rule.selector.includes("button:where("));
+  assert.ok(baselineButtons.length >= 5, "expected Baseline generic and input-mode button fixtures");
+  for (const baseline of baselineButtons) {
+    assert.ok(compareSpecificity(specificity(toggle.selector), specificity(baseline.selector)) > 0,
+      `toggle ${toggle.selector} must outrank Baseline ${baseline.selector}`);
+  }
 }
 
 test("parent-card public tokens exist on body with exact names and fallbacks", () => {
@@ -168,6 +326,113 @@ test("button variants preserve hover geometry and active scale", () => {
   assert.match(body(".sauce-btn.sauce-btn.sauce-btn.sauce-btn-danger"), /--color-red/);
 });
 
+test("CSS1 chrome button modifiers preserve the legacy 32px visual contract", () => {
+  const chrome = body(".sauce-chrome-btn");
+  for (const contract of [
+    "height: 32px", "min-height: 32px", "padding: 0 16px", "gap: 6px",
+    "border-radius: 8px", "border: 1px solid var(--interactive-accent)",
+    "background: var(--background-primary)", "color: var(--interactive-accent)",
+    "font-size: 0.82em", "font-weight: 500", "letter-spacing: 0.01em",
+    "overflow: hidden", "transform: scale(1)", "box-shadow: none",
+  ]) {
+    assert.ok(chrome.includes(contract), "chrome button lost legacy contract " + contract);
+  }
+  const icon = body(".sauce-btn-icon");
+  assert.match(icon, /padding:\s*0 12px/);
+  assert.match(icon, /min-width:\s*38px/);
+  assert.match(body(".sauce-chrome-btn:active"), /transform:\s*scale\(0\.94\)/);
+  assertChromeInteractionPresentation(css);
+});
+
+test("CSS1-CHROME-MODIFIER-SPECIFICITY binds ChromeBar geometry above the triple-class base", () => {
+  assertChromeModifierOutranksBase(css);
+
+  const weakened = css.replace(
+    "body .sauce-btn.sauce-btn.sauce-btn.sauce-chrome-btn {",
+    "body .sauce-chrome-btn {",
+  );
+  assert.notStrictEqual(weakened, css, "specificity mutation did not reach the production selector");
+  assert.throws(
+    () => assertChromeModifierOutranksBase(weakened),
+    /ChromeBar modifier .* must outrank base/,
+    "weak-selector mutation must turn this fixture red",
+  );
+});
+
+test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter snapshots", () => {
+  const makeParent = () => ({
+    children: [],
+    createEl(tag, opts) {
+      const classes = new Set(String((opts && opts.cls) || "").split(/\s+/).filter(Boolean));
+      const button = {
+        tag,
+        className: [...classes].join(" "),
+        innerHTML: "",
+        disabled: false,
+        style: { cssText: "", setProperty() {} },
+        classList: {
+          add(...names) { for (const name of names) classes.add(name); button.className = [...classes].join(" "); },
+          remove(...names) { for (const name of names) classes.delete(name); button.className = [...classes].join(" "); },
+        },
+      };
+      this.children.push(button);
+      return button;
+    },
+  });
+  const bar = new ChromeBar();
+  const surfaces = {
+    project: (variant) => `pcb-btn pcb-btn-${variant}`,
+    wiki: (variant) => `wiki-chrome-btn wiki-chrome-btn-${variant}`,
+    finance: (variant) => `finance-chrome-btn finance-chrome-btn-${variant}`,
+  };
+  const expected = {
+    project: [
+      ["pcb-btn pcb-btn-home", "<svg data-icon=\"home\"/>"],
+      ["pcb-btn pcb-btn-go", "<svg data-icon=\"go\"/>"],
+      ["pcb-btn pcb-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
+      ["pcb-btn pcb-btn-dots", "<svg data-icon=\"dots\"/>"],
+    ],
+    wiki: [
+      ["wiki-chrome-btn wiki-chrome-btn-home", "<svg data-icon=\"home\"/>"],
+      ["wiki-chrome-btn wiki-chrome-btn-go", "<svg data-icon=\"go\"/>"],
+      ["wiki-chrome-btn wiki-chrome-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
+      ["wiki-chrome-btn wiki-chrome-btn-dots", "<svg data-icon=\"dots\"/>"],
+    ],
+    finance: [
+      ["finance-chrome-btn finance-chrome-btn-home", "<svg data-icon=\"home\"/>"],
+      ["finance-chrome-btn finance-chrome-btn-go", "<svg data-icon=\"go\"/>"],
+      ["finance-chrome-btn finance-chrome-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
+      ["finance-chrome-btn finance-chrome-btn-dots", "<svg data-icon=\"dots\"/>"],
+    ],
+  };
+  for (const [surface, btnClass] of Object.entries(surfaces)) {
+    const parent = makeParent();
+    for (const [variant, label, icon] of [
+      ["home", null, '<svg data-icon="home"/>'],
+      ["go", null, '<svg data-icon="go"/>'],
+      ["primary", "New", '<svg data-icon="plus"/>'],
+      ["dots", null, '<svg data-icon="dots"/>'],
+    ]) {
+      bar.renderChromeButton(parent, { cls: btnClass(variant), label, icon, onClick() {} });
+    }
+    const snapshot = parent.children.map((button) => [
+      button.className.split(/\s+/).filter((name) => !name.startsWith("sauce-")).join(" "),
+      button.innerHTML,
+    ]);
+    assert.strictEqual(JSON.stringify(snapshot), JSON.stringify(expected[surface]), surface + " chrome marker/content snapshot changed");
+    assert.ok(parent.children.every((button) => button.className.includes("sauce-btn sauce-chrome-btn")), surface + " buttons lack sauce-core classes");
+    assert.ok(parent.children.filter((button) => !button.innerHTML.includes("New")).every((button) => button.className.includes("sauce-btn-icon")), surface + " icon buttons lack the icon/+ modifier");
+    assert.ok(parent.children.every((button) => button.style.cssText === ""), surface + " ChromeBar still owns inline presentation");
+  }
+});
+
+test("CSS1-STYLING-DEPENDENCY-CLOSURE declares the styling mechanism that owns sauce-core", () => {
+  assert.ok(
+    chromeBarManifest.depends_on.some((dependency) => dependency.name === "styling" && dependency.range === ">=0.3.0"),
+    "chrome-bar must require the styling mechanism before emitting sauce-core classes",
+  );
+});
+
 test("C1C-PILL-VARIANT-CASCADE preserves the parent API and Daily pre-adoption", () => {
   const baseSelector = ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))";
   const accentSelector = ".sauce-pill.sauce-pill-accent";
@@ -178,6 +443,110 @@ test("C1C-PILL-VARIANT-CASCADE preserves the parent API and Daily pre-adoption",
   assert.match(body(dangerSelector), /--color-red/);
   assert.ok(compareSpecificity(specificity(accentSelector), specificity(baseSelector)) > 0, "accent pill must win over base declarations");
   assert.ok(compareSpecificity(specificity(dangerSelector), specificity(baseSelector)) > 0, "danger pill must win over base declarations");
+});
+
+test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primitives", () => {
+  assertTogglePillContract(css);
+
+  const weakened = css.replace(
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {",
+    ".sauce-pill-toggle {",
+  );
+  assert.notStrictEqual(weakened, css, "weak-selector mutation did not reach the base toggle rule");
+  assert.throws(
+    () => assertTogglePillContract(weakened),
+    /missing specificity-bound \.sauce-pill-toggle selector/,
+    "weak base selector must turn the focused fixture red",
+  );
+
+  const weakenedFocus = css.replace(
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {",
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus {",
+  );
+  assert.notStrictEqual(weakenedFocus, css, "focus-visible mutation did not reach its fixture");
+  assert.throws(
+    () => assertTogglePillContract(weakenedFocus),
+    /missing specificity-bound \.sauce-pill-toggle:focus-visible selector/,
+    "a weakened focus-visible selector must turn the focused fixture red",
+  );
+
+  for (const [needle, replacement, message] of [
+    ["display: inline-flex", "display: block", "block display"],
+    ["align-items: center", "align-items: start", "off-center alignment"],
+    ["justify-content: center", "justify-content: start", "off-center justification"],
+    ["min-height: 20px", "min-height: 0px", "degenerate height"],
+    ["padding: 1px 8px", "padding: 0px 0px", "degenerate padding"],
+  ]) {
+    const toggleMarker = "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {";
+    const toggleBlock = blockAfter(css, toggleMarker);
+    const mutatedBlock = toggleBlock.replace(needle, replacement);
+    assert.notStrictEqual(mutatedBlock, toggleBlock, message + " mutation did not reach its fixture");
+    const geometryMutation = css.replace(toggleBlock, mutatedBlock);
+    assert.throws(
+      () => assertTogglePillContract(geometryMutation),
+      undefined,
+      message + " must turn the focused fixture red",
+    );
+  }
+});
+
+test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", () => {
+  assertLegacyPillRules(css, dailyCss);
+
+  const coreSelectorMutation = css.replace(
+    ".sauce-pill.sauce-pill-accent {",
+    "body .sauce-pill.sauce-pill-accent {",
+  );
+  assert.notStrictEqual(coreSelectorMutation, css, "core selector mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(coreSelectorMutation, dailyCss),
+    /legacy sauce-core pill (?:rule family|selector\/declaration bytes) changed/,
+    "a core pill selector-specificity mutation must turn the focused fixture red",
+  );
+
+  const dailyPseudoMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-open-pill::before {",
+    ".foo .space-daily-dashboard .sauce-section-open-pill::before {",
+  );
+  assert.notStrictEqual(dailyPseudoMutation, dailyCss, "Daily pseudo-selector mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, dailyPseudoMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a Daily count-pill pseudo-selector mutation must turn the focused fixture red",
+  );
+
+  const neutralCountMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-count-pill {",
+    "body .space-daily-dashboard .sauce-section-count-pill {",
+  );
+  assert.notStrictEqual(neutralCountMutation, dailyCss, "neutral count-pill mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, neutralCountMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a neutral count-pill selector mutation must turn the focused fixture red",
+  );
+
+  const mobileLabelMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-pill-label { display: none; }",
+    "body .space-daily-dashboard .sauce-section-pill-label { display: none; }",
+  );
+  assert.notStrictEqual(mobileLabelMutation, dailyCss, "mobile count-pill label mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, mobileLabelMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a mobile count-pill label selector mutation must turn the focused fixture red",
+  );
+
+  const mobileGapMutation = dailyCss.replace(
+    "  .space-daily-dashboard .sauce-section-counts { gap: 4px; }",
+    "  body .space-daily-dashboard .sauce-section-counts { gap: 4px; }",
+  );
+  assert.notStrictEqual(mobileGapMutation, dailyCss, "mobile count-pill gap mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, mobileGapMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a mobile count-pill gap selector mutation must turn the focused fixture red",
+  );
 });
 
 test("C1C-390PX-TWO-UP computes two and only two minimum actions at 390px", () => {
@@ -228,6 +597,7 @@ test("C1C-CORE-REDUCED-MOTION-SCOPE covers exactly the ratified roots and surfac
   const roots = [
     ".sauce-btn",
     ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))",
+    ".sauce-pill-toggle",
     ".sauce-action-row",
     ".sauce-modal-backdrop",
     ".sauce-modal",
@@ -281,7 +651,9 @@ test("C1C-DAILY-STATE-TRANSFORMS-PRESERVED reads real Daily state surfaces outsi
     assert.ok(reducedSelectors.every((selector) => !selector.includes(fixture.className)), fixture.className + " leaked into core motion boundary");
   }
   assert.ok(reducedSelectors.every((selector) => !selector.includes(".sauce-pill-dot")), "Daily pill-dot leaked into core motion boundary");
-  const pillSelectors = reducedSelectors.filter((selector) => selector.includes(".sauce-pill"));
+  const pillSelectors = reducedSelectors.filter((selector) => (
+    selector.startsWith(".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))")
+  ));
   assert.ok(pillSelectors.length > 0, "core pill motion coverage missing");
   assert.ok(
     pillSelectors.every((selector) => selector.startsWith(".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))")),

@@ -37,7 +37,32 @@ class MeetingChromeBar {
   // Same page.tags / page.file.tags fallback shape doc-search.js already uses.
   _hasHubTag(page) {
     const tags = Array.isArray(page && page.tags) ? page.tags : ((page && page.file && page.file.tags) || []);
-    return tags.map((t) => String(t).replace(/^#/, "")).includes("meetings-hub");
+    try { return Array.from(tags || []).map((t) => String(t).replace(/^#/, "")).includes("meetings-hub"); }
+    catch (_e) { return false; }
+  }
+
+  // Receipt-bound preview for the hub's EntityCreate gesture. EntityCreate
+  // supplies targetPath only after prompts resolve, then RenderSafe captures
+  // scroll, inserts this exact node before persistence, and removes that node
+  // plus restores the prior focus target if any create step rejects.
+  _entityCreateLifecycle(dv) {
+    return {
+      apply: (ctx) => {
+        const root = dv && dv.container;
+        if (!root || typeof root.createEl !== "function") return { node: null, focusTarget: null };
+        const focusTarget = (typeof document !== "undefined") ? document.activeElement : null;
+        const node = root.createEl("div", { cls: "meeting-create-preview is-optimistic" });
+        const target = String(ctx && ctx.targetPath || "");
+        const name = target.slice(target.lastIndexOf("/") + 1).replace(/\.md$/i, "") || "meeting";
+        node.textContent = `Creating ${name}…`;
+        try { node.setAttr?.("tabindex", "-1"); node.focus?.(); } catch (_e) {}
+        return { node, focusTarget };
+      },
+      rollback: (receipt) => {
+        try { receipt?.node?.remove?.(); } catch (_e) {}
+        try { receipt?.focusTarget?.focus?.(); } catch (_e) {}
+      },
+    };
   }
 
   _config() {
@@ -69,7 +94,11 @@ class MeetingChromeBar {
       dispatch: (dv, ctx, id) => {
         if (id === "new-meeting") {
           if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
-            customJS.EntityCreate.create({ instance: "meeting", dv });
+            customJS.EntityCreate.create({
+              instance: "meeting",
+              dv,
+              structuralLifecycle: self._entityCreateLifecycle(dv),
+            });
           } else if (typeof Notice === "function") { new Notice("MeetingChromeBar: EntityCreate unavailable — reinstall meetings blueprint.", 6000); }
           return;
         }

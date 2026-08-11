@@ -106,6 +106,7 @@ function loadEntityCreate(opts = {}) {
             },
         },
         OpenHelpers: { forceActiveLeafPreview() {}, forceLeafPreview() {} },
+        RenderSafe: opts.renderSafe,
     };
     const FakeNotice = function (msg) { (FakeNotice.captured ||= []).push(String(msg)); };
     FakeNotice.captured = [];
@@ -125,7 +126,13 @@ function loadEntityCreate(opts = {}) {
             // v0.6.0 (Issue 1): create() now does `const newFile = await
             // app.vault.create(...)` and opens that TFile. Return a TFile-shaped
             // stub (just needs .path for the workspace.getLeaf().openFile() call).
-            async create(p, content) { vaultFiles[p] = content; created.push({ path: p, content }); return { path: p }; },
+            async create(p, content) {
+                if (typeof opts.onCreate === "function") opts.onCreate(p, content);
+                if (opts.createError) throw opts.createError;
+                vaultFiles[p] = content;
+                created.push({ path: p, content });
+                return { path: p };
+            },
         },
         workspace: {
             openLinkText(p) { opens.push(p); },
@@ -1169,7 +1176,79 @@ ok("EC-PROJSLUG-1 _projectSlugFromPath derives the slug from a project path",
 // chained twice to flush microtasks.
 // -------------------------------------------------------------------------
 
-setImmediate(() => setImmediate(() => setImmediate(() => {
+const structuralLifecycleCase = (async () => {
+    const spec = {
+        label: "New Doc",
+        prompts: [],
+        destination: { folder_prefix: "spice/projects/demo/docs", filename_prefix: "Lifecycle" },
+        frontmatter_template: { type: "doc-note" },
+        inline_body: "Body",
+    };
+    const receipt = { node: { id: "optimistic-preview" }, focusTarget: { id: "trigger" } };
+
+    {
+        const events = [];
+        const renderSafe = {
+            async mutateStructure(options) {
+                events.push("apply");
+                const applied = options.apply();
+                events.push("write");
+                const value = await options.write();
+                return { ok: true, value, receipt: applied };
+            },
+        };
+        const fixture = loadEntityCreate({ renderSafe, onCreate: () => events.push("create") });
+        const instance = new fixture.Cls();
+        instance._loadSpec = async () => spec;
+        const lifecycle = { apply: () => receipt, rollback: () => events.push("rollback") };
+        const dv = { current: () => ({ file: { path: "spice/projects/demo/Demo.md" } }) };
+        const createdFile = await instance.create({ instance: "doc-note", dv, structuralLifecycle: lifecycle });
+        ok("EC-LIFECYCLE-1 optional structural lifecycle applies before create and returns created file",
+            events.join(",") === "apply,write,create" && createdFile && createdFile.path === "spice/projects/demo/docs/Lifecycle.md",
+            `events=${events.join(",")} file=${createdFile && createdFile.path}`);
+    }
+
+    {
+        const events = [];
+        let rolledBack = null;
+        const renderSafe = {
+            async mutateStructure(options) {
+                const applied = options.apply();
+                try { await options.write(); }
+                catch (error) {
+                    options.rollback(applied, error);
+                    return { ok: false, error };
+                }
+                return { ok: true };
+            },
+        };
+        const fixture = loadEntityCreate({
+            renderSafe,
+            createError: new Error("disk full"),
+            onCreate: () => events.push("create"),
+        });
+        const instance = new fixture.Cls();
+        instance._loadSpec = async () => spec;
+        const lifecycle = {
+            apply: () => { events.push("apply"); return receipt; },
+            rollback: (actual, error, ctx) => {
+                events.push("rollback");
+                rolledBack = { actual, error, ctx };
+            },
+        };
+        const dv = { current: () => ({ file: { path: "spice/projects/demo/Demo.md" } }) };
+        const result = await instance.create({ instance: "doc-note", dv, structuralLifecycle: lifecycle });
+        ok("EC-LIFECYCLE-2 rejected persistence rolls back the exact receipt and returns null",
+            result === null && events.join(",") === "apply,create,rollback"
+                && rolledBack && rolledBack.actual === receipt && rolledBack.error.message === "disk full"
+                && rolledBack.ctx.targetPath === "spice/projects/demo/docs/Lifecycle.md",
+            `events=${events.join(",")} result=${result}`);
+    }
+})().catch((error) => {
+    ok("EC-LIFECYCLE structural lifecycle harness completes", false, error && error.stack || String(error));
+});
+
+structuralLifecycleCase.then(() => setImmediate(() => setImmediate(() => setImmediate(() => {
     console.log(`\nrun-entity-create.js: ${pass} pass · ${fail} fail`);
     process.exit(fail === 0 ? 0 : 1);
-})));
+}))));

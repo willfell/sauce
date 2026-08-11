@@ -25,7 +25,6 @@ const HARD_MAX_INFRA_RETRIES = 1;
 const HARD_MAX_CODE_REPAIRS = 1;
 const DEFAULT_MAX_CARDS = 2;
 const LOCK_STALE_MS = 30 * 60 * 1000;
-const TERMINAL_CARD_PHASES = new Set(['deployed', 'blocked', 'failed', 'cancelled']);
 const EFFECT_KINDS = new Set(['claim', 'retry', 'pr', 'release', 'promotion', 'deployment', 'projection']);
 const MAXBUF = 64 * 1024 * 1024;
 
@@ -63,8 +62,18 @@ function resolveContext(cwd = process.cwd()) {
   const stateDir = path.join(commonDir, 'sauce-autoloop');
   const batchesDir = path.join(stateDir, 'batches');
   const home = os.homedir();
-  const boardPath = path.join(home, 'notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md');
-  const cardsRoot = path.join(home, 'notes/sauce/headspace-sauce/spice/projects/sauce/tasks');
+  // Same SAUCE_LOOP_* binding seam as the coordinator. With no env set,
+  // self-resolve the committed .loop/config.json at the working copy (cwd — the
+  // same seam the coordinator uses via process.cwd()) so defaults track the
+  // binding you checked out, not the shared git-common-dir root (which for a
+  // linked worktree points at the main checkout). ~/obsidian is the last resort.
+  const bound = (process.env.SAUCE_LOOP_BOARD && process.env.SAUCE_LOOP_CARDS_ROOT)
+    ? null
+    : coordinator.resolveBoundDefaults(cwd);
+  const boardPath = process.env.SAUCE_LOOP_BOARD || (bound && bound.board)
+    || path.join(home, 'obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md');
+  const cardsRoot = process.env.SAUCE_LOOP_CARDS_ROOT || (bound && bound.cardsRoot)
+    || path.join(home, 'obsidian/headspace-sauce/spice/projects/sauce/tasks');
   return {
     root, commonDir, stateDir, batchesDir,
     ledgerPath: path.join(batchesDir, 'current.json'),

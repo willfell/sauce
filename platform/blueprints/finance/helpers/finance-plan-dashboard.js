@@ -19,7 +19,7 @@ class FinancePlanDashboard {
             const prev = dv.container.querySelector(".fpd-root");
             if (prev) prev.remove();
         }
-        const page = dv.current() || {};
+        const page = this._page(dv) || {};
         if (page.type !== "finance-plan") return;
 
         const fm = customJS.FinanceMath;
@@ -181,29 +181,138 @@ class FinancePlanDashboard {
         const apply = btns.createEl("button", { text: anyChange ? "Apply" : "OK" });
         apply.style.cssText = "cursor: pointer; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
         apply.addEventListener("click", async () => {
-            if (anyChange) await this._writeAll(diffs);
+            if (anyChange) {
+                const page = this._page(dv);
+                const result = await customJS.RenderSafe.mutate({
+                    app,
+                    dv,
+                    path: page?.file?.path || "spice/finance/Finance Plan.md",
+                    mode: "background",
+                    failureMessage: "Could not apply Finance plan",
+                    optimistic: () => { apply.disabled = true; },
+                    revert: () => { apply.disabled = false; try { apply.focus(); } catch (_e) {} },
+                    write: () => this._writeAll(diffs, page?.file?.path),
+                });
+                if (!result.ok) return;
+            }
             overlay.remove();
             try { new Notice("Finance plan applied to entities."); } catch (_e) {}
-            this.render(dv);
+            await this._rerender(dv);
         });
     }
 
-    async _writeAll(diffs) {
+    async _writeAll(diffs, planPath = "spice/finance/Finance Plan.md") {
+        const path = String(planPath || "spice/finance/Finance Plan.md");
+        return await this._serializePlanApply(path, () => this._writeAllNow(diffs));
+    }
+
+    async _serializePlanApply(path, task) {
+        const owner = this.constructor;
+        if (!Object.prototype.hasOwnProperty.call(owner, "_planApplyQueues")) {
+            owner._planApplyQueues = new Map();
+        }
+        const prior = owner._planApplyQueues.get(path) || Promise.resolve();
+        const current = prior.catch(() => {}).then(task);
+        owner._planApplyQueues.set(path, current);
+        try { return await current; }
+        finally {
+            if (owner._planApplyQueues.get(path) === current) owner._planApplyQueues.delete(path);
+        }
+    }
+
+    async _writeAllNow(diffs) {
+        const applied = [];
         for (const d of diffs) {
             try {
-                if (d.before !== null && Number(d.before) === Number(d.after)) continue;
-                if (d.kind === "debt") {
-                    const file = app.vault.getAbstractFileByPath(`spice/finance/debts/${d.slug}.md`);
-                    if (file) await customJS.FinanceFrontmatter.update(file, (fm) => { fm.planned_monthly_payment = Number(d.after); });
-                } else if (d.kind === "savings") {
-                    const file = app.vault.getAbstractFileByPath("spice/finance/Paycheck Defaults.md");
-                    if (file) await customJS.FinanceFrontmatter.update(file, (fm) => {
-                        if (!Array.isArray(fm.expenses)) return;
-                        const row = fm.expenses.find(x => x && (String(x.category || "").toLowerCase() === "savings" || String(x.item || "").toLowerCase() === "savings"));
-                        if (row) row.amount = Number(d.after);
-                    });
+                // Dataview can lag a just-completed Apply. Capture the actual
+                // field value/presence inside processFrontMatter, immediately
+                // before this write, so compensation never trusts the modal's
+                // display-only snapshot.
+                const receipt = await this._writeDiffValue(d, { present: true, value: d.after });
+                if (receipt.changed) applied.push(receipt);
+            } catch (_e) {
+                console.error("FinancePlanDashboard apply failed", d, _e);
+                let rollbackError = null;
+                for (const receipt of applied.slice().reverse()) {
+                    try { await this._restoreWriteReceipt(receipt); }
+                    catch (error) { rollbackError = rollbackError || error; }
                 }
-            } catch (_e) { /* per-write best-effort; failure-loud via console */ console.error("FinancePlanDashboard apply failed", d, _e); }
+                if (rollbackError) {
+                    const combined = new Error(`Finance plan apply failed and compensation failed: ${rollbackError.message || rollbackError}`);
+                    combined.cause = _e;
+                    throw combined;
+                }
+                throw _e;
+            }
         }
+    }
+
+    async _writeDiffValue(diff, target, opts = {}) {
+        let receipt = null;
+        const mutate = (owner, key) => {
+            const before = {
+                present: Object.prototype.hasOwnProperty.call(owner, key),
+                value: owner[key],
+            };
+            if (opts.expected) {
+                const currentMatches = before.present === opts.expected.present
+                    && (!before.present || Object.is(before.value, opts.expected.value));
+                if (!currentMatches) throw new Error(`Finance plan compensation conflict: ${diff.kind} changed after apply`);
+            }
+            const after = target && target.present
+                ? { present: true, value: opts.literal ? target.value : Number(target.value) }
+                : { present: false, value: undefined };
+            const changed = before.present !== after.present
+                || (before.present && !Object.is(before.value, after.value));
+            if (changed) {
+                if (after.present) owner[key] = after.value;
+                else delete owner[key];
+            }
+            receipt = {
+                diff: { kind: diff.kind, slug: diff.slug },
+                before,
+                after,
+                changed,
+            };
+        };
+        if (diff.kind === "debt") {
+            const file = app.vault.getAbstractFileByPath(`spice/finance/debts/${diff.slug}.md`);
+            if (!file) throw new Error(`Debt file missing: ${diff.slug}`);
+            await customJS.FinanceFrontmatter.update(file, (fm) => {
+                mutate(fm, "planned_monthly_payment");
+            });
+            return receipt;
+        }
+        if (diff.kind === "savings") {
+            const file = app.vault.getAbstractFileByPath("spice/finance/Paycheck Defaults.md");
+            if (!file) throw new Error("Paycheck Defaults file missing");
+            await customJS.FinanceFrontmatter.update(file, (fm) => {
+                if (!Array.isArray(fm.expenses)) throw new Error("Paycheck Defaults expenses are missing");
+                const row = fm.expenses.find(x => x && (String(x.category || "").toLowerCase() === "savings" || String(x.item || "").toLowerCase() === "savings"));
+                if (!row) throw new Error("Paycheck Defaults Savings row is missing");
+                mutate(row, "amount");
+            });
+            return receipt;
+        }
+        throw new Error(`Unsupported Finance plan diff: ${diff.kind}`);
+    }
+
+    async _restoreWriteReceipt(receipt) {
+        const prior = receipt.before || { present: false, value: undefined };
+        return await this._writeDiffValue(
+            receipt.diff,
+            prior,
+            { literal: true, expected: receipt.after },
+        );
+    }
+
+    async _rerender(dv) {
+        try { customJS.RenderSafe?.captureScroll?.(); } catch (_e) {}
+        return await this.render(dv);
+    }
+
+    _page(dv) {
+        try { return customJS.FinanceFrontmatter?.page?.(dv) || customJS.RenderSafe?.page?.(dv) || dv?.current?.() || null; }
+        catch (_e) { return null; }
     }
 }

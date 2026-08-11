@@ -65,6 +65,8 @@ const cfg = inst._config();
 {
   const calls = [];
   const entityCreateCalls = [];
+  const previewNode = { remove() {}, setAttr() {}, focus() {} };
+  const hubDv = { container: { createEl: () => previewNode } };
   const prevCJS = global.customJS;
   global.customJS = {
     MeetingLeafActions: {
@@ -77,7 +79,7 @@ const cfg = inst._config();
   cfg.dispatch({}, { context: 'meeting' }, 'new-task');
   cfg.dispatch({}, { context: 'meeting' }, 'add-project');
   cfg.dispatch({}, { context: 'meeting' }, 'edit-attendees');
-  cfg.dispatch({}, { context: 'meetings-hub' }, 'new-meeting');
+  cfg.dispatch(hubDv, { context: 'meetings-hub' }, 'new-meeting');
   global.customJS = prevCJS;
 
   ok('MCB-DISPATCH-1 new-task → MeetingLeafActions._onNewTask', calls[0] === 'new-task');
@@ -85,6 +87,23 @@ const cfg = inst._config();
   ok('MCB-DISPATCH-3 edit-attendees → MeetingLeafActions._onEditAttendees', calls[2] === 'edit-attendees');
   ok('MCB-DISPATCH-4 new-meeting → EntityCreate.create({instance:"meeting"})',
     entityCreateCalls.length === 1 && entityCreateCalls[0].instance === 'meeting');
+  ok('PERF5-HUB-CREATE-LIFECYCLE New Meeting supplies apply+rollback hooks',
+    entityCreateCalls.length === 1
+    && typeof entityCreateCalls[0].structuralLifecycle?.apply === 'function'
+    && typeof entityCreateCalls[0].structuralLifecycle?.rollback === 'function');
+
+  let removed = 0, refocused = 0;
+  const node = previewNode;
+  node.remove = () => { removed++; };
+  const focusTarget = { focus() { refocused++; } };
+  const previousDocument = global.document;
+  global.document = { activeElement: focusTarget };
+  const lifecycle = entityCreateCalls[0].structuralLifecycle;
+  const receipt = lifecycle.apply({ targetPath: 'spice/meetings/notes/Test.md' });
+  lifecycle.rollback(receipt);
+  global.document = previousDocument;
+  ok('PERF5-HUB-CREATE-LIFECYCLE rollback removes the exact preview and restores focus',
+    receipt.node === node && removed === 1 && refocused === 1);
 }
 
 // MCB-DISPATCH-LINK — add-link → SectionExplorer._openAddLinkForm(dv, _noteSelfAdapter(page), null).
@@ -126,6 +145,14 @@ const cfg = inst._config();
 {
   ok('MCB-CLASS-1 rootClass + btnClass',
     cfg.rootClass === 'meeting-chrome-root' && cfg.btnClass('primary') === 'meeting-chrome-btn meeting-chrome-btn-primary');
+}
+
+{
+  const src = fs.readFileSync(path.join(ROOT, 'platform/blueprints/meetings/helpers/meeting-chrome-bar.js'), 'utf8');
+  const lifecycleContract = (body) => /structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\)/.test(body);
+  const missingLifecycleMutant = src.replace(/\s*structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\),/, '');
+  ok('PERF5-REQUIREMENT-MUTANTS kills the missing EntityCreate lifecycle source mutant',
+    lifecycleContract(src) && !lifecycleContract(missingLifecycleMutant));
 }
 
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);

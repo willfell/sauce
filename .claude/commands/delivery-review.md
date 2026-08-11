@@ -1,10 +1,10 @@
 ---
-description: delivery:review — triage the board's blockers, brainstorm each, draft ratifiable FID amendments (never writes cards)
+description: "Deprecated — use /loop:review from the sauce loop plugin instead"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, AskUserQuestion
 ---
 
-# /delivery-review
+# /delivery-review (deprecated)
 
-Invoke the `delivery-review` skill: discover what is actually blocking the Sauce Delivery board (vs frozen evidence), brainstorm each blocker with the Director one at a time, and emit ratifiable Final Initial Design amendments the loop consumes. Never writes cards, the board, or coordinator state.
+The delivery skills moved into the `loop` plugin — one source of truth for every repo and agent runtime. Run the `loop:review` skill (`/loop:review`) now and follow it exactly.
 
-Run the `delivery-review` skill now and follow it exactly.
+If the plugin is not installed: `/plugin marketplace add willfell/sauce`, then `/plugin install loop@sauce`. The repo binding lives in `.loop/config.json` (run `/loop:init` once per repo).

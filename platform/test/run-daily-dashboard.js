@@ -18,7 +18,11 @@ const path = require('path');
 
 const WORKSHOP = path.resolve(__dirname, '..', '..');
 const SDD_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/blueprints/daily/helpers/space-daily-dashboard.js'), 'utf8');
+const SDD_MIRROR_SRC = fs.readFileSync(path.join(WORKSHOP, 'ranch/scripts/daily/space-daily-dashboard.js'), 'utf8');
+const DAILY_MANIFEST = JSON.parse(fs.readFileSync(path.join(WORKSHOP, 'platform/blueprints/daily/manifest.json'), 'utf8'));
 const AF_SRC  = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/activity-feed/activity-feed.js'), 'utf8');
+const TTL_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-today-list.js'), 'utf8');
+const TE_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-entity.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function assert(cond, msg) { if (cond) { pass++; } else { fail++; console.log('  FAIL ' + msg); } }
@@ -58,13 +62,29 @@ function makeDashEl() {
     _text: '',
     _html: '',
     open: false,
-    createEl(tag, _opts) { const c = makeDashEl(); c._tag = tag; this._children.push(c); return c; },
+    parentNode: null,
+    attributes: {},
+    createEl(tag, opts) {
+      const c = makeDashEl();
+      c._tag = tag;
+      c.parentNode = this;
+      if (opts && opts.cls) c.className = opts.cls;
+      if (opts && opts.text != null) c.textContent = opts.text;
+      this._children.push(c);
+      return c;
+    },
     querySelector() { return null; },
     querySelectorAll() { return []; },
     _listeners: null,
     addEventListener(type, fn) { (this._listeners || (this._listeners = {}))[type] = fn; },
-    _fire(type) { const fn = this._listeners && this._listeners[type]; if (fn) fn(); },
-    remove() {},
+    _fire(type, event) { const fn = this._listeners && this._listeners[type]; if (fn) return fn(event || { target: this, stopPropagation() {} }); },
+    setAttribute(k, v) { this.attributes[k] = v; },
+    remove() {
+      if (!this.parentNode) return;
+      const i = this.parentNode._children.indexOf(this);
+      if (i >= 0) this.parentNode._children.splice(i, 1);
+      this.parentNode = null;
+    },
     get textContent() { return this._text + this._children.map(c => c.textContent).join(''); },
     set textContent(v) { this._text = String(v == null ? '' : v); this._children = []; },
     get innerHTML() { return this._html; },
@@ -88,8 +108,322 @@ function loadActivityFeed(windowShim) {
     {}, { BeaconCards: { render() {} } }, function () {}, windowShim);
 }
 
+async function renderDailyTaskFixture(today, options) {
+  options = options || {};
+  const prevWindow = global.window;
+  const prevApp = global.app;
+  const prevNotice = global.Notice;
+  global.Notice = function () {};
+
+  const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+  const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
+  const TE = new TaskEntityClass();
+  const TTL = new TaskTodayListClass();
+  const openFile = { path: 'spice/tasks/open.md', _fm: { status: 'open', due: today, untouched: 'open' } };
+  const overdueFile = { path: 'spice/tasks/late.md', _fm: { status: 'open', due: '2026-07-01', untouched: 'late' } };
+  const files = new Map([[openFile.path, openFile], [overdueFile.path, overdueFile]]);
+  const writes = { adapter: 0, frontmatter: 0 };
+  const app = {
+    vault: {
+      getAbstractFileByPath: (p) => files.get(p) || null,
+      adapter: {
+        read: async () => { throw new Error('ENOENT'); },
+        write: async () => { writes.adapter++; },
+        mkdir: async () => {},
+      },
+    },
+    fileManager: {
+      processFrontMatter: async (file, mutate) => { writes.frontmatter++; mutate(file._fm); },
+    },
+    workspace: {
+      openLinkText() {},
+      getLeavesOfType() { return []; },
+    },
+  };
+  const windowShim = makeMomentWindow();
+  if (Object.prototype.hasOwnProperty.call(options, 'storage')) {
+    windowShim.localStorage = options.storage;
+  }
+  windowShim.app = app;
+  const customJS = {
+    TaskEntity: TE,
+    TaskTodayList: TTL,
+    TaskDialog: { open() {} },
+    RenderSafe: { captureScroll() {} },
+    ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
+    BeaconCards: { render: async () => {} },
+  };
+  windowShim.customJS = customJS;
+  global.window = windowShim;
+  global.app = app;
+
+  const taskPages = options.taskPages || [
+    { type: 'task', status: 'open', title: 'Open', due: today, file: { path: openFile.path } },
+    { type: 'task', status: 'open', title: 'Late', due: '2026-07-01', file: { path: overdueFile.path } },
+  ];
+  const chain = (items) => {
+    const out = items.slice();
+    out.array = () => items.slice();
+    out.where = (fn) => chain(items.filter(fn));
+    out.sort = () => out;
+    return out;
+  };
+  const root = makeDashEl();
+  const dv = {
+    container: root,
+    current: () => ({ file: { name: 'Journal-' + today } }),
+    pages: (q) => chain(q === '"spice/tasks"' ? taskPages : []),
+    page: () => null,
+    el(tag, _text, opts) {
+      return root.createEl(tag, opts || {});
+    },
+  };
+  const Dash = loadDashboard(windowShim, customJS);
+  await new Dash().render(dv, undefined);
+
+  const allNodes = (node) => {
+    const out = [];
+    for (const child of (node && node._children) || []) {
+      out.push(child, ...allNodes(child));
+    }
+    return out;
+  };
+  return {
+    root,
+    openFile,
+    overdueFile,
+    taskPages,
+    writes,
+    allNodes,
+    cleanup() {
+      if (prevWindow === undefined) delete global.window; else global.window = prevWindow;
+      if (prevApp === undefined) delete global.app; else global.app = prevApp;
+      global.Notice = prevNotice;
+    },
+  };
+}
+
 (async () => {
   const TODAY = '2026-07-03';
+
+  await ok('TD1B-DAILY-MIRROR-TOUCH-ZONE-TYPO canonical mirror bytes + manifest destination stay exact', async () => {
+    assert(SDD_SRC === SDD_MIRROR_SRC,
+      'platform helper and ranch/scripts/daily mirror must be byte-identical');
+    const entry = DAILY_MANIFEST.files.find((f) => f.source === 'helpers/space-daily-dashboard.js');
+    assert(entry && entry.dest === '{{scripts_path}}/daily/space-daily-dashboard.js',
+      'daily manifest must deploy the canonical daily mirror: ' + JSON.stringify(entry));
+  });
+
+  await ok('TD1B-SORT-PURE Due/Priority comparators are deterministic, stable, null-safe, and non-mutating', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const tasks = Object.freeze([
+      { title: 'low-old', due: '2026-07-01', priority: 'low' },
+      { title: 'highest-new', due: '2026-07-03', priority: 'highest' },
+      { title: 'high-new-a', due: '2026-07-02', priority: 'high' },
+      { title: 'high-new-b', due: '2026-07-02', priority: 'HIGH' },
+      { title: 'unset', due: '', priority: '' },
+      { title: 'missing' },
+    ]);
+    const snapshot = JSON.stringify(tasks);
+    const due = Dash.sortTasks(tasks, 'due').map((t) => t.title);
+    assert(JSON.stringify(due) === JSON.stringify([
+      'low-old', 'high-new-a', 'high-new-b', 'highest-new', 'unset', 'missing',
+    ]), 'Due ordering is date asc, missing last, stable ties: ' + JSON.stringify(due));
+    const priority = Dash.sortTasks(tasks, 'priority').map((t) => t.title);
+    assert(JSON.stringify(priority) === JSON.stringify([
+      'highest-new', 'high-new-a', 'high-new-b', 'low-old', 'unset', 'missing',
+    ]), 'Priority ordering is vocabulary rank then Due then stable ties: ' + JSON.stringify(priority));
+    assert(JSON.stringify(tasks) === snapshot, 'sortTasks must not mutate its source array/items');
+    assert(Dash.compareTasksByDue(null, undefined) === 0, 'Due comparator null/null is a stable tie');
+    assert(Dash.compareTasksByPriority(null, {}) === 0, 'Priority comparator null/unset is a stable tie');
+    assert(Dash.sortTasks(null, 'priority').length === 0, 'sortTasks is null-safe');
+    assert(Dash.normalizeTaskSortMode('not-a-mode') === 'due', 'unknown mode safely defaults Due');
+  });
+
+  await ok('TD1B-SORT-STORAGE client-only namespaced persistence is guarded and defaults Due', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const data = new Map();
+    const storage = {
+      getItem(key) { return data.has(key) ? data.get(key) : null; },
+      setItem(key, value) { data.set(key, value); },
+    };
+    assert(Dash.readTaskSortMode(null) === 'due', 'missing localStorage falls back Due');
+    assert(Dash.readTaskSortMode(storage) === 'due', 'empty localStorage falls back Due');
+    assert(Dash.writeTaskSortMode(storage, 'priority') === 'priority', 'Priority selection normalizes');
+    assert(data.size === 1 && data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
+      'selection writes exactly the namespaced client key: ' + JSON.stringify(Array.from(data.entries())));
+    assert(Dash.readTaskSortMode(storage) === 'priority', 'persisted Priority reloads');
+    const throwing = {
+      getItem() { throw new Error('blocked'); },
+      setItem() { throw new Error('blocked'); },
+    };
+    assert(Dash.readTaskSortMode(throwing) === 'due', 'throwing localStorage read falls back Due');
+    assert(Dash.writeTaskSortMode(throwing, 'priority') === 'priority',
+      'throwing localStorage write does not break current Priority selection');
+  });
+
+  await ok('TD1B-NONEXISTENT-UPCOMING-BAND real control sorts Today/Overdue independently and excludes future tasks', async () => {
+    const data = new Map();
+    const storage = {
+      getItem(key) { return data.has(key) ? data.get(key) : null; },
+      setItem(key, value) { data.set(key, value); },
+    };
+    const taskPages = [
+      { type: 'task', status: 'open', title: 'Today Low', due: TODAY, priority: 'low', file: { path: 'spice/tasks/today-low.md' } },
+      { type: 'task', status: 'open', title: 'Today Highest', due: TODAY, priority: 'highest', file: { path: 'spice/tasks/today-highest.md' } },
+      { type: 'task', status: 'open', title: 'Today Unset', due: TODAY, priority: '', file: { path: 'spice/tasks/today-unset.md' } },
+      { type: 'task', status: 'open', title: 'Overdue High', due: '2026-07-02', priority: 'high', file: { path: 'spice/tasks/overdue-high.md' } },
+      { type: 'task', status: 'open', title: 'Overdue Low', due: '2026-07-01', priority: 'low', file: { path: 'spice/tasks/overdue-low.md' } },
+      { type: 'task', status: 'open', title: 'Future Highest', due: '2026-07-04', priority: 'highest', file: { path: 'spice/tasks/future-highest.md' } },
+    ];
+    const fixture = await renderDailyTaskFixture(TODAY, { storage, taskPages });
+    const pathOrder = (list) => fixture.allNodes(list)
+      .filter((node) => node._tag === 'li')
+      .map((node) => node.dataset.sauceTaskPath);
+    const byClass = (cls) => fixture.allNodes(fixture.root)
+      .filter((node) => String(node.className || '').split(/\s+/).includes(cls));
+    try {
+      const controls = byClass('sauce-daily-task-sort');
+      assert(controls.length === 1, 'one always-present sort control renders at Tasks top');
+      assert(controls[0].attributes.role === 'group'
+          && controls[0].attributes['aria-label'] === 'Sort daily tasks',
+        'control has accessible group semantics: ' + JSON.stringify(controls[0].attributes));
+      const buttons = controls[0]._children.filter((node) => node._tag === 'button');
+      assert(buttons.length === 2 && buttons.map((b) => b.textContent).join(',') === 'Due,Priority',
+        'control exposes labeled Due/Priority buttons');
+      const dueButton = buttons.find((b) => b.textContent === 'Due');
+      const priorityButton = buttons.find((b) => b.textContent === 'Priority');
+      assert(dueButton.attributes['aria-pressed'] === 'true'
+          && priorityButton.attributes['aria-pressed'] === 'false',
+        'Due is the default pressed state');
+
+      let todayLists = byClass('sauce-daily-task-today-list');
+      let overdueLists = byClass('sauce-section-overdue-list');
+      assert(todayLists.length === 1 && overdueLists.length === 1,
+        'actual Today and Overdue bands render separately');
+      assert(JSON.stringify(pathOrder(todayLists[0])) === JSON.stringify([
+        'spice/tasks/today-low.md', 'spice/tasks/today-highest.md', 'spice/tasks/today-unset.md',
+      ]), 'Due keeps same-day Today source order: ' + JSON.stringify(pathOrder(todayLists[0])));
+      assert(JSON.stringify(pathOrder(overdueLists[0])) === JSON.stringify([
+        'spice/tasks/overdue-low.md', 'spice/tasks/overdue-high.md',
+      ]), 'Due orders Overdue by date without crossing bands: ' + JSON.stringify(pathOrder(overdueLists[0])));
+      assert(!fixture.allNodes(fixture.root).some((node) =>
+        node.dataset && node.dataset.sauceTaskPath === 'spice/tasks/future-highest.md'),
+      'future task stays excluded by real selectTasks/queryToday');
+      assert(byClass('sauce-section-upcoming-list').length === 0,
+        'Daily does not invent an Upcoming band');
+      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
+        'render performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
+
+      await priorityButton._fire('click', {
+        target: priorityButton, preventDefault() {}, stopPropagation() {},
+      });
+      assert(dueButton.attributes['aria-pressed'] === 'false'
+          && priorityButton.attributes['aria-pressed'] === 'true',
+        'selection updates accessible pressed state');
+      assert(data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
+        'selection persists Priority in namespaced localStorage');
+      assert(byClass('sauce-daily-task-sort').length === 1,
+        'mode rerender retains one control/listener owner');
+      todayLists = byClass('sauce-daily-task-today-list');
+      overdueLists = byClass('sauce-section-overdue-list');
+      assert(JSON.stringify(pathOrder(todayLists[0])) === JSON.stringify([
+        'spice/tasks/today-highest.md', 'spice/tasks/today-low.md', 'spice/tasks/today-unset.md',
+      ]), 'Priority reorders Today only: ' + JSON.stringify(pathOrder(todayLists[0])));
+      assert(JSON.stringify(pathOrder(overdueLists[0])) === JSON.stringify([
+        'spice/tasks/overdue-high.md', 'spice/tasks/overdue-low.md',
+      ]), 'Priority reorders Overdue only: ' + JSON.stringify(pathOrder(overdueLists[0])));
+      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
+        'sort selection performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
+    } finally {
+      fixture.cleanup();
+    }
+
+    const reload = await renderDailyTaskFixture(TODAY, { storage, taskPages });
+    try {
+      const control = reload.allNodes(reload.root).find((node) =>
+        String(node.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
+      const buttons = control._children.filter((node) => node._tag === 'button');
+      assert(buttons.find((b) => b.textContent === 'Priority').attributes['aria-pressed'] === 'true',
+        'persisted Priority survives a fresh dashboard render');
+      assert(reload.writes.adapter === 0 && reload.writes.frontmatter === 0,
+        'reload persistence remains client-only');
+    } finally {
+      reload.cleanup();
+    }
+  });
+
+  await ok('TD1B-SORT-STORAGE throwing browser storage safely renders Due without vault writes', async () => {
+    const throwing = {
+      getItem() { throw new Error('blocked'); },
+      setItem() { throw new Error('blocked'); },
+    };
+    const fixture = await renderDailyTaskFixture(TODAY, { storage: throwing });
+    try {
+      const control = fixture.allNodes(fixture.root).find((node) =>
+        String(node.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
+      const buttons = control._children.filter((node) => node._tag === 'button');
+      assert(buttons.find((b) => b.textContent === 'Due').attributes['aria-pressed'] === 'true',
+        'throwing storage renders safe Due state');
+      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
+        'throwing storage does not fall back to a vault write');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await ok('TD1A3-DAILY-BULLET-LIST-REGRESSION real open + overdue li keep markers while child wrappers align contents', async () => {
+    const fixture = await renderDailyTaskFixture(TODAY);
+    try {
+      const rows = fixture.allNodes(fixture.root).filter((n) => n._tag === 'li');
+      assert(rows.length === 2, 'open and overdue private rows both rendered');
+      for (const row of rows) {
+        assert(/(^|;)\s*display\s*:\s*list-item\b/i.test(row.style.cssText),
+          'task li must explicitly retain browser list-item display semantics: ' + row.style.cssText);
+        assert(row._children.length === 1 && row._children[0]._tag === 'div'
+            && row._children[0].className === 'sauce-daily-task-row-content',
+          'task li owns one inner content wrapper, got ' + row._children.map((n) => n._tag).join(','));
+        const wrapper = row._children[0];
+        assert(/(^|;)\s*display\s*:\s*flex\b/i.test(wrapper.style.cssText),
+          'inner content wrapper owns flex alignment: ' + wrapper.style.cssText);
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await ok('TD1B-REDUNDANT-QUICK-RESCHEDULE-OUTCOME existing open + overdue tomorrow actions remain viewed-day-bound', async () => {
+    const fixture = await renderDailyTaskFixture(TODAY);
+    const { root, openFile, overdueFile, allNodes } = fixture;
+    try {
+    const sortControl = allNodes(root).find((n) =>
+      String(n.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
+    const priorityButton = sortControl._children.find((n) => n._tag === 'button' && n.textContent === 'Priority');
+    await priorityButton._fire('click', { target: priorityButton, preventDefault() {}, stopPropagation() {} });
+    const tomorrowButtons = allNodes(root).filter((n) =>
+      String(n.className || '').split(/\s+/).includes('sauce-daily-task-tomorrow'));
+    assert(tomorrowButtons.length === 2,
+      'Priority rerender retains one tomorrow action for open + overdue: ' + tomorrowButtons.length);
+    const rowsBefore = allNodes(root).filter((n) => n._tag === 'li');
+    assert(rowsBefore.length === 2, 'open and overdue private rows both rendered');
+
+    await tomorrowButtons[0]._fire('click', { target: tomorrowButtons[0], stopPropagation() {} });
+    assert(openFile._fm.due === '2026-07-04',
+      'open task due advances from viewed day, not wall clock: ' + openFile._fm.due);
+    assert(openFile._fm.untouched === 'open', 'open task unrelated frontmatter preserved');
+    assert(overdueFile._fm.due === '2026-07-01', 'non-activated overdue task stays byte-identical');
+    const rowsAfterOpen = allNodes(root).filter((n) => n._tag === 'li');
+    assert(rowsAfterOpen.length === 1, 'only activated private row is optimistically removed');
+
+    await tomorrowButtons[1]._fire('click', { target: tomorrowButtons[1], stopPropagation() {} });
+    assert(overdueFile._fm.due === '2026-07-04',
+      'overdue task also advances to nextDay(viewedDay): ' + overdueFile._fm.due);
+    assert(allNodes(root).filter((n) => n._tag === 'li').length === 0,
+      'overdue activation removes its own row');
+    } finally {
+      fixture.cleanup();
+    }
+  });
 
   // Fixture (unchanged from the pre-2→1 DASH-L5-3 scenario): one direct project
   // hit (foo) + a project whose two task children roll up into its hub (bar).
@@ -190,6 +524,73 @@ function loadActivityFeed(windowShim) {
       'expected render to receive precomputed.pages array');
     assert(spy.renderPages && spy.renderPages.length === 2,
       'expected 2 precomputed pages (foo direct + bar rollup), got ' + (spy.renderPages && spy.renderPages.length));
+  });
+
+  await ok('PERF8J-DASH-MOUNT successful render returns its exact root through the caller receipt', async () => {
+    const { customJS } = makeCustomJS();
+    const dv = makeDv();
+    const Dash = loadDashboard(windowShim, customJS);
+    const receipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: receipt });
+    assert(receipt.ok === true, 'successful dashboard render must stamp the explicit receipt');
+    assert(receipt.node && dv.container._children.includes(receipt.node),
+      'receipt must identify the exact live dashboard root, not a broad DOM diff');
+  });
+
+  await ok('PERF8K-DASH-MOUNT partial cold child render stays unmounted and warm-retries', async () => {
+    const { customJS } = makeCustomJS();
+    delete customJS.BeaconCards;
+    const dv = makeDv();
+    dv.el = (tag, _text, opts) => dv.container.createEl(tag, opts || {});
+    const originalPages = dv.pages.bind(dv);
+    dv.pages = (query) => query === '"spice/meetings/notes"'
+      ? [{ file: { name: `${TODAY} Cold Meeting`, path: `spice/meetings/notes/${TODAY} Cold Meeting.md` } }]
+      : originalPages(query);
+    const Dash = loadDashboard(windowShim, customJS);
+    const failedReceipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: failedReceipt });
+    assert(failedReceipt.ok === false && failedReceipt.node === null,
+      'missing async child mechanism must not stamp a successful mount');
+    assert(!dv.container._children.some((node) => /space-daily-dashboard/.test(node.className)),
+      'failed partial dashboard root must be removed before warm retry');
+
+    customJS.BeaconCards = { render: async () => {} };
+    const warmReceipt = { ok: false, node: null };
+    await new Dash().render(dv, { asOf: TODAY, mountReceipt: warmReceipt });
+    assert(warmReceipt.ok === true && dv.container._children.includes(warmReceipt.node),
+      'same-surface warm retry must stamp the completed dashboard root');
+  });
+
+  await ok('PERF8L-DASH-MOUNT successful async child settles before the root receipt', async () => {
+    const { customJS } = makeCustomJS();
+    let releaseChild;
+    let reportChildStarted;
+    const childReleased = new Promise((resolve) => { releaseChild = resolve; });
+    const childStarted = new Promise((resolve) => { reportChildStarted = resolve; });
+    customJS.BeaconCards = {
+      render: async () => {
+        reportChildStarted();
+        await childReleased;
+      },
+    };
+    const dv = makeDv();
+    dv.el = (tag, _text, opts) => dv.container.createEl(tag, opts || {});
+    const originalPages = dv.pages.bind(dv);
+    dv.pages = (query) => query === '"spice/meetings/notes"'
+      ? [{ file: { name: `${TODAY} Deferred Meeting`, path: `spice/meetings/notes/${TODAY} Deferred Meeting.md` } }]
+      : originalPages(query);
+    const Dash = loadDashboard(windowShim, customJS);
+    const receipt = { ok: false, node: null };
+    const pendingRender = new Dash().render(dv, { asOf: TODAY, mountReceipt: receipt });
+    await childStarted;
+    assert(receipt.ok === false && receipt.node === null,
+      'receipt must remain false/null while a successful async child is pending');
+    const liveRoot = dv.container._children.find((node) => /space-daily-dashboard/.test(node.className));
+    assert(!!liveRoot, 'pending successful child keeps the candidate root live but uncommitted');
+    releaseChild();
+    await pendingRender;
+    assert(receipt.ok === true && receipt.node === liveRoot,
+      'receipt stamps the exact live root only after the successful child settles');
   });
 
   await ok('DASH-L5-3 total + byBlueprint unchanged (1 direct hit + 1 rolled-up root)', async () => {
@@ -421,6 +822,95 @@ function loadActivityFeed(windowShim) {
     details.open = false;
     details._fire('toggle');
     assert(writeCalls === 1, 'a user toggle writes, got ' + writeCalls);
+  });
+
+  await ok('PERF8-DAILY-CREATE optimistic preview precedes persistence and exact rollback removes it/restores focus', async () => {
+    const priorApp = global.app;
+    const priorMoment = global.moment;
+    const priorDocument = global.document;
+    const priorCustomJS = global.customJS;
+    const events = [];
+    let rejectCreate = false;
+    let focused = 0;
+    let trashed = 0;
+    let folderChildren = [];
+    let rollbackActiveElement = null;
+    const trigger = { focus: () => { focused++; } };
+    const files = new Map([['ranch/templates/Today To-Do.md', { path: 'ranch/templates/Today To-Do.md' }]]);
+    const app = {
+      vault: {
+        getAbstractFileByPath: (p) => files.get(p) || null,
+        createFolder: async (p) => { events.push('folder'); files.set(p, { path: p, children: folderChildren.slice() }); },
+      },
+      fileManager: { trashFile: async (f) => { trashed++; files.delete(f.path); } },
+      plugins: { plugins: { 'templater-obsidian': { templater: {
+        create_new_note_from_template: async () => {
+          events.push('write');
+          if (rejectCreate) throw new Error('persist failed');
+          return { path: 'created' };
+        },
+      } } } },
+      workspace: { openLinkText() {} },
+    };
+    const renderSafe = {
+      mutateStructure: async (opts) => {
+        events.push('apply');
+        const receipt = await opts.apply();
+        try { return { ok: true, value: await opts.write() }; }
+        catch (error) {
+          events.push('rollback');
+          if (rollbackActiveElement) global.document.activeElement = rollbackActiveElement;
+          await opts.rollback(receipt, error);
+          return { ok: false, error };
+        }
+      },
+    };
+    global.app = app;
+    global.moment = () => ({ format: (fmt) => fmt === 'YYYY/MM-MMMM' ? '2026/07-July' : '2026-07-13' });
+    global.document = { activeElement: trigger };
+    global.customJS = { RenderSafe: renderSafe };
+    try {
+      const Dash = loadDashboard(windowShim, { RenderSafe: renderSafe });
+      const dash = new Dash();
+      const successHost = makeDashEl();
+      const success = await dash._openTodayToDo('2026-07-13', { dv: {}, host: successHost, trigger });
+      assert(success && success.ok === true, 'successful create returns ok');
+      assert(events.indexOf('apply') < events.indexOf('write'), 'optimistic apply must precede persistence');
+      assert(successHost._children.some((n) => /sauce-daily-todo-preview/.test(n.className)), 'optimistic preview is visible immediately');
+
+      files.delete('spice/to-do/2026/07-July');
+      rejectCreate = true;
+      events.length = 0;
+      const retryHost = makeDashEl();
+      const failed = await dash._openTodayToDo('2026-07-13', { dv: {}, host: retryHost, trigger });
+      assert(failed && failed.ok === false, 'rejected create returns false');
+      assert(events.join(',').includes('apply') && events.join(',').endsWith('rollback'), 'rejection runs apply/write/rollback');
+      assert(retryHost._children.length === 0, 'rollback removes the exact preview node');
+      assert(focused === 1, 'rollback restores triggering focus exactly once');
+      assert(trashed === 1, 'rejected note creation compensates its newly-created empty folder');
+
+      files.delete('spice/to-do/2026/07-July');
+      folderChildren = [{ path: 'spice/to-do/2026/07-July/concurrent.md' }];
+      const newerFocus = { isConnected: true };
+      rollbackActiveElement = newerFocus;
+      await dash._openTodayToDo('2026-07-13', { dv: {}, host: makeDashEl(), trigger });
+      assert(trashed === 1, 'rollback never trashes a newly-created folder after concurrent content arrives');
+      assert(focused === 1 && global.document.activeElement === newerFocus,
+        'late rollback preserves newer connected focus instead of stealing it');
+    } finally {
+      global.app = priorApp;
+      global.moment = priorMoment;
+      global.document = priorDocument;
+      global.customJS = priorCustomJS;
+    }
+  });
+
+  await ok('PERF8-DAILY-COLD render never rejects on missing or throwing Dataview state', async () => {
+    const Dash = loadDashboard(windowShim, undefined);
+    const dash = new Dash();
+    await dash.render(null, {});
+    await dash.render({ container: makeDashEl(), el: () => makeDashEl(), pages: () => { throw new Error('cold index'); } }, {});
+    assert(true, 'cold render paths resolved');
   });
 
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);

@@ -76,19 +76,19 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // bootstrap doesn't skip chrome-bar with "depends on
                      // menu-popover ... not subscribed". Must precede
                      // chrome-bar for deps-first install ordering.
+    "styling",       // chrome-bar and modal depend on styling >=0.3.0. This was
+                     // previously near the tail of the default list; keep it
+                     // before both consumers so fresh-vault subscriptions are
+                     // dependency-first.
     "chrome-bar",    // <this release> — task-entity (in the default mechanism
                      // set) gains a depends_on chrome-bar >=0.3.0; pre-include
                      // so fresh-vault bootstrap doesn't skip task-entity with
                      // "depends on chrome-bar ... not subscribed". Same class
                      // of bug as the doc-search entry above. chrome-bar itself
                      // depends on nav-buttons, menu-popover, breadcrumb,
-                     // render-safe, and icons — all four of the latter are
-                     // already earlier in this list; nav-buttons + menu-popover
-                     // were moved/added directly above. Must precede
+                     // render-safe, icons, and styling — all are already
+                     // earlier in this list. Must precede
                      // task-entity for deps-first install ordering.
-    "styling",       // modal depends on styling >=0.3.0. This was previously
-                     // near the tail of the default list; move it before modal
-                     // so fresh-vault subscriptions are dependency-first.
     "modal",         // v0.244.1 — task-entity depends on modal >=0.2.0 after
                      // TaskDialog adopted SauceModal. Must precede task-entity
                      // or the installer skips task-entity in a fresh vault.

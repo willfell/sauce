@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.257.1",
+  "workshop_version": "0.284.0",
   "mechanisms": [
     {
       "name": "editor-width",
@@ -12,7 +12,7 @@
     },
     {
       "name": "customjs-guard",
-      "version": "1.0.0"
+      "version": "1.0.2"
     },
     {
       "name": "validator",
@@ -20,7 +20,7 @@
     },
     {
       "name": "delivery",
-      "version": "0.3.0"
+      "version": "0.7.0"
     },
     {
       "name": "audit",
@@ -48,7 +48,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.15.5"
+      "version": "0.16.1"
     },
     {
       "name": "modal",
@@ -76,7 +76,7 @@
     },
     {
       "name": "styling",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     {
       "name": "convenience",
@@ -84,11 +84,11 @@
     },
     {
       "name": "platform-claude",
-      "version": "0.4.0"
+      "version": "0.6.0"
     },
     {
       "name": "entity-create",
-      "version": "0.9.1"
+      "version": "0.9.2"
     },
     {
       "name": "backlink-panel",
@@ -112,7 +112,7 @@
     },
     {
       "name": "render-safe",
-      "version": "0.2.2"
+      "version": "0.3.1"
     },
     {
       "name": "doc-search",
@@ -124,29 +124,29 @@
     },
     {
       "name": "section-explorer",
-      "version": "0.6.1"
+      "version": "0.6.3"
     },
     {
       "name": "chrome-bar",
-      "version": "0.4.2"
+      "version": "0.4.3"
     }
   ],
   "blueprints": [
     {
       "name": "project",
-      "version": "1.56.1"
+      "version": "1.62.8"
     },
     {
       "name": "daily",
-      "version": "0.23.2"
+      "version": "0.25.1"
     },
     {
       "name": "meetings",
-      "version": "0.19.2"
+      "version": "0.19.4"
     },
     {
       "name": "sticky-notes",
-      "version": "0.11.4"
+      "version": "0.11.6"
     },
     {
       "name": "people",
@@ -158,19 +158,19 @@
     },
     {
       "name": "to-do",
-      "version": "0.26.1"
+      "version": "0.26.2"
     },
     {
       "name": "wiki",
-      "version": "0.8.2"
+      "version": "0.8.4"
     },
     {
       "name": "home",
-      "version": "0.8.6"
+      "version": "0.8.7"
     },
     {
       "name": "reader",
-      "version": "0.6.0"
+      "version": "0.6.3"
     }
   ]
 }

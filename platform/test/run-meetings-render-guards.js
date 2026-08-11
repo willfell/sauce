@@ -138,6 +138,8 @@ global.moment = momentFn;
 const widgets = [
     { name: 'MeetingsHubCards', path: 'platform/blueprints/meetings/helpers/meetings-hub-cards.js' },
     { name: 'MeetingLeafActions', path: 'platform/blueprints/meetings/helpers/meeting-leaf-actions.js' },
+    { name: 'MeetingsBrowseList', path: 'platform/blueprints/meetings/helpers/meetings-browse-list.js' },
+    { name: 'MeetingChromeBar', path: 'platform/blueprints/meetings/helpers/meeting-chrome-bar.js' },
 ];
 
 // cold-load variants: Dataview not indexed → dv.current() undefined/null, or
@@ -160,7 +162,30 @@ const variants = [
                 await Promise.resolve(inst.render(makeDv(v.embed, v.current), {}));
             });
         }
+        await guard(`PERF5-COLD-LOAD-MATRIX ${w.name} — undefined dv`, async () => {
+            await Promise.resolve(new WidgetClass().render(undefined));
+        });
+        await guard(`PERF5-COLD-LOAD-MATRIX ${w.name} — throwing current`, async () => {
+            const dv = makeDv(false, null);
+            dv.current = () => { throw new Error('cold current'); };
+            await Promise.resolve(new WidgetClass().render(dv));
+        });
     }
+    await guard('PERF5-COLD-LOAD-MATRIX all Meetings renderers — missing customJS dependencies', async () => {
+        const priorGlobal = global.customJS;
+        const priorWindow = global.window.customJS;
+        global.customJS = {};
+        global.window.customJS = global.customJS;
+        try {
+            for (const w of widgets) {
+                const WidgetClass = loadWidget(w.path, w.name);
+                await Promise.resolve(new WidgetClass().render(makeDv(false, { file: { name: 'Meetings-2026-07-03', path: 'x.md' } })));
+            }
+        } finally {
+            global.customJS = priorGlobal;
+            global.window.customJS = priorWindow;
+        }
+    });
     await guard('MTGGUARD MeetingsHubCards — RenderSafe active-file recovery', async () => {
         activeFile = { path: 'spice/meetings/Meetings-2026-07-03.md', basename: 'Meetings-2026-07-03' };
         beaconCalls = 0;

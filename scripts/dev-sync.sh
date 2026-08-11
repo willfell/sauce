@@ -20,12 +20,12 @@
 
 set -euo pipefail
 
-WORKSHOP="/Users/willfellhoelter/projects/repos/sauce"
+WORKSHOP="$HOME/Documents/GitHub/sauce"
 CONSUMERS=(
-  "/Users/willfellhoelter/notes/sauce/headspace-sauce"
-  "/Users/willfellhoelter/notes/sauce/accuris-sauce"
-  # "/Users/willfellhoelter/notes/sauce/ero-sauce"          # uncomment when needed
-  # "/Users/willfellhoelter/notes/sauce/barebones"          # uncomment when needed
+  "$HOME/obsidian/headspace-sauce"
+  "$HOME/obsidian/accuris-sauce"
+  # "$HOME/obsidian/ero-sauce"          # uncomment when needed
+  # "$HOME/obsidian/barebones"          # uncomment when needed
 )
 
 red() { printf "\033[31m%s\033[0m\n" "$*"; }

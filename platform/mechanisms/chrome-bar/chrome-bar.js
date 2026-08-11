@@ -27,44 +27,32 @@ class ChromeBar {
 
   // ── renderChromeButton — the bar's own button look ──────────────────────────
   // 32px, icon-first, hover-lift + press-scale micro-motion. The CALLER supplies
-  // opts.cls (its marker class, e.g. "pcb-btn pcb-btn-go") so each blueprint's
-  // rendered DOM stays byte-identical. Icon-only when opts.label is omitted.
+  // opts.cls (its marker class, e.g. "pcb-btn pcb-btn-go"); shared sauce-core
+  // classes are appended while adopter marker/content snapshots stay identical.
+  // Icon-only when opts.label is omitted.
   // opts: { cls, label?, icon?, onClick }.
   renderChromeButton(parent, opts) {
     const o = opts || {};
-    const btn = parent.createEl("button", { cls: o.cls || "sc-chrome-btn" });
     const hasLabel = !!o.label;
+    const classes = [o.cls || "sc-chrome-btn", "sauce-btn", "sauce-chrome-btn"];
+    if (!hasLabel) classes.push("sauce-btn-icon");
+    const btn = parent.createEl("button", { cls: classes.join(" ") });
     const iconHtml = o.icon || "";
     const labelHtml = hasLabel
       ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${o.label}</span>`
       : "";
     btn.innerHTML = iconHtml + labelHtml;
-    const EASE = "cubic-bezier(0.2, 0.9, 0.25, 1)";
-    btn.style.cssText = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center;"
-      + " gap: 6px; height: 32px; box-sizing: border-box;"
-      + ` padding: 0 ${hasLabel ? "16" : "12"}px;`
-      + (hasLabel ? "" : " min-width: 38px;")
-      + " border-radius: 8px; border: 1px solid var(--interactive-accent);"
-      + " background: var(--background-primary); color: var(--interactive-accent);"
-      + " font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em;"
-      + " overflow: hidden; transform: scale(1); box-shadow: none;"
-      + ` transition: background 0.15s ${EASE}, color 0.15s ${EASE}, border-color 0.15s ${EASE},`
-      + ` box-shadow 0.15s ${EASE}, transform 0.15s ${EASE};`;
+    const hasClassList = btn.classList && typeof btn.classList.add === "function";
     btn.onmouseenter = () => {
       if (btn.disabled) return;
-      btn.style.background = "var(--interactive-accent)";
-      btn.style.color = "var(--text-on-accent)";
-      btn.style.boxShadow = "0 2px 10px rgba(0, 0, 0, 0.14)";
+      if (hasClassList) btn.classList.add("is-hovered");
     };
     btn.onmouseleave = () => {
       if (btn.disabled) return;
-      btn.style.background = "var(--background-primary)";
-      btn.style.color = "var(--interactive-accent)";
-      btn.style.boxShadow = "none";
-      btn.style.transform = "scale(1)";
+      if (hasClassList) btn.classList.remove("is-hovered", "is-pressed");
     };
-    btn.onmousedown = () => { if (!btn.disabled) btn.style.transform = "scale(0.94)"; };
-    btn.onmouseup = () => { if (!btn.disabled) btn.style.transform = "scale(1)"; };
+    btn.onmousedown = () => { if (!btn.disabled && hasClassList) btn.classList.add("is-pressed"); };
+    btn.onmouseup = () => { if (!btn.disabled && hasClassList) btn.classList.remove("is-pressed"); };
     btn.onclick = o.onClick;
     return btn;
   }

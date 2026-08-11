@@ -24,7 +24,7 @@ Flags worth knowing:
 
 | Concept | Workshop | Consumer vault |
 |---|---|---|
-| Root | `/Users/willfellhoelter/projects/repos/sauce` | e.g. `/Users/willfellhoelter/notes/sauce/headspace-sauce` |
+| Root | `/Users/willfell/Documents/GitHub/sauce` | e.g. `/Users/willfell/obsidian/headspace-sauce` |
 | Source of truth for | mechanisms + blueprints + tests + this guide | per-user content under module-directory namespaces |
 | Self-installs? | Yes (dogfood) — but only subscribes to a subset of blueprints | Yes — subscribes to whichever blueprints the engagement needs |
 | Modifies platform code? | YES — this is where edits happen | NO — installer overwrites consumer copies on every run |
@@ -33,14 +33,14 @@ The workshop is its OWN first consumer (workshop dogfood). Look at `ranch/platfo
 
 ## Local-clone vs brew install
 
-The workshop ships to Homebrew via the `willfell/homebrew-sauce` tap. Consumer vaults can resolve their `workshop_relative_path` to EITHER `/opt/homebrew/opt/sauce/libexec` (brew) OR a local clone (`/Users/willfellhoelter/projects/repos/sauce`). The two consumer vaults on this machine point at the local clone for daily-cycle dev workflow.
+The workshop ships to Homebrew via the `willfell/homebrew-sauce` tap. Consumer vaults can resolve their `workshop_relative_path` to EITHER `/opt/homebrew/opt/sauce/libexec` (brew) OR a local clone (`/Users/willfell/Documents/GitHub/sauce`). The two consumer vaults on this machine point at the local clone for daily-cycle dev workflow.
 
 **Currently** the brew tap formula is stale at v0.84.0 (we're at workshop 0.111.3+); 27 versions behind. Local-clone is the only realistic deploy path until the tap is bumped. See [`Docs/landmines.md`](../landmines.md) for the asking-before-acting policy around brew operations.
 
 **Quick check** — look at a consumer vault's `Docs/Meta/platform-config.json`:
 ```json
 {
-  "workshop_relative_path": "/Users/willfellhoelter/projects/repos/sauce"  // local-clone
+  "workshop_relative_path": "/Users/willfell/Documents/GitHub/sauce"  // local-clone
 }
 ```
 vs
@@ -55,7 +55,7 @@ vs
 When workshop ships a new version, consumer vaults need to re-pin and re-install:
 
 ```bash
-cd /Users/willfellhoelter/notes/sauce/<vault-name>
+cd /Users/willfell/obsidian/<vault-name>
 sauce update --bump-pins   # rewrites ranch/platform-subscription.json pins
 sauce install              # runs the installer against the new pin map
 ```

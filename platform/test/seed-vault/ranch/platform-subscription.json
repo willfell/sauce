@@ -3,7 +3,7 @@
   "mechanisms": [
     {
       "name": "customjs-guard",
-      "version": "1.0.0"
+      "version": "1.0.2"
     },
     {
       "name": "validator",
@@ -11,7 +11,7 @@
     },
     {
       "name": "delivery",
-      "version": "0.3.0"
+      "version": "0.7.0"
     },
     {
       "name": "activity-feed",
@@ -55,7 +55,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.15.5"
+      "version": "0.16.1"
     },
     {
       "name": "modal",
@@ -75,7 +75,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.9.1"
+      "version": "0.9.2"
     },
     {
       "name": "people-rendering",
@@ -87,7 +87,7 @@
     },
     {
       "name": "styling",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     {
       "name": "convenience",
@@ -95,7 +95,7 @@
     },
     {
       "name": "platform-claude",
-      "version": "0.4.0"
+      "version": "0.6.0"
     },
     {
       "name": "smart-connections-bridge",
@@ -103,7 +103,7 @@
     },
     {
       "name": "render-safe",
-      "version": "0.2.2"
+      "version": "0.3.1"
     },
     {
       "name": "doc-search",
@@ -115,11 +115,11 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.4.2"
+      "version": "0.4.3"
     },
     {
       "name": "section-explorer",
-      "version": "0.6.1"
+      "version": "0.6.3"
     }
   ],
   "blueprints": [
@@ -133,11 +133,11 @@
     },
     {
       "name": "daily",
-      "version": "0.23.2"
+      "version": "0.25.1"
     },
     {
       "name": "meetings",
-      "version": "0.19.2"
+      "version": "0.19.4"
     },
     {
       "name": "people",
@@ -149,27 +149,27 @@
     },
     {
       "name": "project",
-      "version": "1.56.1"
+      "version": "1.62.8"
     },
     {
       "name": "to-do",
-      "version": "0.26.1"
+      "version": "0.26.2"
     },
     {
       "name": "journal",
-      "version": "0.5.1"
+      "version": "0.5.3"
     },
     {
       "name": "trips",
-      "version": "0.10.1"
+      "version": "0.10.3"
     },
     {
       "name": "finance",
-      "version": "0.23.0"
+      "version": "0.23.2"
     },
     {
       "name": "sticky-notes",
-      "version": "0.11.4"
+      "version": "0.11.6"
     },
     {
       "name": "teams",
@@ -177,11 +177,11 @@
     },
     {
       "name": "wiki",
-      "version": "0.8.2"
+      "version": "0.8.4"
     },
     {
       "name": "reader",
-      "version": "0.6.0"
+      "version": "0.6.3"
     }
   ]
 }

@@ -35,7 +35,7 @@ node_modules/
 # Claude Code per-session scheduler lock (runtime state; never tracked)
 .claude/scheduled_tasks.lock
 
-# Git worktrees (created via /Users/willfellhoelter/.claude/.../using-git-worktrees skill).
+# Git worktrees (created via /Users/willfell/.claude/.../using-git-worktrees skill).
 .worktrees/
 .superpowers/
 

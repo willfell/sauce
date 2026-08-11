@@ -170,6 +170,56 @@ function ok(cond, msg) {
     }
 
     // -----------------------------------------------------------------------
+    // HC-V0127-TCEL-H2: rejected persistence restores the browser-toggled
+    // checkbox and title styling after RenderSafe optimism.
+    // -----------------------------------------------------------------------
+    {
+        const entries = [{
+            idx: 9, line: '- [ ] Roll me back',
+            parsed: { title: 'Roll me back', priority: null, due: null, scheduled: null, project: null },
+        }];
+        let mutateCalls = 0;
+        const sandbox = loadIntoSandbox({
+            customJS: {
+                TaskInteractions: {
+                    findTaskLines: () => entries,
+                    replaceTaskAt: async () => ({ ok: false, reason: 'fixture rejection' }),
+                },
+                RenderSafe: {
+                    mutate: async (opts) => {
+                        mutateCalls++;
+                        if (opts.optimistic) await opts.optimistic();
+                        try { return { ok: true, value: await opts.write() }; }
+                        catch (error) {
+                            if (opts.revert) await opts.revert(error);
+                            return { ok: false, error };
+                        }
+                    },
+                },
+                ToDoCreateTask: { open: () => {} },
+            },
+        });
+        const container = makeEl();
+        const dv = {
+            container,
+            current: () => ({ file: { path: 'spice/to-do/2026/06-June/ToDo-2026-06-25.md' } }),
+        };
+        await new sandbox.TodayCaptureEditableList().render(dv);
+        const cb = findAll(container, (el) => el.tagName === 'input' && el.type === 'checkbox')[0];
+        const title = findAll(container, (el) => el.tagName === 'span' && /Roll me back/.test(el.innerHTML || ''))[0];
+        ok(!!cb && !!title, 'HC-V0127-TCEL-H2: rollback fixture resolves checkbox and title');
+        if (cb && title) {
+            cb.checked = true;
+            const handler = ((cb._listeners && cb._listeners.change) || [])[0];
+            await handler({});
+            ok(mutateCalls === 1, 'HC-V0127-TCEL-H2-2: rejected write still routes through mutate');
+            ok(cb.checked === false, 'HC-V0127-TCEL-H2-3: browser-toggled checkbox restores prior state');
+            ok(title.style.textDecoration === '' && title.style.color === 'var(--text-normal)',
+                'HC-V0127-TCEL-H2-4: title styling restores the unchecked state');
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // HC-V0127-TCEL-B: project/priority/due chips appear when parsed has them.
     // -----------------------------------------------------------------------
     {
@@ -342,11 +392,20 @@ function ok(cond, msg) {
             parsed: { title: 'Toggle me', priority: null, due: null, scheduled: null, project: null },
         }];
         let replaceArgs = null;
+        let mutateCalls = 0;
         const sandbox = loadIntoSandbox({
             customJS: {
                 TaskInteractions: {
                     findTaskLines: () => entries,
                     replaceTaskAt: async (fp, idx, line) => { replaceArgs = { fp, idx, line }; return { ok: true }; },
+                },
+                RenderSafe: {
+                    mutate: async (opts) => {
+                        mutateCalls++;
+                        if (opts.optimistic) await opts.optimistic();
+                        try { return { ok: true, value: await opts.write() }; }
+                        catch (error) { if (opts.revert) await opts.revert(error); return { ok: false, error }; }
+                    },
                 },
                 ToDoCreateTask: { open: () => {} },
             },
@@ -367,6 +426,7 @@ function ok(cond, msg) {
             const handlers = (cbs[0]._listeners && cbs[0]._listeners.change) || [];
             ok(handlers.length === 1, 'HC-V0127-TCEL-H-3: change handler attached');
             if (handlers.length) await handlers[0]({});
+            ok(mutateCalls === 1, 'HC-V0127-TCEL-H-3b: checkbox write routes through RenderSafe.mutate');
             ok(replaceArgs && replaceArgs.idx === 9
                 && replaceArgs.line === '- [x] Toggle me'
                 && replaceArgs.fp === 'spice/to-do/2026/06-June/ToDo-2026-06-25.md',

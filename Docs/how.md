@@ -7,8 +7,8 @@ Two distinct postures co-exist post-v0.21.0:
 **Posture A — workshop dev repo separate from consumer vaults (current machine):**
 
 ```
-~/projects/repos/sauce/               canonical platform source-of-truth (git-tracked) + self-installs as workshop dogfood
-~/notes/sauce/
+~/Documents/GitHub/sauce/               canonical platform source-of-truth (git-tracked) + self-installs as workshop dogfood
+~/obsidian/
   barebones/                          primary regression target (Sauce-shape from scratch)
   accuris-sauce/                      Sauce-shape consumer (post-v0.28.0 migrated)
   ero-sauce/                          Sauce-shape consumer (post-v0.28.0 migrated)
@@ -236,7 +236,7 @@ Sauce vault platform ships an interactive Node-based bootstrap orchestrator at `
 
 ```bash
 # One-time workshop setup
-cd <workshop-path>           # e.g., /Users/willfellhoelter/projects/repos/sauce
+cd <workshop-path>           # e.g., /Users/willfell/Documents/GitHub/sauce
 npm install
 
 # Consumer-side, from inside any consumer vault

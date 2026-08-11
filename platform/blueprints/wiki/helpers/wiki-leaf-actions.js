@@ -13,6 +13,8 @@
  */
 class WikiLeafActions {
     render(dv) {
+      try {
+        if (!dv || !dv.container || typeof dv.current !== "function") return;
         const cur = dv.current();
         if (!cur || !cur.file || cur.type !== "wiki-page") return;
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
@@ -62,6 +64,7 @@ class WikiLeafActions {
         // strips the legacy template "---" from existing pages.
         const hrBottom = wrap.createEl("hr");
         hrBottom.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 12px 0;";
+      } catch (_e) { /* never throw during cold load */ }
     }
 
     // Each button stretches to an equal share of the centered row (flex: 1) with a
@@ -93,10 +96,13 @@ class WikiLeafActions {
     }
 
     async _openMoveDialog(dv, currentPath) {
-        if (!customJS || !customJS.WikiMove || typeof customJS.WikiMove.sectionTargets !== "function") {
+      try {
+        const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || null;
+        if (!cjs || !cjs.WikiMove || typeof cjs.WikiMove.sectionTargets !== "function") {
             new Notice("WikiLeafActions: WikiMove unavailable.", 6000);
             return;
         }
+        if (!dv || typeof dv.pages !== "function") return;
         const wikiPages = dv.pages('"spice/wiki"');
         const pages = wikiPages.array ? wikiPages.array() : Array.from(wikiPages);
         const options = this._buildMoveOptions(pages, currentPath);
@@ -142,7 +148,8 @@ class WikiLeafActions {
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
         });
-        if (chosen) await customJS.WikiMove.move(dv, chosen);
+        if (chosen) await cjs.WikiMove.move(dv, chosen);
+      } catch (_e) { /* stale Dataview or dependency: fail closed */ }
     }
 
     _escape(s) {

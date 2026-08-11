@@ -140,6 +140,8 @@ function makeEl(tag, opts) {
     return child;
   };
   el.querySelector = function (sel) {
+    const direct = typeof sel === 'string' ? sel.match(/^:scope\s*>\s*\.([A-Za-z0-9_-]+)$/) : null;
+    if (direct) return el.children.find((child) => child.cls === direct[1] || child.className === direct[1]) || null;
     if (typeof sel !== 'string' || sel[0] !== '.') return null;
     const cls = sel.slice(1);
     const walk = (n) => {
@@ -338,6 +340,65 @@ function loadPeopleRenderingClass(app, customJS, Notice) {
 
 function makeFinanceCustomJsStub(overrides) {
   const noop = { render: async () => {} };
+  const renderSafe = {
+    page: (dv) => {
+      try { return dv && typeof dv.current === 'function' ? (dv.current() || null) : null; }
+      catch (_e) { return null; }
+    },
+    captureScroll() {},
+    async mutateStructure(opts) {
+      let receipt;
+      try {
+        receipt = await opts.apply();
+        return { ok: true, value: await opts.write() };
+      } catch (error) {
+        if (typeof opts.rollback === 'function') await opts.rollback(receipt, error);
+        return { ok: false, error };
+      }
+    },
+    async mutate(opts) {
+      try {
+        if (typeof opts.optimistic === 'function') await opts.optimistic();
+        return { ok: true, value: await opts.write() };
+      } catch (error) {
+        if (typeof opts.revert === 'function') await opts.revert(error);
+        return { ok: false, error };
+      }
+    },
+  };
+  const financeRenderQueues = new Map();
+  const financeFrontmatter = {
+    page: renderSafe.page,
+    update: async () => {},
+    read: () => null,
+    isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true'),
+    async mutateRendered(file, opts) {
+      const container = opts && opts.dv && opts.dv.container;
+      const selector = String(opts && opts.selector || '');
+      const key = `${file && file.path || ''}\u0000${selector}`;
+      const prior = financeRenderQueues.get(key) || Promise.resolve();
+      const current = prior.catch(() => {}).then(async () => {
+        const prepared = typeof opts.prepare === 'function' ? await opts.prepare() : null;
+        const active = prepared && typeof prepared === 'object' ? Object.assign({}, opts, prepared) : opts;
+        return await renderSafe.mutateStructure({
+          apply: async () => {
+            const oldRoot = container && container.querySelector ? container.querySelector(selector) : null;
+            await active.render();
+            const optimisticRoot = container && container.querySelector ? container.querySelector(selector) : null;
+            return { oldRoot, optimisticRoot };
+          },
+          rollback: ({ oldRoot, optimisticRoot } = {}) => {
+            optimisticRoot && optimisticRoot.remove && optimisticRoot.remove();
+            if (oldRoot && container && container.appendChild) container.appendChild(oldRoot);
+          },
+          write: () => typeof active.write === 'function' ? active.write() : financeFrontmatter.update(file, active.mutator),
+        });
+      });
+      financeRenderQueues.set(key, current);
+      try { return await current; }
+      finally { if (financeRenderQueues.get(key) === current) financeRenderQueues.delete(key); }
+    },
+  };
   const base = {
     NewBudgetButton: noop,
     NewPaycheckButton: noop,
@@ -345,7 +406,8 @@ function makeFinanceCustomJsStub(overrides) {
     BudgetsCards: noop,
     PaychecksCards: noop,
     InvoicesCards: noop,
-    FinanceFrontmatter: { update: async () => {}, read: () => null, isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true') },
+    FinanceFrontmatter: financeFrontmatter,
+    RenderSafe: renderSafe,
     AccentButton: {
       render: (parent, opts) => {
         const btn = parent.createEl('button');
@@ -356,7 +418,10 @@ function makeFinanceCustomJsStub(overrides) {
       },
     },
   };
-  return Object.assign(base, overrides || {});
+  const supplied = overrides || {};
+  if (supplied.FinanceFrontmatter) Object.assign(financeFrontmatter, supplied.FinanceFrontmatter);
+  if (supplied.RenderSafe) Object.assign(renderSafe, supplied.RenderSafe);
+  return Object.assign(base, supplied, { FinanceFrontmatter: financeFrontmatter, RenderSafe: renderSafe });
 }
 
 function loadFinanceClass(className, app, customJsOverrides) {
@@ -1975,6 +2040,15 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
   const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
   app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
   const overrides = {
+    FinanceFrontmatter: {
+      // The metadata page below remains frozen. The shared helper exposes the
+      // completed first write to the second gesture until Dataview catches up.
+      read: () => ({
+        month: store.month,
+        deposits: store.deposits.map(d => ({ ...d })),
+        expenses: store.expenses.slice(),
+      }),
+    },
     FinanceMath: {
       _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
       // depositTotals derives from the passed page so the header reflects the
@@ -1991,14 +2065,31 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
     deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 3000 }],
     expenses: [],
   };
+  let concurrentWrites = 0;
+  let maxConcurrentWrites = 0;
+  let writeCount = 0;
+  let releaseFirstWrite;
+  let firstWriteStarted;
+  const firstWriteReady = new Promise((resolve) => { firstWriteStarted = resolve; });
+  const firstWriteGate = new Promise((resolve) => { releaseFirstWrite = resolve; });
   inst._mutate = async (file, mutator) => {
+    concurrentWrites++;
+    maxConcurrentWrites = Math.max(maxConcurrentWrites, concurrentWrites);
+    const sequence = ++writeCount;
     const fm = { month: store.month, deposits: store.deposits.map(d => ({ ...d })), expenses: store.expenses.slice() };
     await mutator(fm);
+    if (sequence === 1) {
+      firstWriteStarted();
+      await firstWriteGate;
+    }
     store.deposits = fm.deposits;
     store.expenses = fm.expenses;
+    concurrentWrites--;
   };
-  // Stub window.prompt to type the NEW deposit amount (6000).
-  const restoreWin = (() => { const prior = global.window; global.window = { prompt: () => '6000' }; return () => { global.window = prior; }; })();
+  // Two gestures complete while dv.current() remains frozen. The second must
+  // retain deposit[0]=6000 while applying deposit[1]=3500.
+  const promptValues = ['6000', '3500'];
+  const restoreWin = (() => { const prior = global.window; global.window = { prompt: () => promptValues.shift() }; return () => { global.window = prior; }; })();
   // dv.current() is FROZEN to the PRE-edit page (deposit 0 amount = 4500).
   const page = {
     file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
@@ -2008,17 +2099,30 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
   };
   const dv = makeDvWithCurrent(page);
   const file = app.vault.getAbstractFileByPath(page.file.path);
-  await inst._editDepositAmount(file, dv, 0);
+  const renderedDeposits = [];
+  const rerender = inst._rerender.bind(inst);
+  inst._rerender = async (...args) => {
+    renderedDeposits.push((args[2]?.deposits || []).map((deposit) => deposit.amount));
+    return await rerender(...args);
+  };
+  const first = inst._editDepositAmount(file, dv, 0);
+  await firstWriteReady;
+  const second = inst._editDepositAmount(file, dv, 1);
+  await Promise.resolve();
+  releaseFirstWrite();
+  await Promise.all([first, second]);
   restoreWin();
-  const wroteAmount = store.deposits[0].amount === 6000;
+  const wroteAmounts = store.deposits[0].amount === 6000 && store.deposits[1].amount === 3500;
   const root = findClass(dv.container, 'pee-root');
   const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
   const joined = texts.join(' | ');
-  // The re-render must show the NEW amount (6000.00), NOT the frozen 4500.00.
-  const showsNew = joined.includes('6000.00');
-  const showsStale = joined.includes('4500.00');
-  console.log(`  wrote deposit[0]=6000: ${wroteAmount} ; re-render shows 6000.00: ${showsNew} ; stale 4500.00 still shown: ${showsStale}`);
-  const pass = wroteAmount && showsNew && !showsStale;
+  const showsBoth = joined.includes('6000.00') && joined.includes('3500.00');
+  const rootCount = dv.container.children.filter((child) => child.cls === 'pee-root').length;
+  const resurrectsStale = joined.includes('4500.00') || joined.includes('3000.00');
+  const exactSequence = JSON.stringify(renderedDeposits) === JSON.stringify([[6000, 3000], [6000, 3500]]);
+  console.log(`  persisted both edits: ${wroteAmounts} ; exact optimistic sequence: ${exactSequence} ; max concurrent writes: ${maxConcurrentWrites} ; roots: ${rootCount} ; second repaint shows both: ${showsBoth} ; stale amount resurrected: ${resurrectsStale}`);
+  const pass = wroteAmounts && exactSequence && maxConcurrentWrites === 1
+    && rootCount === 1 && showsBoth && !resurrectsStale;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -2706,7 +2810,7 @@ async function testFF16BudgetAllocationsEditMaterializesOverride() {
   cjs.FinanceMath = { budgetAllocations: () => makeStaleView(), fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
   // Capture the frontmatter write (durable), but DO NOT reflect it into the view —
   // the view stays stale, exactly like Dataview before it reindexes.
-  cjs.FinanceFrontmatter = {
+  Object.assign(cjs.FinanceFrontmatter, {
     update: async (file, mut) => {
       const fm = { debt_allocations: capturedDebtAlloc.slice(), savings_allocations: [] };
       await mut(fm);
@@ -2714,7 +2818,7 @@ async function testFF16BudgetAllocationsEditMaterializesOverride() {
     },
     read: () => null,
     isTruthy: (v) => v === true,
-  };
+  });
   const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn BudgetAllocationsEditor;`)(app, cjs, FakeNotice);
   const inst = new Cls();
   // Stub the row-edit modal to return the user's new planned amount.
@@ -2839,6 +2943,27 @@ async function testFinanceColdLoadRenderGuards() {
     console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${cls} cold-load early-return`);
     if (!ok) allPass = false;
   }
+  // PERF-3 editors must also survive a genuinely missing/throwing current page
+  // outside an embed. These helpers now route their page access through the
+  // never-throw FinanceFrontmatter/RenderSafe seam before any query or write.
+  const perf3ColdLoadWidgets = [
+    'BudgetAllocationsEditor', 'BudgetCategoriesEditor', 'BudgetDefaultsEditor',
+    'PaycheckDefaultsEditor', 'PaycheckExpensesEditor', 'DebtDefaultsEditor',
+    'FinancePlanDashboard', 'InvoiceControls', 'InvoiceTimeLogEditor',
+  ];
+  for (const cls of perf3ColdLoadWidgets) {
+    let ok = false;
+    try {
+      const Cls = load(cls);
+      const dv = makeDvWithCurrent(null);
+      dv.current = () => { throw new Error('cold Dataview index'); };
+      dv.container.closest = () => null;
+      await new Cls().render(dv);
+      ok = dv.container.children.length === 0;
+    } catch (e) { console.log(`  [throw] PERF-3 ${cls}: ${e && e.message}`); ok = false; }
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — PERF-3 ${cls} missing-page guard`);
+    if (!ok) allPass = false;
+  }
   // DebtConfigEditor: modal editor, render(file, opts) with `if (!file) return`.
   {
     let ok = false;
@@ -2849,6 +2974,265 @@ async function testFinanceColdLoadRenderGuards() {
   }
   console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
   return allPass;
+}
+
+// PERF-3 — the shared Finance structural seam must render before persistence,
+// capture scroll first, and restore the exact prior root/focus/selection when
+// persistence rejects. This behavioral fixture fails on the pre-PERF-3 helper,
+// which has no mutateRendered lifecycle at all.
+async function testFF35FinanceStructuralRollback() {
+  console.log('\n=== FF35 / PERF-3 — Finance structural mutation rolls back exact DOM + focus ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const helpersDir = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers');
+  const renderSafeSrc = fs.readFileSync(path.join(WORKSHOP, 'platform', 'mechanisms', 'render-safe', 'render-safe.js'), 'utf8');
+  const ffSrc = fs.readFileSync(path.join(helpersDir, 'finance-frontmatter.js'), 'utf8');
+  const RenderSafe = new Function('app', 'Notice', `${renderSafeSrc}\nreturn RenderSafe;`)(app, FakeNotice);
+  const renderSafe = new RenderSafe();
+  const events = [];
+  renderSafe.captureScroll = () => { events.push('capture'); };
+  const customJS = { RenderSafe: renderSafe };
+  const FinanceFrontmatter = new Function('app', 'customJS', 'Notice', `${ffSrc}\nreturn FinanceFrontmatter;`)(app, customJS, FakeNotice);
+  const ff = new FinanceFrontmatter();
+
+  const parent = {
+    children: [],
+    insertBefore(node, before) {
+      const oldIndex = this.children.indexOf(node);
+      if (oldIndex >= 0) this.children.splice(oldIndex, 1);
+      const at = before ? this.children.indexOf(before) : -1;
+      this.children.splice(at >= 0 ? at : this.children.length, 0, node);
+      node.parentNode = this;
+    },
+  };
+  const makeRoot = (name, input) => ({
+    cls: 'perf3-root', name, parentNode: parent, nextSibling: null,
+    contains: (target) => target === input,
+    querySelector: () => input,
+    remove() {
+      const at = parent.children.indexOf(this);
+      if (at >= 0) parent.children.splice(at, 1);
+      this.parentNode = null;
+    },
+  });
+  const focusState = [];
+  const oldInput = {
+    dataset: { financeFocusKey: 'amount' }, selectionStart: 2, selectionEnd: 4,
+    selectionDirection: 'forward',
+    focus: () => focusState.push('old-focus'),
+    setSelectionRange: (start, end, direction) => focusState.push(`old-selection:${start}:${end}:${direction}`),
+  };
+  const newInput = {
+    dataset: { financeFocusKey: 'amount' },
+    focus: () => focusState.push('new-focus'),
+    setSelectionRange: (start, end, direction) => focusState.push(`new-selection:${start}:${end}:${direction}`),
+  };
+  const oldRoot = makeRoot('old', oldInput);
+  const optimisticRoot = makeRoot('optimistic', newInput);
+  parent.children = [oldRoot];
+  const container = {
+    querySelector: (selector) => selector === ':scope > .perf3-root'
+      ? (parent.children.find((node) => node.cls === 'perf3-root') || null) : null,
+  };
+  const priorDocument = global.document;
+  global.document = { activeElement: oldInput };
+  let result;
+  try {
+    result = await ff.mutateRendered({ path: 'spice/finance/Test.md' }, {
+      dv: { container }, selector: ':scope > .perf3-root',
+      render: async () => {
+        events.push('render');
+        oldRoot.remove();
+        parent.insertBefore(optimisticRoot, null);
+      },
+      write: async () => { events.push('write'); throw new Error('synthetic persistence rejection'); },
+    });
+  } finally {
+    global.document = priorDocument;
+  }
+  const exactOrder = events.join(',') === 'capture,render,write';
+  const exactRoot = parent.children.length === 1 && parent.children[0] === oldRoot;
+  const optimisticGone = !parent.children.includes(optimisticRoot);
+  const focusRestored = focusState.includes('new-focus') && focusState.includes('old-focus')
+    && focusState.includes('old-selection:2:4:forward');
+  const pass = result && result.ok === false && exactOrder && exactRoot && optimisticGone && focusRestored;
+  console.log(`  capture→render→write: ${exactOrder} ; exact old root restored: ${exactRoot} ; optimistic removed: ${optimisticGone} ; focus/selection restored: ${focusRestored}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// PERF-3 compensation: the Time-Log and its sibling Invoice are one gesture.
+// A missing Invoice must reject and restore the authoritative Time-Log state,
+// not commit a partial success that leaves the optimistic editor root visible.
+async function testFF37InvoiceTimeLogMissingSiblingCompensation() {
+  console.log('\n=== FF37 / PERF-3 — missing sibling Invoice compensates the Time-Log write ===');
+  const app = makeApp();
+  const file = { path: 'spice/finance/invoices/2026-08/Time-Log-2026-08.md' };
+  const state = { server_only: 'keep' };
+  app.vault.getAbstractFileByPath = () => null;
+  const Cls = loadFinanceClass('InvoiceTimeLogEditor', app, {
+    FinanceFrontmatter: {
+      read: () => ({
+        entries: [{ date: '2025-01-01', hours: 99, description: 'Stale cache' }],
+        total_hours: 99,
+      }),
+      update: async (_file, mutator) => { await mutator(state); },
+    },
+  });
+  let rejected = false;
+  try {
+    await new Cls()._propagateAfterMutation(
+      file,
+      {},
+      [{ date: '2026-08-02', hours: 2, description: 'New' }],
+      'spice/finance/invoices/2026-08/Invoice-2026-08.md',
+    );
+  } catch (error) {
+    rejected = /Sibling Invoice file is missing/.test(String(error && error.message));
+  }
+  const restored = !Object.prototype.hasOwnProperty.call(state, 'entries')
+    && !Object.prototype.hasOwnProperty.call(state, 'total_hours')
+    && state.server_only === 'keep';
+  const concurrent = [{ date: '2026-08-03', hours: 8, description: 'Concurrent edit' }];
+  const conflictState = {
+    entries: [{ date: '2026-08-01', hours: 1, description: 'Prior' }],
+    total_hours: 1,
+    server_only: 'keep',
+  };
+  const conflictApp = makeApp();
+  conflictApp.vault.getAbstractFileByPath = () => {
+    conflictState.entries = concurrent.map((row) => ({ ...row }));
+    conflictState.total_hours = 8;
+    return null;
+  };
+  const ConflictCls = loadFinanceClass('InvoiceTimeLogEditor', conflictApp, {
+    FinanceFrontmatter: {
+      read: () => ({ entries: [], total_hours: 0 }),
+      update: async (_file, mutator) => { await mutator(conflictState); },
+    },
+  });
+  let conflictRejected = false;
+  try {
+    await new ConflictCls()._propagateAfterMutation(
+      file,
+      {},
+      [{ date: '2026-08-02', hours: 2, description: 'New' }],
+      'spice/finance/invoices/2026-08/Invoice-2026-08.md',
+    );
+  } catch (error) {
+    conflictRejected = /compensation failed/.test(String(error && error.message));
+  }
+  const concurrentPreserved = JSON.stringify(conflictState.entries) === JSON.stringify(concurrent)
+    && conflictState.total_hours === 8
+    && conflictState.server_only === 'keep';
+  const pass = rejected && restored && conflictRejected && concurrentPreserved;
+  console.log(`  rejected: ${rejected} ; stale read ignored + field absence restored: ${restored}`);
+  console.log(`  compensation conflict rejected: ${conflictRejected} ; concurrent edit preserved: ${concurrentPreserved}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// PERF-3 rapid-sequence authority: InvoiceControls must derive its optimistic
+// amount from the same authoritative frontmatter snapshot used by persistence,
+// never from a frozen Dataview page.
+async function testFF38InvoiceControlsAuthoritativePreview() {
+  console.log('\n=== FF38 / PERF-3 — InvoiceControls preview uses authoritative hours ===');
+  const invoicePath = 'spice/finance/invoices/2026-08/Invoice-2026-08.md';
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const state = { hours: 2, rate: 100, amount: 200, submitted_date: '' };
+  const Cls = loadFinanceClass('InvoiceControls', app, {
+    FinanceFrontmatter: {
+      read: () => ({ ...state }),
+      update: async (_file, mutator) => { await mutator(state); },
+    },
+  });
+  const dv = makeDvWithCurrent({
+    file: { path: invoicePath, name: 'Invoice-2026-08' },
+    hours: 1, rate: 100, amount: 100, submitted_date: '',
+  });
+  await new Cls().render(dv);
+  let root = findClass(dv.container, 'ic-root');
+  const rateInput = collectAll(root, (node) => node.tag === 'input')[0];
+  const save = collectButtons(root).find((button) => String(button.innerHTML || '').includes('Save'));
+  rateInput.value = '150';
+  save.disabled = false;
+  await save.onclick();
+  root = findClass(dv.container, 'ic-root');
+  const rendered = collectAll(root, (node) => typeof node.textContent === 'string')
+    .map((node) => node.textContent).join(' | ');
+  const roots = collectAll(dv.container, (node) => node.cls === 'ic-root');
+  const pass = state.hours === 2 && state.rate === 150 && state.amount === 300
+    && rendered.includes('2h') && rendered.includes('$300.00') && roots.length === 1;
+  console.log(`  persisted amount $300: ${state.amount === 300} ; preview 2h/$300: ${rendered.includes('2h') && rendered.includes('$300.00')} ; roots: ${roots.length}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// PERF-3 source matrix: every Finance editor structural surface consumes the
+// shared seam and centralizes its authoritative self-render behind scroll
+// capture; the Plan surface uses the field mutation seam and the same rerender.
+async function testFF36FinanceLifecycleCoverageMatrix() {
+  console.log('\n=== FF36 / PERF-3 — every Finance editor routes through the shared lifecycle ===');
+  const helpersDir = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers');
+  const structural = [
+    'budget-allocations-editor.js', 'budget-categories-editor.js',
+    'budget-defaults-editor.js', 'debt-defaults-editor.js',
+    'invoice-controls.js', 'invoice-time-log-editor.js',
+    'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js',
+  ];
+  const authoritativeReadMarkers = [
+    'FinanceFrontmatter.read', '_mutateRead(', '_authoritativePage(',
+  ];
+  const prepareBodies = (src) => {
+    const bodies = [];
+    const pattern = /prepare\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/g;
+    let match;
+    while ((match = pattern.exec(src))) {
+      const start = pattern.lastIndex;
+      let depth = 1;
+      let quote = null;
+      let escaped = false;
+      let index = start;
+      for (; index < src.length && depth > 0; index++) {
+        const char = src[index];
+        if (quote) {
+          if (escaped) escaped = false;
+          else if (char === '\\') escaped = true;
+          else if (char === quote) quote = null;
+          continue;
+        }
+        if (char === '"' || char === "'" || char === '`') quote = char;
+        else if (char === '{') depth++;
+        else if (char === '}') depth--;
+      }
+      bodies.push(src.slice(start, index - 1));
+      pattern.lastIndex = index;
+    }
+    return bodies;
+  };
+  let pass = true;
+  for (const file of structural) {
+    const src = fs.readFileSync(path.join(helpersDir, file), 'utf8');
+    const mutationCount = (src.match(/FinanceFrontmatter\.mutateRendered\s*\(/g) || []).length;
+    const prepared = prepareBodies(src);
+    const allPreparedReadsAreAuthoritative = mutationCount > 0
+      && prepared.length === mutationCount
+      && prepared.every((body) => authoritativeReadMarkers.some((marker) => body.includes(marker)));
+    const ok = src.includes('FinanceFrontmatter.mutateRendered')
+      && src.includes('RenderSafe?.captureScroll?.()')
+      && src.includes('render: () => this._rerender')
+      && allPreparedReadsAreAuthoritative
+      && !src.includes('dataview-force-refresh-views');
+    console.log(`  ${ok ? 'PASS' : 'FAIL'} — ${file} (${prepared.length}/${mutationCount} queued authoritative prepares)`);
+    pass = pass && ok;
+  }
+  const plan = fs.readFileSync(path.join(helpersDir, 'finance-plan-dashboard.js'), 'utf8');
+  const planOk = plan.includes('RenderSafe.mutate({')
+    && plan.includes('RenderSafe?.captureScroll?.()')
+    && !plan.includes('dataview-force-refresh-views');
+  console.log(`  ${planOk ? 'PASS' : 'FAIL'} — finance-plan-dashboard.js`);
+  pass = pass && planOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
 }
 
 async function testFF3HubAreaRowIcons() {
@@ -3809,6 +4193,10 @@ async function testRendHasNotes() {
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
       results.push(['FF-COLD finance-widget-cold-load-render-guards', await testFinanceColdLoadRenderGuards()]);
+      results.push(['FF35 finance-structural-rollback', await testFF35FinanceStructuralRollback()]);
+      results.push(['FF36 finance-lifecycle-coverage-matrix', await testFF36FinanceLifecycleCoverageMatrix()]);
+      results.push(['FF37 invoice-time-log-missing-sibling-compensation', await testFF37InvoiceTimeLogMissingSiblingCompensation()]);
+      results.push(['FF38 invoice-controls-authoritative-preview', await testFF38InvoiceControlsAuthoritativePreview()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;

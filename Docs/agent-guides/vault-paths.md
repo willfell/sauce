@@ -10,7 +10,7 @@ load_when: Touching any vault path — workshop, consumer, legacy source, or pre
 ## Workshop dev repo (THIS directory)
 
 ```
-/Users/willfellhoelter/projects/repos/sauce
+/Users/willfell/Documents/GitHub/sauce
 ```
 
 Canonical platform source-of-truth. Also self-installs as the workshop dogfood vault. All `cd` / harness invocations in docs assume this path.
@@ -23,17 +23,17 @@ Post-v0.28.0 migrated Sauce-shape vaults:
 
 | Vault | Path | Role |
 | --- | --- | --- |
-| `barebones` | `/Users/willfellhoelter/notes/sauce/barebones` | Primary regression target |
-| `accuris-sauce` | `/Users/willfellhoelter/notes/sauce/accuris-sauce` | Day-to-day consumer |
-| `ero-sauce` | `/Users/willfellhoelter/notes/sauce/ero-sauce` | Day-to-day consumer |
-| `headspace-sauce` | `/Users/willfellhoelter/notes/sauce/headspace-sauce` | Day-to-day consumer + smoke-path target |
+| `barebones` | `/Users/willfell/obsidian/barebones` | Primary regression target |
+| `accuris-sauce` | `/Users/willfell/obsidian/accuris-sauce` | Day-to-day consumer |
+| `ero-sauce` | `/Users/willfell/obsidian/ero-sauce` | Day-to-day consumer |
+| `headspace-sauce` | `/Users/willfell/obsidian/headspace-sauce` | Day-to-day consumer + smoke-path target |
 
 ## Consumer workshop resolution: local-clone (canonical on this machine)
 
 Each consumer vault's `ranch/platform-config.json` declares `workshop_relative_path`. On THIS dev machine, consumers point at the **local clone** of the workshop, NOT the brew bottle:
 
 ```json
-{ "workshop_relative_path": "/Users/willfellhoelter/projects/repos/sauce" }
+{ "workshop_relative_path": "/Users/willfell/Documents/GitHub/sauce" }
 ```
 
 **Why local clone (not brew bottle):**
@@ -50,18 +50,18 @@ Run this sequence whenever you've just landed a workshop cycle and want consumer
 
 ```bash
 # 1. Workshop side — confirm clean + on origin/main
-cd /Users/willfellhoelter/projects/repos/sauce
+cd /Users/willfell/Documents/GitHub/sauce
 git status                              # expect: clean working tree
 git log --oneline origin/main..HEAD     # expect: empty (no unpushed commits)
 git log --oneline HEAD..origin/main     # expect: empty (no unpulled commits)
 node platform/test/run-helper-cases.js  # expect: PASS
 
 # 2. Per consumer vault — bump subscription pins to match workshop
-cd /Users/willfellhoelter/notes/sauce/headspace-sauce
+cd /Users/willfell/obsidian/headspace-sauce
 sauce update --bump-pins
 sauce status                            # expect: drift: none + git head matches workshop HEAD
 
-cd /Users/willfellhoelter/notes/sauce/accuris-sauce
+cd /Users/willfell/obsidian/accuris-sauce
 sauce update --bump-pins
 sauce status
 
@@ -98,9 +98,9 @@ Never push origin/main with stale runtime artifacts mixed into a feature commit.
 Per landmine #20, these are READ-ONLY: they are **only ever inputs** to `sauce migrate --from <path>`. Never written to.
 
 ```
-/Users/willfellhoelter/notes/accuris
-/Users/willfellhoelter/notes/ero-sync/ero
-/Users/willfellhoelter/notes/headspace
+/Users/willfell/notes/accuris
+/Users/willfell/notes/ero-sync/ero
+/Users/willfell/notes/headspace
 ```
 
 ## Predecessor-machine paths (historical reference)

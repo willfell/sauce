@@ -29,10 +29,8 @@ function loadClass(relPath, className) {
   return new Function(`${src}\nreturn ${className};`)();
 }
 
-const ProjectChromeBar = loadClass(
-  'platform/blueprints/project/helpers/project-chrome-bar.js',
-  'ProjectChromeBar'
-);
+const chromeBarSource = fs.readFileSync(path.join(ROOT, 'platform/blueprints/project/helpers/project-chrome-bar.js'), 'utf8');
+const ProjectChromeBar = new Function(`${chromeBarSource}\nreturn ProjectChromeBar;`)();
 // The bar now delegates its render + Vault-section to the shared chrome-bar
 // mechanism, which delegates ordering to nav-buttons. Load both REAL classes so
 // the render + _navEntries cases exercise the true end-to-end wiring (not stubs).
@@ -48,18 +46,68 @@ const inst = new ProjectChromeBar();
 // block but awaited from the render chain (so it runs before summarize()).
 let dispatch8Fn = async () => {};
 
+async function archiveMutationRollbackCase() {
+  const page = { file: { path: 'spice/projects/connectors/Connectors.md' }, status: 'in-progress' };
+  const file = { path: page.file.path };
+  const priorApp = global.app;
+  const priorCJS = global.customJS;
+  const priorDocument = global.document;
+  const priorNotice = global.Notice;
+  let sawOptimistic = false;
+  let focused = false;
+  global.document = { activeElement: { focus: () => { focused = true; } } };
+  global.Notice = function Notice() {};
+  global.app = {
+    fileManager: { processFrontMatter: async () => { sawOptimistic = page.status === 'archived'; throw new Error('fixture failure'); } },
+    commands: { executeCommandById: () => { throw new Error('global refresh forbidden'); } },
+  };
+  global.customJS = {
+    RenderSafe: {
+      page: () => page,
+      mutateStructure: async (opts) => {
+        const receipt = opts.apply();
+        try { await opts.write(); return { ok: true, receipt }; }
+        catch (error) { await opts.rollback(receipt, error); return { ok: false, error, receipt }; }
+      },
+    },
+  };
+  try {
+    const saved = await inst._toggleProjectArchive({ current: () => page }, file);
+    ok('ARCHTOG-5 archive applies optimistic model before persistence', sawOptimistic);
+    ok('ARCHTOG-6 archive failure restores exact status model', saved === false && page.status === 'in-progress' && !('pre_archive_status' in page));
+    ok('ARCHTOG-7 archive rollback restores focus without global refresh', focused);
+  } finally {
+    global.app = priorApp;
+    global.customJS = priorCJS;
+    global.document = priorDocument;
+    global.Notice = priorNotice;
+  }
+}
+
 // ── DOM stub ────────────────────────────────────────────────────────────────
 // Minimal element supporting createEl (Obsidian) + appendChild/createElement
 // (document.body path) + querySelector (returns null; no prior overlay).
 function makeEl(tag) {
+  const classes = new Set();
   const el = {
     tag,
     textContent: '',
     innerHTML: '',
-    className: '',
     style: { cssText: '', setProperty() {} },
     children: [],
     onclick: null,
+  };
+  Object.defineProperty(el, 'className', {
+    get: () => [...classes].join(' '),
+    set: (value) => {
+      classes.clear();
+      for (const name of String(value || '').split(/\s+/).filter(Boolean)) classes.add(name);
+    },
+  });
+  el.classList = {
+    add: (...names) => { for (const name of names) classes.add(name); },
+    remove: (...names) => { for (const name of names) classes.delete(name); },
+    contains: (name) => classes.has(name),
   };
   el.createEl = (t, opts) => {
     const c = makeEl(t);
@@ -387,10 +435,15 @@ function allDescendants(el) {
   {
     const calls = [];
     const dv = { current: () => ({ file: { path: 'spice/projects/connectors/docs/Docs.md' } }) };
-    const cjs = { EntityCreate: { create: (o) => calls.push(o) } };
+    const lifecycle = { apply: () => ({}), rollback: () => {} };
+    const cjs = {
+      EntityCreate: { create: (o) => calls.push(o) },
+      SectionExplorer: { entityCreateLifecycle: (origin) => origin === dv ? lifecycle : null },
+    };
     runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'docs-hub' }, 'new-doc'));
     ok('PCB-DISPATCH-7a new-doc calls EntityCreate.create with instance:"doc-note" + dv',
-      calls.length === 1 && calls[0].instance === 'doc-note' && calls[0].dv === dv);
+      calls.length === 1 && calls[0].instance === 'doc-note' && calls[0].dv === dv
+        && calls[0].structuralLifecycle === lifecycle);
 
     calls.length = 0;
     runDispatch(cjs, {}, () => inst._dispatch(dv, { context: 'docs-hub' }, 'new-section'));
@@ -474,6 +527,9 @@ function allDescendants(el) {
       store['sauce.projects-hub.sort'] === 'alpha');
     ok('PCB-DISPATCH-9b sort forces a Dataview refresh so the hub re-renders',
       cmdCalls.includes('dataview:dataview-force-refresh-views'));
+    ok('PCB-DISPATCH-9c force refresh has a narrow non-vault localStorage exception ledger',
+      chromeBarSource.includes('explicit exception to the structural-write rule')
+        && chromeBarSource.includes('No vault data is written'));
   }
 
   // PCB-DISPATCH-10 — a missing helper degrades gracefully (never throws).
@@ -879,8 +935,8 @@ function runRenderCases() {
 
   // PCB-STYLE-1 — the bar's visual redesign: icon-only Go/⋯ (no "Go"/"⋯" text),
   // a header→content gap (≥10px root bottom margin), and the hover-lift +
-  // press-scale micro-motion (transition + mousedown/mouseup wiring) on all 3
-  // controls, mirroring the Home "+" button's animated feel.
+  // press-scale micro-motion (sauce-core classes + handler wiring) on all 3
+  // controls, mirroring the Home "+" button's animated feel without inline CSS.
   const doStyleChecks = () => {
     accentCalls.length = 0; popoverCalls.length = 0;
     const container = makeEl('div');
@@ -900,8 +956,10 @@ function runRenderCases() {
         !!goBtn && !/>Go</.test(goBtn.innerHTML) && !/^Go$/.test(String(goBtn.innerHTML).trim()));
       ok('PCB-STYLE-1c ⋯ control is icon-only — no literal "⋯" glyph in its markup',
         !!dotsBtn && !dotsBtn.innerHTML.includes('⋯'));
-      ok('PCB-STYLE-1d all 3 controls carry a CSS transition (animated, not instant)',
-        [goBtn, dotsBtn, primaryBtn].every((b) => b && /transition:/.test(b.style.cssText)));
+      ok('PCB-STYLE-1d all 3 controls delegate presentation to sauce-core classes',
+        [goBtn, dotsBtn, primaryBtn].every((b) => b
+          && b.classList.contains('sauce-btn') && b.classList.contains('sauce-chrome-btn')
+          && b.style.cssText === ''));
       ok('PCB-STYLE-1e all 3 controls wire hover-lift + press-scale handlers',
         [goBtn, dotsBtn, primaryBtn].every((b) => b
           && typeof b.onmouseenter === 'function' && typeof b.onmousedown === 'function' && typeof b.onmouseup === 'function'));
@@ -936,6 +994,7 @@ function runRenderCases() {
     .then(doStyleChecks)
     .then(doCrumbClick)
     .then(() => { restore(); return dispatch8Fn(); })
+    .then(archiveMutationRollbackCase)
     .then(() => { summarize(); })
     .catch((e) => { restore(); console.error('render case threw:', e && e.stack || e); results.push(['render-cases-threw', false]); summarize(); });
 }

@@ -46,6 +46,21 @@ function withTempVault(fn) {
     }
 }
 
+function filesBelow(root) {
+    if (!fs.existsSync(root)) return [];
+    const out = [];
+    const stack = [root];
+    while (stack.length) {
+        const dir = stack.pop();
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const target = path.join(dir, entry.name);
+            if (entry.isDirectory()) stack.push(target);
+            else out.push(target);
+        }
+    }
+    return out.sort();
+}
+
 // Thin fs-backed adapter over a tmp vault root. Every relPath (vault-relative)
 // maps to path.join(root, relPath). list() returns entries as `dir + "/" + name`.
 // Shared by every runMigrateFamily-style helper below — keep this the single
@@ -815,7 +830,69 @@ withTempVault((vault) => {
            bkCount > 0);
     }
 
+    // ===== VP-2c graph-first atlas migration: full registered install =====
+    // These committed pre-migration notes bind every guard against the real
+    // installer sequence. Gamma is the sole writable exact stock old-order
+    // pair. Current, missing-either-side, duplicate, and customized atlases
+    // must preserve their original bytes and emit auditable warnings where
+    // appropriate. The backup must contain Gamma's original bytes, never an
+    // intermediate scaffolded body.
+    const vp2cRel = (name) => `spice/projects/epic-fixture/tasks/${name}/${name}.md`;
+    const vp2cNames = ['Alpha Epic', 'Beta Epic', 'Gamma Epic', 'Delta Epic', 'Epsilon Epic', 'Eta Epic', 'Zeta Epic'];
+    const vp2cSeedBodies = Object.fromEntries(vp2cNames.map((name) => [
+        name, fs.readFileSync(path.join(SEED_DIR, vp2cRel(name)), 'utf8'),
+    ]));
+    const vp2cInstalledBodies = Object.fromEntries(vp2cNames.map((name) => [
+        name, fs.readFileSync(path.join(vault, vp2cRel(name)), 'utf8'),
+    ]));
+    const vp2cDashboard = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EpicDashboard" });\n```';
+    const vp2cGraph = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "GraphView" });\n```';
+    const vp2cOldPair = `${vp2cDashboard}\n\n${vp2cGraph}`;
+    const vp2cNewPair = `${vp2cGraph}\n\n${vp2cDashboard}`;
+    const vp2cGammaExpected = vp2cSeedBodies['Gamma Epic'].replace(vp2cOldPair, vp2cNewPair);
+    ok('VP-2C-SEED-1 exact old-order stock atlas migrates to graph-first order once',
+       vp2cInstalledBodies['Gamma Epic'] === vp2cGammaExpected
+         && vp2cInstalledBodies['Gamma Epic'].indexOf(vp2cGraph) < vp2cInstalledBodies['Gamma Epic'].indexOf(vp2cDashboard));
+    for (const name of ['Alpha Epic', 'Beta Epic', 'Delta Epic', 'Epsilon Epic', 'Eta Epic', 'Zeta Epic']) {
+        ok(`VP-2C-SEED-2 ${name} is byte-untouched by the full install sequence`,
+           vp2cInstalledBodies[name] === vp2cSeedBodies[name]);
+    }
+    const vp2cWarnings = (installedJson?.history || []).filter((entry) => entry.step === 'epic_atlas_graph_first_heal'
+        && entry.event === 'warning');
+    const vp2cWarns = (name, reason) => vp2cWarnings.some((entry) => entry.target === vp2cRel(name)
+        && entry.reason === reason);
+    ok('VP-2C-SEED-3 missing GraphView warns without a write',
+       vp2cWarns('Alpha Epic', 'missing_stock_block') && vp2cWarns('Beta Epic', 'missing_stock_block'));
+    ok('VP-2C-SEED-4 missing EpicDashboard warns without a write',
+       vp2cWarns('Eta Epic', 'missing_stock_block'));
+    ok('VP-2C-SEED-5 duplicate stock block warns without a write',
+       vp2cWarns('Epsilon Epic', 'duplicate_stock_block'));
+    ok('VP-2C-SEED-6 customized inter-block content warns without a write',
+       vp2cWarns('Zeta Epic', 'customized_between_stock_blocks'));
+    ok('VP-2C-SEED-7 current graph-first atlas is a silent byte-identical no-op',
+       !vp2cWarnings.some((entry) => entry.target === vp2cRel('Delta Epic')));
+    const vp2cBackupRoot = path.join(vault, '.obsidian/.sauce-heals/backups');
+    const vp2cGammaBackups = filesBelow(vp2cBackupRoot).filter((entry) => entry.replace(/\\/g, '/')
+        .endsWith(`/${vp2cRel('Gamma Epic')}`));
+    ok('VP-2C-SEED-8 exactly one Gamma backup exists after the first install', vp2cGammaBackups.length === 1,
+       `backups=${vp2cGammaBackups.length}`);
+    ok('VP-2C-SEED-9 Gamma backup preserves exact original pre-migration bytes',
+       vp2cGammaBackups.length === 1 && fs.readFileSync(vp2cGammaBackups[0], 'utf8') === vp2cSeedBodies['Gamma Epic']);
+    const vp2cFirstPassBodies = { ...vp2cInstalledBodies };
+    const vp2cFirstPassBackupPaths = [...vp2cGammaBackups];
+
     // ===== Idempotency phase: snapshot, second install, compare =====
+    // A normal same-version install skips already-current blueprint items at
+    // install.js's version gate. Mark only the project ledger entry stale so
+    // the second headless install actually traverses the registered project
+    // heal sequence again; otherwise these assertions prove version-skip
+    // stability rather than migration replay safety.
+    const vp2cReplayLedgerPath = path.join(vault, 'ranch/platform-installed.json');
+    const vp2cReplayLedger = helpers.readJson(vault, 'ranch/platform-installed.json');
+    const vp2cProjectEntry = (vp2cReplayLedger.blueprints || []).find((entry) => entry.name === 'project');
+    ok('VP-2C-SEED-10 replay fixture finds the installed project ledger entry', Boolean(vp2cProjectEntry));
+    if (vp2cProjectEntry) vp2cProjectEntry.version = '0.0.0';
+    fs.writeFileSync(vp2cReplayLedgerPath, JSON.stringify(vp2cReplayLedger, null, 2) + '\n');
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
     ok(
@@ -840,8 +917,10 @@ withTempVault((vault) => {
     ]);
     function isMutable(p) {
         if (KNOWN_MUTABLE.has(p)) return true;
-        // .sauce-backup files are install-time transient
-        if (p.endsWith(".sauce-backup")) return true;
+        // .sauce-backup files are install-time transient. The forced project
+        // replay exercises its backup-first template copies, which create a
+        // timestamped directory under this root on every real traversal.
+        if (p === ".sauce-backup" || p.startsWith(".sauce-backup/") || p.endsWith(".sauce-backup")) return true;
         return false;
     }
     const unexpectedAdded = diff.added.filter((f) => !isMutable(f));
@@ -869,6 +948,14 @@ withTempVault((vault) => {
         installedJson2 && installedJson && installedJson2.history.length > installedJson.history.length,
         `before=${installedJson && installedJson.history.length} after=${installedJson2 && installedJson2.history.length}`
     );
+    ok('VP-2C-SEED-11 forced project replay preserves every atlas byte',
+       vp2cNames.every((name) => fs.readFileSync(path.join(vault, vp2cRel(name)), 'utf8') === vp2cFirstPassBodies[name]));
+    const vp2cSecondPassBackups = filesBelow(vp2cBackupRoot).filter((entry) => entry.replace(/\\/g, '/')
+        .endsWith(`/${vp2cRel('Gamma Epic')}`));
+    ok('VP-2C-SEED-12 forced project replay creates no atlas backup and cannot overwrite the original',
+       vp2cSecondPassBackups.length === 1
+         && JSON.stringify(vp2cSecondPassBackups) === JSON.stringify(vp2cFirstPassBackupPaths)
+         && fs.readFileSync(vp2cSecondPassBackups[0], 'utf8') === vp2cSeedBodies['Gamma Epic']);
 
     // User-authored notes still preserved after second install too.
     for (const [relPath, tag] of preserved) {

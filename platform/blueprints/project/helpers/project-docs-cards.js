@@ -1,6 +1,6 @@
 class ProjectDocsCards {
   async render(dv) {
-    const currentFile = dv.current()?.file;
+    const currentFile = globalThis.customJS?.RenderSafe?.page?.(dv)?.file;
     if (!currentFile) return;
     const docsFolder = currentFile.folder;
 

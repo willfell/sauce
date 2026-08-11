@@ -53,7 +53,7 @@ class StickyChromeBar {
       if (!filePath) return;
       const file = (typeof app !== "undefined" && app.vault && typeof app.vault.getAbstractFileByPath === "function")
         ? app.vault.getAbstractFileByPath(filePath) : null;
-      this._renderTitleBanner(dv.container, page, file);
+      this._renderTitleBanner(dv.container, page, file, dv);
     } catch (_e) { /* never throw */ }
   }
 
@@ -64,7 +64,27 @@ class StickyChromeBar {
     return fn.length > 0 ? fn : null;
   }
 
-  _renderTitleBanner(container, page, file) {
+  _setVisibleBannerTitle(dv, value) {
+    try {
+      const container = dv && dv.container;
+      if (!container || typeof container.querySelectorAll !== "function") return;
+      const banners = container.querySelectorAll(".sticky-title-banner") || [];
+      const banner = banners.length ? banners[banners.length - 1] : null;
+      const h = banner && (typeof banner.querySelector === "function"
+        ? banner.querySelector("div") : banner.firstElementChild);
+      if (!h) return;
+      const title = value && String(value).trim();
+      const placeholder = "Untitled — click to name";
+      const labelBase = "font-size: 0.78em; color: var(--text-muted); font-weight: 600; margin: 4px 0 6px 0; cursor: pointer;";
+      const labelMode = title
+        ? "text-transform: uppercase; letter-spacing: 0.05em;"
+        : "font-style: italic;";
+      h.textContent = title || placeholder;
+      h.style.cssText = labelBase + " " + labelMode + " margin-bottom: 12px;";
+    } catch (_e) { /* never throw */ }
+  }
+
+  _renderTitleBanner(container, page, file, dv) {
     if (!container || typeof container.createEl !== "function") return;
     try {
       if (typeof container.querySelectorAll === "function") {
@@ -82,14 +102,31 @@ class StickyChromeBar {
     h.style.cssText = labelBase + " " + (text ? labelWhenText : labelWhenPlaceholder);
     h.title = "Click to rename";
     h.style.cssText += " margin-bottom: 12px;";
-    h.addEventListener("click", () => this._openRenameDialog(file, text || "", (newTitle) => {
-      const nt = newTitle && String(newTitle).trim();
-      h.textContent = nt || placeholder;
-      h.style.cssText = labelBase + " " + (nt ? labelWhenText : labelWhenPlaceholder);
-    }));
+    h.addEventListener("click", () => this._openRenameDialog(
+      dv, file, text || "", (newTitle) => this._setVisibleBannerTitle(dv, newTitle)
+    ));
   }
 
-  _openRenameDialog(file, current, onDone) {
+  async _writeTitle(dv, file, current, next, onDone) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      if (typeof Notice === "function") new Notice("StickyChromeBar: RenderSafe is unavailable.", 6000);
+      return false;
+    }
+    const result = await renderSafe.mutate({
+      app,
+      dv,
+      path: file.path,
+      failureMessage: "Could not rename sticky note",
+      optimistic: () => { if (typeof onDone === "function") onDone(next); },
+      revert: () => { if (typeof onDone === "function") onDone(current); },
+      write: () => app.fileManager.processFrontMatter(file, (fm) => { fm.title = next; }),
+      isCurrent: (page) => String(page && page.title || "").trim() === next,
+    });
+    return result.ok === true;
+  }
+
+  _openRenameDialog(dv, file, current, onDone) {
     try {
       if (!file || typeof app === "undefined" || !app.fileManager
         || typeof app.fileManager.processFrontMatter !== "function") return;
@@ -106,9 +143,7 @@ class StickyChromeBar {
       const close = () => { try { overlay.remove(); } catch (_e) {} };
       const save = async () => {
         const v = (input.value || "").trim();
-        try { await app.fileManager.processFrontMatter(file, (fm) => { fm.title = v; }); } catch (_e) {}
-        close();
-        try { if (typeof onDone === "function") onDone(v); } catch (_e) {}
+        if (await this._writeTitle(dv, file, current, v, onDone)) close();
       };
       const cancelBtn = row.createEl("button", { text: "Cancel" });
       cancelBtn.addEventListener("click", close);
@@ -290,7 +325,7 @@ class StickyChromeBar {
           const page = customJS && customJS.RenderSafe && typeof customJS.RenderSafe.page === "function"
             ? customJS.RenderSafe.page(dv) : (dv && dv.current ? dv.current() : null);
           const current = page && page.title != null ? String(page.title).trim() : "";
-          this._openRenameDialog(file, current, () => {});
+          this._openRenameDialog(dv, file, current, (newTitle) => this._setVisibleBannerTitle(dv, newTitle));
           return;
         }
         if (id === "add-link") {

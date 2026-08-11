@@ -2,37 +2,102 @@
 'use strict';
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { AsyncLocalStorage, createHook } = require('async_hooks');
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const Module = require('module');
 const { PassThrough } = require('stream');
+const {
+  parseCommit: parseReleaseCommit,
+  bumpLevel: releaseBumpLevel,
+} = require('../../scripts/release/lib/conventional');
+const { inc: incrementReleaseVersion } = require('../../scripts/release/lib/semver-inc');
+const coordinatorModulePath = require.resolve('../../scripts/autoloop/codex-coordinator');
+const priorImportedBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+const hadPriorImportedCoordinatorCache = Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath);
+const priorImportedCoordinatorCache = require.cache[coordinatorModulePath];
+let coordinator;
+try {
+  delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  delete require.cache[coordinatorModulePath];
+  coordinator = require(coordinatorModulePath);
+} finally {
+  delete require.cache[coordinatorModulePath];
+  if (hadPriorImportedCoordinatorCache) require.cache[coordinatorModulePath] = priorImportedCoordinatorCache;
+  if (priorImportedBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorImportedBoardTopology;
+}
+assert.strictEqual(
+  Object.prototype.hasOwnProperty.call(require.cache, coordinatorModulePath),
+  hadPriorImportedCoordinatorCache,
+  'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller coordinator cache presence exactly',
+);
+if (hadPriorImportedCoordinatorCache) {
+  assert.strictEqual(
+    require.cache[coordinatorModulePath],
+    priorImportedCoordinatorCache,
+    'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller coordinator cache identity exactly',
+  );
+}
+assert.strictEqual(
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY,
+  priorImportedBoardTopology,
+  'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller topology environment byte-for-byte',
+);
 const {
   emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
-  normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicShadowCandidate,
-  selectClaimCandidate, summarizeClaimSelection,
-  commandStatus, commandAmendContract, commandPark, commandResume, commandReconcile, commandRecover,
-  commandRecoverDeployed, commandReconcileMetadata, metadataReconciliationPlan,
+  normalizeCardLink, sameParentConflict, dependencySatisfied, resolveEpicBoardSet, selectEpicCandidate, selectEpicShadowCandidate,
+  selectClaimCandidate, selectCoordinatorCandidate, summarizeClaimSelection,
+  commandStatus, commandStatusLocked, commandAmendContract,
+  commandPark: rawCommandPark, commandResume: rawCommandResume,
+  commandDiscard, commandReap, commandRestructure, commandReconcile, commandRecover, commandCutover,
+  commandSupersessionDepth, commandHealEpicBindings,
+  removeBoardCard, discardedDependencyProblem, stemOf, hasDeployedSupersedingSibling, canonicalEpicProjection,
+  commandRecoverDeployed, commandReconcileMetadata, commandRestampContractFrontmatter,
+  metadataReconciliationPlan, restampContractFrontmatter, contractFrontmatterRestampPlan,
+  PARKED_METADATA_REBIND_CARDS,
+  buildLoopStationPayload, validateLoopStationPayload, projectLoopStation,
   consumeRatificationReceipt, consumeRatificationArtifact,
+  scaffoldPendingRatifications, ratificationArtifactForCard, ratificationStatus,
+  commandBackfillRatifications, ratificationAcceptedWait, commandConsumeRatification,
   checkRollup, versionFrom, isReleasableTitle,
-  gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt, commandRecordReview, commandVerifyGates,
-  runIsolatedWorkshopSelfInstall, commandRecordPr, commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
+  gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
+  commandRecordReview: rawCommandRecordReview, commandVerifyGates,
+  runIsolatedWorkshopSelfInstall, commandRecordPr: rawCommandRecordPr,
+  commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
-} = require('../../scripts/autoloop/codex-coordinator');
+} = coordinator;
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
+  parseBoard, parseDependsOn,
   delivery, prepareDeliveryCard, prepareDeliveryObject,
 } = require('../../scripts/autoloop/select-card');
+const {
+  EXIT_CODES, successReceipt, refusalReceipt, usage, requireOnlyOptions, validateReceiptEnvelope,
+} = require('../../scripts/autoloop/cli-kit');
+const deliveryStatusDigest = require('../../scripts/autoloop/delivery-status-digest');
+const commandPark = rawCommandPark;
+const commandResume = rawCommandResume;
+const commandRecordReview = rawCommandRecordReview;
+const commandRecordPr = rawCommandRecordPr;
 
 let count = 0;
 function ok(value, label) { assert.ok(value, label); count++; }
 function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, label); count++; }
+function testSha256(raw) { return crypto.createHash('sha256').update(raw).digest('hex'); }
+function testScalarField(raw, key) {
+  const frontmatter = String(raw).match(/^---\n([\s\S]*?)\n---/);
+  const line = frontmatter && frontmatter[1].split('\n').find((item) => item.startsWith(`${key}:`));
+  return line ? line.slice(line.indexOf(':') + 1).trim().replace(/^['"]|['"]$/g, '') : '';
+}
 
 function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], deploy = true, parent = 'Test parent', name = 'Test card' } = {}) {
   const policy = delivery.derivePolicy({ touch_zones: zones, batch_policy: 'continue' });
@@ -61,6 +126,19 @@ function card({ profile = 'standard', zones = ['Docs/example.md'], deps = [], de
     'deployment_required: true',
     '---', '', '# Work', '', 'Bounded work.',
   ].join('\n');
+}
+
+function canonicalEpicSlice({ name, epic, zones = ['Docs/example.md'], deps = [] }) {
+  return card({ name, parent: epic, zones, deps })
+    .replace('---\n', [
+      '---',
+      'type: slice',
+      `task_parent: "tasks/${epic}/${epic}.md"`,
+      `source_board: "tasks/${epic}/board/${epic}-board.md"`,
+      `kanban_board: "tasks/${epic}/board/${epic}-board.md"`,
+      '',
+    ].join('\n'))
+    .replace('epic: "[[Test epic]]"', `epic: "[[${epic}]]"`);
 }
 
 (async () => {
@@ -113,6 +191,29 @@ const inlineDeploymentMeta = parseExecutionMeta(currentRaw.replace(
 ));
 ok(inlineDeploymentMeta.contractOk, 'coordinator accepts a valid inline YAML deployment map');
 eq(inlineDeploymentMeta.deploySubscriptions, { headspace: [], accuris: [], ero: [] }, 'inline deployment map preserves every required vault');
+const encodedStructuredRaw = currentRaw
+  .replace(
+    'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+    `deploy_subscriptions: ${delivery.encodeStructuredFrontmatterValue(meta.deploySubscriptions)}`,
+  )
+  .replace(
+    /^evidence:.*$/m,
+    `evidence: ${delivery.encodeStructuredFrontmatterValue(meta.contract.evidence)}`,
+  );
+const encodedStructuredMeta = parseExecutionMeta(encodedStructuredRaw);
+ok(encodedStructuredMeta.contractOk,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator accepts JSON-string structured fields');
+eq(encodedStructuredMeta.deploySubscriptions, meta.deploySubscriptions,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator preserves byte-equivalent deployment maps');
+eq(encodedStructuredMeta.contract.evidence, meta.contract.evidence,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator preserves byte-equivalent evidence');
+const malformedStructuredMeta = parseExecutionMeta(encodedStructuredRaw.replace(
+  /^evidence:.*$/m,
+  `evidence: ${JSON.stringify('[{"source_identity":"unterminated"}')}`,
+));
+ok(!malformedStructuredMeta.contractOk
+  && validateExecutionMeta(malformedStructuredMeta).some((error) => /invalid-structured-json:evidence/.test(error)),
+'BGR-OBSY-READERS-BOTH-ENCODINGS coordinator refuses malformed JSON strings loudly');
 const malformedDeploymentMeta = parseExecutionMeta(currentRaw.replace('  ero: []', '  ero: []\n    broken mapping line'));
 ok(!malformedDeploymentMeta.contractOk, 'coordinator rejects unsupported indented deployment-map lines');
 const flowDeploymentMeta = parseExecutionMeta(currentRaw.replace('  headspace: []', '  headspace: [mechanism:delivery]'));
@@ -175,6 +276,37 @@ for (const fixture of sharedFixtures.invalid) {
   ok(!prepareDeliveryObject(fixtureValue(fixture)).ok, `coordinator adapter rejects shared invalid fixture: ${fixture.name}`);
 }
 eq(parseArgs(['park', '--depends-on', 'A', '--depends-on', 'B'])['depends-on'], ['A', 'B'], 'CLI preserves repeated dependency arguments');
+eq(EXIT_CODES, { success: 0, refusal: 1, usage: 2 }, 'CS1-KIT-ENVELOPE exports the shared exit-code contract');
+eq(successReceipt('changed', { card: 'A' }), {
+  action: 'changed', ok: true, no_op: false, card: 'A',
+}, 'CS1-KIT-ENVELOPE builds the additive success receipt');
+eq(refusalReceipt('park-refused', 'json_required', 'park requires --json'), {
+  action: 'park-refused', ok: false, no_op: false, code: 'json_required', message: 'park requires --json',
+}, 'CS1-KIT-ENVELOPE builds the machine refusal receipt');
+eq(validateReceiptEnvelope(successReceipt('changed')), { ok: true, errors: [] },
+  'CS1-KIT-ENVELOPE validates a successful receipt');
+eq(validateReceiptEnvelope(refusalReceipt('park-refused', 'json_required', 'park requires --json')),
+  { ok: true, errors: [] }, 'CS1-KIT-ENVELOPE validates a refusal receipt');
+eq(validateReceiptEnvelope({ action: 'broken', ok: true }).errors, ['no_op must be boolean'],
+  'CS1-KIT-ENVELOPE rejects an incomplete envelope');
+let unknownOptionError = null;
+try {
+  requireOnlyOptions({ _: ['park'], json: true, 'expected-heed': 'a'.repeat(40) },
+    'park', ['json', 'card']);
+} catch (error) {
+  unknownOptionError = error;
+}
+eq({ action: unknownOptionError.action, code: unknownOptionError.code }, {
+  action: 'park-refused', code: 'unknown_option',
+}, 'CS1-KIT-ENVELOPE exports stable shared option allowlist enforcement');
+let cliUsageError = null;
+try {
+  usage('record-pr-refused', 'invalid_arguments', 'record-pr requires --card and numeric --pr');
+} catch (error) {
+  cliUsageError = error;
+}
+eq(cliUsageError.exitCode, EXIT_CODES.usage,
+  'CS1-KIT-ENVELOPE assigns exit code 2 to usage errors');
 eq(projectionMapping('claimed').status, 'in_progress', 'claimed lifecycle projects to canonical in_progress');
 eq(projectionMapping('feature_pr').status, 'in_progress', 'waiting release lifecycle remains canonical in_progress');
 eq(projectionMapping('blocked').status, 'blocked', 'blocked lifecycle keeps canonical blocked');
@@ -491,9 +623,11 @@ const shadowIo = (overrides = {}) => {
 };
 const shadow = (extra = {}) => {
   const io = extra.io || shadowIo();
+  const loader = extra.loadCard || io.loadCard;
   return selectEpicShadowCandidate({
     boardMd: extra.boardMd || shadowParent(), state: extra.state || emptyState(),
-    loadCard: extra.loadCard || io.loadCard, supervised: true, cardsRoot: shadowRoot,
+    loadCard: loader, loadEpicCard: extra.loadEpicCard || ((_epic, name) => loader(name)),
+    supervised: true, cardsRoot: shadowRoot,
     readFile: io.readFile, readDir: io.readDir, exists: io.exists,
   });
 };
@@ -586,22 +720,33 @@ const fileSnapshot = JSON.stringify(shadowFiles);
 const flagOn = selectClaimCandidate({
   boardMd: shadowParent(), state: emptyState(), loadCard: shadowIo().loadCard, supervised: true,
   epicShadow: true, cardsRoot: shadowRoot, readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+  loadEpicCard: (_epic, name) => shadowIo().loadCard(name),
 });
 eq(flagOn.shadow_selection.card, 'A1', 'ES3-FLAG-ON exposes the observational two-level selection beside legacy authority');
 eq(JSON.stringify(shadowFiles), fileSnapshot, 'ES3-SHADOW-NO-WRITE leaves every resolver fixture byte-identical');
 const priorShadowFlag = process.env.SAUCE_EPIC_SELECTION_SHADOW;
+const priorBoardTopology = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 process.env.SAUCE_EPIC_SELECTION_SHADOW = '1';
+delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
 let flaggedStatus;
 try {
   const statusIo = shadowIo();
   flaggedStatus = commandStatus({ root: '/tmp/es3-shadow-status', statePath: '/tmp/es3-shadow-state.json' }, {
     state: emptyState(), boardMd: shadowParent(), loadCard: statusIo.loadCard,
+    loadEpicCard: (_epic, name) => statusIo.loadCard(name),
     cardsRoot: shadowRoot, readFile: statusIo.readFile, readDir: statusIo.readDir, exists: statusIo.exists,
   });
 } finally {
   if (priorShadowFlag === undefined) delete process.env.SAUCE_EPIC_SELECTION_SHADOW;
   else process.env.SAUCE_EPIC_SELECTION_SHADOW = priorShadowFlag;
+  if (priorBoardTopology === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorBoardTopology;
 }
+assert.deepStrictEqual(
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY,
+  priorBoardTopology,
+  'ES3-STATUS-FLAG restores the caller topology environment byte-for-byte',
+);
 eq(flaggedStatus.next.shadow_selection.card, 'A1', 'ES3-STATUS-FLAG invokes the production commandStatus environment-flag wiring');
 eq(flaggedStatus.projection_problems, [], 'ES3-STATUS-FLAG remains observational and creates no tracked projection state');
 const shadowCapacityState = emptyState();
@@ -609,10 +754,171 @@ for (const [index, zone] of ['x', 'y', 'z'].entries()) shadowCapacityState.cards
 const shadowAtCapacity = selectClaimCandidate({
   boardMd: shadowParent(), state: shadowCapacityState, loadCard: shadowIo().loadCard, supervised: true,
   epicShadow: true, cardsRoot: shadowRoot, readFile: shadowIo().readFile, readDir: shadowIo().readDir, exists: shadowIo().exists,
+  loadEpicCard: (_epic, name) => shadowIo().loadCard(name),
 });
 eq(shadowAtCapacity.action, 'at-capacity', 'ES3-STATE-13 legacy capacity remains authoritative');
 eq(shadowAtCapacity.shadow_selection.action, 'at-capacity', 'ES3-STATE-13 shadow status still reports the same global capacity boundary');
 eq(summarizeClaimSelection(shadowAtCapacity).shadow_selection.action, 'at-capacity', 'ES3-STATE-13 summarized status preserves the observational capacity receipt');
+
+const cutoverActualState = emptyState();
+cutoverActualState.cutover = { enabled: true, enabled_at: '2026-07-25T19:00:00.000Z', receipts: {} };
+const cutoverActualIo = shadowIo();
+const cutoverEpicLoader = (_epic, name) => cutoverActualIo.loadCard(name);
+const cutoverActual = selectCoordinatorCandidate({
+  boardMd: shadowParent(), state: cutoverActualState, loadCard: cutoverActualIo.loadCard, supervised: true,
+  loadEpicCard: cutoverEpicLoader,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(
+  [cutoverActual.action, cutoverActual.card, cutoverActual.source, cutoverActual.epic, cutoverActual.board_path],
+  ['claim', 'A1', 'epic', 'Epic A', '/vault/tasks/Epic A/board/Epic A-board.md'],
+  'BGD-CUTOVER-ACTUAL-SELECTOR cutover-on authority selects the top epic frontier slice and records its board',
+);
+const duplicateSlice = 'DUP-1 Shared slice title';
+const duplicateIo = shadowIo({
+  files: {
+    '/vault/tasks/Epic A/board/Epic A-board.md': epicBoard([duplicateSlice]),
+    '/vault/tasks/Epic B/board/Epic B-board.md': epicBoard([duplicateSlice]),
+    [`/vault/tasks/Epic A/board/${duplicateSlice}.md`]: canonicalEpicSlice({
+      name: duplicateSlice, epic: 'Epic A', zones: ['platform/from-epic-a'],
+    }),
+    [`/vault/tasks/Epic B/board/${duplicateSlice}.md`]: canonicalEpicSlice({
+      name: duplicateSlice, epic: 'Epic B', zones: ['platform/from-epic-b'],
+    }),
+  },
+});
+const duplicateSelection = selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A', 'Epic B']), state: cutoverActualState,
+  loadCard: () => ({
+    path: `/vault/tasks/Epic B/board/${duplicateSlice}.md`,
+    raw: duplicateIo.files[`/vault/tasks/Epic B/board/${duplicateSlice}.md`],
+  }),
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: duplicateIo.readFile, readDir: duplicateIo.readDir, exists: duplicateIo.exists,
+});
+eq(
+  [duplicateSelection.cardPath, normalizeCardLink(duplicateSelection.meta.parentCard), duplicateSelection.meta.touchZones],
+  [`/vault/tasks/Epic A/board/${duplicateSlice}.md`, 'Epic A', ['platform/from-epic-a']],
+  'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM binds a selected board line to the canonical slice beside that exact epic board',
+);
+const invalidDuplicateIo = shadowIo({
+  files: {
+    '/vault/tasks/Epic A/board/Epic A-board.md': epicBoard([duplicateSlice]),
+    [`/vault/tasks/Epic A/board/${duplicateSlice}.md`]: canonicalEpicSlice({
+      name: duplicateSlice, epic: 'Epic B', zones: ['platform/from-wrong-epic'],
+    }),
+  },
+});
+const invalidDuplicateSelection = selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A']), state: cutoverActualState,
+  loadCard: () => ({
+    path: `/vault/tasks/Epic B/board/${duplicateSlice}.md`,
+    raw: duplicateIo.files[`/vault/tasks/Epic B/board/${duplicateSlice}.md`],
+  }),
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: invalidDuplicateIo.readFile, readDir: invalidDuplicateIo.readDir, exists: invalidDuplicateIo.exists,
+});
+ok(
+  invalidDuplicateSelection.action === 'no-work'
+    && invalidDuplicateSelection.skipped[0].reason.includes('epic slice binding invalid: epic must be Epic A'),
+  'GA-OPS13A-CROSS-EPIC-DUPLICATE-MISCLAIM refuses a malformed board-local slice instead of resolving a same-title note from another epic',
+);
+const cutoverStatus = commandStatus({ root: '/tmp/bgd-cutover-status', statePath: '/tmp/bgd-cutover-state.json' }, {
+  state: cutoverActualState, boardMd: shadowParent(), loadCard: cutoverActualIo.loadCard,
+  loadEpicCard: cutoverEpicLoader,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(
+  [cutoverStatus.next.card, cutoverStatus.next.source, cutoverStatus.next.epic, cutoverStatus.next.board_path],
+  [cutoverActual.card, cutoverActual.source, cutoverActual.epic, cutoverActual.board_path],
+  'BGD-CUTOVER-STATUS-CLAIM-PARITY status exposes the exact authoritative claim card, epic, and board path',
+);
+const atlasLoadAttempts = [];
+selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A']), state: cutoverActualState,
+  loadCard: (name) => {
+    if (name === 'Epic A') throw new Error('epic atlas must never be validated as an execution card');
+    return cutoverActualIo.loadCard(name);
+  },
+  loadEpicCard: (_epic, name) => {
+    atlasLoadAttempts.push(name);
+    return cutoverActualIo.loadCard(name);
+  },
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(atlasLoadAttempts, ['A1'], 'BGD-CUTOVER-ACTUAL-SELECTOR never loads the epic atlas through execution-card validation');
+const cutoverBlockedBodies = {
+  ...shadowBodies,
+  A1: card({ name: 'A1', parent: 'Epic A', zones: ['platform/a1'], deps: ['Missing'] }),
+  A2: card({ name: 'A2', parent: 'Epic A', zones: ['platform/a2'], deps: ['Missing'] }),
+};
+const cutoverBlocked = selectCoordinatorCandidate({
+  boardMd: shadowParent(['Epic A']), state: cutoverActualState,
+  loadCard: (name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  loadEpicCard: (_epic, name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  supervised: true, cardsRoot: shadowRoot,
+  readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+const cutoverBlockedStatus = commandStatus({ root: '/tmp/bgd-cutover-blocked', statePath: '/tmp/bgd-cutover-blocked-state.json' }, {
+  state: cutoverActualState, boardMd: shadowParent(['Epic A']),
+  loadCard: (name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  loadEpicCard: (_epic, name) => cutoverBlockedBodies[name] ? { path: `/cards/${name}.md`, raw: cutoverBlockedBodies[name] } : null,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+});
+eq(
+  cutoverBlockedStatus.next.first_blocker,
+  cutoverBlocked.skipped[0],
+  'BGD-CUTOVER-STATUS-CLAIM-PARITY status and claim preserve the same first refusal reason',
+);
+const cutoverOffState = emptyState();
+cutoverOffState.cutover = { enabled: false, disabled_at: '2026-07-25T20:00:00.000Z', reason: 'fixture' };
+const cutoverOffActual = selectCoordinatorCandidate({ boardMd: board(['A']), state: cutoverOffState, loadCard });
+const cutoverOffLegacy = selectClaimCandidate({ boardMd: board(['A']), state: cutoverOffState, loadCard });
+eq(cutoverOffActual, cutoverOffLegacy, 'BGD-CUTOVER-PRE-COMPAT cutover-off selection is byte-for-byte legacy-compatible');
+const cutoverAbsentActual = selectCoordinatorCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
+const cutoverAbsentLegacy = selectClaimCandidate({ boardMd: board(['A']), state: emptyState(), loadCard });
+eq(cutoverAbsentActual, cutoverAbsentLegacy, 'BGD-CUTOVER-PRE-COMPAT absent cutover selection is byte-for-byte legacy-compatible');
+
+// LOOP-EPIC-TOPOLOGY: SAUCE_LOOP_BOARD_TOPOLOGY=epic (fresh loop-plugin
+// bindings) routes selection through the epic frontier even with NO cutover
+// history in the ledger; absent flag keeps the legacy pre-cutover path above.
+{
+  const topologyCoordinatorPath = require.resolve('../../scripts/autoloop/codex-coordinator');
+  const cachedTopologyCoordinator = require.cache[topologyCoordinatorPath];
+  const priorTopologyEnvironment = process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+  process.env.SAUCE_LOOP_BOARD_TOPOLOGY = 'epic';
+  delete require.cache[topologyCoordinatorPath];
+  const topologyIo = shadowIo();
+  let topologySelection;
+  try {
+    const boundSelectCoordinatorCandidate = require(topologyCoordinatorPath).selectCoordinatorCandidate;
+    topologySelection = boundSelectCoordinatorCandidate({
+      boardMd: shadowParent(), state: emptyState(), loadCard: topologyIo.loadCard, supervised: true,
+      loadEpicCard: (_epic, name) => topologyIo.loadCard(name),
+      cardsRoot: shadowRoot, readFile: topologyIo.readFile, readDir: topologyIo.readDir, exists: topologyIo.exists,
+    });
+  } finally {
+    delete require.cache[topologyCoordinatorPath];
+    if (cachedTopologyCoordinator) require.cache[topologyCoordinatorPath] = cachedTopologyCoordinator;
+    if (priorTopologyEnvironment === undefined) delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;
+    else process.env.SAUCE_LOOP_BOARD_TOPOLOGY = priorTopologyEnvironment;
+  }
+  eq(
+    [topologySelection.action, topologySelection.card, topologySelection.source, topologySelection.epic],
+    ['claim', 'A1', 'epic', 'Epic A'],
+    'LOOP-EPIC-TOPOLOGY bound environment selects the epic frontier on a cutover-null ledger',
+  );
+}
+const statusLockNames = [];
+const lockedStatus = await commandStatusLocked({ root: '/tmp/bgd-cutover-locked', statePath: '/tmp/bgd-cutover-locked-state.json' }, {
+  state: cutoverActualState, boardMd: shadowParent(), loadCard: cutoverActualIo.loadCard,
+  loadEpicCard: cutoverEpicLoader,
+  cardsRoot: shadowRoot, readFile: cutoverActualIo.readFile, readDir: cutoverActualIo.readDir, exists: cutoverActualIo.exists,
+  withLock: async (_ctx, name, fn) => { statusLockNames.push(name); return fn(); },
+});
+eq(statusLockNames, ['selector'], 'BGD-CUTOVER-STATUS-CLAIM-PARITY operational status selects under the selector lock');
+eq(lockedStatus.next.card, cutoverActual.card, 'BGD-CUTOVER-STATUS-CLAIM-PARITY locked status preserves the authoritative candidate');
 
 eq(checkRollup([{ name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' }]).green, true, 'green rollup');
 eq(checkRollup([{ name: 'linux', status: 'IN_PROGRESS', conclusion: '' }]).pending, ['linux'], 'pending rollup');
@@ -623,14 +929,36 @@ ok(isReleasableTitle('feat!: replace the loop contract'), 'breaking feature titl
 ok(isReleasableTitle('perf(coordinator): reduce status latency'), 'release classifier accepts other patch types');
 ok(!isReleasableTitle('test(preflight): guard orphan harnesses'), 'test-only title cannot enter the deploy loop');
 ok(!isReleasableTitle('docs(autoloop): explain mobile prompts'), 'docs-only title cannot enter the deploy loop');
-const passingReceipt = (head = 'head42', behavioral = true) => ({
+const passingReceipt = (head = 'head42', behavioral = true, prospectiveTitle = 'fix(x): y') => ({
   status: 'pass', head_sha: head, base_ref: 'origin/main', base_sha: 'base42', behavioral,
+  prospective_pr_title: prospectiveTitle,
   checks: { adequacy: 'pass', release_preflight: 'pass', workshop_self_install: 'pass', release_preflight_bumped: 'pass' },
   reviews: behavioral ? Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, head_sha: head, verdict: 'pass' }])) : {},
 });
 ok(gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42').valid, 'complete current gate receipt is valid');
 ok(!gateReceiptStatus({ gate_receipt: passingReceipt('old') }, 'head42').valid, 'stale gate receipt is invalid');
 ok(!gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42', 'new-base').valid, 'stale base receipt is invalid for an open PR');
+ok(!gateReceiptStatus({ gate_receipt: { ...passingReceipt(), prospective_pr_title: undefined } }, 'head42').valid,
+  'gate receipt without a prospective PR title is invalid');
+ok(!gateReceiptStatus({ gate_receipt: passingReceipt() }, 'head42', 'base42', 'fix(x): changed').valid,
+  'gate receipt is invalid after the PR title changes');
+// Merge-only receipts (verify-gates on deploy_vaults:[] bindings) record
+// verify_commands instead of the sauce release checks; record-pr/advance must
+// accept them while deploy-bound validation stays byte-identical.
+const mergeOnlyReceipt = (checks) => ({
+  ...passingReceipt(), merge_only: true,
+  checks: checks || { adequacy: 'pass', verify_commands: { status: 'pass', commands: ['uv run pytest'] } },
+});
+ok(gateReceiptStatus({ gate_receipt: mergeOnlyReceipt() }, 'head42').valid,
+  'merge-only receipt with passing verify_commands is valid');
+ok(gateReceiptStatus({ gate_receipt: mergeOnlyReceipt({ adequacy: 'pass', verify_commands: { status: 'none-declared' } }) }, 'head42').valid,
+  'merge-only receipt with none-declared verify_commands is valid (protected CI gates the merge)');
+ok(!gateReceiptStatus({ gate_receipt: mergeOnlyReceipt({ adequacy: 'pass' }) }, 'head42').valid,
+  'merge-only receipt without verify_commands is incomplete');
+ok(!gateReceiptStatus({ gate_receipt: mergeOnlyReceipt({ verify_commands: { status: 'pass', commands: [] } }) }, 'head42').valid,
+  'merge-only receipt without adequacy is incomplete');
+ok(!gateReceiptStatus({ gate_receipt: { ...passingReceipt(), checks: { adequacy: 'pass', verify_commands: { status: 'pass', commands: ['x'] } } } }, 'head42').valid,
+  'deploy-bound receipt still requires the release checks (merge_only flag absent)');
 ok(pathCoveredByTouchZones('platform/mechanisms/x/a.js', ['platform/mechanisms/x']), 'touch zone covers descendants');
 ok(!pathCoveredByTouchZones('platform/test/run-x.js', ['platform/mechanisms/x']), 'touch zone rejects undeclared files');
 ok(pathCoveredByTouchZones('scripts/autoloop/gate.js', ['scripts']), 'top-level directory touch zone covers descendants');
@@ -650,6 +978,250 @@ eq(await stepCard({ root: '/workshop' }, emptyState(), waitRecord, {}, {
   reason: 'containing release PR not created yet',
 }, 'release branch preserves the durable phase and names the next phase');
 eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable state');
+
+// LOOP-RELEASE-CI-RERUN-DEADEND: a release PR can move after the coordinator
+// persisted its check failure. Only that exact blocked cause may re-enter the
+// release rail; every unrelated or unusable blocked record remains terminal.
+{
+  const releaseFailure = 'release PR checks failed: preflight (macos-latest)';
+  const releasePr = (overrides = {}) => ({
+    number: 646,
+    state: 'OPEN',
+    title: 'chore(release): v0.267.0',
+    url: 'https://example.test/pr/646',
+    mergeCommit: null,
+    statusCheckRollup: [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    ...overrides,
+  });
+  const blockedRelease = (overrides = {}) => ({
+    card: 'TD-1a9 Call-site-bound quick reschedule',
+    phase: 'blocked',
+    reason: releaseFailure,
+    release_pr: 646,
+    release_url: 'https://example.test/pr/646',
+    feature_merge_sha: 'f'.repeat(40),
+    ...overrides,
+  });
+  const withLineage = (deps = {}) => ({
+    findContainingRelease: () => releasePr(),
+    ...deps,
+  });
+
+  let mergedViews = 0; let mergedWrites = 0;
+  const mergedRecord = blockedRelease();
+  const mergedResult = await stepCard({ root: '/workshop' }, emptyState(), mergedRecord, {}, withLineage({
+    prView: (_repo, number) => {
+      mergedViews += 1;
+      eq(number, 646, 'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery views the exact recorded release PR');
+      return releasePr({ state: 'MERGED', mergeCommit: { oid: 'a'.repeat(40) }, statusCheckRollup: null });
+    },
+    writeState: () => { mergedWrites += 1; },
+  }));
+  eq(mergedResult, {
+    action: 'phase-change', phase: 'release_merged', release_pr: 646, version: '0.267.0',
+  }, 'LOOP-RELEASE-CI-RERUN-DEADEND merged green rerun rejoins the release_merged rail');
+  eq(mergedRecord.phase, 'release_merged',
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery advances durable phase');
+  eq(mergedRecord.release_merge_sha, 'a'.repeat(40),
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery records the release merge SHA');
+  eq(mergedRecord.required_version, '0.267.0',
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery derives the required version from the recorded PR title');
+  eq(mergedRecord.reason, undefined,
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery clears the stale release-check failure');
+  eq({ views: mergedViews, writes: mergedWrites }, { views: 1, writes: 1 },
+    'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery reads and persists exactly once');
+
+  for (const [label, statusCheckRollup] of [
+    ['green', [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
+    ['pending', [{ name: 'preflight (macos-latest)', status: 'IN_PROGRESS', conclusion: '' }]],
+  ]) {
+    let writes = 0;
+    const record = blockedRelease();
+    const result = await stepCard({ root: '/workshop' }, emptyState(), record, {}, withLineage({
+      prView: () => releasePr({ statusCheckRollup }),
+      writeState: () => { writes += 1; },
+    }));
+    eq(result, {
+      action: 'waiting', phase: 'release_pr', release_pr: 646, url: 'https://example.test/pr/646',
+    }, `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun matches the existing release_pr waiting rail`);
+    eq(record.phase, 'release_pr',
+      `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun restores the durable release_pr phase`);
+    eq(record.reason, undefined,
+      `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun clears the stale failure`);
+    eq(writes, 1,
+      `LOOP-RELEASE-CI-RERUN-DEADEND open ${label} rerun persists exactly once`);
+  }
+
+  let failedWrites = 0;
+  const stillFailedRecord = blockedRelease();
+  const stillFailedDeps = withLineage({
+    prView: () => releasePr({
+      statusCheckRollup: [
+        { name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'FAILURE' },
+        { name: 'preflight (ubuntu-latest)', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ],
+    }),
+    writeState: () => { failedWrites += 1; },
+  });
+  const stillFailedResult = await stepCard(
+    { root: '/workshop' }, emptyState(), stillFailedRecord, {}, stillFailedDeps,
+  );
+  eq(stillFailedResult.action, 'blocked-external',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun remains externally blocked');
+  eq(stillFailedRecord.phase, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun cannot reopen the release rail');
+  eq(stillFailedRecord.reason,
+    'release PR checks failed: preflight (macos-latest), preflight (ubuntu-latest)',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun refreshes the deterministic failure reason');
+  eq(failedWrites, 1,
+    'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun persists current external evidence');
+  const stillFailedReplay = await stepCard(
+    { root: '/workshop' }, emptyState(), stillFailedRecord, {}, stillFailedDeps,
+  );
+  eq(stillFailedReplay, stillFailedResult,
+    'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery returns a deterministic receipt');
+  eq(stillFailedRecord.reason,
+    'release PR checks failed: preflight (macos-latest), preflight (ubuntu-latest)',
+    'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery keeps deterministic durable state');
+  eq(failedWrites, 2,
+    'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery persists each current evidence read once');
+
+  const closedRecord = blockedRelease();
+  const closedResult = await stepCard({ root: '/workshop' }, emptyState(), closedRecord, {}, withLineage({
+    prView: () => releasePr({ state: 'CLOSED', statusCheckRollup: null }),
+    writeState: () => { throw new Error('closed non-merged recovery must not mutate blocked state'); },
+  }));
+  eq(closedResult.action, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND a closed non-merged release remains terminal');
+  eq(closedRecord, blockedRelease(),
+    'LOOP-RELEASE-CI-RERUN-DEADEND a closed non-merged release preserves blocked evidence byte-for-byte');
+
+  const malformedRecord = blockedRelease();
+  const malformedResult = await stepCard({ root: '/workshop' }, emptyState(), malformedRecord, {}, withLineage({
+    prView: () => releasePr({ state: 'MERGED', title: 'chore(release): malformed', mergeCommit: null }),
+    writeState: () => { throw new Error('malformed release recovery must fail closed without writes'); },
+  }));
+  eq(malformedResult.action, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND malformed merged evidence fails closed');
+  eq(malformedRecord, blockedRelease(),
+    'LOOP-RELEASE-CI-RERUN-DEADEND malformed merged evidence preserves blocked state');
+
+  const mismatchedContainingRelease = () => releasePr({
+    number: 647,
+    title: 'chore(release): v0.267.1',
+    url: 'https://example.test/pr/647',
+  });
+  let mismatchedMergedWrites = 0;
+  const mismatchedMergedRecord = blockedRelease();
+  const mismatchedMergedResult = await stepCard(
+    { root: '/workshop' }, emptyState(), mismatchedMergedRecord, {}, withLineage({
+      findContainingRelease: mismatchedContainingRelease,
+      prView: () => releasePr({
+        state: 'MERGED',
+        title: 'chore(release): v9.9.9',
+        mergeCommit: { oid: '9'.repeat(40) },
+        statusCheckRollup: null,
+      }),
+      writeState: () => { mismatchedMergedWrites += 1; },
+    }),
+  );
+  eq(mismatchedMergedResult.action, 'blocked',
+    'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR remains blocked');
+  eq(mismatchedMergedRecord, blockedRelease(),
+    'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR cannot persist merge or version evidence');
+  eq(mismatchedMergedWrites, 0,
+    'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR performs no ledger write');
+
+  for (const [label, statusCheckRollup] of [
+    ['green', [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
+    ['pending', [{ name: 'preflight (macos-latest)', status: 'IN_PROGRESS', conclusion: '' }]],
+  ]) {
+    let writes = 0;
+    const record = blockedRelease();
+    const result = await stepCard({ root: '/workshop' }, emptyState(), record, {}, withLineage({
+      findContainingRelease: mismatchedContainingRelease,
+      prView: () => releasePr({ statusCheckRollup }),
+      writeState: () => { writes += 1; },
+    }));
+    eq(result.action, 'blocked',
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated open ${label} PR remains blocked`);
+    eq(record, blockedRelease(),
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated open ${label} PR preserves blocked evidence`);
+    eq(writes, 0,
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated open ${label} PR performs no ledger write`);
+  }
+
+  for (const [label, findContainingRelease] of [
+    ['missing', () => null],
+    ['lookup-error', () => { throw new Error('release lookup unavailable'); }],
+  ]) {
+    let views = 0; let writes = 0;
+    const record = blockedRelease();
+    const result = await stepCard({ root: '/workshop' }, emptyState(), record, {}, withLineage({
+      findContainingRelease,
+      prView: () => { views += 1; return releasePr(); },
+      writeState: () => { writes += 1; },
+    }));
+    eq(result.action, 'blocked',
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS ${label} containing-release evidence fails closed`);
+    eq(record, blockedRelease(),
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS ${label} lineage evidence preserves blocked state`);
+    eq({ views, writes }, { views: label === 'missing' ? 1 : 0, writes: 0 },
+      `LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS ${label} lineage failure has deterministic reads and no writes`);
+  }
+
+  let unrelatedViews = 0; let unrelatedWrites = 0;
+  const unrelatedRecord = blockedRelease({ reason: 'tap PR checks failed: bottles' });
+  const unrelatedResult = await stepCard({ root: '/workshop' }, emptyState(), unrelatedRecord, {}, {
+    findContainingRelease: () => { throw new Error('unrelated blocked reason must not inspect release lineage'); },
+    prView: () => { unrelatedViews += 1; throw new Error('unrelated blocked reason must not view a release PR'); },
+    writeState: () => { unrelatedWrites += 1; },
+  });
+  eq(unrelatedResult.action, 'blocked',
+    'LOOP-RELEASE-CI-RERUN-DEADEND unrelated blocked causes remain terminal');
+  eq({ views: unrelatedViews, writes: unrelatedWrites }, { views: 0, writes: 0 },
+    'LOOP-RELEASE-CI-RERUN-DEADEND unrelated blocked causes cannot enter the recovery seam');
+}
+
+// LOOP-MERGE-ONLY: an EMPTY deployment vault list (merge-only binding, e.g.
+// ero's `deploy_vaults: []`) completes at feature_merged — no release chain.
+// The default (non-empty) vault list is byte-identical to the waitRecord case
+// above, which is the no-op guard for deploy-bound boards.
+{
+  let projected = 0; let persisted = 0;
+  const mergeOnlyRecord = { card: 'EM-X Merge-only slice', phase: 'feature_merged', feature_merge_sha: 'abc123' };
+  const result = await stepCard({ root: '/workshop' }, emptyState(), mergeOnlyRecord, {}, {
+    deployVaults: [],
+    attemptProjection: async () => { projected += 1; },
+    writeState: () => { persisted += 1; },
+    findContainingTag: () => { throw new Error('merge-only must not consult tags'); },
+    findContainingRelease: () => { throw new Error('merge-only must not consult release PRs'); },
+  });
+  eq(result.action, 'complete', 'LOOP-MERGE-ONLY empty vault list completes at feature_merged');
+  eq(result.deployment, 'deployed', 'LOOP-MERGE-ONLY completion reports deployed');
+  eq(mergeOnlyRecord.phase, 'deployed', 'LOOP-MERGE-ONLY durable phase advances to deployed');
+  eq(mergeOnlyRecord.merge_only, true, 'LOOP-MERGE-ONLY record is stamped merge_only');
+  ok(typeof mergeOnlyRecord.deployed_at === 'string' && mergeOnlyRecord.deployed_at.length > 0,
+    'LOOP-MERGE-ONLY deployed_at is stamped');
+  eq(projected, 1, 'LOOP-MERGE-ONLY completion attempts board projection exactly once');
+  eq(persisted, 1, 'LOOP-MERGE-ONLY completion persists exactly once');
+
+  const releasePrRecord = { card: 'EM-Y Merge-only from release_pr', phase: 'release_pr', feature_merge_sha: 'def456' };
+  const fromReleasePhase = await stepCard({ root: '/workshop' }, emptyState(), releasePrRecord, {}, {
+    deployVaults: [],
+    attemptProjection: async () => {},
+    writeState: () => {},
+  });
+  eq(fromReleasePhase.action, 'complete', 'LOOP-MERGE-ONLY release_pr phase also exits merge-only (stale phase from a deploy-bound past)');
+
+  const stillWaiting = await stepCard({ root: '/workshop' }, emptyState(),
+    { card: 'A', phase: 'feature_merged', feature_merge_sha: 'abc123' }, {}, {
+      deployVaults: [{ id: 'headspace', path: '/v/h' }],
+      findContainingTag: () => '',
+      findContainingRelease: () => null,
+    });
+  eq(stillWaiting.action, 'waiting', 'LOOP-MERGE-ONLY non-empty vault list keeps the release chain (byte-identical default)');
+}
 const parkedAdvanceRecord = {
   card: 'Parked work', phase: 'parked', dependencies: ['Prerequisite'], resume_condition: 'Prerequisite deploys',
 };
@@ -710,7 +1282,112 @@ await stepCard({ root: '/workshop' }, emptyState(), validGateRecord, {}, {
 eq(armed, 1, 'feature PR arms auto-merge only after current local gates and GitHub CI are green');
 let writes = 0; let merges = 0;
 const immediateCardLock = async (_ctx, _name, fn) => fn();
-await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+let cs1Reads = 0; let cs1Locks = 0; let cs1Writes = 0;
+const jsonFirstDeps = {
+  readState: () => { cs1Reads++; return emptyState(); },
+  writeState: () => { cs1Writes++; },
+  withLock: async (_ctx, _name, fn) => { cs1Locks++; return fn(); },
+};
+for (const [verb, invoke] of [
+  ['park', () => rawCommandPark({ root: '/workshop' }, {
+    card: 'A', 'depends-on': 'B', 'resume-condition': 'B deploys',
+  }, jsonFirstDeps)],
+  ['resume', () => rawCommandResume({ root: '/workshop' }, { card: 'A' }, jsonFirstDeps)],
+  ['record-review', () => rawCommandRecordReview({ root: '/workshop' }, {
+    card: 'A', lens: 'correctness', verdict: 'pass',
+    summary: 'A sufficiently specific exact-head correctness summary.',
+  }, jsonFirstDeps)],
+  ['record-pr', () => rawCommandRecordPr({ root: '/workshop' }, {
+    card: 'A', pr: '42',
+  }, jsonFirstDeps)],
+]) {
+  await assert.rejects(invoke, (error) => error.code === 'json_required'
+    && error.action === `${verb}-refused`, `CS1-JSON-FIRST-REFUSAL ${verb} has a stable refusal`);
+  count++;
+}
+eq({ reads: cs1Reads, locks: cs1Locks, writes: cs1Writes }, { reads: 0, locks: 0, writes: 0 },
+  'CS1-JSON-FIRST-REFUSAL all four verbs refuse before every read, lock, or write');
+const jsonFirstCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'park', '--card', 'A', '--depends-on', 'B', '--resume-condition', 'B deploys',
+  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(jsonFirstCli.code, EXIT_CODES.refusal,
+  'CS1-JSON-FIRST-REFUSAL CLI exits 1 before attempting workshop resolution');
+eq(jsonFirstCli.stdout, '', 'CS1-JSON-FIRST-REFUSAL CLI emits no non-machine success output');
+eq(JSON.parse(jsonFirstCli.stderr), {
+  action: 'park-refused', ok: false, no_op: false, code: 'json_required',
+  message: 'park requires --json for a machine-readable receipt',
+}, 'CS1-JSON-FIRST-REFUSAL CLI emits a parseable refusal even outside a Git checkout');
+for (const [verb, args, invoke] of [
+  ['park', {
+    json: true, card: 'A', 'depends-on': 'B', 'resume-condition': 'B deploys',
+    'unexpected-park-option': true,
+  }, rawCommandPark],
+  ['resume', {
+    json: true, card: 'A', 'unexpected-resume-option': true,
+  }, rawCommandResume],
+  ['record-review', {
+    json: true, card: 'A', lens: 'correctness', verdict: 'pass',
+    summary: 'A sufficiently specific exact-head correctness summary.',
+    'expected-head': 'a'.repeat(40), 'expected-heed': 'a'.repeat(40),
+  }, rawCommandRecordReview],
+  ['record-pr', {
+    json: true, card: 'A', pr: '42', 'unexpected-pr-option': true,
+  }, rawCommandRecordPr],
+]) {
+  const effects = { reads: 0, locks: 0, writes: 0 };
+  const before = JSON.stringify(recordState);
+  await assert.rejects(() => invoke({ root: '/workshop' }, args, {
+    readState: () => { effects.reads++; return recordState; },
+    writeState: () => { effects.writes++; },
+    withLock: async (_ctx, _name, fn) => { effects.locks++; return fn(); },
+  }), (error) => error.code === 'unknown_option' && error.action === `${verb}-refused`,
+  `CS1-UNKNOWN-OPTION-REFUSAL ${verb} returns the stable refusal`);
+  count++;
+  eq(effects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-UNKNOWN-OPTION-REFUSAL ${verb} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(recordState), before,
+    `CS1-UNKNOWN-OPTION-REFUSAL ${verb} preserves authoritative state byte-for-byte`);
+}
+const unknownOptionCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'record-review', '--json', '--card', 'A', '--lens', 'correctness', '--verdict', 'pass',
+    '--summary', 'A sufficiently specific exact-head correctness summary.',
+    '--expected-heed', 'a'.repeat(40),
+  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(unknownOptionCli.code, EXIT_CODES.refusal,
+  'CS1-UNKNOWN-OPTION-REFUSAL CLI exits 1 before attempting workshop resolution');
+eq(unknownOptionCli.stdout, '',
+  'CS1-UNKNOWN-OPTION-REFUSAL CLI emits no non-machine success output');
+eq(JSON.parse(unknownOptionCli.stderr).code, 'unknown_option',
+  'CS1-UNKNOWN-OPTION-REFUSAL misspelled expected-head emits a stable refusal outside Git');
+const usageCli = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [
+    path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+    'record-pr', '--json',
+  ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
+});
+eq(usageCli.code, EXIT_CODES.usage, 'CS1-KIT-ENVELOPE CLI exits 2 for invalid usage');
+eq(usageCli.stdout, '', 'CS1-KIT-ENVELOPE usage emits no non-machine success output');
+eq(JSON.parse(usageCli.stderr).code, 'invalid_arguments',
+  'CS1-KIT-ENVELOPE usage emits a stable machine code');
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => basePr,
   sh: () => { throw new Error('git or gh must not run for a rejected title'); },
@@ -722,7 +1399,7 @@ eq(writes, 0, 'rejected title is not persisted');
 eq(merges, 0, 'rejected title never arms auto-merge');
 eq(recordState.cards.A.phase, 'implementing', 'rejected title leaves the recorded phase unchanged');
 
-await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): require gate receipts' }),
   sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
@@ -730,8 +1407,8 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', p
   withLock: immediateCardLock,
 }), /gate receipt is missing/, 'record-pr refuses a clean matching PR without gate receipts');
 
-recordState.cards.A.gate_receipt = passingReceipt();
-await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+recordState.cards.A.gate_receipt = passingReceipt('head42', true, 'fix(autoloop): guard release triggering');
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, baseRefOid: 'new-base', title: 'fix(autoloop): require gate receipts' }),
   sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
@@ -741,7 +1418,15 @@ await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { card: 'A', p
 
 const events = [];
 const prLocks = [];
-const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '42' }, {
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => ({ ...basePr, title: 'fix(autoloop): edited after verification' }),
+  sh: (cmd, args) => args[0] === 'status' ? '' : 'head42',
+  writeState: () => { writes++; },
+  withLock: immediateCardLock,
+}), (error) => error.code === 'title_mismatch',
+'GA-P1G-TITLE-BINDING record-pr refuses a releasable title that differs byte-for-byte from the gate receipt');
+const accepted = await commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
   readState: () => recordState,
   prView: () => ({ ...basePr, title: 'fix(autoloop): guard release triggering' }),
   sh: (cmd, args) => {
@@ -753,29 +1438,240 @@ const accepted = await commandRecordPr({ root: '/workshop' }, { card: 'A', pr: '
   withLock: async (_ctx, name, fn) => { prLocks.push(name); return fn(); },
 });
 eq(accepted.action, 'recorded', 'record-pr accepts a releasable title');
+eq(accepted.ok, true, 'record-pr adds ok:true without removing legacy receipt keys');
+eq(accepted.no_op, false, 'record-pr first apply reports no_op:false');
 eq(prLocks, [legacyCardGateLockName('A'), cardGateLockName('A')],
   'record-pr acquires migration-compatible then exact-identity per-card gates');
 eq(events, ['write'], 'record-pr persists validated state without arming auto-merge before CI is green');
+const prReplayStateBytes = JSON.stringify(recordState);
+const writesBeforePrReplay = writes;
+const prReplay = await commandRecordPr({ root: '/workshop' }, { json: true, card: 'A', pr: '42' }, {
+  readState: () => recordState,
+  prView: () => { throw new Error('literal record-pr replay must not query GitHub'); },
+  sh: () => { throw new Error('literal record-pr replay must not inspect Git'); },
+  writeState: () => { writes++; },
+  withLock: immediateCardLock,
+});
+eq(prReplay.no_op, true, 'CS1-REPLAY-NOOP literal record-pr replay returns no_op:true');
+eq(JSON.stringify(recordState), prReplayStateBytes,
+  'CS1-REPLAY-NOOP literal record-pr replay preserves authoritative state byte-for-byte');
+eq(writes, writesBeforePrReplay, 'CS1-REPLAY-NOOP literal record-pr replay performs zero ledger writes');
+await assert.rejects(() => commandRecordPr({ root: '/workshop' }, {
+  json: true, card: 'A', pr: '43',
+}, {
+  readState: () => recordState, writeState: () => { writes++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'literal_replay_mismatch',
+'CS1-REPLAY-NOOP different record-pr operands on a settled target refuse');
+eq(writes, writesBeforePrReplay, 'CS1-REPLAY-NOOP mismatched record-pr replay performs zero ledger writes');
 
 const reviewState = emptyState();
 reviewState.cards.Review = { card: 'Review', branch: 'autoloop/review', worktree: os.tmpdir(), phase: 'implementing', gate_receipt: passingReceipt() };
 const reviewLocks = [];
-const review = await commandRecordReview({ root: '/workshop' }, {
-  card: 'Review', lens: 'correctness', verdict: 'pass', summary: 'No correctness defect found in the reviewed diff.',
+let opx2ReviewProjections = 0;
+let reviewWrites = 0;
+const initialReviewHead = 'c'.repeat(40);
+const missingHeadEffects = { reads: 0, locks: 0, writes: 0 };
+const beforeMissingHead = JSON.stringify(reviewState);
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'pass',
+  summary: 'No correctness defect found in the reviewed diff.',
 }, {
-  readState: () => reviewState, sh: () => 'review-head', writeState: () => {},
+  readState: () => { missingHeadEffects.reads++; return reviewState; },
+  writeState: () => { missingHeadEffects.writes++; },
+  withLock: async (_ctx, _name, fn) => { missingHeadEffects.locks++; return fn(); },
+}), (error) => error.code === 'invalid_arguments' && error.exitCode === EXIT_CODES.usage,
+'CS1-MANDATORY-EXACT-HEAD omission refuses with stable usage before command effects');
+eq(missingHeadEffects, { reads: 0, locks: 0, writes: 0 },
+  'CS1-MANDATORY-EXACT-HEAD omission performs zero reads, locks, or writes');
+eq(JSON.stringify(reviewState), beforeMissingHead,
+  'CS1-MANDATORY-EXACT-HEAD omission preserves review state byte-for-byte');
+for (const [label, expectedHeadOperand] of [
+  ['bare token', true],
+  ['duplicate operands', ['a'.repeat(40), 'a'.repeat(40)]],
+  ['uppercase SHA', 'A'.repeat(40)],
+  ['short SHA', 'a'.repeat(39)],
+]) {
+  const effects = { reads: 0, locks: 0, writes: 0 };
+  const before = JSON.stringify(reviewState);
+  await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+    json: true,
+    card: 'Review', lens: 'correctness', verdict: 'pass',
+    summary: 'No correctness defect found in the reviewed diff.',
+    'expected-head': expectedHeadOperand,
+  }, {
+    readState: () => { effects.reads++; return reviewState; },
+    writeState: () => { effects.writes++; },
+    withLock: async (_ctx, _name, fn) => { effects.locks++; return fn(); },
+  }), (error) => error.code === 'invalid_arguments',
+  `CS1-MANDATORY-EXACT-HEAD ${label} refuses with stable usage`);
+  count++;
+  eq(effects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-MANDATORY-EXACT-HEAD ${label} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(reviewState), before,
+    `CS1-MANDATORY-EXACT-HEAD ${label} preserves review state byte-for-byte`);
+}
+const review = await commandRecordReview({ root: '/workshop' }, {
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'pass',
+  summary: 'No correctness defect found in the reviewed diff.',
+  'expected-head': initialReviewHead,
+}, {
+  readState: () => reviewState, sh: () => initialReviewHead, writeState: () => { reviewWrites++; },
+  projectLoopStation: () => { opx2ReviewProjections++; },
   withLock: async (_ctx, name, fn) => { reviewLocks.push(name); return fn(); },
 });
-eq(review.head_sha, 'review-head', 'review receipt is tied to the exact commit');
+eq(review.head_sha, initialReviewHead, 'review receipt is tied to the mandatory exact commit');
+eq(review.ok, true, 'record-review adds ok:true without removing legacy receipt keys');
+eq(review.no_op, false, 'record-review first apply reports no_op:false');
 eq(reviewLocks, [legacyCardGateLockName('Review'), cardGateLockName('Review')],
   'review writes acquire migration-compatible then exact-identity per-card gates');
 eq(reviewState.cards.Review.gate_receipt, null, 'new review invalidates an earlier combined gate receipt');
+eq(opx2ReviewProjections, 0,
+  'OPX2-TRANSITION-ONLY review receipt writes never project Loop Station');
+const exactReviewHead = 'a'.repeat(40);
+const beforeHeadMismatch = JSON.stringify(reviewState);
+const writesBeforeHeadMismatch = reviewWrites;
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  json: true, card: 'Review', lens: 'regression-risk', verdict: 'pass',
+  summary: 'Regression behavior remains bounded by the single-writer deployment model.',
+  'expected-head': 'b'.repeat(40),
+}, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'head_mismatch',
+'CS1-EXPECTED-HEAD-BINDING refuses a review bound to a different exact HEAD');
+eq(JSON.stringify(reviewState), beforeHeadMismatch,
+  'CS1-EXPECTED-HEAD-BINDING mismatch preserves review state byte-for-byte');
+eq(reviewWrites, writesBeforeHeadMismatch,
+  'CS1-EXPECTED-HEAD-BINDING mismatch performs zero ledger writes');
+const limitedReviewArgs = {
+  json: true, card: 'Review', lens: 'regression-risk', verdict: 'pass',
+  summary: 'Concurrency races remain outside the ratified single-writer deployment model.',
+  'expected-head': exactReviewHead, 'accepted-limitation': true,
+  bound: 'single-writer-no-concurrent-races',
+};
+for (const [label, malformed] of [
+  ['accepted flag without bound', {
+    ...limitedReviewArgs, 'accepted-limitation': true, bound: undefined,
+  }],
+  ['bound without accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': undefined,
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['bare bound token without accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': undefined, bound: true,
+  }],
+  ['valued accepted flag', {
+    ...limitedReviewArgs, 'accepted-limitation': 'yes',
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['duplicated accepted flags', {
+    ...limitedReviewArgs, 'accepted-limitation': [true, true],
+    bound: 'single-writer-no-concurrent-races',
+  }],
+  ['mixed named and bare bound tokens', {
+    ...limitedReviewArgs, 'accepted-limitation': true,
+    bound: ['single-writer-no-concurrent-races', true],
+  }],
+]) {
+  const invalidLimitationEffects = { reads: 0, locks: 0, writes: 0 };
+  const invalidLimitationDeps = {
+    readState: () => { invalidLimitationEffects.reads++; return reviewState; },
+    writeState: () => { invalidLimitationEffects.writes++; },
+    withLock: async (_ctx, _name, fn) => { invalidLimitationEffects.locks++; return fn(); },
+  };
+  const beforeInvalidLimitation = JSON.stringify(reviewState);
+  await assert.rejects(() => commandRecordReview({ root: '/workshop' }, malformed, invalidLimitationDeps),
+    (error) => error.code === 'invalid_limitation',
+    `CS1-ACCEPTED-LIMITATION-PAIRING-COVERAGE ${label} refuses with the stable code`);
+  count++;
+  eq(invalidLimitationEffects, { reads: 0, locks: 0, writes: 0 },
+    `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} refuses before reads, locks, or writes`);
+  eq(JSON.stringify(reviewState), beforeInvalidLimitation,
+    `CS1-ACCEPTED-LIMITATION-PER-CASE-ISOLATION ${label} preserves review state byte-for-byte`);
+}
+const rawLimitationCliBase = [
+  path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
+  'record-review', '--json', '--card', 'Review', '--lens', 'regression-risk',
+  '--verdict', 'pass',
+  '--summary', 'A sufficiently specific raw limitation operand refusal summary.',
+  '--expected-head', exactReviewHead,
+];
+for (const [label, rawOperands] of [
+  ['bare bound token', ['--bound']],
+  ['valued accepted flag', [
+    '--accepted-limitation', 'yes', '--bound', 'single-writer-no-concurrent-races',
+  ]],
+  ['duplicated accepted flags', [
+    '--accepted-limitation', '--accepted-limitation',
+    '--bound', 'single-writer-no-concurrent-races',
+  ]],
+  ['mixed named and bare bound tokens', [
+    '--accepted-limitation', '--bound', 'single-writer-no-concurrent-races', '--bound',
+  ]],
+]) {
+  const cliResult = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [...rawLimitationCliBase, ...rawOperands], {
+      cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+  eq(cliResult.code, EXIT_CODES.refusal,
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} exits 1 before workshop resolution`);
+  eq(cliResult.stdout, '',
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} emits no non-machine success output`);
+  eq(JSON.parse(cliResult.stderr).code, 'invalid_limitation',
+    `CS1-RAW-LIMITATION-OPERAND-SHAPE ${label} reaches the real parser and dispatcher`);
+}
+const limitedReview = await commandRecordReview({ root: '/workshop' }, limitedReviewArgs, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+});
+eq(limitedReview.accepted_limitation, { bound: ['single-writer-no-concurrent-races'] },
+  'CS1-ACCEPTED-LIMITATION returns the named bound machine-readably');
+eq(reviewState.cards.Review.reviews['regression-risk'].accepted_limitation,
+  { bound: ['single-writer-no-concurrent-races'] },
+  'CS1-ACCEPTED-LIMITATION persists the named single-writer-bound limitation');
+const limitedReviewStateBytes = JSON.stringify(reviewState);
+const writesBeforeReviewReplay = reviewWrites;
+const limitedReplay = await commandRecordReview({ root: '/workshop' }, limitedReviewArgs, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+});
+eq(limitedReplay.no_op, true, 'CS1-REPLAY-NOOP literal record-review replay returns no_op:true');
+eq(JSON.stringify(reviewState), limitedReviewStateBytes,
+  'CS1-REPLAY-NOOP literal record-review replay preserves authoritative state byte-for-byte');
+eq(reviewWrites, writesBeforeReviewReplay,
+  'CS1-REPLAY-NOOP literal record-review replay performs zero ledger writes');
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  ...limitedReviewArgs, summary: 'A different summary cannot replace a settled exact-head review receipt.',
+}, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'literal_replay_mismatch',
+'CS1-REPLAY-NOOP different record-review operands on the same exact HEAD refuse');
+eq(reviewWrites, writesBeforeReviewReplay,
+  'CS1-REPLAY-NOOP mismatched record-review replay performs zero ledger writes');
+await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
+  ...limitedReviewArgs, lens: 'test-adequacy', verdict: 'refute',
+}, {
+  readState: () => reviewState, sh: () => exactReviewHead,
+  writeState: () => { reviewWrites++; }, withLock: immediateCardLock,
+}), (error) => error.code === 'invalid_limitation',
+'CS1-ACCEPTED-LIMITATION refuses attaching an accepted limitation to a refutation');
 
 reviewState.cards.Review.phase = 'feature_merged';
 await assert.rejects(() => commandRecordReview({ root: '/workshop' }, {
-  card: 'Review', lens: 'correctness', verdict: 'refute', summary: 'A late refutation must not reopen a merged feature.',
+  json: true,
+  card: 'Review', lens: 'correctness', verdict: 'refute',
+  summary: 'A late refutation must not reopen a merged feature.',
+  'expected-head': exactReviewHead,
 }, {
-  readState: () => reviewState, sh: () => 'review-head', writeState: () => {}, withLock: immediateCardLock,
+  readState: () => reviewState, sh: () => exactReviewHead, writeState: () => {}, withLock: immediateCardLock,
 }), /reviews are closed .*feature_merged/, 'review writes are rejected after the feature PR merges');
 reviewState.cards.Review.phase = 'implementing';
 
@@ -784,15 +1680,20 @@ reviewState.cards.Review.reviews = Object.fromEntries(['correctness', 'regressio
   lens, verdict: 'pass', refuted: false, summary: `${lens} review found no release-blocking defect.`, head_sha: 'review-head',
 }]));
 const gateCalls = [];
+let selfInstallOperands = null;
 const verified = await commandVerifyGates({ root: '/workshop' }, { card: 'Review', base: 'HEAD' }, {
   readState: () => reviewState,
   writeState: () => {},
   withLock: async (_ctx, name, fn) => { gateCalls.push(name); return fn(); },
-  runIsolatedWorkshopSelfInstall: () => { gateCalls.push('self-install'); },
+  runIsolatedWorkshopSelfInstall: (_ctx, head, base, title) => {
+    gateCalls.push('self-install');
+    selfInstallOperands = { head, base, title };
+  },
   sh: (cmd, args) => {
     if (cmd === 'git' && args[0] === 'status') return '';
     if (cmd === 'git' && args[0] === 'fetch') { gateCalls.push('fetch-main'); return ''; }
     if (cmd === 'git' && args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'base-current' : 'review-head';
+    if (cmd === 'git' && args[0] === 'show') return 'fix(autoloop): verify release provenance';
     if (cmd === 'git' && args[0] === 'diff') return 'scripts/autoloop/codex-coordinator.js\nplatform/test/run-codex-autoloop.js';
     if (cmd === 'node' && args[0] === 'scripts/autoloop/gate.js') {
       eq(args[args.indexOf('--base') + 1], 'base-current', 'verify-gates ignores caller base overrides and uses fetched origin/main');
@@ -807,11 +1708,17 @@ eq(gateCalls, [legacyCardGateLockName('Review'), cardGateLockName('Review'), 'fe
   'verify-gates serializes through migration-compatible and exact card identity, fetches main, and owns every deterministic release check');
 eq(reviewState.cards.Review.gate_receipt.base_ref, 'origin/main', 'combined receipt records the canonical base ref');
 eq(reviewState.cards.Review.gate_receipt.base_sha, 'base-current', 'combined receipt records the exact fetched base SHA');
+eq(reviewState.cards.Review.gate_receipt.prospective_pr_title, 'fix(autoloop): verify release provenance',
+  'combined receipt records the exact prospective squash title');
+eq(selfInstallOperands, {
+  head: 'review-head', base: 'base-current', title: 'fix(autoloop): verify release provenance',
+}, 'verify-gates binds self-install to exact head, fetched base, and prospective title');
 ok(gateReceiptStatus(reviewState.cards.Review, 'review-head').valid, 'combined receipt is accepted after every check passes');
 
 const advanceState = emptyState();
 advanceState.cards.Advance = { card: 'Advance', phase: 'feature_pr', gate_receipt: passingReceipt() };
 const advanceLocks = []; let insideAdvanceLock = false; let advanceReadInsideLock = false;
+let opx2WaitingProjections = 0;
 const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advance', 'lease-seconds': '0' }, {
   withLock: async (_ctx, name, fn) => {
     advanceLocks.push(name); insideAdvanceLock = true;
@@ -819,12 +1726,41 @@ const advanceResult = await commandAdvance({ root: '/workshop' }, { card: 'Advan
   },
   readState: () => { advanceReadInsideLock = insideAdvanceLock; return advanceState; },
   stepCard: async () => ({ action: 'waiting', phase: 'feature_pr' }),
+  projectLoopStation: () => { opx2WaitingProjections++; },
   emit: () => {},
 });
 eq(advanceLocks, [legacyCardGateLockName('Advance'), cardGateLockName('Advance')],
   'advance acquires migration-compatible then exact-identity per-card gates');
 ok(advanceReadInsideLock, 'advance rereads the card only after acquiring its lock');
 eq(advanceResult.phase, 'feature_pr', 'locked advance returns the feature PR state');
+eq(opx2WaitingProjections, 0,
+  'OPX2-TRANSITION-ONLY waiting poll/retry fires no Loop Station projection');
+const opx2DeployState = emptyState();
+opx2DeployState.cards.Deploy = { card: 'Deploy', phase: 'tap_merged' };
+const opx2DeployProjections = [];
+const opx2DeployDeps = {
+  withLock: immediateCardLock,
+  readState: () => opx2DeployState,
+  stepCard: async (_ctx, _state, record) => {
+    record.phase = 'deployed';
+    return { action: 'complete', card: record.card, phase: record.phase };
+  },
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2DeployProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
+  emit: () => {},
+};
+eq((await commandAdvance({ root: '/workshop' }, { card: 'Deploy', 'lease-seconds': '0' }, opx2DeployDeps)).phase,
+  'deployed', 'OPX2-TRANSITION-ONLY deploy transition completes normally');
+eq(opx2DeployProjections, ['deploy'],
+  'OPX2-TRANSITION-ONLY deploy transition fires exactly one Loop Station projection');
+opx2DeployDeps.stepCard = async (_ctx, _state, record) => ({
+  action: 'complete', card: record.card, phase: record.phase,
+});
+await commandAdvance({ root: '/workshop' }, { card: 'Deploy', 'lease-seconds': '0' }, opx2DeployDeps);
+eq(opx2DeployProjections, ['deploy'],
+  'OPX2-TRANSITION-ONLY deployed replay fires no additional Loop Station projection');
 const parkedAdvanceState = emptyState();
 parkedAdvanceState.cards.Parked = {
   card: 'Parked', phase: 'parked', dependencies: ['Prerequisite'], resume_condition: 'Prerequisite deploys',
@@ -833,14 +1769,18 @@ eq((await commandAdvance({ root: '/workshop' }, { card: 'Parked', 'lease-seconds
   withLock: immediateCardLock, readState: () => parkedAdvanceState, emit: () => {},
 })).action, 'parked', 'advance command refuses to treat a parked card as implementation');
 
-assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
+assert.throws(() => runIsolatedWorkshopSelfInstall(
+  { root: '/workshop' }, 'head42', 'base42', 'fix(x): y', (cmd, args) => {
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') throw new Error('cleanup denied');
+  if (cmd === 'git' && args[0] === 'rev-parse') return 'tree42';
+  if (cmd === 'git' && args[0] === 'commit-tree') return 'synthetic42';
   return '';
 }), /failed to remove disposable self-install worktree .*cleanup denied/, 'self-install gate surfaces disposable worktree cleanup failures');
 
 let partialRemoved = false;
 let partialPath = '';
-assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head42', (cmd, args) => {
+assert.throws(() => runIsolatedWorkshopSelfInstall(
+  { root: '/workshop' }, 'head42', 'base42', 'fix(x): y', (cmd, args) => {
   if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
     partialPath = args[3];
     throw new Error('checkout failed after registration');
@@ -852,6 +1792,1608 @@ assert.throws(() => runIsolatedWorkshopSelfInstall({ root: '/workshop' }, 'head4
   return '';
 }), /checkout failed after registration/, 'self-install preserves the original partial-add failure');
 ok(partialRemoved, 'self-install unregisters a partially-added disposable worktree');
+
+// GA-P1g — the deploy-bound workshop gate validates exactly the state the
+// release bumper will publish. The real fixture below starts from an exact
+// detached HEAD, raises Home's TaskEntity floor one minor, and commits a real
+// TaskEntity feature. Raw installation must reject that source state; the
+// production helper must compute the release in a second disposable worktree,
+// run the real installer there, and leave the claimed fixture byte-clean.
+{
+  const realRun = (cmd, args, opts = {}) => execFileSync(cmd, args, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...opts,
+  }).trim();
+  const releaseGateCommitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Sauce Release Gate',
+    GIT_AUTHOR_EMAIL: 'sauce-release-gate@example.invalid',
+    GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
+    GIT_COMMITTER_NAME: 'Sauce Release Gate',
+    GIT_COMMITTER_EMAIL: 'sauce-release-gate@example.invalid',
+    GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z',
+  };
+  const localCommitFromTree = (cwd, tree, parent, title) => realRun('git', [
+    'commit-tree', tree, '-p', parent, '-m', title,
+  ], { cwd, stdio: 'pipe', env: releaseGateCommitEnv });
+  const localRootCommitFromTree = (cwd, tree, title) => realRun('git', [
+    'commit-tree', tree, '-m', title,
+  ], { cwd, stdio: 'pipe', env: releaseGateCommitEnv });
+  const resolveOrdinaryReleaseTitle = (
+    cwd, headSha, env = process.env, readEvent = fs.readFileSync,
+  ) => {
+    const checkedOutTitle = realRun('git', ['show', '-s', '--format=%s', headSha], { cwd });
+    if (env.GITHUB_EVENT_NAME !== 'pull_request') return checkedOutTitle;
+    if (!env.GITHUB_SHA || env.GITHUB_SHA !== headSha) {
+      throw new Error(
+        `pull-request title binding does not match checked-out HEAD (${env.GITHUB_SHA || 'missing'} != ${headSha})`,
+      );
+    }
+    if (!env.GITHUB_EVENT_PATH) {
+      throw new Error('pull-request title binding requires GITHUB_EVENT_PATH');
+    }
+    let event;
+    try {
+      event = JSON.parse(readEvent(env.GITHUB_EVENT_PATH, 'utf8'));
+    } catch (error) {
+      throw new Error(`pull-request title binding could not read GITHUB_EVENT_PATH: ${error.message}`);
+    }
+    const title = event && event.pull_request && event.pull_request.title;
+    if (typeof title !== 'string' || !title || title !== title.trim()) {
+      throw new Error('pull-request title binding requires one exact non-empty PR title');
+    }
+    return title;
+  };
+
+  // Actions checks out PRs at depth 1. Prove the ordinary release fixture can
+  // build a complete local base/feature pair from that one exact HEAD without
+  // fetching its absent parent or changing the checked-out branch.
+  const shallowSource = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-shallow-source-'));
+  const shallowClone = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-shallow-clone-'));
+  fs.rmSync(shallowClone, { recursive: true, force: true });
+  try {
+    realRun('git', ['init', '--quiet', '--initial-branch=main'], { cwd: shallowSource, stdio: 'pipe' });
+    fs.writeFileSync(path.join(shallowSource, 'fixture.txt'), 'base\n');
+    realRun('git', ['add', 'fixture.txt'], { cwd: shallowSource, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test', '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '--quiet', '-m', 'fix(test): shallow base',
+    ], { cwd: shallowSource, stdio: 'pipe' });
+    fs.writeFileSync(path.join(shallowSource, 'fixture.txt'), 'feature\n');
+    realRun('git', ['add', 'fixture.txt'], { cwd: shallowSource, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test', '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '--quiet', '-m', 'fix(test): shallow feature',
+    ], { cwd: shallowSource, stdio: 'pipe' });
+    realRun('git', ['clone', '--quiet', '--depth=1', '--no-local', shallowSource, shallowClone], {
+      cwd: os.tmpdir(), stdio: 'pipe',
+    });
+    eq(realRun('git', ['rev-parse', '--is-shallow-repository'], { cwd: shallowClone }), 'true',
+      'GA-P1G3-SHALLOW-ORDINARY oracle executes in a real depth-1 clone');
+    assert.throws(
+      () => realRun('git', ['rev-parse', 'HEAD^'], { cwd: shallowClone, stdio: 'pipe' }),
+      /Command failed/,
+      'GA-P1G3-SHALLOW-ORDINARY confirms the checkout parent object is absent',
+    );
+    count++;
+    const shallowHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: shallowClone });
+    const shallowTree = realRun('git', ['rev-parse', `${shallowHead}^{tree}`], { cwd: shallowClone });
+    const localBase = localCommitFromTree(
+      shallowClone, shallowTree, shallowHead, 'test(autoloop): local ordinary base',
+    );
+    const localFeature = localCommitFromTree(
+      shallowClone, shallowTree, localBase, 'fix(autoloop): local ordinary feature',
+    );
+    ok(/^[0-9a-f]{40}$/.test(localBase),
+      'GA-P1G3-SHALLOW-ORDINARY creates a valid local base commit');
+    eq(realRun('git', ['rev-parse', `${localBase}^`], { cwd: shallowClone }), shallowHead,
+      'GA-P1G3-SHALLOW-ORDINARY local base extends the only available exact HEAD');
+    eq(realRun('git', ['rev-parse', `${localFeature}^`], { cwd: shallowClone }), localBase,
+      'GA-P1G3-SHALLOW-ORDINARY local feature has the constructed base as its exact parent');
+    eq(realRun('git', ['rev-parse', `${localFeature}^{tree}`], { cwd: shallowClone }), shallowTree,
+      'GA-P1G3-SHALLOW-ORDINARY local feature preserves the exact checked-out tree');
+    eq(localCommitFromTree(
+      shallowClone, shallowTree, localBase, 'fix(autoloop): local ordinary feature',
+    ), localFeature, 'GA-P1G3-SHALLOW-ORDINARY local feature construction is deterministic');
+  } finally {
+    fs.rmSync(shallowClone, { recursive: true, force: true });
+    fs.rmSync(shallowSource, { recursive: true, force: true });
+  }
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-claim-'));
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  const rawRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1g-raw-'));
+  fs.rmSync(rawRoot, { recursive: true, force: true });
+  const ordinaryDisposable = [];
+  const releaseDisposable = [];
+  const mismatchedDisposable = [];
+  const borrowedDisposable = [];
+  let fixtureAdded = false;
+  let rawAdded = false;
+  try {
+    realRun('git', ['worktree', 'add', '--detach', fixtureRoot, 'HEAD'], {
+      cwd: path.resolve(__dirname, '../..'), stdio: 'pipe',
+    });
+    fixtureAdded = true;
+    const fixtureStart = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    const homeManifestPath = path.join(fixtureRoot, 'platform/blueprints/home/manifest.json');
+    const taskManifestPath = path.join(fixtureRoot, 'platform/mechanisms/task-entity/manifest.json');
+    const taskReadmePath = path.join(fixtureRoot, 'platform/mechanisms/task-entity/README.md');
+    const homeManifest = JSON.parse(fs.readFileSync(homeManifestPath, 'utf8'));
+    const taskManifest = JSON.parse(fs.readFileSync(taskManifestPath, 'utf8'));
+    const [taskMajor, taskMinor, taskPatch] = taskManifest.version.split('.').map(Number);
+    const computedTaskVersion = `${taskMajor}.${taskMinor + 1}.0`;
+    const taskDependency = homeManifest.depends_on.find((dep) => dep.name === 'task-entity');
+    ok(taskDependency && /^\d+\.\d+\.\d+$/.test(taskManifest.version),
+      'GA-P1G-REAL-RELEASE-FIXTURE starts from a versioned shipping TaskEntity dependency');
+    const normalizeFixtureTaskFloor = (manifest, sourceVersion) => {
+      const dependency = manifest.depends_on.find((dep) => dep.name === 'task-entity');
+      if (!dependency) throw new Error('fixture Home manifest lacks task-entity dependency');
+      dependency.range = `>=${sourceVersion}`;
+      return dependency;
+    };
+    const normalizationOracle = (normalizer, sourceVersion) => {
+      const candidate = JSON.parse(JSON.stringify(homeManifest));
+      const candidateDependency = candidate.depends_on.find((dep) => dep.name === 'task-entity');
+      candidateDependency.range = `>=${taskMajor}.${taskMinor + 1}.0`;
+      normalizer(candidate, sourceVersion);
+      assert.strictEqual(
+        candidateDependency.range,
+        `>=${sourceVersion}`,
+        'fixture normalization must bind Home to the exact source TaskEntity version',
+      );
+    };
+    normalizationOracle(normalizeFixtureTaskFloor, taskManifest.version);
+    count++;
+    assert.throws(
+      () => normalizationOracle(() => {}, taskManifest.version),
+      /fixture normalization must bind Home to the exact source TaskEntity version/,
+      'GA-P1H-OMITTED-NORMALIZATION-MUTANT-KILLED requires the preparation floor rewrite',
+    );
+    count++;
+    const alternateSourceVersion = `${taskMajor}.${taskMinor}.${taskPatch + 1}`;
+    normalizationOracle(normalizeFixtureTaskFloor, alternateSourceVersion);
+    count++;
+    assert.throws(
+      () => normalizationOracle(
+        (manifest) => normalizeFixtureTaskFloor(manifest, taskManifest.version),
+        alternateSourceVersion,
+      ),
+      /fixture normalization must bind Home to the exact source TaskEntity version/,
+      'GA-P1H-HISTORICAL-FLOOR-MUTANT-KILLED rejects a fixture pinned to one source release',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(normalizeFixtureTaskFloor.toString()),
+      'GA-P1H-VERSION-RELATIVE-NORMALIZATION contains no historical TaskEntity literal');
+
+    // Reproduce the post-floor source that blocked GA-P1b10: TaskEntity is
+    // still at the shipping version while Home already requires its next
+    // minor. This synthetic source commit is the exact base of the prospective
+    // squash, so the preparation + feature pair below must net back to its
+    // raised floor without borrowing a bump from branch history.
+    taskDependency.range = `>=${computedTaskVersion}`;
+    fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
+    const raisedSourceMarker = '<!-- GA-P1h raised-floor source fixture -->';
+    fs.appendFileSync(taskReadmePath, `\n${raisedSourceMarker}\n`);
+    const raisedSourcePaths = realRun('git', ['diff', '--name-only'], { cwd: fixtureRoot })
+      .split('\n').filter(Boolean).sort();
+    ok(raisedSourcePaths.includes('platform/mechanisms/task-entity/README.md'),
+      'GA-P1H-ALREADY-RAISED-SOURCE-MUTANT-KILLED setup stays non-empty when Home already has the computed floor');
+    ok(raisedSourcePaths.every((sourcePath) => [
+      'platform/blueprints/home/manifest.json',
+      'platform/mechanisms/task-entity/README.md',
+    ].includes(sourcePath)), 'GA-P1H-RAISED-SOURCE setup changes only its two fixture-owned paths');
+    realRun('git', [
+      'add',
+      'platform/blueprints/home/manifest.json',
+      'platform/mechanisms/task-entity/README.md',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    const raisedSourceCommitArgs = [
+      '-c', 'user.name=Sauce Test',
+      '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '-m', 'feat(task-entity): reproduce ambient release provenance',
+    ];
+    ok(!raisedSourceCommitArgs.includes('--allow-empty'),
+      'GA-P1H-RAISED-SOURCE-ALLOW-EMPTY-MUTANT-KILLED source setup rejects empty commits');
+    realRun('git', raisedSourceCommitArgs, { cwd: fixtureRoot, stdio: 'pipe' });
+    const fixtureBase = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    eq(realRun('git', ['rev-parse', `${fixtureBase}^`], { cwd: fixtureRoot }), fixtureStart,
+      'GA-P1H-RAISED-SOURCE base extends the exact checked-out source');
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixtureBase}:platform/blueprints/home/manifest.json`], {
+        cwd: fixtureRoot,
+      })).depends_on.find((dep) => dep.name === 'task-entity').range,
+      `>=${computedTaskVersion}`,
+      'GA-P1H-RAISED-SOURCE reproduces Home already requiring the computed next minor',
+    );
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixtureBase}:platform/mechanisms/task-entity/manifest.json`], {
+        cwd: fixtureRoot,
+      })).version,
+      taskManifest.version,
+      'GA-P1H-RAISED-SOURCE keeps TaskEntity at the exact shipping source version',
+    );
+    ok(realRun('git', [
+      'show', `${fixtureBase}:platform/mechanisms/task-entity/README.md`,
+    ], { cwd: fixtureRoot }).includes(raisedSourceMarker),
+    'GA-P1H-RAISED-SOURCE base carries the independent non-empty fixture marker');
+    eq(realRun('git', ['show', '-s', '--format=%s', fixtureBase], { cwd: fixtureRoot }),
+      'feat(task-entity): reproduce ambient release provenance',
+      'GA-P1I-AMBIENT-FEATURE fixture carries a real releasable feature before the prospective squash');
+
+    // The real feature above deliberately reproduces the history present at
+    // GA-P1b10's preserved product HEAD. Give the prospective squash a
+    // parent with the exact same base tree but independent ancestry, so
+    // compute-release can see only that prospective title. This stays valid
+    // in Actions' depth-1 checkout because it does not need a fetched tag or
+    // the checked-out commit's absent parent.
+    const releaseRangeTree = realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], {
+      cwd: fixtureRoot,
+    });
+    const releaseRangeBase = realRun('git', [
+      'commit-tree', releaseRangeTree,
+      '-m', 'test(autoloop): isolate prospective release range',
+    ], { cwd: fixtureRoot, stdio: 'pipe', env: releaseGateCommitEnv });
+    eq(realRun('git', ['rev-parse', `${releaseRangeBase}^{tree}`], { cwd: fixtureRoot }),
+      releaseRangeTree,
+      'GA-P1I-RANGE-BASE preserves the exact fixture base tree');
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', releaseRangeBase], { cwd: fixtureRoot }),
+      releaseRangeBase,
+      'GA-P1I-RANGE-BASE is an ancestry-isolated root that needs no fetched history');
+    assert.throws(
+      () => realRun('git', ['merge-base', '--is-ancestor', fixtureBase, releaseRangeBase], {
+        cwd: fixtureRoot, stdio: 'pipe',
+      }),
+      /Command failed/,
+      'GA-P1I-RANGE-BASE excludes the ambient feature from prospective release ancestry',
+    );
+    count++;
+    const rangeAnchorOracle = (selectRangeBase) => {
+      const selected = selectRangeBase({ isolated: releaseRangeBase, ambient: fixtureBase });
+      assert.strictEqual(
+        selected,
+        releaseRangeBase,
+        'prospective release must use the ancestry-isolated exact-tree base',
+      );
+    };
+    rangeAnchorOracle(({ isolated }) => isolated);
+    count++;
+    assert.throws(
+      () => rangeAnchorOracle(({ ambient }) => ambient),
+      /prospective release must use the ancestry-isolated exact-tree base/,
+      'GA-P1I-WRONG-RANGE-ANCHOR-MUTANT-KILLED rejects the ambient feature-bearing parent',
+    );
+    count++;
+
+    normalizeFixtureTaskFloor(homeManifest, taskManifest.version);
+    fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
+    fs.appendFileSync(taskReadmePath, '\n<!-- GA-P1g computed-release fixture -->\n');
+    eq(
+      realRun('git', ['diff', '--name-only'], { cwd: fixtureRoot }).split('\n').filter(Boolean).sort(),
+      ['platform/blueprints/home/manifest.json', 'platform/mechanisms/task-entity/README.md'],
+      'GA-P1H-NORMALIZED-PREP is non-empty and binds the exact floor plus feature fixture',
+    );
+    realRun('git', [
+      'add',
+      'platform/blueprints/home/manifest.json',
+      'platform/mechanisms/task-entity/README.md',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    realRun('git', [
+      '-c', 'user.name=Sauce Test',
+      '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '-m', 'fix(task-entity): prepare multi-commit release fixture',
+    ], { cwd: fixtureRoot, stdio: 'pipe' });
+    const fixturePreparation = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    eq(realRun('git', ['rev-parse', `${fixturePreparation}^`], { cwd: fixtureRoot }), fixtureBase,
+      'GA-P1H-NORMALIZED-PREP extends the exact raised-floor base');
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixturePreparation}:platform/blueprints/home/manifest.json`], {
+        cwd: fixtureRoot,
+      })).depends_on.find((dep) => dep.name === 'task-entity').range,
+      `>=${taskManifest.version}`,
+      'GA-P1H-NORMALIZED-PREP lowers Home to the exact source TaskEntity version',
+    );
+    taskDependency.range = `>=${computedTaskVersion}`;
+    fs.writeFileSync(homeManifestPath, `${JSON.stringify(homeManifest, null, 2)}\n`);
+    eq(realRun('git', ['diff', '--name-only'], { cwd: fixtureRoot }),
+      'platform/blueprints/home/manifest.json',
+      'GA-P1H-NONEMPTY-FEATURE-MUTANT-KILLED requires a real computed-floor tree transition');
+    realRun('git', ['add', 'platform/blueprints/home/manifest.json'], { cwd: fixtureRoot, stdio: 'pipe' });
+    const featureCommitArgs = [
+      '-c', 'user.name=Sauce Test',
+      '-c', 'user.email=sauce-test@example.invalid',
+      'commit', '-m', 'feat(task-entity): exercise computed release floor',
+    ];
+    ok(!featureCommitArgs.includes('--allow-empty'),
+      'GA-P1H-ALLOW-EMPTY-COMMIT-MUTANT-KILLED feature fixture rejects empty commits');
+    realRun('git', featureCommitArgs, { cwd: fixtureRoot, stdio: 'pipe' });
+    const fixtureHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot });
+    eq(realRun('git', ['rev-parse', `${fixtureHead}^`], { cwd: fixtureRoot }), fixturePreparation,
+      'GA-P1H-NONEMPTY-FEATURE commit extends the normalized preparation');
+    eq(
+      JSON.parse(realRun('git', ['show', `${fixtureHead}:platform/blueprints/home/manifest.json`], {
+        cwd: fixtureRoot,
+      })).depends_on.find((dep) => dep.name === 'task-entity').range,
+      `>=${computedTaskVersion}`,
+      'GA-P1H-NONEMPTY-FEATURE raises Home to the computed next TaskEntity minor',
+    );
+    ok(realRun('git', ['rev-parse', `${fixtureHead}^{tree}`], { cwd: fixtureRoot })
+        !== realRun('git', ['rev-parse', `${fixturePreparation}^{tree}`], { cwd: fixtureRoot }),
+    'GA-P1H-NONEMPTY-FEATURE feature and preparation trees differ');
+    const claimedHeadBefore = fixtureHead;
+    const claimedStatusBefore = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: fixtureRoot });
+    const claimedHomeBefore = fs.readFileSync(homeManifestPath);
+    const claimedTaskBefore = fs.readFileSync(taskReadmePath);
+    eq(claimedStatusBefore, '', 'GA-P1G-CLAIM-BYTE-CLEAN fixture claim starts clean');
+
+    realRun('git', ['worktree', 'add', '--detach', rawRoot, fixtureHead], {
+      cwd: fixtureRoot, stdio: 'pipe',
+    });
+    rawAdded = true;
+    let rawInstallError = null;
+    try {
+      realRun('node', ['platform/install.js', '--vault', '.', '--auto-approve'], {
+        cwd: rawRoot, stdio: 'pipe',
+      });
+    } catch (error) {
+      rawInstallError = error;
+    }
+    const rawInstallOutput = `${rawInstallError && rawInstallError.stdout || ''}\n${rawInstallError && rawInstallError.stderr || ''}`;
+    ok(rawInstallError && rawInstallError.status === 1,
+      'GA-P1G-RAW-FLOOR-FAIL real installer rejects the uncomputed same-release floor');
+    ok(rawInstallOutput.includes(`depends on task-entity >=${computedTaskVersion} but subscription pins task-entity@${taskManifest.version}`),
+      'GA-P1G-RAW-FLOOR-FAIL rejection is the exact TaskEntity dependency floor');
+    realRun('git', ['worktree', 'remove', '--force', rawRoot], { cwd: fixtureRoot, stdio: 'pipe' });
+    rawAdded = false;
+
+    const releaseRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') releaseDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    };
+    runIsolatedWorkshopSelfInstall(
+      { root: fixtureRoot }, fixtureHead, releaseRangeBase,
+      'feat(task-entity): exercise computed release floor', releaseRun,
+    );
+    eq(releaseDisposable.length, 1,
+      'GA-P1G-COMPUTED-RELEASE-INSTALL production gate creates one disposable release worktree');
+    ok(!fs.existsSync(releaseDisposable[0]),
+      'GA-P1G-COMPUTED-RELEASE-INSTALL successful release-state worktree is removed');
+    ok(!realRun('git', ['worktree', 'list', '--porcelain'], { cwd: fixtureRoot }).includes(`worktree ${releaseDisposable[0]}`),
+      'GA-P1G-COMPUTED-RELEASE-INSTALL successful release-state registration is removed');
+    eq(realRun('git', ['rev-parse', 'HEAD'], { cwd: fixtureRoot }), claimedHeadBefore,
+      'GA-P1G-CLAIM-BYTE-CLEAN computed release leaves claimed HEAD unchanged');
+    eq(realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: fixtureRoot }), claimedStatusBefore,
+      'GA-P1G-CLAIM-BYTE-CLEAN computed release leaves claimed status unchanged');
+    ok(fs.readFileSync(homeManifestPath).equals(claimedHomeBefore)
+        && fs.readFileSync(taskReadmePath).equals(claimedTaskBefore),
+    'GA-P1G-CLAIM-BYTE-CLEAN computed release leaves claimed source bytes unchanged');
+
+    const mismatchedRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') mismatchedDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    };
+    const provenanceMismatchOracle = (rangeBase, trackedRun, disposable) => {
+      let mismatchError = null;
+      try {
+        runIsolatedWorkshopSelfInstall(
+          { root: fixtureRoot }, fixtureHead, rangeBase,
+          'fix(task-entity): misclassified prospective squash', trackedRun,
+        );
+      } catch (error) {
+        mismatchError = error;
+      }
+      const mismatchOutput = `${mismatchError && mismatchError.message || ''}\n`
+        + `${mismatchError && mismatchError.stdout || ''}\n${mismatchError && mismatchError.stderr || ''}`;
+      assert(
+        mismatchError && /depends on task-entity .* but subscription pins task-entity@/.test(mismatchOutput),
+        'GA-P1G-PROVENANCE-MISMATCH isolated fix-title synthetic squash must fail the exact TaskEntity dependency floor',
+      );
+      assert(disposable.length === 1 && !fs.existsSync(disposable[0]),
+        'GA-P1G-PROVENANCE-MISMATCH failed synthetic release worktree is target-cleaned');
+    };
+    provenanceMismatchOracle(releaseRangeBase, mismatchedRun, mismatchedDisposable);
+    count += 2;
+    const borrowedRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') borrowedDisposable.push(args[3]);
+      return realRun(cmd, args, opts);
+    };
+    assert.throws(
+      () => provenanceMismatchOracle(fixtureBase, borrowedRun, borrowedDisposable),
+      /GA-P1G-PROVENANCE-MISMATCH isolated fix-title synthetic squash must fail the exact TaskEntity dependency floor/,
+      'GA-P1I-AMBIENT-FEATURE-BORROWING-MUTANT-KILLED proves the wrong parent borrows the ambient feat bump',
+    );
+    count++;
+    ok(borrowedDisposable.length === 1 && !fs.existsSync(borrowedDisposable[0]),
+      'GA-P1I-AMBIENT-FEATURE-BORROWING-MUTANT-KILLED wrong-anchor success still target-cleans');
+
+    // GitHub Actions checks pull requests out at a synthetic merge commit.
+    // Its subject is not the future squash title, so bind the ordinary gate
+    // fixture to the exact PR title in the event payload after proving that
+    // GITHUB_SHA names this exact checkout. Normalize the isolated base to the
+    // exact source TaskEntity version even when the checked-out source already
+    // carries the next-minor Home floor, then use the exact raised-floor tree
+    // as the merge checkout. The base/feature delta stays non-empty in both
+    // component touch zones and preserves Actions' base-first/feature-second
+    // topology. Release attribution still uses mergeRefBase explicitly, so it
+    // cannot borrow the feature commit through the merge checkout's ancestry.
+    const mergeRefTree = realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], {
+      cwd: fixtureRoot,
+    });
+    const mergeRefBaseTree = realRun('git', ['rev-parse', `${fixturePreparation}^{tree}`], {
+      cwd: fixtureRoot,
+    });
+    const mergeRefFloorAt = (treeish) => JSON.parse(realRun('git', [
+      'show', `${treeish}:platform/blueprints/home/manifest.json`,
+    ], { cwd: fixtureRoot })).depends_on.find((dep) => dep.name === 'task-entity').range;
+    const mergeRefTransitionOracle = (
+      baseTree, featureTree, sourceTaskVersion = taskManifest.version,
+    ) => {
+      assert.notStrictEqual(
+        baseTree,
+        featureTree,
+        'merge-ref release transition must preserve a non-empty exact feature tree',
+      );
+      assert.strictEqual(
+        mergeRefFloorAt(baseTree),
+        `>=${sourceTaskVersion}`,
+        'merge-ref release base must normalize Home to the exact source TaskEntity version',
+      );
+      assert.strictEqual(
+        mergeRefFloorAt(featureTree),
+        `>=${computedTaskVersion}`,
+        'merge-ref feature tree must raise Home to the computed next TaskEntity minor',
+      );
+      assert.deepStrictEqual(
+        realRun('git', ['diff', '--name-only', baseTree, featureTree], { cwd: fixtureRoot })
+          .split('\n').filter(Boolean).sort(),
+        [
+          'platform/blueprints/home/manifest.json',
+          'platform/mechanisms/task-entity/README.md',
+        ],
+        'merge-ref release transition must touch exactly Home and TaskEntity fixture paths',
+      );
+    };
+    mergeRefTransitionOracle(mergeRefBaseTree, mergeRefTree);
+    count++;
+    assert.throws(
+      () => mergeRefTransitionOracle(
+        realRun('git', ['rev-parse', `${fixtureBase}^{tree}`], { cwd: fixtureRoot }),
+        realRun('git', ['rev-parse', `${fixtureHead}^{tree}`], { cwd: fixtureRoot }),
+      ),
+      /merge-ref release base must normalize Home/,
+      'GA-P1K-ALREADY-RAISED-BASE-MUTANT-KILLED rejects reuse of the raised source tree',
+    );
+    count++;
+    assert.throws(
+      () => mergeRefTransitionOracle(mergeRefBaseTree, mergeRefBaseTree),
+      /non-empty exact feature tree/,
+      'GA-P1K-EMPTY-TRANSITION-MUTANT-KILLED rejects an empty normalized merge range',
+    );
+    count++;
+    assert.throws(
+      () => mergeRefTransitionOracle(mergeRefBaseTree, mergeRefTree, alternateSourceVersion),
+      /exact source TaskEntity version/,
+      'GA-P1K-HISTORICAL-VERSION-MUTANT-KILLED binds normalization to the live source version',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(mergeRefTransitionOracle.toString()),
+      'GA-P1K-VERSION-RELATIVE-MERGE-STATE contains no historical component literal');
+    const mergeRefBase = realRun('git', [
+      'commit-tree', mergeRefBaseTree,
+      '-m', 'test(autoloop): isolate merge-ref prospective release range',
+    ], { cwd: fixtureRoot, stdio: 'pipe', env: releaseGateCommitEnv });
+    const mergeRefSubject = 'Merge pull request #663 from willfell/codex-autoloop/ga-p1b12';
+    const mergeRefHead = realRun('git', [
+      'commit-tree', mergeRefTree,
+      '-p', mergeRefBase,
+      '-p', fixtureBase,
+      '-m', mergeRefSubject,
+    ], { cwd: fixtureRoot, stdio: 'pipe', env: releaseGateCommitEnv });
+    eq(realRun('git', ['show', '-s', '--format=%s', mergeRefHead], { cwd: fixtureRoot }),
+      mergeRefSubject,
+      'GA-P1J-MERGE-REF fixture HEAD carries the non-conventional synthetic merge subject');
+    eq(realRun('git', ['rev-parse', `${mergeRefHead}^{tree}`], { cwd: fixtureRoot }), mergeRefTree,
+      'GA-P1J-MERGE-REF fixture preserves the exact feature tree');
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', mergeRefHead], { cwd: fixtureRoot }),
+      `${mergeRefHead} ${mergeRefBase} ${fixtureBase}`,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE fixture is exactly base-first/feature-second two-parent merge');
+    eq(realRun('git', ['rev-parse', `${mergeRefHead}^1`], { cwd: fixtureRoot }), mergeRefBase,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE first parent is the normalized isolated exact base');
+    eq(realRun('git', ['rev-parse', `${mergeRefHead}^2`], { cwd: fixtureRoot }), fixtureBase,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE second parent is the exact feature commit');
+    assert.throws(
+      () => realRun('git', ['rev-parse', `${mergeRefHead}^3`], {
+        cwd: fixtureRoot, stdio: 'pipe',
+      }),
+      /Command failed/,
+      'GA-P1J-MERGE-REF-TOPOLOGY-ORACLE fixture has no third parent',
+    );
+    count++;
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', mergeRefBase], { cwd: fixtureRoot }),
+      mergeRefBase,
+      'GA-P1J-MERGE-REF isolated range base has no ambient feature ancestry');
+    assert.throws(
+      () => realRun('git', ['merge-base', '--is-ancestor', fixtureBase, mergeRefBase], {
+        cwd: fixtureRoot, stdio: 'pipe',
+      }),
+      /Command failed/,
+      'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED isolated range excludes the ambient feature',
+    );
+    count++;
+
+    const exactFeatureTitle = 'feat(task-entity): adopt RenderSafe mutation lifecycle';
+    const mergeEventPath = path.join(os.tmpdir(), 'ga-p1j-event.json');
+    let eventReads = 0;
+    const eventReader = (eventPath, encoding) => {
+      eq(eventPath, mergeEventPath,
+        'GA-P1J-EXACT-EVENT-PATH reads the repository-native Actions event seam');
+      eq(encoding, 'utf8', 'GA-P1J-EXACT-EVENT-PATH decodes the payload as UTF-8');
+      eventReads++;
+      return JSON.stringify({ pull_request: { title: exactFeatureTitle } });
+    };
+    const mergeRefEnv = {
+      GITHUB_EVENT_NAME: 'pull_request',
+      GITHUB_EVENT_PATH: mergeEventPath,
+      GITHUB_SHA: mergeRefHead,
+    };
+    const resolvedFeatureTitle = resolveOrdinaryReleaseTitle(
+      fixtureRoot, mergeRefHead, mergeRefEnv, eventReader,
+    );
+    eq(resolvedFeatureTitle, exactFeatureTitle,
+      'GA-P1J-EXACT-PR-TITLE binds the merge checkout to its exact future squash title');
+    eq(eventReads, 1, 'GA-P1J-EXACT-PR-TITLE reads the exact event payload once');
+    ok(resolvedFeatureTitle !== mergeRefSubject,
+      'GA-P1J-MERGE-TITLE-ONLY-MUTANT-KILLED rejects the synthetic merge subject as release attribution');
+
+    const alternateTitle = 'fix(autoloop): alternate exact pull-request title';
+    eq(resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, mergeRefEnv, () => JSON.stringify({
+      pull_request: { title: alternateTitle },
+    })), alternateTitle,
+    'GA-P1J-HARDCODED-FEATURE-TITLE-MUTANT-KILLED resolves the event title rather than one fixture literal');
+    assert.throws(
+      () => resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, {
+        ...mergeRefEnv, GITHUB_SHA: fixtureHead,
+      }, eventReader),
+      /title binding does not match checked-out HEAD/,
+      'GA-P1J-EXACT-CHECKOUT-BINDING-MUTANT-KILLED rejects a stale event/checkout pairing',
+    );
+    count++;
+    assert.throws(
+      () => resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, {
+        ...mergeRefEnv, GITHUB_EVENT_PATH: '',
+      }, eventReader),
+      /requires GITHUB_EVENT_PATH/,
+      'GA-P1J-EVENT-BYPASS-MUTANT-KILLED refuses a pull-request checkout without its exact title seam',
+    );
+    count++;
+    eq(resolveOrdinaryReleaseTitle(fixtureRoot, mergeRefHead, {}, eventReader), mergeRefSubject,
+      'GA-P1J-NON-PR-FALLBACK preserves the exact HEAD-subject behavior outside pull-request CI');
+
+    const [homeMajor, homeMinor] = homeManifest.version.split('.').map(Number);
+    const computedHomeVersion = `${homeMajor}.${homeMinor + 1}.0`;
+    const mergeRefDisposable = [];
+    let computedMergeState = null;
+    const computedMergeRun = (cmd, args, opts = {}) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        mergeRefDisposable.push(args[3]);
+      }
+      const output = realRun(cmd, args, opts);
+      if (cmd === 'node'
+          && args[0] === 'scripts/release/compute-release.js'
+          && args[1] === '--write') {
+        const subscription = JSON.parse(fs.readFileSync(
+          path.join(opts.cwd, 'ranch/platform-subscription.json'), 'utf8',
+        ));
+        computedMergeState = {
+          task: JSON.parse(fs.readFileSync(
+            path.join(opts.cwd, 'platform/mechanisms/task-entity/manifest.json'), 'utf8',
+          )).version,
+          home: JSON.parse(fs.readFileSync(
+            path.join(opts.cwd, 'platform/blueprints/home/manifest.json'), 'utf8',
+          )).version,
+          taskPin: subscription.mechanisms.find((item) => item.name === 'task-entity').version,
+          homePin: subscription.blueprints.find((item) => item.name === 'home').version,
+        };
+      }
+      return output;
+    };
+    runIsolatedWorkshopSelfInstall(
+      { root: fixtureRoot }, mergeRefHead, mergeRefBase,
+      resolvedFeatureTitle, computedMergeRun,
+    );
+    eq(computedMergeState, {
+      task: computedTaskVersion,
+      home: computedHomeVersion,
+      taskPin: computedTaskVersion,
+      homePin: computedHomeVersion,
+    }, 'GA-P1J-MERGE-REF-COMPUTED-STATE writes exact version-relative TaskEntity/Home manifests and pins');
+    ok(mergeRefDisposable.length === 1 && !fs.existsSync(mergeRefDisposable[0]),
+      'GA-P1J-MERGE-REF-COMPUTED-STATE exact-title release install succeeds and target-cleans');
+
+    const mergeTitleDisposable = [];
+    const isolatedMergeTitleOracle = (rangeBase, disposable) => {
+      let mergeTitleError = null;
+      try {
+        runIsolatedWorkshopSelfInstall(
+          { root: fixtureRoot }, mergeRefHead, rangeBase, mergeRefSubject,
+          (cmd, args, opts = {}) => {
+            if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+              disposable.push(args[3]);
+            }
+            return realRun(cmd, args, opts);
+          },
+        );
+      } catch (error) {
+        mergeTitleError = error;
+      }
+      const output = `${mergeTitleError && mergeTitleError.message || ''}\n`
+        + `${mergeTitleError && mergeTitleError.stdout || ''}\n`
+        + `${mergeTitleError && mergeTitleError.stderr || ''}`;
+      assert(
+        mergeTitleError
+          && /depends on task-entity .* but subscription pins task-entity@/.test(output),
+        'GA-P1J-MERGE-TITLE-ONLY-MUTANT-KILLED isolated merge subject must fail the exact TaskEntity floor',
+      );
+      assert(disposable.length === 1 && !fs.existsSync(disposable[0]),
+        'GA-P1J-MERGE-TITLE-ONLY-MUTANT-KILLED failed release worktree is target-cleaned');
+    };
+    isolatedMergeTitleOracle(mergeRefBase, mergeTitleDisposable);
+    count += 2;
+    const mergeBorrowedDisposable = [];
+    assert.throws(
+      () => isolatedMergeTitleOracle(fixtureBase, mergeBorrowedDisposable),
+      /isolated merge subject must fail the exact TaskEntity floor/,
+      'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED rejects a merge-title result that borrows fixtureBase feat attribution',
+    );
+    count++;
+    ok(mergeBorrowedDisposable.length === 1 && !fs.existsSync(mergeBorrowedDisposable[0]),
+      'GA-P1J-AMBIENT-ANCESTRY-MUTANT-KILLED borrowed-attribution worktree still target-cleans');
+
+    // Reproduce PR #668's depth-one failure exactly: the event supplies the
+    // future feat title, but an unchanged synthetic feature tree gives
+    // compute-release no TaskEntity or Home path attribution.
+    const unchangedOrdinaryBase = localCommitFromTree(
+      fixtureRoot, mergeRefTree, mergeRefBase, 'test(autoloop): unchanged shallow ordinary base',
+    );
+    const unchangedOrdinaryHead = localCommitFromTree(
+      fixtureRoot, mergeRefTree, unchangedOrdinaryBase, exactFeatureTitle,
+    );
+    eq(realRun('git', ['diff', '--name-only', unchangedOrdinaryBase, unchangedOrdinaryHead], {
+      cwd: fixtureRoot,
+    }), '', 'GA-P1L-UNCHANGED-TREE-REPRO has the exact empty component attribution from PR 668');
+    const unchangedOrdinaryDisposable = [];
+    const unchangedOrdinaryCalls = [];
+    let unchangedOrdinaryError = null;
+    try {
+      runIsolatedWorkshopSelfInstall(
+        { root: fixtureRoot }, unchangedOrdinaryHead, unchangedOrdinaryBase, exactFeatureTitle,
+        (cmd, args, opts = {}) => {
+          unchangedOrdinaryCalls.push([cmd, ...args]);
+          if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+            unchangedOrdinaryDisposable.push(args[3]);
+          }
+          return realRun(cmd, args, opts);
+        },
+      );
+    } catch (error) {
+      unchangedOrdinaryError = error;
+    }
+    const unchangedOrdinaryOutput = `${unchangedOrdinaryError && unchangedOrdinaryError.message || ''}\n`
+      + `${unchangedOrdinaryError && unchangedOrdinaryError.stdout || ''}\n`
+      + `${unchangedOrdinaryError && unchangedOrdinaryError.stderr || ''}`;
+    ok(unchangedOrdinaryError
+        && /depends on task-entity .* but subscription pins task-entity@/.test(unchangedOrdinaryOutput),
+    'GA-P1L-TITLE-ONLY-ATTRIBUTION-MUTANT-KILLED exact feat title cannot replace component paths');
+    ok(unchangedOrdinaryDisposable.length === 1 && !fs.existsSync(unchangedOrdinaryDisposable[0]),
+      'GA-P1L-UNCHANGED-TREE-REPRO failed disposable release worktree target-cleans');
+    ok(!unchangedOrdinaryCalls.some(([cmd, operation]) => cmd === 'git'
+        && ['fetch', 'pull', 'remote'].includes(operation)),
+    'GA-P1L-PARENT-FETCH-MUTANT-KILLED unchanged-tree reproduction uses no network or parent fetch');
+
+    const workshopRoot = path.resolve(__dirname, '../..');
+    const workshopHead = realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot });
+    const workshopTree = realRun('git', ['rev-parse', `${workshopHead}^{tree}`], { cwd: workshopRoot });
+    const ordinaryTitle = resolveOrdinaryReleaseTitle(workshopRoot, workshopHead);
+    const ordinaryReleaseTitle = isReleasableTitle(ordinaryTitle)
+      ? ordinaryTitle
+      : exactFeatureTitle;
+    const ordinaryPlumbingCalls = [];
+    const ordinaryPlumbingRun = (cmd, args, opts = {}) => {
+      ordinaryPlumbingCalls.push([cmd, ...args]);
+      return realRun(cmd, args, opts);
+    };
+    const ordinaryTaskPath = 'platform/mechanisms/task-entity/README.md';
+    const ordinaryHomePath = 'platform/blueprints/home/manifest.json';
+    const ordinaryTreeMode = (root, tree, sourcePath) => {
+      const entry = ordinaryPlumbingRun('git', ['ls-tree', tree, '--', sourcePath], { cwd: root });
+      const match = entry.match(/^([0-7]{6})\s+blob\s+[0-9a-f]{40}\t/);
+      if (!match) throw new Error(`ordinary release tree lacks ${sourcePath}`);
+      return match[1];
+    };
+    const ordinaryTreeWithContents = (root, sourceTree, contentsByPath) => {
+      const indexRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ga-p1l-index-'));
+      const indexPath = path.join(indexRoot, 'normalized.index');
+      const indexEnv = { ...releaseGateCommitEnv, GIT_INDEX_FILE: indexPath };
+      try {
+        ordinaryPlumbingRun('git', ['read-tree', sourceTree], {
+          cwd: root, stdio: 'pipe', env: indexEnv,
+        });
+        for (const [sourcePath, contents] of contentsByPath) {
+          const blob = ordinaryPlumbingRun('git', ['hash-object', '-w', '--stdin'], {
+            cwd: root, stdio: 'pipe', env: indexEnv, input: contents,
+          });
+          ordinaryPlumbingRun('git', [
+            'update-index', '--add', '--cacheinfo',
+            `${ordinaryTreeMode(root, sourceTree, sourcePath)},${blob},${sourcePath}`,
+          ], { cwd: root, stdio: 'pipe', env: indexEnv });
+        }
+        return ordinaryPlumbingRun('git', ['write-tree'], {
+          cwd: root, stdio: 'pipe', env: indexEnv,
+        });
+      } finally {
+        fs.rmSync(indexRoot, { recursive: true, force: true });
+      }
+    };
+    const ordinaryHomeBaseMarker = '[GA-P1l normalized ordinary base]';
+    const buildOrdinaryBaseTree = (
+      root, featureTree, sourceTaskVersion, {
+        homeDelta = true, homeMarker = true, taskDelta = true,
+      } = {},
+    ) => {
+      const contentsByPath = [];
+      if (homeDelta) {
+        const normalizedHome = JSON.parse(ordinaryPlumbingRun('git', [
+          'show', `${featureTree}:${ordinaryHomePath}`,
+        ], { cwd: root }));
+        normalizeFixtureTaskFloor(normalizedHome, sourceTaskVersion);
+        if (homeMarker) {
+          normalizedHome.description = `${normalizedHome.description || ''} ${ordinaryHomeBaseMarker}`
+            .trim();
+        }
+        contentsByPath.push([ordinaryHomePath, `${JSON.stringify(normalizedHome, null, 2)}\n`]);
+      }
+      if (taskDelta) {
+        const featureTask = ordinaryPlumbingRun('git', [
+          'show', `${featureTree}:${ordinaryTaskPath}`,
+        ], { cwd: root });
+        contentsByPath.push([
+          ordinaryTaskPath,
+          `${featureTask}\n\n<!-- GA-P1l normalized ordinary base -->\n`,
+        ]);
+      }
+      return ordinaryTreeWithContents(root, featureTree, contentsByPath);
+    };
+    const ordinaryFloorAt = (treeish) => JSON.parse(ordinaryPlumbingRun('git', [
+      'show', `${treeish}:${ordinaryHomePath}`,
+    ], { cwd: workshopRoot })).depends_on.find((dep) => dep.name === 'task-entity').range;
+    const ordinaryTransitionOracle = (
+      baseTree, featureTree, sourceTaskVersion = taskManifest.version,
+    ) => {
+      assert.notStrictEqual(
+        baseTree,
+        featureTree,
+        'shallow ordinary release requires a non-empty exact-tree transition',
+      );
+      assert.strictEqual(
+        ordinaryFloorAt(baseTree),
+        `>=${sourceTaskVersion}`,
+        'shallow ordinary base normalizes Home to the live TaskEntity source version',
+      );
+      assert.deepStrictEqual(
+        ordinaryPlumbingRun('git', ['diff', '--name-only', baseTree, featureTree], {
+          cwd: workshopRoot,
+        }).split('\n').filter(Boolean).sort(),
+        [ordinaryHomePath, ordinaryTaskPath],
+        'shallow ordinary release attributes exactly Home and TaskEntity',
+      );
+    };
+    const ordinaryBaseTree = buildOrdinaryBaseTree(
+      workshopRoot, workshopTree, taskManifest.version,
+    );
+    ordinaryTransitionOracle(ordinaryBaseTree, workshopTree);
+    count++;
+    const equalFloorHome = JSON.parse(ordinaryPlumbingRun('git', [
+      'show', `${workshopTree}:${ordinaryHomePath}`,
+    ], { cwd: workshopRoot }));
+    normalizeFixtureTaskFloor(equalFloorHome, taskManifest.version);
+    const equalFloorFeatureTree = ordinaryTreeWithContents(workshopRoot, workshopTree, [[
+      ordinaryHomePath, `${JSON.stringify(equalFloorHome, null, 2)}\n`,
+    ]]);
+    eq(ordinaryFloorAt(equalFloorFeatureTree), `>=${taskManifest.version}`,
+      'GA-P1L-BUMPED-RELEASE-HEAD fixture starts with Home already at the live TaskEntity floor');
+    const equalFloorBaseTree = buildOrdinaryBaseTree(
+      workshopRoot, equalFloorFeatureTree, taskManifest.version,
+    );
+    ordinaryTransitionOracle(equalFloorBaseTree, equalFloorFeatureTree);
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(
+          workshopRoot, equalFloorFeatureTree, taskManifest.version, { homeMarker: false },
+        ),
+        equalFloorFeatureTree,
+      ),
+      /attributes exactly Home and TaskEntity/,
+      'GA-P1L-RELEASE-PR-HOME-DELTA-COLLAPSE-MUTANT-KILLED floor-only normalization cannot omit Home',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(workshopTree, workshopTree),
+      /non-empty exact-tree transition/,
+      'GA-P1L-UNCHANGED-TREE-MUTANT-KILLED rejects reuse of the workshop tree as range base',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(workshopRoot, workshopTree, taskManifest.version, {
+          taskDelta: false,
+        }),
+        workshopTree,
+      ),
+      /attributes exactly Home and TaskEntity/,
+      'GA-P1L-MISSING-TASK-DELTA-MUTANT-KILLED requires TaskEntity file attribution',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(workshopRoot, workshopTree, taskManifest.version, {
+          homeDelta: false,
+        }),
+        workshopTree,
+      ),
+      /normalizes Home|attributes exactly Home and TaskEntity/,
+      'GA-P1L-MISSING-HOME-DELTA-MUTANT-KILLED requires Home file attribution',
+    );
+    count++;
+    assert.throws(
+      () => ordinaryTransitionOracle(
+        buildOrdinaryBaseTree(workshopRoot, workshopTree, alternateSourceVersion),
+        workshopTree,
+      ),
+      /live TaskEntity source version/,
+      'GA-P1L-HISTORICAL-VERSION-MUTANT-KILLED rejects a stale normalization version',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(buildOrdinaryBaseTree.toString())
+        && !/\d+\.\d+\.\d+/.test(ordinaryTransitionOracle.toString()),
+    'GA-P1L-VERSION-RELATIVE-ORDINARY-RANGE contains no historical component versions');
+    ok(!ordinaryPlumbingCalls.some(([cmd, operation]) => cmd === 'git'
+        && ['fetch', 'pull', 'remote'].includes(operation)),
+    'GA-P1L-PARENT-FETCH-MUTANT-KILLED normalized range uses local plumbing only');
+
+    const nextOrdinaryVersion = (version, title, {
+      parse = parseReleaseCommit,
+      level = releaseBumpLevel,
+      increment = incrementReleaseVersion,
+    } = {}) => {
+      const parsed = parse(title);
+      return increment(version, level(parsed, String(version).startsWith('0.')));
+    };
+    const expectedOrdinaryState = (title, hooks) => {
+      const task = nextOrdinaryVersion(taskManifest.version, title, hooks);
+      const home = nextOrdinaryVersion(homeManifest.version, title, hooks);
+      return {
+        task,
+        home,
+        taskPin: task,
+        homePin: home,
+      };
+    };
+    const ordinaryExpected = expectedOrdinaryState(ordinaryReleaseTitle);
+    const ordinaryFeatureHome = JSON.parse(ordinaryPlumbingRun('git', [
+      'show', `${workshopTree}:${ordinaryHomePath}`,
+    ], { cwd: workshopRoot }));
+    normalizeFixtureTaskFloor(ordinaryFeatureHome, ordinaryExpected.task);
+    const ordinaryFeatureTree = ordinaryTreeWithContents(workshopRoot, workshopTree, [[
+      ordinaryHomePath, `${JSON.stringify(ordinaryFeatureHome, null, 2)}\n`,
+    ]]);
+    const ordinaryComputedBaseTree = buildOrdinaryBaseTree(
+      workshopRoot, ordinaryFeatureTree, taskManifest.version,
+    );
+    ordinaryTransitionOracle(ordinaryComputedBaseTree, ordinaryFeatureTree);
+    const ordinaryBase = localRootCommitFromTree(
+      workshopRoot, ordinaryComputedBaseTree, 'test(autoloop): isolated ordinary base',
+    );
+    const ordinaryHead = localCommitFromTree(
+      workshopRoot, ordinaryFeatureTree, ordinaryBase, ordinaryReleaseTitle,
+    );
+    eq(realRun('git', ['rev-list', '--parents', '-n', '1', ordinaryBase], {
+      cwd: workshopRoot,
+    }), ordinaryBase,
+    'GA-P1M-SHALLOW-COMPUTED-STATE ordinary base has no ambient workshop ancestry');
+    eq(realRun('git', ['rev-parse', `${ordinaryHead}^{tree}`], { cwd: workshopRoot }),
+      ordinaryFeatureTree,
+      'GA-P1G3-SHALLOW-ORDINARY ordinary release binds its title-specific feature tree');
+    const ordinaryStatus = realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot });
+    const ordinaryHomeBefore = fs.readFileSync(path.join(workshopRoot, ordinaryHomePath));
+    const ordinaryTaskBefore = fs.readFileSync(path.join(workshopRoot, ordinaryTaskPath));
+    const computeOrdinaryState = (head, title, disposable, rangeBase = ordinaryBase) => {
+      let computed = null;
+      const trackedRun = (cmd, args, opts = {}) => {
+        if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+          disposable.push(args[3]);
+        }
+        const output = realRun(cmd, args, opts);
+        if (cmd === 'node'
+            && args[0] === 'scripts/release/compute-release.js'
+            && args[1] === '--write') {
+          const subscription = JSON.parse(fs.readFileSync(
+            path.join(opts.cwd, 'ranch/platform-subscription.json'), 'utf8',
+          ));
+          computed = {
+            task: JSON.parse(fs.readFileSync(
+              path.join(opts.cwd, 'platform/mechanisms/task-entity/manifest.json'), 'utf8',
+            )).version,
+            home: JSON.parse(fs.readFileSync(
+              path.join(opts.cwd, ordinaryHomePath), 'utf8',
+            )).version,
+            taskPin: subscription.mechanisms.find((item) => item.name === 'task-entity').version,
+            homePin: subscription.blueprints.find((item) => item.name === 'home').version,
+          };
+        }
+        return output;
+      };
+      runIsolatedWorkshopSelfInstall(
+        { root: workshopRoot }, head, rangeBase, title, trackedRun,
+      );
+      return computed;
+    };
+    const computedOrdinaryState = computeOrdinaryState(
+      ordinaryHead, ordinaryReleaseTitle, ordinaryDisposable,
+    );
+    eq(computedOrdinaryState, ordinaryExpected,
+      'GA-P1L2-SHALLOW-COMPUTED-STATE writes canonically classified TaskEntity/Home versions and pins');
+    eq(nextOrdinaryVersion(taskManifest.version, exactFeatureTitle), computedTaskVersion,
+      'GA-P1L2-FUTURE-FEAT-COMPUTED-STATE computes TaskEntity next minor without a historical literal');
+    eq(nextOrdinaryVersion(homeManifest.version, exactFeatureTitle), computedHomeVersion,
+      'GA-P1L2-FUTURE-FEAT-COMPUTED-STATE computes Home next minor without a historical literal');
+
+    const ordinaryTitleCases = [
+      ['FEAT', exactFeatureTitle],
+      ['FIX', 'fix(task-entity): preserve shallow component attribution'],
+      ['BREAKING-FIX', 'fix(task-entity)!: replace the shallow component contract'],
+      ['BREAKING-PERF', 'perf(task-entity)!: replace the shallow performance contract'],
+      ['BREAKING-REFACTOR', 'refactor(task-entity)!: replace the shallow ownership contract'],
+    ];
+    const buildCanonicalOrdinaryCase = (title) => {
+      const expected = expectedOrdinaryState(title);
+      const featureHome = JSON.parse(ordinaryPlumbingRun('git', [
+        'show', `${workshopTree}:${ordinaryHomePath}`,
+      ], { cwd: workshopRoot }));
+      normalizeFixtureTaskFloor(featureHome, expected.task);
+      const featureTree = ordinaryTreeWithContents(workshopRoot, workshopTree, [[
+        ordinaryHomePath, `${JSON.stringify(featureHome, null, 2)}\n`,
+      ]]);
+      const baseTree = buildOrdinaryBaseTree(
+        workshopRoot, featureTree, taskManifest.version,
+      );
+      ordinaryTransitionOracle(baseTree, featureTree);
+      const base = localRootCommitFromTree(
+        workshopRoot, baseTree, 'test(autoloop): isolated canonical-state base',
+      );
+      const head = localCommitFromTree(workshopRoot, featureTree, base, title);
+      return { base, head, expected };
+    };
+    const computedOrdinaryCases = new Map();
+    for (const [label, title] of ordinaryTitleCases) {
+      ok(isReleasableTitle(title),
+        `GA-P1L2-${label}-TITLE is accepted by the production release-title classifier`);
+      const fixture = buildCanonicalOrdinaryCase(title);
+      eq(realRun('git', ['rev-list', '--parents', '-n', '1', fixture.base], {
+        cwd: workshopRoot,
+      }), fixture.base,
+      `GA-P1M-${label}-CANONICAL-STATE base has no ambient workshop ancestry`);
+      const disposable = [];
+      computedOrdinaryCases.set(
+        label,
+        computeOrdinaryState(fixture.head, title, disposable, fixture.base),
+      );
+      eq(computedOrdinaryCases.get(label), fixture.expected,
+        `GA-P1L2-${label}-CANONICAL-STATE predicts exact production TaskEntity/Home versions and pins`);
+      ok(disposable.length === 1 && !fs.existsSync(disposable[0]),
+        `GA-P1L2-${label}-CANONICAL-STATE target-cleans its disposable release worktree`);
+    }
+    const fixTitle = ordinaryTitleCases.find(([label]) => label === 'FIX')[1];
+    const fixFixture = buildCanonicalOrdinaryCase(fixTitle);
+    const simulatedAmbientBase = localRootCommitFromTree(
+      workshopRoot, ordinaryBaseTree, 'test(autoloop): simulated ambient base',
+    );
+    const simulatedAmbientWorkshopHead = localCommitFromTree(
+      workshopRoot, workshopTree, simulatedAmbientBase, exactFeatureTitle,
+    );
+    const borrowedBase = localCommitFromTree(
+      workshopRoot,
+      realRun('git', ['rev-parse', `${fixFixture.base}^{tree}`], { cwd: workshopRoot }),
+      simulatedAmbientWorkshopHead,
+      'test(autoloop): canonical-state base borrowing ambient workshop head',
+    );
+    const borrowedHead = localCommitFromTree(
+      workshopRoot,
+      realRun('git', ['rev-parse', `${fixFixture.head}^{tree}`], { cwd: workshopRoot }),
+      borrowedBase,
+      fixTitle,
+    );
+    const borrowedCanonicalDisposable = [];
+    const borrowedFixState = computeOrdinaryState(
+      borrowedHead, fixTitle, borrowedCanonicalDisposable, borrowedBase,
+    );
+    eq(borrowedFixState, expectedOrdinaryState(exactFeatureTitle),
+      'GA-P1M-ACTIVE-FEAT-BORROWED-BY-P1L2-FIXTURE control observes the ambient feature bump');
+    assert.throws(
+      () => assert.deepStrictEqual(borrowedFixState, fixFixture.expected),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1M-AMBIENT-WORKSHOP-HEAD-MUTANT-KILLED reusing ambient workshopHead fails FIX canonical state',
+    );
+    count++;
+    ok(borrowedCanonicalDisposable.length === 1 && !fs.existsSync(borrowedCanonicalDisposable[0]),
+      'GA-P1M-AMBIENT-WORKSHOP-HEAD-MUTANT-KILLED borrowed control target-cleans its release worktree');
+    const breakingFixTitle = ordinaryTitleCases.find(([label]) => label === 'BREAKING-FIX')[1];
+    const canonicalBreakingState = computedOrdinaryCases.get('BREAKING-FIX');
+    assert.throws(
+      () => assert.deepStrictEqual(
+        expectedOrdinaryState(breakingFixTitle, {
+          parse: () => parseReleaseCommit('fix(task-entity): parser bypass'),
+        }),
+        canonicalBreakingState,
+      ),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1L2-CANONICAL-PARSE-MUTANT-KILLED bypassing parseCommit loses the breaking marker',
+    );
+    count++;
+    assert.throws(
+      () => assert.deepStrictEqual(
+        expectedOrdinaryState(breakingFixTitle, {
+          level: (parsed) => (parsed && parsed.type === 'feat' ? 'minor' : 'patch'),
+        }),
+        canonicalBreakingState,
+      ),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1L2-NONFEAT-PATCH-MUTANT-KILLED the predecessor feat-versus-patch shortcut misclassifies breaking fix',
+    );
+    count++;
+    assert.throws(
+      () => assert.deepStrictEqual(
+        expectedOrdinaryState(breakingFixTitle, {
+          increment: (version) => version,
+        }),
+        canonicalBreakingState,
+      ),
+      /Expected values to be strictly deep-equal/,
+      'GA-P1L2-CANONICAL-INCREMENT-MUTANT-KILLED bypassing semver inc cannot predict computed release state',
+    );
+    count++;
+    ok(!/\d+\.\d+\.\d+/.test(nextOrdinaryVersion.toString())
+        && !/\d+\.\d+\.\d+/.test(expectedOrdinaryState.toString()),
+    'GA-P1L2-CANONICAL-SEMVER-BINDING contains no historical component versions');
+    eq(realRun('git', ['rev-parse', 'HEAD'], { cwd: workshopRoot }), workshopHead,
+      'GA-P1G-ORDINARY-RELEASE ordinary exact HEAD remains unchanged');
+    eq(realRun('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: workshopRoot }), ordinaryStatus,
+      'GA-P1G-ORDINARY-RELEASE ordinary claimed worktree remains byte-clean');
+    ok(fs.readFileSync(path.join(workshopRoot, ordinaryHomePath)).equals(ordinaryHomeBefore)
+        && fs.readFileSync(path.join(workshopRoot, ordinaryTaskPath)).equals(ordinaryTaskBefore),
+    'GA-P1L-SOURCE-BYTE-CLEAN normalized base and computed release preserve exact source bytes');
+    ok(ordinaryDisposable.length === 1 && !fs.existsSync(ordinaryDisposable[0]),
+      'GA-P1G-ORDINARY-RELEASE ordinary release install still succeeds and cleans up');
+  } finally {
+    if (rawAdded) {
+      try { realRun('git', ['worktree', 'remove', '--force', rawRoot], { cwd: fixtureRoot, stdio: 'pipe' }); } catch (_) {}
+    }
+    if (fixtureAdded) {
+      try {
+        realRun('git', ['worktree', 'remove', '--force', fixtureRoot], {
+          cwd: path.resolve(__dirname, '../..'), stdio: 'pipe',
+        });
+      } catch (_) {}
+    }
+    fs.rmSync(rawRoot, { recursive: true, force: true });
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+// Production-bound failure and semantic-mutation contract. The shell model
+// distinguishes feature-branch history from the one prospective squash, and
+// keeps an unrelated worktree registration as a cleanup-side-effect sentinel.
+{
+  const p1gCoordinatorPath = path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  const productionSource = fs.readFileSync(p1gCoordinatorPath, 'utf8');
+  const loadMutatedCoordinator = (label, before, after) => {
+    eq(productionSource.split(before).length - 1, 1,
+      `GA-P1G-${label} mutation anchor matches production exactly once`);
+    const mutantPath = path.join(path.dirname(p1gCoordinatorPath), `ga-p1g-${label.toLowerCase()}.js`);
+    const mutantModule = new Module(mutantPath);
+    mutantModule.filename = mutantPath;
+    mutantModule.paths = Module._nodeModulePaths(path.dirname(p1gCoordinatorPath));
+    mutantModule._compile(productionSource.replace(before, after), mutantPath);
+    return mutantModule.exports;
+  };
+  const partialAddCanonicalPathOracle = (helper) => {
+    const originalTmpdir = os.tmpdir;
+    let aliasFixtureRoot = null;
+    let aliasTmpRoot;
+    let physicalTmpRoot;
+    if (process.platform === 'darwin') {
+      aliasTmpRoot = '/var/tmp';
+      physicalTmpRoot = fs.realpathSync.native(aliasTmpRoot);
+      assert.strictEqual(physicalTmpRoot, '/private/var/tmp',
+        'GA-P1G2-MACOS-WORKTREE-PATH-ALIAS uses the real /var -> /private/var alias');
+    } else {
+      aliasFixtureRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'ga-p1g2-path-alias-'));
+      physicalTmpRoot = path.join(aliasFixtureRoot, 'private-var');
+      aliasTmpRoot = path.join(aliasFixtureRoot, 'var');
+      fs.mkdirSync(physicalTmpRoot);
+      fs.symlinkSync(physicalTmpRoot, aliasTmpRoot, 'dir');
+    }
+    const state = {
+      registered: false, registeredPath: '', addTarget: '', removeTarget: '',
+    };
+    const physicalRegistration = (target) => {
+      if (target === aliasTmpRoot || target.startsWith(`${aliasTmpRoot}${path.sep}`)) {
+        return path.join(physicalTmpRoot, path.relative(aliasTmpRoot, target));
+      }
+      return target;
+    };
+    const run = (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        state.addTarget = args[3];
+        state.registeredPath = physicalRegistration(state.addTarget);
+        state.registered = true;
+        throw new Error('checkout failed after canonical registration');
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return state.registered
+          ? `worktree ${state.registeredPath}\nHEAD head42\ndetached\n`
+          : '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        state.removeTarget = args[args.length - 1];
+        if (state.removeTarget !== state.registeredPath) throw new Error('noncanonical exact-target removal');
+        state.registered = false;
+        return '';
+      }
+      throw new Error(`unexpected canonical-path fixture command: ${cmd} ${args.join(' ')}`);
+    };
+    os.tmpdir = () => aliasTmpRoot;
+    try {
+      assert.throws(() => helper(
+        { root: '/claimed' }, 'head42', 'base42', 'fix(autoloop): canonical cleanup', run,
+      ), /checkout failed after canonical registration/);
+    } finally {
+      os.tmpdir = originalTmpdir;
+      if (aliasFixtureRoot) fs.rmSync(aliasFixtureRoot, { recursive: true, force: true });
+    }
+    assert.strictEqual(state.registered, false,
+      'partial registration leaked through the worktree path alias');
+    assert.strictEqual(state.addTarget, state.registeredPath,
+      'worktree add must receive the canonical physical target');
+    assert.strictEqual(state.removeTarget, state.registeredPath,
+      'partial-add cleanup must remove the exact canonical registered target');
+  };
+  partialAddCanonicalPathOracle(runIsolatedWorkshopSelfInstall);
+  count += 3;
+  const canonicalTempLine = '    temp = fs.realpathSync.native(tempRoot);';
+  const lexicalTempMutant = loadMutatedCoordinator(
+    'MACOS-WORKTREE-PATH-ALIAS-MUTANT-KILLED', canonicalTempLine,
+    '    temp = tempRoot;',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => partialAddCanonicalPathOracle(lexicalTempMutant),
+    /partial registration leaked through the worktree path alias/,
+    'GA-P1G2-MACOS-WORKTREE-PATH-ALIAS-MUTANT-KILLED requires physical target identity');
+  count++;
+  const registrationInspectionFailureOracle = (helper, cleanupFails = false) => {
+    const state = {
+      registered: false, registeredPath: '', addTarget: '', cleanupArgs: null,
+    };
+    const run = (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        state.addTarget = args[3];
+        state.registeredPath = args[3];
+        state.registered = true;
+        throw new Error('partial add failed after registration');
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        throw new Error('registration inspection failed');
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        state.cleanupArgs = args.slice();
+        state.registered = false;
+        if (cleanupFails) throw new Error('target-safe double-force cleanup failed');
+        return '';
+      }
+      throw new Error(`unexpected inspection-failure fixture command: ${cmd} ${args.join(' ')}`);
+    };
+    let failure = null;
+    try {
+      helper(
+        { root: '/claimed' }, 'head42', 'base42',
+        'fix(autoloop): inspection-failure cleanup', run,
+      );
+    } catch (error) {
+      failure = error;
+    }
+    assert.match(failure && failure.message || '',
+      /partial add failed after registration; could not inspect disposable worktree registration: registration inspection failed/,
+      'GA-P1G3-INSPECTION-FAILURE aggregates the original add and registration-inspection errors');
+    assert.strictEqual(state.registered, false,
+      'GA-P1G3-INSPECTION-FAILURE leaves zero disposable registration residue');
+    assert.deepStrictEqual(state.cleanupArgs,
+      ['worktree', 'remove', '--force', '--force', state.registeredPath],
+      'GA-P1G3-INSPECTION-FAILURE uses exact canonical double-force removal');
+    assert.strictEqual(state.cleanupArgs[state.cleanupArgs.length - 1], state.addTarget,
+      'GA-P1G3-INSPECTION-FAILURE removes the exact canonical partial-add target');
+    if (cleanupFails) {
+      assert.match(failure.message,
+        /failed target-safe cleanup for uninspectable disposable worktree .*target-safe double-force cleanup failed/,
+        'GA-P1G3-INSPECTION-FAILURE cleanup failure remains failure-loud');
+    }
+  };
+  registrationInspectionFailureOracle(runIsolatedWorkshopSelfInstall);
+  registrationInspectionFailureOracle(runIsolatedWorkshopSelfInstall, true);
+  count += 9;
+  const omittedRegistrationInspectionCleanup = loadMutatedCoordinator(
+    'OMITTED-REGISTRATION-INSPECTION-CLEANUP-MUTANT-KILLED',
+    '      } else if (registrationInspectionFailed) {',
+    '      } else if (false && registrationInspectionFailed) {',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(
+    () => registrationInspectionFailureOracle(omittedRegistrationInspectionCleanup),
+    /leaves zero disposable registration residue/,
+    'GA-P1G3-OMITTED-REGISTRATION-INSPECTION-CLEANUP-MUTANT-KILLED uninspectable partial adds require target-safe cleanup',
+  );
+  count++;
+  const setupFailureResidueOracle = (helper, failAt) => {
+    const originalMkdtempSync = fs.mkdtempSync;
+    const originalRealpathNative = fs.realpathSync.native;
+    const originalRmSync = fs.rmSync;
+    let tempRoot = '';
+    let physicalTarget = '';
+    let initialRmFaultInjected = false;
+    let setupCleanupFaultInjected = false;
+    let setupCleanupTarget = '';
+    let runCalls = 0;
+    fs.mkdtempSync = (prefix, ...args) => {
+      const created = originalMkdtempSync(prefix, ...args);
+      if (String(prefix).endsWith('sauce-autoloop-self-install-')) tempRoot = created;
+      return created;
+    };
+    fs.realpathSync.native = (target, ...args) => {
+      if (failAt === 'realpath' && target === tempRoot) throw new Error('injected setup realpath failure');
+      return originalRealpathNative(target, ...args);
+    };
+    fs.rmSync = (target, opts) => {
+      if (failAt === 'initial-rm'
+          && path.basename(target).startsWith('sauce-autoloop-self-install-')) {
+        if (!initialRmFaultInjected) {
+          initialRmFaultInjected = true;
+          physicalTarget = target;
+          throw new Error('injected initial placeholder removal failure');
+        }
+        if (!setupCleanupFaultInjected) {
+          setupCleanupFaultInjected = true;
+          setupCleanupTarget = target;
+          throw new Error('injected setup cleanup failure');
+        }
+      }
+      return originalRmSync(target, opts);
+    };
+    let setupError = null;
+    try {
+      try {
+        helper(
+          { root: '/claimed' }, 'head42', 'base42', 'fix(autoloop): guarded setup',
+          () => { runCalls++; throw new Error('git must not run after setup failure'); },
+        );
+      } catch (error) {
+        setupError = error;
+      }
+    } finally {
+      fs.mkdtempSync = originalMkdtempSync;
+      fs.realpathSync.native = originalRealpathNative;
+      fs.rmSync = originalRmSync;
+    }
+    assert.match(setupError && setupError.message || '', failAt === 'realpath'
+      ? /injected setup realpath failure/
+      : /injected initial placeholder removal failure/);
+    const residuePaths = [...new Set([tempRoot, physicalTarget].filter(Boolean))]
+      .filter((target) => fs.existsSync(target));
+    for (const target of residuePaths) originalRmSync(target, { recursive: true, force: true });
+    assert.deepStrictEqual(residuePaths, [],
+      `GA-P1G2-SETUP-${failAt.toUpperCase()} leaves zero disposable path residue`);
+    assert.strictEqual(runCalls, 0,
+      `GA-P1G2-SETUP-${failAt.toUpperCase()} fails before every Git operation`);
+    if (failAt === 'initial-rm') {
+      assert.match(setupError.message, /failed to delete disposable self-install setup path .*injected setup cleanup failure/,
+        'GA-P1G2-SETUP-INITIAL-RM aggregates setup and cleanup failures');
+      assert.strictEqual(setupCleanupTarget, tempRoot,
+        'GA-P1G2-SETUP-INITIAL-RM retries the exact lexical mkdtemp target');
+    }
+  };
+  setupFailureResidueOracle(runIsolatedWorkshopSelfInstall, 'realpath');
+  setupFailureResidueOracle(runIsolatedWorkshopSelfInstall, 'initial-rm');
+  count += 8;
+  const guardedRealpathPrefix = `  try {
+    temp = fs.realpathSync.native(tempRoot);`;
+  const unguardedRealpathMutant = loadMutatedCoordinator(
+    'UNGUARDED-REALPATH-MUTANT-KILLED', guardedRealpathPrefix,
+    `  temp = fs.realpathSync.native(tempRoot);
+  try {`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => setupFailureResidueOracle(unguardedRealpathMutant, 'realpath'),
+    /leaves zero disposable path residue/,
+    'GA-P1G2-UNGUARDED-REALPATH-MUTANT-KILLED requires setup cleanup after realpath failure');
+  count++;
+  const guardedInitialRemovalPrefix = `  try {
+    temp = fs.realpathSync.native(tempRoot);
+    fs.rmSync(temp, { recursive: true, force: true });`;
+  const unguardedInitialRemovalMutant = loadMutatedCoordinator(
+    'UNGUARDED-INITIAL-RM-MUTANT-KILLED', guardedInitialRemovalPrefix,
+    `  temp = fs.realpathSync.native(tempRoot);
+  fs.rmSync(temp, { recursive: true, force: true });
+  try {`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => setupFailureResidueOracle(unguardedInitialRemovalMutant, 'initial-rm'),
+    /leaves zero disposable path residue/,
+    'GA-P1G2-UNGUARDED-INITIAL-RM-MUTANT-KILLED requires setup cleanup after placeholder removal failure');
+  count++;
+  const shellFixture = (failAt = '') => {
+    const state = {
+      calls: [], registered: false, unrelatedRegistered: true, temp: '',
+      currentCommit: '', computedCommit: '', computedCwd: '', syntheticTitle: '', removeAttempts: 0,
+    };
+    const run = (cmd, args, opts = {}) => {
+      state.calls.push({ cmd, args: args.slice(), cwd: opts.cwd });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') {
+        state.temp = args[3];
+        state.registered = true;
+        state.currentCommit = args[4];
+        if (failAt === 'checkout') throw new Error('checkout exploded after registration');
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return state.registered ? `worktree ${state.temp}\nHEAD head42\ndetached\n` : '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        state.removeAttempts += 1;
+        if (failAt === 'remove' && state.removeAttempts === 1) throw new Error('remove exploded');
+        state.registered = false;
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'prune') {
+        state.unrelatedRegistered = false;
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'rev-parse') return 'tree42';
+      if (cmd === 'git' && args[0] === 'commit-tree') {
+        eq(args.slice(0, 4), ['commit-tree', 'tree42', '-p', 'base42'],
+          'GA-P1G-SYNTHETIC-SQUASH commit-tree binds exact feature tree to exact fetched base');
+        state.syntheticTitle = args[args.indexOf('-m') + 1];
+        return 'synthetic42';
+      }
+      if (cmd === 'git' && args[0] === 'reset' && args[1] === '--hard') {
+        state.currentCommit = args[2];
+        return '';
+      }
+      if (cmd === 'node' && args[0] === 'scripts/release/compute-release.js') {
+        if (failAt === 'compute') throw new Error('compute exploded');
+        state.computedCommit = state.currentCommit;
+        state.computedCwd = opts.cwd;
+        return '';
+      }
+      if (cmd === 'node' && args[0] === 'platform/install.js') {
+        if (failAt === 'install') throw new Error('install exploded');
+        if (!state.computedCommit || state.computedCwd !== state.temp || opts.cwd !== state.temp) {
+          throw new Error('uncomputed dependency floor');
+        }
+        if (state.computedCommit === 'synthetic42' && state.syntheticTitle.startsWith('fix(')) {
+          throw new Error('synthetic fix leaves dependency floor unsatisfied');
+        }
+        return '';
+      }
+      throw new Error(`unexpected self-install fixture command: ${cmd} ${args.join(' ')}`);
+    };
+    return { state, run };
+  };
+  const successOracle = (helper) => {
+    const fixture = shellFixture();
+    helper({ root: '/claimed' }, 'head42', 'base42', 'feat(task-entity): release floor', fixture.run);
+    assert.strictEqual(fixture.state.registered, false, 'disposable registration must be removed');
+    assert.strictEqual(fixture.state.unrelatedRegistered, true, 'cleanup must preserve unrelated worktree registrations');
+    assert.strictEqual(fixture.state.computedCommit, 'synthetic42',
+      'compute-release must consume the prospective synthetic squash');
+    const compute = fixture.state.calls.find((call) => call.cmd === 'node'
+      && call.args[0] === 'scripts/release/compute-release.js');
+    assert(compute && compute.cwd === fixture.state.temp,
+      'compute-release must run in the disposable worktree');
+  };
+  const provenanceMismatchOracle = (helper) => {
+    const fixture = shellFixture();
+    assert.throws(() => helper(
+      { root: '/claimed' }, 'head42', 'base42', 'fix(task-entity): wrong squash bump', fixture.run,
+    ), /synthetic fix leaves dependency floor unsatisfied/);
+    assert.strictEqual(fixture.state.registered, false, 'provenance mismatch must clean target registration');
+    assert.strictEqual(fixture.state.unrelatedRegistered, true,
+      'provenance mismatch cleanup must preserve unrelated registrations');
+  };
+  const failureOracle = (helper, failAt, message) => {
+    const fixture = shellFixture(failAt);
+    assert.throws(() => helper(
+      { root: '/claimed' }, 'head42', 'base42', 'feat(task-entity): release floor', fixture.run,
+    ), new RegExp(message));
+    assert.strictEqual(fixture.state.registered, false, `${failAt} failure must clean registration`);
+    assert.strictEqual(fixture.state.unrelatedRegistered, true,
+      `${failAt} failure must preserve unrelated registrations`);
+  };
+
+  successOracle(runIsolatedWorkshopSelfInstall);
+  provenanceMismatchOracle(runIsolatedWorkshopSelfInstall);
+  count += 6;
+  for (const [failAt, message] of [
+    ['checkout', 'checkout exploded after registration'],
+    ['compute', 'compute exploded'],
+    ['install', 'install exploded'],
+    ['remove', 'failed to remove disposable self-install worktree .*remove exploded'],
+  ]) {
+    failureOracle(runIsolatedWorkshopSelfInstall, failAt, message);
+    count += 2;
+  }
+
+  const computeLine = "    run('node', ['scripts/release/compute-release.js', '--write'], { cwd: temp, stdio: 'pipe' });";
+  const installLine = "    run('node', ['platform/install.js', '--vault', '.', '--auto-approve'], { cwd: temp, stdio: 'pipe' });";
+  const syntheticResetLine = "    run('git', ['reset', '--hard', syntheticSha], { cwd: temp, stdio: 'pipe' });";
+  const removeLine = "      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); }";
+  const omittedCompute = loadMutatedCoordinator(
+    'OMITTED-COMPUTE-MUTANT-KILLED', computeLine, '    // mutant: release computation omitted',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(omittedCompute), /uncomputed dependency floor/,
+    'GA-P1G-OMITTED-COMPUTE-MUTANT-KILLED release-floor oracle turns red');
+  count++;
+  const claimedCompute = loadMutatedCoordinator(
+    'CLAIMED-CWD-MUTANT-KILLED', computeLine,
+    "    run('node', ['scripts/release/compute-release.js', '--write'], { cwd: ctx.root, stdio: 'pipe' });",
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(claimedCompute), /uncomputed dependency floor/,
+    'GA-P1G-CLAIMED-CWD-MUTANT-KILLED exact-disposable oracle turns red');
+  count++;
+  const swallowedCompute = loadMutatedCoordinator(
+    'SWALLOWED-COMPUTE-MUTANT-KILLED', computeLine,
+    `    try { ${computeLine.trim()} } catch (_) {}`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => failureOracle(swallowedCompute, 'compute', 'compute exploded'),
+    /Missing expected exception|did not match the regular expression/,
+    'GA-P1G-SWALLOWED-COMPUTE-MUTANT-KILLED failure-loud oracle turns red');
+  count++;
+  const swallowedInstall = loadMutatedCoordinator(
+    'SWALLOWED-INSTALL-MUTANT-KILLED', installLine,
+    `    try { ${installLine.trim()} } catch (_) {}`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => failureOracle(swallowedInstall, 'install', 'install exploded'),
+    /Missing expected exception/,
+    'GA-P1G-SWALLOWED-INSTALL-MUTANT-KILLED failure-loud oracle turns red');
+  count++;
+  const leakedWorktree = loadMutatedCoordinator(
+    'LEAKED-WORKTREE-MUTANT-KILLED', removeLine,
+    '      try { /* mutant: disposable worktree removal omitted */ }',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(leakedWorktree), /disposable registration must be removed/,
+    'GA-P1G-LEAKED-WORKTREE-MUTANT-KILLED cleanup oracle turns red');
+  count++;
+  const branchHistoryCompute = loadMutatedCoordinator(
+    'BRANCH-HISTORY-COMPUTE-MUTANT-KILLED', computeLine,
+    `    run('git', ['reset', '--hard', headSha], { cwd: temp, stdio: 'pipe' });
+${computeLine}`,
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => provenanceMismatchOracle(branchHistoryCompute), /Missing expected exception/,
+    'GA-P1G-BRANCH-HISTORY-COMPUTE-MUTANT-KILLED multi-commit branch history cannot determine the release plan');
+  count++;
+  const noSyntheticSquash = loadMutatedCoordinator(
+    'NO-SYNTHETIC-SQUASH-MUTANT-KILLED', syntheticResetLine,
+    '    // mutant: prospective synthetic squash is never checked out',
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => provenanceMismatchOracle(noSyntheticSquash), /Missing expected exception/,
+    'GA-P1G-NO-SYNTHETIC-SQUASH-MUTANT-KILLED exact prospective squash is required');
+  count++;
+  const relaxedTitleBinding = loadMutatedCoordinator(
+    'RELAXED-RECORD-PR-TITLE-MUTANT-KILLED',
+    '    if (pr.title !== record.gate_receipt.prospective_pr_title) {',
+    '    if (false && pr.title !== record.gate_receipt.prospective_pr_title) {',
+  ).commandRecordPr;
+  const titleBindingOracle = async (recordPr) => {
+    const state = emptyState();
+    state.cards.A = {
+      card: 'A', branch: 'autoloop/a', worktree: '/workshop/a', phase: 'implementing',
+      gate_receipt: passingReceipt('head42', false, 'fix(autoloop): verified title'),
+    };
+    await assert.rejects(() => recordPr({ root: '/workshop' }, {
+      json: true, card: 'A', pr: '42',
+    }, {
+      readState: () => state,
+      prView: () => ({
+        number: 42, headRefName: 'autoloop/a', baseRefName: 'main',
+        headRefOid: 'head42', baseRefOid: 'base42',
+        title: 'fix(autoloop): edited title', url: 'https://example.invalid/pr/42',
+      }),
+      sh: (_cmd, args) => args[0] === 'status' ? '' : 'head42',
+      writeState: () => {},
+      withLock: immediateCardLock,
+    }), (error) => error.code === 'title_mismatch');
+  };
+  await titleBindingOracle(commandRecordPr);
+  await assert.rejects(() => titleBindingOracle(relaxedTitleBinding), /Missing expected rejection/,
+    'GA-P1G-RELAXED-RECORD-PR-TITLE-MUTANT-KILLED byte-exact title binding is required');
+  count += 2;
+  const omittedAdvanceTitleBinding = loadMutatedCoordinator(
+    'OMITTED-ADVANCE-PR-TITLE-MUTANT-KILLED',
+    '    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid, pr.title);',
+    '    const gateStatus = gateReceiptStatus(record, pr.headRefOid, pr.baseRefOid);',
+  ).stepCard;
+  const advanceVerifiedTitle = 'fix(autoloop): gate-verified title';
+  const advanceActualTitle = 'fix(autoloop): byte-different actual title';
+  assert.notStrictEqual(advanceActualTitle, advanceVerifiedTitle,
+    'GA-P1G3-ADVANCE-TITLE-BINDING fixtures use byte-different verified and actual titles');
+  count++;
+  const openAdvanceTitleBindingOracle = async (advanceStep) => {
+    const record = {
+      card: 'A', phase: 'feature_pr', feature_pr: 42,
+      gate_receipt: passingReceipt('head42', true, advanceVerifiedTitle),
+    };
+    let armed = 0;
+    const result = await advanceStep({ root: '/workshop' }, emptyState(), record, {}, {
+      prView: () => ({
+        ...basePr, title: advanceActualTitle, statusCheckRollup: [
+          { name: 'mac', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        ],
+      }),
+      armFeatureAutoMerge: () => { armed++; },
+    });
+    assert.strictEqual(armed, 0,
+      'GA-P1G3-ADVANCE-TITLE-BINDING open title drift never arms auto-merge');
+    assert.strictEqual(result.action, 'verify-gates',
+      'GA-P1G3-ADVANCE-TITLE-BINDING open title drift returns to verify-gates');
+    assert.strictEqual(record.phase, 'feature_pr',
+      'GA-P1G3-ADVANCE-TITLE-BINDING open title drift preserves feature_pr');
+  };
+  await openAdvanceTitleBindingOracle(stepCard);
+  count += 3;
+  await assert.rejects(
+    () => openAdvanceTitleBindingOracle(omittedAdvanceTitleBinding),
+    /open title drift never arms auto-merge/,
+    'GA-P1G3-OMITTED-ADVANCE-PR-TITLE-OPEN-MUTANT-KILLED production call-site binding is required',
+  );
+  count++;
+  const mergedAdvanceTitleBindingOracle = async (advanceStep) => {
+    const record = {
+      card: 'A', phase: 'feature_pr', feature_pr: 42,
+      gate_receipt: passingReceipt('head42', true, advanceVerifiedTitle),
+    };
+    const result = await advanceStep({ root: '/workshop' }, emptyState(), record, {}, {
+      prView: () => ({
+        ...basePr, state: 'MERGED', title: advanceActualTitle,
+        mergeCommit: { oid: 'merge42' },
+      }),
+      writeState: () => {},
+    });
+    assert.notStrictEqual(record.phase, 'feature_merged',
+      'GA-P1G3-ADVANCE-TITLE-BINDING merged title drift never transitions feature_merged');
+    assert.strictEqual(record.phase, 'needs-inspection',
+      'GA-P1G3-ADVANCE-TITLE-BINDING merged title drift persists needs-inspection');
+    assert.strictEqual(result.action, 'needs-inspection',
+      'GA-P1G3-ADVANCE-TITLE-BINDING merged title drift returns needs-inspection');
+  };
+  await mergedAdvanceTitleBindingOracle(stepCard);
+  count += 3;
+  await assert.rejects(
+    () => mergedAdvanceTitleBindingOracle(omittedAdvanceTitleBinding),
+    /merged title drift never transitions feature_merged/,
+    'GA-P1G3-OMITTED-ADVANCE-PR-TITLE-MERGED-MUTANT-KILLED production call-site binding is required',
+  );
+  count++;
+  const unrelatedPrune = loadMutatedCoordinator(
+    'UNRELATED-PRUNE-SIDE-EFFECT-MUTANT-KILLED', removeLine,
+    "      try { run('git', ['worktree', 'remove', '--force', temp], { cwd: ctx.root, stdio: 'pipe' }); run('git', ['worktree', 'prune'], { cwd: ctx.root, stdio: 'pipe' }); }",
+  ).runIsolatedWorkshopSelfInstall;
+  assert.throws(() => successOracle(unrelatedPrune), /cleanup must preserve unrelated worktree registrations/,
+    'GA-P1G-UNRELATED-PRUNE-SIDE-EFFECT-MUTANT-KILLED cleanup never prunes unrelated registrations');
+  count++;
+}
 
 const moved = moveBoardCard(board(['A', 'C']), 'A', 'In Progress');
 ok(!/## In Planning\n- \[ \] \[\[A\]\]/.test(moved), 'removes card from source lane');
@@ -1690,8 +4232,16 @@ eq(viaGateLocks, [
   legacyCardGateLockName('A1'), cardGateLockName('A1'),
   'completion-projection',
 ], 'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE serializes both legacy and tracked sibling identities before projection');
-eq(JSON.stringify(viaGateRaceState.cards.A1), viaGateTransitionSnapshot,
+// Projecting the tracked sibling (A1) legitimately adds `card_note_sha` —
+// foreign-write detection records the hash of what it wrote on every
+// projectCard pass with a record, additive and orthogonal to the race this
+// block is pinning. Strip it before the byte-for-byte comparison and assert
+// it separately.
+const { card_note_sha: viaGateRaceSha, ...viaGateRaceWithoutSha } = viaGateRaceState.cards.A1;
+eq(JSON.stringify(viaGateRaceWithoutSha), viaGateTransitionSnapshot,
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE locked reread preserves the newer sibling phase and receipts byte-for-byte');
+ok(/^[0-9a-f]{64}$/.test(viaGateRaceSha),
+  'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE projecting the tracked sibling records its card_note_sha');
 ok(viaGateRaceResult.results[0].projection_findings[0].card === 'A2',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-CARD-GATE-RACE retains the exact legacy finding after the concurrent sibling transition');
 
@@ -2904,10 +5454,33 @@ eq(Object.fromEntries(Object.keys(amendProtectedBefore).map((key) => [key, amend
   amendProtectedBefore, 'amendment preserves every protected target metadata field outside the two authorized contract fields');
 ok(/platform\/manifest\.json/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'amended touch zones project into card frontmatter');
 ok(/mechanism:delivery/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'typed deployments project into card frontmatter');
+const amendedCardRaw = fs.readFileSync(amend.cardPath, 'utf8');
+const amendedDeploymentLine = amendedCardRaw.split('\n').find((line) => line.startsWith('deploy_subscriptions: '));
+eq(JSON.parse(JSON.parse(amendedDeploymentLine.slice(amendedDeploymentLine.indexOf(':') + 1).trim())),
+  typedDeployments,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT amend-contract projects the exact authority map as one JSON text scalar');
+ok(!/\ndeploy_subscriptions:\n\s+headspace:/m.test(amendedCardRaw),
+  'GA-OPS20A-AMEND-PROJECTION-FLAT amend-contract never restores the legacy nested deployment map');
 ok(/status: in_progress/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection preserves lifecycle metadata');
 ok(!/status_changed_at: 2026-07-16T18:00:00.000Z/.test(fs.readFileSync(amend.cardPath, 'utf8')), 'contract-only projection does not rewrite the status timestamp');
 eq(withoutExecutionContractBlocks(fs.readFileSync(amend.cardPath, 'utf8')), withoutExecutionContractBlocks(amend.cardSnapshot),
   'card projection preserves every frontmatter field and body byte outside the two authorized contract blocks');
+const repeatedAmendProjection = projectCard(
+  amend.cardPath,
+  amend.boardPath,
+  AMEND_CARD,
+  'implementing',
+  {
+    cardsRoot: amend.root,
+    record: amend.state.cards[AMEND_CARD],
+    state: amend.state,
+    now: amend.deps.now,
+  },
+);
+ok(repeatedAmendProjection.changed === false && repeatedAmendProjection.card_changed === false,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT normal projection recognizes the JSON text scalar and stays no-op');
+eq(fs.readFileSync(amend.cardPath, 'utf8'), amendedCardRaw,
+  'GA-OPS20A-AMEND-PROJECTION-FLAT normal projection preserves the scalar card byte-for-byte');
 eq(snapshotDirectory(amend.worktree), amend.worktreeSnapshot, 'successful amendment preserves the complete target worktree tree and bytes');
 eq(amend.gitCalls, [
   { cmd: 'git', argv: ['fetch', 'origin', 'main', '--quiet'], cwd: amend.worktree, stdio: 'pipe' },
@@ -3251,6 +5824,7 @@ parkState.cards['Park me'] = {
 };
 const parkLocks = [];
 let parkWrites = 0;
+const opx2ParkResumeProjections = [];
 const parkDeps = {
   readState: () => parkState,
   writeState: () => { parkWrites++; },
@@ -3258,25 +5832,38 @@ const parkDeps = {
   boardPath: parkBoardPath,
   findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   now: () => '2026-07-15T16:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2ParkResumeProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Park me', 'resume-condition': 'wait for myself',
 }, parkDeps), /cannot depend on itself/, 'park rejects self-dependencies');
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Missing prerequisite', 'resume-condition': 'wait for it',
 }, parkDeps), /prerequisite card .* does not exist/, 'park rejects missing prerequisite cards');
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Prerequisite A', 'resume-condition': '   ',
 }, parkDeps), /non-empty --resume-condition/, 'park requires an exact non-empty resume condition');
 parkState.cards['Park me'].phase = 'feature_pr';
 await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': 'Prerequisite A', 'resume-condition': 'wait for deployment',
 }, parkDeps), /claimed pre-PR work/, 'park refuses post-feature-PR phases');
 parkState.cards['Park me'].phase = 'implementing';
 const parked = await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
 }, parkDeps);
 eq(parked.action, 'parked', 'park succeeds through the explicit command');
+eq({ ok: parked.ok, no_op: parked.no_op }, { ok: true, no_op: false },
+  'park adds the success envelope without removing legacy receipt keys');
+eq(opx2ParkResumeProjections, ['park'],
+  'OPX2-TRANSITION-ONLY park transition fires exactly one Loop Station projection');
 eq(parkLocks.slice(-4), [
   'selector', legacyCardGateLockName('Park me'), cardGateLockName('Park me'), 'completion-projection',
 ], 'park serializes selector, migration-compatible card, exact-card transition, and metadata projection');
@@ -3290,9 +5877,34 @@ eq(parkState.cards['Park me'].gate_receipt, oldGate, 'park preserves the combine
 ok(/depends_on: \["\[\[Prerequisite A\]\]","\[\[Prerequisite B\]\]"\]/.test(fs.readFileSync(parkCardPath, 'utf8')), 'park projects exact dependencies into card metadata');
 ok(/resume_condition: "Both prerequisites deploy cleanly"/.test(fs.readFileSync(parkCardPath, 'utf8')), 'park projects the resume condition into card metadata');
 ok(parkWrites >= 2, 'park saves authoritative state before and after projection for crash recovery');
+const parkedStateBytes = JSON.stringify(parkState);
+const parkedCardBytes = fs.readFileSync(parkCardPath, 'utf8');
+const writesBeforeParkReplay = parkWrites;
+const projectionsBeforeParkReplay = opx2ParkResumeProjections.length;
+const parkReplay = await commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Both prerequisites deploy cleanly',
+}, parkDeps);
+eq(parkReplay.no_op, true, 'CS1-REPLAY-NOOP literal park replay returns no_op:true');
+eq(JSON.stringify(parkState), parkedStateBytes,
+  'CS1-REPLAY-NOOP literal park replay preserves authoritative state byte-for-byte');
+eq(fs.readFileSync(parkCardPath, 'utf8'), parkedCardBytes,
+  'CS1-REPLAY-NOOP literal park replay preserves projected card bytes');
+eq(parkWrites, writesBeforeParkReplay, 'CS1-REPLAY-NOOP literal park replay performs zero ledger writes');
+eq(opx2ParkResumeProjections.length, projectionsBeforeParkReplay,
+  'CS1-REPLAY-NOOP literal park replay performs zero Loop Station writes');
+await assert.rejects(() => commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Park me', 'depends-on': ['Prerequisite A', 'Prerequisite B'], 'resume-condition': 'Different condition',
+}, parkDeps), (error) => error.code === 'literal_replay_mismatch',
+'CS1-REPLAY-NOOP different park operands on a settled target refuse');
+eq(parkWrites, writesBeforeParkReplay, 'CS1-REPLAY-NOOP mismatched park replay performs zero ledger writes');
+eq(fs.readFileSync(parkCardPath, 'utf8'), parkedCardBytes,
+  'CS1-REPLAY-NOOP mismatched park replay preserves projected card bytes');
 const claimedParkState = emptyState();
 claimedParkState.cards.Claimed = { card: 'Claimed', phase: 'claimed', card_path: parkCardPath };
 eq((await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Claimed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
 }, {
   ...parkDeps, readState: () => claimedParkState, writeState: () => {}, projectCard: () => ({ changed: false }),
@@ -3301,6 +5913,7 @@ const parkRaceState = emptyState();
 parkRaceState.cards.Race = { card: 'Race', phase: 'claimed', card_path: parkCardPath };
 let parkSelectorEntered = false; let parkReadAfterSelector = false;
 eq((await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Race', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
 }, {
   ...parkDeps,
@@ -3325,7 +5938,7 @@ eq(parkedStatus.available_slots, 3, 'parked cards leave every capacity slot avai
 eq(parkedStatus.parked, [{
   card: 'Park me', phase: 'parked', status: 'parked', model_profile: undefined, branch: 'codex-autoloop/park-me',
   dependencies: ['Prerequisite A', 'Prerequisite B'], resume_condition: 'Both prerequisites deploy cleanly',
-  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null,
+  parked_at: '2026-07-15T16:00:00.000Z', projection_error: null, lease: null,
 }], 'status lists parked cards separately with prerequisites and resume condition');
 eq(parkedStatus.tracked.find((record) => record.card === 'Park me').status, 'parked', 'all-tracked status view includes canonical parked');
 
@@ -3353,7 +5966,7 @@ eq(commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
 }], 'status detects a crash between authoritative park state and card metadata projection');
 eq(crashParkState.cards['Crash parked'].phase, 'parked', 'authoritative ledger remains parked while human projection says in_progress');
 const crashBeforeRefusal = JSON.stringify(crashParkState.cards['Crash parked']);
-eq((await commandResume({ root: parkRoot }, { card: 'Crash parked' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
 })).action, 'resume-refused', 'resume directly refuses ledger/card metadata divergence without a saved projection error');
 eq(JSON.stringify(crashParkState.cards['Crash parked']), crashBeforeRefusal, 'metadata-divergence refusal preserves the parked record byte-for-byte');
@@ -3383,8 +5996,62 @@ crashParkState.cards['Crash parked'].branch = 'codex-autoloop/crash-parked';
 crashParkState.cards['Crash parked'].worktree = parkRoot;
 crashParkState.cards['Crash parked'].touch_zones = ['platform/crash'];
 fs.writeFileSync(crashBoardPath, liveBoard({ progress: ['Crash parked'], completed: [[true, 'Prerequisite A']] }));
+const failedResumeState = JSON.parse(JSON.stringify(crashParkState));
+let failedResumeWrites = 0;
+const failedResumeGitCalls = [];
+const failedResumeDeps = {
+  ...parkDeps,
+  readState: () => failedResumeState,
+  writeState: () => { failedResumeWrites++; },
+  boardPath: crashBoardPath,
+  findCard: (_root, name) => name === 'Prerequisite A' ? '/cards/Prerequisite A.md' : null,
+  worktreeExists: () => true,
+  projectCard: () => { throw new Error('resume metadata projection denied'); },
+  sh: (cmd, args) => {
+    failedResumeGitCalls.push([cmd, ...args]);
+    if (args[0] === 'fetch') return '';
+    if (args[0] === 'rev-parse') return args[1] === 'origin/main' ? 'current-main' : 'branch-head';
+    if (args[0] === 'merge-base') return '';
+    throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
+  },
+  now: () => '2026-07-15T16:02:30.000Z',
+  leaseNowMs: () => Date.parse('2026-07-15T16:02:30.000Z'),
+  leaseToken: () => 'tok-crash-1',
+};
+const failedResume = await commandResume(
+  { root: parkRoot }, { json: true, card: 'Crash parked' }, failedResumeDeps,
+);
+eq(failedResume.action, 'resume-projection-failed',
+  'CS1-PROJECTION-REPLAY initial resume projection failure is explicit');
+eq(failedResumeState.cards['Crash parked'].phase, 'implementing',
+  'CS1-PROJECTION-REPLAY failed resume projection preserves authoritative implementing state');
+eq(failedResumeState.cards['Crash parked'].projection_error, 'resume metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed resume projection is saved for reconciliation');
+eq(failedResumeState.cards['Crash parked'].lease.token, 'tok-crash-1',
+  'CS1-PROJECTION-REPLAY successful (if projection-failed) resume still acquires a lease');
+const failedResumeBytesSansLease = JSON.stringify({ ...failedResumeState.cards['Crash parked'], lease: undefined });
+const failedResumeWritesBeforeReplay = failedResumeWrites;
+const failedResumeGitCallsBeforeReplay = failedResumeGitCalls.length;
+// LEASE-ATTACH: resume on this now-'implementing' card is documented attach
+// behavior (Task 1 contract) — lease arbitration only, zero phase/review/
+// projection side effects; supersedes the old settled-replay no-op contract.
+const failedResumeReplay = await commandResume(
+  { root: parkRoot }, { json: true, card: 'Crash parked', 'lease-token': 'tok-crash-1' }, failedResumeDeps,
+);
+eq(failedResumeReplay.action, 'attach',
+  'LEASE-ATTACH resume on an implementing card attaches instead of replaying the settled receipt');
+eq(failedResumeReplay.no_op, true,
+  'LEASE-ATTACH same-token attach is idempotent');
+eq(failedResumeReplay.lease_token, 'tok-crash-1',
+  'LEASE-ATTACH attach renews the existing lease token');
+eq(failedResumeGitCalls.length, failedResumeGitCallsBeforeReplay,
+  'LEASE-ATTACH attach performs zero Git freshness reads');
+ok(failedResumeWrites > failedResumeWritesBeforeReplay,
+  'LEASE-ATTACH attach persists the renewed lease');
+eq(JSON.stringify({ ...failedResumeState.cards['Crash parked'], lease: undefined }), failedResumeBytesSansLease,
+  'LEASE-ATTACH attach preserves every field but the lease byte-for-byte, including the unresolved projection error');
 const currentMainCalls = [];
-const currentMainResume = await commandResume({ root: parkRoot }, { card: 'Crash parked' }, {
+const currentMainResume = await commandResume({ root: parkRoot }, { json: true, card: 'Crash parked' }, {
   ...parkDeps, readState: () => crashParkState, writeState: () => {}, boardPath: crashBoardPath,
   findCard: (_root, name) => name === 'Prerequisite A' ? '/cards/Prerequisite A.md' : null,
   worktreeExists: () => true,
@@ -3408,6 +6075,7 @@ failedParkState.cards.Failed = {
 };
 let failedParkWrites = 0;
 const failedPark = await commandPark({ root: parkRoot }, {
+  json: true,
   card: 'Failed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
 }, {
   ...parkDeps, readState: () => failedParkState, writeState: () => { failedParkWrites++; },
@@ -3417,35 +6085,55 @@ eq(failedPark.action, 'parked-projection-failed', 'metadata projection failure i
 eq(failedParkState.cards.Failed.phase, 'parked', 'failed metadata projection preserves authoritative parked state');
 eq(failedParkState.cards.Failed.projection_error, 'metadata projection denied', 'failed metadata projection is saved for reconciliation');
 ok(failedParkWrites >= 2, 'failed metadata projection persists both transition and failure receipt');
-eq((await commandResume({ root: parkRoot }, { card: 'Failed' }, {
+const failedParkBytes = JSON.stringify(failedParkState);
+const failedParkWritesBeforeReplay = failedParkWrites;
+const failedParkReplay = await commandPark({ root: parkRoot }, {
+  json: true,
+  card: 'Failed', 'depends-on': 'Prerequisite A', 'resume-condition': 'Prerequisite A deploys',
+}, {
+  ...parkDeps, readState: () => failedParkState, writeState: () => { failedParkWrites++; },
+});
+eq(failedParkReplay.action, 'parked-projection-failed',
+  'CS1-PROJECTION-REPLAY park replay keeps the unresolved projection failure explicit');
+eq(failedParkReplay.no_op, true,
+  'CS1-PROJECTION-REPLAY failed park replay is a settled zero-write no-op');
+eq(failedParkReplay.projection_error, 'metadata projection denied',
+  'CS1-PROJECTION-REPLAY failed park replay preserves the exact projection error');
+eq(failedParkReplay.reconcile, 'reconcile --card Failed',
+  'CS1-PROJECTION-REPLAY failed park replay names the exact repair command');
+eq(failedParkWrites, failedParkWritesBeforeReplay,
+  'CS1-PROJECTION-REPLAY failed park replay performs zero ledger writes');
+eq(JSON.stringify(failedParkState), failedParkBytes,
+  'CS1-PROJECTION-REPLAY failed park replay preserves authoritative state byte-for-byte');
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Failed' }, {
   ...parkDeps, readState: () => failedParkState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a parked card with unresolved metadata projection failure');
 
 const malformedResumeState = emptyState();
 malformedResumeState.cards.Malformed = { card: 'Malformed', phase: 'parked', dependencies: [], resume_condition: 'later', card_path: parkCardPath };
 const malformedBefore = JSON.stringify(malformedResumeState.cards.Malformed);
-eq((await commandResume({ root: parkRoot }, { card: 'Malformed' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Malformed' }, {
   ...parkDeps, readState: () => malformedResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses missing dependency metadata');
 eq(JSON.stringify(malformedResumeState.cards.Malformed), malformedBefore, 'missing-dependency refusal preserves the parked record');
 const invalidDependencyState = emptyState();
 invalidDependencyState.cards.Invalid = { card: 'Invalid', phase: 'parked', dependencies: [42], resume_condition: 'later', card_path: parkCardPath };
 const invalidBefore = JSON.stringify(invalidDependencyState.cards.Invalid);
-eq((await commandResume({ root: parkRoot }, { card: 'Invalid' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Invalid' }, {
   ...parkDeps, readState: () => invalidDependencyState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses malformed dependency elements');
 eq(JSON.stringify(invalidDependencyState.cards.Invalid), invalidBefore, 'malformed-dependency refusal preserves receipts and state');
 const selfResumeState = emptyState();
 selfResumeState.cards.Self = { card: 'Self', phase: 'parked', dependencies: ['Self'], resume_condition: 'later', card_path: parkCardPath };
 const selfBefore = JSON.stringify(selfResumeState.cards.Self);
-eq((await commandResume({ root: parkRoot }, { card: 'Self' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Self' }, {
   ...parkDeps, readState: () => selfResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a saved self-dependency');
 eq(JSON.stringify(selfResumeState.cards.Self), selfBefore, 'self-dependency refusal preserves receipts and state byte-for-byte');
 const emptyConditionState = emptyState();
 emptyConditionState.cards.Empty = { card: 'Empty', phase: 'parked', dependencies: ['Prerequisite A'], resume_condition: ' ', card_path: parkCardPath };
 const emptyConditionBefore = JSON.stringify(emptyConditionState.cards.Empty);
-eq((await commandResume({ root: parkRoot }, { card: 'Empty' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Empty' }, {
   ...parkDeps, readState: () => emptyConditionState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses an empty saved resume condition');
 eq(JSON.stringify(emptyConditionState.cards.Empty), emptyConditionBefore, 'empty-condition refusal preserves receipts and state byte-for-byte');
@@ -3453,7 +6141,7 @@ const missingResumeState = emptyState();
 missingResumeState.cards.Missing = {
   card: 'Missing', phase: 'parked', dependencies: ['Vanished prerequisite'], resume_condition: 'later', card_path: parkCardPath,
 };
-eq((await commandResume({ root: parkRoot }, { card: 'Missing' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Missing' }, {
   ...parkDeps, readState: () => missingResumeState, writeState: () => {},
 })).action, 'resume-refused', 'resume refuses a dependency whose card no longer exists');
 
@@ -3471,7 +6159,7 @@ resumeRaceState.cards.Target = {
 };
 resumeRaceState.cards.Contender = { card: 'Contender', phase: 'parked', parent_card: 'Shared parent', touch_zones: ['platform/contender'] };
 let resumeSelectorEntered = false; let resumeReadAfterSelector = false;
-const resumeRace = await commandResume({ root: parkRoot }, { card: 'Target' }, {
+const resumeRace = await commandResume({ root: parkRoot }, { json: true, card: 'Target' }, {
   ...parkDeps,
   readState: () => { resumeReadAfterSelector = resumeSelectorEntered; return resumeRaceState; },
   writeState: () => {}, worktreeExists: () => true,
@@ -3490,20 +6178,20 @@ eq(resumeRaceState.cards.Target.phase, 'parked', 'losing resume contender remain
 for (const name of ['Capacity 1', 'Capacity 2', 'Capacity 3']) {
   parkState.cards[name] = { card: name, phase: 'implementing', touch_zones: [`platform/${name.toLowerCase().replace(' ', '-')}`] };
 }
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => true,
 })).action, 'resume-refused', 'resume refuses to create a fourth active card');
 for (const name of ['Capacity 1', 'Capacity 2', 'Capacity 3']) delete parkState.cards[name];
 parkState.cards.Overlap = { card: 'Overlap', phase: 'implementing', touch_zones: ['platform/park-me'] };
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => true,
 })).action, 'resume-refused', 'resume refuses an active touch-zone conflict');
 delete parkState.cards.Overlap;
 const preservedWorktree = parkState.cards['Park me'].worktree;
 parkState.cards['Park me'].worktree = '/missing/parked-worktree';
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => false,
 })).action, 'resume-refused', 'resume refuses a missing preserved parked worktree');
@@ -3511,18 +6199,19 @@ parkState.cards['Park me'].worktree = preservedWorktree;
 parkState.cards.Sibling = {
   card: 'Sibling', phase: 'implementing', parent_card: 'Shared parent', touch_zones: ['platform/sibling'],
 };
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
 })).action, 'resume-refused', 'resume refuses a second active child of the normalized parent');
 parkState.cards.Sibling.phase = 'parked';
 parkState.cards['Prerequisite A'].vault_receipts.ero.ok = false;
-eq((await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+eq((await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps, findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
 })).action, 'resume-refused', 'resume refuses a tracked prerequisite with a failed required-vault receipt');
 parkState.cards['Prerequisite A'].vault_receipts.ero.ok = true;
 const gitCalls = [];
 const resumeLockStart = parkLocks.length;
-const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
+opx2ParkResumeProjections.length = 0;
+const resumed = await commandResume({ root: parkRoot }, { json: true, card: 'Park me' }, {
   ...parkDeps,
   findCard: (_root, name) => ['Prerequisite A', 'Prerequisite B'].includes(name) ? `/cards/${name}.md` : null,
   worktreeExists: () => true,
@@ -3534,8 +6223,14 @@ const resumed = await commandResume({ root: parkRoot }, { card: 'Park me' }, {
     throw new Error(`unexpected command ${cmd} ${args.join(' ')}`);
   },
   now: () => '2026-07-15T16:05:00.000Z',
+  leaseNowMs: () => Date.parse('2026-07-15T16:05:00.000Z'),
+  leaseToken: () => 'tok-park-1',
 });
 eq(resumed.action, 'implement', 'resume succeeds only after every prerequisite is satisfied');
+eq({ ok: resumed.ok, no_op: resumed.no_op }, { ok: true, no_op: false },
+  'resume adds the success envelope without removing legacy receipt keys');
+eq(opx2ParkResumeProjections, ['resume'],
+  'OPX2-TRANSITION-ONLY resume transition fires exactly one Loop Station projection');
 eq(resumed.origin_main_advanced, true, 'resume reports that origin/main advanced');
 eq(resumed.requires_main_update, true, 'resume reports that the branch needs a manual update');
 ok(!gitCalls.some((call) => ['merge', 'rebase', 'push'].includes(call[1])), 'resume never merges, rebases, or pushes automatically');
@@ -3556,6 +6251,34 @@ eq(parkState.cards['Park me'].resume_condition, null, 'successful resume clears 
 ok(!/^resume_condition:/m.test(fs.readFileSync(parkCardPath, 'utf8')), 'successful resume clears resume condition from card metadata');
 eq(parkState.cards['Park me'].branch, 'codex-autoloop/park-me', 'resume preserves the branch');
 eq(parkState.cards['Park me'].worktree, '/worktrees/park-me', 'resume preserves the worktree and implementation');
+eq(resumed.lease_token, 'tok-park-1', 'successful resume acquires a lease and reports its token');
+eq(parkState.cards['Park me'].lease.token, 'tok-park-1', 'successful resume records the lease on the ledger');
+const resumedStateBytesSansLease = JSON.stringify({ ...parkState.cards['Park me'], lease: undefined });
+const resumedCardBytes = fs.readFileSync(parkCardPath, 'utf8');
+const writesBeforeResumeReplay = parkWrites;
+const projectionsBeforeResumeReplay = opx2ParkResumeProjections.length;
+// LEASE-ATTACH: 'Park me' is now 'implementing', so a further resume call is
+// documented attach behavior (Task 1 contract) — same-token renewal only, no
+// Git/card/Loop-Station side effects; supersedes the old settled-replay no-op.
+const parkResumeReplay = await commandResume({ root: parkRoot }, { json: true, card: 'Park me', 'lease-token': 'tok-park-1' }, {
+  ...parkDeps,
+  sh: () => { throw new Error('literal resume replay must not inspect Git'); },
+  writeState: () => { parkWrites++; },
+  projectCard: () => { throw new Error('literal resume replay must not project card metadata'); },
+  projectLoopStation: () => { throw new Error('literal resume replay must not project Loop Station'); },
+  leaseNowMs: () => Date.parse('2026-07-15T16:05:01.000Z'),
+  leaseToken: () => 'unused',
+});
+eq(parkResumeReplay.action, 'attach', 'LEASE-ATTACH resume on an implementing card attaches');
+eq(parkResumeReplay.no_op, true, 'LEASE-ATTACH same-token attach returns no_op:true');
+eq(parkResumeReplay.lease_token, 'tok-park-1', 'LEASE-ATTACH same-token attach renews the existing token');
+eq(JSON.stringify({ ...parkState.cards['Park me'], lease: undefined }), resumedStateBytesSansLease,
+  'LEASE-ATTACH attach preserves every field but the lease byte-for-byte');
+eq(fs.readFileSync(parkCardPath, 'utf8'), resumedCardBytes,
+  'LEASE-ATTACH attach never touches the projected card file');
+ok(parkWrites > writesBeforeResumeReplay, 'LEASE-ATTACH attach persists the renewed lease');
+eq(opx2ParkResumeProjections.length, projectionsBeforeResumeReplay,
+  'LEASE-ATTACH attach performs zero Loop Station writes');
 
 const reconcileRoot = path.join(tmp, 'projection');
 fs.mkdirSync(reconcileRoot, { recursive: true });
@@ -3907,6 +6630,7 @@ recoveryState.cards['Stranded shipped card'] = {
 };
 let recoveryWrites = 0;
 const recoveryLocks = [];
+const opx2RecoveryProjections = [];
 const recoveryDeps = {
   readState: () => recoveryState,
   writeState: () => { recoveryWrites++; },
@@ -3915,6 +6639,10 @@ const recoveryDeps = {
   boardPath: recoveryBoardPath,
   cardsRoot: reconcileRoot,
   now: () => '2026-07-20T19:01:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2RecoveryProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
 };
 const recoveryArgs = { card: 'Stranded shipped card', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', 'dry-run': true };
 const recoveryBefore = deepCopy(recoveryState.cards['Stranded shipped card']);
@@ -3953,6 +6681,8 @@ eq(recoveryLocks.slice(-2), [
 eq(recoveryState.cards['Stranded shipped card'], recoveryBefore, 'recovery dry-run leaves the ledger byte-equivalent');
 const recovered = await commandRecoverDeployed({ root: reconcileRoot }, { ...recoveryArgs, 'dry-run': false, apply: true }, recoveryDeps);
 eq(recovered.action, 'recovered-deployed', 'verified recovery reaches authoritative deployed');
+eq(opx2RecoveryProjections, ['recover'],
+  'OPX2-TRANSITION-ONLY recover-deployed apply fires exactly one Loop Station projection');
 eq(recoveryState.cards['Stranded shipped card'].phase, 'deployed', 'recovery changes the terminal phase only after every proof passes');
 eq(recoveryState.cards['Stranded shipped card'].branch, 'preserved-branch', 'recovery preserves the branch');
 eq(recoveryState.cards['Stranded shipped card'].worktree, '/preserved-worktree', 'recovery preserves the worktree');
@@ -3966,6 +6696,8 @@ const replayedRecovery = await commandRecoverDeployed({ root: reconcileRoot }, {
 eq(replayedRecovery.no_op, true, 'literal receipt-bound recovery replay returns no_op true');
 eq(recoveryWrites, recoveryWritesAfterApply, 'literal recovery replay performs no ledger write');
 eq(recoveryState.cards['Stranded shipped card'].deployed_recoveries.length, 1, 'literal recovery replay never duplicates its audit');
+eq(opx2RecoveryProjections, ['recover'],
+  'OPX2-TRANSITION-ONLY recover-deployed replay fires no additional Loop Station projection');
 await assert.rejects(() => commandRecoverDeployed(
   { root: reconcileRoot }, { ...recoveryArgs, 'expected-head': `prefix-${RECOVERY_HEAD}` },
   { ...recoveryDeps, readState: () => ({ ...emptyState(), cards: { [recoveryBefore.card]: deepCopy(recoveryBefore) } }) },
@@ -4321,6 +7053,4144 @@ eq(projectionMetadataProblem({
   delivery_contract: historicalNoEvidenceContract,
   delivery_contract_version: '1.0.0',
 }, reconcileRoot), null, 'historical cards may omit optional evidence without false metadata drift');
+
+// GA-OPS20a: canonical structured fields restamp to Obsidian-safe text scalars.
+function restampHarness(id = 'happy') {
+  const root = path.join(reconcileRoot, `contract-frontmatter-restamp-${id}`);
+  fs.mkdirSync(path.join(root, 'Nested Epic', 'board'), { recursive: true });
+  const legacyNames = ['Legacy Restamp A', 'Legacy Restamp B'];
+  const paths = legacyNames.map((name, index) => {
+    const file = index === 0
+      ? path.join(root, `${name}.md`)
+      : path.join(root, 'Nested Epic', 'board', `${name}.md`);
+    fs.writeFileSync(file, `${card({ name })}\nBODY-SENTINEL-${index}\n`);
+    return file;
+  });
+  const alreadyName = 'Already Encoded';
+  const alreadyPath = path.join(root, `${alreadyName}.md`);
+  const alreadyLegacy = card({ name: alreadyName });
+  const alreadyMeta = parseExecutionMeta(alreadyLegacy, alreadyName);
+  const alreadyEncoded = alreadyLegacy
+    .replace(
+      'deploy_subscriptions:\n  headspace: []\n  accuris: []\n  ero: []',
+      `deploy_subscriptions: ${delivery.encodeStructuredFrontmatterValue(alreadyMeta.deploySubscriptions)}`,
+    )
+    .replace(
+      /^evidence:.*$/m,
+      `evidence: ${delivery.encodeStructuredFrontmatterValue(alreadyMeta.contract.evidence)}`,
+    );
+  fs.writeFileSync(alreadyPath, alreadyEncoded);
+  fs.writeFileSync(path.join(root, 'non-card.md'), '---\ntype: context-pack\n---\n\nUnrelated body.\n');
+  let specRaw = '';
+  let writes = 0;
+  let failWrite = 0;
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const reason = 'restamp canonical structured contract fields';
+  const deps = {
+    cardsRoot: root,
+    withLock: async (_ctx, _name, fn) => fn(),
+    readSpec: () => specRaw,
+    atomicWriteText: (file, raw) => {
+      writes += 1;
+      if (failWrite && writes === failWrite) throw new Error('injected restamp write failure');
+      fs.writeFileSync(file, raw);
+    },
+    durablePathBarrier: () => {},
+  };
+  const dryRunArgs = {
+    _: ['reconcile-metadata'],
+    'contract-frontmatter-restamp': true,
+    'dry-run': true,
+    reason,
+    json: true,
+  };
+  const applyArgs = {
+    _: ['reconcile-metadata'],
+    'contract-frontmatter-restamp': true,
+    apply: true,
+    reason,
+    spec: 'contract-frontmatter-restamp.json',
+    json: true,
+  };
+  return {
+    root, paths, alreadyPath, ctx, deps, reason, dryRunArgs, applyArgs,
+    setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
+    setSpecRaw: (raw) => { specRaw = raw; },
+    writes: () => writes,
+    failWrite: (attempt) => { failWrite = attempt; },
+    clearFailure: () => { failWrite = 0; },
+  };
+}
+
+function independentlyRestampedContractBytes(raw) {
+  const legacyDeployments = [
+    'deploy_subscriptions:',
+    '  headspace: []',
+    '  accuris: []',
+    '  ero: []',
+  ].join('\n');
+  const evidenceMatch = raw.match(/^evidence: (.*)$/m);
+  if (!raw.includes(legacyDeployments) || !evidenceMatch) {
+    throw new Error('independent restamp oracle requires the exact legacy writer preimage');
+  }
+  const scalar = (value) => JSON.stringify(JSON.stringify(value));
+  return raw
+    .replace(legacyDeployments, `deploy_subscriptions: ${scalar({
+      headspace: [], accuris: [], ero: [],
+    })}`)
+    .replace(/^evidence:.*$/m, `evidence: ${scalar(JSON.parse(evidenceMatch[1]))}`);
+}
+
+const restamp = restampHarness();
+const restampBodiesBefore = restamp.paths.map((file) => {
+  const raw = fs.readFileSync(file, 'utf8');
+  return raw.slice(raw.match(/^---\n[\s\S]*?\n---/)[0].length);
+});
+const restampContractsBefore = restamp.paths.map((file) => (
+  parseExecutionMeta(fs.readFileSync(file, 'utf8'), path.basename(file, '.md')).contract
+));
+const restampPreimages = restamp.paths.map((file) => fs.readFileSync(file, 'utf8'));
+const restampIntended = restampPreimages.map(independentlyRestampedContractBytes);
+const restampPlan = await commandReconcileMetadata(restamp.ctx, restamp.dryRunArgs, restamp.deps);
+eq(restampPlan.action, 'contract-frontmatter-restamp-plan',
+  'BGR-OBSY-HEAL-IDEMPOTENT starts with a deterministic dry-run');
+eq(restampPlan.exact_target_count, 2,
+  'BGR-OBSY-HEAL-IDEMPOTENT plans every legacy canonical note and excludes already encoded or unrelated notes');
+eq(restampPlan.spec.files.map((entry) => entry.card), ['Legacy Restamp A', 'Legacy Restamp B'],
+  'BGR-OBSY-HEAL-IDEMPOTENT uses stable path ordering');
+for (let index = 0; index < restampPlan.spec.files.length; index += 1) {
+  eq(restampPlan.spec.files[index].expected_sha256, testSha256(restampPreimages[index]),
+    `GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED target ${index + 1} expected receipt uses independent SHA-256`);
+  eq(restampPlan.spec.files[index].intended_sha256, testSha256(restampIntended[index]),
+    `GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED target ${index + 1} intended receipt uses independent SHA-256`);
+}
+eq(restamp.writes(), 0, 'BGR-OBSY-HEAL-IDEMPOTENT dry-run performs zero writes');
+restamp.setSpec(restampPlan.spec);
+restamp.failWrite(2);
+await assert.rejects(
+  () => commandReconcileMetadata(restamp.ctx, restamp.applyArgs, restamp.deps),
+  /injected restamp write failure/,
+  'BGR-OBSY-HEAL-IDEMPOTENT propagates an interrupted atomic write',
+); count++;
+const firstInterruptedRaw = fs.readFileSync(restamp.paths[0], 'utf8');
+const secondInterruptedRaw = fs.readFileSync(restamp.paths[1], 'utf8');
+ok(!restampContractFrontmatter(firstInterruptedRaw, 'Legacy Restamp A').changed
+  && restampContractFrontmatter(secondInterruptedRaw, 'Legacy Restamp B').changed,
+'BGR-OBSY-HEAL-IDEMPOTENT interrupted apply leaves only canonical intended or exact preimage states');
+restamp.clearFailure();
+const restampApplied = await commandReconcileMetadata(restamp.ctx, restamp.applyArgs, restamp.deps);
+eq(restampApplied.changed_count, 1,
+  'BGR-OBSY-HEAL-IDEMPOTENT literal retry rolls the one remaining preimage forward');
+for (let index = 0; index < restamp.paths.length; index += 1) {
+  const raw = fs.readFileSync(restamp.paths[index], 'utf8');
+  const fieldLines = raw.match(/^---\n([\s\S]*?)\n---/)[1].split('\n');
+  ok(/^deploy_subscriptions: "/m.test(raw) && /^evidence: "/m.test(raw),
+    `BGR-OBSY-HEAL-IDEMPOTENT target ${index + 1} uses JSON text scalars`);
+  ok(!fieldLines.some((line) => /^\s{2}(?:headspace|accuris|ero):/.test(line)),
+    `BGR-OBSY-NO-OBJECT-FRONTMATTER-GUARD target ${index + 1} has no nested deployment map`);
+  eq(raw.slice(raw.match(/^---\n[\s\S]*?\n---/)[0].length), restampBodiesBefore[index],
+    `BGR-OBSY-HEAL-IDEMPOTENT target ${index + 1} preserves every body byte`);
+  eq(parseExecutionMeta(raw, path.basename(restamp.paths[index], '.md')).contract,
+    restampContractsBefore[index],
+    `BGR-OBSY-READERS-BOTH-ENCODINGS target ${index + 1} preserves its complete parsed contract`);
+}
+const restampWritesAfterApply = restamp.writes();
+const restampReplay = await commandReconcileMetadata(restamp.ctx, restamp.applyArgs, restamp.deps);
+ok(restampReplay.no_op && restampReplay.changed_count === 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT literal replay returns no_op true');
+eq(restamp.writes(), restampWritesAfterApply,
+  'BGR-OBSY-HEAL-IDEMPOTENT literal replay performs zero writes');
+
+const malformedRestamp = restampHarness('malformed');
+fs.writeFileSync(malformedRestamp.paths[0], fs.readFileSync(malformedRestamp.paths[0], 'utf8')
+  .replace(/^evidence:.*$/m, `evidence: ${JSON.stringify('[{"source_identity":"unterminated"}')}`));
+assert.throws(
+  () => contractFrontmatterRestampPlan(malformedRestamp.root, malformedRestamp.reason),
+  /invalid-structured-json:evidence/,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS bulk restamp refuses malformed structured JSON before writes',
+); count++;
+eq(malformedRestamp.writes(), 0,
+  'BGR-OBSY-READERS-BOTH-ENCODINGS malformed bulk restamp performs zero writes');
+
+const symlinkRestamp = restampHarness('symlink');
+const outsideRestamp = path.join(reconcileRoot, 'contract-frontmatter-restamp-outside.md');
+fs.writeFileSync(outsideRestamp, card({ name: 'Outside Restamp' }));
+fs.symlinkSync(outsideRestamp, path.join(symlinkRestamp.root, 'Escaped Restamp.md'));
+assert.throws(
+  () => contractFrontmatterRestampPlan(symlinkRestamp.root, symlinkRestamp.reason),
+  /refuses symlink path/,
+  'BGR-OBSY-HEAL-IDEMPOTENT refuses a symlinked canonical-note path',
+); count++;
+eq(symlinkRestamp.writes(), 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT symlink refusal performs zero writes');
+
+const escapeRestamp = restampHarness('escape-spec');
+const escapePlan = await commandRestampContractFrontmatter(
+  escapeRestamp.ctx, escapeRestamp.dryRunArgs, escapeRestamp.deps,
+);
+const escapedSpec = deepCopy(escapePlan.spec);
+escapedSpec.files[0].path = '../contract-frontmatter-restamp-outside.md';
+escapeRestamp.setSpec(escapedSpec);
+await assert.rejects(
+  () => commandRestampContractFrontmatter(escapeRestamp.ctx, escapeRestamp.applyArgs, escapeRestamp.deps),
+  /invalid entry/,
+  'BGR-OBSY-HEAL-IDEMPOTENT refuses an out-of-root spec before writes',
+); count++;
+eq(escapeRestamp.writes(), 0,
+  'BGR-OBSY-HEAL-IDEMPOTENT out-of-root refusal performs zero writes');
+
+const thirdHashRestamp = restampHarness('third-hash');
+const thirdHashRestampPlan = await commandRestampContractFrontmatter(
+  thirdHashRestamp.ctx, thirdHashRestamp.dryRunArgs, thirdHashRestamp.deps,
+);
+thirdHashRestamp.setSpec(thirdHashRestampPlan.spec);
+const untouchedThirdHashPeer = fs.readFileSync(thirdHashRestamp.paths[1], 'utf8');
+const thirdHashPreimage = fs.readFileSync(thirdHashRestamp.paths[0], 'utf8');
+const thirdHashMutated = thirdHashPreimage.replace('BODY-SENTINEL-0', 'BODY-SENTINEL-X');
+eq(Buffer.byteLength(thirdHashMutated), Buffer.byteLength(thirdHashPreimage),
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED mutation preserves preimage length');
+eq([...Buffer.from(thirdHashMutated)].filter((byte, index) => byte !== Buffer.from(thirdHashPreimage)[index]).length, 1,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED fixture mutates exactly one byte');
+fs.writeFileSync(thirdHashRestamp.paths[0], thirdHashMutated);
+await assert.rejects(
+  () => commandRestampContractFrontmatter(
+    thirdHashRestamp.ctx, thirdHashRestamp.applyArgs, thirdHashRestamp.deps,
+  ),
+  /unplanned or changed canonical target|third hash/,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED refuses a one-byte post-plan mutation before writes',
+); count++;
+eq(thirdHashRestamp.writes(), 0,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED one-byte refusal performs zero coordinator writes');
+eq(fs.readFileSync(thirdHashRestamp.paths[1], 'utf8'), untouchedThirdHashPeer,
+  'GA-OPS20A2-RESTAMP-HASH-ORACLE-SELF-DERIVED one-byte refusal preserves every peer preimage');
+
+// BGD-PARKED-REBIND: exact-eight migration metadata repair is one atomic ledger write.
+async function captureFsMutationAttempts(run) {
+  const methods = ['writeFileSync', 'appendFileSync', 'renameSync', 'unlinkSync', 'rmSync'];
+  const originals = Object.fromEntries(methods.map((method) => [method, fs[method]]));
+  const calls = [];
+  for (const method of methods) {
+    fs[method] = (...args) => {
+      calls.push({
+        method,
+        path: args[0] == null ? null : String(args[0]),
+        target: args[1] == null || method !== 'renameSync' ? null : String(args[1]),
+      });
+      return undefined;
+    };
+  }
+  let result = null;
+  let error = null;
+  try {
+    try { result = await run(); }
+    catch (err) { error = err; }
+  } finally {
+    for (const method of methods) fs[method] = originals[method];
+  }
+  return { result, error, calls };
+}
+
+function parkedRebindHarness(id = 'happy') {
+  const root = path.join(reconcileRoot, `parked-rebind-${id}`);
+  fs.mkdirSync(root, { recursive: true });
+  const boardPath = path.join(root, 'board-sentinel.md');
+  fs.writeFileSync(boardPath, '## In Progress\n- [ ] parked authority sentinel\n');
+  const state = emptyState();
+  const actualEpics = [
+    'Core Styling Adoption', 'Harness and Docs Hygiene',
+    'Shared-Mechanism Dedup', 'Shared-Mechanism Dedup',
+    'Shared-Mechanism Dedup', 'Shared-Mechanism Dedup',
+    'Feature Polish', 'Feature Polish',
+  ];
+  for (let index = 0; index < PARKED_METADATA_REBIND_CARDS.length; index++) {
+    const name = PARKED_METADATA_REBIND_CARDS[index];
+    const cardPath = path.join(root, `${name}.md`);
+    const raw = card({ name, deps: ['Satisfied dependency'] })
+      .replace('---\n', '---\nkanban_column: In Progress\nresume_condition: \"wait for bounded authority\"\n')
+      .replace('status: planning', 'status: parked')
+      .replace('epic: "[[Test epic]]"', `epic: "[[${actualEpics[index]}]]"`);
+    fs.writeFileSync(cardPath, raw);
+    const projected = prepareDeliveryCard(raw, name).card;
+    state.cards[name] = {
+      card: name, phase: 'parked', card_path: cardPath,
+      delivery_contract: { ...projected, status: 'planning', epic: '[[Priorities for GA]]' },
+      delivery_contract_version: delivery.CONTRACT_VERSION,
+      dependencies: projected.depends_on, touch_zones: projected.touch_zones,
+      deploy_subscriptions: projected.deploy_subscriptions, batch_policy: projected.batch_policy,
+      resume_condition: 'wait for bounded authority',
+      head_sha: 'a'.repeat(40), branch: `preserved-${index}`, worktree: `/preserved-${index}`,
+      gate_receipt: { fixture: `gate-${index}` }, reviews: { fixture: `reviews-${index}` },
+      parked_metadata_rebindings: [{
+        request: { prior_receipt: name, index },
+        spec: { prior_spec: name, index },
+        reconciled_at: `2026-07-24T00:00:${String(index).padStart(2, '0')}.000Z`,
+      }],
+    };
+  }
+  let ledgerWrites = 0;
+  let cardWrites = 0;
+  let barrierCalls = 0;
+  let barrierFailure = null;
+  const locks = [];
+  const stateDir = path.join(root, '.state');
+  const ctx = { root, stateDir, statePath: path.join(stateDir, 'state.json'), boardPath };
+  let specRaw = '';
+  const deps = {
+    readState: () => state,
+    writeState: () => { ledgerWrites++; },
+    withLock: async (_ctx, name, fn) => { locks.push(name); return fn(); },
+    atomicWriteText: (target, raw) => {
+      cardWrites++;
+      fs.writeFileSync(target, raw);
+    },
+    durablePathBarrier: () => {
+      barrierCalls++;
+      if (barrierFailure) throw new Error(barrierFailure);
+    },
+    readSpec: () => specRaw,
+    cardsRoot: root,
+    boardPath,
+    now: () => '2026-07-25T23:30:00.000Z',
+  };
+  const reason = 'rebind the exact eight canonical epic migrations';
+  const dryRunArgs = {
+    _: ['reconcile-metadata'],
+    'parked-rebind': true,
+    'dry-run': true,
+    reason,
+    json: true,
+  };
+  const applyArgs = {
+    _: ['reconcile-metadata'],
+    'parked-rebind': true,
+    apply: true,
+    reason,
+    spec: 'exact-eight.json',
+    json: true,
+  };
+  return {
+    root, boardPath, state, ctx, deps, reason, dryRunArgs, applyArgs,
+    setSpec: (spec) => { specRaw = `${JSON.stringify(spec, null, 2)}\n`; },
+    setSpecRaw: (raw) => { specRaw = String(raw); },
+    counts: () => ({ ledgerWrites, cardWrites, barrierCalls, locks: [...locks] }),
+    failBarrier: (message) => { barrierFailure = message; },
+    clearBarrierFailure: () => { barrierFailure = null; },
+  };
+}
+
+function parkedRefusalSnapshot(harness) {
+  return {
+    state: deepCopy(harness.state),
+    board_sha256: testSha256(fs.readFileSync(harness.boardPath, 'utf8')),
+    card_sha256: Object.fromEntries(Object.entries(harness.state.cards)
+      .filter(([, record]) => record && record.card_path && fs.existsSync(record.card_path))
+      .map(([name, record]) => [name, testSha256(fs.readFileSync(record.card_path, 'utf8'))])),
+    ledger_writes: harness.counts().ledgerWrites,
+    card_writes: harness.counts().cardWrites,
+  };
+}
+
+async function assertParkedRefusalNoMutation(harness, args, pattern, label) {
+  const before = parkedRefusalSnapshot(harness);
+  const probe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+    harness.ctx, args, harness.deps,
+  ));
+  ok(probe.error && pattern.test(probe.error.message),
+    `${label} reaches its exact refusal`);
+  eq(probe.calls, [], `${label} attempts zero filesystem or board mutations`);
+  eq(harness.counts().ledgerWrites, before.ledger_writes,
+    `${label} performs zero ledger writes`);
+  eq(harness.counts().cardWrites, before.card_writes,
+    `${label} performs zero card or board writer calls`);
+  eq(harness.state, before.state, `${label} leaves every ledger/control record exact`);
+  eq(testSha256(fs.readFileSync(harness.boardPath, 'utf8')), before.board_sha256,
+    `${label} preserves the relevant board hash`);
+  eq(Object.fromEntries(Object.entries(harness.state.cards)
+    .filter(([, record]) => record && record.card_path && fs.existsSync(record.card_path))
+    .map(([name, record]) => [name, testSha256(fs.readFileSync(record.card_path, 'utf8'))])),
+  before.card_sha256, `${label} preserves every target card hash`);
+}
+
+const parkedRebind = parkedRebindHarness();
+const parkedLedgerBefore = deepCopy(parkedRebind.state.cards);
+const parkedBoardBefore = fs.readFileSync(parkedRebind.boardPath, 'utf8');
+const parkedCardHashesBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const raw = fs.readFileSync(parkedRebind.state.cards[name].card_path, 'utf8');
+  return [name, testSha256(raw)];
+}));
+const parkedAuthorityBefore = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const record = parkedRebind.state.cards[name];
+  const raw = fs.readFileSync(record.card_path, 'utf8');
+  return [name, {
+    raw, phase: record.phase, resume_condition: record.resume_condition,
+    head_sha: record.head_sha, branch: record.branch, worktree: record.worktree,
+    gate_receipt: deepCopy(record.gate_receipt), reviews: deepCopy(record.reviews),
+    dependencies: deepCopy(record.dependencies),
+  }];
+}));
+const parkedRebindPlan = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.dryRunArgs, parkedRebind.deps,
+);
+eq(parkedRebindPlan.action, 'rebind-parked-metadata-plan', 'BGD-PARKED-REBIND-EXACT-EIGHT exposes a dry-run first');
+eq(parkedRebindPlan.spec.cards.map((entry) => entry.card), PARKED_METADATA_REBIND_CARDS,
+  'BGD-PARKED-REBIND-EXACT-EIGHT binds the complete canonical target set in order');
+ok(parkedRebindPlan.spec.cards.every((entry) => entry.expected_card_sha256 === entry.intended_next_sha256),
+  'BGD-PARKED-REBIND-PRESERVES-AUTHORITY binds byte-identical card preimage and intended hashes');
+eq(parkedRebind.counts().ledgerWrites, 0, 'parked rebind dry-run performs zero ledger writes');
+eq(parkedRebind.counts().cardWrites, 0, 'parked rebind dry-run performs zero card writes');
+parkedRebind.setSpec(parkedRebindPlan.spec);
+const parkedRebindApplied = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+);
+eq(parkedRebindApplied.action, 'rebound-parked-metadata', 'bounded exact-eight parked rebind applies');
+eq(parkedRebindApplied.no_op, false, 'first exact-eight parked rebind records a real ledger repair');
+eq(parkedRebind.counts().ledgerWrites, 1, 'exact-eight parked rebind is one atomic ledger write');
+eq(parkedRebind.counts().cardWrites, 0, 'exact-eight parked rebind never rewrites a card');
+for (const name of PARKED_METADATA_REBIND_CARDS) {
+  const record = parkedRebind.state.cards[name];
+  const before = parkedAuthorityBefore[name];
+  eq({
+    raw: fs.readFileSync(record.card_path, 'utf8'),
+    phase: record.phase, resume_condition: record.resume_condition,
+    head_sha: record.head_sha, branch: record.branch, worktree: record.worktree,
+    gate_receipt: record.gate_receipt, reviews: record.reviews, dependencies: record.dependencies,
+  }, before, `BGD-PARKED-REBIND-PRESERVES-AUTHORITY preserves ${name}`);
+  eq(projectionMetadataProblem(record, parkedRebind.root), null,
+    `BGD-PARKED-REBIND-PRESERVES-AUTHORITY clears ${name}`);
+  eq(record.parked_metadata_rebindings, [
+    ...parkedLedgerBefore[name].parked_metadata_rebindings,
+    {
+      request: parkedRebindApplied.request,
+      spec: parkedRebindApplied.spec,
+      reconciled_at: parkedRebindApplied.reconciled_at,
+    },
+  ], `GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND preserves ${name}'s exact audit prefix and appends one receipt`);
+}
+const parkedLedgerAfterNormalized = deepCopy(parkedRebind.state.cards);
+for (const name of PARKED_METADATA_REBIND_CARDS) {
+  parkedLedgerAfterNormalized[name].delivery_contract.epic =
+    parkedLedgerBefore[name].delivery_contract.epic;
+  if (Object.prototype.hasOwnProperty.call(parkedLedgerBefore[name], 'parked_metadata_rebindings')) {
+    parkedLedgerAfterNormalized[name].parked_metadata_rebindings =
+      deepCopy(parkedLedgerBefore[name].parked_metadata_rebindings);
+  } else {
+    delete parkedLedgerAfterNormalized[name].parked_metadata_rebindings;
+  }
+}
+eq(parkedLedgerAfterNormalized, parkedLedgerBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every ledger and control field except intended epic plus audit');
+eq(fs.readFileSync(parkedRebind.boardPath, 'utf8'), parkedBoardBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves board bytes');
+eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => {
+  const raw = fs.readFileSync(parkedRebind.state.cards[name].card_path, 'utf8');
+  return [name, testSha256(raw)];
+})), parkedCardHashesBefore,
+  'GA-OPS14A2-AUTHORITY-COMPARISON-INCOMPLETE preserves every card byte hash');
+const parkedRebindCountsAfterApply = parkedRebind.counts();
+const parkedAuditsAfterApply = Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
+  name,
+  deepCopy(parkedRebind.state.cards[name].parked_metadata_rebindings),
+]));
+const parkedRebindReplay = await commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+);
+eq(parkedRebindReplay.no_op, true, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS returns no_op true');
+eq(parkedRebind.counts(), {
+  ...parkedRebindCountsAfterApply,
+  barrierCalls: parkedRebindCountsAfterApply.barrierCalls + 1,
+  locks: [...parkedRebindCountsAfterApply.locks, 'parked-metadata-rebind'],
+}, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS performs zero second ledger or card writes');
+eq(Object.fromEntries(PARKED_METADATA_REBIND_CARDS.map((name) => [
+  name,
+  parkedRebind.state.cards[name].parked_metadata_rebindings,
+])), parkedAuditsAfterApply,
+  'GA-OPS14A2-PRIOR-AUDIT-HISTORY-UNBOUND literal replay leaves every prior-plus-appended audit chain exact');
+
+// GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT: cross the real readState/writeState seam
+// and compare the complete serialized ledger envelope, then prove literal replay
+// is byte-identical. Only the eight epic values and eight appended audits may move.
+const realPersistenceRebind = parkedRebindHarness('real-persistence-envelope');
+realPersistenceRebind.state.updated_at = '2026-07-20T12:34:56.789Z';
+realPersistenceRebind.state.top_level_authority_sentinel = {
+  digest_marker: 'preserve-exactly',
+  cutover: { enabled: true, streak: 3 },
+  receipts: ['alpha', 'beta'],
+};
+realPersistenceRebind.state.cards['Unrelated ledger authority sentinel'] = {
+  card: 'Unrelated ledger authority sentinel',
+  phase: 'completed',
+  delivery_contract: {
+    epic: '[[Unrelated Epic]]',
+    status: 'completed',
+  },
+  nested_authority: {
+    deployment_receipts: [{ vault: 'sentinel', ok: true }],
+    prior_reviews: { correctness: 'preserve-exactly' },
+  },
+};
+atomicWriteJson(realPersistenceRebind.ctx.statePath, realPersistenceRebind.state);
+const realPersistenceBefore = JSON.parse(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceDeps = { ...realPersistenceRebind.deps };
+delete realPersistenceDeps.readState;
+delete realPersistenceDeps.writeState;
+const realPersistencePlan = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.dryRunArgs,
+  realPersistenceDeps,
+);
+realPersistenceRebind.setSpec(realPersistencePlan.spec);
+const realPersistenceApplied = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.applyArgs,
+  realPersistenceDeps,
+);
+const realPersistenceAfter = JSON.parse(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceExpected = deepCopy(realPersistenceBefore);
+for (const entry of realPersistencePlan.spec.cards) {
+  const record = realPersistenceExpected.cards[entry.card];
+  record.delivery_contract.epic = entry.intended_ledger_epic;
+  record.parked_metadata_rebindings.push({
+    request: realPersistenceApplied.request,
+    spec: realPersistenceApplied.spec,
+    reconciled_at: realPersistenceApplied.reconciled_at,
+  });
+}
+eq(realPersistenceAfter.cards['Unrelated ledger authority sentinel'],
+  realPersistenceBefore.cards['Unrelated ledger authority sentinel'],
+  'GA-OPS14A4-NON-TARGET-CARD-ENVELOPE-UNBOUND preserves an unrelated complete ledger record through real persistence');
+eq(realPersistenceAfter, realPersistenceExpected,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT changes only eight epic bindings plus eight appended audits across real persistence');
+eq(realPersistenceAfter.updated_at, realPersistenceBefore.updated_at,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT preserves the exact top-level updated_at authority');
+const realPersistenceHashAfterApply = testSha256(fs.readFileSync(
+  realPersistenceRebind.ctx.statePath, 'utf8',
+));
+const realPersistenceReplay = await commandReconcileMetadata(
+  realPersistenceRebind.ctx,
+  realPersistenceRebind.applyArgs,
+  realPersistenceDeps,
+);
+eq(realPersistenceReplay.no_op, true,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT literal replay is a no-op through real persistence');
+eq(testSha256(fs.readFileSync(realPersistenceRebind.ctx.statePath, 'utf8')),
+  realPersistenceHashAfterApply,
+  'GA-OPS14A3-TOP-LEVEL-AUTHORITY-DRIFT literal replay preserves the complete serialized ledger byte hash');
+
+for (const altered of [
+  { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
+  { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
+  { ...parkedRebind.applyArgs, json: false },
+  { ...parkedRebind.applyArgs, 'dry-run': 'false' },
+]) {
+  await assert.rejects(() => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
+    /literal|requires|reason|substituted/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted operand'); count++;
+}
+for (const [mutation, altered] of [
+  ['added', { ...parkedRebind.applyArgs, _: ['reconcile-metadata', 'extra'] }],
+  ['removed', { ...parkedRebind.applyArgs, _: [] }],
+  ['changed', { ...parkedRebind.applyArgs, _: ['reconcile-metadata-substituted'] }],
+]) {
+  await assert.rejects(
+    () => commandReconcileMetadata(parkedRebind.ctx, altered, parkedRebind.deps),
+    /literal|substituted/,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED refuses ${mutation} positional operands`,
+  ); count++;
+  eq(parkedRebind.counts().ledgerWrites, 1,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED ${mutation} positional operands perform zero ledger writes`);
+  eq(parkedRebind.counts().cardWrites, 0,
+    `GA-OPS14A-LITERAL-POSITIONAL-OPERANDS-UNCOVERED ${mutation} positional operands perform zero card writes`);
+}
+const substitutedParkedSpec = deepCopy(parkedRebindPlan.spec);
+substitutedParkedSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
+parkedRebind.setSpec(substitutedParkedSpec);
+await assert.rejects(() => commandReconcileMetadata(
+  parkedRebind.ctx, parkedRebind.applyArgs, parkedRebind.deps,
+), /invalid exact-eight entry/, 'GA-OPS12-METADATA-LITERAL-REPLAY-CAS refuses a substituted CAS hash'); count++;
+parkedRebind.setSpec(parkedRebindPlan.spec);
+eq(parkedRebind.counts().ledgerWrites, 1, 'substituted parked-rebind operands perform zero ledger writes');
+eq(parkedRebind.counts().cardWrites, 0, 'substituted parked-rebind operands perform zero card writes');
+
+const parkedDurabilityReplay = parkedRebindHarness('durability-replay');
+const parkedDurabilityPlan = await commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.dryRunArgs, parkedDurabilityReplay.deps,
+);
+parkedDurabilityReplay.setSpec(parkedDurabilityPlan.spec);
+parkedDurabilityReplay.failBarrier('injected post-ledger durability failure');
+await assert.rejects(() => commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.applyArgs, parkedDurabilityReplay.deps,
+), /post-ledger durability failure/, 'GA-OPS14A-DURABILITY-REPLAY-GAP propagates the first post-ledger barrier failure'); count++;
+eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP leaves exactly one visible atomic ledger write');
+parkedDurabilityReplay.clearBarrierFailure();
+const parkedDurabilityRecovered = await commandReconcileMetadata(
+  parkedDurabilityReplay.ctx, parkedDurabilityReplay.applyArgs, parkedDurabilityReplay.deps,
+);
+eq(parkedDurabilityRecovered.no_op, true,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP exact retry recovers through the replay path');
+eq(parkedDurabilityReplay.counts().barrierCalls, 2,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP replay re-establishes the state durability barrier');
+eq(parkedDurabilityReplay.counts().ledgerWrites, 1,
+  'GA-OPS14A-DURABILITY-REPLAY-GAP recovery performs zero second ledger writes');
+
+const mixedStateRebind = parkedRebindHarness('mixed-ledger-state');
+const mixedStatePlan = await commandReconcileMetadata(
+  mixedStateRebind.ctx, mixedStateRebind.dryRunArgs, mixedStateRebind.deps,
+);
+mixedStateRebind.setSpec(mixedStatePlan.spec);
+mixedStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic =
+  mixedStatePlan.spec.cards[0].intended_ledger_epic;
+const mixedStateBefore = deepCopy(mixedStateRebind.state.cards);
+const mixedStateBoardBefore = fs.readFileSync(mixedStateRebind.boardPath, 'utf8');
+await assert.rejects(
+  () => commandReconcileMetadata(mixedStateRebind.ctx, mixedStateRebind.applyArgs, mixedStateRebind.deps),
+  /mixed third state; zero writes/,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT refuses one intended plus seven expected ledger epics',
+); count++;
+eq(mixedStateRebind.counts().ledgerWrites, 0,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT performs zero ledger writes');
+eq(mixedStateRebind.counts().cardWrites, 0,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT performs zero card writes');
+eq(mixedStateRebind.state.cards, mixedStateBefore,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves every record unchanged');
+eq(fs.readFileSync(mixedStateRebind.boardPath, 'utf8'), mixedStateBoardBefore,
+  'GA-OPS14A2-MIXED-STATE-FIXTURE-ABSENT leaves board bytes unchanged');
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a mixed expected/intended split
+// across targets is the same second-writer signature as a single target's
+// third state — machine-identifiable through the shared cli-kit code. The
+// mixed-state message names no single target (it spans the whole target
+// set), so this pins the "zero writes" fact instead, which is what today's
+// message states.
+{
+  let mixedStateCodeError = null;
+  try {
+    await commandReconcileMetadata(mixedStateRebind.ctx, mixedStateRebind.applyArgs, mixedStateRebind.deps);
+  } catch (err) { mixedStateCodeError = err; }
+  eq(mixedStateCodeError && mixedStateCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a mixed third ledger state refuses with the concurrent_modification code');
+  ok(mixedStateCodeError && /zero writes/.test(mixedStateCodeError.message),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mixed-state refusal still states zero writes');
+  eq(mixedStateRebind.state.cards, mixedStateBefore,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mixed-state refusal still leaves every record unchanged');
+  eq(mixedStateRebind.counts().ledgerWrites, 0,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION mixed-state refusal still performs zero ledger writes');
+}
+
+for (const phase of ['implementing', 'deployed']) {
+  const refusal = parkedRebindHarness(`phase-${phase}`);
+  const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  refusal.setSpec(refusalPlan.spec);
+  refusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].phase = phase;
+  await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
+    /missing, active, completed/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${phase} target before writes`); count++;
+  eq(refusal.counts().ledgerWrites, 0, `${phase} parked-rebind refusal performs zero ledger writes`);
+}
+const missingFindingRebind = parkedRebindHarness('missing-finding');
+const missingFindingRecord = missingFindingRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+missingFindingRecord.delivery_contract.epic = prepareDeliveryCard(
+  fs.readFileSync(missingFindingRecord.card_path, 'utf8'), missingFindingRecord.card,
+).card.epic;
+await assert.rejects(() => commandReconcileMetadata(
+  missingFindingRebind.ctx, missingFindingRebind.dryRunArgs, missingFindingRebind.deps,
+), /complete exact-eight status finding set/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a missing current finding before writes'); count++;
+eq(missingFindingRebind.counts().ledgerWrites, 0, 'missing current finding refusal performs zero ledger writes');
+const extraFindingRebind = parkedRebindHarness('extra-finding');
+const extraFindingName = 'Unexpected ninth parked metadata finding';
+const extraFindingSource = extraFindingRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+const extraFindingPath = path.join(extraFindingRebind.root, `${extraFindingName}.md`);
+const extraFindingRaw = fs.readFileSync(extraFindingSource.card_path, 'utf8')
+  .replaceAll(PARKED_METADATA_REBIND_CARDS[0], extraFindingName);
+fs.writeFileSync(extraFindingPath, extraFindingRaw);
+extraFindingRebind.state.cards[extraFindingName] = {
+  ...deepCopy(extraFindingSource),
+  card: extraFindingName,
+  card_path: extraFindingPath,
+  delivery_contract: {
+    ...deepCopy(extraFindingSource.delivery_contract),
+    card: extraFindingName,
+  },
+};
+await assert.rejects(() => commandReconcileMetadata(
+  extraFindingRebind.ctx, extraFindingRebind.dryRunArgs, extraFindingRebind.deps,
+), /complete exact-eight status finding set/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses an extra current finding before writes'); count++;
+eq(extraFindingRebind.counts().ledgerWrites, 0, 'extra current finding refusal performs zero ledger writes');
+const thirdStateRebind = parkedRebindHarness('third-card-state');
+const thirdStatePlan = await commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.dryRunArgs, thirdStateRebind.deps);
+thirdStateRebind.setSpec(thirdStatePlan.spec);
+fs.appendFileSync(thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path, '\nthird-state');
+await assert.rejects(() => commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps),
+  /third card hash/, 'BGD-PARKED-REBIND-EXACT-EIGHT refuses a third card state before writes'); count++;
+eq(thirdStateRebind.counts().ledgerWrites, 0, 'third-state parked-rebind refusal performs zero ledger writes');
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a third card hash is a second
+// writer, not a crash — machine-identifiable through the shared cli-kit code
+// (same as heal-epic-bindings and restructure). Re-invokes the same refusal
+// (pure, zero-write) to capture the thrown error object directly; this
+// assertion fails against the unconverted `new Error(...)` throw.
+{
+  const thirdCardMutatedPath = thirdStateRebind.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path;
+  const thirdCardMutatedBytes = fs.readFileSync(thirdCardMutatedPath, 'utf8');
+  let thirdCardCodeError = null;
+  try {
+    await commandReconcileMetadata(thirdStateRebind.ctx, thirdStateRebind.applyArgs, thirdStateRebind.deps);
+  } catch (err) { thirdCardCodeError = err; }
+  eq(thirdCardCodeError && thirdCardCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third card hash refuses with the concurrent_modification code');
+  ok(thirdCardCodeError && thirdCardCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed target card');
+  eq(fs.readFileSync(thirdCardMutatedPath, 'utf8'), thirdCardMutatedBytes,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal writes nothing to the mutated target');
+  eq(thirdStateRebind.counts().ledgerWrites, 0,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION third-card refusal still performs zero ledger writes');
+}
+for (const shape of ['missing', 'extra']) {
+  const refusal = parkedRebindHarness(shape);
+  const refusalPlan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  const cards = shape === 'missing'
+    ? refusalPlan.spec.cards.slice(0, -1)
+    : [...refusalPlan.spec.cards, deepCopy(refusalPlan.spec.cards[0])];
+  refusal.setSpec({ ...refusalPlan.spec, cards });
+  await assert.rejects(() => commandReconcileMetadata(refusal.ctx, refusal.applyArgs, refusal.deps),
+    /does not exactly match/, `BGD-PARKED-REBIND-EXACT-EIGHT refuses ${shape} target set before writes`); count++;
+  eq(refusal.counts().ledgerWrites, 0, `${shape} target-set refusal performs zero ledger writes`);
+}
+
+// GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE: every refusal class crosses the
+// same filesystem/state/card/board zero-mutation oracle.
+for (const [label, altered, pattern] of [
+  ['unsupported named operand',
+    { ...parkedRebind.applyArgs, 'unknown-named-operand': true },
+    /unsupported --unknown-named-operand/],
+  ['substituted reason',
+    { ...parkedRebind.applyArgs, reason: ` ${parkedRebind.reason}` },
+    /literal/],
+  ['substituted spec path',
+    { ...parkedRebind.applyArgs, spec: './exact-eight.json' },
+    /literal/],
+  ['substituted JSON operand',
+    { ...parkedRebind.applyArgs, json: false },
+    /requires literal/],
+  ['opposite-mode operand',
+    { ...parkedRebind.applyArgs, 'dry-run': 'false' },
+    /opposite-mode operand/],
+  ['added positional operand',
+    { ...parkedRebind.applyArgs, _: ['reconcile-metadata', 'extra'] },
+    /literal/],
+  ['removed positional operand',
+    { ...parkedRebind.applyArgs, _: [] },
+    /literal/],
+  ['changed positional operand',
+    { ...parkedRebind.applyArgs, _: ['reconcile-metadata-substituted'] },
+    /literal/],
+]) {
+  await assertParkedRefusalNoMutation(
+    parkedRebind,
+    altered,
+    pattern,
+    `GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE ${label}`,
+  );
+}
+const refusalCasSpec = deepCopy(parkedRebindPlan.spec);
+refusalCasSpec.cards[0].expected_card_sha256 = 'b'.repeat(64);
+parkedRebind.setSpec(refusalCasSpec);
+await assertParkedRefusalNoMutation(
+  parkedRebind,
+  parkedRebind.applyArgs,
+  /invalid exact-eight entry/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE substituted CAS',
+);
+parkedRebind.setSpec(parkedRebindPlan.spec);
+await assertParkedRefusalNoMutation(
+  missingFindingRebind,
+  missingFindingRebind.dryRunArgs,
+  /complete exact-eight status finding set/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE missing current finding',
+);
+await assertParkedRefusalNoMutation(
+  extraFindingRebind,
+  extraFindingRebind.dryRunArgs,
+  /complete exact-eight status finding set/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE extra current finding',
+);
+await assertParkedRefusalNoMutation(
+  mixedStateRebind,
+  mixedStateRebind.applyArgs,
+  /mixed third state/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE mixed ledger state',
+);
+await assertParkedRefusalNoMutation(
+  thirdStateRebind,
+  thirdStateRebind.applyArgs,
+  /third card hash/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third card state',
+);
+const malformedJsonRefusal = parkedRebindHarness('write-seam-malformed-json');
+await commandReconcileMetadata(
+  malformedJsonRefusal.ctx,
+  malformedJsonRefusal.dryRunArgs,
+  malformedJsonRefusal.deps,
+);
+malformedJsonRefusal.setSpecRaw('{"schema_version":1,"reason":');
+await assertParkedRefusalNoMutation(
+  malformedJsonRefusal,
+  malformedJsonRefusal.applyArgs,
+  /spec is malformed JSON/,
+  'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP malformed spec JSON',
+);
+const malformedProjectedRefusal = parkedRebindHarness('write-seam-malformed-projected-target');
+const malformedProjectedPlan = await commandReconcileMetadata(
+  malformedProjectedRefusal.ctx,
+  malformedProjectedRefusal.dryRunArgs,
+  malformedProjectedRefusal.deps,
+);
+const malformedProjectedPath =
+  malformedProjectedRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].card_path;
+const malformedProjectedRaw = 'malformed projected target with no Delivery contract\n';
+fs.writeFileSync(malformedProjectedPath, malformedProjectedRaw);
+const malformedProjectedSpec = deepCopy(malformedProjectedPlan.spec);
+malformedProjectedSpec.cards[0].expected_card_sha256 = testSha256(malformedProjectedRaw);
+malformedProjectedSpec.cards[0].intended_next_sha256 = testSha256(malformedProjectedRaw);
+malformedProjectedRefusal.setSpec(malformedProjectedSpec);
+await assertParkedRefusalNoMutation(
+  malformedProjectedRefusal,
+  malformedProjectedRefusal.applyArgs,
+  /third projected epic state/,
+  'GA-OPS14A4-MALFORMED-REFUSAL-ORACLE-GAP hash-matched malformed projected target',
+);
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a hash-matched but non-canonical
+// projected target is a second writer, not a crash — machine-identifiable
+// through the shared cli-kit code.
+{
+  let thirdProjectedCodeError = null;
+  try {
+    await commandReconcileMetadata(malformedProjectedRefusal.ctx, malformedProjectedRefusal.applyArgs, malformedProjectedRefusal.deps);
+  } catch (err) { thirdProjectedCodeError = err; }
+  eq(thirdProjectedCodeError && thirdProjectedCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third projected epic state refuses with the concurrent_modification code');
+  ok(thirdProjectedCodeError && thirdProjectedCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed projected target');
+  eq(fs.readFileSync(malformedProjectedPath, 'utf8'), malformedProjectedRaw,
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the malformed projected target is left byte-untouched');
+}
+for (const phase of ['implementing', 'deployed']) {
+  const refusal = parkedRebindHarness(`write-seam-phase-${phase}`);
+  const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  refusal.setSpec(plan.spec);
+  refusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].phase = phase;
+  await assertParkedRefusalNoMutation(
+    refusal,
+    refusal.applyArgs,
+    /missing, active, completed/,
+    `GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE ${phase} target`,
+  );
+}
+const missingRecordRefusal = parkedRebindHarness('write-seam-missing-record');
+const missingRecordPlan = await commandReconcileMetadata(
+  missingRecordRefusal.ctx, missingRecordRefusal.dryRunArgs, missingRecordRefusal.deps,
+);
+missingRecordRefusal.setSpec(missingRecordPlan.spec);
+delete missingRecordRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]];
+await assertParkedRefusalNoMutation(
+  missingRecordRefusal,
+  missingRecordRefusal.applyArgs,
+  /missing, active, completed/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE missing target record',
+);
+const thirdLedgerRefusal = parkedRebindHarness('write-seam-third-ledger');
+const thirdLedgerPlan = await commandReconcileMetadata(
+  thirdLedgerRefusal.ctx, thirdLedgerRefusal.dryRunArgs, thirdLedgerRefusal.deps,
+);
+thirdLedgerRefusal.setSpec(thirdLedgerPlan.spec);
+thirdLedgerRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic = '[[Third epic]]';
+await assertParkedRefusalNoMutation(
+  thirdLedgerRefusal,
+  thirdLedgerRefusal.applyArgs,
+  /third ledger epic state/,
+  'GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE third ledger state',
+);
+// BGD-PARKED-REBIND-CONCURRENT-MODIFICATION: a third ledger epic value is a
+// second writer, not a crash — machine-identifiable through the shared
+// cli-kit code.
+{
+  let thirdLedgerCodeError = null;
+  try {
+    await commandReconcileMetadata(thirdLedgerRefusal.ctx, thirdLedgerRefusal.applyArgs, thirdLedgerRefusal.deps);
+  } catch (err) { thirdLedgerCodeError = err; }
+  eq(thirdLedgerCodeError && thirdLedgerCodeError.code, 'concurrent_modification',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION a third ledger epic state refuses with the concurrent_modification code');
+  ok(thirdLedgerCodeError && thirdLedgerCodeError.message.includes(PARKED_METADATA_REBIND_CARDS[0]),
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the refusal names the changed ledger target');
+  eq(thirdLedgerRefusal.state.cards[PARKED_METADATA_REBIND_CARDS[0]].delivery_contract.epic, '[[Third epic]]',
+    'BGD-PARKED-REBIND-CONCURRENT-MODIFICATION the mutated ledger epic is left untouched');
+}
+for (const shape of ['missing', 'extra']) {
+  const refusal = parkedRebindHarness(`write-seam-spec-${shape}`);
+  const plan = await commandReconcileMetadata(refusal.ctx, refusal.dryRunArgs, refusal.deps);
+  const cards = shape === 'missing'
+    ? plan.spec.cards.slice(0, -1)
+    : [...plan.spec.cards, deepCopy(plan.spec.cards[0])];
+  refusal.setSpec({ ...plan.spec, cards });
+  await assertParkedRefusalNoMutation(
+    refusal,
+    refusal.applyArgs,
+    /does not exactly match/,
+    `GA-OPS14A3-REFUSAL-WRITE-SEAM-INCOMPLETE ${shape} spec target`,
+  );
+}
+
+// GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED: instrument every filesystem
+// mutation seam while apply, replay, and refusal execute, then prove the probe
+// itself catches an injected board write without allowing it to reach disk.
+const boardSeamRebind = parkedRebindHarness('board-write-seam');
+const boardSeamPlan = await commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.dryRunArgs, boardSeamRebind.deps,
+);
+boardSeamRebind.setSpec(boardSeamPlan.spec);
+const boardSeamHash = testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8'));
+const boardApplyProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.applyArgs, boardSeamRebind.deps,
+));
+eq(boardApplyProbe.error, null,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply completes under the filesystem mutation probe');
+eq(boardApplyProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED apply preserves the relevant board hash');
+const boardReplayProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx, boardSeamRebind.applyArgs, boardSeamRebind.deps,
+));
+eq(boardReplayProbe.error, null,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay completes under the mutation probe');
+eq(boardReplayProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED literal replay preserves the relevant board hash');
+const boardRefusalProbe = await captureFsMutationAttempts(() => commandReconcileMetadata(
+  boardSeamRebind.ctx,
+  { ...boardSeamRebind.applyArgs, reason: `${boardSeamRebind.reason} substituted` },
+  boardSeamRebind.deps,
+));
+ok(boardRefusalProbe.error && /literal/.test(boardRefusalProbe.error.message),
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED substituted request reaches the expected refusal');
+eq(boardRefusalProbe.calls, [],
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED refusal reaches zero filesystem or board writes');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED refusal preserves the relevant board hash');
+const injectedBoardMutation = await captureFsMutationAttempts(async () => {
+  fs.writeFileSync(boardSeamRebind.boardPath, 'injected board mutation');
+});
+eq(injectedBoardMutation.calls, [{
+  method: 'writeFileSync',
+  path: boardSeamRebind.boardPath,
+  target: null,
+}], 'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED probe turns red on a targeted board-write mutation');
+eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash,
+  'GA-OPS14A2-BOARD-PRESERVATION-FIXTURE-DISCONNECTED probe blocks the injected mutation from disk');
+
+// GA-OPS14A2-CLI-ROUTING-UNCOVERED: real parser + main dispatch reach the parked-rebind route.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [
+      coordinatorCli,
+      'reconcile-metadata',
+      '--parked-rebind',
+      '--dry-run',
+      '--reason',
+      'side-effect-free routing probe',
+    ], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /--parked-rebind requires literal --parked-rebind and --json/.test(String(cliError.stderr)),
+    'GA-OPS14A2-CLI-ROUTING-UNCOVERED parser and main dispatch reach the parked-rebind-specific pre-read refusal');
+}
+// --- BGR redesign: discarded terminal phase with tombstones ---
+
+// removeBoardCard: exact mirror of moveBoardCard's location grammar.
+const removalBoard = liveBoard({ progress: ['Doomed card'], planning: ['Survivor'] });
+const removedBoard = removeBoardCard(removalBoard, 'Doomed card');
+ok(!/\[\[Doomed card\]\]/.test(removedBoard), 'removeBoardCard splices the exact card line out of its lane');
+ok(/\[\[Survivor\]\]/.test(removedBoard) && /\[\[Unrelated discovery\]\]/.test(removedBoard), 'removeBoardCard preserves every unrelated board line');
+eq(removeBoardCard(removedBoard, 'Doomed card'), removedBoard, 'removeBoardCard treats absence as already-removed (idempotent)');
+
+// BGR-DISCARD-HAPPY: parked tracked card → tombstone, board line removed, note deleted.
+const DISCARD_HEAD = 'f'.repeat(40);
+const discardRoot = path.join(tmp, 'bgr-discard');
+const discardCardsRoot = path.join(discardRoot, 'spice', 'projects', 'test', 'tasks');
+fs.mkdirSync(discardCardsRoot, { recursive: true });
+const discardBoardPath = path.join(discardRoot, 'spice', 'projects', 'test', 'project-board.md');
+const discardCardPath = path.join(discardCardsRoot, 'Stale slice.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ progress: ['Stale slice'] }));
+fs.writeFileSync(discardCardPath, [
+  '---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'stale body',
+].join('\n'));
+const discardState = emptyState();
+discardState.cards['Stale slice'] = {
+  card: 'Stale slice', phase: 'parked', card_path: discardCardPath,
+  branch: 'codex-autoloop/stale-slice', worktree: '/missing/stale-slice',
+  dependencies: ['Prerequisite A'], resume_condition: 'never satisfied',
+  gate_receipt: passingReceipt(DISCARD_HEAD),
+};
+let discardWrites = 0;
+const discardLocks = [];
+const discardShCalls = [];
+const discardBoardAtPersist = [];
+const opx2DiscardProjections = [];
+const discardDeps = {
+  readState: () => discardState,
+  writeState: () => { discardWrites++; discardBoardAtPersist.push(fs.readFileSync(discardBoardPath, 'utf8')); },
+  withLock: async (_ctx, name, fn) => { discardLocks.push(name); return fn(); },
+  boardPath: discardBoardPath,
+  cardsRoot: discardCardsRoot,
+  worktreeExists: () => false,
+  sh: (cmd, args) => { discardShCalls.push([cmd, ...args]); return ''; },
+  now: () => '2026-07-25T12:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2DiscardProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
+};
+await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+  card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR',
+}, discardDeps), /requires --json/, 'BGR-DISCARD-HAPPY discard refuses without --json before any read or write');
+eq(discardLocks, [], 'BGR-DISCARD-HAPPY missing --json refusal precedes every lock');
+eq(discardWrites, 0, 'BGR-DISCARD-HAPPY missing --json refusal performs zero writes');
+const discardArgs = {
+  card: 'Stale slice', 'superseded-by': 'Stale slice v2', reason: 'redesigned under BGR', json: true,
+};
+const discarded = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
+eq(discarded.action, 'discarded', 'BGR-DISCARD-HAPPY discard succeeds with a machine-readable receipt');
+eq(opx2DiscardProjections, ['discard'],
+  'OPX2-TRANSITION-ONLY discard transition fires exactly one Loop Station projection');
+eq(discarded.no_op, false, 'BGR-DISCARD-HAPPY first discard is not a no-op');
+eq(discarded.tombstone, {
+  discarded_at: '2026-07-25T12:00:00.000Z', discard_reason: 'redesigned under BGR',
+  superseded_by: 'Stale slice v2', final_head: DISCARD_HEAD, carried_fixtures: [],
+}, 'BGR-DISCARD-HAPPY receipt carries the exact tombstone fields');
+eq(discardState.cards['Stale slice'].phase, 'discarded', 'BGR-DISCARD-HAPPY ledger phase becomes discarded');
+eq(discardState.cards['Stale slice'].discarded_at, '2026-07-25T12:00:00.000Z', 'BGR-DISCARD-HAPPY ledger records discarded_at');
+eq(discardState.cards['Stale slice'].discard_reason, 'redesigned under BGR', 'BGR-DISCARD-HAPPY ledger records the discard reason');
+eq(discardState.cards['Stale slice'].superseded_by, 'Stale slice v2', 'BGR-DISCARD-HAPPY ledger records the superseding card');
+eq(discardState.cards['Stale slice'].final_head, DISCARD_HEAD, 'BGR-DISCARD-HAPPY final_head preserves the record gate-receipt HEAD');
+eq(discardState.cards['Stale slice'].carried_fixtures, [], 'BGR-DISCARD-HAPPY ledger records carried fixtures');
+ok(!/\[\[Stale slice\]\]/.test(fs.readFileSync(discardBoardPath, 'utf8')), 'BGR-DISCARD-HAPPY board line is removed from its lane');
+ok(!fs.existsSync(discardCardPath), 'BGR-DISCARD-HAPPY card note file is deleted');
+ok(discardWrites >= 1, 'BGR-DISCARD-HAPPY ledger write happens first');
+ok(/\[\[Stale slice\]\]/.test(discardBoardAtPersist[0]),
+  'BGR-DISCARD-HAPPY the board line is still present at tombstone-persist time (ledger-first ordering)');
+eq(discardShCalls, [
+  ['git', 'worktree', 'list', '--porcelain'],
+  ['git', 'branch', '-D', 'codex-autoloop/stale-slice'],
+], 'BGR-DISCARD-HAPPY deletes the unguarded branch after checking checkouts');
+eq(discarded.branch, { branch: 'codex-autoloop/stale-slice', deleted: true }, 'BGR-DISCARD-HAPPY receipt reports the deleted branch');
+
+// Untracked never-claimed corpse: minimal tombstone, line + note removed.
+const corpsePath = path.join(discardCardsRoot, 'Never claimed.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ planning: ['Never claimed'] }));
+fs.writeFileSync(corpsePath, '---\nstatus: planning\n---\ncorpse body\n');
+const corpse = await commandDiscard({ root: discardRoot }, {
+  card: 'Never claimed', reason: 'never-claimed corpse', json: true,
+}, discardDeps);
+eq(corpse.action, 'discarded', 'BGR-DISCARD-HAPPY untracked corpse discard succeeds');
+eq(corpse.tracked, false, 'BGR-DISCARD-HAPPY untracked corpse is reported untracked');
+eq(discardState.cards['Never claimed'].phase, 'discarded', 'BGR-DISCARD-HAPPY untracked corpse gains a minimal tombstone record');
+eq(discardState.cards['Never claimed'].discarded_at, '2026-07-25T12:00:00.000Z', 'BGR-DISCARD-HAPPY corpse tombstone records discarded_at');
+eq(discardState.cards['Never claimed'].discard_reason, 'never-claimed corpse', 'BGR-DISCARD-HAPPY corpse tombstone records the reason');
+eq(discardState.cards['Never claimed'].final_head, null, 'BGR-DISCARD-HAPPY corpse tombstone has no preserved HEAD');
+ok(!fs.existsSync(corpsePath), 'BGR-DISCARD-HAPPY corpse note file is deleted');
+ok(!/\[\[Never claimed\]\]/.test(fs.readFileSync(discardBoardPath, 'utf8')), 'BGR-DISCARD-HAPPY corpse board line is removed');
+
+// Status surfaces tombstones without consuming capacity.
+const discardStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(discardBoardPath, 'utf8'), loadCard: () => null, state: discardState,
+  cardsRoot: discardCardsRoot,
+});
+eq(discardStatus.discarded_total, 2, 'status reports the total tombstone count');
+eq(discardStatus.discarded_recent.find((item) => item.name === 'Stale slice'), {
+  name: 'Stale slice', discarded_at: '2026-07-25T12:00:00.000Z',
+  superseded_by: 'Stale slice v2', reason: 'redesigned under BGR',
+}, 'status lists recent tombstones with name, time, supersession, and reason');
+eq(discardStatus.active_count, 0, 'tombstones never consume active capacity');
+eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false, 'tombstones have no board projection in the tracked view');
+
+// A3 discard-time scan rewrites planning dependents to the live tail
+{
+  const root = path.join(tmp, 'a3-discard-scan');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['BL-4'], planning: ['BL-5'] }));
+  const predPath = path.join(cardsRoot, 'BL-4.md');
+  const depPath = path.join(cardsRoot, 'BL-5.md');
+  const activePath = path.join(cardsRoot, 'BL-6.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  fs.writeFileSync(depPath, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[BL-4]]"', '---', 'x'].join('\n'));
+  fs.writeFileSync(activePath, ['---', 'type: slice', 'status: claimed', 'depends_on:', '  - "[[BL-4]]"', '---', 'x'].join('\n'));
+  const state = emptyState();
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'parked', card_path: predPath, gate_receipt: passingReceipt(DISCARD_HEAD) };
+  state.cards['BL-4b'] = { card: 'BL-4b', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  state.cards['BL-6'] = { card: 'BL-6', phase: 'claimed', card_path: activePath };
+  const deps = {
+    readState: () => state,
+    writeState: () => {},
+    withLock: async (_c, _n, fn) => fn(),
+    boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-02T00:00:00.000Z',
+    projectLoopStation: (_c, _s, u) => ({ action: 'loop-station-projected', no_op: false, updated_on: u }),
+  };
+  const receipt = await commandDiscard({ root }, {
+    card: 'BL-4', 'superseded-by': 'BL-4b', reason: 'superseded to BL-4c chain', json: true,
+  }, deps);
+  eq(receipt.dependency_rewrites, [{ card: 'BL-5', from: 'BL-4', to: 'BL-4c', path: depPath }],
+    'A3 planning dependent BL-5 is repointed to the live tail BL-4c');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(depPath, 'utf8')), 'A3 BL-5 note now points at BL-4c on disk');
+  eq(receipt.dependency_reports, [{ card: 'BL-6', from: 'BL-4', phase: 'claimed' }],
+    'A3 active dependent BL-6 is reported, not touched');
+  ok(/\[\[BL-4\]\]/.test(fs.readFileSync(activePath, 'utf8')), 'A3 BL-6 note is left untouched');
+}
+
+// FW-DISCARD-PERSIST — scanDependentsForDiscard stamps a rewritten
+// dependent's card_note_sha only in memory; discardCardCore's own persist
+// (`persist(ctx, state, target)`) writes only the discarded card's own
+// record, so a tracked dependent's stamp needs a persist of its own. Real
+// on-disk ledger throughout: no readState/writeState overrides, so
+// commandDiscard exercises the module's real persistence, and the assertions
+// read the state file fresh from disk rather than the object passed in.
+{
+  const root = path.join(tmp, 'fw-discard-persist');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['FWD-4'], planning: ['FWD-5'] }));
+  const predPath = path.join(cardsRoot, 'FWD-4.md');
+  const depPath = path.join(cardsRoot, 'FWD-5.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  fs.writeFileSync(depPath, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[FWD-4]]"', '---', 'x'].join('\n'));
+
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  const seedState = emptyState();
+  seedState.cards['FWD-4'] = { card: 'FWD-4', phase: 'parked', card_path: predPath, gate_receipt: passingReceipt(DISCARD_HEAD) };
+  seedState.cards['FWD-4b'] = { card: 'FWD-4b', phase: 'discarded', superseded_by: 'FWD-4c' };
+  seedState.cards['FWD-4c'] = { card: 'FWD-4c', phase: 'deployed' };
+  // A stale placeholder sha, standing in for "the coordinator last wrote this
+  // dependent a while ago" — the discard-time repoint must advance it, and
+  // that advance must reach disk, not just the in-memory record.
+  seedState.cards['FWD-5'] = { card: 'FWD-5', phase: 'planning', card_path: depPath, card_note_sha: '0'.repeat(64) };
+  writeState(ctx, seedState);
+
+  const receipt = await commandDiscard(ctx, {
+    card: 'FWD-4', 'superseded-by': 'FWD-4b', reason: 'superseded to FWD-4c chain', json: true,
+  }, {
+    boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-05T00:00:00.000Z', writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(),
+    projectLoopStation: (_c, _s, u) => ({ action: 'loop-station-projected', no_op: false, updated_on: u }),
+  });
+  eq(receipt.dependency_rewrites, [{ card: 'FWD-5', from: 'FWD-4', to: 'FWD-4c', path: depPath }],
+    'FW-DISCARD-PERSIST the planning dependent is repointed to the live tail (precondition)');
+
+  const onDiskDependent = readOnDisk().cards['FWD-5'];
+  const healedBytes = fs.readFileSync(depPath, 'utf8');
+  ok(onDiskDependent.card_note_sha !== '0'.repeat(64),
+    'FW-DISCARD-PERSIST the ON-DISK dependent sha advances past its placeholder');
+  eq(onDiskDependent.card_note_sha, crypto.createHash('sha256').update(healedBytes).digest('hex'),
+    'FW-DISCARD-PERSIST the on-disk dependent sha equals sha256 of its repointed note');
+}
+
+// SD supersession-depth circuit-breaker — a lineage at the depth limit refuses
+// to supersede further and escalates to the Director instead of minting the Nth
+// successor (the runaway that spun one slice through 27 supersessions).
+{
+  const root = path.join(tmp, 'supersession-depth');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['TV-2c'] }));
+  const predPath = path.join(cardsRoot, 'TV-2c.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  const state = emptyState();
+  // Chain TV-2 → TV-2a → TV-2b → TV-2c: three prior supersessions already lead
+  // into TV-2c, so superseding it again (→ TV-2d) is the depth-limit breach.
+  state.cards['TV-2'] = { card: 'TV-2', phase: 'discarded', superseded_by: 'TV-2a' };
+  state.cards['TV-2a'] = { card: 'TV-2a', phase: 'discarded', superseded_by: 'TV-2b' };
+  state.cards['TV-2b'] = { card: 'TV-2b', phase: 'discarded', superseded_by: 'TV-2c' };
+  state.cards['TV-2c'] = { card: 'TV-2c', phase: 'parked', card_path: predPath };
+  let sdWrote = 0;
+  const deps = {
+    readState: () => state, writeState: () => { sdWrote++; }, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-04T00:00:00.000Z',
+    projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+  };
+  const sd = await commandDiscard({ root }, {
+    card: 'TV-2c', 'superseded-by': 'TV-2d', reason: 'second refutation supersede', json: true,
+  }, deps);
+  eq(sd.action, 'awaiting_user_decision', 'SD supersession at the depth limit refuses with a decision receipt');
+  eq(sd.reason, 'supersession_depth_exceeded', 'SD refusal names the supersession_depth_exceeded code');
+  eq(sd.supersession_depth, 3, 'SD receipt reports the measured chain depth');
+  eq(state.cards['TV-2c'].phase, 'parked', 'SD the predecessor is NOT discarded when the depth limit is hit');
+  eq(sdWrote, 0, 'SD no ledger write happens on a depth-limit refusal');
+  ok(/\[\[TV-2c\]\]/.test(fs.readFileSync(boardPath, 'utf8')), 'SD the predecessor board line is left in place');
+  ok(fs.existsSync(predPath), 'SD the predecessor note is not deleted');
+}
+
+// SD a shallow supersession (below the depth limit) still discards normally.
+{
+  const root = path.join(tmp, 'supersession-depth-ok');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['BO-1a'] }));
+  const predPath = path.join(cardsRoot, 'BO-1a.md');
+  fs.writeFileSync(predPath, ['---', 'kanban_column: In Progress', 'status: parked', 'depends_on: []', '---', 'x'].join('\n'));
+  const state = emptyState();
+  // One prior supersession (BO-1 → BO-1a): well below the limit, so it proceeds.
+  state.cards['BO-1'] = { card: 'BO-1', phase: 'discarded', superseded_by: 'BO-1a' };
+  state.cards['BO-1a'] = { card: 'BO-1a', phase: 'parked', card_path: predPath };
+  const deps = {
+    readState: () => state, writeState: () => {}, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-04T00:00:00.000Z',
+    projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+  };
+  const ok2 = await commandDiscard({ root }, {
+    card: 'BO-1a', 'superseded-by': 'BO-1b', reason: 'first legitimate supersession', json: true,
+  }, deps);
+  eq(ok2.action, 'discarded', 'SD a shallow supersession below the depth limit still discards');
+  eq(state.cards['BO-1a'].superseded_by, 'BO-1b', 'SD the shallow supersession records its successor pointer');
+}
+
+// BPX a discard whose EPIC SURFACE FAILS must still clean the epic sub-board.
+// Live failure this reproduces: an epic whose atlas binds a non-canonical parent
+// board makes canonicalEpicProjection throw, discard silently fell back to the
+// PARENT board, removed nothing, deleted the note anyway — and the surviving
+// sub-board line then made every later projection of that epic throw
+// "epic slice <X> note is missing", freezing the whole board permanently.
+{
+  const root = path.join(tmp, 'bpx-orphan-prevention');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const epicBoardDir = path.join(cardsRoot, 'Epic A', 'board');
+  fs.mkdirSync(epicBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(cardsRoot, 'Epic A', 'context', 'runs'), { recursive: true });
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Epic A'] }));
+  // The exact live Mode-1 shape: an ABSOLUTE source_board on the atlas.
+  fs.writeFileSync(path.join(cardsRoot, 'Epic A', 'Epic A.md'), [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    `source_board: "${boardPath}"`, `kanban_board: "${boardPath}"`,
+    'status: planning', 'epic_board: "tasks/Epic A/board/Epic A-board.md"',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  const epicBoardPath = path.join(epicBoardDir, 'Epic A-board.md');
+  fs.writeFileSync(epicBoardPath, [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '- [ ] [[AO-1]]', '- [ ] [[AO-2]]', '',
+    '## In Progress', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const orphanPath = path.join(epicBoardDir, 'AO-1.md');
+  for (const [name, file] of [['AO-1', orphanPath], ['AO-2', path.join(epicBoardDir, 'AO-2.md')]]) {
+    fs.writeFileSync(file, [
+      '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+      'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+      'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+      'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+      'kanban_column: In Planning', 'status: parked', 'depends_on: []', '---', `${name} body`, '',
+    ].join('\n'));
+  }
+  const state = emptyState();
+  state.cards['AO-1'] = { card: 'AO-1', phase: 'parked', card_path: orphanPath };
+  const parentBefore = fs.readFileSync(boardPath, 'utf8');
+  const receipt = await commandDiscard({ root }, {
+    card: 'AO-1', 'superseded-by': 'AO-1a', reason: 'superseded after refutation', json: true,
+  }, {
+    readState: () => state, writeState: () => {}, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot, worktreeExists: () => false,
+    sh: () => '', now: () => '2026-08-04T00:00:00.000Z',
+    projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+  });
+  ok(Boolean(receipt.epic_surface_error),
+    'BPX-ORPHAN the epic surface genuinely fails on a non-canonical atlas (the reproduced precondition)');
+  eq(receipt.board_path, epicBoardPath,
+    'BPX-ORPHAN discard targets the slice\'s OWN epic sub-board, not the parent board');
+  const epicBoardAfter = fs.readFileSync(epicBoardPath, 'utf8');
+  ok(!/\[\[AO-1\]\]/.test(epicBoardAfter),
+    'BPX-ORPHAN the discarded slice leaves NO orphan line on its epic sub-board');
+  ok(/\[\[AO-2\]\]/.test(epicBoardAfter), 'BPX-ORPHAN the surviving sibling line is untouched');
+  eq(receipt.board_line_removed, true, 'BPX-ORPHAN the receipt reports the sub-board line removal');
+  eq(receipt.note_deleted, true, 'BPX-ORPHAN the slice note is deleted');
+  eq(fs.readFileSync(boardPath, 'utf8'), parentBefore,
+    'BPX-ORPHAN the parent board is left byte-identical');
+}
+
+// BPX heal-epic-bindings: the reusable repair for boards already frozen by the
+// two failure modes — non-canonical (absolute / project-relative) atlas + slice
+// board bindings, and orphaned sub-board lines whose slice note is gone.
+{
+  const root = path.join(tmp, 'bpx-heal');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Broken Epic', 'Sound Epic'] }));
+
+  const scaffold = (epic, atlasLines, slices) => {
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    fs.mkdirSync(boardDir, { recursive: true });
+    fs.mkdirSync(path.join(cardsRoot, epic, 'context', 'runs'), { recursive: true });
+    fs.writeFileSync(path.join(cardsRoot, epic, `${epic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0', ...atlasLines,
+      'status: planning', 'posture: claimable', '---', '', `${epic} atlas body`, '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(boardDir, `${epic}-board.md`), [
+      '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${epic}]]"`, '---', '',
+      '## In Planning', ...Object.keys(slices).map((n) => `- [ ] [[${n}]]`), '',
+      '## In Progress', '', '## Blocked', '', '## Completed', '',
+    ].join('\n'));
+    for (const [name, taskParent] of Object.entries(slices)) {
+      if (taskParent === null) continue; // orphan: on the board, note deliberately absent
+      fs.writeFileSync(path.join(boardDir, `${name}.md`), [
+        '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `task_parent: ${taskParent}`,
+        `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        'kanban_column: In Planning', 'status: planning', 'depends_on: []', '---', '', `${name} body`, '',
+      ].join('\n'));
+    }
+    return boardDir;
+  };
+
+  const brokenDir = scaffold('Broken Epic', [
+    `source_board: "${boardPath}"`, `kanban_board: "${boardPath}"`,
+    'epic_board: "tasks/Broken Epic/board/Broken Epic-board.md"',
+  ], {
+    'BX-1': 'tasks/Broken Epic/Broken Epic.md',
+    'BX-0 gone': null,
+  });
+  const soundDir = scaffold('Sound Epic', [
+    `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+    `epic_board: ${prefix}/tasks/Sound Epic/board/Sound Epic-board.md`,
+  ], { 'SE-1': `${prefix}/tasks/Sound Epic/Sound Epic.md` });
+
+  const soundBytesBefore = ['Sound Epic.md', path.join('board', 'Sound Epic-board.md'), path.join('board', 'SE-1.md')]
+    .map((rel) => fs.readFileSync(path.join(cardsRoot, 'Sound Epic', rel), 'utf8'));
+  const brokenSliceBefore = fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8');
+
+  const healDeps = { boardPath, cardsRoot, writeText: (p, t) => fs.writeFileSync(p, t), withLock: async (_c, _n, fn) => fn() };
+  const projects = (epic, slice) => {
+    try {
+      return Boolean(canonicalEpicProjection(
+        fs.readFileSync(path.join(cardsRoot, epic, 'board', `${slice}.md`), 'utf8'),
+        path.join(cardsRoot, epic, 'board', `${slice}.md`), boardPath, cardsRoot,
+        { state: { cards: {} }, currentCard: slice },
+      ));
+    } catch (_) { return false; }
+  };
+  ok(!projects('Broken Epic', 'BX-1'), 'BPX-HEAL the broken epic does not project before the heal (precondition)');
+
+  const dry = await commandHealEpicBindings({ root }, { 'dry-run': true, json: true }, healDeps);
+  eq(dry.action, 'heal-epic-bindings', 'BPX-HEAL dry-run reports the heal-epic-bindings action');
+  eq(dry.applied, false, 'BPX-HEAL dry-run reports it applied nothing');
+  eq(dry.atlases.map((a) => a.epic), ['Broken Epic'],
+    'BPX-HEAL dry-run names only the epic whose atlas bindings are non-canonical');
+  eq(dry.atlases[0].fields.source_board.to, `${prefix}/project-board.md`,
+    'BPX-HEAL dry-run rewrites the absolute source_board to the vault-relative parent board');
+  eq(dry.atlases[0].fields.epic_board.to, `${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'BPX-HEAL dry-run rewrites the project-relative epic_board to vault-relative');
+  eq(dry.slices.map((s) => s.card), ['BX-1'], 'BPX-HEAL dry-run names only the slice with a non-canonical task_parent');
+  eq(dry.slices[0].fields.task_parent.to, `${prefix}/tasks/Broken Epic/Broken Epic.md`,
+    'BPX-HEAL dry-run rewrites the slice task_parent to vault-relative');
+  eq(dry.orphan_lines, [{
+    board: path.join(brokenDir, 'Broken Epic-board.md'), epic: 'Broken Epic', card: 'BX-0 gone',
+    preimage_sha: crypto.createHash('sha256')
+      .update(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')).digest('hex'),
+  }], 'BPX-HEAL dry-run names the orphaned sub-board line whose slice note is gone');
+  eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), brokenSliceBefore,
+    'BPX-HEAL dry-run writes nothing');
+
+  const applied = await commandHealEpicBindings({ root }, { apply: true, json: true }, healDeps);
+  eq(applied.applied, true, 'BPX-HEAL apply reports it wrote');
+  eq(applied.no_op, false, 'BPX-HEAL apply on a broken board is not a no-op');
+  ok(projects('Broken Epic', 'BX-1'), 'BPX-HEAL the formerly frozen epic projects through the real contract after the heal');
+  ok(!/\[\[BX-0 gone\]\]/.test(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')),
+    'BPX-HEAL the orphaned sub-board line is pruned');
+  ok(/\[\[BX-1\]\]/.test(fs.readFileSync(path.join(brokenDir, 'Broken Epic-board.md'), 'utf8')),
+    'BPX-HEAL the live sibling line survives the prune');
+  const healedSlice = fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8');
+  ok(healedSlice.split('---\n')[2] === brokenSliceBefore.split('---\n')[2],
+    'BPX-HEAL the slice body below frontmatter is byte-identical');
+  eq(['Sound Epic.md', path.join('board', 'Sound Epic-board.md'), path.join('board', 'SE-1.md')]
+    .map((rel) => fs.readFileSync(path.join(cardsRoot, 'Sound Epic', rel), 'utf8')), soundBytesBefore,
+  'BPX-HEAL the already-canonical epic is left byte-identical');
+
+  const replay = await commandHealEpicBindings({ root }, { apply: true, json: true }, healDeps);
+  eq(replay.no_op, true, 'BPX-HEAL replay on a healed board is a no-op');
+  eq(fs.readFileSync(path.join(brokenDir, 'BX-1.md'), 'utf8'), healedSlice,
+    'BPX-HEAL replay keeps every healed surface byte-stable');
+  ok(soundDir.endsWith(path.join('Sound Epic', 'board')), 'BPX-HEAL fixture scaffolds the canonical control epic');
+}
+
+// FW-HEAL-INTERNAL — heal-epic-bindings is a coordinator-internal writer of a
+// tracked card's note (writeText(path, patchFrontmatter(raw, ...)), the exact
+// shape flagged in review). It must stamp card_note_sha itself AND persist
+// it, or the very next projection — in a fresh process, reading the ledger
+// fresh from disk — reports the coordinator's own repair as a foreign write.
+// This drives commandHealEpicBindings through a REAL on-disk ledger (real
+// readState/writeState, ctx carrying a real stateDir/statePath): an injected
+// `readState: () => state` returning the same live object the test mutated
+// cannot prove persistence, only that the object in memory changed — exactly
+// how round 1's version of this test passed against unpersisted code. BX-1
+// starts canonical (so the first projectCard call can succeed and establish
+// a baseline — canonicalEpicProjection refuses a non-canonical slice
+// outright, so there is no way to seed a baseline any other way), then
+// drifts exactly like BPX-HEAL's fixture (project-relative task_parent)
+// without going through the coordinator, and heal-epic-bindings repairs it.
+{
+  const root = path.join(tmp, 'fw-heal-internal');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['Broken Epic'] }));
+  const boardDir = path.join(cardsRoot, 'Broken Epic', 'board');
+  fs.mkdirSync(boardDir, { recursive: true });
+  fs.mkdirSync(path.join(cardsRoot, 'Broken Epic', 'context', 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(cardsRoot, 'Broken Epic', 'Broken Epic.md'), [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+    `epic_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'status: planning', 'posture: claimable', '---', '', 'Broken Epic atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(boardDir, 'Broken Epic-board.md'), [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Broken Epic]]"', '---', '',
+    '## In Planning', '', '## In Progress', '- [ ] [[BX-1]]', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const notePath = path.join(boardDir, 'BX-1.md');
+  const canonicalTaskParent = `task_parent: ${prefix}/tasks/Broken Epic/Broken Epic.md`;
+  fs.writeFileSync(notePath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Broken Epic]]"',
+    canonicalTaskParent,
+    `source_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    `kanban_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
+    'kanban_column: In Progress', 'status: in_progress', 'depends_on: []', '---', '', 'BX-1 body', '',
+  ].join('\n'));
+
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+
+  // Establish the coordinator's own baseline on a REAL on-disk ledger, the
+  // way production does: project the note (mutates a record in memory), then
+  // persist that record — exactly what attemptProjection/commandReconcile do
+  // — while the note is still canonical.
+  const seedRecord = {
+    card: 'BX-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  projectCard(notePath, boardPath, 'BX-1', 'implementing', {
+    record: seedRecord, state: { cards: { 'BX-1': seedRecord } }, cardsRoot,
+  });
+  writeState(ctx, { cards: { 'BX-1': seedRecord } }, seedRecord);
+  const preDriftSha = readOnDisk().cards['BX-1'].card_note_sha;
+  ok(/^[0-9a-f]{64}$/.test(preDriftSha), 'FW-HEAL-INTERNAL a baseline sha is established on disk before the drift');
+
+  // Drift the binding outside the coordinator, exactly like BPX-HEAL's
+  // fixture (project-relative task_parent) — the ledger's recorded sha is now
+  // stale relative to disk.
+  fs.writeFileSync(notePath, fs.readFileSync(notePath, 'utf8')
+    .replace(canonicalTaskParent, 'task_parent: tasks/Broken Epic/Broken Epic.md'));
+
+  // Real command, real ledger: no readState/writeState overrides, so this
+  // exercises the module's own persistence, not an injected stand-in.
+  const healed = await commandHealEpicBindings(ctx, { apply: true, json: true }, {
+    boardPath, cardsRoot, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(),
+  });
+  eq(healed.slices.map((s) => s.card), ['BX-1'], 'FW-HEAL-INTERNAL the heal actually rewrites the tracked slice (precondition)');
+
+  const healedBytes = fs.readFileSync(notePath, 'utf8');
+  const onDiskAfterHeal = readOnDisk().cards['BX-1'];
+  ok(onDiskAfterHeal.card_note_sha !== preDriftSha,
+    'FW-HEAL-INTERNAL the ON-DISK ledger sha advances past its pre-drift baseline');
+  eq(onDiskAfterHeal.card_note_sha, crypto.createHash('sha256').update(healedBytes).digest('hex'),
+    'FW-HEAL-INTERNAL the on-disk sha equals sha256 of the healed note');
+
+  // A subsequent projection, loading the record fresh from disk (not the
+  // object passed into the heal above), must not report the coordinator's
+  // own repair as a foreign write.
+  const freshRecord = readOnDisk().cards['BX-1'];
+  const reprojected = projectCard(notePath, boardPath, 'BX-1', 'implementing', {
+    record: freshRecord, state: { cards: { 'BX-1': freshRecord } }, cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-HEAL-INTERNAL the coordinator does not report its own repair as a foreign write');
+}
+
+// BH board-health: the board-driven divergence sweep. Every check starts from
+// the BOARD, not the ledger — a board member with no ledger record must be
+// reachable, which is exactly what every Object.values(state.cards) check
+// cannot do. Fixtures scaffold canonical epics exactly like BPX-HEAL so
+// canonicalEpicProjection accepts them.
+const bhScaffold = (root, { epics = {}, planning = [], progress = [], completed = [] } = {}) => {
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  const prefix = 'spice/projects/test';
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ planning, progress, completed }));
+  for (const [epic, spec] of Object.entries(epics)) {
+    const boardDir = path.join(cardsRoot, epic, 'board');
+    fs.mkdirSync(boardDir, { recursive: true });
+    fs.mkdirSync(path.join(cardsRoot, epic, 'context', 'runs'), { recursive: true });
+    fs.writeFileSync(path.join(cardsRoot, epic, `${epic}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      ...(spec.atlasLines || [
+        `source_board: ${prefix}/project-board.md`, `kanban_board: ${prefix}/project-board.md`,
+        `epic_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+      ]),
+      'status: planning', 'posture: claimable', '---', '', `${epic} atlas body`, '',
+    ].join('\n'));
+    const lanes = { 'In Planning': [], 'In Progress': [], 'Blocked': [], 'Completed': [], ...(spec.lanes || {}) };
+    fs.writeFileSync(path.join(boardDir, `${epic}-board.md`), [
+      '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${epic}]]"`, '---', '',
+      ...Object.entries(lanes).flatMap(([lane, names]) => [
+        `## ${lane}`, ...names.map((n) => `- [${lane === 'Completed' ? 'x' : ' '}] [[${n}]]`), '',
+      ]),
+    ].join('\n'));
+    for (const [name, status] of Object.entries(spec.slices || {})) {
+      if (status === null) continue; // orphan board line: note deliberately absent
+      fs.writeFileSync(path.join(boardDir, `${name}.md`), [
+        '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `task_parent: ${prefix}/tasks/${epic}/${epic}.md`,
+        `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
+        `status: ${status}`, 'depends_on: []', '---', '', `${name} body`, '',
+      ].join('\n'));
+    }
+  }
+  return { projectRoot, cardsRoot, boardPath };
+};
+const bhDeps = (fx, extra = {}) => ({
+  boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+  withLock: async (_c, _n, fn) => fn(), ...extra,
+});
+
+// BH-UNTRACKED — the load-bearing blind-spot test: a board member with no
+// ledger record must be reported. Fixture is literally EM-4/5/6: an epic whose
+// board shows six slices complete while the ledger knows only three.
+{
+  const root = path.join(tmp, 'bh-untracked');
+  const fx = bhScaffold(root, {
+    progress: ['Retire ero loop'],
+    epics: {
+      'Retire ero loop': {
+        lanes: { Completed: ['EM-1', 'EM-2', 'EM-3', 'EM-4', 'EM-5', 'EM-6'] },
+        slices: {
+          'EM-1': 'completed', 'EM-2': 'completed', 'EM-3': 'completed',
+          'EM-4': 'completed', 'EM-5': 'completed', 'EM-6': 'completed',
+        },
+      },
+    },
+  });
+  const state = emptyState();
+  for (const name of ['EM-1', 'EM-2', 'EM-3']) {
+    state.cards[name] = {
+      card: name, phase: 'deployed', required_version: '0.233.0',
+      vault_receipts: successfulVaultReceipts(),
+    };
+  }
+  const receipt = await coordinator.commandBoardHealth(
+    { root, statePath: path.join(root, 'state.json') },
+    { json: true },
+    bhDeps(fx, { readState: () => state }),
+  );
+  eq(receipt.action, 'board-health', 'BH-UNTRACKED reports the board-health action');
+  eq(receipt.ok, true, 'BH-UNTRACKED succeeds');
+  eq(receipt.no_op, false, 'BH-UNTRACKED divergence is never a no-op');
+  eq(receipt.ledger, 'present', 'BH-UNTRACKED a populated ledger reads as present');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
+    'BH-UNTRACKED reports exactly the board members the ledger has never heard of');
+  eq(receipt.findings.untracked_members[0], {
+    epic: 'Retire ero loop', card: 'EM-4', note_status: 'completed',
+    stamp: null, provenance: 'foreign',
+    issue: 'board member has no ledger record; a completed note is never counted done',
+    remedy: 'adopt',
+  }, 'BH-UNTRACKED finding carries the epic, note status, stamp provenance, issue, and remedy');
+  eq(receipt.checked, { epics: 1, slices: 6, records: 3 }, 'BH-UNTRACKED counts what it checked');
+  ok(!receipt.findings.untracked_members.some((f) => ['EM-1', 'EM-2', 'EM-3'].includes(f.card)),
+    'BH-UNTRACKED tracked members are not reported');
+}
+
+// BH-LEDGERLESS — the sweep survives the failure it exists to catch: with an
+// empty ledger checks 1–3 still report, checks 4–5 contribute nothing, and the
+// receipt says so explicitly so "clean" can never mean "couldn't check".
+{
+  const root = path.join(tmp, 'bh-ledgerless');
+  const fx = bhScaffold(root, {
+    progress: ['Retire ero loop'],
+    epics: { 'Retire ero loop': {
+      lanes: { Completed: ['EM-4', 'EM-5', 'EM-6'] },
+      slices: { 'EM-4': 'completed', 'EM-5': 'completed', 'EM-6': 'completed' },
+    } },
+  });
+  const statePath = path.join(root, 'state.json');
+  fs.writeFileSync(statePath, JSON.stringify(emptyState()));
+  const receipt = await coordinator.commandBoardHealth({ root, statePath }, { json: true },
+    bhDeps(fx, { readState: () => emptyState() }));
+  eq(receipt.ledger, 'empty', 'BH-LEDGERLESS an empty ledger is named, not hidden');
+  eq(receipt.checked.records, 0, 'BH-LEDGERLESS zero records checked is explicit');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
+    'BH-LEDGERLESS check 1 needs no ledger');
+  eq(receipt.findings.binding_drift,
+    { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    'BH-LEDGERLESS check 3 needs no ledger');
+  eq(receipt.findings.lane_divergence, [], 'BH-LEDGERLESS check 4 is skipped, not failed');
+  eq(receipt.findings.projection_errors, [], 'BH-LEDGERLESS check 5 is skipped, not failed');
+  eq(receipt.no_op, false, 'BH-LEDGERLESS untracked findings keep the run from reading as clean');
+  const absent = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'nope.json') },
+    { json: true }, bhDeps(fx, { readState: () => emptyState() }));
+  eq(absent.ledger, 'absent', 'BH-LEDGERLESS a missing state file reads as absent');
+}
+
+// BH-UNPROJECTABLE / BH-CONTAINMENT — one throwing epic is a finding, not an
+// abort; siblings are still fully checked. That containment is exactly what
+// was missing when one bad binding froze a whole board for days.
+{
+  const root = path.join(tmp, 'bh-unprojectable');
+  const boardAbs = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  const fx = bhScaffold(root, {
+    planning: ['Frozen Epic', 'Healthy Epic', 'Ghost Epic'],
+    epics: {
+      'Frozen Epic': {
+        atlasLines: [
+          `source_board: "${boardAbs}"`,
+          `kanban_board: "${boardAbs}"`,
+          'epic_board: "tasks/Frozen Epic/board/Frozen Epic-board.md"',
+        ],
+        lanes: { 'In Planning': ['FZ-1'], Completed: ['FZ-2'] },
+        slices: { 'FZ-1': 'planning', 'FZ-2': 'completed' },
+      },
+      'Healthy Epic': { lanes: { 'In Planning': ['HE-1'] }, slices: { 'HE-1': 'planning' } },
+    },
+  });
+  // A flat (non-epic) parent-board member with a completed note and no record
+  // is the same blind-spot class and must be reachable too.
+  fs.writeFileSync(path.join(fx.boardPath), fs.readFileSync(fx.boardPath, 'utf8')
+    .replace('- [ ] [[Ghost Epic]]', '- [ ] [[Ghost Epic]]\n- [ ] [[Flat Card]]'));
+  fs.writeFileSync(path.join(fx.cardsRoot, 'Flat Card.md'),
+    ['---', 'status: completed', '---', '', 'flat body', ''].join('\n'));
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => emptyState() }));
+  eq(receipt.findings.unprojectable_epics.map((f) => f.epic), ['Frozen Epic', 'Ghost Epic'],
+    'BH-UNPROJECTABLE the throwing epic and the scaffold-less member are findings, not aborts');
+  eq(receipt.findings.untracked_members.find((f) => f.card === 'Flat Card'), {
+    epic: null, card: 'Flat Card', note_status: 'completed',
+    stamp: null, provenance: 'foreign',
+    issue: 'board member has no ledger record; a completed note is never counted done',
+    remedy: 'adopt',
+  }, 'BH-UNPROJECTABLE a flat board member is still reachable by check 1');
+  ok(/does not bind its canonical parent board/.test(receipt.findings.unprojectable_epics[0].error),
+    'BH-UNPROJECTABLE carries the projection refusal verbatim');
+  eq(receipt.findings.unprojectable_epics[0].remedy, 'heal-epic-bindings --dry-run --json',
+    'BH-UNPROJECTABLE names the mechanical remedy');
+  eq(receipt.checked.epics, 3, 'BH-CONTAINMENT every parent member is visited');
+  eq(receipt.findings.untracked_members.map((f) => f.card), ['FZ-2', 'Flat Card'],
+    'BH-CONTAINMENT check 1 still reaches members of an unprojectable epic');
+  ok(receipt.findings.binding_drift.atlases >= 1,
+    'BH-CONTAINMENT check 3 still reports the frozen atlas drift');
+}
+
+// BH-LANE — derived state vs painted lane, including the agreeing case: the
+// "Retire ero_loop" shape LOOKED broken but was correct, and only showing
+// derived beside painted answers "is this wrong, or telling me something?".
+{
+  const root = path.join(tmp, 'bh-lane');
+  const fx = bhScaffold(root, {
+    planning: ['Stale Epic'], progress: ['Looks Broken Epic'],
+    epics: {
+      'Stale Epic': { lanes: { 'In Progress': ['ST-1'] }, slices: { 'ST-1': 'in_progress' } },
+      'Looks Broken Epic': {
+        lanes: { 'In Progress': ['LB-2'], Completed: ['LB-1'] },
+        slices: { 'LB-1': 'completed', 'LB-2': 'in_progress' },
+      },
+    },
+  });
+  const state = emptyState();
+  state.cards['ST-1'] = { card: 'ST-1', phase: 'implementing' };
+  state.cards['LB-2'] = { card: 'LB-2', phase: 'implementing' };
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  const byEpic = Object.fromEntries(receipt.findings.lane_divergence.map((f) => [f.epic, f]));
+  eq(byEpic['Stale Epic'], { epic: 'Stale Epic', derived: 'active', painted: 'In Planning', agrees: false },
+    'BH-LANE a stale parent lane is reported as disagreement');
+  eq(byEpic['Looks Broken Epic'], { epic: 'Looks Broken Epic', derived: 'active', painted: 'In Progress', agrees: true },
+    'BH-LANE an epic with untracked members reports its agreeing lane so it cannot be misread as broken');
+  eq(receipt.findings.lane_divergence.length, 2, 'BH-LANE one entry per interesting epic, none for healthy ones');
+}
+
+// BH-NOOP / BH-READONLY — a healthy fully-checked board is a no-op, and the
+// default invocation can never touch a vault: only the scheduled job passes
+// --write-note.
+{
+  const root = path.join(tmp, 'bh-noop');
+  const fx = bhScaffold(root, {
+    progress: ['Calm Epic'],
+    epics: { 'Calm Epic': {
+      lanes: { 'In Planning': ['CA-2'], 'In Progress': ['CA-1'] },
+      slices: { 'CA-1': 'in_progress', 'CA-2': 'planning' },
+    } },
+  });
+  const state = emptyState();
+  state.cards['CA-1'] = { card: 'CA-1', phase: 'implementing' };
+  let writes = 0;
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state, writeText: () => { writes++; } }));
+  eq(receipt.no_op, true, 'BH-NOOP a healthy fully-checked board is a no-op');
+  eq(receipt.ledger, 'present', 'BH-NOOP healthy means checked, not unchecked');
+  eq(receipt.findings, {
+    untracked_members: [],
+    untracked_members_by_provenance: { coordinator: 0, foreign: 0 },
+    unprojectable_epics: [],
+    binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    lane_divergence: [], projection_errors: [], foreign_writes: [],
+  }, 'BH-NOOP every finding class is empty');
+  eq(writes, 0, 'BH-READONLY the default invocation performs zero writes');
+  ok(!fs.existsSync(path.join(fx.projectRoot, 'Board Health.md')),
+    'BH-READONLY no vault note is created without --write-note');
+}
+
+// BH-SCAFFOLD / BH-BODY — Loop Station's proven write discipline, inherited
+// verbatim: scaffold once, frontmatter-only thereafter, unchanged findings
+// write zero bytes, body-only notes fail closed without discarding findings.
+{
+  const root = path.join(tmp, 'bh-note');
+  const fx = bhScaffold(root, {
+    progress: ['Note Epic'],
+    epics: { 'Note Epic': { lanes: { Completed: ['NT-1'] }, slices: { 'NT-1': 'completed' } } },
+  });
+  const notePath = path.join(fx.projectRoot, 'Board Health.md');
+  const deps = bhDeps(fx, { readState: () => emptyState() });
+  const first = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(first.note.scaffolded, true, 'BH-SCAFFOLD an absent note is scaffolded once');
+  eq(first.note.path, notePath, 'BH-SCAFFOLD the note lands beside the board');
+  const raw = fs.readFileSync(notePath, 'utf8');
+  ok(/class: "BoardHealth"/.test(raw), 'BH-SCAFFOLD body is the stock BoardHealth customjs-guard block');
+  eq(testScalarField(raw, 'type'), 'board-health', 'BH-SCAFFOLD payload type is registered');
+  eq(testScalarField(raw, 'schema_version'), '1.0.0', 'BH-SCAFFOLD payload carries its schema version');
+  ok(!/checked_at|updated_at/.test(raw.split('---')[1]),
+    'BH-SCAFFOLD no timestamp field — zero-writes-when-unchanged is load-bearing');
+  ok(/untracked_members_overflow_count: 0/.test(raw),
+    'BH-SCAFFOLD capped lists carry explicit overflow counts');
+
+  const replay = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(replay.note.changed, false, 'BH-SCAFFOLD same findings twice writes nothing');
+  eq(fs.readFileSync(notePath, 'utf8'), raw, 'BH-NOOP unchanged findings leave the note byte-identical');
+
+  // Body preservation: a user edit below the frontmatter survives a changed sweep.
+  const customBody = `${raw}\nMy notes about this board.\n`;
+  fs.writeFileSync(notePath, customBody);
+  const epicBoardPath = path.join(fx.cardsRoot, 'Note Epic', 'board', 'Note Epic-board.md');
+  fs.writeFileSync(path.join(fx.cardsRoot, 'Note Epic', 'board', 'NT-2.md'),
+    fs.readFileSync(path.join(fx.cardsRoot, 'Note Epic', 'board', 'NT-1.md'), 'utf8').replaceAll('NT-1', 'NT-2'));
+  fs.writeFileSync(epicBoardPath, fs.readFileSync(epicBoardPath, 'utf8')
+    .replace('- [x] [[NT-1]]', '- [x] [[NT-1]]\n- [x] [[NT-2]]'));
+  const changed = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(changed.note.changed, true, 'BH-BODY changed findings patch the frontmatter');
+  const patched = fs.readFileSync(notePath, 'utf8');
+  ok(patched.endsWith('My notes about this board.\n'), 'BH-BODY the body is preserved byte-for-byte');
+  eq(changed.findings.untracked_members.map((f) => f.card), ['NT-1', 'NT-2'],
+    'BH-BODY the changed sweep reports the new member');
+
+  // Fail closed: a body-only note (no frontmatter) is never rewritten.
+  fs.writeFileSync(notePath, 'just a body, no frontmatter\n');
+  const failed = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true }, deps);
+  eq(failed.ok, true, 'BH-BODY note failure does not fail the sweep');
+  ok(/without frontmatter/.test(failed.note_error),
+    'BH-BODY a body-only note fails closed with a visible note_error');
+  eq(failed.findings.untracked_members.length, 2, 'BH-BODY findings are never discarded by a note failure');
+  eq(fs.readFileSync(notePath, 'utf8'), 'just a body, no frontmatter\n', 'BH-BODY the body-only note is untouched');
+}
+
+// BH-LOCKED — a held selector lock yields a clean skip receipt: a live loop
+// session must never produce a spurious alarm, and hourly means the next
+// check is soon. The skip carries no findings, so it can never be misread as
+// "checked and clean".
+{
+  const root = path.join(tmp, 'bh-locked');
+  const fx = bhScaffold(root, {});
+  let writes = 0;
+  const locked = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true, 'write-note': true },
+    bhDeps(fx, {
+      readState: () => emptyState(), writeText: () => { writes++; },
+      withLock: async () => { const e = new Error('lock selector held by pid 123 on host'); e.code = 'LOCKED'; throw e; },
+    }));
+  eq(locked.action, 'board-health', 'BH-LOCKED skip is still a board-health receipt');
+  eq(locked.ok, true, 'BH-LOCKED a busy board is a clean exit');
+  eq(locked.no_op, true, 'BH-LOCKED a skip performs no work');
+  eq(locked.skipped, true, 'BH-LOCKED the receipt says it skipped');
+  ok(/board busy/.test(locked.reason), 'BH-LOCKED the reason is plain');
+  ok(!locked.findings, 'BH-LOCKED a skip carries no findings');
+  eq(writes, 0, 'BH-LOCKED no write happens on a skip');
+}
+
+// BH sweep-level failure is loud: unreadable board / non-project cards root
+// refuses with a stable code and ok:false — never no_op:true. Silence must
+// mean "checked and clean", never "couldn't check".
+{
+  const root = path.join(tmp, 'bh-refusals');
+  const fx = bhScaffold(root, {});
+  await assert.rejects(
+    () => coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, {},
+      bhDeps(fx, { readState: () => emptyState() })),
+    /requires --json/, 'BH refusal: --json is mandatory');
+  let boardRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps({ boardPath: path.join(root, 'missing-board.md'), cardsRoot: fx.cardsRoot },
+        { readState: () => emptyState() }));
+  } catch (err) { boardRefusal = err; }
+  eq(boardRefusal && boardRefusal.code, 'board_unreadable',
+    'BH refusal: an unreadable board carries a stable code');
+  eq(validateReceiptEnvelope(refusalReceipt(boardRefusal.action, boardRefusal.code, boardRefusal.message)).ok, true,
+    'BH refusal: the board refusal renders a valid ok:false envelope');
+  let rootRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps({ boardPath: fx.boardPath, cardsRoot: root }, { readState: () => emptyState() }));
+  } catch (err) { rootRefusal = err; }
+  eq(rootRefusal && rootRefusal.code, 'cards_root_invalid',
+    'BH refusal: a non-project cards root carries a stable code');
+  let stateRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') }, { json: true },
+      bhDeps(fx, { readState: () => { throw new Error('state is malformed; preserve and recover'); } }));
+  } catch (err) { stateRefusal = err; }
+  eq(stateRefusal && stateRefusal.code, 'state_unreadable',
+    'BH refusal: a malformed ledger is loud, never silently healthy');
+  let optionRefusal = null;
+  try {
+    await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+      { json: true, apply: true }, bhDeps(fx, { readState: () => emptyState() }));
+  } catch (err) { optionRefusal = err; }
+  eq(optionRefusal && optionRefusal.code, 'unknown_option',
+    'BH the CLI grammar rejects unknown options before reads or writes');
+  const schemaIndex = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schemas-index.json'), 'utf8'));
+  ok(schemaIndex.schemas.some((entry) => entry.id === 'sauce.board-health.v1'),
+    'BH sauce.board-health.v1 is registered in the schema index');
+}
+
+// BH-LAUNCHD — hourly per-loop-bound-repo schedule via the cowork-reconciler
+// launchd pattern: the installed coordinator runs with the repo as cwd so the
+// binding resolver picks the right board.
+{
+  const { renderBoardHealthPlist } = require('../../scripts/autoloop/board-health-launchd');
+  const plist = renderBoardHealthPlist({
+    user: 'tester', home: '/Users/tester', nodePath: '/usr/local/bin/node',
+    coordinatorPath: '/opt/homebrew/opt/sauce/libexec/scripts/autoloop/codex-coordinator.js',
+    repoPath: '/Users/tester/repo', slug: 'test-project',
+  });
+  ok(plist.includes('<string>board-health</string>') && plist.includes('<string>--write-note</string>')
+    && plist.includes('<string>--json</string>'), 'BH-LAUNCHD runs the sweep with the note write');
+  ok(plist.includes('<key>StartInterval</key>') && plist.includes('<integer>3600</integer>'),
+    'BH-LAUNCHD fires hourly — the failure class is slow and a healthy run costs zero writes');
+  ok(plist.includes('<key>WorkingDirectory</key>') && plist.includes('<string>/Users/tester/repo</string>'),
+    'BH-LAUNCHD cwd is the bound repo');
+  ok(plist.includes('com.tester.sauce-board-health.test-project'), 'BH-LAUNCHD one label per repo');
+  ok(!plist.includes('{{$'), 'BH-LAUNCHD no template token survives substitution');
+}
+
+// SD read-only supersession-depth query lets a skill fail-fast BEFORE minting a
+// successor the discard would then refuse (no orphaned successor left behind).
+{
+  const root = path.join(tmp, 'supersession-depth-query');
+  const state = emptyState();
+  state.cards['TV-2'] = { card: 'TV-2', phase: 'discarded', superseded_by: 'TV-2a' };
+  state.cards['TV-2a'] = { card: 'TV-2a', phase: 'discarded', superseded_by: 'TV-2b' };
+  state.cards['TV-2b'] = { card: 'TV-2b', phase: 'discarded', superseded_by: 'TV-2c' };
+  state.cards['TV-2c'] = { card: 'TV-2c', phase: 'parked' };
+  state.cards['BO-1'] = { card: 'BO-1', phase: 'discarded', superseded_by: 'BO-1a' };
+  state.cards['BO-1a'] = { card: 'BO-1a', phase: 'parked' };
+  const deps = { readState: () => state };
+  const atLimit = commandSupersessionDepth({ root }, { card: 'TV-2c', json: true }, deps);
+  eq(atLimit.action, 'supersession-depth', 'SD-QUERY reports the supersession-depth action');
+  eq(atLimit.depth, 3, 'SD-QUERY measures the full backward chain depth');
+  eq(atLimit.limit, 3, 'SD-QUERY surfaces the registry depth limit');
+  eq(atLimit.at_limit, true, 'SD-QUERY flags a lineage at the limit so the skill escalates instead of minting');
+  const belowLimit = commandSupersessionDepth({ root }, { card: 'BO-1a', json: true }, deps);
+  eq(belowLimit.depth, 1, 'SD-QUERY a shallow lineage measures depth 1');
+  eq(belowLimit.at_limit, false, 'SD-QUERY a shallow lineage is not at the limit');
+}
+
+// A4 reconcile-dependencies — classify + apply across mixed fates
+{
+  const root = path.join(tmp, 'a4-reconcile');
+  const cardsRoot = path.join(root, 'spice', 'projects', 'test', 'tasks');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  const boardPath = path.join(root, 'spice', 'projects', 'test', 'project-board.md');
+  fs.writeFileSync(boardPath, liveBoard({ planning: ['DEP-repoint', 'DEP-deployed', 'DEP-orphan'] }));
+  const mk = (name, dep) => {
+    const p = path.join(cardsRoot, `${name}.md`);
+    fs.writeFileSync(p, ['---', 'type: slice', 'status: in-planning', 'depends_on:', `  - "[[${dep}]]"`, '---', 'x'].join('\n'));
+    return p;
+  };
+  const pRepoint = mk('DEP-repoint', 'GA-R1a');    // superseded → pending GA-R1a2
+  const pDeployed = mk('DEP-deployed', 'BL-4');     // superseded → deployed BL-4c (still repoint)
+  const pOrphan = mk('DEP-orphan', 'GA-M1');        // never minted
+  const state = emptyState();
+  state.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
+  state.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'planned' };
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  const deps = {
+    readState: () => state, writeText: (p, t) => fs.writeFileSync(p, t),
+    withLock: async (_c, _n, fn) => fn(), boardPath, cardsRoot,
+    now: () => '2026-08-02T00:00:00.000Z',
+  };
+  // dry-run: plan only, no writes
+  const dry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  eq(dry.apply, false, 'A4 dry-run by default');
+  ok(/\[\[GA-R1a\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 dry-run writes nothing');
+  const byCard = Object.fromEntries(dry.plan.map((p) => [p.card, p]));
+  eq(byCard['DEP-repoint'].classification, 'repoint', 'A4 pending tail ⇒ repoint');
+  eq(byCard['DEP-repoint'].to, 'GA-R1a2', 'A4 repoint targets the live tail');
+  eq(byCard['DEP-deployed'].classification, 'repoint', 'A4 deployed tail ⇒ still repoint');
+  eq(byCard['DEP-deployed'].to, 'BL-4c', 'A4 repoint targets the deployed live tail');
+  eq(dry.needs_decision, [{ card: 'DEP-orphan', from: 'GA-M1' }], 'A4 never-minted ⇒ needs-decision');
+
+  // apply
+  const applied = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', apply: true, json: true,
+  }, deps);
+  ok(applied.apply === true && applied.no_op === false, 'A4 apply executes');
+  ok(/\[\[GA-R1a2\]\]/.test(fs.readFileSync(pRepoint, 'utf8')), 'A4 apply repoints the pending tail on disk');
+  ok(/\[\[BL-4c\]\]/.test(fs.readFileSync(pDeployed, 'utf8')), 'A4 apply repoints the deployed tail on disk');
+  ok(/\[\[GA-M1\]\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 never-minted left untouched for escalation');
+
+  // Director-authorized explicit clear of the never-minted dep
+  const cleared = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-orphan', clear: 'GA-M1', reason: 'director confirms GA-M1 obsolete', apply: true, json: true,
+  }, deps);
+  const clearedPlan = cleared.plan.find((p) => p.card === 'DEP-orphan');
+  eq(clearedPlan.classification, 'clear', 'A4 --clear classifies as clear');
+  eq(clearedPlan.to, null, 'A4 --clear has no target');
+  ok(/depends_on: \[\]/.test(fs.readFileSync(pOrphan, 'utf8')), 'A4 --clear removes the confirmed-obsolete dep on disk');
+
+  // Finding #3: --clear must only remove a DANGLING pointer, never a live
+  // (non-discarded) dependency — even when the Director names it explicitly.
+  const pLiveClear = mk('DEP-liveclear', 'BL-4c'); // BL-4c is 'deployed' (live) in state
+  const liveClearBefore = fs.readFileSync(pLiveClear, 'utf8');
+  const liveClearResult = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-liveclear', clear: 'BL-4c', reason: 'attempted clear of a live dep', apply: true, json: true,
+  }, deps);
+  ok(!liveClearResult.plan.some((p) => p.card === 'DEP-liveclear' && p.classification === 'clear'),
+    'A4 --clear of a live (non-discarded) card never enters the plan as clear');
+  eq(fs.readFileSync(pLiveClear, 'utf8'), liveClearBefore,
+    'A4 --clear of a live card leaves the dependent note unchanged on disk');
+
+  // Cycle chain, dead-end tombstone, and in-flight dependent — pin the
+  // remaining classification branches so a refactor can't silently break them.
+  const pCycle = mk('DEP-cycle', 'CYC-X');
+  const pDeadEnd = mk('DEP-deadend', 'DEADEND-Z');
+  const pInflight = mk('DEP-inflight', 'BL-4');
+  state.cards['CYC-X'] = { card: 'CYC-X', phase: 'discarded', superseded_by: 'CYC-Y' };
+  state.cards['CYC-Y'] = { card: 'CYC-Y', phase: 'discarded', superseded_by: 'CYC-X' };
+  state.cards['DEADEND-Z'] = { card: 'DEADEND-Z', phase: 'discarded', superseded_by: null };
+  state.cards['DEP-inflight'] = { card: 'DEP-inflight', phase: 'claimed' };
+
+  const branchDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  eq(branchDry.needs_decision.find((d) => d.card === 'DEP-cycle'), { card: 'DEP-cycle', from: 'CYC-X' },
+    'A4 cycle chain ⇒ needs-decision');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-cycle'), 'A4 cycle chain never enters the repoint plan');
+  eq(branchDry.needs_decision.find((d) => d.card === 'DEP-deadend'), { card: 'DEP-deadend', from: 'DEADEND-Z' },
+    'A4 dead-end tombstone (superseded_by: null) ⇒ needs-decision');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-deadend'), 'A4 dead-end tombstone never enters the repoint plan');
+  eq(branchDry.reports.find((r) => r.card === 'DEP-inflight'), { card: 'DEP-inflight', from: 'BL-4', phase: 'claimed' },
+    'A4 in-flight (claimed) dependent is reported with its phase');
+  ok(!branchDry.plan.some((p) => p.card === 'DEP-inflight'), 'A4 in-flight dependent never enters the repoint plan');
+
+  const branchApplied = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', apply: true, json: true,
+  }, deps);
+  ok(!branchApplied.plan.some((p) => p.card === 'DEP-inflight'), 'A4 apply still never plans the in-flight dependent');
+  ok(/\[\[BL-4\]\]/.test(fs.readFileSync(pInflight, 'utf8')), 'A4 apply leaves the in-flight dependent note untouched on disk');
+  ok(/\[\[CYC-X\]\]/.test(fs.readFileSync(pCycle, 'utf8')), 'A4 apply leaves the cycle-chain dependent note untouched on disk');
+  ok(/\[\[DEADEND-Z\]\]/.test(fs.readFileSync(pDeadEnd, 'utf8')), 'A4 apply leaves the dead-end dependent note untouched on disk');
+
+  // Finding #1: external: markers are off-board deps, accepted verbatim and
+  // NEVER resolved — they must not surface as either a repoint/clear plan
+  // entry or a needs_decision escalation.
+  const pExternal = path.join(cardsRoot, 'DEP-external.md');
+  fs.writeFileSync(pExternal, ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "external:upstream vendor SDK"', '---', 'x'].join('\n'));
+  const externalDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'heal supersession rot', json: true,
+  }, deps);
+  ok(!externalDry.plan.some((p) => p.card === 'DEP-external'), 'A4 external: dep never enters the plan');
+  ok(!externalDry.needs_decision.some((d) => d.card === 'DEP-external'), 'A4 external: dep never enters needs_decision');
+
+  // Argument validation — exact operand-shape errors the CLI relies on.
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, reason: 'x' }, deps),
+    /requires --json/, 'A4 missing --json is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { card: 'DEP-cycle', all: true, reason: 'x', json: true }, deps),
+    /not both/, 'A4 --card and --all together is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { reason: 'x', json: true }, deps),
+    /requires --card or --all/, 'A4 neither --card nor --all is refused',
+  );
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, json: true }, deps),
+    /non-empty --reason/, 'A4 missing --reason is refused',
+  );
+
+  // Disk-aware classification: existence is judged against the board (notes on
+  // disk), not the ledger alone. An In-Planning prerequisite the coordinator
+  // never tracked is LIVE, not never-minted; a renamed successor discoverable
+  // via a "(supersedes <id>)" note is repointable even with no state tombstone.
+  fs.writeFileSync(path.join(cardsRoot, 'PREREQ-ondisk.md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on: []', '---', 'x'].join('\n'));
+  mk('DEP-ondisk', 'PREREQ-ondisk'); // prerequisite exists on disk, absent from state
+  fs.writeFileSync(path.join(cardsRoot, 'ZZ-1b new core (supersedes ZZ-1).md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on: []', '---', 'x'].join('\n'));
+  mk('DEP-disksup', 'ZZ-1 old core'); // ref is missing but its on-disk successor supersedes it
+  mk('DEP-ghost', 'GHOST-NEVER');      // no note, no state, no superseder → truly orphaned
+
+  const diskDry = await coordinator.commandReconcileDependencies({ root }, {
+    all: true, reason: 'disk-aware classification', json: true,
+  }, deps);
+  ok(!diskDry.needs_decision.some((d) => d.card === 'DEP-ondisk'),
+    'A4 a dependency that exists as an on-disk planning note is NOT flagged never-minted');
+  ok(!diskDry.plan.some((p) => p.card === 'DEP-ondisk'),
+    'A4 an on-disk (live) dependency is not repointed');
+  const diskSup = diskDry.plan.find((p) => p.card === 'DEP-disksup');
+  eq(diskSup && diskSup.classification, 'repoint', 'A4 disk (supersedes) inference ⇒ repoint');
+  eq(diskSup && diskSup.to, 'ZZ-1b new core (supersedes ZZ-1)',
+    'A4 disk repoint targets the on-disk successor');
+  eq(diskDry.needs_decision.find((d) => d.card === 'DEP-ghost'), { card: 'DEP-ghost', from: 'GHOST-NEVER' },
+    'A4 truly orphaned dependency (no note, no state, no superseder) ⇒ needs-decision');
+
+  // Director-directed repoint (--clear <deadRef> --to <liveTarget>): repoints an
+  // orphaned pointer to an explicit live successor; guarded against self-deps and
+  // non-live targets; --to without --clear is refused.
+  fs.writeFileSync(path.join(cardsRoot, 'SUCC-target.md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on: []', '---', 'x'].join('\n'));
+  const pDirected = mk('DEP-directed', 'ORPHAN-OLD'); // ORPHAN-OLD has no note/state/superseder
+  const directed = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'DEP-directed', clear: 'ORPHAN-OLD', to: 'SUCC-target', reason: 'director repoint', apply: true, json: true,
+  }, deps);
+  const dp = directed.plan.find((p) => p.card === 'DEP-directed');
+  eq(dp && dp.classification, 'repoint', 'A4 --to directs a repoint');
+  eq(dp && dp.to, 'SUCC-target', 'A4 --to targets the named live successor');
+  ok(/\[\[SUCC-target\]\]/.test(fs.readFileSync(pDirected, 'utf8')), 'A4 --to rewrites the dependent on disk');
+  await assert.rejects(
+    () => coordinator.commandReconcileDependencies({ root }, { all: true, to: 'X', reason: 'x', json: true }, deps),
+    /--to requires --clear/, 'A4 --to without --clear is refused',
+  );
+  const pSelf = mk('SELF-target', 'SELF-old');
+  fs.writeFileSync(path.join(cardsRoot, 'SELF-target.md'),
+    ['---', 'type: slice', 'status: in-planning', 'depends_on:', '  - "[[SELF-old]]"', '---', 'x'].join('\n'));
+  const selfDirected = await coordinator.commandReconcileDependencies({ root }, {
+    card: 'SELF-target', clear: 'SELF-old', to: 'SELF-target', reason: 'self', apply: true, json: true,
+  }, deps);
+  ok(!selfDirected.plan.some((p) => p.card === 'SELF-target' && p.classification === 'repoint'),
+    'A4 --to never repoints a card at itself');
+}
+
+// OPX5-RESIDUE-REPORTED / READ-ONLY: status detects the same tombstone-note
+// residue that reap heals, but performs no mutation while doing so.
+const opx5Root = path.join(tmp, 'opx5-residue');
+const opx5CardsRoot = path.join(opx5Root, 'tasks');
+const opx5BoardPath = path.join(opx5Root, 'project-board.md');
+const opx5ResiduePath = path.join(opx5CardsRoot, 'GA-OPS14a Residue.md');
+fs.mkdirSync(opx5CardsRoot, { recursive: true });
+fs.writeFileSync(opx5BoardPath, liveBoard({}));
+fs.writeFileSync(opx5ResiduePath, '---\nstatus: archived\n---\nresidual body\n');
+const opx5State = emptyState();
+opx5State.cards['GA-OPS14a Residue'] = {
+  card: 'GA-OPS14a Residue', phase: 'discarded', card_path: opx5ResiduePath,
+  discarded_at: '2026-07-26T05:49:28.000Z', discard_reason: 'superseded at mint',
+  superseded_by: 'GA-OPS14a2 Successor', final_head: null, carried_fixtures: [],
+};
+const opx5StateBefore = JSON.stringify(opx5State);
+const opx5BoardBefore = fs.readFileSync(opx5BoardPath);
+const opx5NoteBefore = fs.readFileSync(opx5ResiduePath);
+const opx5WriteMethods = ['appendFileSync', 'mkdirSync', 'renameSync', 'rmSync', 'unlinkSync', 'writeFileSync'];
+const opx5OriginalWrites = Object.fromEntries(opx5WriteMethods.map((name) => [name, fs[name]]));
+const opx5Writes = [];
+let opx5Status;
+try {
+  for (const name of opx5WriteMethods) {
+    fs[name] = (...args) => {
+      opx5Writes.push({ name, target: args[0] });
+      throw new Error(`OPX5 status attempted filesystem write via ${name}`);
+    };
+  }
+  opx5Status = commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'state.json') }, {
+    boardMd: opx5BoardBefore.toString('utf8'), boardPath: opx5BoardPath,
+    loadCard: () => null, state: opx5State, cardsRoot: opx5CardsRoot,
+  });
+} finally {
+  for (const name of opx5WriteMethods) fs[name] = opx5OriginalWrites[name];
+}
+eq(opx5Status.tombstone_residue, [{
+  card: 'GA-OPS14a Residue', path: opx5ResiduePath, heal: 'reap',
+}], 'OPX5-RESIDUE-REPORTED status reports the exact discarded-note residue and its sanctioned healer');
+eq(opx5Writes, [], 'OPX5-RESIDUE-READ-ONLY status invokes no filesystem write seam');
+eq(JSON.stringify(opx5State), opx5StateBefore, 'OPX5-RESIDUE-READ-ONLY status keeps the ledger object byte-stable');
+eq(fs.readFileSync(opx5BoardPath), opx5BoardBefore, 'OPX5-RESIDUE-READ-ONLY status keeps board bytes stable');
+eq(fs.readFileSync(opx5ResiduePath), opx5NoteBefore, 'OPX5-RESIDUE-READ-ONLY status keeps residue-note bytes stable');
+
+// OPX5-DIGEST-SURFACES-RESIDUE: current residue is an attention-lite digest
+// block; an empty field is omitted so the pre-OPX5 digest shape is unchanged.
+const opx5Digest = deliveryStatusDigest.buildDigest(opx5Status, '', []);
+eq(opx5Digest.tombstoneResidue, {
+  count: 1,
+  entries: [{ card: 'GA-OPS14a Residue', path: opx5ResiduePath, heal: 'reap' }],
+}, 'OPX5-DIGEST-SURFACES-RESIDUE digest carries the residue count and exact entries');
+const opx5DigestBaseline = deliveryStatusDigest.buildDigest({
+  ...opx5Status, tombstone_residue: undefined,
+}, '', []);
+const opx5DigestEmpty = deliveryStatusDigest.buildDigest({
+  ...opx5Status, tombstone_residue: [],
+}, '', []);
+eq(JSON.stringify(opx5DigestEmpty), JSON.stringify(opx5DigestBaseline),
+  'OPX5-DIGEST-SURFACES-RESIDUE residue-free status keeps the prior digest shape byte-identical');
+
+// OPX5-RESIDUE-CLEAN-AFTER-REAP: reap remains the only healer; status observes
+// its deletion and an empty discarded set deterministically reports [].
+const opx5ReapDeps = {
+  readState: () => opx5State,
+  writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: opx5BoardPath, cardsRoot: opx5CardsRoot,
+  worktreeExists: () => false, sh: () => '',
+  now: () => '2026-07-26T12:00:00.000Z',
+};
+const opx5Reaped = await commandReap({ root: opx5Root }, { json: true }, opx5ReapDeps);
+eq(opx5Reaped.residue_notes_deleted, [{
+  card: 'GA-OPS14a Residue', path: opx5ResiduePath,
+}], 'OPX5-RESIDUE-CLEAN-AFTER-REAP reap deletes the detected residue');
+const opx5CleanStatus = commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'state.json') }, {
+  boardMd: fs.readFileSync(opx5BoardPath, 'utf8'), boardPath: opx5BoardPath,
+  loadCard: () => null, state: opx5State, cardsRoot: opx5CardsRoot,
+});
+eq(opx5CleanStatus.tombstone_residue, [],
+  'OPX5-RESIDUE-CLEAN-AFTER-REAP status is empty after reap heals the note');
+eq(commandStatus({ root: opx5Root, statePath: path.join(opx5Root, 'empty-state.json') }, {
+  boardMd: liveBoard({}), boardPath: opx5BoardPath,
+  loadCard: () => null, state: emptyState(), cardsRoot: opx5CardsRoot,
+}).tombstone_residue, [], 'OPX5-RESIDUE-CLEAN-AFTER-REAP a ledger without tombstones reports an empty array');
+
+// OPX5-REAP-LAZY-EXISTENCE: sharing the predicate must preserve reap's
+// per-record existence check. If corrupt tombstones alias one note path, the
+// first deletion makes the second a clean skip rather than a false refusal.
+const opx5SharedPath = path.join(opx5CardsRoot, 'Shared residue.md');
+fs.writeFileSync(opx5SharedPath, '---\nstatus: archived\n---\nshared residue\n');
+const opx5AliasedState = emptyState();
+opx5AliasedState.cards['Aliased residue A'] = {
+  card: 'Aliased residue A', phase: 'discarded', card_path: opx5SharedPath,
+};
+opx5AliasedState.cards['Aliased residue B'] = {
+  card: 'Aliased residue B', phase: 'discarded', card_path: opx5SharedPath,
+};
+const opx5AliasedReap = await commandReap({ root: opx5Root }, { json: true }, {
+  ...opx5ReapDeps, readState: () => opx5AliasedState,
+});
+eq(opx5AliasedReap.residue_notes_deleted, [{
+  card: 'Aliased residue A', path: opx5SharedPath,
+}], 'OPX5-REAP-LAZY-EXISTENCE the first aliased tombstone deletes the shared residue');
+eq(opx5AliasedReap.residue_notes_refused, [],
+  'OPX5-REAP-LAZY-EXISTENCE the second aliased tombstone observes deletion and skips cleanly');
+
+ok(typeof buildLoopStationPayload === 'function'
+  && typeof validateLoopStationPayload === 'function'
+  && typeof projectLoopStation === 'function',
+'OPX2-PAYLOAD-SCHEMA exposes the deterministic Loop Station payload, validator, and projection seam');
+
+// OPX2-PAYLOAD-SCHEMA / EXACT-ACTION / BOUNDED: one render-ready payload,
+// reuse of triage + digest semantics, and an explicit overflow count beside
+// every capped list.
+const opx2Root = path.join(tmp, 'opx2-loop-station');
+const opx2StationPath = path.join(opx2Root, 'spice', 'projects', 'sauce', 'Loop Station.md');
+const opx2Ratifications = path.join(path.dirname(opx2StationPath), 'ratifications');
+fs.mkdirSync(opx2Ratifications, { recursive: true });
+fs.writeFileSync(path.join(opx2Ratifications, 'ESC0.md'), 'pending\n');
+const opx2State = emptyState();
+const opx2Active = { card: 'ACTIVE0 Working slice', phase: 'implementing', parent_card: '[[Loop Ops]]' };
+opx2State.cards[opx2Active.card] = opx2Active;
+const opx2Parked = [];
+const opx2Tracked = [{ card: opx2Active.card, phase: 'implementing', status: 'in_progress' }];
+for (let i = 0; i < 25; i++) {
+  const escalation = `ESC${i} Escalation`;
+  const wait = `WAIT${i} Deploy wait`;
+  opx2State.cards[escalation] = { card: escalation, phase: 'parked', parent_card: '[[Loop Ops]]' };
+  opx2State.cards[wait] = { card: wait, phase: 'parked', parent_card: '[[Other Epic]]' };
+  opx2Parked.push(
+    { card: escalation, phase: 'parked', resume_condition: `Will ratifies decision ${i}` },
+    { card: wait, phase: 'parked', resume_condition: `resume after release deploys ${i}` },
+  );
+  opx2Tracked.push(
+    { card: escalation, phase: 'parked', status: 'parked' },
+    { card: wait, phase: 'parked', status: 'parked' },
+  );
+}
+const opx2Status = {
+  action: 'status',
+  active: [{ card: opx2Active.card, phase: 'implementing' }],
+  parked: opx2Parked,
+  tracked: opx2Tracked,
+  projection_problems: [],
+  discarded_recent: Array.from({ length: 25 }, (_, i) => ({
+    name: `DEAD${i}`, discarded_at: `2026-07-26T10:${String(i).padStart(2, '0')}:00.000Z`,
+    reason: 'superseded', superseded_by: null,
+  })),
+  cutover_history: Array.from({ length: 25 }, (_, i) => ({
+    enabled: i % 2 === 0, at: `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+  })),
+  tombstone_residue: Array.from({ length: 25 }, (_, i) => ({
+    card: `RES${i}`, path: `/cards/RES${i}.md`, heal: 'reap',
+  })),
+  state_path: path.join(opx2Root, 'state.json'),
+};
+const opx2Fid = Array.from({ length: 25 }, (_, i) =>
+  `## Amendment ${i} — SELF-RATIFIED 2026-07-${String(i + 1).padStart(2, '0')}`).join('\n');
+const opx2Releases = Array.from({ length: 25 }, (_, i) => `0.${300 - i}.0`);
+const opx2Payload = buildLoopStationPayload({
+  status: opx2Status, state: opx2State, fidText: opx2Fid, lastSeen: null,
+  updatedOn: 'park', updatedAt: '2026-07-26T12:00:00.000Z',
+  stationPath: opx2StationPath, releases: opx2Releases,
+});
+eq(validateLoopStationPayload(opx2Payload), { ok: true, errors: [] },
+  'OPX2-PAYLOAD-SCHEMA the complete projected payload validates against sauce.loop-station.v1');
+ok(opx2Payload.exact_action.includes('ESC0 Escalation')
+  && opx2Payload.exact_action.includes('[[spice/projects/sauce/ratifications/ESC0]]'),
+'OPX2-EXACT-ACTION names the first escalation and its existing ratification artifact');
+eq(opx2Payload.active, { card: opx2Active.card, phase: 'implementing', epic: 'Loop Ops' },
+  'OPX2-PAYLOAD-SCHEMA active carries card, phase, and epic');
+for (const [label, list, overflow] of [
+  ['needs_attention', opx2Payload.needs_attention, opx2Payload.needs_attention_overflow_count],
+  ['waiting', opx2Payload.waiting, opx2Payload.waiting_overflow_count],
+  ['releases_recent', opx2Payload.releases_recent, opx2Payload.releases_recent_overflow_count],
+  ['tombstone_residue', opx2Payload.tombstone_residue, opx2Payload.tombstone_residue_overflow_count],
+  ['since.discards', opx2Payload.since.discards, opx2Payload.since.discards_overflow_count],
+  ['since.self_ratified', opx2Payload.since.self_ratified, opx2Payload.since.self_ratified_overflow_count],
+  ['since.cutover_flips', opx2Payload.since.cutover_flips, opx2Payload.since.cutover_flips_overflow_count],
+]) {
+  eq(list.length, 20, `OPX2-BOUNDED ${label} caps at twenty`);
+  eq(overflow, 5, `OPX2-BOUNDED ${label} records five overflow entries`);
+}
+eq(opx2Payload.counts.needs_attention, 25, 'OPX2-BOUNDED counts preserve the unbounded needs-attention total');
+eq(opx2Payload.counts.waiting, 25, 'OPX2-BOUNDED counts preserve the unbounded genuine-wait total');
+const opx2NoAction = buildLoopStationPayload({
+  status: {
+    ...opx2Status, active: [], parked: [], tracked: [], discarded_recent: [],
+    cutover_history: [], tombstone_residue: [],
+  },
+  state: emptyState(), fidText: '', lastSeen: null, updatedOn: 'resume',
+  updatedAt: '2026-07-26T12:01:00.000Z', stationPath: opx2StationPath, releases: [],
+});
+eq(opx2NoAction.exact_action, null, 'OPX2-EXACT-ACTION no escalation state projects exact_action null');
+
+// OPX2-BODY-PRESERVED / IDEMPOTENT-REPLAY / PEEK-NEVER-ADVANCES.
+fs.mkdirSync(path.dirname(opx2StationPath), { recursive: true });
+const opx2Body = '\n\nCUSTOM OPERATOR BODY — coordinator must never rewrite this.\n';
+fs.writeFileSync(opx2StationPath, `---\ntype: loop-station\n---${opx2Body}`);
+const opx2MarkerPath = path.join(opx2Root, '.delivery-digest-last-seen');
+fs.writeFileSync(opx2MarkerPath, '2026-07-25T00:00:00.000Z');
+const opx2MarkerBefore = fs.readFileSync(opx2MarkerPath);
+let opx2StationWrites = 0;
+let opx2NowCalls = 0;
+let opx2UnexpectedBoardReads = 0;
+const opx2InjectedBoardPath = path.join(opx2Root, 'machine-default-board-must-not-be-read.md');
+const opx2ProjectionDeps = {
+  status: opx2Status, boardPath: opx2InjectedBoardPath,
+  stationPath: opx2StationPath, markerPath: opx2MarkerPath,
+  fidText: opx2Fid, releases: opx2Releases,
+  now: () => `2026-07-26T12:0${opx2NowCalls++}:00.000Z`,
+  readText: (target) => {
+    if (target === opx2InjectedBoardPath) {
+      opx2UnexpectedBoardReads++;
+      throw new Error(`unexpected injected-status read: ${target}`);
+    }
+    return fs.readFileSync(target, 'utf8');
+  },
+  writeText: (target, raw) => { opx2StationWrites++; fs.writeFileSync(target, raw); },
+};
+const opx2Projected = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2Projected.changed, true, 'OPX2-BODY-PRESERVED first projection changes frontmatter');
+eq(opx2StationWrites, 1, 'OPX2-BODY-PRESERVED first projection performs exactly one station write');
+eq(opx2UnexpectedBoardReads, 0,
+  'OPX2-INJECTED-STATUS-ISOLATION injected authoritative status performs no machine-default board read');
+ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
+  'OPX2-BODY-PRESERVED existing station body remains byte-identical');
+ok(!fs.readFileSync(opx2StationPath, 'utf8').includes('GraphView'),
+  'OPX2-BODY-PRESERVED the coordinator never injects the GraphView mount into an existing station body');
+const opx2ProjectedBytes = fs.readFileSync(opx2StationPath);
+const opx2Replay = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2Replay.no_op, true, 'OPX2-IDEMPOTENT-REPLAY identical transition replay is an explicit no-op');
+eq(opx2StationWrites, 1, 'OPX2-IDEMPOTENT-REPLAY identical replay performs zero churn writes');
+eq(fs.readFileSync(opx2StationPath), opx2ProjectedBytes,
+  'OPX2-IDEMPOTENT-REPLAY station frontmatter and body stay byte-identical');
+eq(fs.readFileSync(opx2MarkerPath), opx2MarkerBefore,
+  'OPX2-PEEK-NEVER-ADVANCES projection leaves the digest last-seen marker byte-identical');
+eq(opx2Projected.payload.since.marker_at, '2026-07-25T00:00:00.000Z',
+  'OPX2-PEEK-NEVER-ADVANCES payload carries the peeked marker value');
+const opx2MalformedTimestamp = fs.readFileSync(opx2StationPath, 'utf8')
+  .replace(/updated_at: "[^"]+"/, 'updated_at: "not-an-iso-timestamp"');
+fs.writeFileSync(opx2StationPath, opx2MalformedTimestamp);
+const opx2TimestampWritesBefore = opx2StationWrites;
+const opx2TimestampHealed = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'park', opx2ProjectionDeps,
+);
+eq(opx2TimestampHealed.changed, true,
+  'OPX2-PAYLOAD-SCHEMA malformed prior updated_at is healed instead of reused after validation');
+eq(opx2StationWrites, opx2TimestampWritesBefore + 1,
+  'OPX2-PAYLOAD-SCHEMA malformed prior updated_at performs one corrective projection write');
+ok(Number.isFinite(Date.parse(
+  fs.readFileSync(opx2StationPath, 'utf8').match(/updated_at: "([^"]+)"/)[1],
+)), 'OPX2-PAYLOAD-SCHEMA healed station carries a valid updated_at timestamp');
+ok(fs.readFileSync(opx2StationPath, 'utf8').endsWith(opx2Body),
+  'OPX2-BODY-PRESERVED timestamp healing still preserves the existing station body byte-identically');
+
+const opx2MissingStationPath = path.join(opx2Root, 'missing', 'Loop Station.md');
+let opx2ScaffoldWrites = 0;
+const opx2ScaffoldDeps = {
+  ...opx2ProjectionDeps, stationPath: opx2MissingStationPath,
+  writeText: (target, raw) => { opx2ScaffoldWrites++; fs.writeFileSync(target, raw); },
+};
+const opx2Scaffolded = projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'deploy', opx2ScaffoldDeps,
+);
+eq(opx2Scaffolded.scaffolded, true, 'OPX2-BODY-PRESERVED a missing station is scaffolded exactly once');
+const opx2ScaffoldBody = fs.readFileSync(opx2MissingStationPath, 'utf8');
+ok(/customjs-guard.*OperatorStation/.test(opx2ScaffoldBody),
+  'OPX2-BODY-PRESERVED scaffold carries the stock OperatorStation render body');
+ok(opx2ScaffoldBody.includes('{ class: "GraphView", args: [{ scope: "project" }] }'),
+  'OPX2-SCAFFOLD-GRAPH scaffold-if-absent body mounts the project-scope GraphView block');
+ok(opx2ScaffoldBody.indexOf('class: "OperatorStation"') < opx2ScaffoldBody.indexOf('class: "GraphView"'),
+  'OPX2-SCAFFOLD-GRAPH the GraphView mount sits after the OperatorStation block');
+eq(projectLoopStation(
+  { root: opx2Root, statePath: path.join(opx2Root, 'state.json') },
+  opx2State, 'deploy', opx2ScaffoldDeps,
+).no_op, true, 'OPX2-IDEMPOTENT-REPLAY scaffold replay is a no-op');
+eq(opx2ScaffoldWrites, 1, 'OPX2-IDEMPOTENT-REPLAY scaffold replay performs zero writes');
+
+// OPX2-STATUS-NO-WRITE-MUTATION: intercept the real atomic writer used by
+// projectLoopStation at the exact station target. Status must perform zero
+// writes, while the positive-control projector must hit the trap exactly once;
+// adding that projector to status therefore turns this fixture red.
+const opx2ReadOnlyBoard = path.join(opx2Root, 'read-only', 'sauce-board.md');
+const opx2ReadOnlyStation = path.join(path.dirname(opx2ReadOnlyBoard), 'Loop Station.md');
+const opx2OriginalWriteFileSync = fs.writeFileSync;
+const opx2ReadWriteAttempts = [];
+fs.writeFileSync = (target) => {
+  opx2ReadWriteAttempts.push(String(target));
+  throw new Error('OPX2-STATUS-NO-WRITE-MUTATION trapped a forbidden station write');
+};
+try {
+  commandStatus({ root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') }, {
+    state: emptyState(), boardMd: liveBoard({}), boardPath: opx2ReadOnlyBoard,
+    cardsRoot: path.join(opx2Root, 'read-only-cards'), loadCard: () => null,
+  });
+  eq(opx2ReadWriteAttempts, [],
+    'OPX2-STATUS-NO-WRITE-MUTATION status reaches zero production-writer calls');
+  commandRecover({ root: opx2Root }, { state: emptyState(), sh: () => '' });
+  eq(opx2ReadWriteAttempts, [],
+    'OPX2-STATUS-NO-WRITE-MUTATION read-only recovery inspection reaches zero production-writer calls');
+  assert.throws(() => projectLoopStation(
+    { root: opx2Root, statePath: path.join(opx2Root, 'status-state.json') },
+    opx2State, 'status-positive-control', {
+      status: opx2Status, stationPath: opx2ReadOnlyStation, markerPath: null,
+      fidText: opx2Fid, releases: opx2Releases,
+      now: () => '2026-07-26T12:30:00.000Z',
+    },
+  ), /OPX2-STATUS-NO-WRITE-MUTATION trapped/,
+  'OPX2-STATUS-NO-WRITE-MUTATION positive-control projection turns the writer oracle red'); count++;
+  eq(opx2ReadWriteAttempts.length, 1,
+    'OPX2-STATUS-NO-WRITE-MUTATION positive control reaches the exact atomic station writer once');
+} finally {
+  fs.writeFileSync = opx2OriginalWriteFileSync;
+}
+ok(!fs.existsSync(opx2ReadOnlyStation),
+  'OPX2-TRANSITION-ONLY status and the trapped positive control leave the actual station target absent');
+
+// BGR-DISCARD-REPLAY-NOOP: literal replay is a no-op with zero writes.
+const replayWritesBefore = discardWrites;
+const replayShBefore = discardShCalls.length;
+const replayStationBefore = opx2DiscardProjections.length;
+const replayBoardBytes = fs.readFileSync(discardBoardPath, 'utf8');
+const replayStateBytes = JSON.stringify(discardState);
+const discardReplay = await commandDiscard({ root: discardRoot }, discardArgs, discardDeps);
+eq(discardReplay.action, 'discarded', 'BGR-DISCARD-REPLAY-NOOP literal replay reports discarded');
+eq(discardReplay.no_op, true, 'BGR-DISCARD-REPLAY-NOOP literal replay is an explicit no-op');
+eq(discardWrites, replayWritesBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero ledger writes');
+eq(discardShCalls.length, replayShBefore, 'BGR-DISCARD-REPLAY-NOOP replay performs zero git operations');
+eq(opx2DiscardProjections.length, replayStationBefore,
+  'OPX2-TRANSITION-ONLY discard replay fires no additional Loop Station projection');
+eq(fs.readFileSync(discardBoardPath, 'utf8'), replayBoardBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps board bytes stable');
+eq(JSON.stringify(discardState), replayStateBytes, 'BGR-DISCARD-REPLAY-NOOP replay keeps ledger state byte-stable');
+await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+  ...discardArgs, reason: 'a different reason',
+}, discardDeps), /already discarded/, 'BGR-DISCARD-REPLAY-NOOP non-literal replay of a tombstone refuses');
+
+// BGR-DISCARD-ACTIVE-REFUSED: active claim and every in-flight phase refuse with zero writes.
+for (const phase of ['claimed', 'implementing', 'feature_pr', 'feature_merged', 'release_pr',
+  'release_merged', 'tagged', 'tap_pr', 'tap_merged', 'brew_installed', 'deploying', 'needs-inspection',
+  'deployed', 'adopted']) {
+  const activeState = emptyState();
+  activeState.cards.Active = { card: 'Active', phase, card_path: path.join(discardCardsRoot, 'missing.md') };
+  let activeWrites = 0;
+  await assert.rejects(() => commandDiscard({ root: discardRoot }, {
+    card: 'Active', reason: 'attempted discard of live work', json: true,
+  }, {
+    ...discardDeps, readState: () => activeState, writeState: () => { activeWrites++; },
+  }), /discard refuses/, `BGR-DISCARD-ACTIVE-REFUSED refuses phase ${phase}`);
+  eq(activeWrites, 0, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal performs zero writes`);
+  eq(activeState.cards.Active.phase, phase, `BGR-DISCARD-ACTIVE-REFUSED ${phase} refusal preserves the record`);
+}
+
+// BGR-DISCARD-TERMINAL-WORDING: the refusal is right for every phase above, but
+// a TERMINAL record is not "active in-flight work" — `adopted` and `deployed`
+// are finished. Calling them in-flight misdescribes the state to whoever has to
+// act on it, and a bare Error leaves callers machine-classifying the whole class
+// as `command_failed`. Both classes now carry a stable code.
+for (const [phase, code, wording] of [
+  ['adopted', 'discard_completed_work', /discard refuses completed work/],
+  ['deployed', 'discard_completed_work', /discard refuses completed work/],
+  ['implementing', 'discard_active_work', /discard refuses active in-flight work/],
+]) {
+  const st = emptyState();
+  st.cards.Active = { card: 'Active', phase, card_path: path.join(discardCardsRoot, 'missing.md') };
+  let writes = 0;
+  let err = null;
+  try {
+    await commandDiscard({ root: discardRoot }, { card: 'Active', reason: 'r', json: true },
+      { ...discardDeps, readState: () => st, writeState: () => { writes++; } });
+  } catch (e) { err = e; }
+  eq(err && err.code, code, `BGR-DISCARD-TERMINAL-WORDING ${phase} refuses with ${code}`);
+  eq(wording.test(err && err.message), true,
+    `BGR-DISCARD-TERMINAL-WORDING ${phase} describes the state correctly (${err && err.message})`);
+  eq(writes, 0, `BGR-DISCARD-TERMINAL-WORDING ${phase} refusal performs zero writes`);
+}
+
+// BGR-DISCARD-TOMBSTONE-UNCLAIMABLE: a hand-added board line with a tombstoned name is never claimed.
+const unclaimableSelection = selectClaimCandidate({
+  boardMd: board(['Stale slice']), state: discardState,
+  loadCard: () => { throw new Error('claim must never load a tombstoned card'); },
+});
+eq(unclaimableSelection.action, 'no-work', 'BGR-DISCARD-TOMBSTONE-UNCLAIMABLE tombstoned board line yields no work');
+ok(unclaimableSelection.skipped.some((item) => item.card === 'Stale slice' && /already tracked \(discarded\)/.test(item.reason)),
+  'BGR-DISCARD-TOMBSTONE-UNCLAIMABLE claim guard skips the tombstoned name explicitly');
+
+// BGR-DISCARD-DEP-FAILS-LOUD: a dependency on a tombstone is never satisfied and never checkbox-satisfied.
+const depState = emptyState();
+depState.cards['Dead dep'] = {
+  card: 'Dead dep', phase: 'discarded', discarded_at: '2026-07-25T12:00:00.000Z',
+  discard_reason: 'redesigned', superseded_by: 'Dead dep v2',
+};
+const depBoard = board(['Dependent'], ['Dead dep']);
+eq(dependencySatisfied('Dead dep', null, depState, depBoard), false,
+  'BGR-DISCARD-DEP-FAILS-LOUD a tombstoned dependency is never satisfied even with a checked Completed checkbox');
+eq(discardedDependencyProblem('Dead dep', depState), 'depends on discarded card Dead dep (superseded by Dead dep v2)',
+  'BGR-DISCARD-DEP-FAILS-LOUD the discarded-dependency finding names the tombstone and its successor');
+eq(discardedDependencyProblem('Alive dep', depState), null,
+  'BGR-DISCARD-DEP-FAILS-LOUD non-tombstoned dependencies produce no discarded finding');
+const depSelection = selectClaimCandidate({
+  boardMd: depBoard, state: depState,
+  loadCard: (name) => name === 'Dependent'
+    ? { path: '/cards/Dependent.md', raw: card({ name: 'Dependent', deps: ['Dead dep'], zones: ['platform/dependent'] }) } : null,
+});
+eq(depSelection.action, 'no-work', 'BGR-DISCARD-DEP-FAILS-LOUD a dependent card is not claimable');
+ok(/depends on discarded card Dead dep/.test(depSelection.skipped[0].reason),
+  'BGR-DISCARD-DEP-FAILS-LOUD claim skip reason is the explicit discarded-dependency error, not the checkbox fallback');
+
+// A1 resolveSupersessionTail — multi-hop chain to the live tail
+{
+  const state = emptyState();
+  state.cards['BL-4'] = { card: 'BL-4', phase: 'discarded', superseded_by: 'BL-4b' };
+  state.cards['BL-4b'] = { card: 'BL-4b', phase: 'discarded', superseded_by: 'BL-4c' };
+  state.cards['BL-4c'] = { card: 'BL-4c', phase: 'deployed' };
+  const r = coordinator.resolveSupersessionTail('BL-4', state);
+  eq(r.tail, 'BL-4c', 'A1 follows BL-4 → BL-4b → BL-4c to the live tail');
+  eq(r.hops, ['BL-4', 'BL-4b'], 'A1 records the traversed tombstones');
+  eq(r.deadEnd, false, 'A1 a deployed live tail is a valid repoint target');
+  eq(r.cycle, false, 'A1 no cycle on a clean chain');
+
+  // single hop, pending tail
+  const s2 = emptyState();
+  s2.cards['GA-R1a'] = { card: 'GA-R1a', phase: 'discarded', superseded_by: 'GA-R1a2' };
+  s2.cards['GA-R1a2'] = { card: 'GA-R1a2', phase: 'claimed' };
+  const r2 = coordinator.resolveSupersessionTail('GA-R1a', s2);
+  eq(r2.tail, 'GA-R1a2', 'A1 single hop lands on the pending successor');
+  eq(r2.deadEnd, false, 'A1 pending tail is a valid repoint target');
+
+  // cycle guard
+  const s3 = emptyState();
+  s3.cards['X'] = { card: 'X', phase: 'discarded', superseded_by: 'Y' };
+  s3.cards['Y'] = { card: 'Y', phase: 'discarded', superseded_by: 'X' };
+  const r3 = coordinator.resolveSupersessionTail('X', s3);
+  eq(r3.cycle, true, 'A1 detects a superseded_by cycle instead of looping');
+
+  // dead end: a discarded card with no successor
+  const s4 = emptyState();
+  s4.cards['Z'] = { card: 'Z', phase: 'discarded', superseded_by: null };
+  const r4 = coordinator.resolveSupersessionTail('Z', s4);
+  eq(r4.tail, 'Z', 'A1 a successor-less tombstone is its own tail');
+  eq(r4.deadEnd, true, 'A1 a discarded-with-no-successor tail is a dead end (not repointable)');
+
+  // multi-hop message on discardedDependencyProblem
+  eq(coordinator.discardedDependencyProblem('BL-4', state),
+    'depends on discarded card BL-4 (superseded by BL-4c)',
+    'A1 problem message names the live tail, not the immediate hop');
+}
+
+// A2 rewriteDependsOn — repoint and clear, format-preserving
+{
+  const block = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "[[Other]]"', '---', 'body'].join('\n');
+  const rp = coordinator.rewriteDependsOn(block, 'BL-4', 'BL-4c');
+  ok(rp.changed, 'A2 block-list repoint reports changed');
+  ok(/\[\[BL-4c\]\]/.test(rp.text) && !/\[\[BL-4\]\]/.test(rp.text.replace(/BL-4c/g, '')),
+    'A2 block-list repoint swaps BL-4 → BL-4c and keeps Other');
+  ok(/\[\[Other\]\]/.test(rp.text), 'A2 block-list repoint preserves the sibling dep');
+
+  const cleared = coordinator.rewriteDependsOn(block, 'BL-4', null);
+  ok(cleared.changed && !/\[\[BL-4\]\]/.test(cleared.text.replace(/BL-4c/g, '')),
+    'A2 clear removes the BL-4 line');
+  ok(/\[\[Other\]\]/.test(cleared.text), 'A2 clear keeps the sibling dep');
+
+  const inline = ['---', 'depends_on: ["[[BL-4]]","[[Other]]"]', '---', 'body'].join('\n');
+  const inlineRp = coordinator.rewriteDependsOn(inline, 'BL-4', 'BL-4c');
+  ok(inlineRp.changed && /\[\[BL-4c\]\]/.test(inlineRp.text), 'A2 inline-array repoint swaps the name');
+
+  const bare = ['---', 'depends_on:', '  - BL-4', '---', 'body'].join('\n');
+  const bareRp = coordinator.rewriteDependsOn(bare, 'BL-4', 'BL-4c');
+  ok(bareRp.changed, 'A2 bare-name form matches via normalization');
+
+  const absent = coordinator.rewriteDependsOn(block, 'NOT-PRESENT', 'X');
+  ok(!absent.changed && absent.text === block, 'A2 absent dep is a no-op');
+
+  // Finding #2: an external: sibling must survive serialization unwrapped —
+  // not corrupted into a wikilink when another dep on the same card is repointed.
+  const blockWithExternal = ['---', 'type: slice', 'depends_on:', '  - "[[BL-4]]"', '  - "external:upstream vendor SDK"', '---', 'body'].join('\n');
+  const extRp = coordinator.rewriteDependsOn(blockWithExternal, 'BL-4', 'BL-4c');
+  ok(extRp.changed && /\[\[BL-4c\]\]/.test(extRp.text), 'A2 external-sibling repoint still swaps BL-4 → BL-4c');
+  ok(/external:upstream vendor SDK/.test(extRp.text), 'A2 external-sibling repoint preserves the external: entry verbatim');
+  ok(!/\[\[external:/.test(extRp.text), 'A2 external-sibling repoint leaves external: unwrapped, not [[external:...]]');
+}
+
+// BGR-DISCARD-PROJECTION-NULL: tombstones project to nothing; reconcile is a clean no-op.
+eq(projectionMapping('discarded'), null, 'BGR-DISCARD-PROJECTION-NULL projectionMapping(discarded) is null');
+const tombstoneReconcileWritesBefore = discardWrites;
+const tombstoneReconcile = await commandReconcile({ root: discardRoot }, { card: 'Stale slice' }, {
+  readState: () => discardState, writeState: () => { discardWrites++; },
+  withLock: immediateCardLock, boardPath: discardBoardPath, cardsRoot: discardCardsRoot,
+});
+eq(tombstoneReconcile.action, 'reconciled', 'BGR-DISCARD-PROJECTION-NULL reconcile of a tombstone succeeds');
+eq(tombstoneReconcile.no_op, true, 'BGR-DISCARD-PROJECTION-NULL reconcile of a tombstone is a no-op');
+eq(tombstoneReconcile.results[0].skipped, 'phase has no board projection',
+  'BGR-DISCARD-PROJECTION-NULL tombstone reconcile skips projection entirely');
+eq(discardWrites, tombstoneReconcileWritesBefore, 'BGR-DISCARD-PROJECTION-NULL tombstone reconcile performs zero writes');
+ok(!discardState.cards['Stale slice'].projection_error,
+  'BGR-DISCARD-PROJECTION-NULL absence of the board line is the correct projection, never a projection_error');
+
+// BGR-DISCARD-BRANCH-GUARD: open PR or checked-out branch refuses deletion; discard still completes.
+const guardedPath = path.join(discardCardsRoot, 'Guarded.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ blocked: ['Guarded'] }));
+fs.writeFileSync(guardedPath, '---\nstatus: blocked\n---\nguarded body\n');
+const guardState = emptyState();
+guardState.cards.Guarded = {
+  card: 'Guarded', phase: 'blocked', reason: 'feature PR CLOSED', feature_pr: 321,
+  branch: 'codex-autoloop/guarded', worktree: path.join(discardRoot, 'guarded-worktree'), card_path: guardedPath,
+};
+const guardShCalls = [];
+const guarded = await commandDiscard({ root: discardRoot }, {
+  card: 'Guarded', reason: 'abandoned closed PR', json: true,
+}, {
+  ...discardDeps, readState: () => guardState, writeState: () => {},
+  worktreeExists: () => true,
+  sh: (cmd, args) => { guardShCalls.push([cmd, ...args]); return ''; },
+});
+eq(guarded.action, 'discarded', 'BGR-DISCARD-BRANCH-GUARD the discard itself still completes');
+eq(guardState.cards.Guarded.phase, 'discarded', 'BGR-DISCARD-BRANCH-GUARD ledger still becomes discarded');
+eq(guarded.branch.retained_unsafe_to_delete, true, 'BGR-DISCARD-BRANCH-GUARD recorded-PR branch is flagged retained_unsafe_to_delete');
+ok(/record has feature PR #321 recorded; branch deletion not verified safe/.test(guarded.branch.reason),
+  'BGR-DISCARD-BRANCH-GUARD recorded-PR retention names its reason without claiming the PR is open');
+ok(guardShCalls.some((call) => call[1] === 'worktree' && call[2] === 'remove'),
+  'BGR-DISCARD-BRANCH-GUARD the record worktree is still removed');
+ok(!guardShCalls.some((call) => call[1] === 'branch'), 'BGR-DISCARD-BRANCH-GUARD no branch deletion is attempted with a recorded PR');
+const checkedPath = path.join(discardCardsRoot, 'Checked out.md');
+fs.writeFileSync(discardBoardPath, liveBoard({ blocked: ['Checked out'] }));
+fs.writeFileSync(checkedPath, '---\nstatus: blocked\n---\nchecked body\n');
+const checkedState = emptyState();
+checkedState.cards['Checked out'] = {
+  card: 'Checked out', phase: 'blocked', reason: 'stuck', branch: 'codex-autoloop/checked-out', card_path: checkedPath,
+  gate_receipt: passingReceipt('not-a-canonical-sha'),
+};
+const checkedShCalls = [];
+const checkedOut = await commandDiscard({ root: discardRoot }, {
+  card: 'Checked out', reason: 'superseded while checked out', json: true,
+}, {
+  ...discardDeps, readState: () => checkedState, writeState: () => {},
+  worktreeExists: () => false,
+  sh: (cmd, args) => {
+    checkedShCalls.push([cmd, ...args]);
+    if (args[0] === 'worktree' && args[1] === 'list') {
+      return ['worktree /elsewhere', 'HEAD ' + 'a'.repeat(40), 'branch refs/heads/codex-autoloop/checked-out', ''].join('\n');
+    }
+    return '';
+  },
+});
+eq(checkedOut.action, 'discarded', 'BGR-DISCARD-BRANCH-GUARD checked-out branch discard still completes');
+eq(checkedOut.branch.retained_unsafe_to_delete, true, 'BGR-DISCARD-BRANCH-GUARD checked-out branch is retained');
+ok(/checked out/.test(checkedOut.branch.reason), 'BGR-DISCARD-BRANCH-GUARD checked-out retention names its reason');
+ok(!checkedShCalls.some((call) => call[1] === 'branch'), 'BGR-DISCARD-BRANCH-GUARD no branch deletion when a worktree holds the branch');
+eq(checkedState.cards['Checked out'].final_head, null,
+  'a malformed preserved gate-receipt HEAD never becomes a tombstone final_head (canonical 40-hex or null)');
+
+// BGR-DISCARD-EPIC-ROLLUP: discarding a canonical epic slice reprojects the epic without it.
+const rollup = makeEpicProjectionFixture('bgr-discard-rollup');
+rollup.state.cards.A1.phase = 'parked';
+rollup.state.cards.A1.branch = 'codex-autoloop/a1';
+const rollupResult = await commandDiscard({ root: rollup.root }, {
+  card: 'A1', 'superseded-by': 'A1b', reason: 'resliced under BGR', json: true,
+}, {
+  readState: () => rollup.state, writeState: () => {},
+  withLock: async (_ctx, _name, fn) => fn(),
+  boardPath: rollup.parentBoardPath, cardsRoot: rollup.cardsRoot,
+  worktreeExists: () => false, sh: () => '', now: () => '2026-07-25T13:00:00.000Z',
+});
+eq(rollupResult.action, 'discarded', 'BGR-DISCARD-EPIC-ROLLUP canonical slice discard succeeds');
+eq(rollup.state.cards.A1.phase, 'discarded', 'BGR-DISCARD-EPIC-ROLLUP slice ledger becomes a tombstone');
+ok(!/\[\[A1\]\]/.test(fs.readFileSync(rollup.epicBoardPath, 'utf8')), 'BGR-DISCARD-EPIC-ROLLUP discarded slice disappears from the epic board');
+ok(!fs.existsSync(rollup.cardPath), 'BGR-DISCARD-EPIC-ROLLUP discarded slice note is deleted');
+const rollupParent = fs.readFileSync(rollup.parentBoardPath, 'utf8');
+const rollupPlanningIdx = rollupParent.indexOf('## In Planning');
+const rollupProgressIdx = rollupParent.indexOf('## In Progress');
+const rollupEpicIdx = rollupParent.indexOf('- [ ] [[Epic A]]');
+ok(rollupEpicIdx > rollupPlanningIdx && rollupEpicIdx < rollupProgressIdx,
+  'BGR-DISCARD-EPIC-ROLLUP the parent rollup recomputes the epic from surviving slices');
+ok(!/- \[x\] \[\[Epic A\]\]/.test(rollupParent), 'BGR-DISCARD-EPIC-ROLLUP the epic is no longer checked Completed');
+const rollupAtlas = fs.readFileSync(rollup.atlasPath, 'utf8');
+ok(/status: planned/.test(rollupAtlas) && /posture: claimable/.test(rollupAtlas),
+  'BGR-DISCARD-EPIC-ROLLUP the atlas recomputes without the tombstone');
+eq(rollupResult.epic.state, 'planned', 'BGR-DISCARD-EPIC-ROLLUP receipt reports the recomputed epic state');
+
+// CLI wiring: the discard command exists and refuses without --json before any read or write.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI discard without --json refuses with a machine-parseable error before any read or write');
+}
+
+// --- BGR redesign: idempotent reap ---
+
+// BGR-REAP-STEM-EXACT: the ported triage inference is token-exact.
+eq(stemOf('ES4a Something bounded'), 'ES4', 'BGR-REAP-STEM-EXACT stem strips a single lowercase supersession suffix');
+eq(stemOf('ES4a2 Something rebuilt'), 'ES4', 'BGR-REAP-STEM-EXACT stem strips a lowercase letter + digits suffix');
+eq(stemOf('ES41 No suffix here'), 'ES41', 'BGR-REAP-STEM-EXACT ids without a lowercase suffix are their own stem');
+eq(stemOf('GA-C9a2'), 'GA-C9', 'BGR-REAP-STEM-EXACT stem handles hyphenated card ids');
+const stemTracked = [
+  { card: 'ES4a2 Rebuilt renderer (supersedes ES4a)', status: 'deployed' },
+  { card: 'ES5a2 Rebuilt without marker', status: 'deployed' },
+  { card: 'ES6a2 Pending successor (supersedes ES6a)', status: 'parked' },
+];
+eq(hasDeployedSupersedingSibling({ card: 'ES4a Original renderer' }, stemTracked), true,
+  'BGR-REAP-STEM-EXACT a deployed stem-sibling with a supersession marker is a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES5a Original renderer' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a deployed stem-sibling without the marker is not a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES6a Original renderer' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a non-deployed successor is not a corpse signal');
+eq(hasDeployedSupersedingSibling({ card: 'ES4a2 Rebuilt renderer (supersedes ES4a)' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT a card is never its own superseding sibling (id tokens are exact)');
+eq(hasDeployedSupersedingSibling({ card: 'ES40a Widened scope' }, stemTracked), false,
+  'BGR-REAP-STEM-EXACT stem matching is token-exact, never substring: ES40a does not match the ES4 stem');
+eq(hasDeployedSupersedingSibling({ card: 'ES7a Legacy pass' },
+  [{ card: 'ES7a2 Wrap-up (final value-review completion)', status: 'completed' }]), true,
+  'BGR-REAP-STEM-EXACT completed final value-review successors also mark corpses');
+
+// BGR-REAP-CORPSES / STUBS / DUPES / RESIDUE-HEAL: one sweep over a live board.
+const reapRoot = path.join(tmp, 'bgr-reap');
+const reapProjectRoot = path.join(reapRoot, 'spice', 'projects', 'test');
+const reapCardsRoot = path.join(reapProjectRoot, 'tasks');
+fs.mkdirSync(reapCardsRoot, { recursive: true });
+const reapBoardPath = path.join(reapProjectRoot, 'project-board.md');
+fs.writeFileSync(reapBoardPath, [
+  '---', 'kanban-plugin: board', '---', '',
+  '## In Planning',
+  '- [ ] [[Decomposed parent]] (decomposed → [[Child one]] → [[Child two]])',
+  '- [ ] [[Settled container]] (decomposed → [[Done child]] → [[Dead child]])',
+  '- [ ] [[Docs $$ parent]] (docs-only → [[Some doc]])',
+  '- [ ] [[Dupe card]]',
+  '- [ ] [[Dupe card]]',
+  '',
+  '## In Progress',
+  '- [ ] [[ES9a Old renderer]]',
+  '- [ ] [[Keeper parked]]',
+  '- [ ] [[Ghost residue]]',
+  '',
+  '## Blocked', '',
+  '## Completed',
+  '- [x] [[Done child]]',
+  '- [x] [[ES9a2 Renderer rework (supersedes ES9a)]]',
+  '',
+].join('\n'));
+const reapCorpsePath = path.join(reapCardsRoot, 'ES9a Old renderer.md');
+const reapKeeperPath = path.join(reapCardsRoot, 'Keeper parked.md');
+const reapGhostPath = path.join(reapCardsRoot, 'Ghost residue.md');
+fs.writeFileSync(reapCorpsePath, '---\nstatus: parked\n---\nold renderer body\n');
+fs.writeFileSync(reapKeeperPath, '---\nstatus: parked\n---\nkeeper body\n');
+fs.writeFileSync(reapGhostPath, '---\nstatus: parked\n---\nghost body\n');
+const REAP_HEAD = 'e'.repeat(40);
+const reapState = emptyState();
+reapState.cards['ES9a Old renderer'] = {
+  card: 'ES9a Old renderer', phase: 'parked', card_path: reapCorpsePath,
+  branch: 'codex-autoloop/es9a', dependencies: ['ES9 base'], resume_condition: 'never satisfied',
+  gate_receipt: passingReceipt(REAP_HEAD),
+};
+reapState.cards['ES9a2 Renderer rework (supersedes ES9a)'] = {
+  card: 'ES9a2 Renderer rework (supersedes ES9a)', phase: 'deployed',
+};
+reapState.cards['Keeper parked'] = {
+  card: 'Keeper parked', phase: 'parked', card_path: reapKeeperPath,
+  dependencies: ['Something real'], resume_condition: 'still real',
+};
+reapState.cards['Dead child'] = {
+  card: 'Dead child', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'superseded', superseded_by: null, final_head: null, carried_fixtures: [],
+};
+reapState.cards['Ghost residue'] = {
+  card: 'Ghost residue', phase: 'discarded', card_path: reapGhostPath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crashed mid-discard',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+let reapWrites = 0;
+const reapLocks = [];
+const reapShCalls = [];
+const opx2ReapProjections = [];
+const reapDeps = {
+  readState: () => reapState,
+  writeState: () => { reapWrites++; },
+  withLock: async (_ctx, name, fn) => { reapLocks.push(name); return fn(); },
+  boardPath: reapBoardPath, cardsRoot: reapCardsRoot,
+  worktreeExists: () => false,
+  sh: (cmd, cmdArgs) => { reapShCalls.push([cmd, ...cmdArgs]); return ''; },
+  now: () => '2026-07-25T14:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2ReapProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
+};
+await assert.rejects(() => commandReap({ root: reapRoot }, {}, reapDeps), /requires --json/,
+  'BGR-REAP refuses without --json before any read or write');
+eq(reapLocks, [], 'BGR-REAP missing --json refusal precedes every lock');
+eq(reapWrites, 0, 'BGR-REAP missing --json refusal performs zero writes');
+const reaped = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
+eq(reaped.action, 'reaped', 'BGR-REAP emits one machine-readable reap receipt');
+eq(reaped.no_op, false, 'BGR-REAP first sweep is not a no-op');
+eq(opx2ReapProjections, ['reap'],
+  'OPX2-TRANSITION-ONLY one mutating reap batch fires exactly one Loop Station projection');
+ok(reapLocks.includes('selector'), 'BGR-REAP the sweep runs under the selector lock');
+
+// BGR-REAP-CORPSES: parked stem-sibling with a deployed successor is discarded.
+eq(reaped.corpses.length, 1, 'BGR-REAP-CORPSES exactly one superseded corpse is discovered');
+eq(reaped.corpses[0].card, 'ES9a Old renderer', 'BGR-REAP-CORPSES the parked stem-sibling is the corpse');
+eq(reaped.corpses[0].tombstone.superseded_by, 'ES9a2 Renderer rework (supersedes ES9a)',
+  'BGR-REAP-CORPSES the tombstone names the exact deployed successor card');
+eq(reapState.cards['ES9a Old renderer'].phase, 'discarded', 'BGR-REAP-CORPSES the corpse ledger record becomes a tombstone');
+eq(reapState.cards['ES9a Old renderer'].final_head, REAP_HEAD, 'BGR-REAP-CORPSES the tombstone preserves the corpse gate-receipt HEAD');
+ok(!fs.existsSync(reapCorpsePath), 'BGR-REAP-CORPSES the corpse note is deleted');
+const sweptBoard = fs.readFileSync(reapBoardPath, 'utf8');
+ok(!/\[\[ES9a Old renderer\]\]/.test(sweptBoard), 'BGR-REAP-CORPSES the corpse board line is removed');
+eq(reapState.cards['Keeper parked'].phase, 'parked', 'BGR-REAP-CORPSES a parked card with no deployed successor is untouched');
+ok(fs.existsSync(reapKeeperPath), 'BGR-REAP-CORPSES the untouched parked note survives');
+ok(/- \[ \] \[\[Keeper parked\]\]/.test(sweptBoard), 'BGR-REAP-CORPSES the untouched parked board line survives');
+
+// BGR-REAP-STUBS: annotations stripped; fully settled containers discarded outright.
+ok(sweptBoard.includes('- [ ] [[Decomposed parent]]') && !/Decomposed parent\]\] \(decomposed/.test(sweptBoard),
+  'BGR-REAP-STUBS the decomposition annotation is stripped, checkbox state and wikilink preserved exactly');
+ok(sweptBoard.includes('- [ ] [[Docs $$ parent]]') && !/\(docs-only/.test(sweptBoard),
+  'BGR-REAP-STUBS the docs-only variant strips safely for names containing $');
+ok(!/\[\[Settled container\]\]/.test(sweptBoard),
+  'BGR-REAP-STUBS a planning container whose children are all tombstoned or completed is discarded outright');
+eq(reapState.cards['Settled container'].phase, 'discarded', 'BGR-REAP-STUBS the settled container gains a tombstone');
+eq(reaped.stub_parents.length, 1, 'BGR-REAP-STUBS the receipt lists exactly one settled-container discard');
+eq(reaped.stub_parents[0].card, 'Settled container', 'BGR-REAP-STUBS the receipt names the discarded container');
+eq(reaped.annotations_stripped.map((item) => item.card).sort(), ['Decomposed parent', 'Docs $$ parent'],
+  'BGR-REAP-STUBS the receipt lists every stripped annotation');
+
+// BGR-REAP-DUPES: two lines targeting the same wikilink → first kept, second removed.
+eq((sweptBoard.match(/\[\[Dupe card\]\]/g) || []).length, 1, 'BGR-REAP-DUPES only the first duplicate line survives');
+eq(reaped.duplicates_removed, [{ board: reapBoardPath, card: 'Dupe card' }],
+  'BGR-REAP-DUPES the receipt lists the removed duplicate line');
+
+// BGR-REAP-RESIDUE-HEAL: tombstone residue (line + note) is healed.
+ok(!/\[\[Ghost residue\]\]/.test(sweptBoard), 'BGR-REAP-RESIDUE-HEAL the residual tombstone board line is removed');
+eq(reaped.residue_lines_removed, [{ board: reapBoardPath, card: 'Ghost residue' }],
+  'BGR-REAP-RESIDUE-HEAL the receipt lists the healed residual line');
+ok(!fs.existsSync(reapGhostPath), 'BGR-REAP-RESIDUE-HEAL the residual tombstone note is deleted');
+eq(reaped.residue_notes_deleted, [{ card: 'Ghost residue', path: reapGhostPath }],
+  'BGR-REAP-RESIDUE-HEAL the receipt lists the healed residual note');
+
+// BGR-REAP-NOOP: replay on the settled board is a no-op with zero writes.
+const noopWritesBefore = reapWrites;
+const noopShBefore = reapShCalls.length;
+const noopBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+const noopStateBytes = JSON.stringify(reapState);
+const reapReplay = await commandReap({ root: reapRoot }, { json: true }, reapDeps);
+eq(reapReplay.action, 'reaped', 'BGR-REAP-NOOP replay still emits the reap receipt');
+eq(reapReplay.no_op, true, 'BGR-REAP-NOOP replay on a settled board is an explicit no-op');
+eq(reapWrites, noopWritesBefore, 'BGR-REAP-NOOP replay performs zero ledger writes');
+eq(reapShCalls.length, noopShBefore, 'BGR-REAP-NOOP replay performs zero git operations');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), noopBoardBytes, 'BGR-REAP-NOOP replay keeps board bytes stable');
+eq(JSON.stringify(reapState), noopStateBytes, 'BGR-REAP-NOOP replay keeps ledger state byte-stable');
+
+// BGR-REAP-EXPLICIT-LIST: --also discards named settled work, refuses active phases.
+const explicitPath = path.join(reapCardsRoot, 'Explicit corpse.md');
+const untrackedStubPath = path.join(reapCardsRoot, 'Untracked stub.md');
+fs.writeFileSync(reapBoardPath, liveBoard({ blocked: ['Explicit corpse'], planning: ['Untracked stub'], progress: ['Busy card'] }));
+fs.writeFileSync(explicitPath, '---\nstatus: blocked\n---\nexplicit body\n');
+fs.writeFileSync(untrackedStubPath, '---\nstatus: planning\n---\nstub body\n');
+const alsoState = emptyState();
+alsoState.cards['Explicit corpse'] = { card: 'Explicit corpse', phase: 'blocked', card_path: explicitPath };
+alsoState.cards['Busy card'] = { card: 'Busy card', phase: 'implementing' };
+let alsoWrites = 0;
+const alsoDeps = { ...reapDeps, readState: () => alsoState, writeState: () => { alsoWrites++; } };
+const alsoReap = await commandReap({ root: reapRoot }, { json: true, also: ['Explicit corpse', 'Untracked stub'] }, alsoDeps);
+eq(alsoReap.also.map((item) => item.card), ['Explicit corpse', 'Untracked stub'],
+  'BGR-REAP-EXPLICIT-LIST discards every explicitly listed card');
+eq(alsoState.cards['Explicit corpse'].phase, 'discarded', 'BGR-REAP-EXPLICIT-LIST a blocked listed card becomes a tombstone');
+eq(alsoState.cards['Untracked stub'].phase, 'discarded', 'BGR-REAP-EXPLICIT-LIST an untracked listed card gains a minimal tombstone');
+ok(!fs.existsSync(explicitPath) && !fs.existsSync(untrackedStubPath), 'BGR-REAP-EXPLICIT-LIST listed card notes are deleted');
+const alsoBoard = fs.readFileSync(reapBoardPath, 'utf8');
+ok(!/\[\[Explicit corpse\]\]/.test(alsoBoard) && !/\[\[Untracked stub\]\]/.test(alsoBoard),
+  'BGR-REAP-EXPLICIT-LIST listed board lines are removed');
+ok(/\[\[Busy card\]\]/.test(alsoBoard), 'BGR-REAP-EXPLICIT-LIST the active board line survives');
+const refuseWritesBefore = alsoWrites;
+const refuseBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+await assert.rejects(() => commandReap({ root: reapRoot }, { json: true, also: 'Busy card' }, alsoDeps),
+  /refuses active in-flight work/, 'BGR-REAP-EXPLICIT-LIST refuses names with active in-flight phases');
+eq(alsoWrites, refuseWritesBefore, 'BGR-REAP-EXPLICIT-LIST active-name refusal performs zero writes');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), refuseBoardBytes, 'BGR-REAP-EXPLICIT-LIST active-name refusal keeps board bytes stable');
+eq(alsoState.cards['Busy card'].phase, 'implementing', 'BGR-REAP-EXPLICIT-LIST the active record is preserved');
+
+// BGR-REAP-EXPLICIT-LIST overlap: --also naming a corpse-set member (or any
+// already-tombstoned card) records a skip entry; the identical re-run stays no_op.
+const overlapCorpsePath = path.join(reapCardsRoot, 'ES8a Old pass.md');
+fs.writeFileSync(reapBoardPath, liveBoard({ progress: ['ES8a Old pass'] }));
+fs.writeFileSync(overlapCorpsePath, '---\nstatus: parked\n---\nold pass body\n');
+const overlapState = emptyState();
+overlapState.cards['ES8a Old pass'] = { card: 'ES8a Old pass', phase: 'parked', card_path: overlapCorpsePath };
+overlapState.cards['ES8a2 New pass (supersedes ES8a)'] = { card: 'ES8a2 New pass (supersedes ES8a)', phase: 'deployed' };
+overlapState.cards['Manual tombstone'] = {
+  card: 'Manual tombstone', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'hand discarded with its own reason', superseded_by: null, final_head: null, carried_fixtures: [],
+};
+const overlapDeps = { ...reapDeps, readState: () => overlapState, writeState: () => {} };
+const overlapArgs = { json: true, also: ['ES8a Old pass', 'Manual tombstone'] };
+
+// BGR-REAP-EXPLICIT-LIST typo: an unresolvable --also name refuses up-front,
+// before the corpse pass performs any write, and names the offender.
+const typoBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+await assert.rejects(() => commandReap({ root: reapRoot }, { json: true, also: 'No Such Card' }, overlapDeps),
+  /cannot resolve --also card No Such Card/,
+  'BGR-REAP-EXPLICIT-LIST typo: an unresolvable listed name refuses up-front and names the offender');
+eq(overlapState.cards['ES8a Old pass'].phase, 'parked',
+  'BGR-REAP-EXPLICIT-LIST typo: the refusal precedes the corpse pass, so the corpse record is untouched');
+ok(fs.existsSync(overlapCorpsePath), 'BGR-REAP-EXPLICIT-LIST typo: the refused run performs zero note deletions');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), typoBoardBytes,
+  'BGR-REAP-EXPLICIT-LIST typo: the refused run keeps board bytes stable');
+
+const overlapReap = await commandReap({ root: reapRoot }, overlapArgs, overlapDeps);
+eq(overlapReap.corpses.map((item) => item.card), ['ES8a Old pass'],
+  'BGR-REAP-EXPLICIT-LIST overlap: the corpse pass discards the listed card first');
+eq(overlapReap.also, [
+  { card: 'ES8a Old pass', no_op: true, skipped: 'already discarded' },
+  { card: 'Manual tombstone', no_op: true, skipped: 'already discarded' },
+], 'BGR-REAP-EXPLICIT-LIST overlap: already-tombstoned listed names record skip entries, never a throw');
+eq(overlapReap.no_op, false, 'BGR-REAP-EXPLICIT-LIST overlap: the first run still reports its corpse work');
+const overlapBoardBytes = fs.readFileSync(reapBoardPath, 'utf8');
+const overlapReplay = await commandReap({ root: reapRoot }, overlapArgs, overlapDeps);
+eq(overlapReplay.no_op, true, 'BGR-REAP-EXPLICIT-LIST overlap: the identical re-run is an explicit no-op');
+eq(overlapReplay.also, [
+  { card: 'ES8a Old pass', no_op: true, skipped: 'already discarded' },
+  { card: 'Manual tombstone', no_op: true, skipped: 'already discarded' },
+], 'BGR-REAP-EXPLICIT-LIST overlap: the re-run keeps the skip entries');
+eq(fs.readFileSync(reapBoardPath, 'utf8'), overlapBoardBytes,
+  'BGR-REAP-EXPLICIT-LIST overlap: the re-run keeps board bytes stable');
+
+// BGR-REAP-RESIDUE-HEAL guard: a symlinked residue note is refused per-item and
+// reported in the receipt; the rest of the reap completes.
+const symTargetPath = path.join(reapRoot, 'outside-note.md');
+const symNotePath = path.join(reapCardsRoot, 'Symlinked residue.md');
+const healthyResiduePath = path.join(reapCardsRoot, 'Healthy residue.md');
+fs.writeFileSync(symTargetPath, 'outside body\n');
+fs.symlinkSync(symTargetPath, symNotePath);
+fs.writeFileSync(healthyResiduePath, '---\nstatus: parked\n---\nhealthy residue body\n');
+const symState = emptyState();
+symState.cards['Symlinked residue'] = {
+  card: 'Symlinked residue', phase: 'discarded', card_path: symNotePath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crash residue',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+symState.cards['Healthy residue'] = {
+  card: 'Healthy residue', phase: 'discarded', card_path: healthyResiduePath,
+  discarded_at: '2026-07-24T00:00:00.000Z', discard_reason: 'crash residue',
+  superseded_by: null, final_head: null, carried_fixtures: [],
+};
+fs.writeFileSync(reapBoardPath, liveBoard({}));
+const symDeps = { ...reapDeps, readState: () => symState, writeState: () => {} };
+const symReap = await commandReap({ root: reapRoot }, { json: true }, symDeps);
+eq(symReap.action, 'reaped', 'BGR-REAP-RESIDUE-HEAL a corrupt residue entry never aborts the batch');
+eq(symReap.residue_notes_refused.length, 1, 'BGR-REAP-RESIDUE-HEAL exactly one residue refusal is reported');
+eq(symReap.residue_notes_refused[0].card, 'Symlinked residue', 'BGR-REAP-RESIDUE-HEAL the refusal names the corrupt entry');
+eq(symReap.residue_notes_refused[0].residue_note, 'refused', 'BGR-REAP-RESIDUE-HEAL the refusal is marked refused');
+ok(/regular non-symlink file/.test(symReap.residue_notes_refused[0].reason),
+  'BGR-REAP-RESIDUE-HEAL the refusal carries the guard reason');
+ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the guard leaves the symlink in place');
+ok(fs.existsSync(symTargetPath), 'BGR-REAP-RESIDUE-HEAL the guard leaves the symlink target untouched');
+ok(!fs.existsSync(healthyResiduePath), 'BGR-REAP-RESIDUE-HEAL the rest of the residue pass still completes');
+eq(symReap.residue_notes_deleted, [{ card: 'Healthy residue', path: healthyResiduePath }],
+  'BGR-REAP-RESIDUE-HEAL the receipt still lists the healed healthy residue');
+const symReplay = await commandReap({ root: reapRoot }, { json: true }, symDeps);
+eq(symReplay.no_op, true, 'BGR-REAP-RESIDUE-HEAL a persistent refused entry keeps the replay an explicit zero-write no-op');
+eq(symReplay.residue_notes_refused.length, 1, 'BGR-REAP-RESIDUE-HEAL the replay still reports the persistent refusal');
+ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the replay still leaves the symlink in place');
+
+// CLI wiring: the reap command exists and refuses without --json before any read or write.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI reap without --json refuses with a machine-parseable error before any read or write');
+}
+
+// --- BGR redesign: restructure — sanctioned flat-to-epic board migration ---
+
+const noteBody = (raw) => String(raw).replace(/^---\n[\s\S]*?\n---/, '');
+let restructureFixtureId = 0;
+function makeRestructureFixture(opts = {}) {
+  const root = path.join(tmp, `bgr-restructure-${++restructureFixtureId}`);
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, [
+    '---', 'kanban-plugin: board', 'type: kanban', 'project_name: Test', 'project_slug: test', '---', '',
+    '## In Planning',
+    '- [ ] [[Card A1]]',
+    '- [ ] [[Card A2]]',
+    '- [ ] [[Bystander card]]',
+    '- [ ] [[Card B1]]',
+    '- [ ] [[Card B2]]',
+    '',
+    '## In Progress', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  const bodies = {
+    'Card A1': '\n\nA1 body line one.\n\nA1 body line two.\n',
+    'Card A2': '\n\nA2 body with $& and $$ and $1 dollar specials.\n',
+    'Card B1': '\n\nB1 body.\n',
+    'Card B2': '\n\nB2 body.\n',
+    'Bystander card': '\n\nBystander body.\n',
+  };
+  for (const [name, body] of Object.entries(bodies)) {
+    fs.writeFileSync(path.join(cardsRoot, `${name}.md`), [
+      '---', 'type: task-hub',
+      'source_board: spice/projects/test/project-board.md',
+      `status: ${(opts.statuses || {})[name] || 'planning'}`,
+      name === 'Card A2' ? 'depends_on: "[[Card A1]]"' : 'depends_on: []',
+      '---',
+    ].join('\n') + body);
+  }
+  const spec = {
+    project_root: projectRoot,
+    board: boardPath,
+    epics: [
+      { epic: 'Family A', members: ['Card A1', 'Card A2'] },
+      { epic: 'Family B', members: ['Card B1', 'Card B2'] },
+    ],
+  };
+  const specPath = path.join(root, 'map.json');
+  fs.writeFileSync(specPath, JSON.stringify(spec, null, 2));
+  const state = emptyState();
+  const counters = { writes: 0, locks: [] };
+  const deps = {
+    readState: () => state,
+    writeState: () => { counters.writes++; },
+    withLock: async (_ctx, name, fn) => { counters.locks.push(name); return fn(); },
+    now: () => '2026-07-25T15:00:00.000Z',
+    journalPath: path.join(root, 'restructure-journal.json'),
+  };
+  return { root, projectRoot, cardsRoot, boardPath, spec, specPath, state, bodies, counters, deps };
+}
+const writeSpec = (fixture, spec) => fs.writeFileSync(fixture.specPath, JSON.stringify(spec, null, 2));
+
+// BGR-RESTRUCTURE-HAPPY: the spec'd flat cards become two canonical epics.
+const happy = makeRestructureFixture();
+const happySources = Object.fromEntries(Object.keys(happy.bodies)
+  .map((name) => [name, fs.readFileSync(path.join(happy.cardsRoot, `${name}.md`), 'utf8')]));
+await assert.rejects(() => commandRestructure({ root: happy.root }, { spec: happy.specPath }, happy.deps),
+  /requires --json/, 'BGR-RESTRUCTURE-HAPPY restructure refuses without --json before any read or write');
+eq(happy.counters.locks, [], 'BGR-RESTRUCTURE-HAPPY missing --json refusal precedes every lock');
+eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-HAPPY missing --json refusal performs zero ledger writes');
+const restructured = await commandRestructure({ root: happy.root }, { spec: happy.specPath, json: true }, happy.deps);
+eq(restructured.action, 'restructured', 'BGR-RESTRUCTURE-HAPPY emits one machine-readable receipt');
+eq(restructured.no_op, false, 'BGR-RESTRUCTURE-HAPPY first run is not a no-op');
+ok(happy.counters.locks.includes('selector'), 'BGR-RESTRUCTURE-HAPPY the pass runs under the selector lock');
+eq(restructured.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
+  'BGR-RESTRUCTURE-HAPPY receipt reports every epic in spec order');
+eq(restructured.epics[0].members.map((entry) => entry.card), ['Card A1', 'Card A2'],
+  'BGR-RESTRUCTURE-HAPPY receipt reports every member move');
+const happyAtlasPath = path.join(happy.cardsRoot, 'Family A', 'Family A.md');
+const happyEpicBoardPath = path.join(happy.cardsRoot, 'Family A', 'board', 'Family A-board.md');
+const happyAtlas = fs.readFileSync(happyAtlasPath, 'utf8');
+ok(/^type: epic$/m.test(happyAtlas), 'BGR-RESTRUCTURE-HAPPY atlas is type epic');
+ok(/^status: planned$/m.test(happyAtlas) && /^posture: claimable$/m.test(happyAtlas),
+  'BGR-RESTRUCTURE-HAPPY atlas derives planned/claimable from all-planning members');
+ok(happyAtlas.includes('source_board: spice/projects/test/project-board.md')
+  && happyAtlas.includes('kanban_board: spice/projects/test/project-board.md'),
+  'BGR-RESTRUCTURE-HAPPY atlas binds its canonical parent board');
+ok(happyAtlas.includes('epic_board: spice/projects/test/tasks/Family A/board/Family A-board.md'),
+  'BGR-RESTRUCTURE-HAPPY atlas binds its canonical epic board');
+const happyEpicBoard = fs.readFileSync(happyEpicBoardPath, 'utf8');
+ok(/^board_role: epic$/m.test(happyEpicBoard), 'BGR-RESTRUCTURE-HAPPY epic board carries board_role epic');
+ok(/## In Planning\n\n- \[ \] \[\[Card A1\]\]\n- \[ \] \[\[Card A2\]\]/.test(happyEpicBoard),
+  'BGR-RESTRUCTURE-HAPPY member lines land in the epic In Planning lane in original relative order');
+ok(/## In Progress/.test(happyEpicBoard) && /## Blocked/.test(happyEpicBoard) && /## Completed/.test(happyEpicBoard),
+  'BGR-RESTRUCTURE-HAPPY epic board carries all four canonical lanes');
+for (const keepDir of ['runs', 'lessons', 'decisions']) {
+  ok(fs.existsSync(path.join(happy.cardsRoot, 'Family A', 'context', keepDir, '.keep')),
+    `BGR-RESTRUCTURE-HAPPY epic context/${keepDir}/.keep scaffold exists`);
+}
+for (const [epic, member] of [['Family A', 'Card A1'], ['Family A', 'Card A2'], ['Family B', 'Card B1'], ['Family B', 'Card B2']]) {
+  const target = path.join(happy.cardsRoot, epic, 'board', `${member}.md`);
+  ok(!fs.existsSync(path.join(happy.cardsRoot, `${member}.md`)), `BGR-RESTRUCTURE-HAPPY ${member} source note is gone`);
+  ok(fs.existsSync(target), `BGR-RESTRUCTURE-HAPPY ${member} note moved into the epic board directory`);
+  const raw = fs.readFileSync(target, 'utf8');
+  ok(/^type: slice$/m.test(raw), `BGR-RESTRUCTURE-HAPPY ${member} is rewritten to type slice`);
+  ok(raw.includes(`epic: "[[${epic}]]"`), `BGR-RESTRUCTURE-HAPPY ${member} carries its epic backlink`);
+  ok(raw.includes(`task_parent: spice/projects/test/tasks/${epic}/${epic}.md`),
+    `BGR-RESTRUCTURE-HAPPY ${member} binds its canonical task_parent`);
+  ok(raw.includes(`source_board: spice/projects/test/tasks/${epic}/board/${epic}-board.md`)
+    && raw.includes(`kanban_board: spice/projects/test/tasks/${epic}/board/${epic}-board.md`),
+    `BGR-RESTRUCTURE-HAPPY ${member} binds its canonical epic board`);
+  ok(/^status: planning$/m.test(raw), `BGR-RESTRUCTURE-HAPPY ${member} preserves its flat status`);
+  eq(noteBody(raw), happy.bodies[member], `BGR-RESTRUCTURE-HAPPY ${member} body below frontmatter is byte-preserved`);
+}
+eq(parseDependsOn(fs.readFileSync(path.join(happy.cardsRoot, 'Family A', 'board', 'Card A2.md'), 'utf8')), ['Card A1'],
+  'BGR-RESTRUCTURE-HAPPY depends_on is preserved through the slice rewrite');
+ok(/^schema_version: 1\.1\.0$/m.test(fs.readFileSync(path.join(happy.cardsRoot, 'Family A', 'board', 'Card A1.md'), 'utf8'))
+  && /^schema_version: 1\.1\.0$/m.test(happyAtlas),
+  'BGR-RESTRUCTURE-HAPPY slices and atlas stamp the project-blueprint note schema (1.1.0, not the Delivery contract version)');
+const happyParent = fs.readFileSync(happy.boardPath, 'utf8');
+for (const member of ['Card A1', 'Card A2', 'Card B1', 'Card B2']) {
+  ok(!new RegExp(`\\[\\[${member.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`).test(happyParent),
+    `BGR-RESTRUCTURE-HAPPY parent board member line for ${member} is removed`);
+}
+eq(parseBoard(happyParent)['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-HAPPY one unchecked epic line replaces its first member position; bystanders stay put');
+eq(noteBody(fs.readFileSync(path.join(happy.cardsRoot, 'Bystander card.md'), 'utf8')), happy.bodies['Bystander card'],
+  'BGR-RESTRUCTURE-HAPPY the bystander note is untouched');
+eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-HAPPY untracked flat cards trigger zero ledger writes');
+for (const [epic, member] of [['Family A', 'Card A1'], ['Family B', 'Card B2']]) {
+  const target = path.join(happy.cardsRoot, epic, 'board', `${member}.md`);
+  const surface = canonicalEpicProjection(fs.readFileSync(target, 'utf8'), target, happy.boardPath, happy.cardsRoot, { currentCard: member });
+  eq(surface.epic, epic, `BGR-RESTRUCTURE-HAPPY canonicalEpicProjection accepts the built ${epic} surface`);
+}
+const happyResolved = resolveEpicBoardSet({ parentBoardMd: happyParent, cardsRoot: happy.cardsRoot });
+eq(happyResolved.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
+  'BGR-RESTRUCTURE-HAPPY the epic resolver sees both built epics');
+eq(happyResolved.findings, [], 'BGR-RESTRUCTURE-HAPPY the epic resolver reports no findings');
+
+// BGR-RESTRUCTURE-NOOP: literal replay of the applied spec is a zero-write no-op.
+const happySnapshot = snapshotDirectory(happy.projectRoot);
+const happyLocksBefore = happy.counters.locks.length;
+const replayRestructure = await commandRestructure({ root: happy.root }, { spec: happy.specPath, json: true }, happy.deps);
+eq(replayRestructure.action, 'restructured', 'BGR-RESTRUCTURE-NOOP literal replay still emits the receipt');
+eq(replayRestructure.no_op, true, 'BGR-RESTRUCTURE-NOOP literal replay is an explicit no-op');
+eq(snapshotDirectory(happy.projectRoot), happySnapshot, 'BGR-RESTRUCTURE-NOOP replay keeps every project byte stable');
+eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-NOOP replay performs zero ledger writes');
+ok(happy.counters.locks.length > happyLocksBefore, 'BGR-RESTRUCTURE-NOOP replay still runs under the selector lock');
+
+// BGR-RESTRUCTURE-TRACKED: a tracked member keeps its exact ledger key and phase.
+const tracked = makeRestructureFixture({ statuses: { 'Card A2': 'parked' } });
+const trackedOldPath = path.join(tracked.cardsRoot, 'Card A2.md');
+tracked.state.cards['Card A2'] = {
+  card: 'Card A2', phase: 'parked', card_path: trackedOldPath,
+  dependencies: ['Card A1'], resume_condition: 'restructure lands',
+};
+let trackedPersists = 0;
+tracked.deps.writeState = (_ctx, _state, record) => { trackedPersists++; if (record) tracked.state.cards[record.card] = record; };
+const trackedReceipt = await commandRestructure({ root: tracked.root }, { spec: tracked.specPath, json: true }, tracked.deps);
+eq(trackedReceipt.no_op, false, 'BGR-RESTRUCTURE-TRACKED restructure applies');
+const trackedNewPath = path.join(tracked.cardsRoot, 'Family A', 'board', 'Card A2.md');
+eq(Object.keys(tracked.state.cards), ['Card A2'], 'BGR-RESTRUCTURE-TRACKED the ledger key set is unchanged');
+eq(tracked.state.cards['Card A2'].phase, 'parked', 'BGR-RESTRUCTURE-TRACKED the tracked phase is unchanged');
+eq(tracked.state.cards['Card A2'].card_path, trackedNewPath,
+  'BGR-RESTRUCTURE-TRACKED the ledger card_path is rebound to the epic-board location with the move');
+ok(trackedPersists >= 1, 'BGR-RESTRUCTURE-TRACKED the card_path rebind is persisted');
+ok(trackedReceipt.epics[0].members.find((entry) => entry.card === 'Card A2').tracked === true,
+  'BGR-RESTRUCTURE-TRACKED the receipt marks the tracked member');
+ok(/^status: parked$/m.test(fs.readFileSync(trackedNewPath, 'utf8')),
+  'BGR-RESTRUCTURE-TRACKED the tracked member status is preserved from the flat card');
+const trackedReconcileDeps = {
+  readState: () => tracked.state,
+  writeState: tracked.deps.writeState,
+  withLock: immediateCardLock,
+  boardPath: tracked.boardPath, cardsRoot: tracked.cardsRoot,
+  now: () => '2026-07-25T15:30:00.000Z',
+};
+const trackedReconcile = await commandReconcile({ root: tracked.root }, { card: 'Card A2' }, trackedReconcileDeps);
+eq(trackedReconcile.action, 'reconciled', 'BGR-RESTRUCTURE-TRACKED reconcile succeeds against the new epic-board location');
+eq(trackedReconcile.results[0].ok, true, 'BGR-RESTRUCTURE-TRACKED reconcile reports zero projection errors');
+ok(!tracked.state.cards['Card A2'].projection_error,
+  'BGR-RESTRUCTURE-TRACKED the tracked record carries no projection error after reconcile');
+const trackedReplay = await commandReconcile({ root: tracked.root }, { card: 'Card A2' }, trackedReconcileDeps);
+eq(trackedReplay.no_op, true, 'BGR-RESTRUCTURE-TRACKED the second reconcile is an explicit no-op');
+eq(projectionBoardDrift(fs.readFileSync(tracked.boardPath, 'utf8'), tracked.state.cards['Card A2'], {
+  boardPath: tracked.boardPath, cardsRoot: tracked.cardsRoot, state: tracked.state,
+}), null, 'BGR-RESTRUCTURE-TRACKED the epic drift audit reports clean after reconcile');
+
+// BGR-RESTRUCTURE-REFUSES: every refusal precedes the first write.
+const refuseChecks = [
+  [{ epics: [{ epic: 'Family A', members: ['Card A1', 'No Such Card'] }] }, /absent from the parent board/, 'a member name absent from the parent board'],
+  [{ epics: [{ epic: 'Family A', members: ['Card A1', 'Card A1'] }] }, /listed more than once/, 'a member present twice in one epic'],
+  [{ epics: [{ epic: 'Family A', members: ['Card A1'] }, { epic: 'Family B', members: ['Card A1'] }] }, /listed more than once/, 'a member present twice across epics'],
+  [{ epics: [{ epic: 'Bystander card', members: ['Card A1'] }] }, /collides with an existing note/, 'an epic name colliding with an existing note path'],
+  [{ epics: [{ epic: 'Bad/Name', members: ['Card A1'] }] }, /epic name/, 'an unsafe epic name'],
+];
+for (const [partial, pattern, label] of refuseChecks) {
+  const refuse = makeRestructureFixture();
+  writeSpec(refuse, { ...refuse.spec, ...partial });
+  const before = snapshotDirectory(refuse.projectRoot);
+  await assert.rejects(() => commandRestructure({ root: refuse.root }, { spec: refuse.specPath, json: true }, refuse.deps),
+    pattern, `BGR-RESTRUCTURE-REFUSES ${label} refuses with a machine-readable error`);
+  eq(snapshotDirectory(refuse.projectRoot), before, `BGR-RESTRUCTURE-REFUSES ${label} performs zero writes`);
+  eq(refuse.counters.writes, 0, `BGR-RESTRUCTURE-REFUSES ${label} performs zero ledger writes`);
+  ok(!fs.existsSync(refuse.deps.journalPath), `BGR-RESTRUCTURE-REFUSES ${label} records no intent journal`);
+}
+
+// BGR-RESTRUCTURE-RESUME: a crash mid-pass resumes forward from the durable intent journal.
+const resume = makeRestructureFixture();
+const crashingWriteText = (file, value) => {
+  if (file.endsWith('Family B-board.md')) throw new Error('injected crash before the Family B board write');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, value);
+};
+await assert.rejects(
+  () => commandRestructure({ root: resume.root }, { spec: resume.specPath, json: true }, { ...resume.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-RESUME the injected crash propagates');
+ok(fs.existsSync(resume.deps.journalPath), 'BGR-RESTRUCTURE-RESUME the durable intent journal survives the crash');
+ok(fs.existsSync(path.join(resume.cardsRoot, 'Family A', 'board', 'Card A1.md')),
+  'BGR-RESTRUCTURE-RESUME the first epic completed before the crash');
+ok(fs.existsSync(path.join(resume.cardsRoot, 'Card B1.md')),
+  'BGR-RESTRUCTURE-RESUME the second epic members are still at their preimage locations');
+const resumedRestructure = await commandRestructure({ root: resume.root }, { spec: resume.specPath, json: true }, resume.deps);
+eq(resumedRestructure.action, 'restructured', 'BGR-RESTRUCTURE-RESUME the rerun completes the pass');
+eq(resumedRestructure.no_op, false, 'BGR-RESTRUCTURE-RESUME the completing rerun is not a no-op');
+eq(resumedRestructure.resumed, true, 'BGR-RESTRUCTURE-RESUME the rerun reports that it resumed the recorded intent');
+ok(fs.existsSync(path.join(resume.cardsRoot, 'Family B', 'board', 'Card B1.md'))
+  && !fs.existsSync(path.join(resume.cardsRoot, 'Card B1.md')),
+  'BGR-RESTRUCTURE-RESUME the rerun finishes the interrupted moves');
+eq(parseBoard(fs.readFileSync(resume.boardPath, 'utf8'))['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-RESUME the parent board converges to the intended shape');
+const resumeReplay = await commandRestructure({ root: resume.root }, { spec: resume.specPath, json: true }, resume.deps);
+eq(resumeReplay.no_op, true, 'BGR-RESTRUCTURE-RESUME the post-resume literal replay is a no-op');
+
+// BGR-RESTRUCTURE-RESUME third state: a mutated preimage fails closed and deletes nothing.
+const thirdState = makeRestructureFixture();
+await assert.rejects(
+  () => commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, { ...thirdState.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-RESUME third-state setup crash propagates');
+const mutatedPath = path.join(thirdState.cardsRoot, 'Card B1.md');
+fs.appendFileSync(mutatedPath, 'operator edit after the crash\n');
+const mutatedRaw = fs.readFileSync(mutatedPath, 'utf8');
+let thirdStateError = null;
+try {
+  await commandRestructure({ root: thirdState.root }, { spec: thirdState.specPath, json: true }, thirdState.deps);
+} catch (err) { thirdStateError = err; }
+ok(thirdStateError && /neither the recorded preimage nor the intended result/.test(thirdStateError.message),
+  'BGR-RESTRUCTURE-RESUME a target in a third state fails closed with a machine-readable error');
+// BGR-RESTRUCTURE-CONCURRENT-MODIFICATION: a second writer (a target matching
+// neither the recorded preimage nor the intended result) is machine-identifiable
+// through the shared cli-kit code, same as heal-epic-bindings — this assertion
+// fails against the unconverted `new Error(...)` third-state throw.
+eq(thirdStateError && thirdStateError.code, 'concurrent_modification',
+  'BGR-RESTRUCTURE-CONCURRENT-MODIFICATION a target in a third state refuses with the concurrent_modification code');
+ok(thirdStateError && thirdStateError.message.includes('Card B1.md'),
+  'BGR-RESTRUCTURE-CONCURRENT-MODIFICATION the refusal names the changed member note');
+eq(fs.readFileSync(mutatedPath, 'utf8'), mutatedRaw,
+  'BGR-RESTRUCTURE-RESUME the fail-closed rerun never deletes or rewrites the mutated note');
+ok(!fs.existsSync(path.join(thirdState.cardsRoot, 'Family B', 'board', 'Card B1.md')),
+  'BGR-RESTRUCTURE-RESUME the fail-closed rerun writes no target for the mutated member');
+
+// BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL: a partially applied spec with no intent
+// journal is a third state for the whole pass — refuse before any write.
+const partialNoJournal = makeRestructureFixture();
+await commandRestructure({ root: partialNoJournal.root }, { spec: partialNoJournal.specPath, json: true }, partialNoJournal.deps);
+fs.rmSync(partialNoJournal.deps.journalPath);
+const partialParentRaw = fs.readFileSync(partialNoJournal.boardPath, 'utf8');
+fs.writeFileSync(partialNoJournal.boardPath,
+  partialParentRaw.replace('## In Planning\n', '## In Planning\n\n- [ ] [[Card B1]]\n'));
+const partialSnapshot = snapshotDirectory(partialNoJournal.projectRoot);
+await assert.rejects(
+  () => commandRestructure({ root: partialNoJournal.root }, { spec: partialNoJournal.specPath, json: true }, partialNoJournal.deps),
+  /partially applied without a matching intent journal/,
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL a converged-except-one-detail state without a journal fails closed');
+eq(snapshotDirectory(partialNoJournal.projectRoot), partialSnapshot,
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL the refusal performs zero writes');
+eq(partialNoJournal.counters.writes, 0,
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL the refusal performs zero ledger writes');
+ok(!fs.existsSync(partialNoJournal.deps.journalPath),
+  'BGR-RESTRUCTURE-PARTIAL-NO-JOURNAL the refusal records no new intent journal');
+
+// BGR-RESTRUCTURE-FOREIGN-JOURNAL: an uncompleted journal from a DIFFERENT
+// spec refuses a new pass and is left byte-untouched for inspection.
+const foreignJournal = makeRestructureFixture();
+const foreignJournalBytes = `${JSON.stringify({ schema_version: 1, spec_digest: 'deadbeef', completed: false }, null, 2)}\n`;
+fs.writeFileSync(foreignJournal.deps.journalPath, foreignJournalBytes);
+const foreignSnapshot = snapshotDirectory(foreignJournal.projectRoot);
+await assert.rejects(
+  () => commandRestructure({ root: foreignJournal.root }, { spec: foreignJournal.specPath, json: true }, foreignJournal.deps),
+  /a different restructure intent journal is mid-flight/,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL a mid-flight journal for a different spec fails closed');
+eq(snapshotDirectory(foreignJournal.projectRoot), foreignSnapshot,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL the refusal performs zero writes');
+eq(foreignJournal.counters.writes, 0,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL the refusal performs zero ledger writes');
+eq(fs.readFileSync(foreignJournal.deps.journalPath, 'utf8'), foreignJournalBytes,
+  'BGR-RESTRUCTURE-FOREIGN-JOURNAL the foreign journal is left byte-untouched for inspection');
+
+// BGR-RESTRUCTURE-HALF-MOVE: crash landed between the target write and the
+// source unlink — resume unlinks ONLY the source and never rewrites the target.
+const halfMove = makeRestructureFixture();
+await assert.rejects(
+  () => commandRestructure({ root: halfMove.root }, { spec: halfMove.specPath, json: true }, { ...halfMove.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-HALF-MOVE setup crash propagates');
+const halfJournal = JSON.parse(fs.readFileSync(halfMove.deps.journalPath, 'utf8'));
+const halfB1 = halfJournal.epics[1].moves.find((move) => move.card === 'Card B1');
+fs.mkdirSync(path.dirname(halfB1.to), { recursive: true });
+fs.writeFileSync(halfB1.to, halfB1.content);
+ok(fs.existsSync(halfB1.from), 'BGR-RESTRUCTURE-HALF-MOVE the hand-staged half-move keeps the source present');
+const halfResume = await commandRestructure({ root: halfMove.root }, { spec: halfMove.specPath, json: true }, halfMove.deps);
+eq(halfResume.resumed, true, 'BGR-RESTRUCTURE-HALF-MOVE the rerun resumes the recorded intent');
+eq(halfResume.no_op, false, 'BGR-RESTRUCTURE-HALF-MOVE the completing rerun is not a no-op');
+ok(!fs.existsSync(halfB1.from), 'BGR-RESTRUCTURE-HALF-MOVE resume unlinks only the source of the half-completed move');
+eq(fs.readFileSync(halfB1.to, 'utf8'), halfB1.content,
+  'BGR-RESTRUCTURE-HALF-MOVE the already-intended target bytes are untouched');
+eq(parseBoard(fs.readFileSync(halfMove.boardPath, 'utf8'))['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-HALF-MOVE the pass completes to the intended parent shape');
+
+// BGR-RESTRUCTURE-REENTRANT: a crash during the RESUMED pass still converges
+// on a third invocation.
+const reentrant = makeRestructureFixture();
+const crashFamilyA = (file, value) => {
+  if (file.endsWith('Family A-board.md')) throw new Error('injected crash before the Family A board write');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, value);
+};
+await assert.rejects(
+  () => commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, { ...reentrant.deps, writeText: crashFamilyA }),
+  /injected crash/, 'BGR-RESTRUCTURE-REENTRANT the first crash propagates');
+await assert.rejects(
+  () => commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, { ...reentrant.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-REENTRANT the second crash during the resumed pass propagates');
+const reentrantFinal = await commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, reentrant.deps);
+eq(reentrantFinal.action, 'restructured', 'BGR-RESTRUCTURE-REENTRANT the third invocation completes cleanly');
+eq(reentrantFinal.resumed, true, 'BGR-RESTRUCTURE-REENTRANT the third invocation resumes the same recorded intent');
+eq(parseBoard(fs.readFileSync(reentrant.boardPath, 'utf8'))['In Planning'], ['Family A', 'Bystander card', 'Family B'],
+  'BGR-RESTRUCTURE-REENTRANT the parent board converges to the intended shape');
+for (const [epic, member] of [['Family A', 'Card A1'], ['Family A', 'Card A2'], ['Family B', 'Card B1'], ['Family B', 'Card B2']]) {
+  ok(fs.existsSync(path.join(reentrant.cardsRoot, epic, 'board', `${member}.md`))
+    && !fs.existsSync(path.join(reentrant.cardsRoot, `${member}.md`)),
+    `BGR-RESTRUCTURE-REENTRANT ${member} converged into ${epic}`);
+}
+const reentrantReplay = await commandRestructure({ root: reentrant.root }, { spec: reentrant.specPath, json: true }, reentrant.deps);
+eq(reentrantReplay.no_op, true, 'BGR-RESTRUCTURE-REENTRANT the post-convergence literal replay is a no-op');
+
+// BGR-RESTRUCTURE-DONE-CHECKBOX: the parent epic line derives its checkbox
+// from the derived lifecycle, checked only when the epic rolls up done.
+const doneEpic = makeRestructureFixture({ statuses: { 'Card A1': 'completed', 'Card A2': 'completed' } });
+writeSpec(doneEpic, { ...doneEpic.spec, epics: [{ epic: 'Family A', members: ['Card A1', 'Card A2'] }] });
+const doneReceipt = await commandRestructure({ root: doneEpic.root }, { spec: doneEpic.specPath, json: true }, doneEpic.deps);
+eq(doneReceipt.epics[0].state, 'done', 'BGR-RESTRUCTURE-DONE-CHECKBOX all-completed members derive a done epic');
+ok(/- \[x\] \[\[Family A\]\]/.test(fs.readFileSync(doneEpic.boardPath, 'utf8')),
+  'BGR-RESTRUCTURE-DONE-CHECKBOX a done epic paints a checked parent line');
+
+// BGR-RESTRUCTURE-ESCAPING-TARGET: a tampered journal target outside the cards
+// root fails closed before any write (symmetric with the source guard).
+const escapeTarget = makeRestructureFixture();
+await assert.rejects(
+  () => commandRestructure({ root: escapeTarget.root }, { spec: escapeTarget.specPath, json: true }, { ...escapeTarget.deps, writeText: crashingWriteText }),
+  /injected crash/, 'BGR-RESTRUCTURE-ESCAPING-TARGET setup crash propagates');
+const escapeJournal = JSON.parse(fs.readFileSync(escapeTarget.deps.journalPath, 'utf8'));
+const escapedPath = path.join(escapeTarget.root, 'escaped-outside.md');
+escapeJournal.epics[1].scaffolds.find((scaffold) => scaffold.path.endsWith('Family B-board.md')).path = escapedPath;
+fs.writeFileSync(escapeTarget.deps.journalPath, JSON.stringify(escapeJournal, null, 2));
+const escapeSnapshot = snapshotDirectory(escapeTarget.projectRoot);
+await assert.rejects(
+  () => commandRestructure({ root: escapeTarget.root }, { spec: escapeTarget.specPath, json: true }, escapeTarget.deps),
+  /escapes its physical root/,
+  'BGR-RESTRUCTURE-ESCAPING-TARGET a journal-supplied target outside the cards root fails closed');
+ok(!fs.existsSync(escapedPath), 'BGR-RESTRUCTURE-ESCAPING-TARGET the escaping target is never written');
+eq(snapshotDirectory(escapeTarget.projectRoot), escapeSnapshot,
+  'BGR-RESTRUCTURE-ESCAPING-TARGET the fail-closed rerun performs zero project writes');
+
+// BGR-RESTRUCTURE-E2E: seed fixture → reap → restructure → double reconcile → clean audit.
+const seedFlatSource = path.join(__dirname, 'seed-vault', 'spice', 'projects', 'flat-fixture');
+const e2eRoot = path.join(tmp, 'bgr-restructure-e2e');
+const e2eProjectRoot = path.join(e2eRoot, 'spice', 'projects', 'flat-fixture');
+fs.cpSync(seedFlatSource, e2eProjectRoot, { recursive: true });
+const e2eBoardPath = path.join(e2eProjectRoot, 'flat-fixture-board.md');
+const e2eCardsRoot = path.join(e2eProjectRoot, 'tasks');
+const e2eState = emptyState();
+e2eState.cards['FF4a Corpse pass'] = {
+  card: 'FF4a Corpse pass', phase: 'parked',
+  card_path: path.join(e2eCardsRoot, 'FF4a Corpse pass.md'),
+};
+e2eState.cards['FF4a2 Corpse rework (supersedes FF4a)'] = {
+  card: 'FF4a2 Corpse rework (supersedes FF4a)', phase: 'deployed',
+  card_path: path.join(e2eCardsRoot, 'FF4a2 Corpse rework (supersedes FF4a).md'),
+};
+const e2eDeps = {
+  readState: () => e2eState,
+  writeState: (_ctx, _state, record) => { if (record) e2eState.cards[record.card] = record; },
+  withLock: immediateCardLock,
+  boardPath: e2eBoardPath, cardsRoot: e2eCardsRoot,
+  worktreeExists: () => false, sh: () => '',
+  now: () => '2026-07-25T16:00:00.000Z',
+  journalPath: path.join(e2eRoot, 'restructure-journal.json'),
+};
+const e2eReap = await commandReap({ root: e2eRoot }, { json: true }, e2eDeps);
+eq(e2eReap.corpses.map((entry) => entry.card), ['FF4a Corpse pass'],
+  'BGR-RESTRUCTURE-E2E reap discards the corpse-pair member');
+eq(e2eReap.corpses[0].tombstone.superseded_by, 'FF4a2 Corpse rework (supersedes FF4a)',
+  'BGR-RESTRUCTURE-E2E the corpse tombstone names its deployed successor');
+eq(e2eReap.annotations_stripped.map((entry) => entry.card), ['FF Stub Parent'],
+  'BGR-RESTRUCTURE-E2E reap strips the stub annotation');
+ok(!fs.existsSync(path.join(e2eCardsRoot, 'FF4a Corpse pass.md')), 'BGR-RESTRUCTURE-E2E the corpse note is deleted');
+const e2eSpecPath = path.join(e2eRoot, 'map.json');
+fs.writeFileSync(e2eSpecPath, JSON.stringify({
+  project_root: e2eProjectRoot,
+  board: e2eBoardPath,
+  epics: [
+    { epic: 'Family A', members: ['FA1 Alpha intake', 'FA2 Alpha engine', 'FA3 Alpha polish'] },
+    { epic: 'Family B', members: ['FB1 Beta capture', 'FB2 Beta render', 'FB3 Beta ship'] },
+  ],
+}, null, 2));
+const e2eRestructure = await commandRestructure({ root: e2eRoot }, { spec: e2eSpecPath, json: true }, e2eDeps);
+eq(e2eRestructure.no_op, false, 'BGR-RESTRUCTURE-E2E restructure applies against the reaped board');
+eq(e2eRestructure.epics.map((entry) => [entry.epic, entry.members.length]), [['Family A', 3], ['Family B', 3]],
+  'BGR-RESTRUCTURE-E2E both family epics absorb their three members');
+const e2eParent = fs.readFileSync(e2eBoardPath, 'utf8');
+eq(parseBoard(e2eParent)['In Planning'], ['FF Stub Parent', 'Family A', 'Family B'],
+  'BGR-RESTRUCTURE-E2E the parent In Planning lane holds the stripped stub and both epic lines');
+ok(/- \[x\] \[\[FF4a2 Corpse rework \(supersedes FF4a\)\]\]/.test(e2eParent),
+  'BGR-RESTRUCTURE-E2E the deployed successor line survives untouched');
+const e2eFirstReconcile = await commandReconcile({ root: e2eRoot }, {}, e2eDeps);
+eq(e2eFirstReconcile.failed, 0, 'BGR-RESTRUCTURE-E2E the first full reconcile reports zero failures');
+const e2eSecondReconcile = await commandReconcile({ root: e2eRoot }, {}, e2eDeps);
+eq(e2eSecondReconcile.no_op, true, 'BGR-RESTRUCTURE-E2E the second full reconcile reports zero drift and no_op');
+eq(e2eSecondReconcile.failed, 0, 'BGR-RESTRUCTURE-E2E the second full reconcile reports zero failures');
+const e2eStatus = commandStatus({ root: e2eRoot, statePath: path.join(e2eRoot, 'state.json') }, {
+  state: e2eState, boardMd: fs.readFileSync(e2eBoardPath, 'utf8'),
+  loadCard: () => null, cardsRoot: e2eCardsRoot, boardPath: e2eBoardPath,
+});
+eq(e2eStatus.board_drift, [], 'BGR-RESTRUCTURE-E2E the epic drift audit reports clean');
+eq(e2eStatus.projection_problems, [], 'BGR-RESTRUCTURE-E2E status reports zero projection problems');
+eq(e2eStatus.discarded_total, 1, 'BGR-RESTRUCTURE-E2E the corpse tombstone is the only discard');
+const e2eResolved = resolveEpicBoardSet({ parentBoardMd: e2eParent, cardsRoot: e2eCardsRoot });
+eq(e2eResolved.epics.map((entry) => entry.epic), ['Family A', 'Family B'],
+  'BGR-RESTRUCTURE-E2E the epic resolver sees both migrated family epics');
+eq(e2eResolved.findings, [], 'BGR-RESTRUCTURE-E2E the epic resolver reports no findings');
+const e2eReplay = await commandRestructure({ root: e2eRoot }, { spec: e2eSpecPath, json: true }, e2eDeps);
+eq(e2eReplay.no_op, true, 'BGR-RESTRUCTURE-E2E the literal replay after reconcile is still a no-op');
+
+// --- BGR-CUTOVER: receipt-gated, reversible ES5 epic-intake cutover flag ---
+const cutRoot = path.join(tmp, 'bgr-cutover');
+fs.mkdirSync(cutRoot, { recursive: true });
+const cutBoardPath = path.join(cutRoot, 'board.md');
+const cutCardPath = path.join(cutRoot, 'Cut card.md');
+fs.writeFileSync(cutCardPath, '---\nkanban_column: In Progress\nstatus: in_progress\n---\nbody\n');
+fs.writeFileSync(cutBoardPath, liveBoard({ progress: ['Cut card'] }));
+const cutState = emptyState();
+cutState.cards['Cut card'] = {
+  card: 'Cut card', phase: 'implementing', card_path: cutCardPath,
+  projection_reconciled_at: '2026-07-25T00:00:00.000Z',
+};
+let cutWrites = 0;
+const cutLocks = [];
+const cutDeps = {
+  readState: () => cutState,
+  writeState: () => { cutWrites++; },
+  withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
+  boardPath: cutBoardPath,
+  now: () => '2026-07-25T18:00:00.000Z',
+};
+
+// Status before any cutover call: the object is absent (null), not fabricated.
+const cutStatusBefore = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusBefore.cutover, null, 'BGR-CUTOVER-REVERSIBLE status exposes cutover as null before any cutover write');
+eq(cutStatusBefore.cutover_history, [], 'BGR-CUTOVER-REVERSIBLE status exposes an empty cutover_history before any flip');
+
+// BGR-CUTOVER-STREAK: only clean FULL reconciles advance the counter.
+const cutClean1 = await commandReconcile({ root: cutRoot }, {}, cutDeps);
+eq(cutClean1.no_op, true, 'BGR-CUTOVER-STREAK the fixture starts converged (clean full pass)');
+eq(cutClean1.reconcile_clean_streak, 1, 'BGR-CUTOVER-STREAK first clean full reconcile reports streak 1');
+eq(cutState.reconcile_clean_streak, 1, 'BGR-CUTOVER-STREAK the streak persists in top-level coordinator state');
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 2, 'BGR-CUTOVER-STREAK second clean full reconcile reports streak 2');
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 3, 'BGR-CUTOVER-STREAK third clean full reconcile reports streak 3');
+const cutSingle = await commandReconcile({ root: cutRoot }, { card: 'Cut card' }, cutDeps);
+eq(cutSingle.no_op, true, 'BGR-CUTOVER-STREAK the single-card pass is itself clean');
+ok(!('reconcile_clean_streak' in cutSingle), 'BGR-CUTOVER-STREAK single-card receipts never carry the streak');
+eq(cutState.reconcile_clean_streak, 3, 'BGR-CUTOVER-STREAK single-card reconciles leave the streak untouched');
+fs.writeFileSync(cutBoardPath, liveBoard({ planning: ['Cut card'] }));
+const cutDrift = await commandReconcile({ root: cutRoot }, {}, cutDeps);
+ok(cutDrift.changed >= 1, 'BGR-CUTOVER-STREAK the moved board line registers as drift on the full pass');
+eq(cutDrift.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK a drift-finding full reconcile resets the streak to 0');
+eq(cutState.reconcile_clean_streak, 0, 'BGR-CUTOVER-STREAK the reset persists in coordinator state');
+
+// BGR-CUTOVER-CRITERIA: --json first, operands required, every unmet criterion listed.
+const opx2CutoverProjections = [];
+const cutoverBaseDeps = {
+  readState: () => cutState,
+  writeState: () => { cutWrites++; },
+  withLock: async (_ctx, name, fn) => { cutLocks.push(name); return fn(); },
+  now: () => '2026-07-25T19:00:00.000Z',
+  projectLoopStation: (_ctx, _state, updatedOn) => {
+    opx2CutoverProjections.push(updatedOn);
+    return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+  },
+};
+cutLocks.length = 0;
+const cutWritesBeforeRefusals = cutWrites;
+await assert.rejects(() => commandCutover({ root: cutRoot }, { 'chain-prefix': 'ES' }, cutoverBaseDeps),
+  /requires --json/, 'BGR-CUTOVER-CRITERIA cutover refuses without --json before any read or write');
+eq(cutLocks, [], 'BGR-CUTOVER-CRITERIA missing --json refusal precedes every lock');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true }, cutoverBaseDeps),
+  /--require-card|--chain-prefix/, 'BGR-CUTOVER-CRITERIA cutover requires an explicit chain declaration operand');
+eq(cutLocks, [], 'BGR-CUTOVER-CRITERIA missing-operand refusal precedes every lock');
+eq(cutWrites, cutWritesBeforeRefusals, 'BGR-CUTOVER-CRITERIA usage refusals perform zero writes');
+// All three criteria red: streak is 0, the ES chain is undeclared/incomplete,
+// and the injected package.json has no registered harness.
+const cutRefused = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: () => ({ scripts: { test: 'echo nothing' } }) });
+eq(cutRefused.action, 'cutover-refused', 'BGR-CUTOVER-CRITERIA unmet criteria refuse with a machine-readable receipt');
+eq(cutRefused.enabled, false, 'BGR-CUTOVER-CRITERIA a refused cutover never enables');
+eq(cutRefused.unmet, ['es_chain_complete', 'migration_harness_registered', 'reconcile_clean_streak'],
+  'BGR-CUTOVER-CRITERIA the refusal lists EVERY unmet criterion');
+ok(cutRefused.criteria.es_chain_complete.missing.some((entry) => entry.card === 'ES1 Alpha'),
+  'BGR-CUTOVER-CRITERIA the chain criterion names the untracked required card');
+ok(cutRefused.criteria.es_chain_complete.missing.some((entry) => entry.chain_prefix === 'ES'),
+  'BGR-CUTOVER-CRITERIA a chain prefix matching zero ledger cards fails rather than passing vacuously');
+ok(/reconcile_clean_streak 0 < 3/.test(cutRefused.criteria.reconcile_clean_streak.missing),
+  'BGR-CUTOVER-CRITERIA the streak criterion reports the exact shortfall');
+ok(typeof cutRefused.criteria.migration_harness_registered.missing === 'string',
+  'BGR-CUTOVER-CRITERIA the harness criterion reports a machine-readable missing reason');
+eq(cutWrites, cutWritesBeforeRefusals, 'BGR-CUTOVER-CRITERIA a refused cutover performs zero writes');
+ok(!cutState.cutover, 'BGR-CUTOVER-CRITERIA a refused cutover leaves no cutover object in state');
+
+// Rebuild the streak to 3, then complete the ES chain in the ledger.
+await commandReconcile({ root: cutRoot }, {}, cutDeps);
+await commandReconcile({ root: cutRoot }, {}, cutDeps);
+eq((await commandReconcile({ root: cutRoot }, {}, cutDeps)).reconcile_clean_streak, 3,
+  'BGR-CUTOVER-STREAK three clean full reconciles after a reset rebuild streak 3');
+cutState.cards['ES1 Alpha'] = { card: 'ES1 Alpha', phase: 'deployed' };
+cutState.cards['ES2 Beta'] = { card: 'ES2 Beta', phase: 'deployed' };
+cutState.cards['ES3a Gamma'] = {
+  card: 'ES3a Gamma', phase: 'discarded', discarded_at: '2026-07-24T00:00:00.000Z',
+  discard_reason: 'superseded', superseded_by: 'ES3a2 Gamma rework (supersedes ES3a)', final_head: null, carried_fixtures: [],
+};
+cutState.cards['ES3a2 Gamma rework (supersedes ES3a)'] = { card: 'ES3a2 Gamma rework (supersedes ES3a)', phase: 'deployed' };
+// The real repo package.json is the harness registry: de-registering
+// run-codex-autoloop there must break this fixture (criterion 2 is live).
+const realPackageJson = () => JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+// Harness de-registration alone blocks cutover even with chain + streak green.
+const cutHarnessOnly = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: () => ({ scripts: { test: 'echo nothing' } }) });
+eq(cutHarnessOnly.unmet, ['migration_harness_registered'],
+  'BGR-CUTOVER-CRITERIA harness de-registration alone blocks an otherwise-green cutover');
+// A tracked-but-parked chain card blocks completeness until it turns terminal.
+cutState.cards['ES9 Parked'] = { card: 'ES9 Parked', phase: 'parked' };
+const cutParked = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutParked.unmet, ['es_chain_complete'], 'BGR-CUTOVER-CRITERIA a parked chain card alone blocks cutover');
+eq(cutParked.criteria.es_chain_complete.missing,
+  [{ card: 'ES9 Parked', phase: 'parked', problem: "phase is neither 'deployed' nor tombstoned 'discarded'" }],
+  'BGR-CUTOVER-CRITERIA the refusal names the parked card and its ledger phase');
+cutState.cards['ES9 Parked'].phase = 'deployed'; // flipping it terminal unblocks the enable below
+cutLocks.length = 0;
+const cutWritesBeforeEnable = cutWrites;
+const cutEnabled = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutEnabled.action, 'cutover', 'BGR-CUTOVER-CRITERIA all-green cutover emits the cutover receipt');
+eq(cutEnabled.enabled, true, 'BGR-CUTOVER-CRITERIA all-green cutover enables the flag');
+eq(cutEnabled.no_op, false, 'BGR-CUTOVER-CRITERIA first enable is not a no-op');
+eq(opx2CutoverProjections, ['cutover'],
+  'OPX2-TRANSITION-ONLY cutover enable fires exactly one Loop Station projection');
+ok(cutLocks.includes('selector'), 'BGR-CUTOVER-CRITERIA cutover evaluates under the selector lock');
+eq(cutWrites, cutWritesBeforeEnable + 1, 'BGR-CUTOVER-CRITERIA enabling writes coordinator state exactly once');
+eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-CRITERIA the enabled flag persists in coordinator state');
+eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-CRITERIA the receipt records when cutover enabled');
+ok(cutState.cutover.receipts.es_chain_complete.satisfied.some((entry) => entry.card === 'ES3a Gamma' && entry.phase === 'discarded'),
+  'BGR-CUTOVER-CRITERIA a tombstoned superseded ES sibling satisfies (never blocks) the chain criterion');
+ok(cutState.cutover.receipts.es_chain_complete.satisfied.some((entry) => entry.card === 'ES1 Alpha' && entry.phase === 'deployed'),
+  'BGR-CUTOVER-CRITERIA the receipt lists each deployed chain card as evidence');
+ok(typeof cutState.cutover.receipts.migration_harness_registered.script === 'string',
+  'BGR-CUTOVER-CRITERIA the receipt names the package.json script that registers the harness');
+eq(cutState.cutover.receipts.reconcile_clean_streak.streak, 3,
+  'BGR-CUTOVER-CRITERIA the receipt carries the clean-reconcile streak evidence');
+eq(cutState.cutover_history, [{ enabled: true, at: '2026-07-25T19:00:00.000Z' }],
+  'BGR-CUTOVER-REVERSIBLE the enable flip appends one cutover_history entry');
+
+// BGR-CUTOVER-NOOP: replay when already enabled → no_op, zero writes.
+const cutWritesBeforeReplay = cutWrites;
+const cutReplay = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutReplay.no_op, true, 'BGR-CUTOVER-NOOP replay while enabled reports no_op:true');
+eq(cutReplay.enabled, true, 'BGR-CUTOVER-NOOP replay reports the enabled flag');
+eq(cutWrites, cutWritesBeforeReplay, 'BGR-CUTOVER-NOOP replay performs zero writes');
+eq(cutState.cutover.enabled_at, '2026-07-25T19:00:00.000Z', 'BGR-CUTOVER-NOOP replay never restamps enabled_at');
+eq(cutState.cutover_history.length, 1, 'BGR-CUTOVER-NOOP replay appends no cutover_history entry');
+eq(opx2CutoverProjections, ['cutover'],
+  'OPX2-TRANSITION-ONLY cutover replay fires no additional Loop Station projection');
+
+// BGR-CUTOVER-REVERSIBLE: --off flips it back; status exposes both ways; re-enable works.
+const cutStatusEnabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusEnabled.cutover.enabled, true, 'BGR-CUTOVER-REVERSIBLE status --json exposes the enabled cutover object');
+ok(cutStatusEnabled.cutover.receipts, 'BGR-CUTOVER-REVERSIBLE status carries the cutover receipts');
+eq(cutStatusEnabled.cutover_history, [{ enabled: true, at: '2026-07-25T19:00:00.000Z' }],
+  'BGR-CUTOVER-REVERSIBLE status --json exposes cutover_history while enabled');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: true }, cutoverBaseDeps),
+  /--reason/, 'BGR-CUTOVER-REVERSIBLE --off requires a non-empty --reason');
+await assert.rejects(() => commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'x', 'chain-prefix': 'ES' }, cutoverBaseDeps),
+  /never evaluates criteria/, 'BGR-CUTOVER-REVERSIBLE --off refuses criteria operands rather than silently ignoring them');
+const cutOff = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
+eq(cutOff.enabled, false, 'BGR-CUTOVER-REVERSIBLE --off disables the flag');
+eq(cutOff.no_op, false, 'BGR-CUTOVER-REVERSIBLE first --off is not a no-op');
+eq(opx2CutoverProjections, ['cutover', 'cutover'],
+  'OPX2-TRANSITION-ONLY cutover disable fires exactly one additional Loop Station projection');
+eq(cutState.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+  'BGR-CUTOVER-REVERSIBLE the disable receipt records disabled_at and reason');
+eq(cutState.cutover_history, [
+  { enabled: true, at: '2026-07-25T19:00:00.000Z' },
+  { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+], 'BGR-CUTOVER-REVERSIBLE the disable flip appends a history entry carrying the reason');
+const cutWritesBeforeOffReplay = cutWrites;
+const cutOffReplay = await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'live incident' }, cutoverBaseDeps);
+eq(cutOffReplay.no_op, true, 'BGR-CUTOVER-REVERSIBLE --off replay while disabled is a no_op');
+eq(cutWrites, cutWritesBeforeOffReplay, 'BGR-CUTOVER-REVERSIBLE --off replay performs zero writes');
+eq(cutState.cutover_history.length, 2, 'BGR-CUTOVER-REVERSIBLE --off replay appends no cutover_history entry');
+const cutStatusDisabled = commandStatus({ root: cutRoot, statePath: path.join(cutRoot, 'state.json') }, {
+  state: cutState, boardMd: fs.readFileSync(cutBoardPath, 'utf8'), loadCard: () => null, boardPath: cutBoardPath, cardsRoot: cutRoot,
+});
+eq(cutStatusDisabled.cutover, { enabled: false, disabled_at: '2026-07-25T19:00:00.000Z', reason: 'live incident' },
+  'BGR-CUTOVER-REVERSIBLE status --json exposes the disabled cutover object');
+eq(cutStatusDisabled.cutover_history.length, 2, 'BGR-CUTOVER-REVERSIBLE status --json exposes cutover_history while disabled');
+const cutReEnabled = await commandCutover({ root: cutRoot }, {
+  json: true, 'require-card': 'ES1 Alpha', 'chain-prefix': 'ES',
+}, { ...cutoverBaseDeps, readPackageJson: realPackageJson });
+eq(cutReEnabled.enabled, true, 'BGR-CUTOVER-REVERSIBLE a subsequent cutover with criteria green re-enables');
+eq(cutReEnabled.no_op, false, 'BGR-CUTOVER-REVERSIBLE re-enable after --off is a fresh enable, not a replay');
+eq(cutState.cutover.enabled, true, 'BGR-CUTOVER-REVERSIBLE the re-enabled flag persists with fresh receipts');
+eq(cutState.cutover_history.length, 3, 'BGR-CUTOVER-REVERSIBLE the re-enable flip appends a third history entry');
+eq(cutState.cutover_history[2], { enabled: true, at: '2026-07-25T19:00:00.000Z' },
+  'BGR-CUTOVER-REVERSIBLE the newest history entry is the re-enable flip');
+// History is bounded: seed past the cap, flip once, oldest entries drop.
+cutState.cutover_history = Array.from({ length: 22 }, (_, i) => ({ enabled: i % 2 === 0, at: `seed-${i}` }));
+await commandCutover({ root: cutRoot }, { json: true, off: true, reason: 'cap check' }, cutoverBaseDeps);
+eq(cutState.cutover_history.length, 20, 'BGR-CUTOVER-REVERSIBLE cutover_history is capped at the 20 most recent entries');
+eq(cutState.cutover_history[0].at, 'seed-3', 'BGR-CUTOVER-REVERSIBLE the cap drops the oldest entries first');
+eq(cutState.cutover_history[19], { enabled: false, at: '2026-07-25T19:00:00.000Z', reason: 'cap check' },
+  'BGR-CUTOVER-REVERSIBLE the newest capped entry is the latest flip');
+
+// --- OPX4: coordinator-owned ratification inbox, receipt consumption, and digest feed ---
+const OPX4_CARD = 'GA-TEST1a Exact ratification fixture';
+const OPX4_HEAD = 'e'.repeat(40);
+const opx4Vault = path.join(tmp, 'opx4-vault');
+const opx4Project = path.join(opx4Vault, 'spice/projects/sauce');
+const opx4Board = path.join(opx4Project, 'sauce-board.md');
+const opx4Worktree = path.join(tmp, 'opx4-worktree');
+const opx4CardPath = path.join(opx4Project, 'tasks/Test epic/board', `${OPX4_CARD}.md`);
+fs.mkdirSync(path.dirname(opx4CardPath), { recursive: true });
+fs.mkdirSync(opx4Worktree, { recursive: true });
+fs.writeFileSync(opx4Board, [
+  '# Board', '', '## In Planning', '', '## In Progress', '',
+  `- [ ] [[${OPX4_CARD}]]`, '', '## Blocked', '', '## Completed', '',
+].join('\n'));
+fs.writeFileSync(opx4CardPath, card({ name: OPX4_CARD, parent: 'Test epic' })
+  .replace('status: planning', 'status: parked'));
+const opx4State = {
+  schema_version: 1,
+  cards: {
+    [OPX4_CARD]: {
+      card: OPX4_CARD,
+      phase: 'parked',
+      status: 'parked',
+      model_profile: 'heavy',
+      parent_card: 'Test epic',
+      touch_zones: ['scripts/autoloop/codex-coordinator.js'],
+      dependencies: [],
+      deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+      resume_condition: 'Will must ratify the exact bounded continuation.',
+      gate_receipt: passingReceipt(OPX4_HEAD),
+      reviews: { correctness: { head_sha: OPX4_HEAD } },
+      worktree: opx4Worktree,
+      card_path: opx4CardPath,
+    },
+  },
+};
+const firstScaffold = scaffoldPendingRatifications(opx4State, {
+  boardPath: opx4Board,
+  now: () => '2026-07-26T15:30:00.000Z',
+  uuid: () => '11111111-2222-4333-8444-555555555555',
+});
+eq(firstScaffold.scaffolded.length, 1,
+  'OPX4-SCAFFOLD-PREFILLED escalation projection scaffolds exactly one missing artifact');
+const opx4Artifact = ratificationArtifactForCard(OPX4_CARD, opx4Board);
+const opx4PendingRaw = fs.readFileSync(opx4Artifact.absolute, 'utf8');
+eq(testScalarField(opx4PendingRaw, 'type'), 'ratification',
+  'OPX4-SCAFFOLD-PREFILLED artifact frontmatter has the canonical type');
+eq(testScalarField(opx4PendingRaw, 'state'), 'pending',
+  'OPX4-SCAFFOLD-PREFILLED artifact frontmatter begins pending');
+eq(testScalarField(opx4PendingRaw, 'target_card'), OPX4_CARD,
+  'OPX4-SCAFFOLD-PREFILLED target identity comes from the ledger');
+ok(opx4PendingRaw.includes(`"target_head": "${OPX4_HEAD}"`),
+  'OPX4-SCAFFOLD-PREFILLED exact 40-hex target HEAD comes from the preserved gate receipt');
+ok(opx4PendingRaw.includes('"decision": ""')
+  && opx4PendingRaw.includes('"accepted_at": ""')
+  && opx4PendingRaw.includes('"authority": ""'),
+'OPX4-SCAFFOLD-PREFILLED only the three human-authored receipt fields begin empty');
+const scaffoldReplay = scaffoldPendingRatifications(opx4State, {
+  boardPath: opx4Board,
+  now: () => '2026-07-26T16:00:00.000Z',
+  uuid: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+});
+eq(scaffoldReplay.scaffolded, [],
+  'OPX4-BACKFILL-IDEMPOTENT replay scaffolds no artifact');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), opx4PendingRaw,
+  'OPX4-BACKFILL-IDEMPOTENT replay preserves the existing artifact byte-for-byte');
+const commandBackfillReplay = await commandBackfillRatifications({ root: tmp }, {
+  _: ['backfill-ratifications'], json: true,
+}, {
+  boardPath: opx4Board,
+  readState: () => opx4State,
+  withLock: async (_ctx, _name, fn) => fn(),
+});
+eq(commandBackfillReplay.no_op, true,
+  'OPX4-BACKFILL-IDEMPOTENT the explicit backfill replay emits no_op true');
+ok(ratificationStatus(opx4State.cards[OPX4_CARD], opx4State, { boardPath: opx4Board }).error,
+  'OPX4-CONSUME-INCOMPLETE status surfaces the incomplete pending receipt read-only');
+
+let opx4Writes = 0;
+let opx4StateReads = 0;
+let opx4ProjectionWrites = 0;
+const opx4ImmediateLock = async (_ctx, _name, fn) => fn();
+const opx4Deps = {
+  boardPath: opx4Board,
+  cardsRoot: path.join(opx4Project, 'tasks'),
+  readState: () => { opx4StateReads++; return opx4State; },
+  writeState: () => { opx4Writes++; },
+  withLock: opx4ImmediateLock,
+  projectCard: () => { opx4ProjectionWrites++; return { changed: true }; },
+  projectLoopStation: async () => {
+    opx4ProjectionWrites++;
+    return { action: 'loop-station-projected', no_op: false };
+  },
+  resolveWorktreeHead: () => OPX4_HEAD,
+  now: () => '2026-07-26T15:31:00.000Z',
+};
+const opx4Args = { _: ['consume-ratification'], json: true, card: OPX4_CARD };
+const incompleteConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(incompleteConsume.action, 'ratification-refused',
+  'OPX4-CONSUME-INCOMPLETE an empty decision refuses with a machine receipt');
+eq(opx4Writes, 0, 'OPX4-CONSUME-INCOMPLETE refusal performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), opx4PendingRaw,
+  'OPX4-CONSUME-INCOMPLETE refusal leaves the pending artifact byte-identical');
+
+const multiInvalidRaw = opx4PendingRaw.replace(
+  'created_at:',
+  'unexpected_one: "x"\nunexpected_two: "y"\ntype: ratification\ncreated_at:',
+);
+fs.writeFileSync(opx4Artifact.absolute, multiInvalidRaw);
+const multiInvalidConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(
+  multiInvalidConsume.errors.filter((issue) => issue.code === 'ratification-frontmatter-field-unexpected')
+    .map((issue) => issue.field),
+  ['unexpected_one', 'unexpected_two'],
+  'OPX4-CONSUME-INCOMPLETE returns every unsupported frontmatter field',
+);
+ok(multiInvalidConsume.errors.some((issue) => (
+  issue.code === 'ratification-frontmatter-field-duplicate' && issue.field === 'type'
+)), 'OPX4-CONSUME-INCOMPLETE rejects ambiguous duplicate frontmatter keys');
+eq(opx4Writes, 0, 'OPX4-CONSUME-INCOMPLETE multi-error refusal performs zero ledger writes');
+
+const tamperedRaw = opx4PendingRaw
+  .replace('"decision": ""', '"decision": "accepted"')
+  .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:30:00-06:00"')
+  .replace('"authority": ""', '"authority": "delegate"')
+  .replace(OPX4_HEAD, `f${OPX4_HEAD.slice(1)}`);
+fs.writeFileSync(opx4Artifact.absolute, tamperedRaw);
+const tamperedConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(tamperedConsume.action, 'ratification-refused',
+  'OPX4-CONSUME-TAMPERED-HEAD target-head deviation refuses');
+ok(tamperedConsume.errors.some((issue) => issue.code === 'ratification-target-head-mismatch'),
+  'OPX4-CONSUME-TAMPERED-HEAD receipt names the exact-head mismatch');
+eq(opx4Writes, 0, 'OPX4-CONSUME-TAMPERED-HEAD refusal performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), tamperedRaw,
+  'OPX4-CONSUME-TAMPERED-HEAD refusal does not flip artifact state');
+
+const authorityVerbatim = 'delegate: exact mechanical authority';
+const acceptedRaw = opx4PendingRaw
+  .replace('"decision": ""', '"decision": "accepted"')
+  .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:31:00-06:00"')
+  .replace('"authority": ""', `"authority": ${JSON.stringify(authorityVerbatim)}`);
+const duplicatePayloadRaw = acceptedRaw
+  .replace('"decision": "accepted"', '"decision": "",\n  "decision": "accepted"')
+  .replace(
+    `"authority": ${JSON.stringify(authorityVerbatim)}`,
+    `"authority": "",\n  "authority": ${JSON.stringify(authorityVerbatim)}`,
+  );
+fs.writeFileSync(opx4Artifact.absolute, duplicatePayloadRaw);
+const duplicatePayloadConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  duplicatePayloadConsume.errors.filter((issue) => issue.code === 'ratification-field-duplicate')
+    .map((issue) => issue.field),
+  ['decision', 'authority'],
+  'OPX4-CONSUME-INCOMPLETE returns every duplicate selected receipt payload field',
+);
+eq(opx4Writes, 0,
+  'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), duplicatePayloadRaw,
+  'OPX4-CONSUME-INCOMPLETE duplicate-payload refusal leaves the artifact byte-identical');
+const mixedPayloadInvalidRaw = acceptedRaw
+  .replace(
+    '"decision": "accepted"',
+    '"decision": "accepted",\n  "decision": "provisionally_accepted"',
+  )
+  .replace('"accepted_at": "2026-07-26T09:31:00-06:00"', '"accepted_at": "not-a-timestamp"')
+  .replace(`"target_card": "${OPX4_CARD}"`, '"target_card": "GA-OPX4 wrong target"')
+  .replace(`"target_head": "${OPX4_HEAD}"`, `"target_head": "${'b'.repeat(40)}"`)
+  .replace(
+    '  "scope": [',
+    '  "unexpected_one": "x",\n  "unexpected_two": "y",\n  "scope": [',
+  );
+fs.writeFileSync(opx4Artifact.absolute, mixedPayloadInvalidRaw);
+const mixedPayloadInvalidConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  mixedPayloadInvalidConsume.errors.map((issue) => [issue.code, issue.field]),
+  [
+    ['ratification-field-duplicate', 'decision'],
+    ['ratification-field-unexpected', 'unexpected_one'],
+    ['ratification-field-unexpected', 'unexpected_two'],
+    ['invalid-ratification-timestamp', 'accepted_at'],
+    ['ratification-target-card-mismatch', 'target_card'],
+    ['ratification-target-head-mismatch', 'target_head'],
+    ['ratification-decision-mismatch', 'decision'],
+  ],
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS returns structural, semantic, and binding errors together',
+);
+eq(opx4Writes, 0,
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS performs zero ledger writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), mixedPayloadInvalidRaw,
+  'GA-OPS19A4-MIXED-PAYLOAD-ERROR-EXHAUSTIVENESS leaves the artifact pending and byte-identical');
+const mixedSectionOffset = mixedPayloadInvalidRaw.indexOf(`## Ratification — ${OPX4_CARD}`);
+ok(mixedSectionOffset >= 0,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION locates the authoritative section fixture');
+const mixedSection = mixedPayloadInvalidRaw.slice(mixedSectionOffset);
+const positionCollisionRaw = [
+  mixedPayloadInvalidRaw.slice(0, mixedSectionOffset),
+  '````md',
+  mixedSection,
+  '````',
+  '',
+  mixedPayloadInvalidRaw.slice(mixedSectionOffset),
+].join('\n');
+fs.writeFileSync(opx4Artifact.absolute, positionCollisionRaw);
+const positionCollisionConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  positionCollisionConsume.errors.map((issue) => [issue.code, issue.field]),
+  mixedPayloadInvalidConsume.errors.map((issue) => [issue.code, issue.field]),
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION ignores the earlier byte-identical fenced decoy and preserves the exhaustive error order',
+);
+eq(opx4Writes, 0,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION performs zero ledger writes');
+eq(opx4ProjectionWrites, 0,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION performs zero card or Loop Station projection writes');
+eq(fs.readFileSync(opx4Artifact.absolute, 'utf8'), positionCollisionRaw,
+  'GA-OPS19A5-AUTHORITATIVE-SECTION-OFFSET-COLLISION leaves the pending artifact byte-identical');
+const multiPayloadDecoy = [
+  '````md',
+  `## Ratification — ${OPX4_CARD}`,
+  '```delivery-ratification',
+  '{"decoy_unexpected":"must-not-be-selected"}',
+  '```',
+  '````',
+  '',
+].join('\n');
+const multiPayloadInvalidRaw = `${multiPayloadDecoy}${acceptedRaw.replace(
+  '  "scope": [',
+  '  "unexpected_one": "x",\n  "unexpected_two": "y",\n  "scope": [',
+)}`;
+fs.writeFileSync(opx4Artifact.absolute, multiPayloadInvalidRaw);
+const multiPayloadInvalidConsume = await commandConsumeRatification(
+  { root: tmp }, opx4Args, opx4Deps,
+);
+eq(
+  multiPayloadInvalidConsume.errors.filter((issue) => issue.code === 'ratification-field-unexpected')
+    .map((issue) => issue.field),
+  ['unexpected_one', 'unexpected_two'],
+  'OPX4-CONSUME-INCOMPLETE returns every unsupported receipt payload field',
+);
+eq(opx4Writes, 0,
+  'OPX4-CONSUME-INCOMPLETE multi-payload-error refusal performs zero ledger writes');
+fs.writeFileSync(opx4Artifact.absolute, acceptedRaw);
+await assert.rejects(() => commandConsumeRatification({ root: tmp }, opx4Args, {
+  ...opx4Deps,
+  writeText: (_target, value) => {
+    if (String(value).includes('state: consumed')) throw new Error('injected artifact finalize failure');
+  },
+}), /injected artifact finalize failure/,
+'OPX4-CONSUME-VALID a post-ledger artifact finalize failure remains recoverable');
+count++;
+ok(opx4State.cards[OPX4_CARD].ratification_receipt
+  && testScalarField(fs.readFileSync(opx4Artifact.absolute, 'utf8'), 'state') === 'pending',
+'OPX4-CONSUME-VALID authority persists before a failed consumed-state flip');
+const validConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(validConsume.action, 'ratification-consumed',
+  'OPX4-CONSUME-VALID a complete exact-head artifact is consumed');
+eq(validConsume.recovered, true,
+  'OPX4-CONSUME-VALID literal recovery finishes the pending artifact flip');
+eq(opx4State.cards[OPX4_CARD].ratification_receipt.authority, authorityVerbatim,
+  'OPX4-AUTHORITY-VERBATIM authority is recorded exactly without validator policy');
+for (const field of ['artifact_path', 'artifact_sha256', 'section_heading', 'section_sha256']) {
+  ok(opx4State.cards[OPX4_CARD].ratification_receipt[field],
+    `OPX4-CONSUME-VALID stores receipt provenance ${field}`);
+}
+eq(opx4State.cards[OPX4_CARD].phase, 'implementing',
+  'OPX4-CONSUME-VALID resolves the ratification park');
+const opx4ConsumedRaw = fs.readFileSync(opx4Artifact.absolute, 'utf8');
+eq(testScalarField(opx4ConsumedRaw, 'state'), 'consumed',
+  'OPX4-CONSUME-VALID flips artifact frontmatter to consumed');
+eq(testScalarField(opx4ConsumedRaw, 'consumed_at'), '2026-07-26T15:31:00.000Z',
+  'OPX4-CONSUME-VALID records the exact consumption timestamp');
+const opx4WritesAfterSuccess = opx4Writes;
+const replayConsume = await commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps);
+eq(replayConsume.no_op, true,
+  'OPX4-REPLAY-LITERAL identical re-consume returns no_op true');
+eq(opx4Writes, opx4WritesAfterSuccess,
+  'OPX4-REPLAY-LITERAL exact replay performs no additional ledger write');
+fs.writeFileSync(opx4Artifact.absolute, `${opx4ConsumedRaw}\nchanged prose outside the receipt\n`);
+await assert.rejects(
+  () => commandConsumeRatification({ root: tmp }, opx4Args, opx4Deps),
+  /differs from the stored exact-head receipt/,
+  'OPX4-REPLAY-LITERAL full consumed-artifact drift refuses even when the selected receipt is unchanged',
+);
+count++;
+fs.writeFileSync(opx4Artifact.absolute, opx4ConsumedRaw);
+await assert.rejects(() => commandConsumeRatification({ root: tmp }, {
+  ...opx4Args,
+  artifact: opx4Artifact.relative,
+}, opx4Deps), /different operands; replay must be literal/,
+'OPX4-REPLAY-LITERAL an explicit substituted artifact operand refuses after omitted-operand success');
+count++;
+
+const outsideArtifact = path.join(opx4Vault, 'outside.md');
+fs.writeFileSync(outsideArtifact, '# outside\n');
+const readsBeforeContainment = opx4StateReads;
+await assert.rejects(() => commandConsumeRatification({ root: tmp }, {
+  ...opx4Args,
+  artifact: 'outside.md',
+}, opx4Deps), /inside the project ratifications directory/,
+'OPX4-CONTAINMENT an artifact outside the ratifications root refuses');
+count++;
+eq(opx4StateReads, readsBeforeContainment,
+  'OPX4-CONTAINMENT refusal happens before any state read');
+
+const opx4Digest = deliveryStatusDigest.buildDigest({
+  active: [],
+  parked: [],
+  tracked: [],
+  ratified_recent: [{
+    card: OPX4_CARD,
+    authority: authorityVerbatim,
+    at: '2026-07-26T09:31:00-06:00',
+    artifact_path: opx4Artifact.relative,
+  }],
+}, '', [], { lastSeen: '2026-07-26T09:00:00-06:00' });
+eq(opx4Digest.since.ratified, [{
+  card: OPX4_CARD,
+  authority: authorityVerbatim,
+  at: '2026-07-26T09:31:00-06:00',
+  artifact_path: opx4Artifact.relative,
+}], 'OPX4-CONSUME-VALID successful consumption enters the digest ratified feed');
+const opx4OffsetDigest = deliveryStatusDigest.buildDigest({
+  active: [],
+  parked: [],
+  tracked: [],
+  ratified_recent: [{
+    card: OPX4_CARD,
+    authority: authorityVerbatim,
+    at: '2026-07-26T10:01:00-06:00',
+    artifact_path: opx4Artifact.relative,
+  }],
+}, '', [], { lastSeen: '2026-07-26T16:00:00.000Z' });
+eq(opx4OffsetDigest.since.ratified.length, 1,
+  'OPX4-CONSUME-VALID digest compares offset timestamps chronologically');
+const opx4OffsetStatusState = emptyState();
+opx4OffsetStatusState.cards['GA-RAT-NEWER'] = {
+  card: 'GA-RAT-NEWER',
+  phase: 'discarded',
+  ratification_receipt: {
+    accepted_at: '2026-07-26T10:00:00-06:00',
+    authority: 'delegate',
+    artifact_path: 'spice/projects/sauce/ratifications/GA-RAT-NEWER.md',
+  },
+};
+opx4OffsetStatusState.cards['GA-RAT-OLDER'] = {
+  card: 'GA-RAT-OLDER',
+  phase: 'discarded',
+  ratification_receipt: {
+    accepted_at: '2026-07-26T15:30:00Z',
+    authority: 'delegate',
+    artifact_path: 'spice/projects/sauce/ratifications/GA-RAT-OLDER.md',
+  },
+};
+const opx4OffsetStatus = commandStatus(
+  { root: tmp, statePath: path.join(tmp, 'opx4-offset-state.json') },
+  {
+    state: opx4OffsetStatusState,
+    boardMd: '# Board\n\n## In Planning\n\n## In Progress\n\n## Blocked\n\n## Completed\n',
+    boardPath: opx4Board,
+    cardsRoot: opx4Project,
+    loadCard: () => null,
+    exists: () => false,
+  },
+);
+eq(opx4OffsetStatus.ratified_recent.map((item) => item.card), ['GA-RAT-NEWER', 'GA-RAT-OLDER'],
+  'OPX4-CONSUME-VALID status orders offset ratification timestamps chronologically');
+
+const deliveryReviewTriage = require('../../scripts/autoloop/delivery-review-triage');
+for (const [label, wait, expectedBucket] of [
+  ['sibling', ratificationAcceptedWait({ sibling: { card: 'GA-SIBLING' } }), 'concurrency-wait'],
+  ['touch-zone', ratificationAcceptedWait({ conflict: { card: 'GA-CONFLICT' } }), 'concurrency-wait'],
+  ['dependency', ratificationAcceptedWait({ unmet: ['GA-DEP'] }), 'deploy-wait'],
+  ['capacity', ratificationAcceptedWait({ atCapacity: true }), 'concurrency-wait'],
+]) {
+  eq(
+    deliveryReviewTriage.classifyCard(
+      { card: `GA-WAIT-${label}`, status: 'parked', resume_condition: wait },
+      { activeIds: new Set(), tracked: [] },
+    ),
+    expectedBucket,
+    `OPX4-CONSUME-VALID accepted ${label} constraint remains a loop-owned wait`,
+  );
+}
+
+const OPX4_DEAD_CARD = 'GA-TEST1b Discarded dependency ratification fixture';
+const OPX4_DEAD_DEP = 'GA-TEST0a Discarded prerequisite';
+const opx4DeadCardPath = path.join(
+  opx4Project, 'tasks/Test epic/board', `${OPX4_DEAD_CARD}.md`,
+);
+fs.writeFileSync(opx4DeadCardPath, card({ name: OPX4_DEAD_CARD, parent: 'Test epic' })
+  .replace('status: planning', 'status: parked'));
+const opx4DeadState = {
+  schema_version: 1,
+  cards: {
+    [OPX4_DEAD_DEP]: {
+      card: OPX4_DEAD_DEP,
+      phase: 'discarded',
+      superseded_by: 'GA-TEST0a2 Deployed successor',
+    },
+    [OPX4_DEAD_CARD]: {
+      card: OPX4_DEAD_CARD,
+      phase: 'parked',
+      status: 'parked',
+      model_profile: 'heavy',
+      parent_card: 'Test epic',
+      touch_zones: ['scripts/autoloop/codex-coordinator.js'],
+      dependencies: [OPX4_DEAD_DEP],
+      deploy_subscriptions: { headspace: [], accuris: [], ero: [] },
+      resume_condition: 'Will must ratify the exact bounded continuation.',
+      gate_receipt: passingReceipt(OPX4_HEAD),
+      reviews: { correctness: { head_sha: OPX4_HEAD } },
+      worktree: opx4Worktree,
+      card_path: opx4DeadCardPath,
+    },
+  },
+};
+scaffoldPendingRatifications(opx4DeadState, {
+  boardPath: opx4Board,
+  now: () => '2026-07-26T15:40:00.000Z',
+  uuid: () => '99999999-2222-4333-8444-555555555555',
+});
+const opx4DeadArtifact = ratificationArtifactForCard(OPX4_DEAD_CARD, opx4Board);
+const opx4DeadAcceptedRaw = fs.readFileSync(opx4DeadArtifact.absolute, 'utf8')
+  .replace('"decision": ""', '"decision": "accepted"')
+  .replace('"accepted_at": ""', '"accepted_at": "2026-07-26T09:40:00-06:00"')
+  .replace('"authority": ""', '"authority": "delegate"');
+fs.writeFileSync(opx4DeadArtifact.absolute, opx4DeadAcceptedRaw);
+let opx4DeadProjectedPhase = null;
+let opx4DeadStationProjections = 0;
+const opx4DeadArgs = {
+  _: ['consume-ratification'], json: true, card: OPX4_DEAD_CARD,
+};
+const opx4DeadDeps = {
+  boardPath: opx4Board,
+  cardsRoot: path.join(opx4Project, 'tasks'),
+  readState: () => opx4DeadState,
+  writeState: () => {},
+  withLock: opx4ImmediateLock,
+  projectCard: (_cardPath, _boardPath, _card, phase) => {
+    opx4DeadProjectedPhase = phase;
+    return { changed: true };
+  },
+  projectLoopStation: async () => {
+    opx4DeadStationProjections++;
+    return { action: 'loop-station-projected', no_op: false };
+  },
+  resolveWorktreeHead: () => OPX4_HEAD,
+  now: () => '2026-07-26T15:41:00.000Z',
+};
+await assert.rejects(() => commandConsumeRatification(
+  { root: tmp },
+  opx4DeadArgs,
+  {
+    ...opx4DeadDeps,
+    writeText: (_target, value) => {
+      if (String(value).includes('state: consumed')) {
+        throw new Error('injected deadend artifact finalize failure');
+      }
+    },
+  },
+), /injected deadend artifact finalize failure/,
+'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND preserves blocked authority when artifact finalization fails');
+count++;
+eq(opx4DeadState.cards[OPX4_DEAD_CARD].phase, 'blocked',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND stores the deadend before artifact finalization');
+eq(opx4DeadProjectedPhase, null,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND cannot project before interrupted artifact finalization');
+eq(opx4DeadStationProjections, 0,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND cannot project Loop Station before interrupted finalization');
+const opx4DeadConsume = await commandConsumeRatification(
+  { root: tmp },
+  opx4DeadArgs,
+  opx4DeadDeps,
+);
+eq(opx4DeadConsume.recovered, true,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND literal replay reports recovered finalization');
+eq(opx4DeadStationProjections, 1,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND literal recovery refreshes Loop Station exactly once');
+eq(testScalarField(fs.readFileSync(opx4DeadArtifact.absolute, 'utf8'), 'state'), 'consumed',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND literal recovery finalizes the artifact');
+eq(opx4DeadConsume.action, 'ratification-consumed-deadend',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND emits a fail-loud consumption receipt');
+eq(opx4DeadState.cards[OPX4_DEAD_CARD].phase, 'blocked',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND moves the accepted card out of parked');
+ok(opx4DeadConsume.blocked === true
+  && opx4DeadConsume.deadend.includes(`depends on discarded card ${OPX4_DEAD_DEP}`),
+'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND names the impossible prerequisite');
+eq(opx4DeadProjectedPhase, 'blocked',
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND projects the coordinator deadend');
+eq(opx4DeadState.cards[OPX4_DEAD_CARD].resume_condition, null,
+  'GA-OPS19A3-DISCARDED-DEPENDENCY-DEADEND never writes a hidden deploy wait');
+
+// GA-OPS19A2-CLI-DISPATCH-UNBOUND: execute both ratification verbs through
+// main(), rather than proving only the exported command functions.
+for (const [verb, args, expected] of [
+  [
+    'backfill-ratifications',
+    ['backfill-ratifications'],
+    /backfill-ratifications requires --json for a machine-readable receipt/,
+  ],
+  [
+    'consume-ratification',
+    ['consume-ratification', '--card', OPX4_CARD],
+    /consume-ratification requires --json for a machine-readable receipt/,
+  ],
+]) {
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli(process.execPath, [coordinatorCli, ...args], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && expected.test(String(cliError.stderr)),
+    `GA-OPS19A2-CLI-DISPATCH-UNBOUND ${verb} reaches its real dispatcher branch and refuses before state read`);
+}
+
+// CLI wiring: the cutover command exists and refuses without --json.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI cutover without --json refuses with a machine-parseable error before any read or write');
+}
+
+// CLI wiring: the restructure command exists and refuses without --json.
+{
+  const { execFileSync: execCli } = require('child_process');
+  const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  let cliError = null;
+  try {
+    execCli('node', [coordinatorCli, 'restructure', '--spec', 'missing.json'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (err) { cliError = err; }
+  ok(cliError && /requires --json/.test(String(cliError.stderr)),
+    'CLI restructure without --json refuses with a machine-parseable error before any read or write');
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const subscription = JSON.parse(fs.readFileSync(path.join(__dirname, '../../ranch/platform-subscription.json'), 'utf8'));
@@ -4332,6 +11202,1426 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
       ok(subscribed.has(dependency.name), `workshop subscription closes ${item.name} -> ${dependency.name}`);
     }
   }
+}
+
+// LOOP-MERGE-ONLY-GATE: verify-gates on a merge-only binding (empty vault
+// list) uses the installed gate script by absolute path with --cwd, runs the
+// binding's verify commands instead of the sauce release preflights, and never
+// touches npm or the workshop self-install. Deploy-bound bindings keep the
+// historical checks byte-identically.
+{
+  const gateWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-gate-wt-'));
+  try {
+    const mkRecord = () => ({
+      card: 'PA-1 Merge-only slice', phase: 'implementing', worktree: gateWorktree,
+      touch_zones: ['src', 'tests'],
+      reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [
+        lens, { lens, verdict: 'pass', refuted: false, summary: 'ok', head_sha: 'headM' },
+      ])),
+    });
+    const mergeState = { schema_version: 1, cards: { 'PA-1 Merge-only slice': mkRecord() } };
+    const calls = [];
+    const gateSh = (cmd, cmdArgs, opts = {}) => {
+      calls.push({ cmd, args: cmdArgs, cwd: opts.cwd });
+      if (cmd === 'git' && cmdArgs[0] === 'status') return '';
+      if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return cmdArgs[1] === 'origin/main' ? 'baseM' : 'headM';
+      if (cmd === 'git' && cmdArgs[0] === 'show') return 'fix(loop): merge-only fixture';
+      if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
+      if (cmd === 'git' && cmdArgs[0] === 'diff') return 'src/x.py\ntests/test_x.py';
+      if (cmd === 'node' && String(cmdArgs[0]).endsWith('gate.js')) {
+        return JSON.stringify({ behavioral: true, adequate: true, reason: 'ok' });
+      }
+      if (cmd === '/bin/sh' && cmdArgs[0] === '-c') return '';
+      if (cmd === 'npm') throw new Error('npm must never run on a merge-only binding');
+      throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+    };
+    const mergeOnlyResult = await commandVerifyGates({ root: '/workshop' }, { card: 'PA-1 Merge-only slice' }, {
+      readState: () => mergeState,
+      writeState: () => {},
+      sh: gateSh,
+      withLock: immediateCardLock,
+      deployVaults: [],
+      env: { SAUCE_LOOP_VERIFY_COMMANDS: JSON.stringify(['./venv/bin/pytest -q', 'echo lint']) },
+      runIsolatedWorkshopSelfInstall: () => { throw new Error('self-install must never run on a merge-only binding'); },
+    });
+    eq(mergeOnlyResult.action, 'gates-passed', 'LOOP-MERGE-ONLY-GATE merge-only verify-gates passes');
+    const gateCall = calls.find((c) => c.cmd === 'node' && String(c.args[0]).endsWith('gate.js'));
+    ok(path.isAbsolute(gateCall.args[0]), 'LOOP-MERGE-ONLY-GATE gate.js invoked by absolute installed path');
+    ok(gateCall.args.includes('--cwd') && gateCall.args[gateCall.args.indexOf('--cwd') + 1] === gateWorktree,
+      'LOOP-MERGE-ONLY-GATE gate.js bound to the card worktree via --cwd');
+    const shellCalls = calls.filter((c) => c.cmd === '/bin/sh');
+    eq(shellCalls.length, 2, 'LOOP-MERGE-ONLY-GATE both verify commands ran');
+    ok(!calls.some((c) => c.cmd === 'npm'), 'LOOP-MERGE-ONLY-GATE npm never invoked');
+    const mergeReceipt = mergeState.cards['PA-1 Merge-only slice'].gate_receipt;
+    eq(mergeReceipt.merge_only, true, 'LOOP-MERGE-ONLY-GATE receipt marked merge_only');
+    eq(mergeReceipt.checks.verify_commands.status, 'pass', 'LOOP-MERGE-ONLY-GATE receipt records verify commands');
+
+    // Malformed verify-commands env fails loud before any command runs.
+    const badState = { schema_version: 1, cards: { 'PA-1 Merge-only slice': mkRecord() } };
+    await assert.rejects(() => commandVerifyGates({ root: '/workshop' }, { card: 'PA-1 Merge-only slice' }, {
+      readState: () => badState,
+      writeState: () => {},
+      sh: gateSh,
+      withLock: immediateCardLock,
+      deployVaults: [],
+      env: { SAUCE_LOOP_VERIFY_COMMANDS: '{not json' },
+    }), /not valid JSON/, 'LOOP-MERGE-ONLY-GATE malformed verify-commands env fails loud');
+
+    // Deploy-bound guard: default vault list still runs the sauce checks.
+    const deployState = { schema_version: 1, cards: { 'PA-1 Merge-only slice': mkRecord() } };
+    const deployCalls = [];
+    let selfInstalls = 0;
+    const deployResult = await commandVerifyGates({ root: '/workshop' }, { card: 'PA-1 Merge-only slice' }, {
+      readState: () => deployState,
+      writeState: () => {},
+      sh: (cmd, cmdArgs, opts = {}) => {
+        deployCalls.push({ cmd, args: cmdArgs });
+        if (cmd === 'git' && cmdArgs[0] === 'status') return '';
+        if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return cmdArgs[1] === 'origin/main' ? 'baseM' : 'headM';
+        if (cmd === 'git' && cmdArgs[0] === 'show') return 'fix(loop): deploy-bound fixture';
+        if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
+        if (cmd === 'git' && cmdArgs[0] === 'diff') return 'src/x.py\ntests/test_x.py';
+        if (cmd === 'node' && String(cmdArgs[0]).endsWith('gate.js')) return JSON.stringify({ behavioral: true, adequate: true, reason: 'ok' });
+        if (cmd === 'npm') return '';
+        throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+      },
+      withLock: immediateCardLock,
+      deployVaults: [{ id: 'headspace', path: '/v/h' }],
+      runIsolatedWorkshopSelfInstall: () => { selfInstalls += 1; },
+    });
+    eq(deployResult.action, 'gates-passed', 'LOOP-MERGE-ONLY-GATE deploy-bound path still passes');
+    eq(deployCalls.filter((c) => c.cmd === 'npm').length, 2, 'LOOP-MERGE-ONLY-GATE deploy-bound path keeps both npm preflights');
+    eq(selfInstalls, 1, 'LOOP-MERGE-ONLY-GATE deploy-bound path keeps the workshop self-install');
+    const deployGateCall = deployCalls.find((c) => c.cmd === 'node' && String(c.args[0]).endsWith('gate.js'));
+    eq(deployGateCall.args[0], 'scripts/autoloop/gate.js', 'LOOP-MERGE-ONLY-GATE deploy-bound gate invocation is byte-identical (repo-relative, no --cwd)');
+    ok(!deployGateCall.args.includes('--cwd'), 'LOOP-MERGE-ONLY-GATE deploy-bound gate has no --cwd flag');
+  } finally {
+    fs.rmSync(gateWorktree, { recursive: true, force: true });
+  }
+}
+
+// LOOP-AMEND-PARK: bounded supervised repair for parked-card metadata (wrong
+// dependency recorded at park time, e.g. the ero OC-1/EM-1 knot). Compare-and-
+// swap on the preserved worktree HEAD, audit trail, literal replay no_op;
+// never touches receipts, worktrees, or non-parked cards.
+{
+  const parkWt = fs.mkdtempSync(path.join(os.tmpdir(), 'amend-park-wt-'));
+  try {
+    const HEAD40 = 'a'.repeat(40);
+    const mkParked = () => ({
+      card: 'OC-1 Parked slice', phase: 'parked', worktree: parkWt, branch: 'x/oc-1',
+      dependencies: ['[[EM-4 Wrong dependency]]'], resume_condition: 'blocked on EM-4',
+      reviews: { correctness: { lens: 'correctness', verdict: 'pass', head_sha: HEAD40 } },
+    });
+    const amendDeps = (state, extra = {}) => ({
+      readState: () => state,
+      writeState: () => {},
+      withLock: immediateCardLock,
+      sh: (cmd, cmdArgs) => {
+        if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return HEAD40;
+        throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+      },
+      findCard: () => '/vault/tasks/somewhere.md',
+      projectCard: () => {},
+      boardPath: '/vault/board.md',
+      cardsRoot: '/vault/tasks',
+      now: () => '2026-07-28T00:00:00.000Z',
+      ...extra,
+    });
+
+    const amendState = { schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } };
+    const amended = await coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'park recorded an impossible dependency; prerequisite shipped upstream',
+      'clear-dependencies': true, 'resume-condition': 'ready to resume — upstream fix deployed',
+    }, amendDeps(amendState));
+    eq(amended.action, 'park-amended', 'LOOP-AMEND-PARK amend succeeds');
+    const rec = amendState.cards['OC-1 Parked slice'];
+    eq(rec.dependencies, [], 'LOOP-AMEND-PARK dependencies cleared');
+    eq(rec.resume_condition, 'ready to resume — upstream fix deployed', 'LOOP-AMEND-PARK resume condition replaced');
+    eq(rec.park_amendments.length, 1, 'LOOP-AMEND-PARK audit record appended');
+    eq(rec.park_amendments[0].previous.dependencies, ['[[EM-4 Wrong dependency]]'], 'LOOP-AMEND-PARK audit preserves the previous metadata');
+    ok(rec.reviews.correctness.verdict === 'pass', 'LOOP-AMEND-PARK preserved receipts untouched');
+    eq(rec.phase, 'parked', 'LOOP-AMEND-PARK card stays parked (resume is a separate explicit command)');
+
+    const replay = await coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'park recorded an impossible dependency; prerequisite shipped upstream',
+      'clear-dependencies': true, 'resume-condition': 'ready to resume — upstream fix deployed',
+    }, amendDeps(amendState));
+    eq(replay.no_op, true, 'LOOP-AMEND-PARK literal replay is no_op');
+    eq(amendState.cards['OC-1 Parked slice'].park_amendments.length, 1, 'LOOP-AMEND-PARK replay appends no second audit record');
+
+    const headMismatchState = { schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } };
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': 'b'.repeat(40),
+      reason: 'stale head', 'clear-dependencies': true,
+    }, amendDeps(headMismatchState)), /head_mismatch|expected HEAD/, 'LOOP-AMEND-PARK refuses a stale expected head');
+    eq(headMismatchState.cards['OC-1 Parked slice'].dependencies, ['[[EM-4 Wrong dependency]]'],
+      'LOOP-AMEND-PARK refused amend leaves metadata untouched');
+
+    const notParkedState = { schema_version: 1, cards: { 'OC-1 Parked slice': { ...mkParked(), phase: 'implementing' } } };
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'wrong phase', 'clear-dependencies': true,
+    }, amendDeps(notParkedState)), /phase_ineligible|only amends parked/, 'LOOP-AMEND-PARK refuses non-parked cards');
+
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'both operands', 'clear-dependencies': true, 'depends-on': 'EM-2 Other',
+    }, amendDeps({ schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } })),
+    /exactly one of/, 'LOOP-AMEND-PARK refuses --clear-dependencies combined with --depends-on');
+
+    const missingDepState = { schema_version: 1, cards: { 'OC-1 Parked slice': mkParked() } };
+    await assert.rejects(() => coordinator.commandAmendPark({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Parked slice', 'expected-head': HEAD40,
+      reason: 'swap dependency', 'depends-on': 'EM-9 Ghost card',
+    }, amendDeps(missingDepState, { findCard: () => null })), /dependency_missing|does not exist/,
+    'LOOP-AMEND-PARK refuses a replacement dependency that does not exist');
+  } finally {
+    fs.rmSync(parkWt, { recursive: true, force: true });
+  }
+}
+
+// LOOP-RESUME-CLEARED-PARK: a parked card whose dependencies were cleared by
+// amend-park (audit trail present) is resumable; the same empty list WITHOUT
+// the audit trail stays refused as malformed park metadata.
+{
+  const resumeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-cleared-park-'));
+  try {
+    const HEAD40 = 'c'.repeat(40);
+    const resumeWt = path.join(resumeRoot, 'wt'); fs.mkdirSync(resumeWt);
+    const cardPath = path.join(resumeRoot, 'OC-1 Cleared slice.md');
+    fs.writeFileSync(cardPath, '---\ntype: slice\nstatus: parked\nresume_condition: ready — upstream merge-only support deployed\n---\nbody\n');
+    const resumeBoard = path.join(resumeRoot, 'board.md');
+    fs.writeFileSync(resumeBoard, '## In Planning\n\n## Completed\n');
+    const mkCleared = (audited) => ({
+      card: 'OC-1 Cleared slice', phase: 'parked', worktree: resumeWt, branch: 'x/oc-1',
+      card_path: cardPath, dependencies: [], touch_zones: ['some/zone'],
+      resume_condition: 'ready — upstream merge-only support deployed',
+      ...(audited ? {
+        park_amendments: [{
+          at: '2026-07-29T00:00:00.000Z', reason: 'wrong dependency recorded at park',
+          previous: { dependencies: ['[[EM-4 Wrong dependency]]'], resume_condition: 'blocked' },
+          next: { dependencies: [], resume_condition: 'ready — upstream merge-only support deployed' },
+        }],
+      } : {}),
+    });
+    const resumeDeps = (state) => ({
+      readState: () => state,
+      writeState: () => {},
+      withLock: immediateCardLock,
+      findCard: () => cardPath,
+      sh: (cmd, cmdArgs) => {
+        if (cmd === 'git' && cmdArgs[0] === 'fetch') return '';
+        if (cmd === 'git' && cmdArgs[0] === 'rev-parse') return HEAD40;
+        if (cmd === 'git' && cmdArgs[0] === 'merge-base') return '';
+        throw new Error(`unexpected command: ${cmd} ${cmdArgs.join(' ')}`);
+      },
+      boardPath: resumeBoard,
+      projectCard: () => {},
+      now: () => '2026-07-29T00:00:00.000Z',
+    });
+
+    const clearedState = { schema_version: 1, cards: { 'OC-1 Cleared slice': mkCleared(true) } };
+    const resumed = await coordinator.commandResume({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Cleared slice',
+    }, resumeDeps(clearedState));
+    ok(resumed.action !== 'resume-refused', 'LOOP-RESUME-CLEARED-PARK audited empty dependencies resume');
+    eq(clearedState.cards['OC-1 Cleared slice'].phase, 'implementing',
+      'LOOP-RESUME-CLEARED-PARK resumed card is implementing');
+    eq(clearedState.cards['OC-1 Cleared slice'].gate_receipt, null,
+      'LOOP-RESUME-CLEARED-PARK resume still invalidates receipts');
+
+    const unauditedState = { schema_version: 1, cards: { 'OC-1 Cleared slice': mkCleared(false) } };
+    const refused = await coordinator.commandResume({ root: '/workshop' }, {
+      json: true, card: 'OC-1 Cleared slice',
+    }, resumeDeps(unauditedState));
+    eq(refused.action, 'resume-refused', 'LOOP-RESUME-CLEARED-PARK unaudited empty dependencies stay refused');
+    ok(/missing or malformed/.test(refused.reason), 'LOOP-RESUME-CLEARED-PARK refusal names malformed park metadata');
+  } finally {
+    fs.rmSync(resumeRoot, { recursive: true, force: true });
+  }
+}
+
+// AD adopt: the sanctioned out-of-band completion. Every precondition refuses
+// BEFORE any ledger write; the verb can only ratify a declaration already
+// sitting unrecorded on the board, never invent one.
+const adScaffold = (root) => bhScaffold(root, {
+  progress: ['Retire ero loop'],
+  epics: {
+    'Retire ero loop': {
+      lanes: { Completed: ['EM-4'], 'In Progress': ['EM-7'] },
+      // EM-ORPHAN has a note that declares `completed` but appears in NO lane —
+      // a slice detached from its epic board. `findCard` finds it, so without a
+      // membership gate `adopt` records it and then cannot project it, forever.
+      slices: { 'EM-4': 'completed', 'EM-7': 'in_progress', 'EM-ORPHAN': 'completed' },
+    },
+  },
+});
+const AD_SHA = '9922ec4373e4a925829c7917912263e2c27a29e4';
+const adGit = () => (args) => {
+  if (args[0] === 'cat-file') return '';
+  if (args[0] === 'merge-base') return '';
+  if (args[0] === 'rev-parse') return 'main';
+  throw new Error(`unexpected git ${args.join(' ')}`);
+};
+const adPrView = (overrides = {}) => () => ({
+  number: 126, state: 'MERGED', mergeCommit: { oid: AD_SHA }, ...overrides,
+});
+const adDeps = (fx, state, extra = {}) => bhDeps(fx, {
+  readState: () => state,
+  writeState: () => {},
+  git: adGit(),
+  prView: adPrView(),
+  ...extra,
+});
+// Every refusal path must throw BEFORE any write and without mutating the
+// ledger it was handed — adRefusal threads a counting writeState through so
+// every AD-* assertion below can pin that, not just the refusal code.
+const adRefusal = async (fx, state, args, extra = {}) => {
+  const writes = [];
+  const before = JSON.stringify(state.cards);
+  let err = null;
+  try {
+    await coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+      { json: true, ...args }, adDeps(fx, state, { writeState: (_c, _s, rec) => writes.push(rec), ...extra }));
+  } catch (e) { err = e; }
+  return { err, writes, unchanged: JSON.stringify(state.cards) === before };
+};
+const adNoMutation = (result, label) => {
+  eq(result.writes.length, 0, `${label} refuses before any write`);
+  eq(result.unchanged, true, `${label} leaves ledger state byte-identical`);
+};
+
+{
+  const root = path.join(tmp, 'ad-refusals');
+  const fx = adScaffold(root);
+  const base = { card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
+
+  // --json is mandatory before any read or write, exactly like every other
+  // mutating verb.
+  const adJsonWrites = [];
+  await assert.rejects(
+    () => coordinator.commandAdopt({ root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+      { ...base }, adDeps(fx, emptyState(), { writeState: (_c, _s, rec) => adJsonWrites.push(rec) })),
+    /requires --json/, 'AD-JSON refusal: --json is mandatory');
+  eq(adJsonWrites.length, 0, 'AD-JSON refuses before any write');
+
+  // Unknown options are rejected by the shared CLI grammar before state access.
+  let r = await adRefusal(fx, emptyState(), { ...base, apply: true });
+  eq(r.err && r.err.code, 'unknown_option', 'AD-GRAMMAR rejects unknown options before reads or writes');
+  adNoMutation(r, 'AD-GRAMMAR');
+
+  // A card that already has a ledger record is NOT adoptable — that is what
+  // stops adopt from becoming a general-purpose "mark it done" backdoor.
+  const tracked = emptyState();
+  tracked.cards['EM-4'] = { card: 'EM-4', phase: 'implementing' };
+  r = await adRefusal(fx, tracked, base);
+  eq(r.err && r.err.code, 'adopt_record_exists', 'AD-TRACKED a card with a record refuses');
+  adNoMutation(r, 'AD-TRACKED');
+
+  // Adoption ratifies a declaration; it never invents one.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-7' });
+  eq(r.err && r.err.code, 'adopt_not_declared_complete', 'AD-DECLARED a non-completed note refuses');
+  adNoMutation(r, 'AD-DECLARED');
+
+  // A board member with no note at all cannot be adopted.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-404' });
+  eq(r.err && r.err.code, 'adopt_card_not_found', 'AD-MISSING an unknown card refuses');
+  adNoMutation(r, 'AD-MISSING');
+
+  // A note under cards_root is NOT sufficient: adoption ratifies a declaration
+  // sitting on the BOARD, and a slice detached from its epic board has no board
+  // line to project onto. Without this gate adopt returned ok:true, wrote a
+  // durable `adopted` record with no card_note_sha baseline (so foreign-write
+  // detection never arms for it), and left a projection_error that check 1
+  // cannot see, check 5 reports forever, and `reconcile --card` can never clear
+  // — a permanently unhealthy hourly sweep with an unusable remedy.
+  r = await adRefusal(fx, emptyState(), { ...base, card: 'EM-ORPHAN' });
+  eq(r.err && r.err.code, 'adopt_card_not_on_board', 'AD-ORPHAN a note detached from its epic board refuses');
+  adNoMutation(r, 'AD-ORPHAN');
+
+  // Provenance operands are structurally validated first.
+  r = await adRefusal(fx, emptyState(), { ...base, 'merge-sha': 'deadbeef' });
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-SHAPE a non-40-hex sha refuses');
+  adNoMutation(r, 'AD-SHA-SHAPE');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    git: (args) => { if (args[0] === 'cat-file') throw new Error('bad object'); return ''; },
+  });
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-ABSENT a sha git cannot resolve refuses');
+  adNoMutation(r, 'AD-SHA-ABSENT');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    git: (args) => { if (args[0] === 'merge-base') throw new Error('not an ancestor'); if (args[0] === 'rev-parse') return 'main'; return ''; },
+  });
+  eq(r.err && r.err.code, 'adopt_sha_unreachable', 'AD-SHA-UNMERGED a sha off the default branch refuses');
+  adNoMutation(r, 'AD-SHA-UNMERGED');
+
+  r = await adRefusal(fx, emptyState(), base, { prView: adPrView({ state: 'OPEN' }) });
+  eq(r.err && r.err.code, 'adopt_pr_not_merged', 'AD-PR-OPEN an unmerged PR refuses');
+  adNoMutation(r, 'AD-PR-OPEN');
+
+  r = await adRefusal(fx, emptyState(), base, {
+    prView: adPrView({ mergeCommit: { oid: 'a'.repeat(40) } }),
+  });
+  eq(r.err && r.err.code, 'adopt_pr_mismatch', 'AD-PR-MISMATCH a PR whose merge commit is not the sha refuses');
+  adNoMutation(r, 'AD-PR-MISMATCH');
+
+  // gh successfully resolving and reporting "no such PR" is a different
+  // signal than a gh outage: it must refuse, never durably record an
+  // unverifiable PR reference at a degraded tier.
+  r = await adRefusal(fx, emptyState(), base, {
+    prView: () => { throw new Error('GraphQL: Could not resolve to a PullRequest with the number of 126. (repository.pullRequest)'); },
+  });
+  eq(r.err && r.err.code, 'adopt_pr_not_found', 'AD-PR-NOTFOUND gh resolving "no such PR" refuses, not degrades');
+  adNoMutation(r, 'AD-PR-NOTFOUND');
+
+  r = await adRefusal(fx, emptyState(), { ...base, reason: '   ' });
+  eq(r.err && r.err.code, 'adopt_reason_required', 'AD-REASON an empty reason refuses');
+  adNoMutation(r, 'AD-REASON');
+
+  r = await adRefusal(fx, emptyState(), { card: 'EM-4', pr: 'nope', 'merge-sha': AD_SHA, reason: 'x' });
+  eq(r.err && r.err.code, 'invalid_arguments', 'AD-PR-SHAPE a non-numeric --pr refuses');
+  adNoMutation(r, 'AD-PR-SHAPE');
+
+  // Every refusal renders a valid ok:false envelope.
+  eq(validateReceiptEnvelope(refusalReceipt(r.err.action, r.err.code, r.err.message)).ok, true,
+    'AD refusals render a valid ok:false envelope');
+}
+
+// AD-ADOPT — the successful path. One ledger record, verified provenance,
+// permanently labeled `adopted`, and an epic that can finally roll up.
+{
+  const root = path.join(tmp, 'ad-adopt');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const writes = [];
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const adStation = [];
+  const receipt = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR; per-slice was wrong here' },
+    adDeps(fx, state, {
+      writeState: (_c, _s, rec) => writes.push(rec),
+      now: () => '2026-08-04T12:00:00.000Z',
+      projectLoopStation: (_c, _s, updatedOn) => {
+        adStation.push(updatedOn);
+        return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn };
+      },
+    }));
+
+  eq(receipt.action, 'adopt', 'AD-ADOPT reports the adopt action');
+  eq(receipt.ok, true, 'AD-ADOPT succeeds');
+  eq(receipt.no_op, false, 'AD-ADOPT a first adoption is never a no-op');
+  eq(receipt.card, 'EM-4', 'AD-ADOPT names the adopted card');
+  eq(receipt.adoption.pr, 126, 'AD-ADOPT records the PR number');
+  eq(receipt.adoption.merge_sha, AD_SHA, 'AD-ADOPT records the merge sha');
+  eq(receipt.adoption.reason, 'batch PR; per-slice was wrong here', 'AD-ADOPT records the reason verbatim');
+  eq(receipt.adoption.verified, 'git+gh', 'AD-ADOPT records the full verification tier');
+  eq(receipt.adoption.adopted_at, '2026-08-04T12:00:00.000Z', 'AD-ADOPT stamps the adoption');
+
+  const record = state.cards['EM-4'];
+  ok(record, 'AD-ADOPT writes exactly one ledger record');
+  eq(record.phase, 'adopted', "AD-ADOPT the record's ledger phase is the terminal 'adopted' phase, not 'completed'");
+  eq(receipt.phase, 'adopted', 'AD-ADOPT the receipt reports the same adopted phase');
+  eq(record.adoption.verified, 'git+gh', 'AD-ADOPT provenance lives on the record, not only the receipt');
+  eq(record.card_path, path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md'),
+    'AD-ADOPT binds the record to the resolved note path');
+  // Two persists, deliberately, and in this order: the record first so the
+  // adopted phase is durable even if the projection then fails, and again
+  // afterwards so the projection's own record mutations
+  // (projection_reconciled_at, the card_note_sha baseline) reach disk. This is
+  // the same persist/project/persist discipline park, resume, amend-park and
+  // amend-contract already use; a single persist would silently drop the
+  // baseline that foreign-write detection depends on.
+  // Every other transition verb (park, resume, discard, reap, claim, cutover,
+  // consume-ratification) refreshes Loop Station so the station view matches the
+  // ledger. adopt did not, so an adoption — which can be the ONLY activity on a
+  // board for days — left the station stale indefinitely, showing work as
+  // outstanding after it had been ratified.
+  eq(adStation, ['adopt'], 'AD-ADOPT refreshes Loop Station under its own updated_on');
+  eq(receipt.loop_station && receipt.loop_station.action, 'loop-station-projected',
+    'AD-ADOPT the station result rides the receipt, as it does for park/resume');
+
+  eq(writes.length, 2, 'AD-ADOPT persists the record, projects, then persists the projection mutations');
+  eq(writes.every((rec) => rec === record), true, 'AD-ADOPT both persists carry the one adopted record');
+  ok(record.projection_reconciled_at, 'AD-ADOPT the projection receipt lands on the record');
+  eq(record.card_note_sha, testSha256(fs.readFileSync(record.card_path, 'utf8')),
+    'AD-ADOPT adoption establishes the card_note_sha baseline from the bytes on disk');
+
+  // The adopted record projects as complete THROUGH THE REAL PRODUCTION
+  // PATH — noteProjectionMapping and canonicalEpicProjection/
+  // deriveEpicProjection, not a hand-fed resolveSliceAuthority call — which
+  // is the whole point: the epic can now roll up while never claiming
+  // deployment proof. (resolveSliceAuthority's own 'adopted' tier is unit
+  // tested in isolation by run-delivery-topology.js; re-asserting it here
+  // with hand-supplied hasRecord/adopted would be self-fulfilling and would
+  // pass even against an inert commandAdopt.)
+  const noteRaw = fs.readFileSync(record.card_path, 'utf8');
+  eq(coordinator.noteProjectionMapping(noteRaw, record),
+    { column: 'Completed', complete: true, status: 'completed' },
+    'AD-ADOPT the adopted note projects to Completed through the real per-note call site');
+
+  const surface = coordinator.canonicalEpicProjection(noteRaw, record.card_path, fx.boardPath, fx.cardsRoot, { state });
+  const lifecycle = coordinator.deriveEpicProjection(surface, null, null);
+  eq(lifecycle.counts.done, 1, 'AD-ADOPT the epic rollup counts the adopted slice done');
+  eq(lifecycle.findings, [], 'AD-ADOPT no legacy-completion finding fires for an adopted slice');
+}
+
+// AD-REPLAY — literal replay is free; substituted operands refuse.
+{
+  const root = path.join(tmp, 'ad-replay');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  const args = { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' };
+  await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state));
+  // A no-op must be a no-op all the way down: the replay path returns before
+  // the card projection precisely so it cannot re-stamp status_changed_at, and
+  // the Loop Station refresh added alongside it must sit behind the same guard
+  // or an idempotent call becomes an unbounded vault writer again.
+  const replay = await coordinator.commandAdopt(ctx, { ...args }, adDeps(fx, state, {
+    projectLoopStation: () => { throw new Error('literal adopt replay must not project Loop Station'); },
+  }));
+  eq(replay.no_op, true, 'AD-REPLAY identical replay is a no-op');
+  eq(replay.ok, true, 'AD-REPLAY identical replay still succeeds');
+  eq('loop_station' in replay, false, 'AD-REPLAY a no-op replay carries no station projection');
+
+  // adopt_conflict refuses before adoptProvenance ever runs, so no prView
+  // override is needed here — the default (matching) mock is never called.
+  let conflict = null;
+  const conflictWrites = [];
+  try {
+    await coordinator.commandAdopt(ctx, { ...args, pr: 999 },
+      adDeps(fx, state, { writeState: (_c, _s, rec) => conflictWrites.push(rec) }));
+  } catch (err) { conflict = err; }
+  eq(conflict && conflict.code, 'adopt_conflict', 'AD-REPLAY substituted operands refuse');
+  eq(conflictWrites.length, 0, 'AD-REPLAY substituted operands write nothing before refusing');
+}
+
+// AD-DEGRADE — a gh outage lowers the recorded verification tier. It never
+// fails the verb and never passes silently as full verification.
+{
+  const root = path.join(tmp, 'ad-degrade');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const receipt = await coordinator.commandAdopt(
+    { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') },
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' },
+    adDeps(fx, state, { prView: () => { throw new Error('gh: not authenticated'); } }));
+  eq(receipt.adoption.verified, 'git', 'AD-DEGRADE a gh outage records the git-only tier');
+  eq(state.cards['EM-4'].adoption.verified, 'git', 'AD-DEGRADE the degrade is durable on the record');
+  eq(receipt.ok, true, 'AD-DEGRADE the verb still succeeds');
+}
+
+// AD-PROJECTION — effectiveProjectionMapping must exempt `adopted` the same
+// way resolveSliceAuthority already does. Before `adopted` became a real
+// ledger phase (fix round 1), projectionMapping('completed') returned null
+// and this demotion path was a silent no-op for every adopted record. Now
+// that it returns a real mapping, the demotion would fire on every read:
+// projectionBoardDrift/projectionMetadataProblem would report phantom drift
+// (which wedges batch-runner's readiness gate — it throws on either being
+// non-empty), and the advertised drift remedy — single-card reconcile via
+// projectCard — would rewrite the epic board line and note frontmatter back
+// to in-progress, permanently un-completing the adopted slice on every
+// repair pass. This block pins the exemption at all three surfaces.
+{
+  const root = path.join(tmp, 'ad-projection');
+  const fx = adScaffold(root);
+  const state = emptyState();
+  const ctx = { root: fx.projectRoot, statePath: path.join(fx.projectRoot, 'state.json') };
+  await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'batch PR' },
+    adDeps(fx, state));
+  const record = state.cards['EM-4'];
+
+  // bhScaffold's slice template never stamps kanban_column (it wasn't built
+  // for projectCard-idempotency fixtures — every OTHER idempotency test in
+  // this suite hand-builds its own card with kanban_column present, see e.g.
+  // the BGR-RESTRUCTURE / drift fixtures above). Stamp it here so the note is
+  // metadata-canonical for an already-Completed slice, isolating the
+  // adoption exemption as the only variable under test. Likewise the atlas
+  // is always hardcoded to status:planning regardless of the epic's actual
+  // roll-up — with EM-4 done and EM-7 still in_progress the real epic
+  // lifecycle is 'active', so stamp that too, or the pre-existing atlas
+  // staleness (unrelated to adoption) would show up as unrelated drift.
+  fs.writeFileSync(record.card_path, patchFrontmatter(fs.readFileSync(record.card_path, 'utf8'), { kanban_column: 'Completed' }));
+  const atlasPath = path.join(fx.cardsRoot, 'Retire ero loop', 'Retire ero loop.md');
+  fs.writeFileSync(atlasPath, patchFrontmatter(fs.readFileSync(atlasPath, 'utf8'), { status: 'active' }));
+
+  const boardMd = fs.readFileSync(fx.boardPath, 'utf8');
+  eq(projectionBoardDrift(boardMd, record, { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, state }),
+    null, 'AD-PROJECTION an adopted record reports zero board drift');
+
+  const loadCard = (card) => {
+    const p = path.join(fx.cardsRoot, 'Retire ero loop', 'board', `${card}.md`);
+    return fs.existsSync(p) ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  };
+  const statusReceipt = commandStatus(ctx, {
+    state, boardMd, loadCard, cardsRoot: fx.cardsRoot, boardPath: fx.boardPath,
+  });
+  eq(statusReceipt.board_drift, [], 'AD-PROJECTION commandStatus reports zero board drift for an adopted record');
+  eq(statusReceipt.projection_problems, [], 'AD-PROJECTION commandStatus reports zero projection problems for an adopted record');
+
+  // The destructive-reconcile pin: projectCard is exactly what the advertised
+  // drift remedy (single-card reconcile) runs. board_changed/card_changed are
+  // the slice-level fields — the epic board line (`- [x]` on the EPIC board,
+  // not the project board) and the note's own `status: completed` frontmatter
+  // — which is precisely what the bug flipped back to in-progress. With the
+  // fixture now fully lifecycle-canonical (kanban_column + atlas stamped
+  // above), the aggregate `changed` is asserted too: nothing on this slice or
+  // its epic should move for an already-correct adopted record.
+  const projectWrites = [];
+  const projectResult = projectCard(record.card_path, fx.boardPath, 'EM-4', 'adopted', {
+    cardsRoot: fx.cardsRoot, record, writeText: (target, text) => projectWrites.push({ target, text }),
+  });
+  eq(projectResult.board_changed, false,
+    'AD-PROJECTION reconcile-style projectCard leaves the epic board line `- [x]` byte-identical');
+  eq(projectResult.card_changed, false,
+    "AD-PROJECTION reconcile-style projectCard leaves the note's `status: completed` byte-identical");
+  eq(projectResult.changed, false, 'AD-PROJECTION reconcile-style projectCard makes no change at all');
+  eq(projectWrites.length, 0, 'AD-PROJECTION an unchanged projection writes nothing');
+}
+
+// AD-KANBAN-DRAG — the motivating scenario, end to end, on a REAL ledger under
+// the REAL nested locks. A Director drags a slice into Completed in Obsidian:
+// KanbanStatusSync rewrites `status`/`status_prev`/`status_changed_at` and
+// nothing else — no `kanban_column`, no epic atlas, no parent board. If `adopt`
+// only wrote its record and returned (which is what it did, while three shipped
+// documents said it refreshed the projection), the very next read reported
+// `projectionMetadataProblem` expected_column "Completed" vs actual
+// "In Progress" AND `projectionBoardDrift` expected_status "done" vs actual
+// "active", and `batch-runner.js` `readiness()` THROWS on either being
+// non-empty. Using the verb exactly as documented stopped the unattended loop
+// until someone ran `reconcile`. This block pins the whole chain: the note, the
+// atlas, both status surfaces, and the durable `card_note_sha` baseline.
+//
+// Deliberately NOT using adDeps here: adDeps injects readState/writeState/
+// withLock stand-ins, and a projection asserted against an injected live object
+// under an injected lock proves neither durability nor lock safety (the exact
+// vacuous-test shape this cycle already shipped twice). Real state io, real
+// `withLock` — `commandAdopt` holds `selector` while `attemptProjection` takes
+// `completion-projection`, so this also pins that the nesting cannot deadlock.
+{
+  const root = path.join(tmp, 'ad-kanban-drag');
+  const fx = adScaffold(root);
+  const ctx = {
+    root: fx.projectRoot,
+    stateDir: path.join(fx.projectRoot, '.state'),
+    statePath: path.join(fx.projectRoot, '.state', 'state.json'),
+  };
+  const notePath = path.join(fx.cardsRoot, 'Retire ero loop', 'board', 'EM-4.md');
+  const atlasPath = path.join(fx.cardsRoot, 'Retire ero loop', 'Retire ero loop.md');
+  // Exactly what a Kanban drag leaves behind: the status declaration flipped,
+  // a bare-date (non-coordinator) stamp, a STALE kanban_column, and an epic
+  // atlas nothing ever touched.
+  fs.writeFileSync(notePath, patchFrontmatter(fs.readFileSync(notePath, 'utf8'), {
+    kanban_column: 'In Progress', status_prev: 'in_progress', status_changed_at: '2026-07-31',
+  }));
+  eq(testScalarField(fs.readFileSync(atlasPath, 'utf8'), 'status'), 'planning',
+    'AD-KANBAN-DRAG precondition: the drag left the epic atlas untouched');
+  eq(testScalarField(fs.readFileSync(notePath, 'utf8'), 'kanban_column'), 'In Progress',
+    'AD-KANBAN-DRAG precondition: the drag left kanban_column stale');
+
+  const receipt = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'dragged to Completed in Obsidian' },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, git: adGit(), prView: adPrView(), now: () => '2026-08-05T09:00:00.000Z' });
+  eq(receipt.ok, true, 'AD-KANBAN-DRAG adopt succeeds');
+  eq(receipt.action, 'adopt', 'AD-KANBAN-DRAG a successful projection keeps the plain adopt action');
+  eq(receipt.projection && receipt.projection.ok, true,
+    'AD-KANBAN-DRAG the receipt surfaces the projection result the way park/resume/amend-contract do');
+
+  // The ledger read fresh from disk, not the object commandAdopt mutated.
+  const onDisk = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['EM-4'];
+  eq(onDisk.phase, 'adopted', 'AD-KANBAN-DRAG the on-disk record is adopted');
+  ok(onDisk.projection_reconciled_at, 'AD-KANBAN-DRAG the projection receipt is durable on the on-disk record');
+  eq(onDisk.card_note_sha, testSha256(fs.readFileSync(notePath, 'utf8')),
+    'AD-KANBAN-DRAG the on-disk card_note_sha baseline equals sha256 of the note bytes on disk');
+
+  // The vault surfaces the drag never touched.
+  eq(testScalarField(fs.readFileSync(notePath, 'utf8'), 'kanban_column'), 'Completed',
+    'AD-KANBAN-DRAG the stale kanban_column is refreshed to the projected column');
+  eq(testScalarField(fs.readFileSync(atlasPath, 'utf8'), 'status'), 'active',
+    'AD-KANBAN-DRAG the epic atlas rolls up (EM-4 adopted, EM-7 still in flight)');
+
+  // The two surfaces batch-runner's readiness() throws on.
+  const state = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  eq(projectionBoardDrift(fs.readFileSync(fx.boardPath, 'utf8'), onDisk,
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, state }),
+  null, 'AD-KANBAN-DRAG projectionBoardDrift is clean after adopt');
+  const loadCard = (card) => {
+    const p = path.join(fx.cardsRoot, 'Retire ero loop', 'board', `${card}.md`);
+    return fs.existsSync(p) ? { path: p, raw: fs.readFileSync(p, 'utf8') } : null;
+  };
+  const statusReceipt = commandStatus(ctx, {
+    state, boardMd: fs.readFileSync(fx.boardPath, 'utf8'), loadCard,
+    cardsRoot: fx.cardsRoot, boardPath: fx.boardPath,
+  });
+  eq(statusReceipt.projection_problems, [], 'AD-KANBAN-DRAG commandStatus reports zero projection problems');
+  eq(statusReceipt.board_drift, [], 'AD-KANBAN-DRAG commandStatus reports zero board drift');
+
+  // Literal replay stays a zero-write no-op: the replay path must never
+  // project, or a replayed adopt would re-stamp status_changed_at forever.
+  const beforeReplay = fs.readFileSync(notePath, 'utf8');
+  const ledgerBeforeReplay = fs.readFileSync(ctx.statePath, 'utf8');
+  const replay = await coordinator.commandAdopt(ctx,
+    { json: true, card: 'EM-4', pr: 126, 'merge-sha': AD_SHA, reason: 'dragged to Completed in Obsidian' },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, git: adGit(), prView: adPrView() });
+  eq(replay.no_op, true, 'AD-KANBAN-DRAG literal replay is a no-op');
+  eq(fs.readFileSync(notePath, 'utf8'), beforeReplay, 'AD-KANBAN-DRAG replay leaves the note byte-identical');
+  eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBeforeReplay, 'AD-KANBAN-DRAG replay leaves the ledger byte-identical');
+}
+
+// FW-WRITERS — "card_note_sha is stamped at EVERY coordinator write of a
+// tracked card's note" is asserted absolutely in the spec, in
+// delivery-board.md, and in schemas-index.json ("so the coordinator never
+// mistakes its own repair for a foreign write"). Three writers did not honour
+// it, so running them over tracked projectable cards made the very next
+// projection report a foreign writer that was the coordinator itself.
+//
+// Every block below drives the REAL command against a REAL on-disk ledger
+// (no injected readState/writeState) and re-reads the record from disk after
+// the command — an assertion against the live object the command mutated
+// proves nothing about durability. Each seeds a genuine pre-write baseline
+// first, so an unstamped writer fails the way production fails: stale
+// baseline, divergent bytes, `foreign_write` on the next projection.
+const fwSeedLedger = (ctx, cards) => {
+  fs.mkdirSync(path.dirname(ctx.statePath), { recursive: true });
+  writeState(ctx, { schema_version: 1, cards });
+};
+const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256(fs.readFileSync(notePath, 'utf8')) });
+
+// FW-DEPS — reconcile-dependencies --apply is the direct sibling of the
+// discard dependent scan (scanDependentsForDiscard), which IS stamped: the
+// same rewriteDependsOn against the same tracked note, one stamped and one
+// not.
+{
+  const root = path.join(tmp, 'fw-reconcile-deps');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const boardPath = path.join(projectRoot, 'project-board.md');
+  fs.mkdirSync(cardsRoot, { recursive: true });
+  fs.writeFileSync(boardPath, liveBoard({ progress: ['FWD-1'] }));
+  const notePath = path.join(cardsRoot, 'FWD-1.md');
+  fs.writeFileSync(notePath, [
+    '---', 'type: task-hub', 'source_board: spice/projects/test/project-board.md',
+    'kanban_column: In Progress', 'status: in_progress',
+    'depends_on:', '  - "[[FWD-OLD]]"', '---', '', 'FWD-1 body', '',
+  ].join('\n'));
+  const ctx = { root, stateDir: path.join(root, '.state'), statePath: path.join(root, '.state', 'state.json') };
+  fwSeedLedger(ctx, {
+    'FWD-1': fwBaseline({
+      card: 'FWD-1', phase: 'feature_pr', card_path: notePath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, notePath),
+    'FWD-OLD': { card: 'FWD-OLD', phase: 'discarded', superseded_by: 'FWD-NEW' },
+    'FWD-NEW': { card: 'FWD-NEW', phase: 'planned' },
+  });
+
+  const applied = await coordinator.commandReconcileDependencies(ctx, {
+    all: true, apply: true, reason: 'heal supersession rot', json: true,
+  }, { boardPath, cardsRoot });
+  eq(applied.plan.map((entry) => [entry.card, entry.to]), [['FWD-1', 'FWD-NEW']],
+    'FW-DEPS precondition: the apply actually repoints the tracked dependent');
+  ok(/\[\[FWD-NEW\]\]/.test(fs.readFileSync(notePath, 'utf8')),
+    'FW-DEPS precondition: the note bytes on disk changed');
+
+  const fresh = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['FWD-1'];
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(notePath, 'utf8')),
+    'FW-DEPS the ON-DISK ledger sha equals sha256 of the repointed note bytes');
+  const reprojected = projectCard(notePath, boardPath, 'FWD-1', 'feature_pr', {
+    record: fresh, state: { cards: { 'FWD-1': fresh } }, cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-DEPS the coordinator does not report its own dependency repoint as a foreign write');
+}
+
+// FW-RESTAMP — reconcile-metadata --contract-frontmatter-restamp --apply
+// rewrites canonical card notes wholesale and never touched the ledger at all.
+{
+  const rs = restampHarness('foreign-write');
+  const restampBoard = path.join(reconcileRoot, 'fw-restamp-board.md');
+  fs.writeFileSync(restampBoard, liveBoard({ progress: ['Legacy Restamp A'] }));
+  fwSeedLedger(rs.ctx, {
+    'Legacy Restamp A': fwBaseline({
+      card: 'Legacy Restamp A', phase: 'implementing', card_path: rs.paths[0],
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, rs.paths[0]),
+  });
+  const plan = await commandRestampContractFrontmatter(rs.ctx, rs.dryRunArgs, rs.deps);
+  rs.setSpec(plan.spec);
+  const restamped = await commandRestampContractFrontmatter(rs.ctx, rs.applyArgs, rs.deps);
+  eq(restamped.changed_count, 2, 'FW-RESTAMP precondition: the apply actually rewrites both canonical notes');
+
+  const fresh = JSON.parse(fs.readFileSync(rs.ctx.statePath, 'utf8')).cards['Legacy Restamp A'];
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(rs.paths[0], 'utf8')),
+    'FW-RESTAMP the ON-DISK ledger sha equals sha256 of the restamped note bytes');
+  const reprojected = projectCard(rs.paths[0], restampBoard, 'Legacy Restamp A', 'implementing', {
+    record: fresh, state: { cards: { 'Legacy Restamp A': fresh } }, cardsRoot: rs.ctx.root,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-RESTAMP the coordinator does not report its own contract restamp as a foreign write');
+}
+
+// FW-RESTRUCTURE — restructure writes new note bytes at a NEW path and rebinds
+// card_path. Ordering is the whole difficulty: the stamp must describe the
+// bytes at the note's FINAL location, after the move and after the card_path
+// rebind, and it must ride restructure's own journal/persist discipline rather
+// than an extra bolted-on write.
+{
+  const fwR = makeRestructureFixture({ statuses: { 'Card A2': 'in_progress' } });
+  const fwCtx = {
+    root: fwR.root, stateDir: path.join(fwR.root, '.state'),
+    statePath: path.join(fwR.root, '.state', 'state.json'),
+  };
+  const oldPath = path.join(fwR.cardsRoot, 'Card A2.md');
+  fwSeedLedger(fwCtx, {
+    'Card A2': fwBaseline({
+      card: 'Card A2', phase: 'implementing', card_path: oldPath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    }, oldPath),
+  });
+  const receipt = await commandRestructure(fwCtx, { spec: fwR.specPath, json: true }, {
+    now: () => '2026-08-05T10:00:00.000Z',
+    journalPath: path.join(fwR.root, 'fw-restructure-journal.json'),
+  });
+  eq(receipt.no_op, false, 'FW-RESTRUCTURE precondition: the migration actually ran');
+  const newPath = path.join(fwR.cardsRoot, 'Family A', 'board', 'Card A2.md');
+  ok(fs.existsSync(newPath) && !fs.existsSync(oldPath),
+    'FW-RESTRUCTURE precondition: the tracked member moved to its epic board directory');
+
+  const fresh = JSON.parse(fs.readFileSync(fwCtx.statePath, 'utf8')).cards['Card A2'];
+  eq(fresh.card_path, newPath, 'FW-RESTRUCTURE the on-disk record is rebound to the final path');
+  eq(fresh.card_note_sha, testSha256(fs.readFileSync(newPath, 'utf8')),
+    'FW-RESTRUCTURE the ON-DISK ledger sha equals sha256 of the note bytes at the FINAL path');
+  const reprojected = projectCard(fresh.card_path, fwR.boardPath, 'Card A2', 'implementing', {
+    record: fresh, state: { cards: { 'Card A2': fresh } }, cardsRoot: fwR.cardsRoot,
+  });
+  eq(reprojected.foreign_write, null,
+    'FW-RESTRUCTURE the coordinator does not report its own migration as a foreign write');
+}
+
+// BHP board-health provenance: the aggregate untracked count is not a
+// rail-leaving rate. A coordinator-format stamp with no record in THIS clone
+// can only mean another clone's ledger holds it — legitimate, and not
+// actionable here. A foreign stamp means something outside the rail wrote it,
+// and THAT is what `adopt` exists for.
+{
+  const root = path.join(tmp, 'bhp-provenance');
+  const projectRoot = path.join(root, 'spice', 'projects', 'test');
+  const cardsRoot = path.join(projectRoot, 'tasks');
+  const fx = bhScaffold(root, {
+    progress: ['Mixed provenance'],
+    epics: {
+      'Mixed provenance': {
+        lanes: { Completed: ['XC-1', 'FH-1', 'FH-2'], Blocked: ['FH-3'] },
+        slices: { 'XC-1': 'completed', 'FH-1': 'completed', 'FH-2': 'completed', 'FH-3': 'blocked' },
+      },
+    },
+  });
+  const stamp = (name, value) => {
+    const p = path.join(cardsRoot, 'Mixed provenance', 'board', `${name}.md`);
+    const raw = fs.readFileSync(p, 'utf8');
+    fs.writeFileSync(p, value === null
+      ? raw
+      : raw.replace(/^status: completed$/m, `status: completed\nstatus_changed_at: ${value}`));
+  };
+  // Real shapes, both observed on live boards:
+  stamp('XC-1', '2026-07-28T15:31:35.493Z');  // coordinator (GA-P1k)
+  stamp('FH-1', '2026-07-31');                // KanbanStatusSync bare date (EM-4/5/6)
+  stamp('FH-2', null);                        // no stamp at all (EM-5)
+
+  const receipt = await coordinator.commandBoardHealth(
+    { root, statePath: path.join(root, 'state.json') },
+    { json: true },
+    bhDeps({ boardPath: fx.boardPath, cardsRoot }, { readState: () => emptyState() }),
+  );
+  const byCard = Object.fromEntries(receipt.findings.untracked_members.map((f) => [f.card, f]));
+
+  eq(byCard['XC-1'].provenance, 'coordinator', 'BHP an ISO-ms stamp is coordinator-written');
+  eq(byCard['XC-1'].stamp, '2026-07-28T15:31:35.493Z', 'BHP the stamp is reported verbatim');
+  eq(byCard['XC-1'].remedy, 'cross-clone: no action in this clone',
+    'BHP a coordinator stamp with no local record is cross-clone residue, not drift');
+
+  eq(byCard['FH-1'].provenance, 'foreign', 'BHP a bare-date stamp is foreign-written');
+  eq(byCard['FH-1'].remedy, 'adopt', 'BHP foreign completions route to adopt');
+  eq(byCard['FH-2'].provenance, 'foreign', 'BHP an absent stamp is foreign-written');
+  eq(byCard['FH-2'].stamp, null, 'BHP an absent stamp reports null');
+
+  // A remedy is a mechanical instruction, so it must be one the named verb will
+  // actually accept. `adopt` ratifies a COMPLETED declaration and refuses
+  // anything else with adopt_not_declared_complete — so routing a foreign
+  // `blocked`/`in_progress` finding to `adopt` hands the operator a command
+  // that cannot succeed. Observed live: 2 of 100 foreign findings.
+  eq(byCard['FH-3'].provenance, 'foreign', 'BHP a foreign non-completion is still foreign');
+  eq(byCard['FH-3'].note_status, 'blocked', 'BHP the non-completion status is reported');
+  eq(byCard['FH-3'].remedy, 'no mechanical remedy: adopt ratifies only a completed declaration',
+    'BHP a foreign finding adopt would refuse does not advertise adopt');
+
+  eq(receipt.findings.untracked_members_by_provenance, { coordinator: 1, foreign: 3 },
+    'BHP the receipt collapses the aggregate into a readable pair');
+  // collectBoardHealth's `healthy` is aliased into the receipt as `no_op`
+  // (see commandBoardHealth) — there is no separate `healthy` field to read.
+  eq(receipt.no_op, false, 'BHP classification is not a sixth check; health is unchanged');
+}
+
+// FW foreign-write detection. A repo-local lock cannot exclude KanbanStatusSync
+// (Obsidian, at vault boot) or Obsidian Sync (another machine). So the
+// coordinator does not pretend to exclude them — it detects them. For a
+// TRACKED card this is report-only on purpose: adoption does not apply to a
+// card that already has a record, and refusing here would wedge the autoloop
+// on a cosmetic Obsidian edit.
+{
+  const root = path.join(tmp, 'fw-detect');
+  const fx = bhScaffold(root, {
+    progress: ['Detect epic'],
+    epics: {
+      'Detect epic': { lanes: { 'In Progress': ['FW-1'] }, slices: { 'FW-1': 'in_progress' } },
+    },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Detect epic', 'board', 'FW-1.md');
+  const record = {
+    card: 'FW-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  const state = emptyState();
+  state.cards['FW-1'] = record;
+  const opts = { record, state, cardsRoot: fx.cardsRoot, now: () => '2026-08-04T12:00:00.000Z' };
+
+  // First projection has no prior sha to compare against: it establishes one.
+  const first = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(first.foreign_write, null, 'FW-1 a first projection cannot detect a foreign write');
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-1 projection records the sha of what it wrote');
+  const established = record.card_note_sha;
+
+  // Replay with the note untouched: no foreign write.
+  const replay = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(replay.foreign_write, null, 'FW-1 an untouched note reports no foreign write');
+  eq(record.card_note_sha, established, 'FW-1 an unchanged note keeps its recorded sha');
+
+  // Now simulate KanbanStatusSync: a bare-date stamp appended out of band.
+  const tampered = fs.readFileSync(notePath, 'utf8').replace(/^status: /m, 'status_changed_at: 2026-08-04\nstatus: ');
+  fs.writeFileSync(notePath, tampered);
+  const detected = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  ok(detected.foreign_write, 'FW-1 a note changed behind the coordinator is detected');
+  eq(detected.foreign_write.expected_sha, established, 'FW-1 the finding names the sha the coordinator wrote');
+  eq(detected.foreign_write.detected_at, '2026-08-04T12:00:00.000Z', 'FW-1 the finding is stamped');
+  ok(detected.foreign_write.actual_sha !== established, 'FW-1 the finding names the sha it actually found');
+  eq(record.foreign_write.expected_sha, established, 'FW-1 the finding is durable on the record');
+  ok(detected.changed !== undefined, 'FW-1 detection does not abort the projection');
+
+  // The detection call above already resynced record.card_note_sha to the
+  // tampered bytes on disk (stampCardNoteSha rereads unconditionally). A
+  // resolved condition must not leave a stale finding behind: the very next
+  // projection sees the sha already agrees and clears it.
+  const resolved = coordinator.projectCard(notePath, fx.boardPath, 'FW-1', 'implementing', opts);
+  eq(resolved.foreign_write, null, 'FW-1 the next projection resolves once the sha resyncs');
+  eq(record.foreign_write, undefined, 'FW-1 a resolved finding is cleared from the record, not left stale');
+}
+
+// FW-SKIPPED — the early-return path for a phase with no board projection
+// must still carry `foreign_write` (as `null`), so the result's shape is
+// uniform across every path projectCard can take, not just the ones that
+// reach detection.
+{
+  const skipped = coordinator.projectCard('/nonexistent/path.md', '/nonexistent/board.md', 'FW-SKIP', 'no-such-phase', {});
+  eq(skipped, { changed: false, skipped: true, foreign_write: null },
+    'FW-SKIPPED the skipped path carries foreign_write: null');
+}
+
+// FW-RECONCILE-PERSIST — a foreign write that produces no projection change
+// must still force persistence and reach the reconcile receipt. Before this
+// fix, `stateChanged` ignored `foreign_write` entirely, so the exact
+// canonical case this feature exists for — Obsidian's kanban mechanism
+// stamping status_changed_at while status/kanban_column are already correct
+// — would be detected and then thrown away: never persisted, never in the
+// receipt.
+{
+  const root = path.join(tmp, 'fw-reconcile-persist');
+  const fx = bhScaffold(root, {
+    progress: ['Persist epic'],
+    epics: { 'Persist epic': { lanes: { 'In Progress': ['FWP-1'] }, slices: { 'FWP-1': 'in_progress' } } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Persist epic', 'board', 'FWP-1.md');
+  const record = {
+    card: 'FWP-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  let state = emptyState();
+  state.cards['FWP-1'] = record;
+  let persistCount = 0;
+  const reconcileDeps = {
+    readState: () => state,
+    writeState: (_ctx, nextState) => { persistCount++; state = nextState; },
+    withLock: async (_c, _n, fn) => fn(),
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+    now: () => '2026-08-04T12:00:00.000Z',
+  };
+
+  // Seed pass: establishes the canonical baseline (kanban_column/status get
+  // stamped) and records the sha of exactly what real projectCard wrote.
+  const seed = await commandReconcile({ root: fx.projectRoot }, { card: 'FWP-1' }, reconcileDeps);
+  eq(seed.results[0].ok, true, 'FW-RECONCILE-PERSIST the seed reconcile succeeds');
+  ok(/^[0-9a-f]{64}$/.test(record.card_note_sha), 'FW-RECONCILE-PERSIST the seed establishes a baseline sha');
+  const priorPersistCount = persistCount;
+
+  // Simulate KanbanStatusSync stamping status_changed_at with no semantic
+  // change: status/kanban_column already agree with the ledger, so the
+  // projection itself has nothing to do.
+  const tampered = fs.readFileSync(notePath, 'utf8').replace(/^status: /m, 'status_changed_at: 2026-08-04\nstatus: ');
+  fs.writeFileSync(notePath, tampered);
+
+  const result = await commandReconcile({ root: fx.projectRoot }, { card: 'FWP-1' }, reconcileDeps);
+  const entry = result.results[0];
+  ok(entry.foreign_write, 'FW-RECONCILE-PERSIST the receipt carries the foreign-write finding');
+  eq(entry.projection_changed, false, 'FW-RECONCILE-PERSIST the projection itself made no change (precondition)');
+  eq(entry.state_changed, true, 'FW-RECONCILE-PERSIST a foreign write with no projection change still forces persistence');
+  ok(persistCount > priorPersistCount, 'FW-RECONCILE-PERSIST the forced state change actually persisted');
+}
+
+// FW-BOARD-HEALTH — board-health surfaces the same finding, per the design
+// spec's §6.1 requirement that a foreign write show up "in the projection
+// receipt and in board-health." Ledger-driven exactly like check 5
+// (projection_errors): an empty/absent ledger contributes nothing, and a
+// resolved record reports nothing — live conditions only.
+{
+  const root = path.join(tmp, 'fw-board-health');
+  const fx = bhScaffold(root, {
+    progress: ['FWBH epic'],
+    epics: { 'FWBH epic': { lanes: { 'In Progress': ['FWBH-1'] }, slices: { 'FWBH-1': 'in_progress' } } },
+  });
+  const state = emptyState();
+  const finding = { detected_at: '2026-08-04T12:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: 'b'.repeat(64) };
+  state.cards['FWBH-1'] = { card: 'FWBH-1', phase: 'implementing', foreign_write: finding };
+
+  const withFinding = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(withFinding.findings.foreign_writes, [{ card: 'FWBH-1', phase: 'implementing', foreign_write: finding }],
+    'FW-BOARD-HEALTH a live foreign_write finding is surfaced');
+  eq(withFinding.healthy, false, 'FW-BOARD-HEALTH a live foreign-write finding is not a healthy board');
+
+  delete state.cards['FWBH-1'].foreign_write;
+  const resolved = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(resolved.findings.foreign_writes, [], 'FW-BOARD-HEALTH a resolved record reports nothing');
+}
+
+// FW-BOARD-HEALTH-TERMINAL — a foreign_write on a card whose phase has no
+// board projection (discarded, failed, cancelled) can never be cleared:
+// projectCard is the only thing that clears it, and none of those phases
+// ever run through projectCard again (reconcile returns `skipped: 'phase has
+// no board projection'`). Without the phase gate on check 6, detecting a
+// foreign write and then discarding the card would leave board-health
+// permanently unhealthy — the hourly-sweep-never-recovers failure Minor A
+// fixed, reached through a different route (code this task introduced, not a
+// pre-existing condition).
+{
+  const root = path.join(tmp, 'fw-board-health-terminal');
+  const fx = bhScaffold(root, {});
+  const state = emptyState();
+  const finding = { detected_at: '2026-08-04T12:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: 'b'.repeat(64) };
+  state.cards['FWT-1'] = { card: 'FWT-1', phase: 'discarded', foreign_write: finding };
+
+  const bh = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(bh.findings.foreign_writes, [],
+    'FW-BOARD-HEALTH-TERMINAL a discarded record with a foreign_write is not reported — no projection can ever clear it');
+  eq(bh.healthy, true, 'FW-BOARD-HEALTH-TERMINAL an otherwise-clean board stays healthy');
+
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  eq(receipt.no_op, true, 'FW-BOARD-HEALTH-TERMINAL commandBoardHealth still reports no_op: true');
+
+  // failed/cancelled are equally unclearable and must be gated the same way.
+  for (const phase of ['failed', 'cancelled']) {
+    state.cards['FWT-1'].phase = phase;
+    const swept = coordinator.collectBoardHealth(state, {
+      boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+    });
+    eq(swept.findings.foreign_writes, [], `FW-BOARD-HEALTH-TERMINAL phase ${phase} with a foreign_write is also not reported`);
+  }
+}
+
+// FW-RECONCILE-CLEAR-PERSIST — projectCard clears an in-memory
+// `foreign_write` the moment its sha resyncs, but that clear must reach
+// disk too, or a stale finding from an earlier detection survives forever:
+// the resolving pass's `projected.foreign_write` is null (nothing NEW),
+// `projected.changed` is false (nothing to project), and
+// `projection_reconciled_at` is already set — none of that trips
+// `stateChanged` unless the pre-call `foreign_write` is captured and OR'd
+// in. Real on-disk ledger throughout — no readState/writeState overrides —
+// so this can only pass if the clear genuinely reaches disk.
+{
+  const root = path.join(tmp, 'fw-reconcile-clear-persist');
+  const fx = bhScaffold(root, {
+    progress: ['Clear epic'],
+    epics: { 'Clear epic': { lanes: { 'In Progress': ['FWC-1'] }, slices: { 'FWC-1': 'in_progress' } } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Clear epic', 'board', 'FWC-1.md');
+  const ctx = {
+    root: fx.projectRoot,
+    stateDir: path.join(fx.projectRoot, '.state'),
+    statePath: path.join(fx.projectRoot, '.state', 'state.json'),
+  };
+  const readOnDisk = () => JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+  const reconcileDeps = {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+    withLock: async (_c, _n, fn) => fn(), now: () => '2026-08-05T00:00:00.000Z',
+  };
+
+  const seedState = emptyState();
+  seedState.cards['FWC-1'] = {
+    card: 'FWC-1', phase: 'implementing', card_path: notePath,
+    touch_zones: ['a.js'], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ctx, seedState);
+
+  // Seed pass: canonicalizes the note, board, and epic atlas through the
+  // real ledger, and records the sha of exactly what real projectCard wrote.
+  const seed = await commandReconcile(ctx, { card: 'FWC-1' }, reconcileDeps);
+  eq(seed.results[0].ok, true, 'FW-RECONCILE-CLEAR-PERSIST the seed reconcile succeeds');
+
+  // Simulate a previously-persisted detection: inject a stale foreign_write
+  // finding directly onto the on-disk record, WITHOUT touching the note file
+  // — card_note_sha stays the seed pass's own value, so nothing about the
+  // note or board has drifted; only the ledger record carries an old finding.
+  const seeded = readOnDisk().cards['FWC-1'];
+  seeded.foreign_write = {
+    detected_at: '2026-08-01T00:00:00.000Z', expected_sha: 'a'.repeat(64), actual_sha: seeded.card_note_sha,
+  };
+  writeState(ctx, { cards: { 'FWC-1': seeded } }, seeded);
+
+  const before = coordinator.collectBoardHealth(readOnDisk(), {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(before.findings.foreign_writes.length, 1,
+    'FW-RECONCILE-CLEAR-PERSIST the seeded finding is visible on disk before the resolving pass (precondition)');
+
+  // Resolving pass: nothing on the note/board has changed since the seed, so
+  // the projection itself has nothing to do, and no NEW drift is detected.
+  const result = await commandReconcile(ctx, { card: 'FWC-1' }, reconcileDeps);
+  const entry = result.results[0];
+  eq(entry.projection_changed, false, 'FW-RECONCILE-CLEAR-PERSIST the projection itself makes no change (precondition)');
+  eq(entry.foreign_write, null, 'FW-RECONCILE-CLEAR-PERSIST the resolving pass detects no NEW foreign write');
+  eq(entry.state_changed, true, 'FW-RECONCILE-CLEAR-PERSIST the resolved finding still forces persistence');
+
+  const onDiskAfter = readOnDisk().cards['FWC-1'];
+  eq(onDiskAfter.foreign_write, undefined,
+    'FW-RECONCILE-CLEAR-PERSIST the ON-DISK record no longer carries the resolved finding');
+
+  const after = coordinator.collectBoardHealth(readOnDisk(), {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(after.findings.foreign_writes, [], 'FW-RECONCILE-CLEAR-PERSIST board-health reports nothing once resolved');
+  eq(after.healthy, true, 'FW-RECONCILE-CLEAR-PERSIST the board returns to healthy');
+
+  // No readState override here either — commandBoardHealth reads the real
+  // on-disk ledger through ctx's own stateDir/statePath.
+  const receipt = await coordinator.commandBoardHealth(ctx, { json: true }, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+  });
+  eq(receipt.no_op, true, 'FW-RECONCILE-CLEAR-PERSIST commandBoardHealth returns to no_op: true');
+}
+
+// CM concurrent-modification. delivery-board.md used to say "never run --apply
+// against a board with a live loop session or an active cross-machine sync".
+// A sentence is not a guard. The plan records what it read; apply refuses if
+// anything moved underneath it.
+{
+  const root = path.join(tmp, 'cm-heal');
+  const prefix = 'spice/projects/test';
+  const fx = bhScaffold(root, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        // Non-canonical atlas bindings, so the planner finds real drift.
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const plan = coordinator.planEpicBindingHeal(fx.cardsRoot, fx.boardPath);
+  ok(plan.atlases.length >= 1, 'CM the fixture presents real binding drift');
+  ok(/^[0-9a-f]{64}$/.test(plan.atlases[0].preimage_sha),
+    'CM the plan records the sha of every file it read');
+
+  // Clean apply against an untouched tree succeeds.
+  const cleanRoot = path.join(tmp, 'cm-heal-clean');
+  const cleanFx = bhScaffold(cleanRoot, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const applied = await coordinator.commandHealEpicBindings(
+    { root: cleanRoot }, { json: true, apply: true },
+    { boardPath: cleanFx.boardPath, cardsRoot: cleanFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(applied.ok, true, 'CM-CLEAN an untouched tree still applies');
+  eq(applied.applied, true, 'CM-CLEAN reports it applied');
+
+  // A second writer between plan and write is refused, with zero writes.
+  const atlasPath = path.join(fx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
+  const before = fs.readFileSync(atlasPath, 'utf8');
+  const atlasForeignWrite = `${before}\nappended by another writer\n`;
+  let refusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root }, { json: true, apply: true },
+      {
+        boardPath: fx.boardPath, cardsRoot: fx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        // Simulate Obsidian Sync landing a change after the plan is computed.
+        planHook: () => fs.writeFileSync(atlasPath, atlasForeignWrite),
+      });
+  } catch (err) { refusal = err; }
+  eq(refusal && refusal.code, 'concurrent_modification',
+    'CM-RACE a target changed after planning refuses');
+  ok(/Drifted epic.md/.test(refusal.message), 'CM-RACE the refusal names the changed path');
+  // Exact-bytes equality, not a substring regex: patchFrontmatter preserves
+  // the body, so a regex for the appended marker would also match a HEALED
+  // file (the write would carry the marker forward too) — only byte-for-byte
+  // equality with the untouched foreign write proves nothing was written.
+  eq(fs.readFileSync(atlasPath, 'utf8'), atlasForeignWrite,
+    'CM-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-SLICE-RACE — the same guard, pinned on the SLICE class specifically. A
+// guard reduced to `for (const target of atlases)` alone would miss this: it
+// never reads a slice target's bytes, so a slice drifting underneath the
+// plan would be silently healed rather than refused.
+{
+  const sliceRoot = path.join(tmp, 'cm-heal-slice');
+  const prefix = 'spice/projects/test';
+  const sliceFx = bhScaffold(sliceRoot, {
+    progress: ['Slice epic'],
+    epics: { 'Slice epic': { lanes: { 'In Progress': ['SL-1'] }, slices: { 'SL-1': 'in_progress' } } },
+  });
+  const slicePath = path.join(sliceFx.cardsRoot, 'Slice epic', 'board', 'SL-1.md');
+  // Drift the slice's task_parent to project-relative (non-canonical), the
+  // same shape BPX-HEAL's fixture uses, so the planner finds real slice drift
+  // while the atlas stays fully canonical — isolates the slice branch.
+  fs.writeFileSync(slicePath, fs.readFileSync(slicePath, 'utf8')
+    .replace(`task_parent: ${prefix}/tasks/Slice epic/Slice epic.md`, 'task_parent: tasks/Slice epic/Slice epic.md'));
+
+  const slicePlan = coordinator.planEpicBindingHeal(sliceFx.cardsRoot, sliceFx.boardPath);
+  eq(slicePlan.atlases.length, 0, 'CM-SLICE-RACE the fixture atlas stays canonical (isolates the slice branch)');
+  ok(slicePlan.slices.length >= 1, 'CM-SLICE-RACE the fixture presents real slice-level drift');
+  ok(/^[0-9a-f]{64}$/.test(slicePlan.slices[0].preimage_sha),
+    'CM-SLICE-RACE the plan records the sha of the slice it read');
+
+  const sliceBefore = fs.readFileSync(slicePath, 'utf8');
+  const sliceForeignWrite = `${sliceBefore}\nappended by another writer\n`;
+  let sliceRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: sliceRoot }, { json: true, apply: true },
+      {
+        boardPath: sliceFx.boardPath, cardsRoot: sliceFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(slicePath, sliceForeignWrite),
+      });
+  } catch (err) { sliceRefusal = err; }
+  eq(sliceRefusal && sliceRefusal.code, 'concurrent_modification',
+    'CM-SLICE-RACE a slice changed after planning refuses');
+  ok(/SL-1\.md/.test(sliceRefusal.message), 'CM-SLICE-RACE the refusal names the changed slice path');
+  eq(fs.readFileSync(slicePath, 'utf8'), sliceForeignWrite,
+    'CM-SLICE-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-ORPHAN — the same guard, pinned on the ORPHAN-BOARD class specifically,
+// on a fixture where atlases and slices are both fully canonical so only the
+// orphan branch can produce the refusal. Multi-orphan (three lines sharing
+// one board file) so the dedup — one board file named once, not once per
+// orphan line — is pinned by a test rather than merely true today.
+{
+  const orphanEpicSpec = {
+    lanes: { 'In Progress': ['OR-1', 'OR-2', 'OR-3'] },
+    slices: { 'OR-1': null, 'OR-2': null, 'OR-3': null },
+  };
+
+  const orphanRoot = path.join(tmp, 'cm-heal-orphan');
+  const orphanFx = bhScaffold(orphanRoot, { progress: ['Orphan epic'], epics: { 'Orphan epic': orphanEpicSpec } });
+  const orphanBoardPath = path.join(orphanFx.cardsRoot, 'Orphan epic', 'board', 'Orphan epic-board.md');
+
+  const orphanPlan = coordinator.planEpicBindingHeal(orphanFx.cardsRoot, orphanFx.boardPath);
+  eq(orphanPlan.atlases.length, 0, 'CM-ORPHAN the fixture atlas stays canonical (isolates the orphan branch)');
+  eq(orphanPlan.slices.length, 0, 'CM-ORPHAN the fixture has no slice drift (isolates the orphan branch)');
+  eq(orphanPlan.orphanLines.length, 3, 'CM-ORPHAN the fixture presents three orphan lines sharing one board');
+  ok(orphanPlan.orphanLines.every((o) => o.board === orphanBoardPath),
+    'CM-ORPHAN all three orphan lines share the same board file');
+
+  // Clean multi-orphan apply heals and prunes every line.
+  const orphanCleanRoot = path.join(tmp, 'cm-heal-orphan-clean');
+  const orphanCleanFx = bhScaffold(orphanCleanRoot, {
+    progress: ['Orphan epic'], epics: { 'Orphan epic': orphanEpicSpec },
+  });
+  const orphanCleanBoardPath = path.join(orphanCleanFx.cardsRoot, 'Orphan epic', 'board', 'Orphan epic-board.md');
+  const orphanApplied = await coordinator.commandHealEpicBindings(
+    { root: orphanCleanRoot }, { json: true, apply: true },
+    { boardPath: orphanCleanFx.boardPath, cardsRoot: orphanCleanFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(orphanApplied.ok, true, 'CM-ORPHAN-CLEAN an untouched multi-orphan board still applies');
+  eq(orphanApplied.orphan_lines.map((o) => o.card).sort(), ['OR-1', 'OR-2', 'OR-3'],
+    'CM-ORPHAN-CLEAN the receipt names every orphan line');
+  const orphanCleanBoardAfter = fs.readFileSync(orphanCleanBoardPath, 'utf8');
+  for (const card of ['OR-1', 'OR-2', 'OR-3']) {
+    ok(!new RegExp(`\\[\\[${card}\\]\\]`).test(orphanCleanBoardAfter), `CM-ORPHAN-CLEAN ${card} is pruned from the board`);
+  }
+
+  // A second writer touching the shared orphan board between plan and apply
+  // is refused, the board is named exactly once, and nothing is written.
+  const orphanBoardBefore = fs.readFileSync(orphanBoardPath, 'utf8');
+  const orphanForeignWrite = `${orphanBoardBefore}\nappended by another writer\n`;
+  let orphanRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: orphanRoot }, { json: true, apply: true },
+      {
+        boardPath: orphanFx.boardPath, cardsRoot: orphanFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(orphanBoardPath, orphanForeignWrite),
+      });
+  } catch (err) { orphanRefusal = err; }
+  eq(orphanRefusal && orphanRefusal.code, 'concurrent_modification',
+    'CM-ORPHAN-RACE a shared orphan board changed after planning refuses');
+  const orphanBoardMentions = (orphanRefusal.message.match(/Orphan epic-board\.md/g) || []).length;
+  eq(orphanBoardMentions, 1, 'CM-ORPHAN-RACE the changed board is named exactly once, not once per orphan line');
+  eq(fs.readFileSync(orphanBoardPath, 'utf8'), orphanForeignWrite,
+    'CM-ORPHAN-RACE the foreign write is left intact — the refusal wrote nothing');
+}
+
+// CM-LEDGER — a real on-disk ledger (real stateDir/statePath, no readState/
+// writeState overrides) with a real tracked record for the drifted slice, so
+// the stamp/persist tail commandHealEpicBindings grew since the brief was
+// written is actually exercised. CM-LEDGER-CONTROL proves the fixture is
+// live (unraced, it heals AND advances card_note_sha) — without that control
+// a "the ledger didn't change" assertion in the race case could pass against
+// an inert fixture that never touches the ledger either way.
+{
+  const ledgerEpicSpec = { lanes: { 'In Progress': ['LE-1'] }, slices: { 'LE-1': 'in_progress' } };
+  const prefix = 'spice/projects/test';
+  const driftTaskParent = (slicePath) => fs.writeFileSync(slicePath, fs.readFileSync(slicePath, 'utf8')
+    .replace(`task_parent: ${prefix}/tasks/Ledger epic/Ledger epic.md`, 'task_parent: tasks/Ledger epic/Ledger epic.md'));
+
+  // Control: unraced, real ledger, real tracked record.
+  const ledgerControlRoot = path.join(tmp, 'cm-heal-ledger-control');
+  const ledgerControlFx = bhScaffold(ledgerControlRoot, {
+    progress: ['Ledger epic'], epics: { 'Ledger epic': ledgerEpicSpec },
+  });
+  const ledgerControlSlicePath = path.join(ledgerControlFx.cardsRoot, 'Ledger epic', 'board', 'LE-1.md');
+  driftTaskParent(ledgerControlSlicePath);
+  const ledgerControlCtx = {
+    root: ledgerControlRoot, stateDir: path.join(ledgerControlRoot, '.state'),
+    statePath: path.join(ledgerControlRoot, '.state', 'state.json'),
+  };
+  const ledgerControlSeed = {
+    card: 'LE-1', phase: 'implementing', card_path: ledgerControlSlicePath,
+    touch_zones: [], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ledgerControlCtx, { cards: { 'LE-1': ledgerControlSeed } }, ledgerControlSeed);
+  const ledgerControlApplied = await coordinator.commandHealEpicBindings(
+    ledgerControlCtx, { json: true, apply: true },
+    { boardPath: ledgerControlFx.boardPath, cardsRoot: ledgerControlFx.cardsRoot, withLock: async (_c, _n, fn) => fn() });
+  eq(ledgerControlApplied.ok, true, 'CM-LEDGER-CONTROL an untouched tracked slice still applies (fixture is live)');
+  const ledgerControlOnDisk = JSON.parse(fs.readFileSync(ledgerControlCtx.statePath, 'utf8'));
+  const ledgerControlHealedBytes = fs.readFileSync(ledgerControlSlicePath, 'utf8');
+  eq(ledgerControlOnDisk.cards['LE-1'].card_note_sha,
+    crypto.createHash('sha256').update(ledgerControlHealedBytes).digest('hex'),
+    'CM-LEDGER-CONTROL card_note_sha advances to the healed bytes — the stamp/persist tail is live');
+
+  // Race: identical fixture, but a writer lands on the tracked slice between
+  // plan and apply. The refused run must leave the ledger untouched in BOTH
+  // bytes and mtime, and card_note_sha must never advance past its seed.
+  const ledgerRaceRoot = path.join(tmp, 'cm-heal-ledger-race');
+  const ledgerRaceFx = bhScaffold(ledgerRaceRoot, {
+    progress: ['Ledger epic'], epics: { 'Ledger epic': ledgerEpicSpec },
+  });
+  const ledgerRaceSlicePath = path.join(ledgerRaceFx.cardsRoot, 'Ledger epic', 'board', 'LE-1.md');
+  driftTaskParent(ledgerRaceSlicePath);
+  const ledgerRaceCtx = {
+    root: ledgerRaceRoot, stateDir: path.join(ledgerRaceRoot, '.state'),
+    statePath: path.join(ledgerRaceRoot, '.state', 'state.json'),
+  };
+  const ledgerRaceSeed = {
+    card: 'LE-1', phase: 'implementing', card_path: ledgerRaceSlicePath,
+    touch_zones: [], dependencies: [], deploy_subscriptions: null,
+  };
+  writeState(ledgerRaceCtx, { cards: { 'LE-1': ledgerRaceSeed } }, ledgerRaceSeed);
+  const ledgerBeforeBytes = fs.readFileSync(ledgerRaceCtx.statePath, 'utf8');
+  const ledgerBeforeMtime = fs.statSync(ledgerRaceCtx.statePath).mtimeMs;
+  const ledgerRaceSliceBefore = fs.readFileSync(ledgerRaceSlicePath, 'utf8');
+  const ledgerRaceForeignWrite = `${ledgerRaceSliceBefore}\nappended by another writer\n`;
+  let ledgerRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      ledgerRaceCtx, { json: true, apply: true },
+      {
+        boardPath: ledgerRaceFx.boardPath, cardsRoot: ledgerRaceFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(ledgerRaceSlicePath, ledgerRaceForeignWrite),
+      });
+  } catch (err) { ledgerRefusal = err; }
+  eq(ledgerRefusal && ledgerRefusal.code, 'concurrent_modification', 'CM-LEDGER-RACE a race on a tracked slice refuses');
+  eq(fs.readFileSync(ledgerRaceCtx.statePath, 'utf8'), ledgerBeforeBytes,
+    'CM-LEDGER-RACE the ledger is byte-for-byte unchanged after a refused apply');
+  eq(fs.statSync(ledgerRaceCtx.statePath).mtimeMs, ledgerBeforeMtime,
+    'CM-LEDGER-RACE the ledger mtime is unchanged after a refused apply — persist was never reached');
+  eq(JSON.parse(ledgerBeforeBytes).cards['LE-1'].card_note_sha, undefined,
+    'CM-LEDGER-RACE card_note_sha was never advanced past its unset seed value');
+  eq(fs.readFileSync(ledgerRaceSlicePath, 'utf8'), ledgerRaceForeignWrite,
+    'CM-LEDGER-RACE the foreign write on the slice itself is left intact too');
+}
+
+// CM-DELETE-RACE — a concurrent writer that deletes a target (a sync client
+// removing a note, exactly the case this verb exists to catch) must fail
+// closed through the SAME sanctioned refusal code, not bubble up as a raw
+// ENOENT that a caller branching on `code` would fail to recognize.
+{
+  const deleteRoot = path.join(tmp, 'cm-heal-delete');
+  const prefix = 'spice/projects/test';
+  const deleteFx = bhScaffold(deleteRoot, {
+    progress: ['Drifted epic'],
+    epics: {
+      'Drifted epic': {
+        atlasLines: [
+          'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+          `epic_board: ${prefix}/tasks/Drifted epic/board/Drifted epic-board.md`,
+        ],
+        lanes: { 'In Progress': ['CM-1'] },
+        slices: { 'CM-1': 'in_progress' },
+      },
+    },
+  });
+  const deleteAtlasPath = path.join(deleteFx.cardsRoot, 'Drifted epic', 'Drifted epic.md');
+  let deleteRefusal = null;
+  try {
+    await coordinator.commandHealEpicBindings(
+      { root: deleteRoot }, { json: true, apply: true },
+      {
+        boardPath: deleteFx.boardPath, cardsRoot: deleteFx.cardsRoot,
+        withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.unlinkSync(deleteAtlasPath),
+      });
+  } catch (err) { deleteRefusal = err; }
+  eq(deleteRefusal && deleteRefusal.code, 'concurrent_modification',
+    'CM-DELETE-RACE a target deleted after planning refuses through the sanctioned code, not raw ENOENT');
+  ok(deleteRefusal && /Drifted epic\.md/.test(deleteRefusal.message),
+    'CM-DELETE-RACE the refusal names the deleted path');
+  ok(!fs.existsSync(deleteAtlasPath), 'CM-DELETE-RACE the deletion itself is left as the concurrent writer made it');
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);

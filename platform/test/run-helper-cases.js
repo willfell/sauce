@@ -10761,9 +10761,10 @@ async function caseV01020EC1PresetPromptsPlumbed() {
   // create() destructures presetPrompts with a default-empty object
   assertTrue("HC-V01020-EC-1a: create() destructures presetPrompts = {} default",
     /presetPrompts\s*=\s*\{\}/.test(src));
-  // render() forwards presetPrompts to create() on click
+  // render() forwards presetPrompts and the optional structural lifecycle to
+  // create() on click. Existing callers omit the latter and remain unchanged.
   assertTrue("HC-V01020-EC-1b: render() forwards presetPrompts to create()",
-    /this\.create\(\s*\{\s*instance\s*,\s*dv\s*,\s*presetPrompts\s*\}\s*\)/.test(src));
+    /this\.create\(\s*\{\s*instance\s*,\s*dv\s*,\s*presetPrompts\s*,\s*structuralLifecycle\s*\}\s*\)/.test(src));
   // Prompt-loop has a presetPrompts hasOwnProperty short-circuit using p.key
   assertTrue("HC-V01020-EC-1c: prompt loop short-circuits on presetPrompts via hasOwnProperty(p.key)",
     /Object\.prototype\.hasOwnProperty\.call\(\s*presetPrompts\s*,\s*p\.key\s*\)/.test(src));
