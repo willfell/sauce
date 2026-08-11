@@ -202,6 +202,118 @@ async function main() {
       return lines.length === 50 && lines.every((l) => l.startsWith(`${r.id}:`));
     }));
 
+  // --- group mutual exclusion ---
+  // Steps append a one-character "tag" plus "+"/"-" to a shared log around a
+  // 150ms busy-wait: `<tag>+` on start, `<tag>-` on end. Replaying the log
+  // gives the true peak overlap, either across every step (ignore the tag) or
+  // within a single group (filter by tag first). Real subprocesses only — the
+  // spawn seam is what group mutual-exclusion has to hold up under.
+  const makeGroupStep = (logPath) => (id, tag, group) => ({
+    id,
+    ...(group ? { group } : {}),
+    cmd: ['node', '-e',
+      `const fs=require("fs");fs.appendFileSync(${JSON.stringify(logPath)},"${tag}+");`
+      + `const t=Date.now();while(Date.now()-t<150);`
+      + `fs.appendFileSync(${JSON.stringify(logPath)},"${tag}-")`],
+  });
+  const parseTaggedLog = (p) => fs.readFileSync(p, 'utf8').match(/.[-+]/g) || [];
+  const peakOverall = (tokens) => {
+    let cur = 0; let peak = 0;
+    for (const tok of tokens) {
+      if (tok.endsWith('+')) { cur += 1; peak = Math.max(peak, cur); } else { cur -= 1; }
+    }
+    return peak;
+  };
+  const peakForTag = (tokens, tag) => peakOverall(tokens.filter((t) => t[0] === tag));
+  const timeoutGuard = (promise, ms) => Promise.race([
+    promise.then((v) => ({ timedOut: false, value: v })),
+    new Promise((resolve) => { setTimeout(() => resolve({ timedOut: true }), ms); }),
+  ]);
+
+  // GROUP-1: six steps in a single group never overlap even with jobs to spare.
+  const log1 = path.join(tmp, 'group1.log');
+  fs.writeFileSync(log1, '');
+  const step1 = makeGroupStep(log1);
+  const g1steps = Array.from({ length: 6 }, (_, i) => step1(`g1-${i}`, 'g', 'g'));
+  await runManifest({ schema_version: '1.0.0', steps: g1steps }, { jobs: 4 });
+  const g1tokens = parseTaggedLog(log1);
+  ok('GROUP-1 six steps in one group never overlap at jobs=4',
+    peakForTag(g1tokens, 'g') === 1 && peakOverall(g1tokens) === 1);
+
+  // GROUP-2: two different groups run concurrently with each other, while each
+  // group still serializes internally.
+  const log2 = path.join(tmp, 'group2.log');
+  fs.writeFileSync(log2, '');
+  const step2 = makeGroupStep(log2);
+  const g2steps = [
+    ...Array.from({ length: 3 }, (_, i) => step2(`g2-a${i}`, 'a', 'a')),
+    ...Array.from({ length: 3 }, (_, i) => step2(`g2-b${i}`, 'b', 'b')),
+  ];
+  await runManifest({ schema_version: '1.0.0', steps: g2steps }, { jobs: 4 });
+  const g2tokens = parseTaggedLog(log2);
+  ok('GROUP-2 steps in two different groups overlap with each other',
+    peakOverall(g2tokens) > 1);
+  ok('GROUP-2b each group still never overlaps with itself',
+    peakForTag(g2tokens, 'a') === 1 && peakForTag(g2tokens, 'b') === 1);
+
+  // GROUP-3 / GROUP-4: grouped and ungrouped steps overlap with each other, the
+  // grouped ones still serialize among themselves, and every step completes.
+  const log3 = path.join(tmp, 'group3.log');
+  fs.writeFileSync(log3, '');
+  const step3 = makeGroupStep(log3);
+  const g3steps = [
+    ...Array.from({ length: 3 }, (_, i) => step3(`g3-c${i}`, 'c', 'c')),
+    ...Array.from({ length: 3 }, (_, i) => step3(`g3-u${i}`, 'u')),
+  ];
+  const g3run = await runManifest({ schema_version: '1.0.0', steps: g3steps }, { jobs: 4 });
+  const g3tokens = parseTaggedLog(log3);
+  ok('GROUP-3 grouped and ungrouped steps overlap with each other',
+    peakOverall(g3tokens) > 1);
+  ok('GROUP-3b the grouped steps still never overlap each other',
+    peakForTag(g3tokens, 'c') === 1);
+  ok('GROUP-4 every step still completes and the run reports ok',
+    g3run.ok === true && g3run.results.length === 6
+    && g3run.results.every((r) => r.status === 'pass'));
+
+  // GROUP-5: a failing grouped step must release its group rather than wedge
+  // it forever. Within one jobs=1 run, a passing step and then a failing step
+  // share a group; if release didn't happen the single worker would poll its
+  // own permanently-busy group forever. Guarded with a timeout so a real
+  // deadlock fails the assertion instead of hanging the whole test file.
+  const group5 = 'g5line';
+  const seq5 = [
+    { id: 'g5line-first', group: group5, cmd: ['node', '-e', 'process.stdout.write("marker-first")'] },
+    { id: 'g5line-fail', group: group5, cmd: ['node', '-e', 'process.stderr.write("boom");process.exit(3)'] },
+  ];
+  const run5Guard = await timeoutGuard(
+    runManifest({ schema_version: '1.0.0', steps: seq5 }, { jobs: 1 }), 5000,
+  );
+  ok('GROUP-5a a failing grouped step releases its group instead of deadlocking',
+    run5Guard.timedOut === false);
+  if (!run5Guard.timedOut) {
+    const run5 = run5Guard.value;
+    ok('GROUP-5b the later same-group step still dispatched, and the run terminated',
+      run5.results.map((r) => r.id).join(',') === 'g5line-first,g5line-fail'
+      && run5.results[0].status === 'pass' && run5.results[1].status === 'fail');
+  }
+
+  // A separate run reusing the same group id proves group state does not leak
+  // across manifest runs — the group is reachable and the run is not halted.
+  const passing5 = { id: 'g5line-second', group: group5, cmd: ['node', '-e', 'process.stdout.write("marker-second")'] };
+  const run5bGuard = await timeoutGuard(
+    runManifest({ schema_version: '1.0.0', steps: [passing5] }, { jobs: 2 }), 5000,
+  );
+  ok('GROUP-5c a later, separate run reusing the same group id is not deadlocked',
+    run5bGuard.timedOut === false && run5bGuard.value.ok === true);
+
+  // --- validateManifest: group ---
+  ok('VALID-7 a non-string group is rejected',
+    validateManifest({ schema_version: '1.0.0', steps: [{ id: 'a', cmd: ['node', '-e', '0'], group: 42 }] })
+      .some((m) => m.includes('group')));
+  ok('VALID-8 an empty-string group is rejected',
+    validateManifest({ schema_version: '1.0.0', steps: [{ id: 'a', cmd: ['node', '-e', '0'], group: '' }] })
+      .some((m) => m.includes('group')));
+
   fs.rmSync(tmp, { recursive: true, force: true });
 
   const failed = results.filter(([, passed]) => !passed);

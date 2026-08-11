@@ -60,6 +60,9 @@ function validateManifest(manifest) {
     if (step.lane !== undefined && !LANES.includes(step.lane)) {
       errors.push(`${where}: lane must be one of ${LANES.join(', ')}`);
     }
+    if (step.group !== undefined && (typeof step.group !== 'string' || !step.group.trim())) {
+      errors.push(`${where}: group must be a non-empty string`);
+    }
   });
   return errors;
 }
@@ -99,18 +102,44 @@ function runStep(step, cwd) {
 // steps once any step has failed, but lets in-flight steps finish. Never
 // retries: a retry would mask exactly the concurrency-coupling bugs the soak
 // exists to find.
+//
+// A step may carry an optional `group`. At most one step per group runs at a
+// time; steps in different groups (or with no group at all) still run
+// concurrently around them. A worker that finds every remaining step's group
+// busy polls rather than blocking, so other workers can keep draining
+// ungrouped/other-group work in the meantime. Releasing a group happens in a
+// `finally` so a step that throws never wedges its group forever.
 async function runLane(steps, jobs, cwd, onResult, isHalted) {
-  let next = 0;
+  const queue = steps.map((step) => step);
+  const busy = new Set();
   let failed = false;
+  const takeNext = () => {
+    for (let k = 0; k < queue.length; k += 1) {
+      const g = queue[k].group;
+      if (!g || !busy.has(g)) return queue.splice(k, 1)[0];
+    }
+    return null;
+  };
   const workers = Array.from({ length: Math.min(jobs, steps.length || 1) }, async () => {
     for (;;) {
       if (failed || isHalted()) return;
-      const i = next;
-      next += 1;
-      if (i >= steps.length) return;
-      const result = await runStep(steps[i], cwd);
-      onResult(result);
-      if (result.status === 'fail') failed = true;
+      const step = takeNext();
+      if (!step) {
+        if (queue.length === 0) return;
+        // Every queued step's group is currently busy; wait for a holder to
+        // finish rather than spin-locking the event loop.
+        await new Promise((resolve) => { setTimeout(resolve, 25); });
+        continue;
+      }
+      const g = step.group;
+      if (g) busy.add(g);
+      try {
+        const result = await runStep(step, cwd);
+        onResult(result);
+        if (result.status === 'fail') failed = true;
+      } finally {
+        if (g) busy.delete(g);
+      }
     }
   });
   await Promise.all(workers);
