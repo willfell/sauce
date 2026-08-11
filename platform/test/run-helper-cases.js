@@ -7700,14 +7700,15 @@ async function caseHCV01174TodoManifest() {
 }
 
 async function caseHCV01174TodoTemplate() {
-  console.log("\n--- Case HC-V01174-TODO-TEMPLATE: to-do templates are SectionLabel-only (no load-bearing ## H2) ---");
+  console.log("\n--- Case HC-V01174-TODO-TEMPLATE: to-do templates use canonical renderers (no load-bearing ## H2) ---");
   const todayBody = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/templates/Today To-Do.md"), "utf8");
   const projectBody = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/templates/Project To-Do.md"), "utf8");
 
-  assertTrue("HC-V01174-TODO-TEMPLATE-1: Today To-Do.md uses class: \"SectionLabel\"",
-    /class:\s*"SectionLabel"/.test(todayBody),
+  const todayClasses = [...todayBody.matchAll(/class:\s*"([^"]+)"/g)].map(match => match[1]);
+  assertTrue("HC-V01174-TODO-TEMPLATE-1: Today To-Do.md uses exactly ToDoChromeBar + ToDoDailyFilterView",
+    JSON.stringify(todayClasses) === JSON.stringify(["ToDoChromeBar", "ToDoDailyFilterView"]),
     `today body:\n${todayBody.slice(0, 400)}`);
 
   const todayBanned = [/^## Today\s*$/m, /^## Today's Capture\s*$/m, /^## Carryover\s*$/m, /^## Recurring\s*$/m];

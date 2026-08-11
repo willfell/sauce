@@ -8,6 +8,7 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const SOURCE_PATH = path.join(ROOT, 'platform/blueprints/to-do/helpers/todo-daily-filter-view.js');
 const SOURCE = fs.readFileSync(SOURCE_PATH, 'utf8');
+const TEMPLATE_PATH = path.join(ROOT, 'platform/blueprints/to-do/templates/Today To-Do.md');
 
 let passed = 0;
 let failed = 0;
@@ -106,11 +107,12 @@ function dataArray(items) {
 
 const TODAY = '2026-08-11';
 const TASKS = [
-  { type: 'task', title: 'Today low', status: 'open', due: TODAY, priority: 'low', file: { path: 'spice/tasks/today-low.md' } },
-  { type: 'task', title: 'Overdue high', status: 'open', due: '2026-08-10', priority: 'high', file: { path: 'spice/tasks/overdue-high.md' } },
-  { type: 'task', title: 'Upcoming highest', status: 'open', due: '2026-08-12', priority: 'highest', file: { path: 'spice/tasks/upcoming-highest.md' } },
-  { type: 'task', title: 'No date medium', status: 'open', due: null, priority: 'medium', file: { path: 'spice/tasks/no-date.md' } },
-  { type: 'task', title: 'Done', status: 'done', due: TODAY, priority: 'highest', file: { path: 'spice/tasks/_done/done.md' } },
+  { type: 'task', title: 'Today low', status: 'open', due: TODAY, priority: 'low', source: 'daily', file: { path: 'spice/tasks/today-low.md' } },
+  { type: 'task', title: 'Overdue high', status: 'open', due: '2026-08-10', priority: 'high', project: '[[Sauce]]', project_slug: 'sauce', source: 'project', file: { path: 'spice/tasks/overdue-high.md' } },
+  { type: 'task', title: 'Upcoming highest', status: 'open', due: '2026-08-12', priority: 'highest', project: '[[Sauce]]', project_slug: 'sauce', source: 'meeting', file: { path: 'spice/tasks/upcoming-highest.md' } },
+  { type: 'task', title: 'No date medium', status: 'open', due: null, priority: 'medium', trip: 'Seed Trip', trip_slug: 'seed-trip', source: 'trip', file: { path: 'spice/tasks/no-date.md' } },
+  { type: 'task', title: 'Done today', status: 'done', due: TODAY, completed_at: `${TODAY}T09:15:00-06:00`, priority: 'highest', file: { path: 'spice/tasks/_done/done.md' } },
+  { type: 'task', title: 'Done yesterday', status: 'done', due: '2026-08-10', completed_at: '2026-08-10T09:15:00-06:00', file: { path: 'spice/tasks/_done/done-old.md' } },
 ];
 
 (async () => {
@@ -147,18 +149,55 @@ const TASKS = [
   ok('TV3-STATE guarded storage round-trips canonical client-only state', () => {
     const View = loadClass({});
     const storage = makeStorage();
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due' });
-    const written = View.writeState(storage, { scopes: ['upcoming', 'no-date'], sort: 'priority' });
-    assert.deepStrictEqual(written, { scopes: ['upcoming', 'no-date'], sort: 'priority' });
+    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
+    const written = View.writeState(storage, { scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true });
+    assert.deepStrictEqual(written, { scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true });
     assert.deepStrictEqual(View.readState(storage), written);
 
     storage.data.set(View.STORAGE_KEY, '{bad json');
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due' });
+    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
     storage.data.set(View.STORAGE_KEY, JSON.stringify({ scopes: [], sort: 'priority' }));
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due' });
+    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
     const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
-    assert.deepStrictEqual(View.readState(throwing), { scopes: ['today', 'overdue'], sort: 'due' });
+    assert.deepStrictEqual(View.readState(throwing), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
     assert.doesNotThrow(() => View.writeState(throwing, written));
+  });
+
+  ok('TV4-DONE is off by default and includes only tasks completed today when enabled', () => {
+    const View = loadClass({});
+    assert(!View.DEFAULT_SCOPES.includes('done'));
+    assert(!View.selectByScope(TASKS, new Set(View.DEFAULT_SCOPES), TODAY).some((task) => task.status === 'done'));
+    assert.deepStrictEqual(
+      View.selectByScope(TASKS, new Set(['done']), TODAY).map((task) => task.title),
+      ['Done today'],
+    );
+    assert.deepStrictEqual(
+      View.selectByScope(TASKS, new Set(['all', 'done']), TODAY).map((task) => task.title),
+      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium', 'Done today'],
+    );
+  });
+
+  ok('TV4-GROUP partitions the same sorted rows by project without loss or duplication', () => {
+    const View = loadClass({});
+    const rows = TASKS.slice(0, 4);
+    const groups = View.groupByProject(rows);
+    assert.deepStrictEqual(groups.map((group) => group.label), ['No Project', 'Sauce']);
+    assert.deepStrictEqual(groups.flatMap((group) => group.tasks).map((task) => task.title),
+      ['Today low', 'No date medium', 'Overdue high', 'Upcoming highest']);
+    assert.deepStrictEqual(
+      [...groups.flatMap((group) => group.tasks)].sort((a, b) => a.title.localeCompare(b.title)).map((task) => task.title),
+      [...rows].sort((a, b) => a.title.localeCompare(b.title)).map((task) => task.title),
+    );
+  });
+
+  ok('TV4-TEMPLATE contains exactly ToDoChromeBar + ToDoDailyFilterView renderer blocks', () => {
+    const template = fs.readFileSync(TEMPLATE_PATH, 'utf8');
+    const classes = [...template.matchAll(/class:\s*"([^"]+)"/g)].map((match) => match[1]);
+    assert.deepStrictEqual(classes, ['ToDoChromeBar', 'ToDoDailyFilterView']);
+    for (const retired of ['SectionLabel', 'TaskTodayList', 'ToDoDailyRecurring', 'ToDoDailyProjectGroups',
+      'ToDoDailyTripGroups', 'ToDoDailyUnassignedMeetings', 'TaskDoneTodayList']) {
+      assert(!template.includes(`class: "${retired}"`), `retired renderer remains: ${retired}`);
+    }
   });
 
   ok('TV3-SORT delegates Due and Priority ordering to SpaceDailyDashboard comparators', () => {
@@ -210,6 +249,11 @@ const TASKS = [
           },
         },
         TaskDialog: {},
+        SectionLabel: {
+          render(dvLike, opts) {
+            return dvLike.container.createEl('div', { cls: 'sauce-section-label', text: opts.text });
+          },
+        },
         SpaceDailyDashboard: {
           compareTasksByDue(a, b) {
             const ad = a.due || '9999-99-99';
@@ -239,7 +283,7 @@ const TASKS = [
     const groups = byClass(root, 'sauce-pill-group');
     assert.strictEqual(groups.length, 2);
     const buttons = descendants(root).filter((node) => node.tagName === 'BUTTON');
-    assert.strictEqual(buttons.length, 7);
+    assert.strictEqual(buttons.length, 9);
     assert(buttons.every((button) => String(button.className).split(/\s+/).includes('sauce-pill-toggle')));
     assert.deepStrictEqual(rendered, ['Overdue high', 'Today low'],
       JSON.stringify({ state: View.readState(storage), nodes: descendants(root).map((node) => [node.tagName, node.className, node.textContent]) }));
@@ -253,8 +297,21 @@ const TASKS = [
     await priority.fire('click');
     assert(String(priority.className).includes('is-active'));
     assert.deepStrictEqual(View.readState(storage), {
-      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority',
+      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority', groupByProject: false,
     });
+
+    const groupToggle = buttons.find((button) => button.textContent === 'By Project');
+    await groupToggle.fire('click');
+    assert(String(groupToggle.className).includes('is-active'));
+    assert.strictEqual(byClass(root, 'sauce-todo-filter-project-label').length, 2);
+    assert.deepStrictEqual(View.readState(storage), {
+      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority', groupByProject: true,
+    });
+
+    const done = buttons.find((button) => button.textContent === 'Done');
+    await done.fire('click');
+    assert(rendered.slice(-4).includes('Done today'));
+    assert(!rendered.slice(-4).includes('Done yesterday'));
   });
 
   await okAsync('TV3-COLD missing TaskEntity or TaskTodayList is a no-throw no-op', async () => {

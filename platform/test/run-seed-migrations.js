@@ -1301,11 +1301,11 @@ withTempVault((vault) => {
         }
         ok("HC-DAILYTASK-SEED-4 .sauce-backup snapshot of the daily exists", backupOfDaily);
 
-        // 5. Healed daily now has a TaskTodayList block + sentinel, and the migrated
+        // 5. Healed daily now has a ToDoDailyFilterView block + sentinel, and the migrated
         //    open lines are gone (done line stays).
         const healedDaily = helpers.readNote(vault, "spice/to-do/2026/06-June/ToDo-2026-06-17.md");
-        ok("HC-DAILYTASK-SEED-5 healed daily has TaskTodayList block",
-           /class:\s*"TaskTodayList"/.test(healedDaily));
+        ok("HC-DAILYTASK-SEED-5 healed daily has ToDoDailyFilterView block",
+           /class:\s*"ToDoDailyFilterView"/.test(healedDaily));
         ok("HC-DAILYTASK-SEED-5b healed daily has <!-- tasks-migrated --> sentinel",
            healedDaily.includes("<!-- tasks-migrated -->"));
         ok("HC-DAILYTASK-SEED-5c migrated open lines removed from healed daily",
@@ -1318,13 +1318,13 @@ withTempVault((vault) => {
            !/class:\s*"ToDoDailyCarryover"/.test(healedDaily));
 
         // 6. Idempotency (post two-install): exactly one task-note per unique title,
-        //    no duplicates, and exactly one TaskTodayList + one sentinel.
+        //    no duplicates, and exactly one ToDoDailyFilterView + one sentinel.
         ok("HC-DAILYTASK-SEED-6 no duplicate task-notes after two installs",
            byTitle("Apply for Credit card").length === 1 &&
            byTitle("Call Shirley Septic").length === 1);
-        ok("HC-DAILYTASK-SEED-6b sentinel + TaskTodayList each present exactly once",
+        ok("HC-DAILYTASK-SEED-6b sentinel + ToDoDailyFilterView each present exactly once",
            (healedDaily.match(/<!-- tasks-migrated -->/g) || []).length === 1 &&
-           (healedDaily.match(/class:\s*"TaskTodayList"/g) || []).length === 1);
+           (healedDaily.match(/class:\s*"ToDoDailyFilterView"/g) || []).length === 1);
     }
 
     // ===== HC-TASKHEAL-SEED-* — applyTaskNoteHeal =====
@@ -1609,6 +1609,69 @@ withTempVault((vault) => {
                 !/^scheduled:/m.test(migTask)
             );
         }
+    }
+
+    // ===== HC-V0288-SEED-MIGRATE-TODO-FILTER-* — daily renderer cutover =====
+    // The committed daily is a pre-cutover stock note carrying every retired
+    // renderer. Source-specific task notes plus the legacy recurring registry
+    // prove the unified task pool retains project, meeting, trip, recurring,
+    // daily, and done coverage exactly once after the real installer runs.
+    {
+        const dailyRel = "spice/to-do/2026/06-June/ToDo-2026-06-17.md";
+        const daily = helpers.readNote(vault, dailyRel);
+        const classes = [...daily.matchAll(/class:\s*"([^"]+)"/g)].map((match) => match[1]);
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-1 daily has the exact two-block cutover",
+           JSON.stringify(classes) === JSON.stringify(["ToDoChromeBar", "ToDoDailyFilterView"]),
+           `classes=${JSON.stringify(classes)}`);
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-2 portable cutover sentinel present",
+           daily.includes("<!-- todo-daily-filter-cutover -->"));
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-3 pre-cutover sentinel and retired renderers are gone",
+           !daily.includes("tv4-pre-cutover-seed") &&
+           !/ToDoDaily(?:Recurring|ProjectGroups|TripGroups|UnassignedMeetings)|Task(?:TodayList|DoneTodayList)/.test(daily));
+
+        const taskFiles = filesBelow(path.join(vault, "spice/tasks"))
+            .filter((file) => file.endsWith(".md"));
+        const taskRows = taskFiles.map((file) => {
+            const body = fs.readFileSync(file, "utf8");
+            let frontmatter = {};
+            try { frontmatter = helpers.parseFrontmatter(body).frontmatter; } catch (_e) {}
+            return { file, body, frontmatter };
+        });
+        const expected = ["Seed Project Task", "Seed Meeting Task", "Seed Trip Task", "Water the plants", "Seed Done Task"];
+        const counts = Object.fromEntries(expected.map((title) => [title,
+            taskRows.filter((row) => row.frontmatter.title === title).length]));
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-4 every prior source task appears exactly once",
+           expected.every((title) => counts[title] === 1), `counts=${JSON.stringify(counts)}`);
+        const byTitle = (title) => taskRows.find((row) => row.frontmatter.title === title)?.frontmatter || {};
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-5 project meeting trip and recurring provenance survive",
+           byTitle("Seed Project Task").source === "project" &&
+           byTitle("Seed Meeting Task").source === "meeting" &&
+           byTitle("Seed Trip Task").trip_slug === "seed-trip" &&
+           byTitle("Water the plants").recurrence === "every day");
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-6 done fixture remains queryable from _done",
+           byTitle("Seed Done Task").status === "done" &&
+           String(byTitle("Seed Done Task").completed_at || "").startsWith("2026-06-17"));
+        const cutoverHistory = (installedJson2?.history || []).filter((entry) =>
+            entry.step === "todo_daily_filter_cutover" && entry.target === dailyRel);
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-7 installer records one audited cutover",
+           cutoverHistory.length === 1, `history=${cutoverHistory.length}`);
+        const backups = filesBelow(path.join(vault, ".sauce-backup/todo-daily-filter-cutover"));
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-8 backup preserves the pre-cutover sentinel",
+           backups.some((file) => fs.readFileSync(file, "utf8").includes("tv4-pre-cutover-seed")));
+
+        const { _todoDailyFilterCutoverBody } = require("../install.js");
+        const customDaily = [
+            "---", "type: to-do", "---", "",
+            "```dataviewjs", "await dv.view(\"ranch/views/customjs-guard\", { class: \"TaskTodayList\" });", "```", "",
+            "```dataviewjs", "await dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Personal Notes\" }] });", "```", "",
+            "```dataviewjs", "await dv.view(\"custom/views/panel\", { mode: \"daily\" });", "```", "",
+            "Keep this user-authored prose.", "",
+        ].join("\n");
+        const customCutover = _todoDailyFilterCutoverBody(customDaily, "ranch/views");
+        ok("HC-V0288-SEED-MIGRATE-TODO-FILTER-9 user labels custom Dataview and prose survive",
+           /class: \"SectionLabel\"[^`]*Personal Notes/.test(customCutover) &&
+           customCutover.includes('dv.view("custom/views/panel"') &&
+           customCutover.includes("Keep this user-authored prose."));
     }
 });
 

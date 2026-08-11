@@ -8,10 +8,10 @@
 class ToDoDailyFilterView {
     static get STORAGE_KEY() { return 'sauce-todo-filter:state'; }
     static get DEFAULT_SCOPES() { return ['today', 'overdue']; }
-    static get SCOPE_KEYS() { return ['today', 'overdue', 'upcoming', 'no-date', 'all']; }
+    static get SCOPE_KEYS() { return ['today', 'overdue', 'upcoming', 'no-date', 'all', 'done']; }
 
     static _defaultState() {
-        return { scopes: ToDoDailyFilterView.DEFAULT_SCOPES, sort: 'due' };
+        return { scopes: ToDoDailyFilterView.DEFAULT_SCOPES, sort: 'due', groupByProject: false };
     }
 
     static _normalizeState(value) {
@@ -28,7 +28,7 @@ class ToDoDailyFilterView {
         const sort = String(value.sort || '').trim().toLowerCase() === 'priority'
             ? 'priority'
             : 'due';
-        return { scopes, sort };
+        return { scopes, sort, groupByProject: value.groupByProject === true };
     }
 
     static storage() {
@@ -66,7 +66,17 @@ class ToDoDailyFilterView {
         const all = scopes.has('all');
         const today = String(todayIso || '');
         return (Array.isArray(tasks) ? tasks : []).filter((task) => {
-            if (!task || String(task.status || 'open').toLowerCase() !== 'open') return false;
+            if (!task) return false;
+            const status = String(task.status || 'open').toLowerCase();
+            if (status === 'done') {
+                if (!scopes.has('done') || !task.completed_at) return false;
+                const completed = task.completed_at;
+                if (typeof completed === 'object' && typeof completed.toFormat === 'function') {
+                    return completed.toFormat('yyyy-MM-dd') === today;
+                }
+                return String(completed).slice(0, 10) === today;
+            }
+            if (status !== 'open') return false;
             const due = task.due == null ? '' : String(task.due).trim();
             if (all) return true;
             if (!due) return scopes.has('no-date');
@@ -74,6 +84,31 @@ class ToDoDailyFilterView {
             if (due < today) return scopes.has('overdue');
             return scopes.has('upcoming');
         });
+    }
+
+    static _projectLabel(task) {
+        const raw = task && task.project;
+        let value = '';
+        if (raw && typeof raw === 'object') {
+            value = raw.display || raw.name || raw.path || '';
+        } else {
+            value = raw == null ? '' : String(raw);
+        }
+        value = String(value).replace(/^\[\[/, '').replace(/\]\]$/, '');
+        if (value.includes('|')) value = value.split('|').pop();
+        if (value.includes('/')) value = value.split('/').pop();
+        value = value.replace(/\.md$/i, '').trim();
+        return value || 'No Project';
+    }
+
+    static groupByProject(tasks) {
+        const groups = new Map();
+        for (const task of (Array.isArray(tasks) ? tasks : [])) {
+            const label = ToDoDailyFilterView._projectLabel(task);
+            if (!groups.has(label)) groups.set(label, []);
+            groups.get(label).push(task);
+        }
+        return [...groups].map(([label, groupedTasks]) => ({ label, tasks: groupedTasks }));
     }
 
     static _fallbackDue(a, b) {
@@ -131,10 +166,10 @@ class ToDoDailyFilterView {
         let tasks = [];
         try {
             const raw = dv.pages('"spice/tasks"').where((candidate) =>
-                candidate && candidate.type === 'task' && candidate.status === 'open'
+                candidate && candidate.type === 'task'
+                && (candidate.status === 'open' || candidate.status === 'done')
                 && candidate.file && candidate.file.path
-                && !candidate.file.path.includes('/_trash/')
-                && !candidate.file.path.includes('/_done/'));
+                && !candidate.file.path.includes('/_trash/'));
             const pages = raw && typeof raw.array === 'function' ? raw.array() : Array.from(raw || []);
             tasks = pages.map((candidate) => TE.parseNote(candidate));
         } catch (_e) { tasks = []; }
@@ -154,11 +189,12 @@ class ToDoDailyFilterView {
         const sortGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-sort' });
         sortGroup.setAttribute('role', 'group');
         sortGroup.setAttribute('aria-label', 'Sort tasks');
-        const list = root.createEl('ul', { cls: 'sauce-todo-daily-filter-list' });
-        list.style.cssText = 'display:flex; flex-direction:column; gap:0; margin:0; padding:0; list-style:none; width:100%;';
+        const listHost = root.createEl('div', { cls: 'sauce-todo-daily-filter-list-host' });
+        listHost.style.cssText = 'display:flex; flex-direction:column; gap:8px; width:100%;';
 
         const scopeButtons = {};
         const sortButtons = {};
+        let groupButton = null;
         const updateButtons = () => {
             for (const key of ToDoDailyFilterView.SCOPE_KEYS) {
                 const active = state.scopes.includes(key);
@@ -170,26 +206,60 @@ class ToDoDailyFilterView {
                 sortButtons[key].className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
                 sortButtons[key].setAttribute('aria-pressed', active ? 'true' : 'false');
             }
+            groupButton.className = `sauce-pill-toggle${state.groupByProject ? ' is-active' : ''}`;
+            groupButton.setAttribute('aria-pressed', state.groupByProject ? 'true' : 'false');
         };
 
         const dashboard = CJS.SpaceDailyDashboard || null;
         const TD = CJS.TaskDialog || null;
+        const makeList = (parent) => {
+            const list = parent.createEl('ul', { cls: 'sauce-todo-daily-filter-list' });
+            list.style.cssText = 'display:flex; flex-direction:column; gap:0; margin:0; padding:0; list-style:none; width:100%;';
+            return list;
+        };
+        const renderRows = (list, rows) => {
+            for (const task of rows) {
+                try {
+                    const row = TTL.renderTaskRow(list, task, TD);
+                    if (task.status === 'done' && row && typeof row.querySelector === 'function') {
+                        const checkbox = row.querySelector('input[type="checkbox"]');
+                        if (checkbox) checkbox.checked = true;
+                    }
+                } catch (_e) { /* isolate bad notes */ }
+            }
+        };
         const renderList = () => {
-            while (list.firstChild) list.removeChild(list.firstChild);
+            while (listHost.firstChild) listHost.removeChild(listHost.firstChild);
             const selected = ToDoDailyFilterView.selectByScope(tasks, new Set(state.scopes), todayIso);
             const sorted = ToDoDailyFilterView.sortTasks(selected, state.sort, dashboard);
-            for (const task of sorted) {
-                try { TTL.renderTaskRow(list, task, TD); } catch (_e) { /* isolate bad notes */ }
-            }
             if (!sorted.length) {
+                const list = makeList(listHost);
                 const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: 'No tasks in the selected scopes.' });
                 empty.style.cssText = 'color:var(--text-muted); font-size:0.85em; font-style:italic; padding:6px 0;';
+                return;
+            }
+            if (!state.groupByProject) {
+                renderRows(makeList(listHost), sorted);
+                return;
+            }
+            const SL = CJS.SectionLabel || null;
+            for (const group of ToDoDailyFilterView.groupByProject(sorted)) {
+                const section = listHost.createEl('div', { cls: 'sauce-todo-filter-project-group' });
+                const label = section.createEl('div', { cls: 'sauce-todo-filter-project-label' });
+                if (SL && typeof SL.render === 'function') {
+                    try { SL.render({ ...dv, container: label }, { text: group.label }); }
+                    catch (_e) { label.textContent = group.label; }
+                } else {
+                    label.textContent = group.label;
+                    label.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); font-weight:600;';
+                }
+                renderRows(makeList(section), group.tasks);
             }
         };
 
         const scopeLabels = {
             today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming',
-            'no-date': 'No date', all: 'All',
+            'no-date': 'No date', all: 'All', done: 'Done',
         };
         for (const key of ToDoDailyFilterView.SCOPE_KEYS) {
             const button = scopeGroup.createEl('button', { text: scopeLabels[key] });
@@ -198,11 +268,18 @@ class ToDoDailyFilterView {
             button.addEventListener('click', (event) => {
                 try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
                 if (key === 'all') {
-                    state = { ...state, scopes: ['all'] };
+                    state = { ...state, scopes: state.scopes.includes('done') ? ['all', 'done'] : ['all'] };
+                } else if (key === 'done') {
+                    const next = [...state.scopes];
+                    const index = next.indexOf('done');
+                    if (index >= 0) next.splice(index, 1); else next.push('done');
+                    state = { ...state, scopes: next };
                 } else {
-                    const next = state.scopes.includes('all') ? [] : [...state.scopes];
+                    const keepDone = state.scopes.includes('done');
+                    const next = state.scopes.filter((scope) => scope !== 'all' && scope !== 'done');
                     const index = next.indexOf(key);
                     if (index >= 0) next.splice(index, 1); else next.push(key);
+                    if (keepDone) next.push('done');
                     state = { ...state, scopes: next };
                 }
                 state = ToDoDailyFilterView.writeState(storage, state);
@@ -222,6 +299,17 @@ class ToDoDailyFilterView {
                 renderList();
             });
         }
+
+        groupButton = sortGroup.createEl('button', { text: 'By Project' });
+        groupButton.setAttribute('type', 'button');
+        groupButton.addEventListener('click', (event) => {
+            try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
+            state = ToDoDailyFilterView.writeState(storage, {
+                ...state, groupByProject: !state.groupByProject,
+            });
+            updateButtons();
+            renderList();
+        });
 
         updateButtons();
         renderList();

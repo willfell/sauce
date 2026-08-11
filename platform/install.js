@@ -621,6 +621,11 @@ module.exports = async function (tp) {
     // 6a9. to-do — inject ToDoDailyTripGroups block into existing daily notes.
     await applyTodoDailyTripGroupsHeal(tp, installedNow.history, git);
 
+    // 6a10. to-do — after every legacy source migration/heal has converged on
+    // spice/tasks/, replace the stacked daily renderers with the single filter
+    // view. This MUST remain after 6a9 so the old trip block cannot be re-added.
+    await applyTodoDailyFilterCutover(tp, installedNow.history, git);
+
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
     // aggregator failure does NOT abort the broader install. The
@@ -13237,6 +13242,101 @@ async function applyTodoDailyTripGroupsHeal(tp, history, git) {
   } catch (_e) { /* top-level, never throw */ }
 }
 
+// _todoDailyFilterCutoverBody — pure daily-note transform for TV-4. Removes
+// only known stock customjs-guard renderer blocks, then prepends the canonical
+// ToDoChromeBar + ToDoDailyFilterView pair. User prose and unknown/custom
+// Dataview blocks survive. A fixed sentinel makes replay byte-stable.
+function _todoDailyFilterCutoverBody(body, viewsPath) {
+  if (typeof body !== 'string') return body;
+  const fm = body.match(/^(---\n[\s\S]*?\n---)(?:\n|$)/);
+  if (!fm) return body;
+  const vp = viewsPath || 'ranch/views';
+  const retired = new Set([
+    'Breadcrumb', 'SpaceNavButtons', 'ToDoLeafActions',
+    'TodayCaptureEditableList', 'TaskTodayList', 'ToDoDailyCarryover',
+    'ToDoDailyRecurring', 'ToDoDailyProjectGroups', 'ToDoDailyTripGroups',
+    'ToDoDailyUnassignedMeetings', 'TaskDoneTodayList', 'ToDoChromeBar',
+    'ToDoDailyFilterView',
+  ]);
+  let rest = body.slice(fm[0].length);
+  rest = rest.replace(/```dataviewjs[^\n]*\n([\s\S]*?)\n```\n?/g, (block, code) => {
+    if (!/customjs-guard/.test(code)) return block;
+    const match = code.match(/class:\s*["']([^"']+)["']/);
+    if (match && match[1] === 'SectionLabel') {
+      const label = code.match(/text:\s*["']([^"']+)["']/);
+      const stockLabel = label && /^(?:Today|Today(?:'s)? Capture|Carryover(?: \(from \d{4}-\d{2}-\d{2}\))?|Recurring(?: Today)?|From Meetings|Projects|Trips|Unassigned Meetings|Done Today)$/.test(label[1]);
+      return stockLabel ? '' : block;
+    }
+    return match && retired.has(match[1]) ? '' : block;
+  });
+  rest = rest
+    .replace(/^\s*<!--\s*(?:todo-daily-filter-cutover|tv4-pre-cutover-seed)\s*-->\s*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const block = (className) => [
+    '```dataviewjs',
+    `await dv.view("${vp}/customjs-guard", { class: "${className}" });`,
+    '```',
+  ].join('\n');
+  const parts = [block('ToDoChromeBar'), block('ToDoDailyFilterView'), '<!-- todo-daily-filter-cutover -->'];
+  if (rest) parts.push(rest);
+  return fm[1] + '\n\n' + parts.join('\n\n') + '\n';
+}
+
+// applyTodoDailyFilterCutover — backup-first, recursive, idempotent install
+// heal for every existing ToDo-YYYY-MM-DD.md note. Per-file failures are loud
+// in history and never prevent other dailies from healing.
+async function applyTodoDailyFilterCutover(tp, history, git) {
+  const STEP = 'todo_daily_filter_cutover';
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    const root = 'spice/to-do';
+    if (!(await adapter.exists(root).catch(() => false))) return;
+    const walk = async (dir, out = []) => {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return out; }
+      for (const file of (listing.files || [])) {
+        if (/\/ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(file)) out.push(file);
+      }
+      for (const folder of (listing.folders || [])) await walk(folder, out);
+      return out;
+    };
+    const files = (await walk(root)).sort();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    let healed = 0;
+    for (const file of files) {
+      try {
+        const before = await adapter.read(file);
+        const after = _todoDailyFilterCutoverBody(before, 'ranch/views');
+        if (after === before) continue;
+        const slash = file.lastIndexOf('/');
+        const backupDir = `.sauce-backup/todo-daily-filter-cutover/${stamp}/${file.slice(0, slash)}`;
+        await adapter.mkdir(backupDir);
+        await adapter.write(`${backupDir}/${file.slice(slash + 1)}`, before);
+        await adapter.write(file, after);
+        healed += 1;
+        history?.push({ event: 'info', step: STEP, name: 'to-do', action: 'cutover', target: file,
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      } catch (e) {
+        history?.push({ event: 'warning', step: STEP, name: 'to-do', target: file,
+          reason: e && e.message ? e.message : String(e),
+          git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+    history?.push({ event: 'info', step: STEP, name: 'to-do', summary: { scanned: files.length, healed },
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: 'warning', step: STEP, name: 'to-do',
+      reason: `heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+}
+
 // _localIsoNoMillis — local-offset ISO timestamp with NO milliseconds
 // (YYYY-MM-DDTHH:mm:ss±HH:mm), matching the canonical created_at vocab the
 // schema validator + seed harness expect (new Date().toISOString() emits `.SSSZ`
@@ -22609,6 +22709,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._composeEntityTaskFrontmatter = _composeEntityTaskFrontmatter;
     module.exports._extractOpenLinesUnderMarker = _extractOpenLinesUnderMarker;
     module.exports._swapDailyToTaskTodayList = _swapDailyToTaskTodayList;
+    module.exports.applyTodoDailyFilterCutover = applyTodoDailyFilterCutover;
+    module.exports._todoDailyFilterCutoverBody = _todoDailyFilterCutoverBody;
     // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;

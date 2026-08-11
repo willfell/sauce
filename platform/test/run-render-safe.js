@@ -1599,7 +1599,7 @@ ok('PERF-0-LEDGER code guide pins structural receipt protocol and every audited 
       while ((match = invocation.exec(source))) surfaces.add(match[1]);
     }
   }
-  assert(surfaces.size === 112, 'baseline inventory contains all 112 production Dataview entry classes');
+  assert(surfaces.size === 110, 'baseline inventory contains all 110 production Dataview entry classes');
   for (const surface of surfaces) {
     assert(guide.includes('`' + surface + '`'), 'ledger enumerates ' + surface);
   }
