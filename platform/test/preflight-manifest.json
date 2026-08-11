@@ -810,7 +810,7 @@
         "node",
         "platform/test/run-cross-blueprint-style-adoption.js"
       ],
-      "lane": "parallel"
+      "lane": "serial"
     },
     {
       "id": "finance-frontmatter",
