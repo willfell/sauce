@@ -6625,6 +6625,7 @@ const automaticProjection = await attemptProjection({ root: reconcileRoot }, aut
   withLock: async (_ctx, name, fn) => { automaticProjectionLock = name; return fn(); },
   projectCard: () => { throw new Error('automatic completion projection denied'); },
   now: () => '2026-07-15T15:00:30.000Z',
+  state: emptyState(),
 });
 eq(automaticProjectionLock, 'completion-projection', 'automatic completion projection uses the shared board lock');
 eq(automaticProjection.ok, false, 'deployment-time projection failure is returned');
@@ -6901,6 +6902,96 @@ const parkedRecoveryRefusalState = { ...emptyState(), cards: { [parkedRecoveryRe
 await assert.rejects(() => commandRecoverDeployed(
   { root: reconcileRoot }, recoveryArgs, { ...recoveryDeps, readState: () => parkedRecoveryRefusalState },
 ), /parked and pre-PR cards are never recovery targets/, 'parked recovery is unconditionally refused'); count++;
+
+// RECOVER-EPIC-LEDGER — the recovery fixture above is a FLAT card, so
+// canonicalEpicProjection returns null and recover-deployed's projection never
+// touches the epic path. That blind spot is why recover-deployed shipped
+// calling attemptProjection without the loaded ledger: with an empty ledger the
+// adopted sibling A2 looks untracked, demotes to a legacy completion, and the
+// verb WRITES an unchecked parent lane plus an active/claimable atlas over a
+// genuinely done epic. This fixture is epic-native so the write is observable.
+{
+  const epicRecoveryRoot = path.join(tmp, 'epic-recovery');
+  const epicRecoveryProject = path.join(epicRecoveryRoot, 'spice', 'projects', 'test');
+  const epicRecoveryCardsRoot = path.join(epicRecoveryProject, 'tasks');
+  const epicRecoveryBoardDir = path.join(epicRecoveryCardsRoot, 'Epic A', 'board');
+  const epicRecoveryParentBoard = path.join(epicRecoveryProject, 'project-board.md');
+  const epicRecoveryAtlas = path.join(epicRecoveryCardsRoot, 'Epic A', 'Epic A.md');
+  const epicRecoveryCardPath = path.join(epicRecoveryBoardDir, 'A1.md');
+  fs.mkdirSync(epicRecoveryBoardDir, { recursive: true });
+  fs.mkdirSync(path.join(epicRecoveryCardsRoot, 'Epic A', 'context', 'runs'), { recursive: true });
+  fs.writeFileSync(epicRecoveryParentBoard, [
+    '## In Planning', '- [ ] [[Epic B]]', '',
+    '## In Progress', '- [ ] [[Epic A]]', '', '## Blocked', '', '## Completed', '',
+  ].join('\n'));
+  fs.writeFileSync(epicRecoveryAtlas, [
+    '---', 'type: epic', 'schema_version: 1.1.0',
+    'source_board: spice/projects/test/project-board.md',
+    'kanban_board: spice/projects/test/project-board.md',
+    'status: active',
+    'epic_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'posture: claimable', '---', 'atlas body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicRecoveryBoardDir, 'Epic A-board.md'), [
+    '---', 'kanban-plugin: board', 'board_role: epic', 'epic: "[[Epic A]]"', '---', '',
+    '## In Planning', '', '## In Progress', '- [ ] [[A1]]', '',
+    '## Blocked', '', '## Completed', '- [x] [[A2]]', '',
+  ].join('\n'));
+  fs.writeFileSync(epicRecoveryCardPath, [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: In Progress', 'status: in_progress', 'depends_on: []', '---', 'A1 body', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(epicRecoveryBoardDir, 'A2.md'), [
+    '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Epic A]]"',
+    'task_parent: spice/projects/test/tasks/Epic A/Epic A.md',
+    'source_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_board: spice/projects/test/tasks/Epic A/board/Epic A-board.md',
+    'kanban_column: Completed', 'status: completed', 'depends_on: []', '---', 'A2 body', '',
+  ].join('\n'));
+  const epicRecoveryState = emptyState();
+  epicRecoveryState.cards.A1 = {
+    ...deepCopy(recoveryRecord), card: 'A1', card_path: epicRecoveryCardPath,
+    gate_receipt: { status: 'pass', head_sha: RECOVERY_HEAD },
+    reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy']
+      .map((lens) => [lens, { lens, verdict: 'pass', head_sha: RECOVERY_HEAD }])),
+  };
+  epicRecoveryState.cards.A2 = {
+    card: 'A2', phase: 'adopted', parent_card: 'Epic A',
+    card_path: path.join(epicRecoveryBoardDir, 'A2.md'),
+    adoption: {
+      pr: 4, merge_sha: 'abc123', reason: 'shipped outside the loop',
+      verified: 'git', adopted_at: '2026-08-01T00:00:00.000Z',
+    },
+  };
+  const epicRecovered = await commandRecoverDeployed(
+    { root: epicRecoveryRoot },
+    { card: 'A1', 'expected-head': RECOVERY_HEAD, reason: 'receipts prove shipped code', apply: true },
+    {
+      readState: () => epicRecoveryState,
+      writeState: () => {},
+      withLock: async (_ctx, _name, fn) => fn(),
+      collectDeployedRecoveryEvidence: () => deepCopy(collectedRecovery),
+      boardPath: epicRecoveryParentBoard,
+      cardsRoot: epicRecoveryCardsRoot,
+      now: () => '2026-07-20T19:03:00.000Z',
+      projectLoopStation: () => ({ action: 'loop-station-projected', no_op: false }),
+    },
+  );
+  eq(epicRecovered.action, 'recovered-deployed',
+    'RECOVER-EPIC-LEDGER an epic-native recovery reaches authoritative deployed');
+  eq(epicRecovered.projection.projection_findings, [],
+    'RECOVER-EPIC-LEDGER the adopted sibling stays tracked instead of demoting to a legacy completion');
+  eq(epicRecovered.projection.epic_state, 'done',
+    'RECOVER-EPIC-LEDGER the roll-up sees every sibling done');
+  ok(/## Completed[\s\S]*- \[x\] \[\[Epic A\]\]/.test(fs.readFileSync(epicRecoveryParentBoard, 'utf8')),
+    'RECOVER-EPIC-LEDGER recovery writes the completed epic lane to the parent board');
+  const epicRecoveryAtlasRaw = fs.readFileSync(epicRecoveryAtlas, 'utf8');
+  ok(/status: done/.test(epicRecoveryAtlasRaw) && /posture: done/.test(epicRecoveryAtlasRaw),
+    'RECOVER-EPIC-LEDGER recovery writes the done atlas state');
+}
 
 // GA-OPS12-METADATA-ONLY-RECONCILE: card-only CAS, audit, and exact replay.
 const metadataCardPath = path.join(reconcileRoot, 'Metadata drift.md');

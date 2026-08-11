@@ -2815,7 +2815,13 @@ async function attemptProjection(ctx, record, boardPath = BOARD, opts = {}) {
   const projectionLock = opts.withLock || withLock;
   try {
     return await projectionLock(ctx, 'completion-projection', async () => {
-      const state = opts.state || { cards: {} };
+      // No empty-ledger default. `{ cards: {} }` is truthy, so it sailed past
+      // canonicalEpicProjection's fail-closed ledger guard and built an epic
+      // surface in which every sibling looked untracked — the same blindness
+      // the guard exists to stop, one layer up. Every transition verb already
+      // has the loaded ledger in hand; a caller that does not must say so.
+      const state = opts.state;
+      if (!state) throw new Error('projection requires the loaded ledger');
       state.cards ||= {};
       state.cards[record.card] = record;
       const result = project(record.card_path, boardPath, record.card, record.phase, {
@@ -7408,7 +7414,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
     persist(ctx, state, record);
     const projection = await project(ctx, record, deps.boardPath || BOARD, {
       projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
-      cardsRoot: deps.cardsRoot, now,
+      cardsRoot: deps.cardsRoot, now, state,
     });
     persist(ctx, state, record);
     return {
