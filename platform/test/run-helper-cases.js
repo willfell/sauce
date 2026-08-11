@@ -13622,11 +13622,14 @@ async function caseV01103BehavioralHarnessShipped() {
     /MIG-B-1[\s\S]{0,4000}MIG-B-2[\s\S]{0,4000}MIG-B-3[\s\S]{0,4000}MIG-B-4/.test(src));
   assertTrue("V01103-MO-BH-5: harness covers chained-migration ordering (MIG-B-8)",
     /MIG-B-8[\s\S]{0,400}chained migrations|MIG-B-8[\s\S]{0,400}canonical order/.test(src));
-  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  const preflight = pkg.scripts && pkg.scripts["release:preflight"];
-  assertTrue("V01103-MO-BH-6: release:preflight script invokes run-v01103-monthly-overview.js",
-    typeof preflight === "string" && preflight.includes(harnessRel),
-    `preflight chain missing harness invocation`);
+  // The release:preflight registration surface moved from a package.json chain
+  // string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+  // cutover); count manifest steps whose command invokes this harness instead.
+  const manifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/test/preflight-manifest.json"), "utf8"));
+  const moSteps = manifest.steps.filter((s) => s.cmd.join(" ").includes(harnessRel));
+  assertTrue("V01103-MO-BH-6: release:preflight manifest invokes run-v01103-monthly-overview.js exactly once",
+    moSteps.length === 1,
+    `preflight manifest missing harness invocation (found ${moSteps.length})`);
   // Coverage expansion (post-cycle additions 2026-06-15):
   assertTrue("V01103-MO-BH-7: harness covers Dataview-proxy fidelity (DV-PROXY-1..3)",
     /DV-PROXY-1[\s\S]{0,6000}DV-PROXY-2[\s\S]{0,6000}DV-PROXY-3/.test(src));
@@ -13779,11 +13782,14 @@ async function caseV0113LintSchemasShipped() {
 
 async function caseV0113LintInPreflight() {
   console.log("\n--- Case V0113-PF: release:preflight invokes lint-schemas.js ---");
-  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  const preflight = pkg.scripts && pkg.scripts["release:preflight"];
-  assertTrue("V0113-PF-1: release:preflight chain includes lint-schemas.js",
-    typeof preflight === "string" && preflight.includes("lint-schemas.js"),
-    `preflight chain missing lint-schemas.js`);
+  // The release:preflight registration surface moved from a package.json chain
+  // string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+  // cutover); count manifest steps whose command invokes lint-schemas.js instead.
+  const manifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/test/preflight-manifest.json"), "utf8"));
+  const lintSteps = manifest.steps.filter((s) => s.cmd.join(" ").includes("lint-schemas.js"));
+  assertTrue("V0113-PF-1: release:preflight manifest includes lint-schemas.js exactly once",
+    lintSteps.length === 1,
+    `preflight manifest missing lint-schemas.js (found ${lintSteps.length})`);
 }
 
 async function caseV0113SchemasGuideShipped() {

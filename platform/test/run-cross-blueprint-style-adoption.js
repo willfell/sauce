@@ -593,6 +593,9 @@ async function removeTreeWithRetry(target) {
     throw lastError;
 }
 function createCdpTarget(port, url) {
+    if (!/^\d+$/.test(String(port)) || Number(port) <= 0) {
+        return Promise.reject(new Error(`createCdpTarget requires a positive integer port, got: ${JSON.stringify(port)}`));
+    }
     return new Promise((resolve, reject) => {
         const request = http.request({
             hostname: "127.0.0.1", port, method: "PUT",
@@ -700,9 +703,19 @@ async function exactViewportCapture(executable, url, width, height) {
     let sendCommand;
     try {
         const portFile = path.join(profile, "DevToolsActivePort");
-        for (let attempt = 0; attempt < 100 && !fs.existsSync(portFile); attempt += 1) await wait(50);
-        assert(fs.existsSync(portFile), "Chrome publishes its DevTools endpoint");
-        const port = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0];
+        // Chrome creates the file and writes its contents non-atomically: there is a
+        // window where the file exists but is still empty. Poll for valid content, not
+        // mere existence, or a read in that window yields an empty port string (which
+        // Node resolves to port 80, talking to whatever else is listening there).
+        let port = "";
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+            if (fs.existsSync(portFile)) {
+                const first = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0].trim();
+                if (/^\d+$/.test(first) && Number(first) > 0) { port = first; break; }
+            }
+            await wait(50);
+        }
+        assert(/^\d+$/.test(port) && Number(port) > 0, "Chrome publishes its DevTools endpoint");
         const target = await createCdpTarget(port, url);
         socket = await connectCdpSocket(target.webSocketDebuggerUrl);
         let nextId = 0;

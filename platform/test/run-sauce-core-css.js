@@ -158,6 +158,113 @@ function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
+function selectorBoundRuleBytes(source, predicate) {
+  const masked = source.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  return [...masked.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((match) => {
+      const leadingWhitespace = match[0].match(/^\s*/)[0].length;
+      return {
+        selector: match[1].trim(),
+        raw: source.slice(match.index + leadingWhitespace, match.index + match[0].length),
+      };
+    })
+    .filter(predicate)
+    .map((rule) => rule.raw);
+}
+
+function assertLegacyPillRules(coreSource, dailySource) {
+  const coreSelectors = new Set([
+    ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))",
+    ".sauce-pill.sauce-pill-accent",
+    ".sauce-pill.sauce-pill-danger",
+  ]);
+  const coreRules = selectorBoundRuleBytes(coreSource, (rule) => coreSelectors.has(rule.selector));
+  assert.strictEqual(coreRules.length, 3, "legacy sauce-core pill rule family changed");
+  assert.strictEqual(
+    sha256(coreRules.join("\n")),
+    "1a75c446986c4081d7d7e061ab683a99afb3be9e920a68eb0b6173689adb082b",
+    "legacy sauce-core pill selector/declaration bytes changed",
+  );
+
+  const dailyFragments = [
+    ".sauce-pill",
+    ".sauce-pill-dot",
+    ".sauce-section-open-pill",
+    ".sauce-section-overdue-pill",
+    ".sauce-section-done-pill",
+    ".sauce-section-count-pill",
+    ".sauce-section-pill-label",
+    ".sauce-section-counts",
+  ];
+  const dailyRules = selectorBoundRuleBytes(
+    dailySource,
+    (rule) => dailyFragments.some((fragment) => rule.selector.includes(fragment)),
+  );
+  assert.strictEqual(dailyRules.length, 16, "legacy Daily count-pill rule family changed");
+  assert.strictEqual(
+    sha256(dailyRules.join("\n")),
+    "3147a92dd70cbc7eeaf158cff328873db73ff8d8ba79f664b6c4592464deb887",
+    "legacy Daily count-pill selector/declaration bytes changed",
+  );
+}
+
+function assertTogglePillContract(source) {
+  const parsed = rules(source);
+  const group = parsed.find((rule) => rule.selector === ".sauce-pill-group");
+  const toggle = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle"
+  ));
+  const active = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.is-active.sauce-pill-toggle.sauce-pill-toggle"
+  ));
+  const focusVisible = parsed.find((rule) => (
+    rule.selector === "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible"
+  ));
+  assert.ok(group, "missing exact .sauce-pill-group selector");
+  assert.ok(toggle, "missing specificity-bound .sauce-pill-toggle selector");
+  assert.ok(active, "missing specificity-bound .sauce-pill-toggle.is-active selector");
+  assert.ok(focusVisible, "missing specificity-bound .sauce-pill-toggle:focus-visible selector");
+  assert.match(group.declarations, /display:\s*inline-flex/);
+  assert.match(group.declarations, /gap:\s*var\(--size-4-1,\s*4px\)/);
+
+  const minHeight = Number(toggle.declarations.match(/min-height:\s*(\d+)px/)[1]);
+  const padding = toggle.declarations.match(/padding:\s*(\d+)px\s+(\d+)px/);
+  assert.strictEqual(minHeight, 20, "toggle min-height must remain the intended lean 20px");
+  assert.deepStrictEqual(padding.slice(1).map(Number), [1, 8],
+    "toggle padding must remain the intended lean 1px 8px");
+  for (const contract of [
+    "display: inline-flex",
+    "align-items: center",
+    "justify-content: center",
+    "border: 1px solid var(--sauce-hairline)",
+    "border-radius: var(--sauce-radius-pill)",
+    "background: var(--background-primary, #fff)",
+  ]) {
+    assert.ok(toggle.declarations.includes(contract), "toggle base lost " + contract);
+  }
+  for (const contract of [
+    "border-color: var(--interactive-accent, #7c3aed)",
+    "background: var(--interactive-accent, #7c3aed)",
+    "color: var(--text-on-accent, #fff)",
+  ]) {
+    assert.ok(active.declarations.includes(contract), "toggle active state lost " + contract);
+  }
+  assert.ok(
+    focusVisible.declarations.includes("outline: 2px solid var(--interactive-accent, #7c3aed)"),
+    "toggle focus-visible state lost its accent outline",
+  );
+  assert.ok(focusVisible.declarations.includes("outline-offset: 2px"),
+    "toggle focus-visible state lost its outline offset");
+  assert.ok(compareSpecificity(specificity(active.selector), specificity(toggle.selector)) > 0,
+    "active toggle selector must outrank the base toggle selector");
+  const baselineButtons = rules(theme).filter((rule) => rule.selector.includes("button:where("));
+  assert.ok(baselineButtons.length >= 5, "expected Baseline generic and input-mode button fixtures");
+  for (const baseline of baselineButtons) {
+    assert.ok(compareSpecificity(specificity(toggle.selector), specificity(baseline.selector)) > 0,
+      `toggle ${toggle.selector} must outrank Baseline ${baseline.selector}`);
+  }
+}
+
 test("parent-card public tokens exist on body with exact names and fallbacks", () => {
   assert.match(css, /body\s*\{/);
   const nativeFallbackTokens = [
@@ -338,6 +445,110 @@ test("C1C-PILL-VARIANT-CASCADE preserves the parent API and Daily pre-adoption",
   assert.ok(compareSpecificity(specificity(dangerSelector), specificity(baseSelector)) > 0, "danger pill must win over base declarations");
 });
 
+test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primitives", () => {
+  assertTogglePillContract(css);
+
+  const weakened = css.replace(
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {",
+    ".sauce-pill-toggle {",
+  );
+  assert.notStrictEqual(weakened, css, "weak-selector mutation did not reach the base toggle rule");
+  assert.throws(
+    () => assertTogglePillContract(weakened),
+    /missing specificity-bound \.sauce-pill-toggle selector/,
+    "weak base selector must turn the focused fixture red",
+  );
+
+  const weakenedFocus = css.replace(
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {",
+    "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus {",
+  );
+  assert.notStrictEqual(weakenedFocus, css, "focus-visible mutation did not reach its fixture");
+  assert.throws(
+    () => assertTogglePillContract(weakenedFocus),
+    /missing specificity-bound \.sauce-pill-toggle:focus-visible selector/,
+    "a weakened focus-visible selector must turn the focused fixture red",
+  );
+
+  for (const [needle, replacement, message] of [
+    ["display: inline-flex", "display: block", "block display"],
+    ["align-items: center", "align-items: start", "off-center alignment"],
+    ["justify-content: center", "justify-content: start", "off-center justification"],
+    ["min-height: 20px", "min-height: 0px", "degenerate height"],
+    ["padding: 1px 8px", "padding: 0px 0px", "degenerate padding"],
+  ]) {
+    const toggleMarker = "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {";
+    const toggleBlock = blockAfter(css, toggleMarker);
+    const mutatedBlock = toggleBlock.replace(needle, replacement);
+    assert.notStrictEqual(mutatedBlock, toggleBlock, message + " mutation did not reach its fixture");
+    const geometryMutation = css.replace(toggleBlock, mutatedBlock);
+    assert.throws(
+      () => assertTogglePillContract(geometryMutation),
+      undefined,
+      message + " must turn the focused fixture red",
+    );
+  }
+});
+
+test("TV1-LEGACY-PILL-BYTES preserves core and Daily count-pill presentation", () => {
+  assertLegacyPillRules(css, dailyCss);
+
+  const coreSelectorMutation = css.replace(
+    ".sauce-pill.sauce-pill-accent {",
+    "body .sauce-pill.sauce-pill-accent {",
+  );
+  assert.notStrictEqual(coreSelectorMutation, css, "core selector mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(coreSelectorMutation, dailyCss),
+    /legacy sauce-core pill (?:rule family|selector\/declaration bytes) changed/,
+    "a core pill selector-specificity mutation must turn the focused fixture red",
+  );
+
+  const dailyPseudoMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-open-pill::before {",
+    ".foo .space-daily-dashboard .sauce-section-open-pill::before {",
+  );
+  assert.notStrictEqual(dailyPseudoMutation, dailyCss, "Daily pseudo-selector mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, dailyPseudoMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a Daily count-pill pseudo-selector mutation must turn the focused fixture red",
+  );
+
+  const neutralCountMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-count-pill {",
+    "body .space-daily-dashboard .sauce-section-count-pill {",
+  );
+  assert.notStrictEqual(neutralCountMutation, dailyCss, "neutral count-pill mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, neutralCountMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a neutral count-pill selector mutation must turn the focused fixture red",
+  );
+
+  const mobileLabelMutation = dailyCss.replace(
+    ".space-daily-dashboard .sauce-section-pill-label { display: none; }",
+    "body .space-daily-dashboard .sauce-section-pill-label { display: none; }",
+  );
+  assert.notStrictEqual(mobileLabelMutation, dailyCss, "mobile count-pill label mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, mobileLabelMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a mobile count-pill label selector mutation must turn the focused fixture red",
+  );
+
+  const mobileGapMutation = dailyCss.replace(
+    "  .space-daily-dashboard .sauce-section-counts { gap: 4px; }",
+    "  body .space-daily-dashboard .sauce-section-counts { gap: 4px; }",
+  );
+  assert.notStrictEqual(mobileGapMutation, dailyCss, "mobile count-pill gap mutation did not reach its fixture");
+  assert.throws(
+    () => assertLegacyPillRules(css, mobileGapMutation),
+    /legacy Daily count-pill selector\/declaration bytes changed/,
+    "a mobile count-pill gap selector mutation must turn the focused fixture red",
+  );
+});
+
 test("C1C-390PX-TWO-UP computes two and only two minimum actions at 390px", () => {
   const mediaHeader = "@media (max-width: 480px)";
   const media = blockAfter(css, mediaHeader);
@@ -386,6 +597,7 @@ test("C1C-CORE-REDUCED-MOTION-SCOPE covers exactly the ratified roots and surfac
   const roots = [
     ".sauce-btn",
     ".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))",
+    ".sauce-pill-toggle",
     ".sauce-action-row",
     ".sauce-modal-backdrop",
     ".sauce-modal",
@@ -439,7 +651,9 @@ test("C1C-DAILY-STATE-TRANSFORMS-PRESERVED reads real Daily state surfaces outsi
     assert.ok(reducedSelectors.every((selector) => !selector.includes(fixture.className)), fixture.className + " leaked into core motion boundary");
   }
   assert.ok(reducedSelectors.every((selector) => !selector.includes(".sauce-pill-dot")), "Daily pill-dot leaked into core motion boundary");
-  const pillSelectors = reducedSelectors.filter((selector) => selector.includes(".sauce-pill"));
+  const pillSelectors = reducedSelectors.filter((selector) => (
+    selector.startsWith(".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))")
+  ));
   assert.ok(pillSelectors.length > 0, "core pill motion coverage missing");
   assert.ok(
     pillSelectors.every((selector) => selector.startsWith(".sauce-pill:not(:where(.space-daily-dashboard .sauce-pill))")),

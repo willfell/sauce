@@ -2940,7 +2940,13 @@ function projectionMetadataProblemFromRaw(record, raw, opts = {}) {
       const dependencies = parseDependsOn(raw).map(normalizeCardLink);
       const expected = Array.isArray(record.dependencies) ? record.dependencies.map(normalizeCardLink) : [];
       const condition = typeof record.resume_condition === 'string' ? record.resume_condition.trim() : '';
-      differs = differs || !expected.length || !condition
+      // Empty dependencies are legitimate when a park amendment cleared them
+      // (the upstream shipped). parkDependenciesClearedByAudit is the same
+      // escape hatch commandResume and parkedAmendmentProblem already honor;
+      // without it this finding is unclearable by construction, since it reads
+      // only record.dependencies while `reconcile` — the remedy its own error
+      // names — rewrites the card note.
+      differs = differs || (!expected.length && !parkDependenciesClearedByAudit(record)) || !condition
         || JSON.stringify(dependencies) !== JSON.stringify(expected)
         || scalarField(raw, 'resume_condition') !== condition;
     }
@@ -5076,9 +5082,16 @@ function collectBoardHealth(state, opts = {}) {
   }
   // Check 5 — records carrying projection_error. Ledger-driven by nature, so
   // an empty/absent ledger contributes zero findings (skipped, not failed).
+  // Gated to projectable phases for the same reason check 6 is (see its
+  // comment below): discard's own epic-rollup step can set projection_error
+  // on the very record it just discarded (e.g. a sibling slice note is
+  // already gone), and `discarded`/`failed`/`cancelled` never run through a
+  // projection again — nothing could ever clear the finding. A finding no
+  // projection can ever resolve is not actionable, so it must not hold the
+  // board unhealthy.
   const projectionErrors = ledger === 'present'
     ? Object.values(cards)
-      .filter((record) => record.projection_error)
+      .filter((record) => record.projection_error && projectionMapping(record.phase))
       .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }))
     : [];
   // Check 6 — records carrying a live foreign_write finding: a tracked card's
@@ -6545,8 +6558,17 @@ function commandStatus(ctx, opts = {}) {
     readFile: opts.readFile, readDir: opts.readDir, exists: opts.exists,
     loadEpicCard: opts.loadEpicCard,
   }), nowMs);
+  // Gated to projectable phases for the same reason board-health check 5 is
+  // (and reusing the same helper projectionMetadataProblem below already
+  // uses): discard's own epic-rollup step can set projection_error on the
+  // very record it just discarded, and discarded/failed/cancelled never run
+  // through a projection again — only a successful projection clears
+  // projection_error. This is what readiness() actually reads (via
+  // coordinatorSnapshot -> commandStatus), so leaving this filter unguarded
+  // permanently blocks batch-runner's readiness() even after the board-health
+  // check is fixed — they are separate computations, not shared code.
   const savedProjectionProblems = Object.values(state.cards || {})
-    .filter((record) => record.projection_error)
+    .filter((record) => record.projection_error && projectionMapping(record.phase))
     .map((record) => ({ card: record.card, phase: record.phase, error: record.projection_error }));
   const detectedMetadataProblems = Object.values(state.cards || {})
     .map((record) => projectionMetadataProblem(record, cardsRoot))

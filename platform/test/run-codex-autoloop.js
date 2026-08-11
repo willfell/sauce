@@ -6412,6 +6412,33 @@ ok(terminalStatus.tracked.some((record) => record.card === 'Tracked blocked' && 
 ok(terminalStatus.tracked.some((record) => record.card === 'Tracked deployed' && record.status === 'completed'), 'all-tracked status view includes canonical completed');
 ok(!terminalStatus.active.some((record) => record.card === 'Tracked deployed'), 'deployed card with projection failure is not counted active');
 eq(terminalStatus.projection_problems, [{ card: 'Tracked deployed', phase: 'deployed', error: 'permission denied' }], 'status exposes saved terminal projection failure');
+
+// PE-STATUS-TERMINAL — the same unclearable-forever flaw board-health check 5
+// was gated for (only a successful projection clears projection_error, and
+// discarded/failed/cancelled never run through one again) also lived here:
+// commandStatus's own savedProjectionProblems filter is a SEPARATE inline
+// `.filter(record => record.projection_error)` that never reused
+// projectionMetadataProblem's existing projectionMapping(record.phase) gate.
+// This is what readiness() actually reads (via coordinatorSnapshot ->
+// commandStatus), so the board-health fix alone did not clear it — confirmed
+// against a real board (ero-egnyte-mcp) carrying 27 such findings, all on
+// discarded records, where board-health reported projection_errors: [] but
+// `status` still reported all 27 in projection_problems, permanently
+// blocking batch-runner's readiness().
+reconcileState.cards['Tracked deployed'].phase = 'discarded';
+const discardedTerminalStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+});
+eq(discardedTerminalStatus.projection_problems, [],
+  'PE-STATUS-TERMINAL a discarded record with a saved projection_error is not reported — no projection can ever clear it');
+for (const phase of ['failed', 'cancelled']) {
+  reconcileState.cards['Tracked deployed'].phase = phase;
+  const phaseStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+    boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+  });
+  eq(phaseStatus.projection_problems, [], `PE-STATUS-TERMINAL phase ${phase} with a saved projection_error is also not reported`);
+}
+reconcileState.cards['Tracked deployed'].phase = 'deployed';
 const failedCompletion = await stepCard({ root: reconcileRoot }, reconcileState, reconcileState.cards['Tracked deployed']);
 eq(failedCompletion.action, 'completion-projection-failed', 'deployed card never reports clean completion while projection failed');
 eq(failedCompletion.deployment, 'deployed', 'failed completion preserves authoritative deployment truth');
@@ -11444,6 +11471,67 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
   }
 }
 
+// PARK-AUDIT-PROJECTION — a parked card whose dependencies were legitimately
+// cleared by a park amendment must NOT report a projection problem. The parked
+// branch of projectionMetadataProblemFromRaw failed `differs` on a bare
+// `!expected.length`, with none of the parkDependenciesClearedByAudit() escape
+// hatch that commandResume (LOOP-RESUME-CLEARED-PARK above) and
+// parkedAmendmentProblem both already honor — three readers of the same state,
+// one dissenting.
+//
+// The finding it produced was unclearable by construction: the condition reads
+// only record.dependencies from the ledger, while `reconcile` — the remedy its
+// own error message names — rewrites the card note. Observed in the wild on the
+// finance board: `reconcile` returned ok/changed:false/projection_findings:[]
+// while `status` kept reporting the problem, and `amend-contract` refused on it
+// ("target metadata must be reconciled before amendment"), deadlocking the card
+// and every slice downstream of it.
+{
+  const parkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'park-audit-projection-'));
+  try {
+    const cardName = 'OC-9 Audited park';
+    const condition = 'ready — upstream dependency merged';
+    const cardPath = path.join(parkRoot, `${cardName}.md`);
+    fs.writeFileSync(cardPath, [
+      '---', 'type: slice', `card: "${cardName}"`, 'kanban_column: In Progress',
+      'status: parked', 'depends_on: []', `resume_condition: "${condition}"`,
+      '---', 'body', '',
+    ].join('\n'));
+    const parkBoard = path.join(parkRoot, 'board.md');
+    fs.writeFileSync(parkBoard, `## In Planning\n\n## In Progress\n\n- [ ] [[${cardName}]]\n\n## Completed\n`);
+    const mkParked = (audited) => ({
+      card: cardName, phase: 'parked', card_path: cardPath,
+      dependencies: [], resume_condition: condition,
+      ...(audited ? {
+        park_amendments: [{
+          at: '2026-08-11T00:00:00.000Z', reason: 'upstream dependency merged',
+          previous: { dependencies: ['[[OC-8 Upstream]]'], resume_condition: 'blocked on OC-8' },
+          next: { dependencies: [], resume_condition: condition },
+        }],
+      } : {}),
+    });
+    const statusFor = (record) => coordinator.commandStatus({ root: parkRoot }, {
+      state: { schema_version: 1, cards: { [cardName]: record } },
+      boardMd: fs.readFileSync(parkBoard, 'utf8'),
+      boardPath: parkBoard,
+      cardsRoot: parkRoot,
+      loadCard: () => ({ path: cardPath, raw: fs.readFileSync(cardPath, 'utf8') }),
+      supervised: false,
+    });
+
+    eq(statusFor(mkParked(true)).projection_problems, [],
+      'PARK-AUDIT-PROJECTION an audit-cleared parked card reports no projection problem');
+
+    const unaudited = statusFor(mkParked(false)).projection_problems;
+    eq(unaudited.length, 1,
+      'PARK-AUDIT-PROJECTION empty dependencies with NO audit trail still report a problem');
+    eq(unaudited[0].card, cardName,
+      'PARK-AUDIT-PROJECTION the unaudited problem names the card');
+  } finally {
+    fs.rmSync(parkRoot, { recursive: true, force: true });
+  }
+}
+
 // AD adopt: the sanctioned out-of-band completion. Every precondition refuses
 // BEFORE any ledger write; the verb can only ratify a declaration already
 // sitting unrecorded on the board, never invent one.
@@ -12244,6 +12332,53 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
     });
     eq(swept.findings.foreign_writes, [], `FW-BOARD-HEALTH-TERMINAL phase ${phase} with a foreign_write is also not reported`);
   }
+}
+
+// PE-BOARD-HEALTH-TERMINAL — a projection_error on a card whose phase has no
+// board projection (discarded, failed, cancelled) can never be cleared: only
+// a successful projection clears projection_error, and none of those phases
+// ever run through a projection again. Check 5 had the identical unclearable-
+// forever flaw check 6 was fixed for (FW-BOARD-HEALTH-TERMINAL above) but
+// never got the same phase gate — surfaced by discard's own epic-rollup step
+// setting projection_error on the record it just discarded, whenever a
+// sibling slice note is already gone (real-world case: ero-egnyte-mcp carried
+// 27 such findings, all on discarded records, permanently blocking readiness).
+{
+  const root = path.join(tmp, 'pe-board-health-terminal');
+  const fx = bhScaffold(root, {});
+  const state = emptyState();
+  state.cards['PET-1'] = { card: 'PET-1', phase: 'discarded', projection_error: 'epic slice PET-0 … note is missing' };
+
+  const bh = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(bh.findings.projection_errors, [],
+    'PE-BOARD-HEALTH-TERMINAL a discarded record with a projection_error is not reported — no projection can ever clear it');
+  eq(bh.healthy, true, 'PE-BOARD-HEALTH-TERMINAL an otherwise-clean board stays healthy');
+
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  eq(receipt.no_op, true, 'PE-BOARD-HEALTH-TERMINAL commandBoardHealth still reports no_op: true');
+
+  // failed/cancelled are equally unclearable and must be gated the same way.
+  for (const phase of ['failed', 'cancelled']) {
+    state.cards['PET-1'].phase = phase;
+    const swept = coordinator.collectBoardHealth(state, {
+      boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+    });
+    eq(swept.findings.projection_errors, [], `PE-BOARD-HEALTH-TERMINAL phase ${phase} with a projection_error is also not reported`);
+  }
+
+  // A projectable phase's projection_error must still surface — the gate
+  // narrows to unclearable phases, it does not silence the check.
+  state.cards['PET-1'].phase = 'implementing';
+  const stillLive = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(stillLive.findings.projection_errors,
+    [{ card: 'PET-1', phase: 'implementing', error: 'epic slice PET-0 … note is missing' }],
+    'PE-BOARD-HEALTH-TERMINAL a projectable phase with a projection_error is still surfaced');
+  eq(stillLive.healthy, false, 'PE-BOARD-HEALTH-TERMINAL a live projection_error on a projectable phase is not a healthy board');
 }
 
 // FW-RECONCILE-CLEAR-PERSIST — projectCard clears an in-memory

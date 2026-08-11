@@ -299,11 +299,13 @@ if (candidateBaseline.length === 0 && releasedBaseline.length === 0) {
   check(false, "mutation fixtures require a green baseline", "repair workflow contract first");
 }
 
-const pkg = JSON.parse(fs.readFileSync(PACKAGE_PATH, "utf8"));
-const preflight = String(pkg.scripts && pkg.scripts["release:preflight"] || "");
+// The release:preflight registration surface moved from a package.json chain
+// string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+// cutover); count manifest steps whose command invokes this harness instead.
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "platform/test/preflight-manifest.json"), "utf8"));
 check(
-  (preflight.match(/node platform\/test\/run-ci-candidate-source\.js/g) || []).length === 1,
-  "candidate-source harness is registered exactly once in release:preflight"
+  manifest.steps.filter((s) => s.cmd.join(" ").includes("platform/test/run-ci-candidate-source.js")).length === 1,
+  "candidate-source harness is registered exactly once in the preflight manifest"
 );
 
 console.log(`\nci-candidate-source: ${passed} passed, ${failed} failed`);

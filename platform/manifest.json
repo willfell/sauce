@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.283.0",
+  "workshop_version": "0.285.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -149,7 +149,7 @@
     },
     {
       "name": "styling",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "path": "mechanisms/styling"
     },
     {

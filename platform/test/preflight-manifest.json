@@ -1,0 +1,1406 @@
+{
+  "schema_version": "1.0.0",
+  "steps": [
+    {
+      "id": "version-sync",
+      "cmd": [
+        "node",
+        "scripts/check-version-sync.js"
+      ],
+      "lane": "serial"
+    },
+    {
+      "id": "renderer",
+      "cmd": [
+        "node",
+        "platform/test/run-renderer.js"
+      ],
+      "lane": "serial"
+    },
+    {
+      "id": "epic-dashboard",
+      "cmd": [
+        "node",
+        "platform/test/run-epic-dashboard.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "cross-blueprint-style-adoption",
+      "cmd": [
+        "node",
+        "platform/test/run-cross-blueprint-style-adoption.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "operator-station",
+      "cmd": [
+        "node",
+        "platform/test/run-operator-station.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "finance-style-adoption",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-style-adoption.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "finance-modal-adoption",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-modal-adoption.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "codex-autoloop",
+      "cmd": [
+        "node",
+        "platform/test/run-codex-autoloop.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "seed-migrations",
+      "cmd": [
+        "node",
+        "platform/test/run-seed-migrations.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "integration-smoke",
+      "cmd": [
+        "node",
+        "platform/test/run-integration-smoke.js"
+      ],
+      "lane": "parallel",
+      "group": "bootstrap"
+    },
+    {
+      "id": "helper-cases",
+      "cmd": [
+        "node",
+        "platform/test/run-helper-cases.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "lint-schemas",
+      "cmd": [
+        "node",
+        "scripts/lint-schemas.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "lint-display-markers",
+      "cmd": [
+        "node",
+        "scripts/lint-display-markers.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "lint-note-chrome",
+      "cmd": [
+        "node",
+        "scripts/lint-note-chrome.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "lint-cold-load-self-test",
+      "cmd": [
+        "node",
+        "scripts/lint-cold-load.js",
+        "--self-test"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "lint-cold-load",
+      "cmd": [
+        "node",
+        "scripts/lint-cold-load.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "files-forbidden-paths",
+      "cmd": [
+        "node",
+        "scripts/check-files-forbidden-paths.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sauce-core-css",
+      "cmd": [
+        "node",
+        "platform/test/run-sauce-core-css.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "modal",
+      "cmd": [
+        "node",
+        "platform/test/run-modal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "bootstrap",
+      "cmd": [
+        "node",
+        "platform/test/run-bootstrap.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "registry",
+      "cmd": [
+        "node",
+        "platform/test/run-registry.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "audit-delivery",
+      "cmd": [
+        "node",
+        "platform/test/run-audit-delivery.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "nav-launcher",
+      "cmd": [
+        "node",
+        "platform/test/run-nav-launcher.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "migrate-layout",
+      "cmd": [
+        "node",
+        "platform/test/run-migrate-layout.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "cli",
+      "cmd": [
+        "node",
+        "platform/test/run-cli.js"
+      ],
+      "lane": "parallel",
+      "group": "bootstrap"
+    },
+    {
+      "id": "migrate",
+      "cmd": [
+        "node",
+        "platform/test/run-migrate.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "audit",
+      "cmd": [
+        "node",
+        "platform/test/run-audit.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "claude-surface",
+      "cmd": [
+        "node",
+        "platform/test/run-claude-surface.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "card-intake",
+      "cmd": [
+        "node",
+        "platform/test/run-card-intake.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "slice-plan",
+      "cmd": [
+        "node",
+        "platform/test/run-slice-plan.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sticky-notes",
+      "cmd": [
+        "node",
+        "platform/test/run-sticky-notes.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "install-sh",
+      "cmd": [
+        "node",
+        "platform/test/run-install-sh.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "cowork-smoke",
+      "cmd": [
+        "node",
+        "platform/test/run-cowork-smoke.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "doctor-self",
+      "cmd": [
+        "node",
+        "platform/test/run-doctor-self.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "seed",
+      "cmd": [
+        "node",
+        "platform/test/run-seed.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "entity-create",
+      "cmd": [
+        "node",
+        "platform/test/run-entity-create.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "wiki-to-docs-migration",
+      "cmd": [
+        "node",
+        "platform/test/run-wiki-to-docs-migration.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "migrate-frontmatter",
+      "cmd": [
+        "node",
+        "platform/test/run-migrate-frontmatter.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "validator",
+      "cmd": [
+        "node",
+        "platform/test/run-validator.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "backlink-panel",
+      "cmd": [
+        "node",
+        "platform/test/run-backlink-panel.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "activity-feed",
+      "cmd": [
+        "node",
+        "platform/test/run-activity-feed.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "kanban-status-sync",
+      "cmd": [
+        "node",
+        "platform/test/run-kanban-status-sync.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-parser",
+      "cmd": [
+        "node",
+        "platform/test/run-task-parser.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "recurrence-parser",
+      "cmd": [
+        "node",
+        "platform/test/run-recurrence-parser.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-interactions",
+      "cmd": [
+        "node",
+        "platform/test/run-task-interactions.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v0127-project-hub-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-v0127-project-hub-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "doc-leaf-actions-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-doc-leaf-actions-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "doc-bulk-move-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-doc-bulk-move-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-links-manager-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-project-links-manager-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-chrome-heal-guard",
+      "cmd": [
+        "node",
+        "platform/test/run-project-chrome-heal-guard.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-chrome-bar-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-project-chrome-bar-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-activity-panels-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-project-activity-panels-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-name-conformance",
+      "cmd": [
+        "node",
+        "platform/test/run-project-name-conformance.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v0127-projects-hub-defaults",
+      "cmd": [
+        "node",
+        "platform/test/run-v0127-projects-hub-defaults.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v0127-today-capture-editable-list",
+      "cmd": [
+        "node",
+        "platform/test/run-v0127-today-capture-editable-list.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v01271-today-capture-renderer-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-v01271-today-capture-renderer-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-carryover",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-carryover.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-dialog",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-dialog.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meeting-leaf-actions",
+      "cmd": [
+        "node",
+        "platform/test/run-meeting-leaf-actions.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-materialize",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-materialize.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "smart-connections-bridge",
+      "cmd": [
+        "node",
+        "platform/test/run-smart-connections-bridge.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v0109-projects-overhaul",
+      "cmd": [
+        "node",
+        "platform/test/run-v0109-projects-overhaul.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v01103-monthly-overview",
+      "cmd": [
+        "node",
+        "platform/test/run-v01103-monthly-overview.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "v01120-monthly-cohesion",
+      "cmd": [
+        "node",
+        "platform/test/run-v01120-monthly-cohesion.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "customjs-contract",
+      "cmd": [
+        "node",
+        "platform/test/run-customjs-contract.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "customjs-loadable-self-test",
+      "cmd": [
+        "node",
+        "platform/test/run-customjs-loadable.js",
+        "--self-test"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "customjs-loadable",
+      "cmd": [
+        "node",
+        "platform/test/run-customjs-loadable.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "customjs-guard",
+      "cmd": [
+        "node",
+        "platform/test/run-customjs-guard.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-markdown-render",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-markdown-render.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-nav-buttons",
+      "cmd": [
+        "node",
+        "platform/test/run-project-nav-buttons.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-activity-cards",
+      "cmd": [
+        "node",
+        "platform/test/run-project-activity-cards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "projects-hub-cards",
+      "cmd": [
+        "node",
+        "platform/test/run-projects-hub-cards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-project-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "cowork-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-cowork-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sticky-notes-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-sticky-notes-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "products-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-products-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-entity-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-task-entity-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "wiki-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-wiki-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "trips-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-trips-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "teams-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-teams-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "people-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-people-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meetings-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "home-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-home-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "backlink-panel-render-guards",
+      "cmd": [
+        "node",
+        "platform/test/run-backlink-panel-render-guards.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sticky-notes-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-sticky-notes-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sticky-notes-migrate",
+      "cmd": [
+        "node",
+        "platform/test/run-sticky-notes-migrate.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sticky-notes-rename-migration",
+      "cmd": [
+        "node",
+        "platform/test/run-sticky-notes-rename-migration.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "trips",
+      "cmd": [
+        "node",
+        "platform/test/run-trips.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "trips-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-trips-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "migration-gate",
+      "cmd": [
+        "node",
+        "platform/test/run-migration-gate.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "open-helpers",
+      "cmd": [
+        "node",
+        "platform/test/run-open-helpers.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "section-label",
+      "cmd": [
+        "node",
+        "platform/test/run-section-label.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "breadcrumb",
+      "cmd": [
+        "node",
+        "platform/test/run-breadcrumb.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "render-safe",
+      "cmd": [
+        "node",
+        "platform/test/run-render-safe.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "people-identity",
+      "cmd": [
+        "node",
+        "platform/test/run-people-identity.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "links",
+      "cmd": [
+        "node",
+        "platform/test/run-links.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-links",
+      "cmd": [
+        "node",
+        "platform/test/run-project-links.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-links-hub-backfill",
+      "cmd": [
+        "node",
+        "platform/test/run-project-links-hub-backfill.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-doc-move",
+      "cmd": [
+        "node",
+        "platform/test/run-project-doc-move.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-todo-owned-tasks",
+      "cmd": [
+        "node",
+        "platform/test/run-project-todo-owned-tasks.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "finance-plan-state",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-plan-state.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "finance-plan-widgets",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-plan-widgets.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "finance-frontmatter",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-frontmatter.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "release-bumper",
+      "cmd": [
+        "node",
+        "platform/test/run-release-bumper.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "release-title-gate",
+      "cmd": [
+        "node",
+        "platform/test/run-release-title-gate.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "ci-candidate-source",
+      "cmd": [
+        "node",
+        "platform/test/run-ci-candidate-source.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "autoloop-select",
+      "cmd": [
+        "node",
+        "platform/test/run-autoloop-select.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "autoloop-leases",
+      "cmd": [
+        "node",
+        "platform/test/run-autoloop-leases.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "autoloop-batch",
+      "cmd": [
+        "node",
+        "platform/test/run-autoloop-batch.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "worktree-sweep",
+      "cmd": [
+        "node",
+        "platform/test/run-worktree-sweep.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "coverage-rubric",
+      "cmd": [
+        "node",
+        "platform/test/run-coverage-rubric.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "workstreams-analysis",
+      "cmd": [
+        "node",
+        "platform/test/run-workstreams-analysis.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "workstream-source",
+      "cmd": [
+        "node",
+        "platform/test/run-workstream-source.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "finance-template-classes",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-template-classes.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "content-token-leaks",
+      "cmd": [
+        "node",
+        "platform/test/run-content-token-leaks.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-all-list",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-all-list.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "cowork-note-chrome",
+      "cmd": [
+        "node",
+        "platform/test/run-cowork-note-chrome.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-entity",
+      "cmd": [
+        "node",
+        "platform/test/run-task-entity.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "doc-search",
+      "cmd": [
+        "node",
+        "platform/test/run-doc-search.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "wiki",
+      "cmd": [
+        "node",
+        "platform/test/run-wiki.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "reader",
+      "cmd": [
+        "node",
+        "platform/test/run-reader.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "reader-article-paste",
+      "cmd": [
+        "node",
+        "platform/test/run-reader-article-paste.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "home",
+      "cmd": [
+        "node",
+        "platform/test/run-home.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "daily-dashboard",
+      "cmd": [
+        "node",
+        "platform/test/run-daily-dashboard.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sauce-plugin",
+      "cmd": [
+        "node",
+        "platform/test/run-sauce-plugin.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "menu-popover",
+      "cmd": [
+        "node",
+        "platform/test/run-menu-popover.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-project-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-commands",
+      "cmd": [
+        "node",
+        "platform/test/run-project-commands.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "section-explorer",
+      "cmd": [
+        "node",
+        "platform/test/run-section-explorer.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "wiki-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-wiki-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "prune-orphan-breadcrumb",
+      "cmd": [
+        "node",
+        "platform/test/run-prune-orphan-breadcrumb.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "chrome-bar-cycle3-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-chrome-bar-cycle3-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "trips-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-trips-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "reader-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-reader-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "people-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-people-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "products-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-products-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "teams-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-teams-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "journal-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-journal-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "journal-multi-entry",
+      "cmd": [
+        "node",
+        "platform/test/run-journal-multi-entry.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "boards-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-boards-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "finance-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "finance-nav-guard",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-nav-guard.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meeting-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-meeting-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meetings-hub-chrome-bar-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-hub-chrome-bar-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-chrome-bar-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-task-chrome-bar-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "sticky-hub-title-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-sticky-hub-title-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "code-fence-button",
+      "cmd": [
+        "node",
+        "platform/test/run-code-fence-button.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "cycle-status",
+      "cmd": [
+        "node",
+        "platform/test/run-cycle-status.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "daily-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-daily-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "daily-home-chrome-bar-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-daily-home-chrome-bar-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "home-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-home-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meetings-browse-list",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-browse-list.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meetings-chrome-modernize-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-chrome-modernize-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "meetings-hub-scaffold-archive-heal",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-hub-scaffold-archive-heal.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "project-status-widget",
+      "cmd": [
+        "node",
+        "platform/test/run-project-status-widget.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-chrome-bar",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-chrome-bar.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "delivery-contract",
+      "cmd": [
+        "node",
+        "platform/test/run-delivery-contract.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "delivery-topology",
+      "cmd": [
+        "node",
+        "platform/test/run-delivery-topology.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "delivery-review",
+      "cmd": [
+        "node",
+        "platform/test/run-delivery-review.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "delivery-status",
+      "cmd": [
+        "node",
+        "platform/test/run-delivery-status.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "graph-layout",
+      "cmd": [
+        "node",
+        "platform/test/run-graph-layout.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "graph-view",
+      "cmd": [
+        "node",
+        "platform/test/run-graph-view.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "graph-insights",
+      "cmd": [
+        "node",
+        "platform/test/run-graph-insights.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "graph-view-contract",
+      "cmd": [
+        "node",
+        "platform/test/run-graph-view-contract.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "graph-view-focus-contract",
+      "cmd": [
+        "node",
+        "platform/test/run-graph-view-focus-contract.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "orphan-harnesses",
+      "cmd": [
+        "node",
+        "platform/test/run-orphan-harnesses.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "check-orphan-harnesses",
+      "cmd": [
+        "node",
+        "scripts/check-orphan-harnesses.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "loop-config",
+      "cmd": [
+        "node",
+        "platform/test/run-loop-config.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "loop-binding",
+      "cmd": [
+        "node",
+        "platform/test/run-loop-binding.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "loop-plugin-surface",
+      "cmd": [
+        "node",
+        "platform/test/run-loop-plugin-surface.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "loop-codex-routers",
+      "cmd": [
+        "node",
+        "platform/test/run-loop-codex-routers.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "preflight-runner",
+      "cmd": [
+        "node",
+        "platform/test/run-preflight-runner.js"
+      ],
+      "lane": "parallel"
+    }
+  ]
+}
