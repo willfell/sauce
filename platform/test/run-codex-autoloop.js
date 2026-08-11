@@ -12246,6 +12246,53 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
   }
 }
 
+// PE-BOARD-HEALTH-TERMINAL — a projection_error on a card whose phase has no
+// board projection (discarded, failed, cancelled) can never be cleared: only
+// a successful projection clears projection_error, and none of those phases
+// ever run through a projection again. Check 5 had the identical unclearable-
+// forever flaw check 6 was fixed for (FW-BOARD-HEALTH-TERMINAL above) but
+// never got the same phase gate — surfaced by discard's own epic-rollup step
+// setting projection_error on the record it just discarded, whenever a
+// sibling slice note is already gone (real-world case: ero-egnyte-mcp carried
+// 27 such findings, all on discarded records, permanently blocking readiness).
+{
+  const root = path.join(tmp, 'pe-board-health-terminal');
+  const fx = bhScaffold(root, {});
+  const state = emptyState();
+  state.cards['PET-1'] = { card: 'PET-1', phase: 'discarded', projection_error: 'epic slice PET-0 … note is missing' };
+
+  const bh = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(bh.findings.projection_errors, [],
+    'PE-BOARD-HEALTH-TERMINAL a discarded record with a projection_error is not reported — no projection can ever clear it');
+  eq(bh.healthy, true, 'PE-BOARD-HEALTH-TERMINAL an otherwise-clean board stays healthy');
+
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  eq(receipt.no_op, true, 'PE-BOARD-HEALTH-TERMINAL commandBoardHealth still reports no_op: true');
+
+  // failed/cancelled are equally unclearable and must be gated the same way.
+  for (const phase of ['failed', 'cancelled']) {
+    state.cards['PET-1'].phase = phase;
+    const swept = coordinator.collectBoardHealth(state, {
+      boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+    });
+    eq(swept.findings.projection_errors, [], `PE-BOARD-HEALTH-TERMINAL phase ${phase} with a projection_error is also not reported`);
+  }
+
+  // A projectable phase's projection_error must still surface — the gate
+  // narrows to unclearable phases, it does not silence the check.
+  state.cards['PET-1'].phase = 'implementing';
+  const stillLive = coordinator.collectBoardHealth(state, {
+    boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, ledger: 'present',
+  });
+  eq(stillLive.findings.projection_errors,
+    [{ card: 'PET-1', phase: 'implementing', error: 'epic slice PET-0 … note is missing' }],
+    'PE-BOARD-HEALTH-TERMINAL a projectable phase with a projection_error is still surfaced');
+  eq(stillLive.healthy, false, 'PE-BOARD-HEALTH-TERMINAL a live projection_error on a projectable phase is not a healthy board');
+}
+
 // FW-RECONCILE-CLEAR-PERSIST — projectCard clears an in-memory
 // `foreign_write` the moment its sha resyncs, but that clear must reach
 // disk too, or a stale finding from an earlier detection survives forever:
