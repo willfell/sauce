@@ -947,6 +947,14 @@
       "lane": "parallel"
     },
     {
+      "id": "todo-daily-filter-view",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-daily-filter-view.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "cowork-note-chrome",
       "cmd": [
         "node",
