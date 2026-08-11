@@ -2175,6 +2175,13 @@ function canonicalEpicMembers(boardRaw, boardDir, epic, boardPath, expectedAtlas
 
 function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, opts = {}) {
   if (scalarField(cardRaw, 'type') !== 'slice') return null;
+  // A ledger is the authority for sibling slice status. Defaulting it to an
+  // empty map made every sibling look untracked, which demoted any completed
+  // sibling and invented drift no command could clear. Callers that only need
+  // topology (members/paths) say so explicitly instead.
+  if (!opts.state && opts.topologyOnly !== true) {
+    throw new Error('canonical epic projection requires an explicit ledger, or topologyOnly: true');
+  }
   const epic = normalizeCardLink(scalarField(cardRaw, 'epic'));
   if (!epic) throw new Error('canonical slice is missing its epic backlink');
   const currentCard = normalizeCardLink(opts.currentCard);
@@ -2248,7 +2255,7 @@ function canonicalEpicProjection(cardRaw, cardPath, parentBoardPath, cardsRoot, 
   return {
     epic, atlasPath, atlasRaw, boardPath: epicBoardPath,
     boardRaw, parentRaw, members, expectedAtlasPath, expectedBoardPath,
-    cardsRoot: root, physicalBoardDir, state: opts.state || { cards: {} },
+    cardsRoot: root, physicalBoardDir, state: opts.state || null,
   };
 }
 
@@ -2272,6 +2279,7 @@ function legacyCompletionFinding(surface, card, record = null) {
 }
 
 function deriveEpicProjection(surface, currentCard, currentStatus) {
+  if (!surface.state) throw new Error('epic roll-up requires an explicit ledger');
   const cards = canonicalEpicMembers(
     surface.boardRaw,
     path.dirname(surface.boardPath),
@@ -5807,7 +5815,8 @@ function restructureEpicApplied(epicSpec, boardPath, cardsRoot, parentRaw) {
   if (!boardCardLocation(parentRaw, epic)) return false;
   try {
     const surface = canonicalEpicProjection(
-      fs.readFileSync(firstTarget, 'utf8'), firstTarget, boardPath, cardsRoot, { currentCard: members[0] },
+      fs.readFileSync(firstTarget, 'utf8'), firstTarget, boardPath, cardsRoot,
+      { currentCard: members[0], topologyOnly: true },
     );
     return Boolean(surface) && members.every((member) => surface.members.includes(member));
   } catch (_) { return false; }
@@ -6047,7 +6056,7 @@ async function executeRestructure(ctx, journal, d, opts = {}) {
     try {
       surface = canonicalEpicProjection(
         fs.readFileSync(firstMove.to, 'utf8'), firstMove.to, journal.board, journal.cards_root,
-        { currentCard: firstMove.card },
+        { currentCard: firstMove.card, topologyOnly: true },
       );
     } catch (err) {
       throw new Error(`restructure fail-closed: built epic ${plan.epic} is not canonical: ${err.message}`);

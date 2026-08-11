@@ -10154,7 +10154,7 @@ eq(noteBody(fs.readFileSync(path.join(happy.cardsRoot, 'Bystander card.md'), 'ut
 eq(happy.counters.writes, 0, 'BGR-RESTRUCTURE-HAPPY untracked flat cards trigger zero ledger writes');
 for (const [epic, member] of [['Family A', 'Card A1'], ['Family B', 'Card B2']]) {
   const target = path.join(happy.cardsRoot, epic, 'board', `${member}.md`);
-  const surface = canonicalEpicProjection(fs.readFileSync(target, 'utf8'), target, happy.boardPath, happy.cardsRoot, { currentCard: member });
+  const surface = canonicalEpicProjection(fs.readFileSync(target, 'utf8'), target, happy.boardPath, happy.cardsRoot, { currentCard: member, topologyOnly: true });
   eq(surface.epic, epic, `BGR-RESTRUCTURE-HAPPY canonicalEpicProjection accepts the built ${epic} surface`);
 }
 const happyResolved = resolveEpicBoardSet({ parentBoardMd: happyParent, cardsRoot: happy.cardsRoot });
@@ -11757,6 +11757,31 @@ const adNoMutation = (result, label) => {
   eq(lifecycle.findings, [], 'AD-ADOPT no legacy-completion finding fires for an adopted slice');
 }
 
+// EPIC-LEDGER-FAIL-CLOSED — a surface built without an explicit ledger must
+// refuse to roll up rather than silently treating every sibling as untracked
+// (which demotes completed siblings and invents drift). See
+// docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md.
+{
+  const fx = makeEpicProjectionFixture('ledger-fail-closed');
+  const noteRaw = fs.readFileSync(fx.cardPath, 'utf8');
+  assert.throws(
+    () => coordinator.canonicalEpicProjection(noteRaw, fx.cardPath, fx.parentBoardPath, fx.cardsRoot, {}),
+    /requires an explicit ledger/,
+    'EPIC-LEDGER-FAIL-CLOSED canonicalEpicProjection refuses a stateless build',
+  );
+  const topology = coordinator.canonicalEpicProjection(
+    noteRaw, fx.cardPath, fx.parentBoardPath, fx.cardsRoot, { topologyOnly: true },
+  );
+  ok(topology && topology.members.includes('A1'),
+    'EPIC-LEDGER-FAIL-CLOSED topologyOnly still reads members');
+  eq(topology.state, null, 'EPIC-LEDGER-FAIL-CLOSED topologyOnly carries no ledger');
+  assert.throws(
+    () => coordinator.deriveEpicProjection(topology, null, null),
+    /requires an explicit ledger/,
+    'EPIC-LEDGER-FAIL-CLOSED the roll-up refuses a stateless surface',
+  );
+}
+
 // AD-REPLAY — literal replay is free; substituted operands refuse.
 {
   const root = path.join(tmp, 'ad-replay');
@@ -11862,7 +11887,7 @@ const adNoMutation = (result, label) => {
   // its epic should move for an already-correct adopted record.
   const projectWrites = [];
   const projectResult = projectCard(record.card_path, fx.boardPath, 'EM-4', 'adopted', {
-    cardsRoot: fx.cardsRoot, record, writeText: (target, text) => projectWrites.push({ target, text }),
+    cardsRoot: fx.cardsRoot, record, state, writeText: (target, text) => projectWrites.push({ target, text }),
   });
   eq(projectResult.board_changed, false,
     'AD-PROJECTION reconcile-style projectCard leaves the epic board line `- [x]` byte-identical');
