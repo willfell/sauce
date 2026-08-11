@@ -6412,6 +6412,33 @@ ok(terminalStatus.tracked.some((record) => record.card === 'Tracked blocked' && 
 ok(terminalStatus.tracked.some((record) => record.card === 'Tracked deployed' && record.status === 'completed'), 'all-tracked status view includes canonical completed');
 ok(!terminalStatus.active.some((record) => record.card === 'Tracked deployed'), 'deployed card with projection failure is not counted active');
 eq(terminalStatus.projection_problems, [{ card: 'Tracked deployed', phase: 'deployed', error: 'permission denied' }], 'status exposes saved terminal projection failure');
+
+// PE-STATUS-TERMINAL — the same unclearable-forever flaw board-health check 5
+// was gated for (only a successful projection clears projection_error, and
+// discarded/failed/cancelled never run through one again) also lived here:
+// commandStatus's own savedProjectionProblems filter is a SEPARATE inline
+// `.filter(record => record.projection_error)` that never reused
+// projectionMetadataProblem's existing projectionMapping(record.phase) gate.
+// This is what readiness() actually reads (via coordinatorSnapshot ->
+// commandStatus), so the board-health fix alone did not clear it — confirmed
+// against a real board (ero-egnyte-mcp) carrying 27 such findings, all on
+// discarded records, where board-health reported projection_errors: [] but
+// `status` still reported all 27 in projection_problems, permanently
+// blocking batch-runner's readiness().
+reconcileState.cards['Tracked deployed'].phase = 'discarded';
+const discardedTerminalStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+  boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+});
+eq(discardedTerminalStatus.projection_problems, [],
+  'PE-STATUS-TERMINAL a discarded record with a saved projection_error is not reported — no projection can ever clear it');
+for (const phase of ['failed', 'cancelled']) {
+  reconcileState.cards['Tracked deployed'].phase = phase;
+  const phaseStatus = commandStatus({ ...statusCtx, statePath: ctx.statePath }, {
+    boardMd: fs.readFileSync(reconcileBoardPath, 'utf8'), loadCard, state: reconcileState,
+  });
+  eq(phaseStatus.projection_problems, [], `PE-STATUS-TERMINAL phase ${phase} with a saved projection_error is also not reported`);
+}
+reconcileState.cards['Tracked deployed'].phase = 'deployed';
 const failedCompletion = await stepCard({ root: reconcileRoot }, reconcileState, reconcileState.cards['Tracked deployed']);
 eq(failedCompletion.action, 'completion-projection-failed', 'deployed card never reports clean completion while projection failed');
 eq(failedCompletion.deployment, 'deployed', 'failed completion preserves authoritative deployment truth');
