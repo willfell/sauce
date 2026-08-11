@@ -325,13 +325,13 @@ git commit -m "ci: add a temporary two-pool runner smoke workflow
 
 workflow_dispatch only. Proves both self-hosted pools dispatch before
 the real jobs are repointed. Deleted once green."
-git push -u origin worktree-ci-self-hosted-runners
+git push -u origin ci/self-hosted-runners
 ```
 
 - [ ] **Step 3: Run it and watch both jobs**
 
 ```bash
-gh workflow run runner-smoke.yml --ref worktree-ci-self-hosted-runners
+gh workflow run runner-smoke.yml --ref ci/self-hosted-runners
 sleep 10
 gh run list --workflow=runner-smoke.yml --limit 1
 gh run watch "$(gh run list --workflow=runner-smoke.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
