@@ -983,14 +983,14 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
 // persisted its check failure. Only that exact blocked cause may re-enter the
 // release rail; every unrelated or unusable blocked record remains terminal.
 {
-  const releaseFailure = 'release PR checks failed: preflight (macos-latest)';
+  const releaseFailure = 'release PR checks failed: preflight (macos)';
   const releasePr = (overrides = {}) => ({
     number: 646,
     state: 'OPEN',
     title: 'chore(release): v0.267.0',
     url: 'https://example.test/pr/646',
     mergeCommit: null,
-    statusCheckRollup: [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    statusCheckRollup: [{ name: 'preflight (macos)', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     ...overrides,
   });
   const blockedRelease = (overrides = {}) => ({
@@ -1032,8 +1032,8 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
     'LOOP-RELEASE-CI-RERUN-DEADEND merged recovery reads and persists exactly once');
 
   for (const [label, statusCheckRollup] of [
-    ['green', [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
-    ['pending', [{ name: 'preflight (macos-latest)', status: 'IN_PROGRESS', conclusion: '' }]],
+    ['green', [{ name: 'preflight (macos)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
+    ['pending', [{ name: 'preflight (macos)', status: 'IN_PROGRESS', conclusion: '' }]],
   ]) {
     let writes = 0;
     const record = blockedRelease();
@@ -1057,7 +1057,7 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
   const stillFailedDeps = withLineage({
     prView: () => releasePr({
       statusCheckRollup: [
-        { name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'FAILURE' },
+        { name: 'preflight (macos)', status: 'COMPLETED', conclusion: 'FAILURE' },
         { name: 'preflight (ubuntu-latest)', status: 'COMPLETED', conclusion: 'FAILURE' },
       ],
     }),
@@ -1071,7 +1071,7 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
   eq(stillFailedRecord.phase, 'blocked',
     'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun cannot reopen the release rail');
   eq(stillFailedRecord.reason,
-    'release PR checks failed: preflight (macos-latest), preflight (ubuntu-latest)',
+    'release PR checks failed: preflight (macos), preflight (ubuntu-latest)',
     'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun refreshes the deterministic failure reason');
   eq(failedWrites, 1,
     'LOOP-RELEASE-CI-RERUN-DEADEND a still-failed rerun persists current external evidence');
@@ -1081,7 +1081,7 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
   eq(stillFailedReplay, stillFailedResult,
     'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery returns a deterministic receipt');
   eq(stillFailedRecord.reason,
-    'release PR checks failed: preflight (macos-latest), preflight (ubuntu-latest)',
+    'release PR checks failed: preflight (macos), preflight (ubuntu-latest)',
     'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery keeps deterministic durable state');
   eq(failedWrites, 2,
     'LOOP-RELEASE-CI-RERUN-DEADEND repeated failed recovery persists each current evidence read once');
@@ -1133,8 +1133,8 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
     'LOOP-RELEASE-RERUN-MISMATCHED-PR-REOPENS unrelated merged PR performs no ledger write');
 
   for (const [label, statusCheckRollup] of [
-    ['green', [{ name: 'preflight (macos-latest)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
-    ['pending', [{ name: 'preflight (macos-latest)', status: 'IN_PROGRESS', conclusion: '' }]],
+    ['green', [{ name: 'preflight (macos)', status: 'COMPLETED', conclusion: 'SUCCESS' }]],
+    ['pending', [{ name: 'preflight (macos)', status: 'IN_PROGRESS', conclusion: '' }]],
   ]) {
     let writes = 0;
     const record = blockedRelease();
