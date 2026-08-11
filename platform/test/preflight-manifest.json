@@ -19,6 +19,51 @@
       "lane": "serial"
     },
     {
+      "id": "epic-dashboard",
+      "cmd": [
+        "node",
+        "platform/test/run-epic-dashboard.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "cross-blueprint-style-adoption",
+      "cmd": [
+        "node",
+        "platform/test/run-cross-blueprint-style-adoption.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "operator-station",
+      "cmd": [
+        "node",
+        "platform/test/run-operator-station.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "finance-style-adoption",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-style-adoption.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
+      "id": "finance-modal-adoption",
+      "cmd": [
+        "node",
+        "platform/test/run-finance-modal-adoption.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
       "id": "codex-autoloop",
       "cmd": [
         "node",
@@ -40,7 +85,8 @@
         "node",
         "platform/test/run-integration-smoke.js"
       ],
-      "lane": "serial"
+      "lane": "parallel",
+      "group": "bootstrap"
     },
     {
       "id": "helper-cases",
@@ -161,7 +207,8 @@
         "node",
         "platform/test/run-cli.js"
       ],
-      "lane": "serial"
+      "lane": "parallel",
+      "group": "bootstrap"
     },
     {
       "id": "migrate",
@@ -789,30 +836,6 @@
       "lane": "parallel"
     },
     {
-      "id": "finance-modal-adoption",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-modal-adoption.js"
-      ],
-      "lane": "serial"
-    },
-    {
-      "id": "finance-style-adoption",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-style-adoption.js"
-      ],
-      "lane": "serial"
-    },
-    {
-      "id": "cross-blueprint-style-adoption",
-      "cmd": [
-        "node",
-        "platform/test/run-cross-blueprint-style-adoption.js"
-      ],
-      "lane": "serial"
-    },
-    {
       "id": "finance-frontmatter",
       "cmd": [
         "node",
@@ -1285,14 +1308,6 @@
       "lane": "parallel"
     },
     {
-      "id": "epic-dashboard",
-      "cmd": [
-        "node",
-        "platform/test/run-epic-dashboard.js"
-      ],
-      "lane": "parallel"
-    },
-    {
       "id": "graph-layout",
       "cmd": [
         "node",
@@ -1329,14 +1344,6 @@
       "cmd": [
         "node",
         "platform/test/run-graph-view-focus-contract.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "operator-station",
-      "cmd": [
-        "node",
-        "platform/test/run-operator-station.js"
       ],
       "lane": "parallel"
     },
