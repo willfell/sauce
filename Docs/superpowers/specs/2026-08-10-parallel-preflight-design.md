@@ -88,7 +88,7 @@ Steps are authored **heaviest-first** — `codex-autoloop` (66s), `seed-migratio
 
 `scripts/run-preflight.js` — a work queue over N workers.
 
-- **Concurrency** defaults to `os.availableParallelism()`, overridable by `--jobs N` or `SAUCE_PREFLIGHT_JOBS`. The coordinator can reserve headroom later if the box proves contended; no such tuning ships in this change.
+- **Concurrency** defaults to `os.availableParallelism?.() ?? os.cpus().length` — the fallback is required because `package.json` declares `engines.node >= 18` and `availableParallelism` only landed in Node 18.14. Overridable by `--jobs N` or `SAUCE_PREFLIGHT_JOBS`. The coordinator can reserve headroom later if the box proves contended; no such tuning ships in this change.
 - **Serial lane** runs to completion before the parallel lane begins. It is empty at launch and exists as the escape hatch for any step the soak proves unsafe.
 - **Output is buffered per step** and printed as one contiguous block on completion. Never interleaved.
 - **`--jobs 1`** reproduces today's serial behavior exactly. This is both the debugging contract and the rollout mechanism.
@@ -108,12 +108,14 @@ Parallel execution improves attribution here rather than degrading it. Today a f
 
 `scripts/check-orphan-harnesses.js` currently reads `package.json` scripts to assert every `platform/test/run-*.js` is registered. It must change regardless, since the step list is moving. It gains a second assertion at the same time:
 
-1. Every `run-*.js` appears in the manifest exactly once.
+1. Every `run-*.js` is registered — in the manifest's steps **or** in a `package.json` script. This preserves today's exact semantics.
 2. No fixed `/tmp/<name>` literal appears in two different harnesses.
 
 The second is what keeps parallelism correct as harnesses are added.
 
 Note that today the guard's registration source is `package.json` scripts, and several harnesses (`run-cli.js`, `run-migrate.js`, and others) appear there *only* inside the preflight chain string — so moving the chain out is precisely what forces this change.
+
+Assertion 1 is deliberately the union, not "must be in the manifest." **Seven harnesses are registered via `test:*` scripts but are not in the preflight chain at all** — `run-install.js`, `run-project-dashboard.js`, `run-project-dashboard-heal.js`, `run-task-trip-list.js`, `run-trip-dashboard.js`, `run-trip-entry-list.js`, `run-trip-links.js`. A manifest-only assertion would fail on day one. Whether those seven *should* gate is a real question, and a pre-existing one; it is explicitly out of scope here, since answering it means changing what preflight covers rather than how fast it runs.
 
 `platform/test/run-orphan-harnesses.js` exercises the exported `orphanHarnesses(harnesses, registered)` as a pure function against synthetic inputs; it does not read `package.json` itself. It therefore needs changing only if that signature changes, plus new coverage for the `/tmp`-collision assertion.
 
