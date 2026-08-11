@@ -42,6 +42,43 @@ ok('PERF10-SENTINEL-4 Projects harness requires exactly 180 emitted cards',
   projectsHarness.includes('PERF10-EMIT-4 Daily requires exactly 180 emitted cards')
     && projectsHarness.includes(String.raw`/metrics\.beaconEmitted === 180/.test(perfReceiptSrc)`));
 
+// The file's existing header destructures only `orphanHarnesses`; the cases
+// below also need `repositoryHarnesses`, so re-destructure here rather than
+// editing the header and risking a merge conflict with the top of the file.
+const {
+  registrationSources, sharedTmpPaths, repositoryHarnesses,
+} = require('../../scripts/check-orphan-harnesses.js');
+
+const ROOT = path.resolve(__dirname, '..', '..');
+
+// Registration is the UNION of package.json scripts and the manifest. Seven
+// harnesses (run-install.js, run-project-dashboard{,-heal}.js,
+// run-task-trip-list.js, run-trip-{dashboard,entry-list,links}.js) are
+// registered only via test:* scripts and are deliberately not in preflight --
+// a manifest-only assertion would fail on day one.
+const sources = registrationSources(ROOT);
+ok('ORPHAN-4 registration sources include the preflight manifest',
+  typeof sources.preflightManifest === 'string'
+    && sources.preflightManifest.includes('platform/test/run-cli.js'));
+ok('ORPHAN-5 registration sources still include package.json scripts',
+  Object.keys(sources).some((k) => k !== 'preflightManifest'));
+ok('ORPHAN-6 no harness is orphaned under the merged sources',
+  orphanHarnesses(repositoryHarnesses(ROOT), sources).length === 0);
+ok('ORPHAN-7 the seven non-preflight harnesses stay registered',
+  ['run-install.js', 'run-project-dashboard.js', 'run-project-dashboard-heal.js',
+    'run-task-trip-list.js', 'run-trip-dashboard.js', 'run-trip-entry-list.js',
+    'run-trip-links.js'].every((h) => orphanHarnesses([h], sources).length === 0));
+
+// The parallel-safety invariant: fixed /tmp paths must be single-owner.
+// mkdtemp prefixes are exempt -- mkdtemp appends random characters, so they
+// cannot collide.
+const shared = sharedTmpPaths(ROOT);
+ok('ORPHAN-8 no fixed /tmp path is shared by two harnesses',
+  shared.length === 0);
+if (shared.length) {
+  console.error(`  shared: ${shared.map((s) => `${s.tmpPath} <- ${s.harnesses.join(', ')}`).join(' | ')}`);
+}
+
 const failed = results.filter(([, passed]) => !passed);
 console.log(`\n${failed.length ? 'FAIL' : 'PASS'} — orphan harness guard (${results.length - failed.length}/${results.length})`);
 process.exitCode = failed.length ? 1 : 0;

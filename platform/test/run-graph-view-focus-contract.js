@@ -21,7 +21,13 @@ const PACKAGE = path.join(ROOT, 'package.json');
 const source = fs.readFileSync(BEHAVIOR, 'utf8');
 const compact = source.replace(/\s+/g, ' ');
 const pkg = JSON.parse(fs.readFileSync(PACKAGE, 'utf8'));
-const EXPECTED_BEHAVIOR_SHA256 = '1d79d557ce51b14a08fc360c8b435beab3a524acb1d7ec218386d5caddd8bf8d';
+// Re-pinned 2026-08-10: run-graph-view.js's release:preflight registration
+// assertion was migrated from a package.json chain-string check to a
+// preflight-manifest membership check (see the BL6A-PREFLIGHT edit below and
+// Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md); that
+// sanctioned edit changed the pinned file's byte content, so the anti-mutation
+// digest below was recomputed to match.
+const EXPECTED_BEHAVIOR_SHA256 = 'cbd716996e4b2187c2fdde935762e4e56857a299ec2c678535741a6e799ac1fe';
 
 const exactPredicates = [
   ["epic no-op", "bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0, 'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');"],
@@ -157,7 +163,11 @@ assert(staticFailures(directWriter).includes('receipt recorder'),
 assert.strictEqual(pkg.scripts?.['test:graph-view-focus-contract'],
   'node platform/test/run-graph-view-focus-contract.js',
   'BL6A-REGISTRY: the independent focus contract is registered');
-assert.strictEqual(((pkg.scripts?.['release:preflight'] || '').match(/run-graph-view-focus-contract\.js/g) || []).length, 1,
+// The release:preflight registration surface moved from a package.json chain
+// string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+// cutover); count manifest steps whose command invokes this harness instead.
+const preflightManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/test/preflight-manifest.json'), 'utf8'));
+assert.strictEqual(preflightManifest.steps.filter((s) => s.cmd.join(' ').includes('run-graph-view-focus-contract.js')).length, 1,
   'BL6A-PREFLIGHT: release preflight invokes the focus contract exactly once');
 
 console.log('PASS — GraphView BL-6c scope-bound focus contract');

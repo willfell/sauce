@@ -159,9 +159,22 @@ test('case 11: manifest and preflight register GraphInsights exactly once', () =
     && entry.dest === '{{scripts_path}}/project/graph-insights.js').length, 1);
   assert.strictEqual(packageJson.scripts['test:graph-insights'],
     'node platform/test/run-graph-insights.js');
-  assert.ok(packageJson.scripts['release:preflight'].includes(
-    'node platform/test/run-graph-layout.js && node platform/test/run-graph-view.js && node platform/test/run-graph-insights.js'));
-  assert.strictEqual((packageJson.scripts['release:preflight'].match(/run-graph-insights\.js/g) || []).length, 1);
+  // Execution order is no longer sequential: the release:preflight registration
+  // surface moved from a package.json chain string to
+  // platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+  // cutover), which is ordered heaviest-first and whose parallel lane has no
+  // execution order at all -- see
+  // Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md. The
+  // surviving intent (the graph trio plus the independent contract sentinel all
+  // stay wired into preflight) is now a membership check per harness, not an
+  // order check.
+  const preflightManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/test/preflight-manifest.json'), 'utf8'));
+  const preflightCmds = preflightManifest.steps.map((s) => s.cmd.join(' '));
+  for (const harness of ['run-graph-layout.js', 'run-graph-view.js', 'run-graph-insights.js', 'run-graph-view-contract.js']) {
+    assert.strictEqual(preflightCmds.filter((cmd) => cmd.includes(harness)).length, 1,
+      `preflight preserves the graph trio plus the independent contract sentinel: ${harness} registered exactly once`);
+  }
+  assert.strictEqual(preflightCmds.filter((cmd) => cmd.includes('run-graph-insights.js')).length, 1);
 });
 
 test('case 12: required behavioral mutants are executable and turn red', () => {
