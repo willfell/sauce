@@ -102,6 +102,7 @@
     "RecurrenceParser",
     "ToDoDailyCarryover",
     "ToDoDailyRecurring",
+    "ToDoDailyFilterView",
     "ToDoDailyProjectGroups",
     "ToDoDailyUnassignedMeetings",
     "ToDoDailyTripGroups",
@@ -176,6 +177,10 @@
     {
       "source": "helpers/todo-daily-recurring.js",
       "dest": "{{scripts_path}}/to-do/todo-daily-recurring.js"
+    },
+    {
+      "source": "helpers/todo-daily-filter-view.js",
+      "dest": "{{scripts_path}}/to-do/todo-daily-filter-view.js"
     },
     {
       "source": "helpers/todo-daily-project-groups.js",
