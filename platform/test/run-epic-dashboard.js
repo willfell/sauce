@@ -1365,7 +1365,7 @@ async function main() {
   const terminalManifest = { name: 'project' };
   const terminalGit = { commit: 'fixture', tag: null, dirty: false };
   await installer.applyEpicScaffoldHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
-  await installer.applyKanbanSettingsTerminalHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
+  await installer.applyKanbanSettingsTerminalHeal(terminalTp, terminalHistory, terminalGit);
   const healedChromeless = terminalAdapter.store.get('spice/projects/chromeless/chromeless-board.md');
   assert(healedChromeless.includes('class: "EpicCreateAction"') && settingsIsTerminal(healedChromeless),
     'ES4-KANBAN-TERMINAL: chrome-less board gains EpicCreateAction with the settings comment still terminal');
@@ -1380,7 +1380,7 @@ async function main() {
   const terminalSnapshot = [...terminalAdapter.store.entries()].sort(([a], [b]) => a.localeCompare(b));
   const terminalWrites = terminalAdapter.writes.length;
   await installer.applyEpicScaffoldHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
-  await installer.applyKanbanSettingsTerminalHeal(terminalTp, terminalManifest, {}, terminalHistory, terminalGit);
+  await installer.applyKanbanSettingsTerminalHeal(terminalTp, terminalHistory, terminalGit);
   assert.deepStrictEqual([...terminalAdapter.store.entries()].sort(([a], [b]) => a.localeCompare(b)), terminalSnapshot,
     'ES4-KANBAN-TERMINAL: second pass is byte-identical');
   assert.strictEqual(terminalAdapter.writes.length, terminalWrites,
@@ -1388,9 +1388,72 @@ async function main() {
   const terminalFault = [];
   await assert.doesNotReject(() => installer.applyKanbanSettingsTerminalHeal({
     app: { vault: { adapter: { async exists() { throw new Error('adapter fault'); } } } },
-  }, terminalManifest, {}, terminalFault, terminalGit), 'ES4-KANBAN-TERMINAL: adapter failures never escape install');
+  }, terminalFault, terminalGit), 'ES4-KANBAN-TERMINAL: adapter failures never escape install');
   assert(terminalFault.some((entry) => entry.event === 'warning' && entry.step === 'kanban_settings_terminal_heal'),
     'ES4-KANBAN-TERMINAL: adapter failure leaves an auditable warning');
+
+  // Language-tagged settings fence (```json instead of bare ```) — obsidian-kanban's
+  // reader slices JSON content starting immediately after the opening fence's third
+  // backtick, so a language tag feeds "json\n{...}" into JSON.parse. Observed in the
+  // wild on 3 ero-egnyte-mcp epic sub-boards.
+  const jsonFencedBoard = ['---', 'kanban-plugin: board', 'type: kanban', 'project_slug: "jsonfenced"',
+    'project_name: "JsonFenced"', '---', '', '## In Planning', '',
+    '%% kanban:settings', '```json', '{"kanban-plugin":"board","list-collapse":[false],"mark-cards-complete":true}',
+    '```', '%%', ''].join('\n');
+  const unfenced = installer._relocateTrailingKanbanBlocks(jsonFencedBoard);
+  assert(!/```json/.test(unfenced) && /%% kanban:settings\n```\n\{/.test(unfenced),
+    'ES4-KANBAN-TERMINAL: a ```json-tagged settings fence is normalized to a bare fence');
+  assert.strictEqual(installer._relocateTrailingKanbanBlocks(unfenced), unfenced,
+    'ES4-KANBAN-TERMINAL: fence-language normalization is idempotent');
+
+  // Real-seam regression — drives the REAL top-level install() entrypoint (the
+  // exact function run-install.js/the CLI use), not the heal function directly,
+  // over a vault subscribed to NOTHING. installItem is therefore never invoked
+  // for anything — this is the strongest possible proof that the heal fires
+  // unconditionally post-loop rather than as a side effect of some blueprint's
+  // own (version-gated) installItem pass. The bug this guards: install.js is a
+  // shared root that compute-release.js's component attribution treats as
+  // umbrella-only, so a fix landing purely in install.js never bumps any
+  // blueprint's manifest version — a heal gated *inside* installItem can ship
+  // and still never run for a single real vault, on any release, because
+  // installItem's per-item version-skip (`installedEntry.version ===
+  // node.sub.version`) means the vault's own already-installed "project"
+  // version permanently matches and installItem for "project" is never called.
+  // Reproduced by hand against v0.284.1 before this fix: a same-version
+  // `--auto-approve` reinstall left a broken board untouched with zero
+  // kanban_settings_terminal_heal history entries (not even a warning) — the
+  // function was never entered at all.
+  {
+    const seamAtlas = ['---', 'type: "project"', 'project_name: "Seam"', '---', '', '# Seam'].join('\n');
+    const seamBoard = ['---', '', 'kanban-plugin: board', 'title: Seam Board', 'type: kanban',
+      'project_name: "Seam"', 'created_at: 2026-01-01T00:00:00Z', 'tags:', '  - project/seam', '',
+      'project_slug: "seam"', '---', '', '## In Planning', '', '## In Progress', '', '## Blocked', '',
+      '## Completed', '', ...kanbanSettingsBlock, '', ...epicCreateFence, ''].join('\n');
+    const seamAdapter = memoryAdapter({
+      '.obsidian/.keep': '',
+      'ranch/platform-config.json': JSON.stringify({ workshop_path: ROOT, variables: {} }),
+      'ranch/platform-subscription.json': JSON.stringify({ blueprints: [], mechanisms: [] }),
+      'spice/projects/seam/Seam.md': seamAtlas,
+      'spice/projects/seam/seam-board.md': seamBoard,
+    });
+    // install.js's readJson/writeJson go through app.vault.getAbstractFileByPath
+    // + vault.read/modify/create — a different surface than app.vault.adapter,
+    // which every heal uses directly. Bridge both onto the same memoryAdapter.
+    const seamVault = {
+      adapter: seamAdapter,
+      getAbstractFileByPath: (p) => (seamAdapter.store.has(p) ? { path: p } : null),
+      read: (f) => seamAdapter.read(f.path),
+      modify: (f, text) => seamAdapter.write(f.path, text),
+      create: (p, text) => seamAdapter.write(p, text),
+      createFolder: (p) => seamAdapter.mkdir(p),
+    };
+    const seamTp = { app: { vault: seamVault }, system: { suggester: async (t, items) => items[0] } };
+    global.Notice = global.Notice || class Notice { constructor() {} };
+    await installer(seamTp);
+    const seamAfter = seamAdapter.store.get('spice/projects/seam/seam-board.md');
+    assert(settingsIsTerminal(seamAfter),
+      'ES4-KANBAN-TERMINAL (real seam): a broken project board is repaired by the real install() entrypoint even with an empty subscription (installItem never runs for anything)');
+  }
 
   const seedRoot = 'platform/test/seed-vault/spice/projects/epic-fixture';
   const seedSlices = ['Alpha 1', 'Alpha 2', 'Alpha 3'].map((name) => {
