@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Spec: `docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md`. Read it first.
+- Spec: `Docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md`. Read it first.
 - Base is v0.285.1. Baseline before any change: `npm run test:codex-autoloop` → **2923 assertions, PASS**.
 - Conventional commits. `fix:` on the coordinator change so the release pipeline ships it.
 - **Never** hand-edit versions, tags, pins, the release PR, or the tap — the bumper is fully automatic.
@@ -45,7 +45,7 @@ Add near the `AD-ADOPT` block (which already builds a surface via `makeEpicProje
 // EPIC-LEDGER-FAIL-CLOSED — a surface built without an explicit ledger must
 // refuse to roll up rather than silently treating every sibling as untracked
 // (which demotes completed siblings and invents drift). See
-// docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md.
+// Docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md.
 {
   const fx = makeEpicProjectionFixture('ledger-fail-closed');
   const noteRaw = fs.readFileSync(fx.cardPath, 'utf8');
@@ -412,7 +412,7 @@ Note this corrects an earlier diagnosis that blamed a project-vs-epic board mixu
 
 Existing `amend-contract` tests used a card with no `type: slice`, so they never built an epic surface — which is why this shipped.
 
-Design: `docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md`
+Design: `Docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md`
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
