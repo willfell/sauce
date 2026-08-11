@@ -2901,6 +2901,16 @@ function projectionBoardDrift(boardMd, record, opts = {}) {
   return null;
 }
 
+// Board-drift findings come in two shapes: most carry a prose `issue`, but the
+// plain column/checked mismatch carries only expected/actual fields. A refusal
+// that names neither is a dead end for the operator.
+function describeBoardDriftFinding(finding) {
+  const card = finding.card || '(unknown card)';
+  if (finding.issue) return `${card}: ${finding.issue}`;
+  return `${card}: board placement differs (expected ${finding.expected_column}/${finding.expected_checked}, `
+    + `actual ${finding.actual_column}/${finding.actual_checked})`;
+}
+
 function expectedProjectedContract(record, mapping) {
   const raw = {
     ...record.delivery_contract,
@@ -3777,8 +3787,14 @@ async function commandAmendContract(ctx, args, deps = {}) {
     let boardRaw;
     try { boardRaw = fs.readFileSync(boardPath, 'utf8'); }
     catch (err) { throw new Error(`target board projection is unreadable: ${err.message}`); }
-    const boardProblem = projectionBoardDrift(boardRaw, record);
-    if (boardProblem) throw new Error('target board projection must be reconciled before amendment');
+    const boardProblem = projectionBoardDrift(boardRaw, record, {
+      boardPath, cardsRoot: deps.cardsRoot || CARDS_ROOT, state, allFindings: true,
+    });
+    if (boardProblem) {
+      const findings = Array.isArray(boardProblem) ? boardProblem : [boardProblem];
+      throw new Error('target board projection must be reconciled before amendment: '
+        + findings.map(describeBoardDriftFinding).join('; '));
+    }
 
     const newTouchZones = [...oldTouchZones];
     for (const zone of additions) if (!newTouchZones.includes(zone)) newTouchZones.push(zone);
