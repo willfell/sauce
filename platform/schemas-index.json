@@ -646,6 +646,24 @@
         "platform/test/run-loop-binding.js"
       ],
       "notes": "v0.266 loop plugin \u2014 per-repo `.loop/config.json` binding contract (repo \u2192 vault/board/policy). schema_version 1.0.0; resolver+validator is loop-config.js (resolve/check verbs, refusal-coded envelope). Feeds DELIVERY_* and SAUCE_LOOP_* env seams."
+    },
+    {
+      "id": "preflight-manifest",
+      "kind": "data-file",
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
+      "source": "platform/test/preflight-manifest.json",
+      "accepted_versions": [
+        "1.0.0"
+      ],
+      "consumers": [
+        "scripts/run-preflight.js",
+        "scripts/check-orphan-harnesses.js",
+        "platform/test/run-preflight-runner.js"
+      ],
+      "notes": "Preflight step list \u2014 id/cmd/lane/group per step, authored heaviest-first. Replaces the release:preflight && chain. Lane is serial or parallel; the serial lane runs first. group is optional; at most one step per group runs at a time in the parallel lane."
     }
   ]
 }

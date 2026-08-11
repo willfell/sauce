@@ -12,7 +12,9 @@
 //   FM-FMT-* — fmtMoney (sign/negative/positive)
 //
 // Load pattern: fs.readFileSync + IIFE-eval (mirrors run-v01103-monthly-overview.js).
-// Wiring: package.json release:preflight invokes this after run-v01103-monthly-overview.js.
+// Wiring: registered as a step in platform/test/preflight-manifest.json after
+// run-v01103-monthly-overview; package.json's release:preflight invokes it only
+// transitively (via scripts/run-preflight.js reading the manifest).
 
 const fs = require("fs");
 const path = require("path");

@@ -88,7 +88,11 @@ check(!/\bassert(?:\.ok)?\s*\(\s*true\b/.test(behavior),
 
 check(pkg.scripts?.['test:graph-view-contract'] === 'node platform/test/run-graph-view-contract.js',
   'BL5B-SENTINEL-REGISTRY: focused contract script is registered');
-check(((pkg.scripts?.['release:preflight'] || '').match(/run-graph-view-contract\.js/g) || []).length === 1,
+// The release:preflight registration surface moved from a package.json chain
+// string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
+// cutover); count manifest steps whose command invokes this harness instead.
+const preflightManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/test/preflight-manifest.json'), 'utf8'));
+check(preflightManifest.steps.filter((s) => s.cmd.join(' ').includes('run-graph-view-contract.js')).length === 1,
   'BL5B-SENTINEL-PREFLIGHT: release preflight invokes this sentinel exactly once');
 
 if (failures.length) {

@@ -15,8 +15,10 @@
 //   S7  Breadcrumb type branches + path fallback  → BC-B-1..6
 //   S8  applyDocNoteBreadcrumbMarkerCleanup edges → CLN-B-1..5
 //
-// Wiring: invoked from release:preflight via package.json. Fires on every
-// push to main + every PR (ci.yml) AND on every annotated tag (release.yml).
+// Wiring: registered as a step in platform/test/preflight-manifest.json,
+// invoked from release:preflight via package.json only transitively (package.json
+// now runs scripts/run-preflight.js, which dispatches manifest steps). Fires on
+// every push to main + every PR (ci.yml) AND on every annotated tag (release.yml).
 //
 // Stub posture: minimal. Only what the helpers actually call. Stubs are
 // inlined here (no test framework, no jsdom dep) to stay zero-dep.
