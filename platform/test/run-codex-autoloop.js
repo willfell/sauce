@@ -11471,6 +11471,67 @@ for (const [kind, items] of [['mechanisms', subscription.mechanisms || []], ['bl
   }
 }
 
+// PARK-AUDIT-PROJECTION — a parked card whose dependencies were legitimately
+// cleared by a park amendment must NOT report a projection problem. The parked
+// branch of projectionMetadataProblemFromRaw failed `differs` on a bare
+// `!expected.length`, with none of the parkDependenciesClearedByAudit() escape
+// hatch that commandResume (LOOP-RESUME-CLEARED-PARK above) and
+// parkedAmendmentProblem both already honor — three readers of the same state,
+// one dissenting.
+//
+// The finding it produced was unclearable by construction: the condition reads
+// only record.dependencies from the ledger, while `reconcile` — the remedy its
+// own error message names — rewrites the card note. Observed in the wild on the
+// finance board: `reconcile` returned ok/changed:false/projection_findings:[]
+// while `status` kept reporting the problem, and `amend-contract` refused on it
+// ("target metadata must be reconciled before amendment"), deadlocking the card
+// and every slice downstream of it.
+{
+  const parkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'park-audit-projection-'));
+  try {
+    const cardName = 'OC-9 Audited park';
+    const condition = 'ready — upstream dependency merged';
+    const cardPath = path.join(parkRoot, `${cardName}.md`);
+    fs.writeFileSync(cardPath, [
+      '---', 'type: slice', `card: "${cardName}"`, 'kanban_column: In Progress',
+      'status: parked', 'depends_on: []', `resume_condition: "${condition}"`,
+      '---', 'body', '',
+    ].join('\n'));
+    const parkBoard = path.join(parkRoot, 'board.md');
+    fs.writeFileSync(parkBoard, `## In Planning\n\n## In Progress\n\n- [ ] [[${cardName}]]\n\n## Completed\n`);
+    const mkParked = (audited) => ({
+      card: cardName, phase: 'parked', card_path: cardPath,
+      dependencies: [], resume_condition: condition,
+      ...(audited ? {
+        park_amendments: [{
+          at: '2026-08-11T00:00:00.000Z', reason: 'upstream dependency merged',
+          previous: { dependencies: ['[[OC-8 Upstream]]'], resume_condition: 'blocked on OC-8' },
+          next: { dependencies: [], resume_condition: condition },
+        }],
+      } : {}),
+    });
+    const statusFor = (record) => coordinator.commandStatus({ root: parkRoot }, {
+      state: { schema_version: 1, cards: { [cardName]: record } },
+      boardMd: fs.readFileSync(parkBoard, 'utf8'),
+      boardPath: parkBoard,
+      cardsRoot: parkRoot,
+      loadCard: () => ({ path: cardPath, raw: fs.readFileSync(cardPath, 'utf8') }),
+      supervised: false,
+    });
+
+    eq(statusFor(mkParked(true)).projection_problems, [],
+      'PARK-AUDIT-PROJECTION an audit-cleared parked card reports no projection problem');
+
+    const unaudited = statusFor(mkParked(false)).projection_problems;
+    eq(unaudited.length, 1,
+      'PARK-AUDIT-PROJECTION empty dependencies with NO audit trail still report a problem');
+    eq(unaudited[0].card, cardName,
+      'PARK-AUDIT-PROJECTION the unaudited problem names the card');
+  } finally {
+    fs.rmSync(parkRoot, { recursive: true, force: true });
+  }
+}
+
 // AD adopt: the sanctioned out-of-band completion. Every precondition refuses
 // BEFORE any ledger write; the verb can only ratify a declaration already
 // sitting unrecorded on the board, never invent one.
