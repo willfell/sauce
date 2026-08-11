@@ -469,7 +469,7 @@ For the legacy onboarding flow (manual git clone + manual config files + manual 
 
 ### Upgrading from v0.69.0 → v0.70.0
 
-Run `sauce install` (or `brew upgrade sauce && sauce install`) — the workshop's installer rewrites `ranch/scripts/activity-feed/activity-feed.js`, `ranch/scripts/daily/space-daily-dashboard.js`, and `.obsidian/snippets/sauce-daily-dashboard.css` in-place. No vault-side migration required; the new opts are additive and the daily dashboard adopts them automatically.
+Run `brew upgrade sauce && sauce update --bump-pins` — the workshop's installer rewrites `ranch/scripts/activity-feed/activity-feed.js`, `ranch/scripts/daily/space-daily-dashboard.js`, and `.obsidian/snippets/sauce-daily-dashboard.css` in-place. No vault-side migration required; the new opts are additive and the daily dashboard adopts them automatically.
 
 Visual changes you will see in today's daily note:
 - The Activity panel groups all `cowork-*` notes under a single "Cowork" header.
@@ -480,7 +480,7 @@ If you're a downstream consumer with a CustomJS surface that calls `ActivityFeed
 
 ### Upgrading from v0.70.0 → v0.70.1
 
-CSS-only PATCH. Run `sauce install` (or `brew upgrade sauce && sauce install`) — the workshop's installer rewrites `.obsidian/snippets/sauce-daily-dashboard.css` in-place. No JS files change; no API change; no vault-side migration.
+CSS-only PATCH. Run `brew upgrade sauce && sauce update --bump-pins` — the workshop's installer rewrites `.obsidian/snippets/sauce-daily-dashboard.css` in-place. No JS files change; no API change; no vault-side migration.
 
 Visual changes:
 - **Desktop:** times in the Activity panel now align vertically across rows within the same sub-group (e.g., "2:48 AM" and "1:30 PM" share the same right edge). Slightly more breathing room around rows and between meta tokens.
@@ -885,8 +885,7 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 After `brew upgrade sauce`, run from each consumer vault:
 
 ```bash
-sauce update --bump-pins
-sauce install
+sauce update --bump-pins   # re-pins AND re-runs the installer
 ```
 
 v0.117.4 is a **test/doc hardening PATCH** — no new consumer behavior and no new migrations fire at install time. The to-do and project blueprint versions are unchanged (to-do 0.5.3, project 1.22.1). The redeploy is a clean no-op for vault users. Workshop 0.117.3 → 0.117.4.
@@ -903,7 +902,7 @@ The six-cycle arc added a full recurrence engine, per-project To-Do notes, a +Ne
 - **v0.117.3 (project-name normalization PATCH):** Fixed meeting-task-assigned-to-project not appearing in the daily's project section. NEW `_normalizeProjectName` static method handles all Dataview Link object representations; per-meeting try/catch prevents one bad meeting from blanking the whole array. to-do 0.5.2 → 0.5.3.
 - **v0.117.4 (regression-net + doc backfill PATCH):** Three orphaned to-do harnesses wired into release:preflight (run-todo-carryover, run-todo-dialog, run-todo-materialize). Behavioral coverage for all v0.117.x fixes. HC-V01174 source contracts. Seed-migration end-to-end. This is the current version.
 
-**What `sauce install` does on update:**
+**What the installer does on update:**
 
 `applyToDoBlueprintMigration` runs on every install (unconditional, idempotent). On vaults still on the pre-v0.116.0 shape it will:
 
@@ -926,15 +925,14 @@ All steps are idempotent. `.sauce-backup/<ts>/` snapshots are written before any
 After `brew upgrade sauce`, run from each consumer vault:
 
 ```bash
-sauce update --bump-pins
-sauce install
+sauce update --bump-pins   # re-pins AND re-runs the installer
 ```
 
 v0.104.0 is the cleanest cycle close in the recent arc: **pure additive — no migration step, no schema change, no template rewrite, no installer step, no contract bump**. The entire surface delta is helper materialization. Workshop 0.103.0.1 → 0.104.0; project blueprint 1.17.0 → 1.18.0; all other mechanism/blueprint versions UNCHANGED (cowork 0.40.0; contract 0.35.1; meetings 0.8.0; entity-create 0.5.0; platform-claude 0.1.3).
 
 v0.104.0 closes the original v0.102.0 three-item ask. Sections + meetings link shipped at v0.102.0; search was deferred to v0.102.1 then re-evaluated against v0.103.0's section-hub reframe. The deferred search design adapted cleanly here because the underlying user-need (in-page filter + tag chips + scoped-search escape hatch) was unchanged and the section-hub model gave us natural query scope per hub for free.
 
-**What `sauce install` materializes:**
+**What the installer materializes:**
 
 - `ranch/scripts/project/doc-search.js` — NEW. `DocSearch` CustomJS class. `render(dv, opts)` builds the filter UI strip (text input + dynamic top-8 tag chips + scoped-Obsidian-search button + status pill) and returns the initial `filterContext` `{text, tags, hasActiveFilter}`. Static `DocSearch.matches(page, ctx)` is the pure predicate consumed by `ProjectDocsIndex` + `SectionHub` at query time — AND-logic across text substring (`file.name` + `tags` + first 200 chars of `file.content`) + every selected tag chip. The scoped-search button invokes Obsidian's `global-search:open` command pre-filled with `path:"<scopePath>"` — the escape hatch for full-body fuzzy search.
 - `ranch/scripts/project/project-docs-index.js` — REFRESHED. Mounts `customJS.DocSearch.render` above the section card row at `recursive: true` cross-section scope. The `allDocs` query gates on `customJS.DocSearch.matches` so the dashboard doc-count chip + per-section meta counts both reflect the live filter. `onChange` triggers full re-render via `dv.container.empty() + this.render(dv)` with `_currentCtx` carry-over.
@@ -959,8 +957,7 @@ v0.104.0 closes the original v0.102.0 three-item ask. Sections + meetings link s
 After `brew upgrade sauce`, run from each consumer vault:
 
 ```bash
-sauce update --bump-pins
-sauce install
+sauce update --bump-pins   # re-pins AND re-runs the installer
 ```
 
 v0.103.0 ships a single, additive structural change to the project blueprint: a **hierarchical section-hub navigation tree** replaces v0.102.0's single-page Confluence-style Docs Hub. The previous bucket-on-one-page model scaled but did not communicate hierarchy — with 30+ docs across 5+ sections, the section identity got lost in the bucket density. The new model makes each section a first-class entity with its own hub note. Workshop 0.102.0 → 0.103.0; project blueprint 1.16.0 → 1.17.0; all other mechanism/blueprint versions UNCHANGED (cowork 0.40.0; contract 0.35.1; meetings 0.8.0; entity-create 0.5.0; platform-claude 0.1.3).
@@ -1011,8 +1008,7 @@ Fixes the project Docs hub "+ New Doc" button, which was missing on every projec
 After `brew upgrade sauce`, run from each consumer vault:
 
 ```bash
-sauce update --bump-pins
-sauce install
+sauce update --bump-pins   # re-pins AND re-runs the installer
 ```
 
 The v0.102.0 install runs two new steps:
@@ -1353,8 +1349,7 @@ The title field remains the single free-text field; `serializePayloadToLine` pas
 After `brew upgrade sauce`, run from each consumer vault:
 
 ```bash
-sauce update --bump-pins
-sauce install
+sauce update --bump-pins   # re-pins AND re-runs the installer
 ```
 
 This is a **PATCH** that fixes recurring tasks not appearing on daily notes — workshop 0.118.0 → 0.118.1, to-do blueprint 0.6.0 → **0.6.1**.
@@ -1378,8 +1373,7 @@ Fix: `parseRegistry` now accepts both the SectionLabel block and the legacy H2 a
 `brew update && brew upgrade sauce` (waits for the tap PR to merge after tag push). Then in each consumer vault:
 
 ```bash
-sauce update --bump-pins
-sauce install
+sauce update --bump-pins   # re-pins AND re-runs the installer
 ```
 
 This is a **MINOR** release — workshop 0.126.1 → **0.127.0**.
@@ -1407,10 +1401,10 @@ This is a **MINOR** release — workshop 0.126.1 → **0.127.0**.
 
 **What does NOT change:**
 
-- No manual migration steps required. All four installer heals (args-scrub, `ACTION_ITEMS_MARKER` injection, `TODAY_CAPTURE_MARKER` injection, `applyProjectMeetingsPanelHeal`) run automatically during `sauce install` and are idempotent on re-run.
+- No manual migration steps required. All four installer heals (args-scrub, `ACTION_ITEMS_MARKER` injection, `TODAY_CAPTURE_MARKER` injection, `applyProjectMeetingsPanelHeal`) run automatically during the install pass and are idempotent on re-run.
 - The `+ New Task` dialog's create path is unchanged. Only the new `editExisting` mode + the meeting-context dual-write are new behavior.
 - No vault data is dropped or restructured. Each transform is fenced + bounded + reads-write-back via the existing `.sauce-backup/<ts>/` snapshot path.
-- Cmd+R Obsidian after `sauce install` so the new CustomJS classes (`TaskInteractions` + `TodayCaptureEditableList`) load.
+- Cmd+R Obsidian after the install so the new CustomJS classes (`TaskInteractions` + `TodayCaptureEditableList`) load.
 
 ## Upgrading from v0.127.0
 
@@ -1432,7 +1426,7 @@ sauce update --bump-pins
 
 - **`TodayCaptureEditableList` back-injection into existing daily To-Do notes.** v0.127.0's heal step 6 injected the `<!-- TODAY_CAPTURE_MARKER -->` sentinel but missed the `TodayCaptureEditableList` dataviewjs renderer block. Existing pre-v0.127.0 daily notes ended up with the anchor but no click-to-edit UI. v0.127.1 splits the heal guard so the renderer block back-fills on any note where the marker exists but the renderer doesn't (and remains idempotent on fully-healed notes).
 
-**Effect of running this upgrade:** every pre-v0.127.0 daily To-Do note (any note with `type: to-do` frontmatter + a `Today` SectionLabel) gets the `TodayCaptureEditableList` dataviewjs block back-injected during the next install pass. After `sauce install`, the click-to-edit pencil rows render below the `## Today` SectionLabel on every daily note, matching the experience NEW daily notes have been getting since v0.127.0 deployed.
+**Effect of running this upgrade:** every pre-v0.127.0 daily To-Do note (any note with `type: to-do` frontmatter + a `Today` SectionLabel) gets the `TodayCaptureEditableList` dataviewjs block back-injected during the next install pass. After the install pass, the click-to-edit pencil rows render below the `## Today` SectionLabel on every daily note, matching the experience NEW daily notes have been getting since v0.127.0 deployed.
 
 **What does NOT change:** no manifest bumps; no blueprint source changes; no `TaskInteractions` API change. The fix is a one-function patch in `_healNoteChromeBody`.
 

@@ -280,11 +280,11 @@ self-install, confirm skip notices clear.
 Trigger: writing code that reads `frontmatter.section` or `sub_section`.
 Rule: the value can be EITHER a bare string (`"Knowledge"`, pre-v0.103.0) or
 a wikilink (`"[[Knowledge]]"`, v0.103.0+) until both consumer vaults have
-completed the `sauce install` that migrates them — normalize at read time
+completed the install pass that migrates them — normalize at read time
 with `String(p.section||"").replace(/^\[\[|\]\]$/g,"")` before comparing.
 Symptom: a helper compares against the raw string form and silently drops
 already-migrated doc-notes from a hub, with no error.
-Why: `applyProjectSectionsHubMigration` only fires on `sauce install`
+Why: `applyProjectSectionsHubMigration` only fires on an install pass
 against an updated workshop, so the platform is in a mixed state until both
 vaults are migrated. Designed proactively at v0.103.0.
 
@@ -356,6 +356,57 @@ and macOS's case-insensitive filesystem folds that pattern onto lowercase
 Why: narrowing the `.gitignore` risks accidentally tracking bootstrap
 activation artifacts; `-f` is the surgical per-file workaround. Surfaced at
 v0.124.0 when adding `scripts/lint-note-chrome.js`.
+
+### 32. A heal gated inside `installItem` can ship and never run — put per-vault heals post-loop
+Trigger: a new heal is added to `installItem`'s per-item chain (alongside
+`applyEpicScaffoldHeal` et al.), ships in a release, and repairs nothing on
+any real vault — with NO error and NO warning in install history, because the
+function was never entered at all.
+Rule: a heal that repairs EXISTING vault content belongs in `install()`'s
+unconditional post-loop block (with `applyNoteChromeHeal`,
+`applyMeetingsHubChromeBarHeal`, `applyStickyHubTitleHeal`, …), taking
+`(tp, history, git)` — not inside `installItem`. Reserve `installItem` for
+work that genuinely belongs to materializing one item at its new version.
+Why: `installItem` is only reached when a component's recorded installed
+version differs from its manifest version (`installedEntry.version ===
+node.sub.version` → `continue`). But `platform/install.js` is a SHARED ROOT:
+`compute-release.js`'s component attribution maps files to components by
+manifest `path` prefix, and anything outside `platform/blueprints/<c>/` or
+`platform/mechanisms/<c>/` bumps only the umbrella. So a fix living purely in
+`install.js` never bumps any blueprint's own version — the vault's installed
+`project` version keeps matching, `installItem` for `project` is skipped
+forever, and the heal is dead code on every vault including the release that
+shipped it. The two facts are individually reasonable and lethal in
+combination.
+Detection: the heal's `try/catch` pushes a warning on throw, so the
+distinguishing signature is the *absence* of any history entry — not a
+failure entry. `grep` install history for the heal's `step` name: zero
+entries of ANY kind (info or warning) means "never ran", not "ran clean".
+Testing: exercise the heal through the real `install()` entrypoint over a
+vault subscribed to nothing — if it still fires, it is genuinely
+unconditional. Calling the heal function directly (or via `installItem`)
+cannot distinguish these cases and will pass either way. Surfaced at
+v0.284.3, where the v0.284.1 `applyKanbanSettingsTerminalHeal` was found
+inert on all three consumer vaults.
+
+### 33. Duplicated finding-filters drift — gate every copy, not just the one you found
+Trigger: a phase/eligibility gate is added to one findings filter (e.g.
+`board-health` check 5's `projection_errors`) and the symptom persists,
+because a second, textually separate filter over the same field feeds a
+different consumer.
+Rule: when gating a findings filter, `grep` the whole coordinator for the
+field name and gate EVERY inline filter over it. `collectBoardHealth` and
+`commandStatus` compute their findings independently — they do not share
+code — and `batch-runner`'s `readiness()` reads `commandStatus`, NOT
+`board-health`.
+Why: `board-health --json` reporting `projection_errors: []` while `status`
+still reports the same records in `projection_problems` looks like a caching
+or staleness bug and isn't; they are two separate `.filter()` calls that
+happen to read the same `record.projection_error`. Fixing only the one named
+in the bug report leaves the actual gate (readiness) still blocked, and the
+green board-health receipt makes it look fixed. Surfaced at v0.284.4,
+immediately after v0.284.3 gated check 5 alone and `ero-egnyte-mcp` remained
+readiness-blocked on all 27 findings.
 
 ## Operational gotchas
 
