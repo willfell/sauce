@@ -469,6 +469,14 @@ const sdCov = splitDiff(['platform/test/coverage-matrix.json', 'autoloop-queue.m
 ok('SD-6 generated coverage-matrix.json excluded from source (matrix-only refresh is non-behavioral)', sdCov.sourceFiles.length === 0);
 const sdCovMixed = splitDiff(['scripts/autoloop/gate.js', 'platform/test/run-autoloop-select.js', 'platform/test/coverage-matrix.json']);
 ok('SD-7 matrix rides alongside real source without inflating the behavioral set', sdCovMixed.sourceFiles.length === 1 && sdCovMixed.sourceFiles[0] === 'scripts/autoloop/gate.js' && sdCovMixed.testFiles.length === 1);
+// platform/test/preflight-manifest.json replaced package.json's release:preflight
+// && chain as the registration surface a new harness wires itself into to run in
+// CI. It is the same class of test-runner wiring as package.json above, not
+// behavioral source — a harness-only card must classify as test-only (empty
+// sourceFiles) or it spuriously blocks at Gate B.
+const sdManifest = splitDiff(['platform/test/run-foo.js', 'platform/test/preflight-manifest.json']);
+ok('SD-8 harness + its preflight-manifest step classify test-only', sdManifest.sourceFiles.length === 0
+  && sdManifest.testFiles.length === 1 && sdManifest.testFiles[0] === 'platform/test/run-foo.js');
 // ---- splitDiff gate config (SD-CFG-*): repo-agnostic bindings classify by
 // their own globs; absent config keeps the sauce rules byte-identical.
 const pyConfig = { test_globs: ['tests/**'], exclude_globs: ['docs/**', '*.md'] };
