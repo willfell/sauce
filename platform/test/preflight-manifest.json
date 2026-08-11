@@ -802,7 +802,7 @@
         "node",
         "platform/test/run-finance-style-adoption.js"
       ],
-      "lane": "parallel"
+      "lane": "serial"
     },
     {
       "id": "cross-blueprint-style-adoption",
