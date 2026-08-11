@@ -15,7 +15,7 @@
 - **No comments in config files.** YAML, HCL, JSON, TOML, Dockerfiles — the new Argo Application and all workflow edits carry no comments. Rationale goes in the commit message. Never strip a human's pre-existing comments; `release.yml` already has some, leave them.
 - **Never hand-edit versions.** Do not bump `package.json`, do not tag, do not merge the release PR. The release pipeline is fully automatic.
 - **Harnesses stay zero-dependency.** No YAML parser. Parse workflows with `fs.readFileSync` + regex, matching the existing style of `platform/test/run-ci-candidate-source.js`.
-- **Runner labels are exactly:** `sauce` for Pool A; `[self-hosted, macOS, ARM64]` for Pool B. Tartelet cannot set custom labels.
+- **Runner labels are exactly:** `sauce` for Pool A; `[self-hosted, macOS, ARM64]` for Pool B — the labels GitHub assigns self-hosted runners automatically. Tartelet 0.12.0 does expose a custom Labels field (its wiki says otherwise), but custom labels are additive, so the automatic triple matches either way.
 - **ARC chart pin:** `0.14.2`, matching the three sibling Applications.
 - **Preflight concurrency:** `SAUCE_PREFLIGHT_JOBS: '4'` as a job-level `env:` on every job that runs `npm run release:preflight`.
 - **Workflow pushes need SSH.** Commits touching `.github/workflows/*` are rejected over HTTPS (no `workflow` token scope). Push over the `git@github.com` remote.

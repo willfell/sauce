@@ -168,9 +168,12 @@ On the Mac mini (macOS 15.7.7, Apple Silicon, 374 GiB free — all prerequisites
 Lifecycle per job: clone VM → boot → download and register the runner → run exactly one job →
 destroy the VM. Nothing persists between jobs.
 
-Tartelet does not expose custom runner labels, so these runners carry the stock
-`self-hosted, macOS, ARM64` label set and are addressed as
-`runs-on: [self-hosted, macOS, ARM64]`.
+These runners are addressed as `runs-on: [self-hosted, macOS, ARM64]` — the label set
+GitHub assigns every self-hosted runner automatically from its platform and architecture.
+Tartelet 0.12.0 *does* expose a custom **Labels** field (defaulting to `tartelet`), contrary
+to what its wiki documents; custom labels are additive, so the stock triple matches
+regardless of what is set there. Addressing the pool by the automatic labels rather than a
+custom one keeps the workflows working even if that field is later changed.
 
 Tart is licensed **Fair Source 100**: free for personal machines, paid only for organizational
 server fleets exceeding 100 CPU cores. A single personal 14-core Mac mini is well inside the
@@ -300,6 +303,19 @@ ReadWriteMany PVC mounted at the transformers cache path, deliberately out of sc
 
 **Release availability now depends on the homelab.** Accepted; see
 [Why this reopens a one-day-old decision](#why-this-reopens-a-one-day-old-decision).
+
+**Host screen lock silently disables the macOS pool.** Tartelet reads the GitHub App private
+key from the host's login Keychain, which locks when the screen locks; runner creation then
+fails with *"The private key is not available"* and the VM is shut down
+([tartelet#98](https://github.com/framna-dk/tartelet/issues/98), closed with no fix). Pool A
+is unaffected, so the failure mode is a half-alive CI: Linux jobs run, macOS jobs never get
+picked up. This directly threatens the unattended overnight release train, and it is worse
+than the availability risk above because nothing appears to be down. Mitigation is to disable
+screen lock on the Mac mini (`sysadminctl -screenLock off`), which is a real security tradeoff
+on a host holding SSH keys, a cluster-admin kubeconfig, and the Obsidian vaults. **This must be
+resolved before `preflight (macos)` becomes a required status check** — a required check that
+stops reporting every night would block all merges. Discovered during implementation; not
+weighed in the original design.
 
 **The 2-VM cap serialises macOS work.** A push to main wants macOS preflight, CodeQL, and the
 formula smoke concurrently; only two can run at once. Expect longer main-branch wall clock.
