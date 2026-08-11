@@ -1,0 +1,8 @@
+{
+  "new_entity_buttons": [
+    {
+      "id": "prose-only",
+      "inline_body": "Use customJS.SpaceNavButtons.render(dv) when migrating.\nUse row.style.cssText = \"#abcdef\" only in old releases."
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "new_entity_buttons": [
+    {
+      "id": "fixture",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```"
+    }
+  ]
+}

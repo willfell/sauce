@@ -120,6 +120,23 @@
       "lane": "parallel"
     },
     {
+      "id": "lint-styling-self-test",
+      "cmd": [
+        "node",
+        "scripts/lint-styling.js",
+        "--self-test"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "lint-styling",
+      "cmd": [
+        "node",
+        "scripts/lint-styling.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "lint-cold-load-self-test",
       "cmd": [
         "node",

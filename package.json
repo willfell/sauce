@@ -80,6 +80,7 @@
     "scaffold-harness": "node scripts/scaffold-behavioral-harness.js",
     "lint-schemas": "node scripts/lint-schemas.js",
     "lint-display-markers": "node scripts/lint-display-markers.js",
+    "lint-styling": "node scripts/lint-styling.js",
     "lint-note-chrome": "node scripts/lint-note-chrome.js",
     "lint-cold-load": "node scripts/lint-cold-load.js",
     "seed:rebaseline": "node scripts/rebaseline-seed.js",
