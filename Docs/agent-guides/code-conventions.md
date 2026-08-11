@@ -5,7 +5,7 @@ load_when: Writing or editing any mechanism / blueprint / installer code.
 
 # Code conventions
 
-> Authoritative source: `Docs/landmines.md` (22 entries; canonical traps and their rationale). This guide summarizes the rules; `Docs/landmines.md` carries the precedents.
+> Authoritative source: `Docs/landmines.md` (canonical traps and their rationale). This guide summarizes the rules; `Docs/landmines.md` carries the precedents.
 
 ## The five platform non-negotiables
 

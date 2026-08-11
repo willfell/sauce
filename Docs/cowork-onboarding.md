@@ -6,7 +6,7 @@ How to connect Claude Cowork (or any scheduler) to a sauce-installed vault so th
 
 | Step | Action | Where readiness panel reflects it |
 |---|---|---|
-| 1 | Install sauce + subscribe to cowork blueprint (`sauce install`) | implicit — panel renders only if blueprint is installed |
+| 1 | Install sauce + subscribe to cowork blueprint (`sauce bootstrap`, or `sauce update --bump-pins` on an existing vault) | implicit — panel renders only if blueprint is installed |
 | 2 | Run `cowork:bootstrap-vault` to create `spice/cowork/context/vault-config.md` + your engagement | `Engagement: ✓ <id>` |
 | 3 | Customize the prompt bodies at `spice/cowork/prompts/{morning-briefing,midday-tripwire,eod-review,weekly-review,monthly-review}.md` (or leave empty — orchestrators emit stub notes with `warning: empty_prompt` frontmatter) | `Prompts: 5/5 present (N empty stubs)` |
 | 4 | Connect Claude Cowork app: mount the vault as an MCP server (obsidian-mcp), register the orchestrators as scheduled jobs (Mon–Fri at your preferred times) | `MCP routing: ✓ ready` |
