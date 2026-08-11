@@ -4487,11 +4487,20 @@ ok(/^[a-z0-9-]+$/.test(cardGateLockName('Lock Alias')) && cardGateLockName('x'.r
 const coordinatorLockSource = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
 eq((coordinatorLockSource.match(/`gates-\$\{slugify\(/g) || []).length, 1,
   'ES4-GATE-LOCK-NAMESPACE-MIGRATION-SPLIT-BRAIN keeps the shipping slug spelling in one compatibility helper only');
-// EPIC-SURFACE-LEDGER — every construction of an epic surface must declare its
-// ledger intent. Landmine #33: gate every copy, not just the one in the bug
-// report. Runtime fail-closed cannot catch a callsite no test exercises.
+// EPIC-SURFACE-LEDGER — a purely TEXTUAL sweep: every construction of an epic
+// surface must spell out its ledger intent at the callsite. Landmine #33: gate
+// every copy, not just the one in the bug report, because a runtime fail-closed
+// cannot fire on a callsite no test exercises.
+//
+// Be precise about the reach of this check. Matching argument text cannot tell
+// `state: opts.state` (which forwards whatever the caller supplied, possibly
+// nothing) from a genuinely loaded ledger. Run against the pre-fix tree it would
+// have been GREEN, because commandAmendContract reached the surface through
+// projectionBoardDrift, whose own callsite already spelled `state: opts.state`.
+// So this pins an adjacent invariant — no callsite silently omits the argument —
+// and canonicalEpicProjection's runtime throw remains the real enforcement.
 {
-  const source = fs.readFileSync(path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js'), 'utf8');
+  const source = coordinatorLockSource;
   const callsites = [];
   const needle = 'canonicalEpicProjection(';
   for (let index = source.indexOf(needle); index !== -1; index = source.indexOf(needle, index + 1)) {
@@ -4511,7 +4520,7 @@ eq((coordinatorLockSource.match(/`gates-\$\{slugify\(/g) || []).length, 1,
   ok(callsites.length >= 6, 'EPIC-SURFACE-LEDGER finds the epic-surface callsites');
   const stateless = callsites.filter((site) => !/\bstate\b/.test(site.args) && !/topologyOnly:\s*true/.test(site.args));
   eq(stateless.map((site) => site.line), [],
-    'EPIC-SURFACE-LEDGER every epic-surface callsite passes a ledger or declares topologyOnly');
+    'EPIC-SURFACE-LEDGER every epic-surface callsite textually names a state argument or declares topologyOnly (the runtime guard, not this sweep, proves the ledger is real)');
 }
 eq(collisionReconcile.results[0].via_card, 'Lock-Alias',
   'ES4-LEGACY-EXACT-RECONCILE-VIA-GATE-SLUG-COLLISION preserves legacy-to-via routing through the exact tracked sibling');
@@ -5960,11 +5969,35 @@ eq(snapshotDirectory(afterProjectionCrash.worktree), afterProjectionCrash.worktr
   const drifted = makeEpicAmendFixture();
   const board = fs.readFileSync(drifted.epicBoardPath, 'utf8');
   fs.writeFileSync(drifted.epicBoardPath, board.replace('- [ ] [[A1]]', '- [x] [[A1]]'));
+  const driftedStateBefore = JSON.stringify(drifted.state);
   await assert.rejects(
     () => commandAmendContract({ root: drifted.root }, drifted.args, drifted.deps),
     /target board projection must be reconciled before amendment: A1: /,
     'AMEND-EPIC-LEDGER real drift still refuses and the refusal names the finding',
   );
+  eq(drifted.writes, 0, 'AMEND-EPIC-LEDGER a drift refusal performs no ledger write');
+  eq(JSON.stringify(drifted.state), driftedStateBefore,
+    'AMEND-EPIC-LEDGER a drift refusal leaves the ledger byte-identical');
+}
+
+// The refusal has two shapes and only one of them was covered above. That case
+// lands on the plain column/checked mismatch; the shape that CAUSED the shipped
+// bug carries a prose `issue` from a demoted sibling. Mis-keying A2's ledger
+// entry reproduces exactly what the blind empty ledger did to every sibling, so
+// this pins that the operator is told the real cause and not just a card name.
+{
+  const demoted = makeEpicAmendFixture();
+  demoted.state.cards.A2X = demoted.state.cards.A2;
+  delete demoted.state.cards.A2;
+  const demotedStateBefore = JSON.stringify(demoted.state);
+  await assert.rejects(
+    () => commandAmendContract({ root: demoted.root }, demoted.args, demoted.deps),
+    /target board projection must be reconciled before amendment: A2: legacy completion lacks successful deployment receipts and is not counted done/,
+    'AMEND-EPIC-LEDGER a demoted sibling refusal names the sibling and the actual cause',
+  );
+  eq(demoted.writes, 0, 'AMEND-EPIC-LEDGER a demoted-sibling refusal performs no ledger write');
+  eq(JSON.stringify(demoted.state), demotedStateBefore,
+    'AMEND-EPIC-LEDGER a demoted-sibling refusal leaves the ledger byte-identical');
 }
 
 const parkRoot = path.join(tmp, 'park');
@@ -12018,7 +12051,7 @@ const adNoMutation = (result, label) => {
 // EPIC-LEDGER-FAIL-CLOSED — a surface built without an explicit ledger must
 // refuse to roll up rather than silently treating every sibling as untracked
 // (which demotes completed siblings and invents drift). See
-// docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md.
+// Docs/superpowers/specs/2026-08-11-amend-contract-epic-ledger-design.md.
 {
   const fx = makeEpicProjectionFixture('ledger-fail-closed');
   const noteRaw = fs.readFileSync(fx.cardPath, 'utf8');
