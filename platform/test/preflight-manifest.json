@@ -40,7 +40,7 @@
         "node",
         "platform/test/run-integration-smoke.js"
       ],
-      "lane": "parallel"
+      "lane": "serial"
     },
     {
       "id": "helper-cases",
@@ -161,7 +161,7 @@
         "node",
         "platform/test/run-cli.js"
       ],
-      "lane": "parallel"
+      "lane": "serial"
     },
     {
       "id": "migrate",
