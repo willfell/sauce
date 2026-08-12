@@ -190,6 +190,37 @@ The workflows target `[self-hosted, macOS, ARM64]`, which GitHub assigns automat
 
 **Why not ephemeral VMs.** Tartelet + Tart was the original design and was abandoned during implementation. Three defects, in ascending order of severity: it silently failed to store the GitHub App private key (no log line, and the one documented cause — a corrupt `Local Items` keychain — did not match this host); its SSH retry window is roughly 18 seconds, too tight for two macOS VMs booting against a host where Colima already holds 8 of 14 cores; and [tartelet#98](https://github.com/framna-dk/tartelet/issues/98) means a host screen lock locks the login Keychain, after which runner creation stops silently — Pool A keeps working, so CI goes half-alive rather than down. That last one is disqualifying for an unattended release train. The stock runner authenticates from a token file on disk, so none of the three apply. The tradeoff accepted in exchange is that this runner is persistent rather than ephemeral; the mitigation is the repo's fork-PR approval policy, set to `all_external_contributors`.
 
+### Surviving a reboot
+
+Both pools hang off **user LaunchAgents**, so neither starts until someone logs in. **FileVault is on**, which means macOS refuses automatic login — after any reboot or power loss, CI stays down until the Mac is unlocked at the pre-boot screen. That is the single biggest availability constraint on self-hosted CI here, and it is a deliberate trade: turning FileVault off would allow unattended recovery, on a host holding SSH keys, a cluster-admin kubeconfig, and the Obsidian vaults.
+
+Once the user session exists, recovery is automatic and needs no commands:
+
+| Agent | Plist | Effect |
+| --- | --- | --- |
+| Colima | `~/Library/LaunchAgents/com.willfell.colima-autostart.plist` | runs `colima start`; k3s, Argo CD and the ARC controller come back with the VM, then Pool A reconciles itself |
+| Runner | `~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist` | `svc.sh`-generated, plus a hand-added `KeepAlive` |
+
+`colima start` is idempotent — if the VM is already up it logs `already running, ignoring` and exits, so the agent is safe to fire on every login.
+
+`KeepAlive` is **not** part of what `svc.sh` writes and was added by hand. `runsvc.sh` execs the runner and waits with no restart loop, so without it a crashed runner stays dead until someone notices. **Re-running `./svc.sh install` rewrites the plist and silently drops it** — re-add it after any runner upgrade:
+
+```bash
+PLIST=~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist
+/usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$PLIST"
+launchctl unload "$PLIST" && launchctl load "$PLIST"
+```
+
+Verify both pools after a reboot:
+
+```bash
+colima status
+kubectl get autoscalingrunnerset sauce -n arc-runners
+gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status}'
+```
+
+Expect Colima running, the `sauce` scale set present with `0`/`3`, and `sauce-macos` `online`. Pool A reports zero registered runners when idle — that is scale-to-zero, not a fault; pods appear per assigned job. If the scale set is missing after Colima returns, force a reconcile with `kubectl annotate application root -n argocd argocd.argoproj.io/refresh=hard --overwrite`.
+
 ## Cycle-close artifacts
 
 Every cycle close MUST produce (canonical list from `Docs/prompts/SESSION-START.md`):
