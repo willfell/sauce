@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { lintSource, loadAllowlist } = require('../../scripts/lint-gesture-writes.js');
+const { lintSource, loadAllowlist, run } = require('../../scripts/lint-gesture-writes.js');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const LINT = path.join(ROOT, 'scripts', 'lint-gesture-writes.js');
@@ -74,6 +76,48 @@ ok('GW-7 required automated writers have reasoned allowlist entries', [
   'platform/blueprints/project/helpers/project-workstreams.js',
   'platform/blueprints/meetings/helpers/meeting-leaf-actions.js',
 ].every((entry) => allowlist.has(entry)));
+
+const syntheticRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gesture-write-lint-'));
+try {
+  const scanDir = path.join(syntheticRoot, 'helpers');
+  const sourcePath = path.join(scanDir, 'synthetic.js');
+  const allowlistPath = path.join(syntheticRoot, 'allowlist.json');
+  fs.mkdirSync(scanDir, { recursive: true });
+  fs.writeFileSync(sourcePath, [
+    'button.onclick = async () => {',
+    '  await app.vault.modify(allowedFile, allowedBody);',
+    '  await app.vault.create(unapprovedPath, unapprovedBody);',
+    '};',
+    '',
+  ].join('\n'));
+  fs.writeFileSync(allowlistPath, JSON.stringify({
+    entries: [{
+      path: 'helpers/synthetic.js',
+      reason: 'The first synthetic write is the exact line-bound control for the file contract.',
+      lines: [2],
+    }],
+  }));
+
+  const synthetic = run([scanDir], allowlistPath, syntheticRoot);
+  ok('GA-P4G-TEST-FILE-CONTRACT line-bound allowlists do not suppress the whole file',
+    synthetic.findings.length === 1);
+  ok('GA-P4G-TEST-FILE-CONTRACT another violation in the same file remains visible',
+    synthetic.findings[0]?.line === 3 && /bare vault\.create/.test(synthetic.findings[0]?.message || ''));
+  ok('GA-P4G-TEST-FILE-CONTRACT run returns a stable POSIX relative path',
+    synthetic.findings[0]?.file === 'helpers/synthetic.js');
+
+  const syntheticCli = spawnSync(process.execPath, [
+    LINT,
+    '--scan', scanDir,
+    '--root', syntheticRoot,
+    '--allowlist', allowlistPath,
+  ], { encoding: 'utf8' });
+  ok('GA-P4G-TEST-FILE-CONTRACT CLI fails with the exact path:line finding',
+    syntheticCli.status !== 0
+      && /helpers\/synthetic\.js:3 bare vault\.create/.test(syntheticCli.stderr));
+} finally {
+  fs.rmSync(syntheticRoot, { recursive: true, force: true });
+}
 
 const repository = spawnSync(process.execPath, [LINT], { cwd: ROOT, encoding: 'utf8' });
 ok('GW-8 post-GA-P3c repository has no unapproved gesture writes', repository.status === 0);
