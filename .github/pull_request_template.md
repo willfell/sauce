@@ -16,7 +16,7 @@
 
 ## Test plan
 
-- [ ] CI green on `macos-latest` and `ubuntu-latest`.
+- [ ] CI green on `preflight (linux)` and `preflight (macos)`.
 - [ ] (UI-surface change) walked `Docs/agent-guides/smoke-checklists/<blueprint>.md` on a deployed vault.
 - [ ] Manual smoke (if applicable).
 

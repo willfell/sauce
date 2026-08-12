@@ -867,6 +867,14 @@
       "lane": "parallel"
     },
     {
+      "id": "ci-runner-policy",
+      "cmd": [
+        "node",
+        "platform/test/run-ci-runner-policy.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "autoloop-select",
       "cmd": [
         "node",

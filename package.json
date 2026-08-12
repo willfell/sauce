@@ -37,6 +37,7 @@
     "test:autoloop": "node platform/test/run-autoloop-select.js",
     "test:codex-autoloop": "node platform/test/run-codex-autoloop.js",
     "test:ci-candidate-source": "node platform/test/run-ci-candidate-source.js",
+    "test:ci-runner-policy": "node platform/test/run-ci-runner-policy.js",
     "test:workstreams-analysis": "node platform/test/run-workstreams-analysis.js",
     "test:workstream-source": "node platform/test/run-workstream-source.js",
     "test:finance-template-classes": "node platform/test/run-finance-template-classes.js",

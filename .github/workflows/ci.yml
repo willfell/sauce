@@ -9,11 +9,18 @@ on:
 
 jobs:
   preflight:
+    name: preflight (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - platform: linux
+            runner: sauce
+          - platform: macos
+            runner: [self-hosted, macOS, ARM64]
+    runs-on: ${{ matrix.runner }}
+    env:
+      SAUCE_PREFLIGHT_JOBS: '4'
     steps:
       - name: Checkout sauce repo
         uses: actions/checkout@v4
@@ -30,7 +37,7 @@ jobs:
         run: npm run release:preflight
 
       - name: Validate checked-out candidate CLI and fresh-vault bootstrap (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: matrix.platform == 'macos'
         env:
           SAUCE_CANDIDATE_CLI: ${{ github.workspace }}/platform/cli/sauce-cli.js
         run: |
@@ -50,7 +57,7 @@ jobs:
 
   pr-title-bump:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: sauce
     steps:
       - name: Checkout sauce repo
         uses: actions/checkout@v4
@@ -72,7 +79,7 @@ jobs:
     name: released formula smoke (non-required)
     if: github.event_name != 'pull_request'
     continue-on-error: true
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - name: Tap and install released sauce formula
         run: |
@@ -92,5 +99,3 @@ jobs:
         if: always()
         run: |
           rm -rf "$RUNNER_TEMP/sauce-released-formula-vault" 2>/dev/null || true
-          brew uninstall sauce 2>/dev/null || true
-          brew untap willfell/sauce 2>/dev/null || true

@@ -11,7 +11,7 @@ on:
 jobs:
   analyze:
     name: Analyze (JavaScript/TypeScript)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     permissions:
       actions: read
       contents: read

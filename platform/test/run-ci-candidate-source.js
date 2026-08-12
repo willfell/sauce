@@ -65,8 +65,13 @@ function candidateErrors(source) {
   const body = jobBody(source, "preflight");
   const errors = [];
   if (!body) return ["missing preflight job"];
-  if (!/matrix:\s*[\s\S]*os:\s*\[macos-latest,\s*ubuntu-latest\]/.test(body)) {
-    errors.push("required macOS/Ubuntu matrix changed");
+  const hasLinuxLeg = /- platform: linux\s*\n\s*runner: sauce\b/.test(body);
+  const hasMacosLeg = /- platform: macos\s*\n\s*runner: \[self-hosted, macOS, ARM64\]/.test(body);
+  if (!hasLinuxLeg || !hasMacosLeg) {
+    errors.push("required linux/macOS self-hosted matrix changed");
+  }
+  if (/\b(?:ubuntu|macos|windows)-latest\b/.test(body)) {
+    errors.push("required preflight still targets a GitHub-hosted runner");
   }
   if (!body.includes("uses: actions/checkout@v4")) {
     errors.push("candidate source is not checked out");
@@ -77,7 +82,7 @@ function candidateErrors(source) {
   if (!candidateStep) {
     errors.push("candidate bootstrap step is missing");
   }
-  if (!candidateStep.includes("if: matrix.os == 'macos-latest'")) {
+  if (!candidateStep.includes("if: matrix.platform == 'macos'")) {
     errors.push("candidate bootstrap is not bound to the required macOS matrix arm");
   }
   if (!candidateStep.includes('SAUCE_CANDIDATE_CLI: ${{ github.workspace }}/platform/cli/sauce-cli.js')) {
@@ -124,7 +129,7 @@ function releasedFormulaEvidenceErrors(source) {
   if (!body.includes("continue-on-error: true")) {
     errors.push("released-formula evidence is not explicitly non-required");
   }
-  if (!body.includes("runs-on: macos-latest")) {
+  if (!body.includes("runs-on: [self-hosted, macOS, ARM64]")) {
     errors.push("released-formula evidence is not macOS-only");
   }
   if (!body.includes("brew install willfell/sauce/sauce")) {
@@ -260,14 +265,24 @@ if (candidateBaseline.length === 0 && releasedBaseline.length === 0) {
     "GA-OPS12B2-CANDIDATE-AUDIT-FAILURE-LOUD rejects masked nonzero audit exits"
   );
 
-  const ubuntuOnlyCandidate = replaceOnce(
+  const linuxOnlyCandidate = replaceOnce(
     workflow,
-    "        if: matrix.os == 'macos-latest'\n        env:\n          SAUCE_CANDIDATE_CLI:",
-    "        if: matrix.os == 'ubuntu-latest'\n        env:\n          SAUCE_CANDIDATE_CLI:"
+    "        if: matrix.platform == 'macos'\n        env:\n          SAUCE_CANDIDATE_CLI:",
+    "        if: matrix.platform == 'linux'\n        env:\n          SAUCE_CANDIDATE_CLI:"
   );
   check(
-    candidateErrors(ubuntuOnlyCandidate).length > 0,
+    candidateErrors(linuxOnlyCandidate).length > 0,
     "candidate bootstrap cannot leave the required macOS matrix arm"
+  );
+
+  const hostedLinuxLeg = replaceOnce(
+    workflow,
+    "            runner: sauce",
+    "            runner: ubuntu-latest"
+  );
+  check(
+    candidateErrors(hostedLinuxLeg).length > 0,
+    "required preflight matrix cannot drift the linux leg back onto a GitHub-hosted runner"
   );
 
   const formulaInRequired = replaceOnce(

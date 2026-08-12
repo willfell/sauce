@@ -132,7 +132,7 @@ Direct-push to `origin/main` remains possible (admin override) but the preferred
 
 1. Branch off `origin/main`: `git switch -c cycle/v0.X.Y-<topic>` (or use a worktree under `.worktrees/`).
 2. Cycle stages commit normally; push to the branch instead of main: `git push -u origin cycle/v0.X.Y-<topic>`.
-3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on `macos-latest` + `ubuntu-latest`. The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
+3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on both self-hosted pools (`preflight (linux)` + `preflight (macos)`). The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
 4. CI red → merge blocked (once branch protection is on; see below).
 5. Merge to main via the PR.
 6. On merge to `main`, the **release pipeline takes over automatically** — it bumps every version record, opens + auto-merges the release PR, tags `v<X.Y.Z>`, and ships to brew (§ Release workflow). You do **not** bump / tag by hand. The seed vault is **not** auto-rebaselined — that's a manual, reviewed action (§ Seed-vault rebaseline).
@@ -151,19 +151,54 @@ The `seed-vault-prev/` snapshot is the one-cycle-back safety net referenced in l
 
 ### Branch protection setup (one-time, manual; user approval required)
 
-Branch protection on `main` is **enabled** (required `preflight (macos-latest)` + `preflight (ubuntu-latest)` CI checks, strict; `enforce_admins=false` so the owner / `RELEASE_PAT` can bypass for the automated tag + seed pushes). The auto-merge pipeline depends on it — required checks are what the release PR's auto-merge waits for. It was set via the call below (changes to the rule still require user approval per `asking-before-acting.md` § Git):
+Branch protection on `main` is **enabled** (required `preflight (linux)` + `preflight (macos)` CI checks, strict; `enforce_admins=false` so the owner / `RELEASE_PAT` can bypass for the automated tag + seed pushes). The auto-merge pipeline depends on it — required checks are what the release PR's auto-merge waits for. It was set via the call below (changes to the rule still require user approval per `asking-before-acting.md` § Git):
 
 ```
 gh api -X PUT repos/willfell/sauce/branches/main/protection \
   --field required_status_checks[strict]=true \
-  --field 'required_status_checks[contexts][]=preflight (macos-latest)' \
-  --field 'required_status_checks[contexts][]=preflight (ubuntu-latest)' \
+  --field 'required_status_checks[contexts][]=preflight (linux)' \
+  --field 'required_status_checks[contexts][]=preflight (macos)' \
   --field enforce_admins=false \
   --field required_pull_request_reviews=null \
   --field restrictions=null
 ```
 
-Already in place. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
+Already in place under the old `preflight (macos-latest)` / `preflight (ubuntu-latest)` contexts; the rule itself is updated to the names above in a separate, human-gated step once the self-hosted-runner migration merges. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
+
+### Self-hosted runner pools
+
+Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). The source of truth for its credentials is 1Password, vault `Lab`, item `arc-github-app`, fields `app-id` / `installation-id` / `private-key` — read them with `op read "op://Lab/arc-github-app/private-key"` (swap the field name for the others). The `arc-github-app` Kubernetes Secret in namespace `arc-runners` is *materialized from* those references by the `lab` repo's `k8s/secrets/registry.yaml`; it is a derivative, not the source. Recover from 1Password rather than from the cluster — a machine rebuild is precisely the moment the cluster does not exist yet. Don't hardcode any of these values here: this file is public.
+
+**Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image pinned to `ghcr.io/actions/actions-runner:2.336.0`, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
+
+**Pool B — Tartelet ephemeral macOS VMs.** macOS runners on the Mac mini, label set `[self-hosted, macOS, ARM64]`. This pool is a GUI app (Tartelet) plus a Keychain-held credential — outside Argo CD's reach entirely, so its config is **not** reconciled from git. This section is the reproduction runbook after a machine rebuild.
+
+Install Tart and pull the base VM image:
+
+```bash
+brew install cirruslabs/cli/tart
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sauce-macos-base
+```
+
+`macos-sequoia-base` publishes only a mutable `latest` tag (the `-vanilla` variant has pinned version tags but lacks the Homebrew this pool needs, so `-base:latest` is the only viable choice). Resolve and record the digest at pull time with `crane digest ghcr.io/cirruslabs/macos-sequoia-base:latest` since the tag itself floats:
+
+- Image: `ghcr.io/cirruslabs/macos-sequoia-base:latest`
+- Digest at last pull: `sha256:3f4d14a5ffb9efd3bda2ae0184fd4bc2773d924ff8b7565f958761420ec41a0c`
+- Local VM name: `sauce-macos-base`
+
+Download the latest Tartelet release from <https://github.com/framna-dk/tartelet/releases> (`gh release download <version> --repo framna-dk/tartelet --pattern "Tartelet.zip"`) and move `Tartelet.app` into `/Applications`. Then configure it through its own GUI — this step cannot be scripted, since the private key is deliberately handed to the macOS Keychain via Tartelet's own flow rather than written to disk by an agent:
+
+| Tab | Setting | Value |
+| --- | --- | --- |
+| GitHub | Runner Scope | Repository (personal account) |
+| GitHub | Owner / account | `willfell` |
+| GitHub | Repository | `sauce` |
+| GitHub | App ID | `op read "op://Lab/arc-github-app/app-id"` |
+| GitHub | Private key | `op read "op://Lab/arc-github-app/private-key" > ~/Desktop/tartelet-app.pem`, `chmod 600`, point Tartelet's picker at it; Tartelet stores it in the Keychain, then delete the file |
+| Virtual Machine | VM | `sauce-macos-base` |
+| Virtual Machine | Number of VMs | 2 (Apple's hard cap) |
+
+Add Tartelet to System Settings → General → Login Items so the pool survives a reboot. Verify a runner registered with `gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, os, status, labels: [.labels[].name]}'` — expect `status: online` and labels including `self-hosted`, `macOS`, `ARM64`.
 
 ## Cycle-close artifacts
 
