@@ -163,28 +163,47 @@ gh api -X PUT repos/willfell/sauce/branches/main/protection \
   --field restrictions=null
 ```
 
-Already in place under the old `preflight (macos-latest)` / `preflight (ubuntu-latest)` contexts; the rule itself is updated to the names above in a separate, human-gated step once the self-hosted-runner migration merges. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
+**Done** — the rule now requires exactly `preflight (linux)` + `preflight (macos)`, strict, confirmed against the live API. The old `preflight (macos-latest)` / `preflight (ubuntu-latest)` contexts are gone. The auto-merge release pipeline relies on it (required checks gate the release PR's auto-merge) plus the repo's "Allow auto-merge" setting (also ON).
 
 ### Self-hosted runner pools
 
+Every job in this repo runs on the Mac mini. Nothing runs on GitHub-hosted runners:
+
+| Workflow | Job | Pool |
+| --- | --- | --- |
+| `ci.yml` | `preflight (linux)` | A — `sauce` |
+| `ci.yml` | `preflight (macos)` | B — `[self-hosted, macOS, ARM64]` |
+| `ci.yml` | `pr-title-bump` | A |
+| `ci.yml` | `released-formula-smoke` | B |
+| `codeql.yml` | `analyze` | B |
+| `release.yml` | `prepare-release` | A |
+| `release.yml` | `tag-and-ship` | A |
+| `release.yml` | `rebaseline-seed` | A |
+
+CodeQL is on Pool B by necessity, not preference: GitHub publishes no linux-arm64 CodeQL bundle (`codeql-bundle-v2.26.2` ships `linux64` / `osx64` / `win64` only), and the Colima VM registers `qemu-x86_64` binfmt rather than Rosetta, so emulating it would be the slow path. Everything touching Homebrew is on B for the same reason it needs macOS.
+
 Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). The source of truth for its credentials is 1Password, vault `Lab`, item `arc-github-app`, fields `app-id` / `installation-id` / `private-key` — read them with `op read "op://Lab/arc-github-app/private-key"` (swap the field name for the others). The `arc-github-app` Kubernetes Secret in namespace `arc-runners` is *materialized from* those references by the `lab` repo's `k8s/secrets/registry.yaml`; it is a derivative, not the source. Recover from 1Password rather than from the cluster — a machine rebuild is precisely the moment the cluster does not exist yet. Don't hardcode any of these values here: this file is public.
 
-**Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image `localhost:30500/sauce-runner:2.336.0`, built from `ghcr.io/actions/actions-runner:2.336.0` with Chromium, `gh` and Node 20 baked in — rebuild and retag it when the runner version bumps, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
+**Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image `localhost:30500/sauce-runner:2.336.0`, built from `ghcr.io/actions/actions-runner:2.336.0` with Chromium, `gh` and Node 20 baked in, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
 
-**Pool B — `sauce-macos` runner.** macOS runner on the Mac mini, labels `self-hosted`, `macOS`, `ARM64`, `sauce-macos`. A stock `actions/runner` installed as a LaunchAgent — outside Argo CD's reach, so its config is **not** reconciled from git. This is the reproduction runbook after a machine rebuild.
+The image's Dockerfile lives in the `lab` repo at `host/sauce-runner/Dockerfile`, and `lab host image build` builds and pushes it. Bumping the runner version is a **three-file** change there — `RUNNER_VERSION` in `src/lab/host.py`, the `FROM` tag in the Dockerfile, and the `image:` tag in `arc-runner-sauce.yaml` — bound by a test, so missing one fails `lab`'s CI rather than silently shipping a mismatched pair. Rebuild after any bump; the image carries a hash of the Dockerfile it was built from, and `lab host doctor` compares the two.
+
+**Pool B — `sauce-macos` runner.** macOS runner on the Mac mini, labels `self-hosted`, `macOS`, `ARM64`, `sauce-macos`. A stock `actions/runner` installed as a LaunchAgent — outside Argo CD's reach, but **no longer hand-managed**: its plist is committed in the `lab` repo at `host/launchagents/`, and `lab host` installs and checks it.
+
+Reproduction after a machine rebuild:
 
 ```bash
 mkdir -p ~/actions-runner-sauce && cd ~/actions-runner-sauce
-V=$(gh api repos/actions/runner/releases/latest --jq '.tag_name' | sed 's/^v//')
+V=2.336.0   # must match RUNNER_VERSION in lab's src/lab/host.py
 curl -fsSL -O "https://github.com/actions/runner/releases/download/v${V}/actions-runner-osx-arm64-${V}.tar.gz"
 tar xzf "actions-runner-osx-arm64-${V}.tar.gz"
-./config.sh --url https://github.com/willfell/sauce \
-  --token "$(gh api -X POST repos/willfell/sauce/actions/runners/registration-token --jq .token)" \
-  --name sauce-macos --labels sauce-macos --work _work --unattended --replace
-./svc.sh install && ./svc.sh start
+lab host runner enroll
 ```
 
-`svc.sh` writes `~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist` — a LaunchAgent, so no `sudo` and it runs inside the user session. Verify with `gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'`; expect `status: online`.
+`lab host runner enroll` mints a registration token from the `arc-github-app` GitHub App via 1Password — no human `gh` session required — then runs `config.sh`, `svc.sh install`, restores the committed plist, and starts the service. Verify with `lab host doctor`, or directly:
+`gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'`; expect `status: online`.
+
+**Do not run `./svc.sh install` by hand.** See *Surviving a reboot* — it silently drops `KeepAlive`, and `enroll` exists to make that unreachable.
 
 The workflows target `[self-hosted, macOS, ARM64]`, which GitHub assigns automatically from the platform — `sauce-macos` is an extra handle, not the thing being matched.
 
@@ -199,19 +218,23 @@ Once the user session exists, recovery is automatic and needs no commands:
 | Agent | Plist | Effect |
 | --- | --- | --- |
 | Colima | `~/Library/LaunchAgents/com.willfell.colima-autostart.plist` | runs `colima start`; k3s, Argo CD and the ARC controller come back with the VM, then Pool A reconciles itself |
-| Runner | `~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist` | `svc.sh`-generated, plus a hand-added `KeepAlive` |
+| Runner | `~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist` | starts the runner, with `KeepAlive` so a crash restarts it |
+
+**Both plists are now in git**, in the `lab` repo at `host/launchagents/`, committed byte-for-byte identical to what is installed. `lab host apply` installs them; `lab host doctor` fails if the machine drifts from the committed copy. They were the single biggest reproducibility risk here — the boot chain hung on two files that existed nowhere else.
 
 `colima start` is idempotent — if the VM is already up it logs `already running, ignoring` and exits, so the agent is safe to fire on every login.
 
-`KeepAlive` is **not** part of what `svc.sh` writes and was added by hand. `runsvc.sh` execs the runner and waits with no restart loop, so without it a crashed runner stays dead until someone notices. **Re-running `./svc.sh install` rewrites the plist and silently drops it** — re-add it after any runner upgrade:
+`KeepAlive` is **not** part of what `svc.sh` writes. `runsvc.sh` execs the runner and waits with no restart loop, so without it a crashed runner stays dead until someone notices — and **re-running `./svc.sh install` rewrites the plist and silently drops it**.
+
+It used to be re-added by hand after every runner upgrade. It no longer is: the key is in the committed plist, and `lab host runner enroll` restores that plist *between* `svc.sh install` and `svc.sh start`, which is the whole reason to use it instead of the raw commands. If you ever do run `svc.sh install` directly, re-run `lab host apply` afterwards — or `lab host doctor` will tell you the installed plist no longer matches git.
+
+Verify both pools after a reboot with one command:
 
 ```bash
-PLIST=~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist
-/usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$PLIST"
-launchctl unload "$PLIST" && launchctl load "$PLIST"
+lab host doctor
 ```
 
-Verify both pools after a reboot:
+It checks both LaunchAgents (installed, loaded, matching git), the power settings, Colima's size, the runner image, Pool B's registration, the Argo apps, and reports FileVault state. Exit 0 means every link in the chain is intact. The underlying checks, if you want them individually:
 
 ```bash
 colima status
@@ -220,6 +243,8 @@ gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status}'
 ```
 
 Expect Colima running, the `sauce` scale set present with `0`/`3`, and `sauce-macos` `online`. Pool A reports zero registered runners when idle — that is scale-to-zero, not a fault; pods appear per assigned job. If the scale set is missing after Colima returns, force a reconcile with `kubectl annotate application root -n argocd argocd.argoproj.io/refresh=hard --overwrite`.
+
+A **queued job that never starts** is the symptom to know: it looks identical whether the pool is dead or merely busy. Pool B is a *single* runner, so `preflight (macos)` and CodeQL serialise behind each other and a wait of a few minutes is normal. If it is longer than that, run `lab host doctor` — a dead pool shows up there, a busy one does not. Jobs sent to a dead pool sit in `queued` indefinitely rather than failing, so nothing will time out and tell you.
 
 ## Cycle-close artifacts
 
