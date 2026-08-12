@@ -408,6 +408,38 @@ green board-health receipt makes it look fixed. Surfaced at v0.284.4,
 immediately after v0.284.3 gated check 5 alone and `ero-egnyte-mcp` remained
 readiness-blocked on all 27 findings.
 
+### 34. Renaming a matrix leg renames a required status check
+Trigger: restructuring a workflow matrix whose job name feeds a required
+status check — e.g. `preflight (macos-latest)` → `preflight (macos)`.
+Rule: back the rule up, then swap `required_status_checks.contexts` *after*
+the PR's new checks report green and *before* merging.
+Why: protection matches contexts by exact string. Rename them early and `main`
+is briefly unguarded; rename them late and every PR sits on "Expected —
+waiting for status to be reported" forever, stalling the automated release
+train. Observed live on PR #793: all checks green, `mergeStateStatus=BLOCKED`,
+until the contexts were swapped. Back up first:
+`gh api repos/willfell/sauce/branches/main/protection > backup.json`.
+Also set an explicit job `name:` — without one GitHub derives the check name
+from every matrix key, so `platform`/`runner` keys would yield
+`preflight (linux, sauce)`.
+
+### 35. The self-hosted Linux pool needs a browser baked into its image
+Trigger: adding a preflight harness that drives Chrome, or debugging
+`Chrome is required for ...` on the `sauce` pool.
+Rule: Chromium comes from the custom runner image
+(`localhost:30500/sauce-runner:<runner-version>`, built from
+`k8s/argocd-apps/arc-runner-sauce.yaml`'s pinned runner version), exposed as
+`/usr/local/bin/chromium` with `CHROME_BIN` set. Rebuild and retag it when the
+runner version bumps.
+Why: three harnesses — `epic-dashboard`, `operator-station`,
+`cross-blueprint-style-adoption` — assert on rendered geometry over DevTools.
+They passed on `ubuntu-latest` because Chrome is preinstalled there. On
+arm64 Linux there is no apt path: Google ships no arm64 Linux Chrome, and
+Ubuntu 24.04's `chromium-browser` is a snap stub that cannot run in a
+container. `run-preflight.js` has no skip/filter, so the three cannot be
+excluded per-platform. `release.yml` runs preflight too, so a missing browser
+breaks the release train, not just the CI matrix leg.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault configured in `.obsidian/plugins/customjs/data.json`

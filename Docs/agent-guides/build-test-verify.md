@@ -169,36 +169,26 @@ Already in place under the old `preflight (macos-latest)` / `preflight (ubuntu-l
 
 Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). The source of truth for its credentials is 1Password, vault `Lab`, item `arc-github-app`, fields `app-id` / `installation-id` / `private-key` — read them with `op read "op://Lab/arc-github-app/private-key"` (swap the field name for the others). The `arc-github-app` Kubernetes Secret in namespace `arc-runners` is *materialized from* those references by the `lab` repo's `k8s/secrets/registry.yaml`; it is a derivative, not the source. Recover from 1Password rather than from the cluster — a machine rebuild is precisely the moment the cluster does not exist yet. Don't hardcode any of these values here: this file is public.
 
-**Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image pinned to `ghcr.io/actions/actions-runner:2.336.0`, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
+**Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image `localhost:30500/sauce-runner:2.336.0`, built from `ghcr.io/actions/actions-runner:2.336.0` with Chromium, `gh` and Node 20 baked in — rebuild and retag it when the runner version bumps, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
 
-**Pool B — Tartelet ephemeral macOS VMs.** macOS runners on the Mac mini, label set `[self-hosted, macOS, ARM64]`. This pool is a GUI app (Tartelet) plus a Keychain-held credential — outside Argo CD's reach entirely, so its config is **not** reconciled from git. This section is the reproduction runbook after a machine rebuild.
-
-Install Tart and pull the base VM image:
+**Pool B — `sauce-macos` runner.** macOS runner on the Mac mini, labels `self-hosted`, `macOS`, `ARM64`, `sauce-macos`. A stock `actions/runner` installed as a LaunchAgent — outside Argo CD's reach, so its config is **not** reconciled from git. This is the reproduction runbook after a machine rebuild.
 
 ```bash
-brew install cirruslabs/cli/tart
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sauce-macos-base
+mkdir -p ~/actions-runner-sauce && cd ~/actions-runner-sauce
+V=$(gh api repos/actions/runner/releases/latest --jq '.tag_name' | sed 's/^v//')
+curl -fsSL -O "https://github.com/actions/runner/releases/download/v${V}/actions-runner-osx-arm64-${V}.tar.gz"
+tar xzf "actions-runner-osx-arm64-${V}.tar.gz"
+./config.sh --url https://github.com/willfell/sauce \
+  --token "$(gh api -X POST repos/willfell/sauce/actions/runners/registration-token --jq .token)" \
+  --name sauce-macos --labels sauce-macos --work _work --unattended --replace
+./svc.sh install && ./svc.sh start
 ```
 
-`macos-sequoia-base` publishes only a mutable `latest` tag (the `-vanilla` variant has pinned version tags but lacks the Homebrew this pool needs, so `-base:latest` is the only viable choice). Resolve and record the digest at pull time with `crane digest ghcr.io/cirruslabs/macos-sequoia-base:latest` since the tag itself floats:
+`svc.sh` writes `~/Library/LaunchAgents/actions.runner.willfell-sauce.sauce-macos.plist` — a LaunchAgent, so no `sudo` and it runs inside the user session. Verify with `gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'`; expect `status: online`.
 
-- Image: `ghcr.io/cirruslabs/macos-sequoia-base:latest`
-- Digest at last pull: `sha256:3f4d14a5ffb9efd3bda2ae0184fd4bc2773d924ff8b7565f958761420ec41a0c`
-- Local VM name: `sauce-macos-base`
+The workflows target `[self-hosted, macOS, ARM64]`, which GitHub assigns automatically from the platform — `sauce-macos` is an extra handle, not the thing being matched.
 
-Download the latest Tartelet release from <https://github.com/framna-dk/tartelet/releases> (`gh release download <version> --repo framna-dk/tartelet --pattern "Tartelet.zip"`) and move `Tartelet.app` into `/Applications`. Then configure it through its own GUI — this step cannot be scripted, since the private key is deliberately handed to the macOS Keychain via Tartelet's own flow rather than written to disk by an agent:
-
-| Tab | Setting | Value |
-| --- | --- | --- |
-| GitHub | Runner Scope | Repository (personal account) |
-| GitHub | Owner / account | `willfell` |
-| GitHub | Repository | `sauce` |
-| GitHub | App ID | `op read "op://Lab/arc-github-app/app-id"` |
-| GitHub | Private key | `op read "op://Lab/arc-github-app/private-key" > ~/Desktop/tartelet-app.pem`, `chmod 600`, point Tartelet's picker at it; Tartelet stores it in the Keychain, then delete the file |
-| Virtual Machine | VM | `sauce-macos-base` |
-| Virtual Machine | Number of VMs | 2 (Apple's hard cap) |
-
-Add Tartelet to System Settings → General → Login Items so the pool survives a reboot. Verify a runner registered with `gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, os, status, labels: [.labels[].name]}'` — expect `status: online` and labels including `self-hosted`, `macOS`, `ARM64`.
+**Why not ephemeral VMs.** Tartelet + Tart was the original design and was abandoned during implementation. Three defects, in ascending order of severity: it silently failed to store the GitHub App private key (no log line, and the one documented cause — a corrupt `Local Items` keychain — did not match this host); its SSH retry window is roughly 18 seconds, too tight for two macOS VMs booting against a host where Colima already holds 8 of 14 cores; and [tartelet#98](https://github.com/framna-dk/tartelet/issues/98) means a host screen lock locks the login Keychain, after which runner creation stops silently — Pool A keeps working, so CI goes half-alive rather than down. That last one is disqualifying for an unattended release train. The stock runner authenticates from a token file on disk, so none of the three apply. The tradeoff accepted in exchange is that this runner is persistent rather than ephemeral; the mitigation is the repo's fork-PR approval policy, set to `all_external_contributors`.
 
 ## Cycle-close artifacts
 
