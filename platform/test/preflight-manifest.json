@@ -137,6 +137,22 @@
       "lane": "parallel"
     },
     {
+      "id": "lint-gesture-writes",
+      "cmd": [
+        "node",
+        "scripts/lint-gesture-writes.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "gesture-write-lint-fixtures",
+      "cmd": [
+        "node",
+        "platform/test/run-gesture-write-lint.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "files-forbidden-paths",
       "cmd": [
         "node",

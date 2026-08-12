@@ -83,6 +83,7 @@
     "lint-display-markers": "node scripts/lint-display-markers.js",
     "lint-note-chrome": "node scripts/lint-note-chrome.js",
     "lint-cold-load": "node scripts/lint-cold-load.js",
+    "lint-gesture-writes": "node scripts/lint-gesture-writes.js",
     "seed:rebaseline": "node scripts/rebaseline-seed.js",
     "seed:prev": "node scripts/seed-prev-snapshot.js",
     "release:plan": "node scripts/release/compute-release.js",
@@ -120,6 +121,7 @@
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
     "@xenova/transformers": "^2.17.2",
+    "acorn": "^8.18.0",
     "ajv": "^8.12.0"
   }
 }
