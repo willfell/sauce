@@ -1,0 +1,39 @@
+{
+  "entries": [
+    {
+      "path": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
+      "reason": "Render-time carryover materialization writes background daily files and is not initiated by a user gesture.",
+      "lines": []
+    },
+    {
+      "path": "platform/blueprints/sticky-notes/helpers/sticky-day-migrate.js",
+      "reason": "Render-time sticky-note migration performs an idempotent background frontmatter heal outside any user gesture.",
+      "lines": []
+    },
+    {
+      "path": "platform/mechanisms/kanban-status-sync/kanban-status-sync.js",
+      "reason": "Kanban vault-event and startup reconciliation writes card projections automatically rather than from a user gesture.",
+      "lines": []
+    },
+    {
+      "path": "platform/blueprints/project/helpers/project-workstreams.js",
+      "reason": "The workstream picker delegates its structural transaction to RenderSafe.mutateStructure, whose write callback is outside this lint's RenderSafe.mutate authority.",
+      "lines": [136]
+    },
+    {
+      "path": "platform/blueprints/meetings/helpers/meeting-leaf-actions.js",
+      "reason": "New-person creation delegates its receipt-bound structural transaction to RenderSafe.mutateStructure, whose create callback is outside this lint's RenderSafe.mutate authority.",
+      "lines": [365]
+    },
+    {
+      "path": "platform/blueprints/project/helpers/doc-bulk-move.js",
+      "reason": "Bulk document relocation is a structural rename transaction whose target is not the active source note; its frontmatter rewrite is part of that transaction.",
+      "lines": [217]
+    },
+    {
+      "path": "platform/blueprints/project/helpers/doc-leaf-actions.js",
+      "reason": "Single-document relocation is a structural rename transaction whose post-rename frontmatter rewrite must remain adjacent to the rename.",
+      "lines": [188]
+    }
+  ]
+}
