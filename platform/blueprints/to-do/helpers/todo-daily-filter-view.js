@@ -161,6 +161,12 @@ class ToDoDailyFilterView {
         return dot;
     }
 
+    static noteDate(page) {
+        const name = page && page.file && page.file.name;
+        const match = /ToDo-(\d{4}-\d{2}-\d{2})/.exec(String(name == null ? '' : name));
+        return match ? match[1] : '';
+    }
+
     static _fallbackDue(a, b) {
         const ad = String(a && a.due != null ? a.due : '').trim();
         const bd = String(b && b.due != null ? b.due : '').trim();
@@ -227,37 +233,53 @@ class ToDoDailyFilterView {
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
         const storage = ToDoDailyFilterView.storage();
-        let state = ToDoDailyFilterView.readState(storage);
+        // Persistence is keyed to the note's own date so opening another day never
+        // silently restores a filter chosen on a different one. Scope arithmetic
+        // below still resolves against the live clock, not this date.
+        const noteDate = ToDoDailyFilterView.noteDate(page);
+        let state = ToDoDailyFilterView.readState(storage, noteDate);
+
         const root = dv.container.createEl('div', { cls: 'sauce-todo-daily-filter-view' });
         root.style.cssText = 'display:flex; flex-direction:column; gap:10px; width:100%;';
 
         const controls = root.createEl('div', { cls: 'sauce-todo-filter-controls' });
-        controls.style.cssText = 'display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;';
         const scopeGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-scopes' });
         scopeGroup.setAttribute('role', 'group');
         scopeGroup.setAttribute('aria-label', 'Filter tasks by date scope');
-        const sortGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-sort' });
+
+        const rightSide = controls.createEl('div', { cls: 'sauce-todo-filter-right' });
+        const doneGroup = rightSide.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-done' });
+        doneGroup.setAttribute('role', 'group');
+        doneGroup.setAttribute('aria-label', 'Include completed tasks');
+        rightSide.createEl('div', { cls: 'sauce-todo-filter-sep' }).setAttribute('aria-hidden', 'true');
+        const sortGroup = rightSide.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-sort' });
         sortGroup.setAttribute('role', 'group');
         sortGroup.setAttribute('aria-label', 'Sort tasks');
+        rightSide.createEl('div', { cls: 'sauce-todo-filter-sep' }).setAttribute('aria-hidden', 'true');
+        const groupGroup = rightSide.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-group' });
+        groupGroup.setAttribute('role', 'group');
+        groupGroup.setAttribute('aria-label', 'Group tasks');
+
+        root.createEl('div', { cls: 'sauce-todo-filter-rule' }).setAttribute('aria-hidden', 'true');
+
         const listHost = root.createEl('div', { cls: 'sauce-todo-daily-filter-list-host' });
         listHost.style.cssText = 'display:flex; flex-direction:column; gap:8px; width:100%;';
 
         const scopeButtons = {};
         const sortButtons = {};
+        let doneButton = null;
         let groupButton = null;
+        const setPill = (button, active) => {
+            button.className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        };
         const updateButtons = () => {
             for (const key of ToDoDailyFilterView.SCOPE_KEYS) {
-                const active = state.scopes.includes(key);
-                scopeButtons[key].className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
-                scopeButtons[key].setAttribute('aria-pressed', active ? 'true' : 'false');
+                setPill(scopeButtons[key], state.scope === key);
             }
-            for (const key of ['due', 'priority']) {
-                const active = state.sort === key;
-                sortButtons[key].className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
-                sortButtons[key].setAttribute('aria-pressed', active ? 'true' : 'false');
-            }
-            groupButton.className = `sauce-pill-toggle${state.groupByProject ? ' is-active' : ''}`;
-            groupButton.setAttribute('aria-pressed', state.groupByProject ? 'true' : 'false');
+            setPill(doneButton, state.includeDone);
+            for (const key of ['due', 'priority']) setPill(sortButtons[key], state.sort === key);
+            setPill(groupButton, state.groupByProject);
         };
 
         const dashboard = CJS.SpaceDailyDashboard || null;
@@ -271,6 +293,7 @@ class ToDoDailyFilterView {
             for (const task of rows) {
                 try {
                     const row = TTL.renderTaskRow(list, task, TD);
+                    ToDoDailyFilterView.decorateRow(row, task);
                     if (task.status === 'done' && row && typeof row.querySelector === 'function') {
                         const checkbox = row.querySelector('input[type="checkbox"]');
                         if (checkbox) checkbox.checked = true;
@@ -280,11 +303,12 @@ class ToDoDailyFilterView {
         };
         const renderList = () => {
             while (listHost.firstChild) listHost.removeChild(listHost.firstChild);
-            const selected = ToDoDailyFilterView.selectByScope(tasks, new Set(state.scopes), todayIso);
+            const selected = ToDoDailyFilterView.selectByScope(
+                tasks, state.scope, state.includeDone, todayIso);
             const sorted = ToDoDailyFilterView.sortTasks(selected, state.sort, dashboard);
             if (!sorted.length) {
                 const list = makeList(listHost);
-                const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: 'No tasks in the selected scopes.' });
+                const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: 'No tasks in this scope.' });
                 empty.style.cssText = 'color:var(--text-muted); font-size:0.85em; font-style:italic; padding:6px 0;';
                 return;
             }
@@ -307,59 +331,45 @@ class ToDoDailyFilterView {
             }
         };
 
+        const commit = (next) => {
+            state = ToDoDailyFilterView.writeState(storage, next, noteDate);
+            updateButtons();
+            renderList();
+        };
+        const onClick = (handler) => (event) => {
+            try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
+            handler();
+        };
+
         const scopeLabels = {
             today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming',
-            'no-date': 'No date', all: 'All', done: 'Done',
+            'no-date': 'No date', all: 'All',
         };
         for (const key of ToDoDailyFilterView.SCOPE_KEYS) {
             const button = scopeGroup.createEl('button', { text: scopeLabels[key] });
             scopeButtons[key] = button;
             button.setAttribute('type', 'button');
-            button.addEventListener('click', (event) => {
-                try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
-                if (key === 'all') {
-                    state = { ...state, scopes: state.scopes.includes('done') ? ['all', 'done'] : ['all'] };
-                } else if (key === 'done') {
-                    const next = [...state.scopes];
-                    const index = next.indexOf('done');
-                    if (index >= 0) next.splice(index, 1); else next.push('done');
-                    state = { ...state, scopes: next };
-                } else {
-                    const keepDone = state.scopes.includes('done');
-                    const next = state.scopes.filter((scope) => scope !== 'all' && scope !== 'done');
-                    const index = next.indexOf(key);
-                    if (index >= 0) next.splice(index, 1); else next.push(key);
-                    if (keepDone) next.push('done');
-                    state = { ...state, scopes: next };
-                }
-                state = ToDoDailyFilterView.writeState(storage, state);
-                updateButtons();
-                renderList();
-            });
+            // Single-select: choosing a scope replaces the previous one. There is no
+            // deselect, so a click can never empty the selection.
+            button.addEventListener('click', onClick(() => commit({ ...state, scope: key })));
         }
+
+        doneButton = doneGroup.createEl('button', { text: 'Done' });
+        doneButton.setAttribute('type', 'button');
+        doneButton.addEventListener('click', onClick(
+            () => commit({ ...state, includeDone: !state.includeDone })));
 
         for (const key of ['due', 'priority']) {
             const button = sortGroup.createEl('button', { text: key === 'due' ? 'Due' : 'Priority' });
             sortButtons[key] = button;
             button.setAttribute('type', 'button');
-            button.addEventListener('click', (event) => {
-                try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
-                state = ToDoDailyFilterView.writeState(storage, { ...state, sort: key });
-                updateButtons();
-                renderList();
-            });
+            button.addEventListener('click', onClick(() => commit({ ...state, sort: key })));
         }
 
-        groupButton = sortGroup.createEl('button', { text: 'By Project' });
+        groupButton = groupGroup.createEl('button', { text: 'By Project' });
         groupButton.setAttribute('type', 'button');
-        groupButton.addEventListener('click', (event) => {
-            try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
-            state = ToDoDailyFilterView.writeState(storage, {
-                ...state, groupByProject: !state.groupByProject,
-            });
-            updateButtons();
-            renderList();
-        });
+        groupButton.addEventListener('click', onClick(
+            () => commit({ ...state, groupByProject: !state.groupByProject })));
 
         updateButtons();
         renderList();

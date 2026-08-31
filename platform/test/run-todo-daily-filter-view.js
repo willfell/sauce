@@ -266,6 +266,15 @@ const TASKS = [
     assert.strictEqual(View.decorateRow(null, { priority: 'low' }), null);
   });
 
+  ok('SB-NOTEDATE reads the date from the note filename, not the clock', () => {
+    const View = loadClass({});
+    assert.strictEqual(View.noteDate({ file: { name: 'ToDo-2026-08-31' } }), '2026-08-31');
+    assert.strictEqual(View.noteDate({ file: { name: 'ToDo-2026-08-31.md' } }), '2026-08-31');
+    assert.strictEqual(View.noteDate({ file: { name: 'Some Other Note' } }), '');
+    assert.strictEqual(View.noteDate({ file: {} }), '');
+    assert.strictEqual(View.noteDate(null), '');
+  });
+
   ok('TV4-GROUP partitions the same sorted rows by project without loss or duplication', () => {
     const View = loadClass({});
     const rows = TASKS.slice(0, 4);
@@ -319,7 +328,7 @@ const TASKS = [
     );
   });
 
-  await okAsync('TV3-RENDER paints one flat ul, shared pills, live rows, and persisted interactions', async () => {
+  await okAsync('SB-RENDER paints four pill groups and persists every interaction', async () => {
     const storage = makeStorage();
     const rendered = [];
     let clockReads = 0;
@@ -327,14 +336,16 @@ const TASKS = [
       localStorage: storage,
       moment: () => { clockReads += 1; return { format: () => TODAY }; },
       customJS: {
-        RenderSafe: { page: () => ({ type: 'to-do' }) },
-        TaskEntity: {
-          parseNote(page) { return { ...page, path: page.file.path }; },
-        },
+        RenderSafe: { page: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }) },
+        TaskEntity: { parseNote(page) { return { ...page, path: page.file.path }; } },
         TaskTodayList: {
           renderTaskRow(container, task) {
             rendered.push(task.title);
-            return container.createEl('li', { cls: 'sauce-task-today-row', text: task.title });
+            const row = container.createEl('div', { cls: 'sauce-task-today-row' });
+            const group = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+            group.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+            group.createEl('span', { cls: 'sauce-task-today-title', text: task.title });
+            return row;
           },
         },
         TaskDialog: {},
@@ -345,14 +356,11 @@ const TASKS = [
         },
         SpaceDailyDashboard: {
           compareTasksByDue(a, b) {
-            const ad = a.due || '9999-99-99';
-            const bd = b.due || '9999-99-99';
-            return ad.localeCompare(bd);
+            return String(a.due || '9999-99-99').localeCompare(String(b.due || '9999-99-99'));
           },
           compareTasksByPriority(a, b) {
             const rank = { highest: 4, high: 3, medium: 2, low: 1 };
-            return (rank[b.priority] || 0) - (rank[a.priority] || 0)
-              || this.compareTasksByDue(a, b);
+            return (rank[b.priority] || 0) - (rank[a.priority] || 0) || this.compareTasksByDue(a, b);
           },
         },
       },
@@ -361,46 +369,56 @@ const TASKS = [
     const root = makeElement();
     const dv = {
       container: root,
-      current: () => ({ type: 'to-do' }),
+      current: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }),
       pages: () => dataArray(TASKS),
     };
     await new View().render(dv);
 
     assert.strictEqual(clockReads, 1, 'render reads the live clock exactly once');
+    assert.strictEqual(byClass(root, 'sauce-pill-group').length, 4, 'scopes, done, sort, group');
+    assert.strictEqual(byClass(root, 'sauce-todo-filter-sep').length, 2);
+    assert.strictEqual(byClass(root, 'sauce-todo-filter-rule').length, 1);
     assert.strictEqual(byClass(root, 'sauce-todo-daily-filter-list').length, 1);
-    assert.strictEqual(byClass(root, 'sauce-section-summary').length, 0, 'flat list has no project headers');
-    const groups = byClass(root, 'sauce-pill-group');
-    assert.strictEqual(groups.length, 2);
+
     const buttons = descendants(root).filter((node) => node.tagName === 'BUTTON');
-    assert.strictEqual(buttons.length, 9);
-    assert(buttons.every((button) => String(button.className).split(/\s+/).includes('sauce-pill-toggle')));
-    assert.deepStrictEqual(rendered, ['Overdue high', 'Today low'],
-      JSON.stringify({ state: View.readState(storage), nodes: descendants(root).map((node) => [node.tagName, node.className, node.textContent]) }));
+    assert.deepStrictEqual(buttons.map((b) => b.textContent),
+      ['Today', 'Overdue', 'Upcoming', 'No date', 'All', 'Done', 'Due', 'Priority', 'By Project']);
+    assert(buttons.every((b) => String(b.className).split(/\s+/).includes('sauce-pill-toggle')));
 
-    const upcoming = buttons.find((button) => button.textContent === 'Upcoming');
-    await upcoming.fire('click');
-    assert(String(upcoming.className).includes('is-active'));
-    assert(rendered.slice(-3).includes('Upcoming highest'));
+    // Default is Today alone — not Today + Overdue.
+    assert.deepStrictEqual(rendered, ['Today low']);
+    assert.strictEqual(byClass(root, 'sauce-task-priority-dot').length, 1);
 
-    const priority = buttons.find((button) => button.textContent === 'Priority');
-    await priority.fire('click');
-    assert(String(priority.className).includes('is-active'));
-    assert.deepStrictEqual(View.readState(storage), {
-      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority', groupByProject: false,
+    const find = (label) => buttons.find((b) => b.textContent === label);
+
+    // Scope is single-select: choosing Overdue deselects Today.
+    await find('Overdue').fire('click');
+    assert(String(find('Overdue').className).includes('is-active'));
+    assert(!String(find('Today').className).includes('is-active'));
+    assert.strictEqual(rendered[rendered.length - 1], 'Overdue high');
+
+    // Clicking the active scope again keeps it active — it can never empty.
+    await find('Overdue').fire('click');
+    assert(String(find('Overdue').className).includes('is-active'));
+    assert.strictEqual(View.readState(storage, TODAY).scope, 'overdue');
+
+    // Done is independent of scope.
+    await find('All').fire('click');
+    await find('Done').fire('click');
+    assert(String(find('Done').className).includes('is-active'));
+    assert(String(find('All').className).includes('is-active'));
+    assert.deepStrictEqual(View.readState(storage, TODAY), {
+      scope: 'all', includeDone: true, sort: 'due', groupByProject: false, date: TODAY,
     });
+    assert(rendered.slice(-6).includes('Done yesterday'), 'All + Done reaches older completions');
 
-    const groupToggle = buttons.find((button) => button.textContent === 'By Project');
-    await groupToggle.fire('click');
-    assert(String(groupToggle.className).includes('is-active'));
+    await find('Priority').fire('click');
+    assert.strictEqual(View.readState(storage, TODAY).sort, 'priority');
+
+    await find('By Project').fire('click');
+    assert(String(find('By Project').className).includes('is-active'));
     assert.strictEqual(byClass(root, 'sauce-todo-filter-project-label').length, 2);
-    assert.deepStrictEqual(View.readState(storage), {
-      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority', groupByProject: true,
-    });
-
-    const done = buttons.find((button) => button.textContent === 'Done');
-    await done.fire('click');
-    assert(rendered.slice(-4).includes('Done today'));
-    assert(!rendered.slice(-4).includes('Done yesterday'));
+    assert.strictEqual(View.readState(storage, TODAY).groupByProject, true);
   });
 
   await okAsync('TV3-COLD missing TaskEntity or TaskTodayList is a no-throw no-op', async () => {
