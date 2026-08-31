@@ -7,28 +7,38 @@
  */
 class ToDoDailyFilterView {
     static get STORAGE_KEY() { return 'sauce-todo-filter:state'; }
-    static get DEFAULT_SCOPES() { return ['today', 'overdue']; }
-    static get SCOPE_KEYS() { return ['today', 'overdue', 'upcoming', 'no-date', 'all', 'done']; }
+    static get DEFAULT_SCOPE() { return 'today'; }
+    static get SCOPE_KEYS() { return ['today', 'overdue', 'upcoming', 'no-date', 'all']; }
 
-    static _defaultState() {
-        return { scopes: ToDoDailyFilterView.DEFAULT_SCOPES, sort: 'due', groupByProject: false };
+    static _defaultState(date) {
+        return {
+            scope: ToDoDailyFilterView.DEFAULT_SCOPE,
+            includeDone: false,
+            sort: 'due',
+            groupByProject: false,
+            date: String(date == null ? '' : date),
+        };
     }
 
-    static _normalizeState(value) {
-        if (!value || typeof value !== 'object' || !Array.isArray(value.scopes)) {
-            return ToDoDailyFilterView._defaultState();
+    static _normalizeState(value, date) {
+        const wanted = String(date == null ? '' : date);
+        if (!value || typeof value !== 'object') return ToDoDailyFilterView._defaultState(wanted);
+        // A blob written before the scope bar correction carries `scopes[]` and no
+        // `date` key. Discard it whole rather than guessing which single scope an
+        // array of scopes meant.
+        if (typeof value.date !== 'string' || value.date !== wanted) {
+            return ToDoDailyFilterView._defaultState(wanted);
         }
-        const allowed = new Set(ToDoDailyFilterView.SCOPE_KEYS);
-        const scopes = [];
-        for (const raw of value.scopes) {
-            const scope = String(raw == null ? '' : raw).trim().toLowerCase();
-            if (allowed.has(scope) && !scopes.includes(scope)) scopes.push(scope);
-        }
-        if (!scopes.length) return ToDoDailyFilterView._defaultState();
-        const sort = String(value.sort || '').trim().toLowerCase() === 'priority'
-            ? 'priority'
-            : 'due';
-        return { scopes, sort, groupByProject: value.groupByProject === true };
+        const scope = String(value.scope == null ? '' : value.scope).trim().toLowerCase();
+        return {
+            scope: ToDoDailyFilterView.SCOPE_KEYS.includes(scope)
+                ? scope
+                : ToDoDailyFilterView.DEFAULT_SCOPE,
+            includeDone: value.includeDone === true,
+            sort: String(value.sort || '').trim().toLowerCase() === 'priority' ? 'priority' : 'due',
+            groupByProject: value.groupByProject === true,
+            date: wanted,
+        };
     }
 
     static storage() {
@@ -36,21 +46,24 @@ class ToDoDailyFilterView {
         catch (_e) { return null; }
     }
 
-    static readState(storage) {
+    static readState(storage, date) {
         try {
             if (!storage || typeof storage.getItem !== 'function') {
-                return ToDoDailyFilterView._defaultState();
+                return ToDoDailyFilterView._defaultState(date);
             }
             const raw = storage.getItem(ToDoDailyFilterView.STORAGE_KEY);
-            if (!raw) return ToDoDailyFilterView._defaultState();
-            return ToDoDailyFilterView._normalizeState(JSON.parse(raw));
+            if (!raw) return ToDoDailyFilterView._defaultState(date);
+            return ToDoDailyFilterView._normalizeState(JSON.parse(raw), date);
         } catch (_e) {
-            return ToDoDailyFilterView._defaultState();
+            return ToDoDailyFilterView._defaultState(date);
         }
     }
 
-    static writeState(storage, state) {
-        const normalized = ToDoDailyFilterView._normalizeState(state);
+    static writeState(storage, state, date) {
+        const normalized = ToDoDailyFilterView._normalizeState(
+            { ...(state || {}), date: String(date == null ? '' : date) },
+            date,
+        );
         try {
             if (storage && typeof storage.setItem === 'function') {
                 storage.setItem(ToDoDailyFilterView.STORAGE_KEY, JSON.stringify(normalized));

@@ -165,21 +165,56 @@ const TASKS = [
     );
   });
 
-  ok('TV3-STATE guarded storage round-trips canonical client-only state', () => {
+  ok('SB-STATE single-select scope round-trips and rejects junk', () => {
+    const View = loadClass({});
+    const D = '2026-08-11';
+    const storage = makeStorage();
+    assert.deepStrictEqual(View.SCOPE_KEYS, ['today', 'overdue', 'upcoming', 'no-date', 'all']);
+    assert.strictEqual(View.DEFAULT_SCOPE, 'today');
+    assert(!View.SCOPE_KEYS.includes('done'), "'done' is no longer a scope");
+
+    assert.deepStrictEqual(View.readState(storage, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+
+    const written = View.writeState(storage, {
+      scope: 'all', includeDone: true, sort: 'priority', groupByProject: true,
+    }, D);
+    assert.deepStrictEqual(written,
+      { scope: 'all', includeDone: true, sort: 'priority', groupByProject: true, date: D });
+    assert.deepStrictEqual(View.readState(storage, D), written);
+
+    // Unrecognised scope falls back to today; non-booleans are false.
+    assert.deepStrictEqual(
+      View._normalizeState({ scope: 'nonsense', includeDone: 'yes', sort: 'sideways', groupByProject: 1, date: D }, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+
+    // Bad JSON and hostile storage both degrade to the default.
+    storage.data.set(View.STORAGE_KEY, '{bad json');
+    assert.deepStrictEqual(View.readState(storage, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+    const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+    assert.deepStrictEqual(View.readState(throwing, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+    assert.doesNotThrow(() => View.writeState(throwing, written, D));
+  });
+
+  ok('SB-STATE state is keyed to the note date and legacy blobs are discarded', () => {
     const View = loadClass({});
     const storage = makeStorage();
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    const written = View.writeState(storage, { scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true });
-    assert.deepStrictEqual(written, { scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true });
-    assert.deepStrictEqual(View.readState(storage), written);
+    View.writeState(storage, { scope: 'all', includeDone: true, sort: 'priority', groupByProject: true }, '2026-08-11');
 
-    storage.data.set(View.STORAGE_KEY, '{bad json');
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    storage.data.set(View.STORAGE_KEY, JSON.stringify({ scopes: [], sort: 'priority' }));
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
-    assert.deepStrictEqual(View.readState(throwing), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    assert.doesNotThrow(() => View.writeState(throwing, written));
+    // Same note: restored.
+    assert.strictEqual(View.readState(storage, '2026-08-11').scope, 'all');
+    // Different note: default, and the stored blob is left alone until written.
+    assert.deepStrictEqual(View.readState(storage, '2026-08-12'),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: '2026-08-12' });
+
+    // A pre-existing v0.288.0 blob has no `date` key at all and is discarded whole,
+    // including its sort and grouping — not partially carried forward.
+    storage.data.set(View.STORAGE_KEY,
+      JSON.stringify({ scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true }));
+    assert.deepStrictEqual(View.readState(storage, '2026-08-11'),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: '2026-08-11' });
   });
 
   ok('TV4-DONE is off by default and includes only tasks completed today when enabled', () => {
