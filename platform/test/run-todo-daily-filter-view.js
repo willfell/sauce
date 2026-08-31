@@ -141,28 +141,40 @@ const TASKS = [
     assert.strictEqual(SOURCE.trim().endsWith('}'), true);
   });
 
-  ok('TV3-SCOPE default Today+Overdue selects exactly the intended open tasks', () => {
+  ok('SB-SCOPE each single scope selects exactly its own open tasks', () => {
     const View = loadClass({});
-    assert.deepStrictEqual(View.DEFAULT_SCOPES, ['today', 'overdue']);
-    const selected = View.selectByScope(TASKS, new Set(View.DEFAULT_SCOPES), TODAY);
-    assert.deepStrictEqual(selected.map((task) => task.title), ['Today low', 'Overdue high']);
+    const titles = (scope, includeDone) =>
+      View.selectByScope(TASKS, scope, includeDone === true, TODAY).map((task) => task.title);
+
+    assert.deepStrictEqual(titles('today'), ['Today low']);
+    assert.deepStrictEqual(titles('overdue'), ['Overdue high']);
+    assert.deepStrictEqual(titles('upcoming'), ['Upcoming highest']);
+    assert.deepStrictEqual(titles('no-date'), ['No date medium']);
+    assert.deepStrictEqual(titles('all'),
+      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium']);
+
+    // An unrecognised scope resolves to today rather than selecting nothing.
+    assert.deepStrictEqual(titles('nonsense'), ['Today low']);
   });
 
-  ok('TV3-SCOPE multi-select adds Upcoming and gates No date behind no-date or All', () => {
+  ok('SB-DONE is an independent include, and All + Done reaches older completions', () => {
     const View = loadClass({});
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['today', 'overdue', 'upcoming']), TODAY).map((task) => task.title),
-      ['Today low', 'Overdue high', 'Upcoming highest'],
-    );
-    assert(!View.selectByScope(TASKS, new Set(['today']), TODAY).some((task) => task.title === 'No date medium'));
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['no-date']), TODAY).map((task) => task.title),
-      ['No date medium'],
-    );
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['all']), TODAY).map((task) => task.title),
-      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium'],
-    );
+    const titles = (scope, includeDone) =>
+      View.selectByScope(TASKS, scope, includeDone === true, TODAY).map((task) => task.title);
+
+    // Off by default on every scope.
+    for (const scope of View.SCOPE_KEYS) {
+      assert(!titles(scope).some((title) => title.startsWith('Done')),
+        `scope ${scope} leaked a done task with includeDone false`);
+    }
+
+    // A date scope adds only today's completions.
+    assert.deepStrictEqual(titles('today', true), ['Today low', 'Done today']);
+    assert(!titles('today', true).includes('Done yesterday'));
+
+    // This is the defect: All + Done must reach a completion older than today.
+    assert.deepStrictEqual(titles('all', true),
+      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium', 'Done today', 'Done yesterday']);
   });
 
   ok('SB-STATE single-select scope round-trips and rejects junk', () => {
@@ -215,20 +227,6 @@ const TASKS = [
       JSON.stringify({ scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true }));
     assert.deepStrictEqual(View.readState(storage, '2026-08-11'),
       { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: '2026-08-11' });
-  });
-
-  ok('TV4-DONE is off by default and includes only tasks completed today when enabled', () => {
-    const View = loadClass({});
-    assert(!View.DEFAULT_SCOPES.includes('done'));
-    assert(!View.selectByScope(TASKS, new Set(View.DEFAULT_SCOPES), TODAY).some((task) => task.status === 'done'));
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['done']), TODAY).map((task) => task.title),
-      ['Done today'],
-    );
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['all', 'done']), TODAY).map((task) => task.title),
-      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium', 'Done today'],
-    );
   });
 
   ok('SB-PRIORITY classifies every level and lands the dot after the checkbox', () => {

@@ -72,17 +72,22 @@ class ToDoDailyFilterView {
         return normalized;
     }
 
-    static selectByScope(tasks, scopeSet, todayIso) {
-        const scopes = scopeSet instanceof Set
-            ? scopeSet
-            : new Set(Array.isArray(scopeSet) ? scopeSet : []);
-        const all = scopes.has('all');
+    static selectByScope(tasks, scope, includeDone, todayIso) {
+        const raw = String(scope == null ? '' : scope).trim().toLowerCase();
+        const key = ToDoDailyFilterView.SCOPE_KEYS.includes(raw)
+            ? raw
+            : ToDoDailyFilterView.DEFAULT_SCOPE;
+        const all = key === 'all';
         const today = String(todayIso || '');
         return (Array.isArray(tasks) ? tasks : []).filter((task) => {
             if (!task) return false;
             const status = String(task.status || 'open').toLowerCase();
             if (status === 'done') {
-                if (!scopes.has('done') || !task.completed_at) return false;
+                // Completion is an independent include, evaluated for its own sake —
+                // never an early return that the `all` widening cannot reach.
+                if (!includeDone) return false;
+                if (all) return true;
+                if (!task.completed_at) return false;
                 const completed = task.completed_at;
                 if (typeof completed === 'object' && typeof completed.toFormat === 'function') {
                     return completed.toFormat('yyyy-MM-dd') === today;
@@ -90,12 +95,12 @@ class ToDoDailyFilterView {
                 return String(completed).slice(0, 10) === today;
             }
             if (status !== 'open') return false;
-            const due = task.due == null ? '' : String(task.due).trim();
             if (all) return true;
-            if (!due) return scopes.has('no-date');
-            if (due === today) return scopes.has('today');
-            if (due < today) return scopes.has('overdue');
-            return scopes.has('upcoming');
+            const due = task.due == null ? '' : String(task.due).trim();
+            if (!due) return key === 'no-date';
+            if (due === today) return key === 'today';
+            if (due < today) return key === 'overdue';
+            return key === 'upcoming';
         });
     }
 
