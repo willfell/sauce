@@ -71,6 +71,20 @@ function makeElement(tag = 'div', cls = '') {
       child.parentNode = null;
       return child;
     },
+    insertBefore(child, ref) {
+      const index = ref == null ? this.children.length : this.children.indexOf(ref);
+      const at = index < 0 ? this.children.length : index;
+      const existing = this.children.indexOf(child);
+      if (existing >= 0) this.children.splice(existing, 1);
+      child.parentNode = this;
+      this.children.splice(at > this.children.length ? this.children.length : at, 0, child);
+      return child;
+    },
+    querySelector(selector) {
+      const want = String(selector).replace(/^\./, '');
+      return descendants(this).find((node) =>
+        String(node.className).split(/\s+/).includes(want)) || null;
+    },
     remove() { if (this.parentNode) this.parentNode.removeChild(this); },
     setAttribute(name, value) { this.attributes[name] = String(value); },
     addEventListener(type, listener) { this._listeners[type] = listener; },
@@ -85,6 +99,11 @@ function makeElement(tag = 'div', cls = '') {
     },
     closest() { return null; },
     get firstChild() { return this.children[0] || null; },
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const siblings = this.parentNode.children;
+      return siblings[siblings.indexOf(this) + 1] || null;
+    },
     get textContent() { return this._text + this.children.map((child) => child.textContent).join(''); },
     set textContent(value) { this._text = String(value == null ? '' : value); this.children = []; },
   };
@@ -175,6 +194,43 @@ const TASKS = [
       View.selectByScope(TASKS, new Set(['all', 'done']), TODAY).map((task) => task.title),
       ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium', 'Done today'],
     );
+  });
+
+  ok('SB-PRIORITY classifies every level and lands the dot after the checkbox', () => {
+    const View = loadClass({});
+
+    assert.strictEqual(View.priorityLevel({ priority: 'highest' }), 'highest');
+    assert.strictEqual(View.priorityLevel({ priority: '  High  ' }), 'high');
+    assert.strictEqual(View.priorityLevel({ priority: 'MEDIUM' }), 'medium');
+    assert.strictEqual(View.priorityLevel({ priority: 'low' }), 'low');
+    assert.strictEqual(View.priorityLevel({ priority: '' }), 'none');
+    assert.strictEqual(View.priorityLevel({ priority: 'urgent' }), 'none');
+    assert.strictEqual(View.priorityLevel({}), 'none');
+    assert.strictEqual(View.priorityLevel(null), 'none');
+
+    // Real row shape: row > titlegroup > [cbwrap, title]
+    const row = makeElement('div', 'sauce-task-today-row');
+    const group = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+    const cbwrap = group.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+    const title = group.createEl('span', { cls: 'sauce-task-today-title', text: 'Retire Atlas' });
+
+    const dot = View.decorateRow(row, { priority: 'high' });
+    assert(dot, 'decorateRow returned nothing');
+    assert.deepStrictEqual(String(dot.className).split(/\s+/).sort(),
+      ['is-high', 'sauce-task-priority-dot']);
+    assert.strictEqual(dot.attributes['aria-hidden'], 'true');
+    assert.deepStrictEqual(group.children, [cbwrap, dot, title],
+      'dot must sit between the checkbox and the title');
+
+    // An unset priority still renders a dot, so every row keeps the same
+    // left edge and the column does not ragged out.
+    const bare = makeElement('div', 'sauce-task-today-row');
+    bare.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+    assert(String(View.decorateRow(bare, {}).className).includes('is-none'));
+
+    // A row without the expected structure degrades to no dot, never a throw.
+    assert.doesNotThrow(() => View.decorateRow(makeElement('div', 'x'), { priority: 'low' }));
+    assert.strictEqual(View.decorateRow(null, { priority: 'low' }), null);
   });
 
   ok('TV4-GROUP partitions the same sorted rows by project without loss or duplication', () => {

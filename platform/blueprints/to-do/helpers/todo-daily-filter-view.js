@@ -111,6 +111,38 @@ class ToDoDailyFilterView {
         return [...groups].map(([label, groupedTasks]) => ({ label, tasks: groupedTasks }));
     }
 
+    static priorityLevel(task) {
+        const known = ['highest', 'high', 'medium', 'low'];
+        const raw = String(task && task.priority || '').trim().toLowerCase();
+        return known.includes(raw) ? raw : 'none';
+    }
+
+    /**
+     * Decorate a row produced by TaskTodayList.renderTaskRow with a priority
+     * dot. Deliberately NOT done inside renderTaskRow: that method is shared by
+     * the Home, project, meeting and trip lists, and only this surface offers a
+     * Priority sort that the dot exists to explain. Every guard degrades to no
+     * dot rather than throwing, so a future change to the row's internals
+     * cannot break the list.
+     */
+    static decorateRow(row, task) {
+        if (!row || typeof row.querySelector !== 'function') return null;
+        let group = null;
+        try { group = row.querySelector('.sauce-task-today-titlegroup'); } catch (_e) { group = null; }
+        if (!group || typeof group.createEl !== 'function') return null;
+        const dot = group.createEl('span', {
+            cls: `sauce-task-priority-dot is-${ToDoDailyFilterView.priorityLevel(task)}`,
+        });
+        if (typeof dot.setAttribute === 'function') dot.setAttribute('aria-hidden', 'true');
+        try {
+            const cbWrap = group.querySelector('.sauce-task-today-cbwrap');
+            if (cbWrap && typeof group.insertBefore === 'function') {
+                group.insertBefore(dot, cbWrap.nextSibling);
+            }
+        } catch (_e) { /* append order is an acceptable fallback */ }
+        return dot;
+    }
+
     static _fallbackDue(a, b) {
         const ad = String(a && a.due != null ? a.due : '').trim();
         const bd = String(b && b.due != null ? b.due : '').trim();
