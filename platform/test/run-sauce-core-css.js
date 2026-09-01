@@ -725,7 +725,10 @@ test("SB-CSS priority dot, control layout, and dividers are bound", () => {
   const all = rules(css);
   const dot = all.find((rule) => rule.selector === ".sauce-task-priority-dot");
   assert.ok(dot, "missing .sauce-task-priority-dot base rule");
-  for (const contract of ["width: 7px", "height: 7px", "border-radius: 50%", "flex-shrink: 0", "align-self: flex-start"]) {
+  // box-sizing keeps the bordered level the same 7px as the filled ones; without it
+  // the border is added to the width and that row's title shifts right of the others.
+  for (const contract of ["width: 7px", "height: 7px", "border-radius: 50%", "flex-shrink: 0",
+    "align-self: flex-start", "box-sizing: border-box"]) {
     assert.ok(dot.declarations.includes(contract), "priority dot lost " + contract);
   }
   for (const level of ["highest", "high", "medium", "low", "none"]) {
@@ -745,6 +748,17 @@ test("SB-CSS priority dot, control layout, and dividers are bound", () => {
   // past its border box and space-between presses the last group against the
   // right edge; with a flush box both get shaved by any clipping ancestor.
   // border-box is what keeps `width: 100%` honest once that padding exists.
+  // An unset priority must draw nothing at all: most tasks carry no priority, so
+  // a visible ring on every row is noise rather than signal. It keeps its 7px box
+  // and 1.5px border so titles stay aligned with rows that DO have a priority.
+  const none = all.find((rule) => rule.selector === ".sauce-task-priority-dot.is-none");
+  assert.ok(none.declarations.includes("background: transparent"),
+    "unset priority dot must not paint a fill");
+  assert.ok(none.declarations.includes("border: 1.5px solid transparent"),
+    "unset priority dot must keep a 1.5px border for alignment but draw it transparent");
+  assert.ok(!/border:[^;]*color-mix/.test(none.declarations),
+    "unset priority dot regressed to a visible ring");
+
   const controls = all.find((rule) => rule.selector === ".sauce-todo-filter-controls");
   assert.ok(controls.declarations.includes("box-sizing: border-box"),
     "control bar lost box-sizing: border-box — padding would overflow its 100% width");
