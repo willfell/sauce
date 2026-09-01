@@ -259,6 +259,10 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
 
 .sauce-task-priority-dot {
   display: inline-block;
+  /* border-box so the levels that draw a border are the same 7px as the levels
+     that only fill. Without it the bordered level measured 9px and pushed its
+     row's title 2px further right than every other row. */
+  box-sizing: border-box;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -284,9 +288,14 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
   background: var(--text-muted, #666);
 }
 
+/* An unset priority draws nothing. The box still occupies its 7px so every
+   title shares one left edge whether or not its task carries a priority —
+   dropping the element instead would ragged the column the moment one row in a
+   list had a priority and the rest did not. The border stays 1.5px and merely
+   turns transparent, so the geometry is identical across all five levels. */
 .sauce-task-priority-dot.is-none {
   background: transparent;
-  border: 1.5px solid color-mix(in srgb, var(--text-muted, #666) 45%, transparent);
+  border: 1.5px solid transparent;
 }
 
 /* Action rows preserve the established _mobilize two-up grammar. */
