@@ -57,11 +57,38 @@ function sharedTmpPaths(root) {
     .map(([tmpPath, harnesses]) => ({ tmpPath, harnesses }));
 }
 
+// Profile safety: headless Chrome with no --user-data-dir falls back to the
+// developer's REAL Chrome profile. That profile's process singleton is held by any
+// desktop Chrome they have open, so the headless instance can take the singleton
+// over, adopt the live browsing session, and never exit — a preflight step wedged
+// for its full timeout, failing in the suite and passing when re-run alone.
+//
+// This is only enforceable because every Chrome launch now goes through the
+// DevTools protocol. Chrome's one-shot --screenshot / --dump-dom modes hang when
+// given an explicit --user-data-dir, so a harness using them could not comply;
+// platform/test/chrome-cdp.js exists to keep that route available.
+function unprofiledChromeLaunchers(root) {
+  const dir = path.join(root, 'platform', 'test');
+  const offenders = [];
+  // Strip comments first: the rationale for this rule mentions both flags, and a
+  // check that counted prose would pass on a file whose actual launch is unprofiled.
+  const stripComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  for (const name of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+    const src = stripComments(fs.readFileSync(path.join(dir, name), 'utf8'));
+    if (!/--headless/.test(src)) continue;
+    if (!/--user-data-dir/.test(src)) offenders.push(name);
+  }
+  return offenders;
+}
+
 function main() {
   const missing = orphanHarnesses(repositoryHarnesses(ROOT), registrationSources(ROOT));
   const shared = sharedTmpPaths(ROOT);
-  if (missing.length === 0 && shared.length === 0) {
-    console.log('PASS — every platform/test/run-*.js harness is registered, and no fixed /tmp path is shared');
+  const unprofiled = unprofiledChromeLaunchers(ROOT);
+  if (missing.length === 0 && shared.length === 0 && unprofiled.length === 0) {
+    console.log('PASS — every platform/test/run-*.js harness is registered, no fixed /tmp path is shared, and every headless Chrome launch uses a private profile');
     return;
   }
   if (missing.length) {
@@ -70,11 +97,15 @@ function main() {
   for (const { tmpPath, harnesses } of shared) {
     console.error(`FAIL — ${tmpPath} is used by multiple harnesses: ${harnesses.join(', ')}`);
   }
+  for (const name of unprofiled) {
+    console.error(`FAIL — ${name} launches headless Chrome without --user-data-dir, so it would run against the developer's real Chrome profile`);
+  }
   process.exit(1);
 }
 
 module.exports = {
   orphanHarnesses, repositoryHarnesses, registrationSources, sharedTmpPaths,
+  unprofiledChromeLaunchers,
 };
 
 if (require.main === module) main();
