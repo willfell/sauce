@@ -20,5 +20,5 @@
   },
   "coordinator": { "resolve": "brew" },
   "fid": "~/obsidian/headspace-sauce/spice/projects/sauce-ai-loop-system/docs/final-initial-design/Final Initial Design.md",
-  "codex": { "routers": true, "plugin_root": "/opt/homebrew/opt/sauce/libexec/plugins/loop" }
+  "codex": { "routers": true, "plugin_root": "/Users/willfell/Documents/GitHub/wac.plugins/plugins/loop" }
 }
