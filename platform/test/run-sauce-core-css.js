@@ -229,9 +229,9 @@ function assertTogglePillContract(source) {
 
   const minHeight = Number(toggle.declarations.match(/min-height:\s*(\d+)px/)[1]);
   const padding = toggle.declarations.match(/padding:\s*(\d+)px\s+(\d+)px/);
-  assert.strictEqual(minHeight, 20, "toggle min-height must remain the intended lean 20px");
-  assert.deepStrictEqual(padding.slice(1).map(Number), [1, 8],
-    "toggle padding must remain the intended lean 1px 8px");
+  assert.strictEqual(minHeight, 19, "toggle min-height must remain the intended lean 19px");
+  assert.deepStrictEqual(padding.slice(1).map(Number), [1, 12],
+    "toggle padding must remain the intended lean 1px 12px");
   for (const contract of [
     "display: inline-flex",
     "align-items: center",
@@ -244,11 +244,14 @@ function assertTogglePillContract(source) {
   }
   for (const contract of [
     "border-color: var(--interactive-accent, #7c3aed)",
-    "background: var(--interactive-accent, #7c3aed)",
-    "color: var(--text-on-accent, #fff)",
+    "background: color-mix(in srgb, var(--interactive-accent, #7c3aed) 14%, transparent)",
+    "color: var(--interactive-accent, #7c3aed)",
+    "box-shadow: 0 0 8px color-mix(in srgb, var(--interactive-accent, #7c3aed) 30%, transparent)",
   ]) {
     assert.ok(active.declarations.includes(contract), "toggle active state lost " + contract);
   }
+  assert.ok(!active.declarations.includes("background: var(--interactive-accent"),
+    "active toggle must be tinted, not a solid accent block");
   assert.ok(
     focusVisible.declarations.includes("outline: 2px solid var(--interactive-accent, #7c3aed)"),
     "toggle focus-visible state lost its accent outline",
@@ -474,8 +477,8 @@ test("TV1-TOGGLE-PILL-CONTRACT exposes lean token-driven toggle and group primit
     ["display: inline-flex", "display: block", "block display"],
     ["align-items: center", "align-items: start", "off-center alignment"],
     ["justify-content: center", "justify-content: start", "off-center justification"],
-    ["min-height: 20px", "min-height: 0px", "degenerate height"],
-    ["padding: 1px 8px", "padding: 0px 0px", "degenerate padding"],
+    ["min-height: 19px", "min-height: 0px", "degenerate height"],
+    ["padding: 1px 12px", "padding: 0px 0px", "degenerate padding"],
   ]) {
     const toggleMarker = "body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {";
     const toggleBlock = blockAfter(css, toggleMarker);
@@ -715,6 +718,27 @@ test("C1C-REAL-MANIFEST-INSTALL repeats the actual styling install idempotently"
     assert.ok(repeatReceipt.some((entry) => entry.step === "appearance" && entry.name === "styling" && entry.action === "skipped_existing"), "repeat lacks appearance skipped_existing receipt");
   } finally {
     fs.rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("SB-CSS priority dot, control layout, and dividers are bound", () => {
+  const all = rules(css);
+  const dot = all.find((rule) => rule.selector === ".sauce-task-priority-dot");
+  assert.ok(dot, "missing .sauce-task-priority-dot base rule");
+  for (const contract of ["width: 7px", "height: 7px", "border-radius: 50%", "flex-shrink: 0", "align-self: flex-start"]) {
+    assert.ok(dot.declarations.includes(contract), "priority dot lost " + contract);
+  }
+  for (const level of ["highest", "high", "medium", "low", "none"]) {
+    assert.ok(all.some((rule) => rule.selector === `.sauce-task-priority-dot.is-${level}`),
+      `missing priority dot level: ${level}`);
+  }
+  for (const selector of [
+    ".sauce-todo-filter-controls",
+    ".sauce-todo-filter-right",
+    ".sauce-todo-filter-sep",
+    ".sauce-todo-filter-rule",
+  ]) {
+    assert.ok(all.some((rule) => rule.selector === selector), `missing layout rule: ${selector}`);
   }
 });
 

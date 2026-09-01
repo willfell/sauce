@@ -194,15 +194,16 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 20px;
-  padding: 1px 8px;
+  min-height: 19px;
+  padding: 1px 12px;
   border: 1px solid var(--sauce-hairline);
   border-radius: var(--sauce-radius-pill);
   background: var(--background-primary, #fff);
   color: var(--text-muted, #666);
   font: inherit;
-  font-size: 0.76em;
+  font-size: 0.8em;
   font-weight: 600;
+  letter-spacing: 0.02em;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
@@ -210,13 +211,75 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {
 
 body .sauce-pill-toggle.is-active.sauce-pill-toggle.sauce-pill-toggle {
   border-color: var(--interactive-accent, #7c3aed);
-  background: var(--interactive-accent, #7c3aed);
-  color: var(--text-on-accent, #fff);
+  background: color-mix(in srgb, var(--interactive-accent, #7c3aed) 14%, transparent);
+  color: var(--interactive-accent, #7c3aed);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--interactive-accent, #7c3aed) 30%, transparent);
 }
 
 body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
   outline: 2px solid var(--interactive-accent, #7c3aed);
   outline-offset: 2px;
+}
+
+.sauce-todo-filter-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--size-4-2, 8px);
+  width: 100%;
+}
+
+.sauce-todo-filter-right {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--size-4-2, 8px);
+}
+
+.sauce-todo-filter-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 16px;
+  background: var(--sauce-hairline);
+}
+
+.sauce-todo-filter-rule {
+  height: 1px;
+  width: 100%;
+  background: var(--sauce-hairline);
+}
+
+.sauce-task-priority-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: calc(0.75em - 3.5px);
+}
+
+.sauce-task-priority-dot.is-highest {
+  background: var(--color-red, #dc2626);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-red, #dc2626) 55%, transparent);
+}
+
+.sauce-task-priority-dot.is-high {
+  background: var(--color-red, #dc2626);
+}
+
+.sauce-task-priority-dot.is-medium {
+  background: var(--color-orange, #ea580c);
+}
+
+.sauce-task-priority-dot.is-low {
+  background: var(--text-muted, #666);
+}
+
+.sauce-task-priority-dot.is-none {
+  background: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--text-muted, #666) 45%, transparent);
 }
 
 /* Action rows preserve the established _mobilize two-up grammar. */

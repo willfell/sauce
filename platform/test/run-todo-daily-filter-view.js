@@ -71,6 +71,20 @@ function makeElement(tag = 'div', cls = '') {
       child.parentNode = null;
       return child;
     },
+    insertBefore(child, ref) {
+      const index = ref == null ? this.children.length : this.children.indexOf(ref);
+      const at = index < 0 ? this.children.length : index;
+      const existing = this.children.indexOf(child);
+      if (existing >= 0) this.children.splice(existing, 1);
+      child.parentNode = this;
+      this.children.splice(at > this.children.length ? this.children.length : at, 0, child);
+      return child;
+    },
+    querySelector(selector) {
+      const want = String(selector).replace(/^\./, '');
+      return descendants(this).find((node) =>
+        String(node.className).split(/\s+/).includes(want)) || null;
+    },
     remove() { if (this.parentNode) this.parentNode.removeChild(this); },
     setAttribute(name, value) { this.attributes[name] = String(value); },
     addEventListener(type, listener) { this._listeners[type] = listener; },
@@ -85,6 +99,11 @@ function makeElement(tag = 'div', cls = '') {
     },
     closest() { return null; },
     get firstChild() { return this.children[0] || null; },
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const siblings = this.parentNode.children;
+      return siblings[siblings.indexOf(this) + 1] || null;
+    },
     get textContent() { return this._text + this.children.map((child) => child.textContent).join(''); },
     set textContent(value) { this._text = String(value == null ? '' : value); this.children = []; },
   };
@@ -122,59 +141,138 @@ const TASKS = [
     assert.strictEqual(SOURCE.trim().endsWith('}'), true);
   });
 
-  ok('TV3-SCOPE default Today+Overdue selects exactly the intended open tasks', () => {
+  ok('SB-SCOPE each single scope selects exactly its own open tasks', () => {
     const View = loadClass({});
-    assert.deepStrictEqual(View.DEFAULT_SCOPES, ['today', 'overdue']);
-    const selected = View.selectByScope(TASKS, new Set(View.DEFAULT_SCOPES), TODAY);
-    assert.deepStrictEqual(selected.map((task) => task.title), ['Today low', 'Overdue high']);
+    const titles = (scope, includeDone) =>
+      View.selectByScope(TASKS, scope, includeDone === true, TODAY).map((task) => task.title);
+
+    assert.deepStrictEqual(titles('today'), ['Today low']);
+    assert.deepStrictEqual(titles('overdue'), ['Overdue high']);
+    assert.deepStrictEqual(titles('upcoming'), ['Upcoming highest']);
+    assert.deepStrictEqual(titles('no-date'), ['No date medium']);
+    assert.deepStrictEqual(titles('all'),
+      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium']);
+
+    // An unrecognised scope resolves to today rather than selecting nothing.
+    assert.deepStrictEqual(titles('nonsense'), ['Today low']);
   });
 
-  ok('TV3-SCOPE multi-select adds Upcoming and gates No date behind no-date or All', () => {
+  ok('SB-DONE is an independent include, and All + Done reaches older completions', () => {
     const View = loadClass({});
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['today', 'overdue', 'upcoming']), TODAY).map((task) => task.title),
-      ['Today low', 'Overdue high', 'Upcoming highest'],
-    );
-    assert(!View.selectByScope(TASKS, new Set(['today']), TODAY).some((task) => task.title === 'No date medium'));
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['no-date']), TODAY).map((task) => task.title),
-      ['No date medium'],
-    );
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['all']), TODAY).map((task) => task.title),
-      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium'],
-    );
+    const titles = (scope, includeDone) =>
+      View.selectByScope(TASKS, scope, includeDone === true, TODAY).map((task) => task.title);
+
+    // Off by default on every scope.
+    for (const scope of View.SCOPE_KEYS) {
+      assert(!titles(scope).some((title) => title.startsWith('Done')),
+        `scope ${scope} leaked a done task with includeDone false`);
+    }
+
+    // A date scope adds only today's completions.
+    assert.deepStrictEqual(titles('today', true), ['Today low', 'Done today']);
+    assert(!titles('today', true).includes('Done yesterday'));
+
+    // This is the defect: All + Done must reach a completion older than today.
+    assert.deepStrictEqual(titles('all', true),
+      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium', 'Done today', 'Done yesterday']);
   });
 
-  ok('TV3-STATE guarded storage round-trips canonical client-only state', () => {
+  ok('SB-STATE single-select scope round-trips and rejects junk', () => {
+    const View = loadClass({});
+    const D = '2026-08-11';
+    const storage = makeStorage();
+    assert.deepStrictEqual(View.SCOPE_KEYS, ['today', 'overdue', 'upcoming', 'no-date', 'all']);
+    assert.strictEqual(View.DEFAULT_SCOPE, 'today');
+    assert(!View.SCOPE_KEYS.includes('done'), "'done' is no longer a scope");
+
+    assert.deepStrictEqual(View.readState(storage, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+
+    const written = View.writeState(storage, {
+      scope: 'all', includeDone: true, sort: 'priority', groupByProject: true,
+    }, D);
+    assert.deepStrictEqual(written,
+      { scope: 'all', includeDone: true, sort: 'priority', groupByProject: true, date: D });
+    assert.deepStrictEqual(View.readState(storage, D), written);
+
+    // Unrecognised scope falls back to today; non-booleans are false.
+    assert.deepStrictEqual(
+      View._normalizeState({ scope: 'nonsense', includeDone: 'yes', sort: 'sideways', groupByProject: 1, date: D }, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+
+    // Bad JSON and hostile storage both degrade to the default.
+    storage.data.set(View.STORAGE_KEY, '{bad json');
+    assert.deepStrictEqual(View.readState(storage, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+    const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+    assert.deepStrictEqual(View.readState(throwing, D),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: D });
+    assert.doesNotThrow(() => View.writeState(throwing, written, D));
+  });
+
+  ok('SB-STATE state is keyed to the note date and legacy blobs are discarded', () => {
     const View = loadClass({});
     const storage = makeStorage();
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    const written = View.writeState(storage, { scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true });
-    assert.deepStrictEqual(written, { scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true });
-    assert.deepStrictEqual(View.readState(storage), written);
+    View.writeState(storage, { scope: 'all', includeDone: true, sort: 'priority', groupByProject: true }, '2026-08-11');
 
-    storage.data.set(View.STORAGE_KEY, '{bad json');
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    storage.data.set(View.STORAGE_KEY, JSON.stringify({ scopes: [], sort: 'priority' }));
-    assert.deepStrictEqual(View.readState(storage), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
-    assert.deepStrictEqual(View.readState(throwing), { scopes: ['today', 'overdue'], sort: 'due', groupByProject: false });
-    assert.doesNotThrow(() => View.writeState(throwing, written));
+    // Same note: restored.
+    assert.strictEqual(View.readState(storage, '2026-08-11').scope, 'all');
+    // Different note: default, and the stored blob is left alone until written.
+    assert.deepStrictEqual(View.readState(storage, '2026-08-12'),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: '2026-08-12' });
+
+    // A pre-existing v0.288.0 blob has no `date` key at all and is discarded whole,
+    // including its sort and grouping — not partially carried forward.
+    storage.data.set(View.STORAGE_KEY,
+      JSON.stringify({ scopes: ['upcoming', 'no-date'], sort: 'priority', groupByProject: true }));
+    assert.deepStrictEqual(View.readState(storage, '2026-08-11'),
+      { scope: 'today', includeDone: false, sort: 'due', groupByProject: false, date: '2026-08-11' });
   });
 
-  ok('TV4-DONE is off by default and includes only tasks completed today when enabled', () => {
+  ok('SB-PRIORITY classifies every level and lands the dot after the checkbox', () => {
     const View = loadClass({});
-    assert(!View.DEFAULT_SCOPES.includes('done'));
-    assert(!View.selectByScope(TASKS, new Set(View.DEFAULT_SCOPES), TODAY).some((task) => task.status === 'done'));
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['done']), TODAY).map((task) => task.title),
-      ['Done today'],
-    );
-    assert.deepStrictEqual(
-      View.selectByScope(TASKS, new Set(['all', 'done']), TODAY).map((task) => task.title),
-      ['Today low', 'Overdue high', 'Upcoming highest', 'No date medium', 'Done today'],
-    );
+
+    assert.strictEqual(View.priorityLevel({ priority: 'highest' }), 'highest');
+    assert.strictEqual(View.priorityLevel({ priority: '  High  ' }), 'high');
+    assert.strictEqual(View.priorityLevel({ priority: 'MEDIUM' }), 'medium');
+    assert.strictEqual(View.priorityLevel({ priority: 'low' }), 'low');
+    assert.strictEqual(View.priorityLevel({ priority: '' }), 'none');
+    assert.strictEqual(View.priorityLevel({ priority: 'urgent' }), 'none');
+    assert.strictEqual(View.priorityLevel({}), 'none');
+    assert.strictEqual(View.priorityLevel(null), 'none');
+
+    // Real row shape: row > titlegroup > [cbwrap, title]
+    const row = makeElement('div', 'sauce-task-today-row');
+    const group = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+    const cbwrap = group.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+    const title = group.createEl('span', { cls: 'sauce-task-today-title', text: 'Retire Atlas' });
+
+    const dot = View.decorateRow(row, { priority: 'high' });
+    assert(dot, 'decorateRow returned nothing');
+    assert.deepStrictEqual(String(dot.className).split(/\s+/).sort(),
+      ['is-high', 'sauce-task-priority-dot']);
+    assert.strictEqual(dot.attributes['aria-hidden'], 'true');
+    assert.deepStrictEqual(group.children, [cbwrap, dot, title],
+      'dot must sit between the checkbox and the title');
+
+    // An unset priority still renders a dot, so every row keeps the same
+    // left edge and the column does not ragged out.
+    const bare = makeElement('div', 'sauce-task-today-row');
+    bare.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+    assert(String(View.decorateRow(bare, {}).className).includes('is-none'));
+
+    // A row without the expected structure degrades to no dot, never a throw.
+    assert.doesNotThrow(() => View.decorateRow(makeElement('div', 'x'), { priority: 'low' }));
+    assert.strictEqual(View.decorateRow(null, { priority: 'low' }), null);
+  });
+
+  ok('SB-NOTEDATE reads the date from the note filename, not the clock', () => {
+    const View = loadClass({});
+    assert.strictEqual(View.noteDate({ file: { name: 'ToDo-2026-08-31' } }), '2026-08-31');
+    assert.strictEqual(View.noteDate({ file: { name: 'ToDo-2026-08-31.md' } }), '2026-08-31');
+    assert.strictEqual(View.noteDate({ file: { name: 'Some Other Note' } }), '');
+    assert.strictEqual(View.noteDate({ file: {} }), '');
+    assert.strictEqual(View.noteDate(null), '');
   });
 
   ok('TV4-GROUP partitions the same sorted rows by project without loss or duplication', () => {
@@ -230,7 +328,7 @@ const TASKS = [
     );
   });
 
-  await okAsync('TV3-RENDER paints one flat ul, shared pills, live rows, and persisted interactions', async () => {
+  await okAsync('SB-RENDER paints four pill groups and persists every interaction', async () => {
     const storage = makeStorage();
     const rendered = [];
     let clockReads = 0;
@@ -238,14 +336,16 @@ const TASKS = [
       localStorage: storage,
       moment: () => { clockReads += 1; return { format: () => TODAY }; },
       customJS: {
-        RenderSafe: { page: () => ({ type: 'to-do' }) },
-        TaskEntity: {
-          parseNote(page) { return { ...page, path: page.file.path }; },
-        },
+        RenderSafe: { page: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }) },
+        TaskEntity: { parseNote(page) { return { ...page, path: page.file.path }; } },
         TaskTodayList: {
           renderTaskRow(container, task) {
             rendered.push(task.title);
-            return container.createEl('li', { cls: 'sauce-task-today-row', text: task.title });
+            const row = container.createEl('div', { cls: 'sauce-task-today-row' });
+            const group = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+            group.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+            group.createEl('span', { cls: 'sauce-task-today-title', text: task.title });
+            return row;
           },
         },
         TaskDialog: {},
@@ -256,14 +356,11 @@ const TASKS = [
         },
         SpaceDailyDashboard: {
           compareTasksByDue(a, b) {
-            const ad = a.due || '9999-99-99';
-            const bd = b.due || '9999-99-99';
-            return ad.localeCompare(bd);
+            return String(a.due || '9999-99-99').localeCompare(String(b.due || '9999-99-99'));
           },
           compareTasksByPriority(a, b) {
             const rank = { highest: 4, high: 3, medium: 2, low: 1 };
-            return (rank[b.priority] || 0) - (rank[a.priority] || 0)
-              || this.compareTasksByDue(a, b);
+            return (rank[b.priority] || 0) - (rank[a.priority] || 0) || this.compareTasksByDue(a, b);
           },
         },
       },
@@ -272,46 +369,56 @@ const TASKS = [
     const root = makeElement();
     const dv = {
       container: root,
-      current: () => ({ type: 'to-do' }),
+      current: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }),
       pages: () => dataArray(TASKS),
     };
     await new View().render(dv);
 
     assert.strictEqual(clockReads, 1, 'render reads the live clock exactly once');
+    assert.strictEqual(byClass(root, 'sauce-pill-group').length, 4, 'scopes, done, sort, group');
+    assert.strictEqual(byClass(root, 'sauce-todo-filter-sep').length, 2);
+    assert.strictEqual(byClass(root, 'sauce-todo-filter-rule').length, 1);
     assert.strictEqual(byClass(root, 'sauce-todo-daily-filter-list').length, 1);
-    assert.strictEqual(byClass(root, 'sauce-section-summary').length, 0, 'flat list has no project headers');
-    const groups = byClass(root, 'sauce-pill-group');
-    assert.strictEqual(groups.length, 2);
+
     const buttons = descendants(root).filter((node) => node.tagName === 'BUTTON');
-    assert.strictEqual(buttons.length, 9);
-    assert(buttons.every((button) => String(button.className).split(/\s+/).includes('sauce-pill-toggle')));
-    assert.deepStrictEqual(rendered, ['Overdue high', 'Today low'],
-      JSON.stringify({ state: View.readState(storage), nodes: descendants(root).map((node) => [node.tagName, node.className, node.textContent]) }));
+    assert.deepStrictEqual(buttons.map((b) => b.textContent),
+      ['Today', 'Overdue', 'Upcoming', 'No date', 'All', 'Done', 'Due', 'Priority', 'By Project']);
+    assert(buttons.every((b) => String(b.className).split(/\s+/).includes('sauce-pill-toggle')));
 
-    const upcoming = buttons.find((button) => button.textContent === 'Upcoming');
-    await upcoming.fire('click');
-    assert(String(upcoming.className).includes('is-active'));
-    assert(rendered.slice(-3).includes('Upcoming highest'));
+    // Default is Today alone — not Today + Overdue.
+    assert.deepStrictEqual(rendered, ['Today low']);
+    assert.strictEqual(byClass(root, 'sauce-task-priority-dot').length, 1);
 
-    const priority = buttons.find((button) => button.textContent === 'Priority');
-    await priority.fire('click');
-    assert(String(priority.className).includes('is-active'));
-    assert.deepStrictEqual(View.readState(storage), {
-      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority', groupByProject: false,
+    const find = (label) => buttons.find((b) => b.textContent === label);
+
+    // Scope is single-select: choosing Overdue deselects Today.
+    await find('Overdue').fire('click');
+    assert(String(find('Overdue').className).includes('is-active'));
+    assert(!String(find('Today').className).includes('is-active'));
+    assert.strictEqual(rendered[rendered.length - 1], 'Overdue high');
+
+    // Clicking the active scope again keeps it active — it can never empty.
+    await find('Overdue').fire('click');
+    assert(String(find('Overdue').className).includes('is-active'));
+    assert.strictEqual(View.readState(storage, TODAY).scope, 'overdue');
+
+    // Done is independent of scope.
+    await find('All').fire('click');
+    await find('Done').fire('click');
+    assert(String(find('Done').className).includes('is-active'));
+    assert(String(find('All').className).includes('is-active'));
+    assert.deepStrictEqual(View.readState(storage, TODAY), {
+      scope: 'all', includeDone: true, sort: 'due', groupByProject: false, date: TODAY,
     });
+    assert(rendered.slice(-6).includes('Done yesterday'), 'All + Done reaches older completions');
 
-    const groupToggle = buttons.find((button) => button.textContent === 'By Project');
-    await groupToggle.fire('click');
-    assert(String(groupToggle.className).includes('is-active'));
+    await find('Priority').fire('click');
+    assert.strictEqual(View.readState(storage, TODAY).sort, 'priority');
+
+    await find('By Project').fire('click');
+    assert(String(find('By Project').className).includes('is-active'));
     assert.strictEqual(byClass(root, 'sauce-todo-filter-project-label').length, 2);
-    assert.deepStrictEqual(View.readState(storage), {
-      scopes: ['today', 'overdue', 'upcoming'], sort: 'priority', groupByProject: true,
-    });
-
-    const done = buttons.find((button) => button.textContent === 'Done');
-    await done.fire('click');
-    assert(rendered.slice(-4).includes('Done today'));
-    assert(!rendered.slice(-4).includes('Done yesterday'));
+    assert.strictEqual(View.readState(storage, TODAY).groupByProject, true);
   });
 
   await okAsync('TV3-COLD missing TaskEntity or TaskTodayList is a no-throw no-op', async () => {

@@ -111,10 +111,6 @@
  *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
-  static get _TASK_SORT_STORAGE_KEY() {
-    return "sauce-daily-dashboard:task-sort-mode";
-  }
-
   /**
    * Daily task sort policy. These comparators intentionally return zero for
    * equal values; sortTasks decorates with the source index so ties stay stable
@@ -152,35 +148,6 @@ class SpaceDailyDashboard {
       .map((task, index) => ({ task, index }))
       .sort((a, b) => comparator(a.task, b.task) || a.index - b.index)
       .map((entry) => entry.task);
-  }
-
-  static readTaskSortMode(storage) {
-    try {
-      if (!storage || typeof storage.getItem !== "function") return "due";
-      return SpaceDailyDashboard.normalizeTaskSortMode(
-        storage.getItem(SpaceDailyDashboard._TASK_SORT_STORAGE_KEY)
-      );
-    } catch (_e) {
-      return "due";
-    }
-  }
-
-  static writeTaskSortMode(storage, mode) {
-    const normalized = SpaceDailyDashboard.normalizeTaskSortMode(mode);
-    try {
-      if (storage && typeof storage.setItem === "function") {
-        storage.setItem(SpaceDailyDashboard._TASK_SORT_STORAGE_KEY, normalized);
-      }
-    } catch (_e) { /* client-only preference persistence is best-effort */ }
-    return normalized;
-  }
-
-  static taskSortStorage() {
-    try {
-      return (typeof window !== "undefined" && window) ? window.localStorage : null;
-    } catch (_e) {
-      return null;
-    }
   }
 
   /**
@@ -620,21 +587,11 @@ class SpaceDailyDashboard {
       if (overdueCount > 0)     tasksRightHtml += `<span class="sauce-section-overdue-pill"><span class="sauce-section-pill-n">${overdueCount}</span><span class="sauce-section-pill-label"> Overdue</span></span>`;
       if (doneCount > 0)        tasksRightHtml += `<span class="sauce-section-done-pill"><span class="sauce-section-pill-n">${doneCount}</span><span class="sauce-section-pill-label"> Done</span></span>`;
 
-      let taskSortControl = null;
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
         iconHtml: icons.checkSquare,
         titleHtml: '<span class="sauce-section-title-link">Tasks</span>',
         rightHtml: tasksRightHtml,
-        renderRight: (countsHost) => {
-          taskSortControl = countsHost.createEl("span");
-          taskSortControl.className = "sauce-daily-task-sort sauce-pill-group";
-          taskSortControl.setAttribute("role", "group");
-          taskSortControl.setAttribute("aria-label", "Sort daily tasks");
-          taskSortControl.addEventListener("click", (event) => {
-            try { event.stopPropagation(); } catch (_e) {}
-          });
-        },
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:tasks",
         sectionState,
@@ -656,23 +613,6 @@ class SpaceDailyDashboard {
       // Done tasks stay surfaced via header count only; their notes stay in
       // spice/tasks/_done/.
       {
-        const taskSortStorage = SpaceDailyDashboard.taskSortStorage();
-        let taskSortMode = SpaceDailyDashboard.readTaskSortMode(taskSortStorage);
-
-        // Client-only sort control. The preference never enters the vault:
-        // localStorage is the sole persistence rail and every access is guarded.
-        const sortControl = taskSortControl;
-
-        const sortButtons = {};
-        const updateSortButtonState = () => {
-          for (const mode of ["due", "priority"]) {
-            const active = mode === taskSortMode;
-            const button = sortButtons[mode];
-            button.setAttribute("aria-pressed", active ? "true" : "false");
-            button.className = `sauce-pill-toggle${active ? " is-active" : ""}`;
-          }
-        };
-
         const taskLists = tasksBody.createEl("div");
         taskLists.className = "sauce-daily-task-lists";
 
@@ -746,8 +686,8 @@ class SpaceDailyDashboard {
           // across mode changes. sortTasks always returns a fresh array, so the
           // TaskEntity/queryToday source bands are never mutated.
           taskLists.textContent = "";
-          const sortedOpen = SpaceDailyDashboard.sortTasks(openTasks, taskSortMode);
-          const sortedOverdue = SpaceDailyDashboard.sortTasks(overdueTasks, taskSortMode);
+          const sortedOpen = SpaceDailyDashboard.sortTasks(openTasks, "due");
+          const sortedOverdue = SpaceDailyDashboard.sortTasks(overdueTasks, "due");
 
           if (sortedOpen.length > 0) {
             const tasksList = taskLists.createEl("ul");
@@ -767,22 +707,6 @@ class SpaceDailyDashboard {
           }
         };
 
-        for (const mode of ["due", "priority"]) {
-          const button = sortControl.createEl("button");
-          sortButtons[mode] = button;
-          button.className = "sauce-pill-toggle";
-          button.textContent = mode === "due" ? "Due" : "Priority";
-          button.setAttribute("type", "button");
-          button.setAttribute("aria-label", `Sort daily tasks by ${mode}`);
-          button.addEventListener("click", (event) => {
-            try { event.preventDefault(); } catch (_e) {}
-            try { event.stopPropagation(); } catch (_e) {}
-            taskSortMode = SpaceDailyDashboard.writeTaskSortMode(taskSortStorage, mode);
-            updateSortButtonState();
-            renderTaskLists();
-          });
-        }
-        updateSortButtonState();
         renderTaskLists();
       }
     }

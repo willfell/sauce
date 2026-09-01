@@ -240,34 +240,7 @@ async function renderDailyTaskFixture(today, options) {
     assert(Dash.normalizeTaskSortMode('not-a-mode') === 'due', 'unknown mode safely defaults Due');
   });
 
-  await ok('TD1B-SORT-STORAGE client-only namespaced persistence is guarded and defaults Due', async () => {
-    const Dash = loadDashboard(makeMomentWindow(), {});
-    const data = new Map();
-    const storage = {
-      getItem(key) { return data.has(key) ? data.get(key) : null; },
-      setItem(key, value) { data.set(key, value); },
-    };
-    assert(Dash.readTaskSortMode(null) === 'due', 'missing localStorage falls back Due');
-    assert(Dash.readTaskSortMode(storage) === 'due', 'empty localStorage falls back Due');
-    assert(Dash.writeTaskSortMode(storage, 'priority') === 'priority', 'Priority selection normalizes');
-    assert(data.size === 1 && data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
-      'selection writes exactly the namespaced client key: ' + JSON.stringify(Array.from(data.entries())));
-    assert(Dash.readTaskSortMode(storage) === 'priority', 'persisted Priority reloads');
-    const throwing = {
-      getItem() { throw new Error('blocked'); },
-      setItem() { throw new Error('blocked'); },
-    };
-    assert(Dash.readTaskSortMode(throwing) === 'due', 'throwing localStorage read falls back Due');
-    assert(Dash.writeTaskSortMode(throwing, 'priority') === 'priority',
-      'throwing localStorage write does not break current Priority selection');
-  });
-
-  await ok('TD1B-NONEXISTENT-UPCOMING-BAND real control sorts Today/Overdue independently and excludes future tasks', async () => {
-    const data = new Map();
-    const storage = {
-      getItem(key) { return data.has(key) ? data.get(key) : null; },
-      setItem(key, value) { data.set(key, value); },
-    };
+  await ok('TD1B-NONEXISTENT-UPCOMING-BAND fixed Due order sorts Today/Overdue independently and excludes future tasks', async () => {
     const taskPages = [
       { type: 'task', status: 'open', title: 'Today Low', due: TODAY, priority: 'low', file: { path: 'spice/tasks/today-low.md' } },
       { type: 'task', status: 'open', title: 'Today Highest', due: TODAY, priority: 'highest', file: { path: 'spice/tasks/today-highest.md' } },
@@ -276,44 +249,15 @@ async function renderDailyTaskFixture(today, options) {
       { type: 'task', status: 'open', title: 'Overdue Low', due: '2026-07-01', priority: 'low', file: { path: 'spice/tasks/overdue-low.md' } },
       { type: 'task', status: 'open', title: 'Future Highest', due: '2026-07-04', priority: 'highest', file: { path: 'spice/tasks/future-highest.md' } },
     ];
-    const fixture = await renderDailyTaskFixture(TODAY, { storage, taskPages });
+    const fixture = await renderDailyTaskFixture(TODAY, { taskPages });
     const pathOrder = (list) => fixture.allNodes(list)
       .filter((node) => node._tag === 'li')
       .map((node) => node.dataset.sauceTaskPath);
     const byClass = (cls) => fixture.allNodes(fixture.root)
       .filter((node) => String(node.className || '').split(/\s+/).includes(cls));
     try {
-      const controls = byClass('sauce-daily-task-sort');
-      assert(controls.length === 1, 'one always-present sort control renders for Tasks');
-      const countsHost = controls[0].parentNode;
-      const summary = countsHost && countsHost.parentNode;
-      assert(countsHost && countsHost.className === 'sauce-section-counts'
-          && summary && summary.className === 'sauce-section-summary',
-        'sort control renders in the Tasks header count cluster, not the section body');
-      assert(countsHost.innerHTML.includes('sauce-section-open-pill')
-          && countsHost.innerHTML.includes('sauce-section-overdue-pill'),
-        'Open/Overdue counts remain before the trailing sort control');
-      assert(controls[0].attributes.role === 'group'
-          && controls[0].attributes['aria-label'] === 'Sort daily tasks',
-        'control has accessible group semantics: ' + JSON.stringify(controls[0].attributes));
-      assert(!fixture.allNodes(controls[0]).some((node) => node.textContent === 'Sort'),
-        'header control omits the redundant Sort label');
-      const buttons = controls[0]._children.filter((node) => node._tag === 'button');
-      assert(buttons.length === 2 && buttons.map((b) => b.textContent).join(',') === 'Due,Priority',
-        'control exposes labeled Due/Priority buttons');
-      const dueButton = buttons.find((b) => b.textContent === 'Due');
-      const priorityButton = buttons.find((b) => b.textContent === 'Priority');
-      assert(buttons.every((button) => String(button.className).split(/\s+/).includes('sauce-pill-toggle')
-          && button.style.cssText === ''),
-        'buttons consume the shared lean toggle-pill primitive without fat inline styling');
-      assert(dueButton.attributes['aria-pressed'] === 'true'
-          && priorityButton.attributes['aria-pressed'] === 'false'
-          && String(dueButton.className).split(/\s+/).includes('is-active')
-          && !String(priorityButton.className).split(/\s+/).includes('is-active'),
-        'Due is the default accessible and visual active state');
-
-      let todayLists = byClass('sauce-daily-task-today-list');
-      let overdueLists = byClass('sauce-section-overdue-list');
+      const todayLists = byClass('sauce-daily-task-today-list');
+      const overdueLists = byClass('sauce-section-overdue-list');
       assert(todayLists.length === 1 && overdueLists.length === 1,
         'actual Today and Overdue bands render separately');
       assert(JSON.stringify(pathOrder(todayLists[0])) === JSON.stringify([
@@ -329,66 +273,6 @@ async function renderDailyTaskFixture(today, options) {
         'Daily does not invent an Upcoming band');
       assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
         'render performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
-
-      const details = summary && summary.parentNode;
-      const detailsOpenBeforeSort = details && details.open;
-      let stoppedSortPropagation = 0;
-      await priorityButton._fire('click', {
-        target: priorityButton, preventDefault() {}, stopPropagation() { stoppedSortPropagation++; },
-      });
-      assert(dueButton.attributes['aria-pressed'] === 'false'
-          && priorityButton.attributes['aria-pressed'] === 'true'
-          && !String(dueButton.className).split(/\s+/).includes('is-active')
-          && String(priorityButton.className).split(/\s+/).includes('is-active'),
-        'selection updates accessible and visual active state');
-      assert(stoppedSortPropagation === 1 && details.open === detailsOpenBeforeSort,
-        'sort click is isolated from the Tasks details disclosure');
-      assert(data.get('sauce-daily-dashboard:task-sort-mode') === 'priority',
-        'selection persists Priority in namespaced localStorage');
-      assert(byClass('sauce-daily-task-sort').length === 1,
-        'mode rerender retains one control/listener owner');
-      todayLists = byClass('sauce-daily-task-today-list');
-      overdueLists = byClass('sauce-section-overdue-list');
-      assert(JSON.stringify(pathOrder(todayLists[0])) === JSON.stringify([
-        'spice/tasks/today-highest.md', 'spice/tasks/today-low.md', 'spice/tasks/today-unset.md',
-      ]), 'Priority reorders Today only: ' + JSON.stringify(pathOrder(todayLists[0])));
-      assert(JSON.stringify(pathOrder(overdueLists[0])) === JSON.stringify([
-        'spice/tasks/overdue-high.md', 'spice/tasks/overdue-low.md',
-      ]), 'Priority reorders Overdue only: ' + JSON.stringify(pathOrder(overdueLists[0])));
-      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
-        'sort selection performs zero vault/frontmatter writes: ' + JSON.stringify(fixture.writes));
-    } finally {
-      fixture.cleanup();
-    }
-
-    const reload = await renderDailyTaskFixture(TODAY, { storage, taskPages });
-    try {
-      const control = reload.allNodes(reload.root).find((node) =>
-        String(node.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
-      const buttons = control._children.filter((node) => node._tag === 'button');
-      assert(buttons.find((b) => b.textContent === 'Priority').attributes['aria-pressed'] === 'true',
-        'persisted Priority survives a fresh dashboard render');
-      assert(reload.writes.adapter === 0 && reload.writes.frontmatter === 0,
-        'reload persistence remains client-only');
-    } finally {
-      reload.cleanup();
-    }
-  });
-
-  await ok('TD1B-SORT-STORAGE throwing browser storage safely renders Due without vault writes', async () => {
-    const throwing = {
-      getItem() { throw new Error('blocked'); },
-      setItem() { throw new Error('blocked'); },
-    };
-    const fixture = await renderDailyTaskFixture(TODAY, { storage: throwing });
-    try {
-      const control = fixture.allNodes(fixture.root).find((node) =>
-        String(node.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
-      const buttons = control._children.filter((node) => node._tag === 'button');
-      assert(buttons.find((b) => b.textContent === 'Due').attributes['aria-pressed'] === 'true',
-        'throwing storage renders safe Due state');
-      assert(fixture.writes.adapter === 0 && fixture.writes.frontmatter === 0,
-        'throwing storage does not fall back to a vault write');
     } finally {
       fixture.cleanup();
     }
@@ -418,14 +302,10 @@ async function renderDailyTaskFixture(today, options) {
     const fixture = await renderDailyTaskFixture(TODAY);
     const { root, openFile, overdueFile, allNodes } = fixture;
     try {
-    const sortControl = allNodes(root).find((n) =>
-      String(n.className || '').split(/\s+/).includes('sauce-daily-task-sort'));
-    const priorityButton = sortControl._children.find((n) => n._tag === 'button' && n.textContent === 'Priority');
-    await priorityButton._fire('click', { target: priorityButton, preventDefault() {}, stopPropagation() {} });
     const tomorrowButtons = allNodes(root).filter((n) =>
       String(n.className || '').split(/\s+/).includes('sauce-daily-task-tomorrow'));
     assert(tomorrowButtons.length === 2,
-      'Priority rerender retains one tomorrow action for open + overdue: ' + tomorrowButtons.length);
+      'both open + overdue rows carry their own tomorrow action: ' + tomorrowButtons.length);
     const rowsBefore = allNodes(root).filter((n) => n._tag === 'li');
     assert(rowsBefore.length === 2, 'open and overdue private rows both rendered');
 
@@ -933,6 +813,36 @@ async function renderDailyTaskFixture(today, options) {
     await dash.render(null, {});
     await dash.render({ container: makeDashEl(), el: () => makeDashEl(), pages: () => { throw new Error('cold index'); } }, {});
     assert(true, 'cold render paths resolved');
+  });
+
+  await ok('SB-HOME sort control removed, comparators and count pills retained', async () => {
+    for (const gone of [
+      'sauce-daily-dashboard:task-sort-mode',
+      'sauce-daily-task-sort',
+      'readTaskSortMode',
+      'writeTaskSortMode',
+      'taskSortStorage',
+      'updateSortButtonState',
+    ]) {
+      assert(!SDD_SRC.includes(gone),
+        `Home must no longer carry its own sort control: found ${gone}`);
+    }
+
+    // The to-do note delegates to these through customJS. Removing them with the
+    // control would silently drop ToDoDailyFilterView onto its private fallbacks.
+    for (const kept of [
+      'static compareTasksByDue',
+      'static compareTasksByPriority',
+      'static normalizeTaskSortMode',
+      'static sortTasks',
+    ]) {
+      assert(SDD_SRC.includes(kept), `ToDoDailyFilterView depends on ${kept}`);
+    }
+
+    // The glance affordances stay.
+    for (const kept of ['sauce-section-open-pill', 'sauce-section-done-pill']) {
+      assert(SDD_SRC.includes(kept), `Home lost its count pill: ${kept}`);
+    }
   });
 
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
