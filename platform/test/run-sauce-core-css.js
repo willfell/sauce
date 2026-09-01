@@ -725,7 +725,7 @@ test("SB-CSS priority dot, control layout, and dividers are bound", () => {
   const all = rules(css);
   const dot = all.find((rule) => rule.selector === ".sauce-task-priority-dot");
   assert.ok(dot, "missing .sauce-task-priority-dot base rule");
-  for (const contract of ["width: 7px", "height: 7px", "border-radius: 50%", "flex-shrink: 0"]) {
+  for (const contract of ["width: 7px", "height: 7px", "border-radius: 50%", "flex-shrink: 0", "align-self: flex-start"]) {
     assert.ok(dot.declarations.includes(contract), "priority dot lost " + contract);
   }
   for (const level of ["highest", "high", "medium", "low", "none"]) {

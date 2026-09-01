@@ -256,20 +256,21 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
-  align-self: center;
+  align-self: flex-start;
+  margin-top: calc(0.75em - 3.5px);
 }
 
 .sauce-task-priority-dot.is-highest {
-  background: var(--color-red);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-red) 55%, transparent);
+  background: var(--color-red, #dc2626);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-red, #dc2626) 55%, transparent);
 }
 
 .sauce-task-priority-dot.is-high {
-  background: var(--color-red);
+  background: var(--color-red, #dc2626);
 }
 
 .sauce-task-priority-dot.is-medium {
-  background: var(--color-orange);
+  background: var(--color-orange, #ea580c);
 }
 
 .sauce-task-priority-dot.is-low {
