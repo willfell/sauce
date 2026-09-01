@@ -5,17 +5,19 @@ load_when: Installing, updating, binding, or debugging the loop plugin surface; 
 
 # Loop plugin — onboarding runbook
 
-The `loop` plugin centralizes the meta-loop skill surface (status, review, brainstorm, plan, execute, run, intake, init, block-review) in ONE place — this repo, `plugins/loop/` — and every repo binds itself to a vault/board with a committed `.loop/config.json`. A plugin reload puts every session of every project on the same logic. Design: `Docs/superpowers/specs/2026-07-26-meta-loop-plugin-design.md`.
+The `loop` plugin centralizes the meta-loop skill surface (status, review, brainstorm, plan, execute, run, intake, init, block-review) in ONE place — `willfell/wac.plugins`, `plugins/loop/` — and every repo binds itself to a vault/board with a committed `.loop/config.json`. A plugin reload puts every session of every project on the same logic. Design: `Docs/superpowers/specs/2026-07-26-meta-loop-plugin-design.md`.
 
 ## Architecture in three sentences
 
 Skill bodies live once in `plugins/loop/skills/*/SKILL.md`; Claude reads them as an installed plugin (`/loop:*`), and Codex reads the SAME bodies through generated `.agents/skills/loop-*` routers that resolve the body location from `.loop/config.json` (`codex.plugin_root`) at use time. The binding contract `.loop/config.json` declares vault root, project slug, board/cards paths, id prefix, policy knobs, and coordinator location; the plugin's resolver (`loop-config.js`) turns it into env (`DELIVERY_*`, `SAUCE_LOOP_*`) that retargets the unchanged coordinator, batch-runner, digest, and intake rails at that board. Board-writer authority is untouched: the coordinator remains the only operational writer and card-intake the only planning writer — the plugin skills orchestrate those CLIs and never hand-edit boards.
 
+Sauce's own automation never depends on the installed plugin: `scripts/autoloop/codex-coordinator.js` and `scripts/autoloop/board-health-launchd.js` require sauce's own runtime copy of the resolver at `scripts/autoloop/loop-config.js` (same module, self-contained, no cross-repo dependency) to self-resolve `.loop/config.json` when `SAUCE_LOOP_*` env is unset. The plugin's copy under `plugins/loop/scripts/loop-config.js` in `willfell/wac.plugins` is for skill use only — the two copies are kept in sync by hand, not shared at runtime.
+
 ## Install (Claude, once per machine)
 
 ```text
-/plugin marketplace add willfell/sauce
-/plugin install loop@sauce
+/plugin marketplace add willfell/wac.plugins
+/plugin install loop@wac-plugins
 ```
 
 Restart the session (or open a new one) — `/loop:status`, `/loop:init`, etc. are now available in EVERY repo.
@@ -23,7 +25,7 @@ Restart the session (or open a new one) — `/loop:status`, `/loop:init`, etc. a
 **Reload after the plugin changes** (any merged sauce commit is a new plugin version):
 
 ```text
-/plugin marketplace update sauce
+/plugin marketplace update wac-plugins
 ```
 
 then restart the session. Repos can auto-recommend the plugin: `/loop:init` offers to write `extraKnownMarketplaces` + `enabledPlugins` into the repo's `.claude/settings.json`, which prompts anyone opening that repo to install.
@@ -33,7 +35,7 @@ then restart the session. Repos can auto-recommend the plugin: `/loop:init` offe
 Codex never reads `~/.claude/`. Its surface is the generated `.agents/skills/loop-*` routers committed in each bound repo, which point at the canonical bodies via `codex.plugin_root` in `.loop/config.json`:
 
 - Consumer/brew setups: `plugin_root = /opt/homebrew/opt/sauce/libexec/plugins/loop` — **reload = `brew upgrade sauce`**, nothing else (routers bake no paths and never go stale).
-- Dev setups: point `plugin_root` at the local sauce clone's `plugins/loop`.
+- Dev setups: point `plugin_root` at the local wac.plugins clone's `plugins/loop`.
 
 Regenerate routers only when the SKILL SET changes: `node <plugin_root>/scripts/gen-codex-routers.js --repo . --json` (also run by `/loop:init`). CI keeps the workshop's own routers honest via the `--check` byte-determinism gate.
 
@@ -84,7 +86,7 @@ Legacy names still answer as deprecation aliases: `/delivery-status` → `/loop:
 
 Run in a fresh Claude session in the sauce workshop repo:
 
-1. `/plugin marketplace add willfell/sauce` → `/plugin install loop@sauce` → restart session. (Workshop is already bound — `.loop/config.json` is committed.)
+1. `/plugin marketplace add willfell/wac.plugins` → `/plugin install loop@wac-plugins` → restart session. (Workshop is already bound — `.loop/config.json` is committed.)
 2. `/loop:status` — expect the real board digest, byte-for-byte the same content `/delivery-status` used to give.
 3. `/loop:brainstorm` a TOY epic — e.g. "a `docs/toys/loop-plugin-smoke.md` note describing the plugin smoke test". Expect: one-question-at-a-time dialogue, proposal written under `spice/projects/sauce/docs/proposals/`.
 4. `/loop:plan` against the proposal — expect prompts for **id prefix** (answer `TOY`) and **board priority position** (answer `bottom`), a dry-run receipt to approve, then mint via the intake rail, then the "execute now or leave for the loop?" question — answer **leave for the loop**.

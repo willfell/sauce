@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * run-loop-config — preflight harness for the loop plugin's binding resolver
- * (plugins/loop/scripts/loop-config.js). Fixture families: config resolution,
- * refusals (missing/invalid/coupling), tilde expansion, env-map emission,
- * coordinator resolution, and the `check` vault validations. Zero-dep.
+ * run-loop-config — preflight harness for sauce's own runtime copy of the
+ * loop plugin's binding resolver (scripts/autoloop/loop-config.js — the
+ * plugin ships its own copy for skill use; this is the coordinator's).
+ * Fixture families: config resolution, refusals (missing/invalid/coupling),
+ * tilde expansion, env-map emission, coordinator resolution, and the `check`
+ * vault validations. Zero-dep.
  */
 'use strict';
 const path = require('path');
@@ -11,8 +13,8 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-const LC = require(path.resolve(__dirname, '..', '..', 'plugins', 'loop', 'scripts', 'loop-config.js'));
-const CLI = path.resolve(__dirname, '..', '..', 'plugins', 'loop', 'scripts', 'loop-config.js');
+const LC = require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'loop-config.js'));
+const CLI = path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'loop-config.js');
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {

@@ -86,13 +86,16 @@ function loopBindingEnv(env = process.env) {
   };
 }
 // Self-resolve board/cards/vault defaults from the bound repo's committed
-// .loop/config.json via the loop plugin resolver. Returns null (→ literal
-// fallback) when the repo is unbound, the resolver is absent, or resolution
-// refuses. brewPrefix is stubbed because only the vault-layout fields are
-// consumed here, never the coordinator path.
+// .loop/config.json via sauce's own runtime copy of the loop plugin's
+// binding resolver (scripts/autoloop/loop-config.js — the plugin ships its
+// own copy for skill use; this is the coordinator's, so it never depends on
+// the marketplace plugin being installed). Returns null (→ literal fallback)
+// when the repo is unbound, the resolver is absent, or resolution refuses.
+// brewPrefix is stubbed because only the vault-layout fields are consumed
+// here, never the coordinator path.
 function resolveBoundDefaults(cwd) {
   try {
-    const resolver = require(path.join(__dirname, '..', '..', 'plugins', 'loop', 'scripts', 'loop-config.js'));
+    const resolver = require(path.join(__dirname, 'loop-config.js'));
     const res = resolver.resolveBinding(cwd, { brewPrefix: () => '' });
     if (!res || !res.ok) return null;
     const c = res.config;

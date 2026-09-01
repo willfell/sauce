@@ -34,7 +34,7 @@ function installedCoordinatorPath() {
 }
 
 function boundProjectSlug(repoPath) {
-  const resolver = require(path.join(__dirname, '..', '..', 'plugins', 'loop', 'scripts', 'loop-config.js'));
+  const resolver = require(path.join(__dirname, 'loop-config.js'));
   const res = resolver.resolveBinding(repoPath, { brewPrefix: () => '' });
   if (!res || !res.ok) {
     throw new Error(`${repoPath} is not loop-bound (.loop/config.json missing or invalid) — run /loop:init first`);
