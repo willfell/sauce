@@ -556,21 +556,25 @@ function chromeExecutable() {
     return [process.env.CHROME_BIN, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"]
         .filter(Boolean).find((candidate) => fs.existsSync(candidate)) || null;
 }
-function runChrome(executable, args) {
-    const result = childProcess.spawnSync(executable, args, { encoding: "utf8", timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
-    assert.strictEqual(result.status, 0, `headless Chrome failed: ${result.stderr || result.error || "unknown error"}`);
-    return result.stdout || "";
-}
-function markerData(html) {
-    const tag = String(html).match(/<meta\s+id="fixture-results"[^>]*>/i)?.[0];
-    assert(tag, "executed fixture emits results");
-    return Object.fromEntries([...tag.matchAll(/data-([a-z0-9-]+)="([^"]*)"/gi)].map((match) => [match[1], match[2]]));
-}
 function pngDimensions(buffer) {
     assert(buffer.length > 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), "capture is a non-empty PNG");
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Every CDP operation needs its own deadline. The readiness polls are bounded, but a
+// request/response against a browser that has stopped answering is not: an un-raced
+// await blocks forever and only the runner's 15-minute per-step kill ends it. Both
+// concurrent suites wedged here on 2026-09-01, in this file's visual section.
+function deadline(promise, milliseconds, label) {
+    let timer;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds}ms`)), milliseconds);
+        }),
+    ]).finally(() => clearTimeout(timer));
+}
 async function stopChild(child) {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
@@ -580,13 +584,21 @@ async function stopChild(child) {
     child.kill("SIGKILL");
     await Promise.race([exited, wait(5000)]);
 }
+// How long headless Chrome gets to become usable. Generous on purpose: exceeding
+// it should mean Chrome is genuinely broken, never that the machine was busy.
+const CHROME_READY_TIMEOUT_MS = 60000;
+
 async function removeTreeWithRetry(target) {
+    // Wall clock again, not a poll count: this waits on Chrome releasing the profile
+    // directory, and how long that takes is a function of how busy the machine is.
     let lastError;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    const deadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+    for (;;) {
         try { fs.rmSync(target, { recursive: true, force: true }); return; }
         catch (error) {
             if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) throw error;
             lastError = error;
+            if (Date.now() >= deadline) break;
             await wait(100);
         }
     }
@@ -698,7 +710,16 @@ async function exactViewportCapture(executable, url, width, height) {
         "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
         "--allow-file-access-from-files", "--force-prefers-reduced-motion",
         "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
-    ], { stdio: "ignore" });
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+    // Keep Chrome's stderr and its exit. Discarding them (stdio: "ignore") is why a
+    // browser that dies on startup and a browser that is merely slow produced the
+    // same bare assertion, with nothing to diagnose it from.
+    let chromeStderr = "";
+    chrome.stderr.on("data", (chunk) => { chromeStderr += chunk; });
+    let chromeExit = null;
+    chrome.on("exit", (code, signal) => { chromeExit = { code, signal }; });
+    const chromeTail = () => chromeStderr.trim().split(/\r?\n/).filter(Boolean).slice(-5).join(" | ")
+        || "(no stderr)";
     let socket;
     let sendCommand;
     try {
@@ -708,16 +729,31 @@ async function exactViewportCapture(executable, url, width, height) {
         // mere existence, or a read in that window yields an empty port string (which
         // Node resolves to port 80, talking to whatever else is listening there).
         let port = "";
-        for (let attempt = 0; attempt < 200; attempt += 1) {
+        // Bound this by wall clock, not by a poll count. A fixed 200 x 50ms budget is
+        // ten seconds of Chrome startup, which is ample on an idle machine and not
+        // ample when the preflight suite is running fourteen steps wide: Chrome loses
+        // the CPU race, the poll count runs out, and the assertion below reports a
+        // browser that never started when it was merely slow. That is a flake that
+        // only ever reproduces under load, so it always passes when re-run alone.
+        const portDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+        while (Date.now() < portDeadline) {
             if (fs.existsSync(portFile)) {
                 const first = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0].trim();
                 if (/^\d+$/.test(first) && Number(first) > 0) { port = first; break; }
             }
+            // A dead browser will never publish the port. Stop waiting for it and say
+            // so, rather than spending the whole deadline and blaming the clock.
+            if (chromeExit) break;
             await wait(50);
         }
-        assert(/^\d+$/.test(port) && Number(port) > 0, "Chrome publishes its DevTools endpoint");
-        const target = await createCdpTarget(port, url);
-        socket = await connectCdpSocket(target.webSocketDebuggerUrl);
+        assert(/^\d+$/.test(port) && Number(port) > 0, chromeExit
+            ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
+                + `before publishing its DevTools endpoint: ${chromeTail()}`
+            : `Chrome publishes its DevTools endpoint within ${CHROME_READY_TIMEOUT_MS}ms: ${chromeTail()}`);
+        const target = await deadline(createCdpTarget(port, url),
+            CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${chromeTail()})`);
+        socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
+            CHROME_READY_TIMEOUT_MS, `Chrome accepts the DevTools WebSocket (${chromeTail()})`);
         let nextId = 0;
         const pending = new Map();
         socket.onMessage((data) => {
@@ -728,18 +764,21 @@ async function exactViewportCapture(executable, url, width, height) {
             if (message.error) reject(new Error(message.error.message));
             else resolve(message.result || {});
         });
-        const send = (method, params = {}) => new Promise((resolve, reject) => {
+        const send = (method, params = {}) => deadline(new Promise((resolve, reject) => {
             const id = ++nextId;
             pending.set(id, { resolve, reject });
             socket.send(JSON.stringify({ id, method, params }));
-        });
+        }), CHROME_READY_TIMEOUT_MS, `CDP ${method}`);
         sendCommand = send;
         await send("Page.enable");
         await send("Runtime.enable");
         await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
         await send("Page.navigate", { url });
         let marker = null;
-        for (let attempt = 0; attempt < 200 && !marker; attempt += 1) {
+        // Same reasoning as the DevToolsActivePort wait: each iteration costs a CDP
+        // round-trip, so a poll count is not even a stable time budget under load.
+        const markerDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+        while (!marker && Date.now() < markerDeadline) {
             const evaluation = await send("Runtime.evaluate", {
                 expression: `(()=>{const m=document.querySelector("#fixture-results");return m?Object.fromEntries(Object.entries(m.dataset)):null})()`,
                 returnByValue: true,
@@ -747,7 +786,7 @@ async function exactViewportCapture(executable, url, width, height) {
             marker = evaluation.result?.value || null;
             if (!marker) await wait(50);
         }
-        assert(marker, "exact-viewport fixture emits results");
+        assert(marker, `exact-viewport fixture emits results within ${CHROME_READY_TIMEOUT_MS}ms`);
         const first = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         return { marker, first, second };
@@ -808,17 +847,6 @@ async function visualContract() {
         fs.writeFileSync(actionFixture, actionRowVisualFixture());
         for (const theme of ["light", "dark"]) for (const width of [1024, 390]) {
             const url = `${pathToFileURL(VISUAL).href}?theme=${theme}`;
-            const common = ["--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files", "--force-prefers-reduced-motion", "--run-all-compositor-stages-before-draw", "--virtual-time-budget=1000", `--window-size=${width},900`];
-            const marker = markerData(runChrome(executable, [...common, "--dump-dom", url]));
-            assert(!marker.error, `executed fixture is error-free: ${marker.error || ""}`);
-            assert.strictEqual(marker.theme, theme); assert.strictEqual(marker["document-fits"], "true");
-            assert.strictEqual(marker["surfaces-fit"], "true"); assert.strictEqual(marker["controls-visible"], "true");
-            assert.strictEqual(marker["actual-helpers"], "true"); assert.strictEqual(marker["actions-clicked"], "true");
-            assert.strictEqual(marker["nav-labels"], "Sauce|Project Board|Docs|More");
-            assert.strictEqual(marker["overflow-labels"], "Map|To-Do|Helpful Links");
-            assert.strictEqual(marker.destinations, "spice/projects/sauce/Sauce.md|spice/projects/sauce/sauce-board.md|spice/projects/sauce/docs/Docs.md|spice/projects/sauce/Project Map.md|spice/projects/sauce/Sauce To-Do.md|spice/projects/sauce/Links Hub.md");
-            assert.strictEqual(marker.rows, "2"); assert.strictEqual(marker.buttons, "6");
-            assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker["modal-title"], "Add link");
             // Two INDEPENDENT browser launches must paint identical pixels — the
             // property this assertion has always been for. What changed is WHEN
             // each one shoots. `--screenshot` with `--virtual-time-budget` fires
@@ -835,6 +863,22 @@ async function visualContract() {
             const shotB = await exactViewportCapture(executable, url, width, 900);
             assert(!shotA.marker.error && !shotB.marker.error,
                 `screenshot fixture is error-free: ${shotA.marker.error || shotB.marker.error || ""}`);
+
+            // The fixture's completion marker, read from the same CDP render that
+            // produced the pixels. This used to be a separate one-shot --dump-dom
+            // launch, which carried no --user-data-dir and therefore ran against
+            // the developer's real Chrome profile — the launch that wedged this
+            // step for its full 15-minute timeout in both concurrent suites.
+            const marker = shotA.marker;
+            assert(!marker.error, `executed fixture is error-free: ${marker.error || ""}`);
+            assert.strictEqual(marker.theme, theme); assert.strictEqual(marker.documentFits, "true");
+            assert.strictEqual(marker.surfacesFit, "true"); assert.strictEqual(marker.controlsVisible, "true");
+            assert.strictEqual(marker.actualHelpers, "true"); assert.strictEqual(marker.actionsClicked, "true");
+            assert.strictEqual(marker.navLabels, "Sauce|Project Board|Docs|More");
+            assert.strictEqual(marker.overflowLabels, "Map|To-Do|Helpful Links");
+            assert.strictEqual(marker.destinations, "spice/projects/sauce/Sauce.md|spice/projects/sauce/sauce-board.md|spice/projects/sauce/docs/Docs.md|spice/projects/sauce/Project Map.md|spice/projects/sauce/Sauce To-Do.md|spice/projects/sauce/Links Hub.md");
+            assert.strictEqual(marker.rows, "2"); assert.strictEqual(marker.buttons, "6");
+            assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker.modalTitle, "Add link");
             const a = shotA.first; const b = shotB.first;
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);

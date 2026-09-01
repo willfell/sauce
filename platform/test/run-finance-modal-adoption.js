@@ -2,7 +2,6 @@
 "use strict";
 
 const assert = require("assert");
-const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -17,6 +16,8 @@ const PAYCHECK_PATH = path.join(ROOT, "platform/blueprints/finance/helpers/paych
 const VISUAL_PATH = path.join(ROOT, "platform/test/visual/finance-modal-adoption.html");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+const { captureViewport } = require("./chrome-cdp");
+
 function chromeExecutable() {
     const candidates = [
         process.env.CHROME_BIN,
@@ -29,21 +30,7 @@ function chromeExecutable() {
     return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
-function runChrome(executable, args) {
-    const result = childProcess.spawnSync(executable, args, {
-        encoding: "utf8",
-        timeout: 30000,
-        maxBuffer: 8 * 1024 * 1024,
-    });
-    assert.strictEqual(result.status, 0, `headless Chrome failed: ${result.stderr || result.error || "unknown error"}`);
-    return result.stdout || "";
-}
 
-function markerData(html) {
-    const tag = String(html).match(/<meta\s+id="fixture-results"[^>]*>/i)?.[0];
-    assert(tag, "executed fixture emits its computed result marker");
-    return Object.fromEntries([...tag.matchAll(/data-([a-z0-9-]+)="([^"]*)"/gi)].map((match) => [match[1], match[2]]));
-}
 
 class FakeElement {
     constructor(tagName) {
@@ -276,19 +263,11 @@ async function caseVisualFixtureContract() {
         for (const theme of ["light", "dark"]) {
             for (const width of [1024, 390]) {
                 const url = `${pathToFileURL(VISUAL_PATH).href}?theme=${theme}`;
-                const common = [
-                    "--headless=new",
-                    "--no-sandbox",
-                    "--disable-gpu",
-                    "--hide-scrollbars",
-                    "--allow-file-access-from-files",
-                    "--force-prefers-reduced-motion",
-                    "--run-all-compositor-stages-before-draw",
-                    "--virtual-time-budget=1000",
-                    `--window-size=${width},900`,
-                ];
-                const rendered = runChrome(executable, [...common, "--dump-dom", url]);
-                const marker = markerData(rendered);
+                // Two independent renders, each in its own browser: the determinism
+                // assertion below is only meaningful across separate processes.
+                const captured = await captureViewport(executable, url, width, 900);
+                const recaptured = await captureViewport(executable, url, width, 900);
+                const marker = captured.marker;
                 assert.strictEqual(marker.theme, theme, `${theme}/${width}: requested theme rendered`);
                 assert.strictEqual(marker.surfaces, "2", `${theme}/${width}: both comparison surfaces rendered`);
                 assert.strictEqual(marker["document-fits"], "true", `${theme}/${width}: document has no horizontal clipping`);
@@ -297,12 +276,8 @@ async function caseVisualFixtureContract() {
                 assert.strictEqual(marker["controls-visible"], "true", `${theme}/${width}: every control has rendered geometry`);
                 assert.strictEqual(marker["actions-clicked"], "true", `${theme}/${width}: Cancel and Save paths are clickable`);
 
-                const first = path.join(temp, `${theme}-${width}-a.png`);
-                const second = path.join(temp, `${theme}-${width}-b.png`);
-                runChrome(executable, [...common, `--screenshot=${first}`, url]);
-                runChrome(executable, [...common, `--screenshot=${second}`, url]);
-                const firstBytes = fs.readFileSync(first);
-                const secondBytes = fs.readFileSync(second);
+                const firstBytes = captured.screenshot;
+                const secondBytes = recaptured.screenshot;
                 assert(firstBytes.length > 1000, `${theme}/${width}: screenshot is non-empty`);
                 assert(firstBytes.subarray(1, 4).equals(Buffer.from("PNG")), `${theme}/${width}: screenshot is PNG`);
                 assert.strictEqual(

@@ -12,6 +12,10 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const HELPER = path.join(ROOT, 'platform/blueprints/project/helpers/operator-station.js');
 const VISUAL = path.join(ROOT, 'platform/test/visual/operator-station.html');
 
+// How long headless Chrome gets to become usable. Generous on purpose: exceeding
+// it should mean Chrome is genuinely broken, never that the machine was busy.
+const CHROME_READY_TIMEOUT_MS = 60000;
+
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 function loadClass() { return eval(`(${fs.readFileSync(HELPER, 'utf8')})`); } // eslint-disable-line no-eval
 function file(filePath) { return { path: filePath, basename: path.posix.basename(filePath, '.md') }; }
@@ -109,7 +113,10 @@ async function renderGeometry(chrome, profile, viewportWidth) {
     await send('Page.navigate', {
       url: `${pathToFileURL(VISUAL).href}?expectedViewport=${viewportWidth}`,
     }, session);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    // Bound by wall clock, not by a poll count — see run-epic-dashboard.js for the
+    // same fix. Five seconds of budget is a load-sensitive flake, not a real limit.
+    const geometryDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+    while (Date.now() < geometryDeadline) {
       const evaluated = await send('Runtime.evaluate', {
         expression: 'JSON.stringify({ready:document.readyState,geometry:document.body?.dataset.geometry||null,result:document.querySelector(".geometry-result")?.textContent||""})',
         returnByValue: true,
@@ -118,7 +125,7 @@ async function renderGeometry(chrome, profile, viewportWidth) {
       if (value.ready === 'complete' && value.geometry) return value;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    throw new Error(`operator geometry never completed: ${stderr}`);
+    throw new Error(`operator geometry never completed within ${CHROME_READY_TIMEOUT_MS}ms: ${stderr}`);
   } finally {
     child.kill('SIGKILL');
     await deadline(closed, 5000, 'headless Chrome close').catch(() => {});
