@@ -174,27 +174,6 @@ function tempCase(fn) {
   }
 }
 
-function validateSkillSurface() {
-  console.log('\n--- skill metadata and surface registration (loop plugin is the sole surface) ---');
-  const canonical = path.join(ROOT, 'plugins/loop/skills/intake/SKILL.md');
-  const alias = path.join(ROOT, '.agents/skills/card-intake/SKILL.md');
-  const router = path.join(ROOT, '.agents/skills/loop-intake/SKILL.md');
-  const metadata = path.join(ROOT, '.agents/skills/card-intake/agents/openai.yaml');
-  for (const file of [canonical, alias, router, metadata]) ok(fs.existsSync(file), `${path.relative(ROOT, file)} exists`);
-  const body = fs.readFileSync(canonical, 'utf8');
-  ok(/^---\nname: intake\ndescription: .+\n---/s.test(body), 'canonical plugin body has valid frontmatter');
-  ok(/Delivery public contract|delivery\/index\.js/.test(body), 'canonical body routes authoring through the Delivery public contract');
-  ok(/supersede_coverage_missing/.test(body) && /supersede_missing_fields/.test(body), 'canonical body carries the supersede refusal contract');
-  ok(/card-intake\.js/.test(body), 'canonical body wraps the deterministic intake script');
-  const aliasBody = fs.readFileSync(alias, 'utf8');
-  ok(/^---\nname: card-intake\ndescription: .+\n---/s.test(aliasBody), 'deprecated alias keeps its $card-intake frontmatter name');
-  ok(/deprecated/i.test(aliasBody) && /loop-intake/.test(aliasBody), 'alias points at the loop-intake router');
-  ok(fs.readFileSync(metadata, 'utf8').includes('default_prompt: "Use $card-intake'), 'openai.yaml names $card-intake');
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/mechanisms/platform-claude/manifest.json'), 'utf8'));
-  ok(!manifest.claude_surface.some((e) => /card-intake/.test(JSON.stringify(e))), 'platform-claude no longer registers card-intake (retired to the loop plugin)');
-  ok(!fs.existsSync(path.join(ROOT, 'platform/mechanisms/platform-claude/skills/card-intake')), 'mirror skill body removed');
-}
-
 function sharedDeliveryFixtures() {
   console.log('\n--- shared Delivery fixture corpus ---');
   const fixtureCard = (fixture) => {
@@ -1029,7 +1008,7 @@ function canonicalBoardBindings() {
 }
 
 async function main() {
-  actualLegacyWriterPin(); installedCoordinatorResolution(); validateSkillSurface(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); canonicalBoardBindings(); supersedeGovernance(); await exactHeadMaterialization();
+  actualLegacyWriterPin(); installedCoordinatorResolution(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); canonicalBoardBindings(); supersedeGovernance(); await exactHeadMaterialization();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

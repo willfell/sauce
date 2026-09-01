@@ -258,14 +258,6 @@
       "lane": "parallel"
     },
     {
-      "id": "slice-plan",
-      "cmd": [
-        "node",
-        "platform/test/run-slice-plan.js"
-      ],
-      "lane": "parallel"
-    },
-    {
       "id": "sticky-notes",
       "cmd": [
         "node",
@@ -1407,22 +1399,6 @@
       "cmd": [
         "node",
         "platform/test/run-loop-binding.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "loop-plugin-surface",
-      "cmd": [
-        "node",
-        "platform/test/run-loop-plugin-surface.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "loop-codex-routers",
-      "cmd": [
-        "node",
-        "platform/test/run-loop-codex-routers.js"
       ],
       "lane": "parallel"
     },

@@ -11,6 +11,8 @@ The `loop` plugin centralizes the meta-loop skill surface (status, review, brain
 
 Skill bodies live once in `plugins/loop/skills/*/SKILL.md`; Claude reads them as an installed plugin (`/loop:*`), and Codex reads the SAME bodies through generated `.agents/skills/loop-*` routers that resolve the body location from `.loop/config.json` (`codex.plugin_root`) at use time. The binding contract `.loop/config.json` declares vault root, project slug, board/cards paths, id prefix, policy knobs, and coordinator location; the plugin's resolver (`loop-config.js`) turns it into env (`DELIVERY_*`, `SAUCE_LOOP_*`) that retargets the unchanged coordinator, batch-runner, digest, and intake rails at that board. Board-writer authority is untouched: the coordinator remains the only operational writer and card-intake the only planning writer — the plugin skills orchestrate those CLIs and never hand-edit boards.
 
+Sauce's own automation never depends on the installed plugin: `scripts/autoloop/codex-coordinator.js` and `scripts/autoloop/board-health-launchd.js` require sauce's own runtime copy of the resolver at `scripts/autoloop/loop-config.js` (same module, self-contained, no cross-repo dependency) to self-resolve `.loop/config.json` when `SAUCE_LOOP_*` env is unset. The plugin's copy under `plugins/loop/scripts/loop-config.js` in `willfell/wac.plugins` is for skill use only — the two copies are kept in sync by hand, not shared at runtime.
+
 ## Install (Claude, once per machine)
 
 ```text
