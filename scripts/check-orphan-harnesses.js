@@ -70,15 +70,39 @@ function sharedTmpPaths(root) {
 function unprofiledChromeLaunchers(root) {
   const dir = path.join(root, 'platform', 'test');
   const offenders = [];
-  // Strip comments first: the rationale for this rule mentions both flags, and a
-  // check that counted prose would pass on a file whose actual launch is unprofiled.
+  // Strip comments first: the rationale for this rule names both flags, and a check
+  // that counted prose would pass on a file whose actual launch is unprofiled.
   const stripComments = (src) => src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '');
+  // Check each LAUNCH, not each file. run-cross-blueprint-style-adoption.js held a
+  // profiled CDP launch and an unprofiled one-shot --dump-dom launch in the same
+  // file; a file-level check saw the first and passed, and the second went on
+  // wedging preflight against the developer's real Chrome profile.
+  const enclosingArgList = (src, at) => {
+    let depth = 0;
+    let start = -1;
+    for (let i = at; i >= 0; i -= 1) {
+      if (src[i] === ']') depth += 1;
+      else if (src[i] === '[') { if (depth === 0) { start = i; break; } depth -= 1; }
+    }
+    if (start < 0) return null;
+    depth = 0;
+    for (let i = start; i < src.length; i += 1) {
+      if (src[i] === '[') depth += 1;
+      else if (src[i] === ']') { depth -= 1; if (depth === 0) return src.slice(start, i + 1); }
+    }
+    return null;
+  };
   for (const name of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
     const src = stripComments(fs.readFileSync(path.join(dir, name), 'utf8'));
-    if (!/--headless/.test(src)) continue;
-    if (!/--user-data-dir/.test(src)) offenders.push(name);
+    for (let at = src.indexOf('--headless'); at !== -1; at = src.indexOf('--headless', at + 1)) {
+      const args = enclosingArgList(src, at);
+      if (args === null || !args.includes('--user-data-dir')) {
+        offenders.push(name);
+        break;
+      }
+    }
   }
   return offenders;
 }

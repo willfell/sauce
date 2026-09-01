@@ -556,16 +556,6 @@ function chromeExecutable() {
     return [process.env.CHROME_BIN, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"]
         .filter(Boolean).find((candidate) => fs.existsSync(candidate)) || null;
 }
-function runChrome(executable, args) {
-    const result = childProcess.spawnSync(executable, args, { encoding: "utf8", timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
-    assert.strictEqual(result.status, 0, `headless Chrome failed: ${result.stderr || result.error || "unknown error"}`);
-    return result.stdout || "";
-}
-function markerData(html) {
-    const tag = String(html).match(/<meta\s+id="fixture-results"[^>]*>/i)?.[0];
-    assert(tag, "executed fixture emits results");
-    return Object.fromEntries([...tag.matchAll(/data-([a-z0-9-]+)="([^"]*)"/gi)].map((match) => [match[1], match[2]]));
-}
 function pngDimensions(buffer) {
     assert(buffer.length > 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), "capture is a non-empty PNG");
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
@@ -857,17 +847,6 @@ async function visualContract() {
         fs.writeFileSync(actionFixture, actionRowVisualFixture());
         for (const theme of ["light", "dark"]) for (const width of [1024, 390]) {
             const url = `${pathToFileURL(VISUAL).href}?theme=${theme}`;
-            const common = ["--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files", "--force-prefers-reduced-motion", "--run-all-compositor-stages-before-draw", "--virtual-time-budget=1000", `--window-size=${width},900`];
-            const marker = markerData(runChrome(executable, [...common, "--dump-dom", url]));
-            assert(!marker.error, `executed fixture is error-free: ${marker.error || ""}`);
-            assert.strictEqual(marker.theme, theme); assert.strictEqual(marker["document-fits"], "true");
-            assert.strictEqual(marker["surfaces-fit"], "true"); assert.strictEqual(marker["controls-visible"], "true");
-            assert.strictEqual(marker["actual-helpers"], "true"); assert.strictEqual(marker["actions-clicked"], "true");
-            assert.strictEqual(marker["nav-labels"], "Sauce|Project Board|Docs|More");
-            assert.strictEqual(marker["overflow-labels"], "Map|To-Do|Helpful Links");
-            assert.strictEqual(marker.destinations, "spice/projects/sauce/Sauce.md|spice/projects/sauce/sauce-board.md|spice/projects/sauce/docs/Docs.md|spice/projects/sauce/Project Map.md|spice/projects/sauce/Sauce To-Do.md|spice/projects/sauce/Links Hub.md");
-            assert.strictEqual(marker.rows, "2"); assert.strictEqual(marker.buttons, "6");
-            assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker["modal-title"], "Add link");
             // Two INDEPENDENT browser launches must paint identical pixels — the
             // property this assertion has always been for. What changed is WHEN
             // each one shoots. `--screenshot` with `--virtual-time-budget` fires
@@ -884,6 +863,22 @@ async function visualContract() {
             const shotB = await exactViewportCapture(executable, url, width, 900);
             assert(!shotA.marker.error && !shotB.marker.error,
                 `screenshot fixture is error-free: ${shotA.marker.error || shotB.marker.error || ""}`);
+
+            // The fixture's completion marker, read from the same CDP render that
+            // produced the pixels. This used to be a separate one-shot --dump-dom
+            // launch, which carried no --user-data-dir and therefore ran against
+            // the developer's real Chrome profile — the launch that wedged this
+            // step for its full 15-minute timeout in both concurrent suites.
+            const marker = shotA.marker;
+            assert(!marker.error, `executed fixture is error-free: ${marker.error || ""}`);
+            assert.strictEqual(marker.theme, theme); assert.strictEqual(marker.documentFits, "true");
+            assert.strictEqual(marker.surfacesFit, "true"); assert.strictEqual(marker.controlsVisible, "true");
+            assert.strictEqual(marker.actualHelpers, "true"); assert.strictEqual(marker.actionsClicked, "true");
+            assert.strictEqual(marker.navLabels, "Sauce|Project Board|Docs|More");
+            assert.strictEqual(marker.overflowLabels, "Map|To-Do|Helpful Links");
+            assert.strictEqual(marker.destinations, "spice/projects/sauce/Sauce.md|spice/projects/sauce/sauce-board.md|spice/projects/sauce/docs/Docs.md|spice/projects/sauce/Project Map.md|spice/projects/sauce/Sauce To-Do.md|spice/projects/sauce/Links Hub.md");
+            assert.strictEqual(marker.rows, "2"); assert.strictEqual(marker.buttons, "6");
+            assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker.modalTitle, "Add link");
             const a = shotA.first; const b = shotB.first;
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
