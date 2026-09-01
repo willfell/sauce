@@ -46,6 +46,49 @@ function makeStorage(seed) {
   };
 }
 
+// The window/customJS surface the view needs in order to render for real.
+// Shared so a test can both drive the pills and count what a click actually
+// costs (localStorage writes, task rows repainted).
+function makeRenderHarness() {
+  const storage = makeStorage();
+  const rendered = [];
+  const clock = { reads: 0 };
+  const windowShim = {
+    localStorage: storage,
+    moment: () => { clock.reads += 1; return { format: () => TODAY }; },
+    customJS: {
+      RenderSafe: { page: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }) },
+      TaskEntity: { parseNote(page) { return { ...page, path: page.file.path }; } },
+      TaskTodayList: {
+        renderTaskRow(container, task) {
+          rendered.push(task.title);
+          const row = container.createEl('div', { cls: 'sauce-task-today-row' });
+          const group = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
+          group.createEl('div', { cls: 'sauce-task-today-cbwrap' });
+          group.createEl('span', { cls: 'sauce-task-today-title', text: task.title });
+          return row;
+        },
+      },
+      TaskDialog: {},
+      SectionLabel: {
+        render(dvLike, opts) {
+          return dvLike.container.createEl('div', { cls: 'sauce-section-label', text: opts.text });
+        },
+      },
+      SpaceDailyDashboard: {
+        compareTasksByDue(a, b) {
+          return String(a.due || '9999-99-99').localeCompare(String(b.due || '9999-99-99'));
+        },
+        compareTasksByPriority(a, b) {
+          const rank = { highest: 4, high: 3, medium: 2, low: 1 };
+          return (rank[b.priority] || 0) - (rank[a.priority] || 0) || this.compareTasksByDue(a, b);
+        },
+      },
+    },
+  };
+  return { storage, rendered, windowShim, clock };
+}
+
 function makeElement(tag = 'div', cls = '') {
   const el = {
     tagName: String(tag).toUpperCase(),
@@ -270,9 +313,38 @@ const TASKS = [
     const View = loadClass({});
     assert.strictEqual(View.noteDate({ file: { name: 'ToDo-2026-08-31' } }), '2026-08-31');
     assert.strictEqual(View.noteDate({ file: { name: 'ToDo-2026-08-31.md' } }), '2026-08-31');
-    assert.strictEqual(View.noteDate({ file: { name: 'Some Other Note' } }), '');
-    assert.strictEqual(View.noteDate({ file: {} }), '');
-    assert.strictEqual(View.noteDate(null), '');
+  });
+
+  // A bare '' fallback put every undated note in one persistence bucket, so
+  // mounting the view on two differently-named notes had them overwrite each
+  // other's saved filters. The bucket is keyed per note instead.
+  ok('SB-NOTEDATE-FALLBACK undated notes get their own bucket, never a shared one', () => {
+    const View = loadClass({});
+    const a = View.noteDate({ file: { name: 'Some Other Note' } });
+    const b = View.noteDate({ file: { name: 'A Different Note' } });
+    assert.notStrictEqual(a, '', 'an undated note must not fall back to the empty-string bucket');
+    assert.notStrictEqual(a, b, 'two differently-named undated notes must not share a bucket');
+    assert.strictEqual(a, View.noteDate({ file: { name: 'Some Other Note' } }),
+      'the bucket for a given note is stable across reads');
+    // A dated note and an undated one can never collide either, whatever the
+    // undated note happens to be called.
+    assert.notStrictEqual(View.noteDate({ file: { name: '2026-08-31' } }),
+      View.noteDate({ file: { name: 'ToDo-2026-08-31' } }));
+    assert.strictEqual(View.noteDate({ file: {} }), View.noteDate(null),
+      'a page with no identity at all resolves to one explicit bucket');
+  });
+
+  // Saved state must not leak between two undated notes.
+  ok('SB-NOTEDATE-FALLBACK state does not leak between two undated notes', () => {
+    const View = loadClass({});
+    const storage = makeStorage();
+    const first = View.noteDate({ file: { name: 'Some Other Note' } });
+    const second = View.noteDate({ file: { name: 'A Different Note' } });
+    View.writeState(storage, { scope: 'all', includeDone: true, sort: 'priority' }, first);
+    const carried = View.readState(storage, second);
+    assert.strictEqual(carried.scope, View.DEFAULT_SCOPE,
+      'the second note must start from the default scope, not the first note\'s');
+    assert.strictEqual(carried.includeDone, false);
   });
 
   ok('TV4-GROUP partitions the same sorted rows by project without loss or duplication', () => {
@@ -329,42 +401,7 @@ const TASKS = [
   });
 
   await okAsync('SB-RENDER paints four pill groups and persists every interaction', async () => {
-    const storage = makeStorage();
-    const rendered = [];
-    let clockReads = 0;
-    const windowShim = {
-      localStorage: storage,
-      moment: () => { clockReads += 1; return { format: () => TODAY }; },
-      customJS: {
-        RenderSafe: { page: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }) },
-        TaskEntity: { parseNote(page) { return { ...page, path: page.file.path }; } },
-        TaskTodayList: {
-          renderTaskRow(container, task) {
-            rendered.push(task.title);
-            const row = container.createEl('div', { cls: 'sauce-task-today-row' });
-            const group = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
-            group.createEl('div', { cls: 'sauce-task-today-cbwrap' });
-            group.createEl('span', { cls: 'sauce-task-today-title', text: task.title });
-            return row;
-          },
-        },
-        TaskDialog: {},
-        SectionLabel: {
-          render(dvLike, opts) {
-            return dvLike.container.createEl('div', { cls: 'sauce-section-label', text: opts.text });
-          },
-        },
-        SpaceDailyDashboard: {
-          compareTasksByDue(a, b) {
-            return String(a.due || '9999-99-99').localeCompare(String(b.due || '9999-99-99'));
-          },
-          compareTasksByPriority(a, b) {
-            const rank = { highest: 4, high: 3, medium: 2, low: 1 };
-            return (rank[b.priority] || 0) - (rank[a.priority] || 0) || this.compareTasksByDue(a, b);
-          },
-        },
-      },
-    };
+    const { storage, rendered, windowShim, clock } = makeRenderHarness();
     const View = loadClass(windowShim);
     const root = makeElement();
     const dv = {
@@ -374,7 +411,7 @@ const TASKS = [
     };
     await new View().render(dv);
 
-    assert.strictEqual(clockReads, 1, 'render reads the live clock exactly once');
+    assert.strictEqual(clock.reads, 1, 'render reads the live clock exactly once');
     assert.strictEqual(byClass(root, 'sauce-pill-group').length, 4, 'scopes, done, sort, group');
     assert.strictEqual(byClass(root, 'sauce-todo-filter-sep').length, 2);
     assert.strictEqual(byClass(root, 'sauce-todo-filter-rule').length, 1);
@@ -419,6 +456,52 @@ const TASKS = [
     assert(String(find('By Project').className).includes('is-active'));
     assert.strictEqual(byClass(root, 'sauce-todo-filter-project-label').length, 2);
     assert.strictEqual(View.readState(storage, TODAY).groupByProject, true);
+  });
+
+  // Re-clicking the ALREADY-ACTIVE scope used to re-run commit() unconditionally:
+  // a redundant localStorage write plus a full list rebuild, for a state that did
+  // not change. The pill must still read as active afterwards (single-select can
+  // never empty), so this guards the cost without weakening the invariant that
+  // SB-RENDER asserts.
+  await okAsync('SB-SCOPE-IDEMPOTENT re-clicking the active scope stays active and costs nothing', async () => {
+    const { storage, rendered, windowShim } = makeRenderHarness();
+    let writes = 0;
+    const setItem = storage.setItem.bind(storage);
+    storage.setItem = (key, value) => { writes += 1; return setItem(key, value); };
+
+    const View = loadClass(windowShim);
+    const root = makeElement();
+    await new View().render({
+      container: root,
+      current: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }),
+      pages: () => dataArray(TASKS),
+    });
+    const buttons = descendants(root).filter((node) => node.tagName === 'BUTTON');
+    const find = (label) => buttons.find((b) => b.textContent === label);
+
+    // Move off the default so the active scope under test was chosen by a click.
+    await find('Overdue').fire('click');
+    assert(String(find('Overdue').className).includes('is-active'));
+    const writesAfterRealChange = writes;
+    const paintedAfterRealChange = rendered.length;
+    assert(writesAfterRealChange > 0, 'a real scope change must persist');
+
+    await find('Overdue').fire('click');
+
+    assert.strictEqual(writes, writesAfterRealChange,
+      're-clicking the active scope must not write localStorage again');
+    assert.strictEqual(rendered.length, paintedAfterRealChange,
+      're-clicking the active scope must not rebuild the list');
+    // The SB-RENDER invariant: the click is not a deselect.
+    assert(String(find('Overdue').className).includes('is-active'),
+      'the re-clicked scope stays active — single-select can never empty');
+    assert.strictEqual(View.readState(storage, TODAY).scope, 'overdue',
+      'persisted scope is unchanged and still overdue');
+
+    // A click that DOES change the scope still commits normally.
+    await find('All').fire('click');
+    assert.strictEqual(writes, writesAfterRealChange + 1, 'a real change still persists');
+    assert(String(find('All').className).includes('is-active'));
   });
 
   await okAsync('TV3-COLD missing TaskEntity or TaskTodayList is a no-throw no-op', async () => {

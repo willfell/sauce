@@ -161,10 +161,18 @@ class ToDoDailyFilterView {
         return dot;
     }
 
+    // The persistence bucket for a note. `date` is compared for equality only
+    // (see _normalizeState), so any stable, distinct string works. A dated
+    // ToDo- note buckets by its date, which is what makes state reset each day.
+    // Anything else buckets by its own filename under a `note:` prefix, so two
+    // undated notes cannot silently share one another's saved filters the way a
+    // bare '' fallback made every one of them do.
     static noteDate(page) {
         const name = page && page.file && page.file.name;
-        const match = /ToDo-(\d{4}-\d{2}-\d{2})/.exec(String(name == null ? '' : name));
-        return match ? match[1] : '';
+        const raw = String(name == null ? '' : name);
+        const match = /ToDo-(\d{4}-\d{2}-\d{2})/.exec(raw);
+        if (match) return match[1];
+        return `note:${raw}`;
     }
 
     static _fallbackDue(a, b) {
@@ -350,8 +358,13 @@ class ToDoDailyFilterView {
             scopeButtons[key] = button;
             button.setAttribute('type', 'button');
             // Single-select: choosing a scope replaces the previous one. There is no
-            // deselect, so a click can never empty the selection.
-            button.addEventListener('click', onClick(() => commit({ ...state, scope: key })));
+            // deselect, so a click can never empty the selection — re-clicking the
+            // active scope keeps it active, it just skips the redundant write and
+            // list rebuild that committing an identical state would cost.
+            button.addEventListener('click', onClick(() => {
+                if (state.scope === key) return;
+                commit({ ...state, scope: key });
+            }));
         }
 
         doneButton = doneGroup.createEl('button', { text: 'Done' });
