@@ -222,12 +222,19 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
 }
 
 .sauce-todo-filter-controls {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--size-4-2, 8px);
   width: 100%;
+  /* The active pill paints an 8px glow beyond its border box, and
+     space-between presses the last group flat against the right edge. Without
+     interior room both get shaved by any clipping ancestor (Obsidian's preview
+     scroller, a callout, a wide-cssclass wrapper). border-box keeps the 100%
+     width honest once the padding exists. */
+  padding: 8px 2px 2px;
 }
 
 .sauce-todo-filter-right {

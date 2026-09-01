@@ -740,6 +740,19 @@ test("SB-CSS priority dot, control layout, and dividers are bound", () => {
   ]) {
     assert.ok(all.some((rule) => rule.selector === selector), `missing layout rule: ${selector}`);
   }
+
+  // The control bar must keep interior room. The active pill paints an 8px glow
+  // past its border box and space-between presses the last group against the
+  // right edge; with a flush box both get shaved by any clipping ancestor.
+  // border-box is what keeps `width: 100%` honest once that padding exists.
+  const controls = all.find((rule) => rule.selector === ".sauce-todo-filter-controls");
+  assert.ok(controls.declarations.includes("box-sizing: border-box"),
+    "control bar lost box-sizing: border-box — padding would overflow its 100% width");
+  const bar = controls.declarations.match(/padding:\s*(\d+)px\s+(\d+)px\s+(\d+)px/);
+  assert.ok(bar, "control bar lost its three-value padding");
+  const [top, side] = bar.slice(1, 3).map(Number);
+  assert.ok(top >= 8, `control bar top padding must clear the 8px active-pill glow, got ${top}px`);
+  assert.ok(side >= 2, `control bar needs side padding so the last pill is not flush, got ${side}px`);
 });
 
 console.log(`\nrun-sauce-core-css: ${passed} passed, ${failed} failed`);
