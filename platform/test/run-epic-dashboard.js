@@ -17,6 +17,10 @@ const { VAULTS } = require(path.join(ROOT, 'scripts/autoloop/deploy.js'));
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const installer = require(path.join(ROOT, 'platform/install.js'));
 
+// How long headless Chrome gets to become usable. Generous on purpose: exceeding
+// it should mean Chrome is genuinely broken, never that the machine was busy.
+const CHROME_READY_TIMEOUT_MS = 60000;
+
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 function scalar(md, key) {
   const match = String(md).match(new RegExp(`^${key}:\\s*(.+?)\\s*$`, 'm'));
@@ -194,7 +198,13 @@ async function renderGeometry(chrome, profile, visualPath, viewportWidth) {
       screenWidth: viewportWidth, screenHeight: 1400,
     }, session);
     await send('Page.navigate', { url: `${visualUrlFor(visualPath)}?expectedViewport=${viewportWidth}` }, session);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    // Bound by wall clock, not by a poll count. 100 x 50ms is five seconds of
+    // budget before the CDP round-trips in the loop are even counted, which is
+    // ample idle and not ample when the preflight suite runs fourteen wide: the
+    // count runs out on a page that was merely slow, and the error claims the
+    // geometry never completed. It always passes when re-run alone.
+    const geometryDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+    while (Date.now() < geometryDeadline) {
       const evaluated = await send('Runtime.evaluate', {
         expression: `JSON.stringify({readyState:document.readyState,geometry:document.body?.dataset.geometry||null,innerWidth:window.innerWidth,clientWidth:document.documentElement.clientWidth,result:document.querySelector('.geometry-result')?.textContent||''})`,
         returnByValue: true,
@@ -203,7 +213,7 @@ async function renderGeometry(chrome, profile, visualPath, viewportWidth) {
       if (value.readyState === 'complete' && value.geometry) return value;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    throw new Error(`headless geometry never completed: ${stderr}`);
+    throw new Error(`headless geometry never completed within ${CHROME_READY_TIMEOUT_MS}ms: ${stderr}`);
   } finally {
     child.kill('SIGKILL');
     await deadline(closed, 5000, 'headless Chrome close').catch(() => {});

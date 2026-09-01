@@ -580,13 +580,21 @@ async function stopChild(child) {
     child.kill("SIGKILL");
     await Promise.race([exited, wait(5000)]);
 }
+// How long headless Chrome gets to become usable. Generous on purpose: exceeding
+// it should mean Chrome is genuinely broken, never that the machine was busy.
+const CHROME_READY_TIMEOUT_MS = 60000;
+
 async function removeTreeWithRetry(target) {
+    // Wall clock again, not a poll count: this waits on Chrome releasing the profile
+    // directory, and how long that takes is a function of how busy the machine is.
     let lastError;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    const deadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+    for (;;) {
         try { fs.rmSync(target, { recursive: true, force: true }); return; }
         catch (error) {
             if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(error?.code)) throw error;
             lastError = error;
+            if (Date.now() >= deadline) break;
             await wait(100);
         }
     }
@@ -698,7 +706,16 @@ async function exactViewportCapture(executable, url, width, height) {
         "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
         "--allow-file-access-from-files", "--force-prefers-reduced-motion",
         "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
-    ], { stdio: "ignore" });
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+    // Keep Chrome's stderr and its exit. Discarding them (stdio: "ignore") is why a
+    // browser that dies on startup and a browser that is merely slow produced the
+    // same bare assertion, with nothing to diagnose it from.
+    let chromeStderr = "";
+    chrome.stderr.on("data", (chunk) => { chromeStderr += chunk; });
+    let chromeExit = null;
+    chrome.on("exit", (code, signal) => { chromeExit = { code, signal }; });
+    const chromeTail = () => chromeStderr.trim().split(/\r?\n/).filter(Boolean).slice(-5).join(" | ")
+        || "(no stderr)";
     let socket;
     let sendCommand;
     try {
@@ -708,14 +725,27 @@ async function exactViewportCapture(executable, url, width, height) {
         // mere existence, or a read in that window yields an empty port string (which
         // Node resolves to port 80, talking to whatever else is listening there).
         let port = "";
-        for (let attempt = 0; attempt < 200; attempt += 1) {
+        // Bound this by wall clock, not by a poll count. A fixed 200 x 50ms budget is
+        // ten seconds of Chrome startup, which is ample on an idle machine and not
+        // ample when the preflight suite is running fourteen steps wide: Chrome loses
+        // the CPU race, the poll count runs out, and the assertion below reports a
+        // browser that never started when it was merely slow. That is a flake that
+        // only ever reproduces under load, so it always passes when re-run alone.
+        const portDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+        while (Date.now() < portDeadline) {
             if (fs.existsSync(portFile)) {
                 const first = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0].trim();
                 if (/^\d+$/.test(first) && Number(first) > 0) { port = first; break; }
             }
+            // A dead browser will never publish the port. Stop waiting for it and say
+            // so, rather than spending the whole deadline and blaming the clock.
+            if (chromeExit) break;
             await wait(50);
         }
-        assert(/^\d+$/.test(port) && Number(port) > 0, "Chrome publishes its DevTools endpoint");
+        assert(/^\d+$/.test(port) && Number(port) > 0, chromeExit
+            ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
+                + `before publishing its DevTools endpoint: ${chromeTail()}`
+            : `Chrome publishes its DevTools endpoint within ${CHROME_READY_TIMEOUT_MS}ms: ${chromeTail()}`);
         const target = await createCdpTarget(port, url);
         socket = await connectCdpSocket(target.webSocketDebuggerUrl);
         let nextId = 0;
@@ -739,7 +769,10 @@ async function exactViewportCapture(executable, url, width, height) {
         await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
         await send("Page.navigate", { url });
         let marker = null;
-        for (let attempt = 0; attempt < 200 && !marker; attempt += 1) {
+        // Same reasoning as the DevToolsActivePort wait: each iteration costs a CDP
+        // round-trip, so a poll count is not even a stable time budget under load.
+        const markerDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+        while (!marker && Date.now() < markerDeadline) {
             const evaluation = await send("Runtime.evaluate", {
                 expression: `(()=>{const m=document.querySelector("#fixture-results");return m?Object.fromEntries(Object.entries(m.dataset)):null})()`,
                 returnByValue: true,
@@ -747,7 +780,7 @@ async function exactViewportCapture(executable, url, width, height) {
             marker = evaluation.result?.value || null;
             if (!marker) await wait(50);
         }
-        assert(marker, "exact-viewport fixture emits results");
+        assert(marker, `exact-viewport fixture emits results within ${CHROME_READY_TIMEOUT_MS}ms`);
         const first = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         return { marker, first, second };
