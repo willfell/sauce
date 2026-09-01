@@ -571,6 +571,20 @@ function pngDimensions(buffer) {
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Every CDP operation needs its own deadline. The readiness polls are bounded, but a
+// request/response against a browser that has stopped answering is not: an un-raced
+// await blocks forever and only the runner's 15-minute per-step kill ends it. Both
+// concurrent suites wedged here on 2026-09-01, in this file's visual section.
+function deadline(promise, milliseconds, label) {
+    let timer;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds}ms`)), milliseconds);
+        }),
+    ]).finally(() => clearTimeout(timer));
+}
 async function stopChild(child) {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
@@ -746,8 +760,10 @@ async function exactViewportCapture(executable, url, width, height) {
             ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
                 + `before publishing its DevTools endpoint: ${chromeTail()}`
             : `Chrome publishes its DevTools endpoint within ${CHROME_READY_TIMEOUT_MS}ms: ${chromeTail()}`);
-        const target = await createCdpTarget(port, url);
-        socket = await connectCdpSocket(target.webSocketDebuggerUrl);
+        const target = await deadline(createCdpTarget(port, url),
+            CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${chromeTail()})`);
+        socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
+            CHROME_READY_TIMEOUT_MS, `Chrome accepts the DevTools WebSocket (${chromeTail()})`);
         let nextId = 0;
         const pending = new Map();
         socket.onMessage((data) => {
@@ -758,11 +774,11 @@ async function exactViewportCapture(executable, url, width, height) {
             if (message.error) reject(new Error(message.error.message));
             else resolve(message.result || {});
         });
-        const send = (method, params = {}) => new Promise((resolve, reject) => {
+        const send = (method, params = {}) => deadline(new Promise((resolve, reject) => {
             const id = ++nextId;
             pending.set(id, { resolve, reject });
             socket.send(JSON.stringify({ id, method, params }));
-        });
+        }), CHROME_READY_TIMEOUT_MS, `CDP ${method}`);
         sendCommand = send;
         await send("Page.enable");
         await send("Runtime.enable");

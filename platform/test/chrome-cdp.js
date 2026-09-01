@@ -34,6 +34,22 @@ const CHROME_READY_TIMEOUT_MS = 60000;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Every CDP operation needs its own deadline. The readiness polls below are bounded,
+// but a request/response against a browser that has stopped answering is not: an
+// un-raced `await send(...)`, HTTP target creation, or WebSocket handshake blocks
+// forever, and the only thing that ends the step is the preflight runner's 15-minute
+// per-step kill. That is the difference between a diagnosable failure and a wedged
+// suite, and it is why run-epic-dashboard.js races every one of its sends.
+function deadline(promise, milliseconds, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds}ms`)), milliseconds);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function chromeExecutable() {
   const candidates = [
     process.env.CHROME_BIN,
@@ -228,8 +244,10 @@ async function captureViewport(executable, url, width, height, options = {}) {
         + `before publishing its DevTools endpoint: ${tail()}`
       : `Chrome publishes its DevTools endpoint within ${CHROME_READY_TIMEOUT_MS}ms: ${tail()}`);
 
-    const target = await createCdpTarget(port, url);
-    socket = await connectCdpSocket(target.webSocketDebuggerUrl);
+    const target = await deadline(createCdpTarget(port, url),
+      CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${tail()})`);
+    socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
+      CHROME_READY_TIMEOUT_MS, `Chrome accepts the DevTools WebSocket (${tail()})`);
     let nextId = 0;
     const pending = new Map();
     socket.onMessage((data) => {
@@ -240,11 +258,11 @@ async function captureViewport(executable, url, width, height, options = {}) {
       if (message.error) reject(new Error(message.error.message));
       else resolve(message.result || {});
     });
-    const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const send = (method, params = {}) => deadline(new Promise((resolve, reject) => {
       const id = ++nextId;
       pending.set(id, { resolve, reject });
       socket.send(JSON.stringify({ id, method, params }));
-    });
+    }), CHROME_READY_TIMEOUT_MS, `CDP ${method}`);
     sendCommand = send;
 
     await send('Page.enable');
