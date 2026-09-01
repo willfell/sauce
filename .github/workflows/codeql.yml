@@ -8,9 +8,14 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Mondays 06:00 UTC
 
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze (JavaScript/TypeScript)
+    if: ${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):') && !startsWith(github.event.head_commit.message, 'docs(prompts):')) }}
     runs-on: [self-hosted, macOS, ARM64]
     permissions:
       actions: read
