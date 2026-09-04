@@ -29,6 +29,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
       - name: Install deps
         run: npm install --omit=dev
       - name: Compute + apply per-component + umbrella bumps
@@ -94,6 +95,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
       - name: Install deps
         run: npm install --omit=dev
       - name: Preflight (final gate before shipping)
@@ -183,6 +185,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
       - name: Install deps
         run: npm install --omit=dev
       - name: Rebaseline seed (post-merge only)
