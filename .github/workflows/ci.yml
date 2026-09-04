@@ -112,7 +112,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/sauce-released-formula-vault" 2>/dev/null || true
 
   lint:
-    uses: willfell/lab.actions/.github/workflows/actionlint.yml@v1.10.2
+    uses: willfell/lab.actions/.github/workflows/actionlint.yml@v1.10.5
     with:
       runner: sauce
     permissions:
