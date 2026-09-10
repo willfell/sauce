@@ -518,6 +518,134 @@ function makeApp(files) {
         ok('PROJDASH-14d unarchive clears stash', fm2.status === 'idea' && !('pre_archive_status' in fm2), JSON.stringify(fm2));
     }
 
+    // GA-P4B-ACTIVE-DASHBOARD-FALSE-ALLOWLIST — drive the pill gesture through
+    // the REAL ProjectStatusWidget and bind the current-file write to
+    // RenderSafe.mutateStructure with exact path + status-only field authority.
+    // (The allowlist absence itself is asserted in run-gesture-write-lint.js.)
+    {
+        const RealWidget = loadClass(
+            'platform/blueprints/project/helpers/project-status-widget.js',
+            'ProjectStatusWidget'
+        );
+        const stubWidget = global.customJS.ProjectStatusWidget;
+        const priorRenderSafe = global.customJS.RenderSafe;
+        const priorApp = global.app;
+        const priorDocument = global.document;
+        const docBody = makeEl('body');
+        global.document = {
+            createElement: (t) => makeEl(t),
+            body: docBody,
+            activeElement: null,
+            addEventListener() {},
+            removeEventListener() {},
+        };
+        let structOpts = null;
+        let written = null;
+        global.customJS.ProjectStatusWidget = new RealWidget();
+        global.customJS.RenderSafe = {
+            mutateStructure: async (opts) => {
+                structOpts = opts;
+                await opts.apply();
+                await opts.write();
+                return { ok: true };
+            },
+        };
+        const dash = new ProjectDashboard();
+        const header = makeEl('div');
+        const file = { path: 'spice/projects/foo/Foo.md' };
+        const currentPage = { status: 'in-progress', file };
+        const headerDv = { page: () => ({ status: 'done' }) };
+        const realApp = {
+            fileManager: {
+                processFrontMatter: async (_file, update) => {
+                    written = { status: 'in-progress' };
+                    update(written);
+                },
+            },
+        };
+        global.app = realApp;
+        dash._renderHeader(header, { currentPage, app: realApp, file, dv: headerDv });
+        const pill = header.__descendants().find(el => el.__isStatusPill);
+        pill.click();
+        const overlay = docBody.__children[docBody.__children.length - 1];
+        const dialog = overlay ? overlay.__children[0] : null;
+        const doneBtn = dialog
+            ? dialog.__descendants().find(el => el.tag === 'button' && el.innerHTML.includes('<span>done</span>'))
+            : null;
+        const saved = doneBtn && doneBtn.onclick ? await doneBtn.onclick() : null;
+        ok('GA-P4B-ACTIVE-DASHBOARD-FALSE-ALLOWLIST pill gesture routes through RenderSafe.mutateStructure',
+            !!structOpts && structOpts.app === realApp && structOpts.dv === headerDv
+            && structOpts.path === file.path
+            && typeof structOpts.apply === 'function' && typeof structOpts.rollback === 'function',
+            JSON.stringify({ hasOpts: !!structOpts, saved }));
+        ok('GA-P4B-ACTIVE-DASHBOARD-FALSE-ALLOWLIST write is exact: status + status_changed_at only',
+            written && written.status === 'done'
+            && /^\d{4}-\d{2}-\d{2}$/.test(String(written.status_changed_at))
+            && Object.keys(written).sort().join(',') === 'status,status_changed_at',
+            JSON.stringify(written));
+        ok('GA-P4B-ACTIVE-DASHBOARD-FALSE-ALLOWLIST optimistic pill and page state applied on success',
+            saved === true && pill.textContent === 'done' && currentPage.status === 'done',
+            JSON.stringify({ saved, pill: pill.textContent, page: currentPage.status }));
+        global.customJS.ProjectStatusWidget = stubWidget;
+        if (priorRenderSafe === undefined) delete global.customJS.RenderSafe;
+        else global.customJS.RenderSafe = priorRenderSafe;
+        if (priorDocument === undefined) delete global.document;
+        else global.document = priorDocument;
+        global.app = priorApp;
+    }
+
+    // GA-P4C-CUSTOMJS-TDZ — evaluate the REAL dashboard + widget helpers in a
+    // scope whose lexical `customJS` binding is never initialized. The pill
+    // gesture must survive via globalThis.customJS, and a missing RenderSafe
+    // must produce exactly one visible notice with zero writes.
+    {
+        const dashSource = fs.readFileSync(path.join(
+            ROOT, 'platform/blueprints/project/helpers/project-dashboard.js'), 'utf8');
+        const widgetSource = fs.readFileSync(path.join(
+            ROOT, 'platform/blueprints/project/helpers/project-status-widget.js'), 'utf8');
+        const body = [
+            'return (async () => {',
+            '  const notices = [];',
+            '  function Notice(...args) { notices.push(args); }',
+            '  const priorCustomJS = globalThis.customJS;',
+            dashSource,
+            widgetSource,
+            '  let writes = 0;',
+            '  try {',
+            '    globalThis.customJS = { ProjectStatusWidget: new ProjectStatusWidget() };',
+            '    const dash = new ProjectDashboard();',
+            '    const header = makeEl("div");',
+            '    const file = { path: "spice/projects/foo/Foo.md" };',
+            '    const currentPage = { status: "idea", file };',
+            '    const realApp = { fileManager: { processFrontMatter: async () => { writes++; } } };',
+            '    dash._renderHeader(header, { currentPage, app: realApp, file, dv: {} });',
+            '    header.__descendants().find(el => el.__isStatusPill).click();',
+            '    const overlay = document.body.__children[document.body.__children.length - 1];',
+            '    const dialog = overlay ? overlay.__children[0] : null;',
+            '    const statusButtons = dialog ? dialog.__descendants().filter(el => el.tag === "button" && /<span>[a-z-]+<\\/span>/.test(el.innerHTML)) : [];',
+            '    const done = statusButtons.find(el => el.innerHTML.includes("<span>done</span>"));',
+            '    if (done && done.onclick) await done.onclick();',
+            '    return { buttonCount: statusButtons.length, noticeCount: notices.length, writes, pillStatus: currentPage.status };',
+            '  } finally {',
+            '    globalThis.customJS = priorCustomJS;',
+            '  }',
+            '  let customJS;',
+            '})();',
+        ].join('\n');
+        const doc = {
+            createElement: (t) => makeEl(t),
+            body: makeEl('body'),
+            activeElement: null,
+            addEventListener() {},
+            removeEventListener() {},
+        };
+        const tdz = await new Function('makeEl', 'document', body)(makeEl, doc);
+        ok('GA-P4C-CUSTOMJS-TDZ picker survives an uninitialized lexical customJS binding',
+            tdz.buttonCount === ProjectDashboard.STATUSES.length, JSON.stringify(tdz));
+        ok('GA-P4C-CUSTOMJS-TDZ missing RenderSafe fails visibly with zero writes',
+            tdz.noticeCount === 1 && tdz.writes === 0 && tdz.pillStatus === 'idea', JSON.stringify(tdz));
+    }
+
     console.log(`\n${passes} passed, ${fails} failed`);
     process.exit(fails === 0 ? 0 : 1);
 })();

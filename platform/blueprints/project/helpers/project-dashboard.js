@@ -442,7 +442,9 @@ class ProjectDashboard {
 
     pill.addEventListener("click", () => {
       try {
-        const widget = (typeof customJS !== "undefined") && customJS.ProjectStatusWidget;
+        // globalThis lookup only: a lexical `customJS` binding may be in its
+        // TDZ here, where even `typeof customJS` throws (landmine #2).
+        const widget = globalThis.customJS?.ProjectStatusWidget;
         if (!widget || typeof widget._openPicker !== "function") return;
         const applyPillStatus = (nextStatus) => {
           currentPage.status = nextStatus;
