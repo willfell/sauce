@@ -49,6 +49,7 @@ class ProjectCommandsInit {
       { id: "sauce-project:go-map", name: "Sauce Project: Go to Map", kind: "nav", arg: "map" },
       { id: "sauce-project:go-todo", name: "Sauce Project: Go to To-Do", kind: "nav", arg: "todo" },
       { id: "sauce-project:go-links", name: "Sauce Project: Go to Links", kind: "nav", arg: "links" },
+      { id: "sauce-project:go-meetings", name: "Sauce Project: Go to Meetings", kind: "nav", arg: "meetings" },
     ];
 
     for (const a of ACTIONS) {

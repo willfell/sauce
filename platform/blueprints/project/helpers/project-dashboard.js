@@ -464,7 +464,7 @@ class ProjectDashboard {
       { key: "board",    label: "Board",         icon: ICON.board,   count: counts.board,    fallback: `${folder}/${slug}-board.md` },
       { key: "todo",     label: "To-Do",         icon: ICON.todo,    count: counts.todo,     fallback: `${folder}/${projectName} To-Do.md` },
       { key: "map",      label: "Map",           icon: ICON.map,     count: counts.map,      fallback: `${folder}/Project Map.md` },
-      { key: "meetings", label: "Meetings",      icon: ICON.project, count: counts.meetings, fallback: "spice/meetings/Meetings.md", noNav: true },
+      { key: "meetings", label: "Meetings",      icon: ICON.project, count: counts.meetings, fallback: "spice/meetings/Meetings.md" },
       { key: "links",    label: "Helpful Links", icon: ICON.links,   noCount: true,          fallback: `${folder}/Links Hub.md` },
     ];
 

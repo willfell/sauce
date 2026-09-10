@@ -811,6 +811,14 @@
       "lane": "parallel"
     },
     {
+      "id": "project-meetings-page",
+      "cmd": [
+        "node",
+        "platform/test/run-project-meetings-page.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "project-doc-move",
       "cmd": [
         "node",
