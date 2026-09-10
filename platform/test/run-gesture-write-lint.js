@@ -70,11 +70,10 @@ ok('GW-6 a reasonless gesture-write-ok marker is rejected', lintSource(`
 
 const allowlist = loadAllowlist();
 ok('GW-7 required automated writers have reasoned allowlist entries', [
-  'platform/blueprints/to-do/helpers/todo-daily-carryover.js',
-  'platform/blueprints/sticky-notes/helpers/sticky-day-migrate.js',
-  'platform/mechanisms/kanban-status-sync/kanban-status-sync.js',
   'platform/blueprints/project/helpers/project-workstreams.js',
   'platform/blueprints/meetings/helpers/meeting-leaf-actions.js',
+  'platform/blueprints/project/helpers/doc-bulk-move.js',
+  'platform/blueprints/project/helpers/doc-leaf-actions.js',
 ].every((entry) => allowlist.has(entry)));
 
 const syntheticRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gesture-write-lint-'));
@@ -313,6 +312,71 @@ lintSource(`
 `);
 ok('GA-P4F-PARSE-ONLY scanned source is never executed',
   globalThis.__gestureLintExecutionSentinel === undefined);
+
+// GA-P4I-CONTEXT-MATRIX — a synthetic NEW bare write in each gesture context
+// must fail the registered preflight engine (walk + parse + allowlist filter,
+// the same run() the CLI main drives), one file per context so no context can
+// hide behind another's finding. Generator handlers assigned directly
+// (button.onclick = function* () {...}) are deliberately absent: a generator
+// body does not execute on the gesture — invoking it only returns an iterator
+// — so the executable generator shapes are the ones pinned here.
+{
+  const matrixRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gesture-context-matrix-'));
+  const scanDir = path.join(matrixRoot, 'scan');
+  fs.mkdirSync(scanDir);
+  const contexts = {
+    'assignment.js': "button.onclick = async () => { await app.vault.modify(file, body); };\n",
+    'listener.js': "button.addEventListener('click', async () => { await app.fileManager.processFrontMatter(file, update); });\n",
+    'property.js': "panel.el.onchange = () => app.vault.modify(file, body);\n",
+    'expression.js': "button.onclick = () => app.fileManager.processFrontMatter(file, update);\n",
+    'template-interpolation.js': "button.onclick = async () => { await notify(`saved ${await app.vault.modify(file, body)}`); };\n",
+    'optional-chain.js': "button.onclick = async () => { await app?.fileManager?.processFrontMatter(file, update); };\n",
+    'generator.js': "button.onclick = async () => { for (const step of (function* () { yield app.fileManager.processFrontMatter(file, update); })()) { await step; } };\n",
+    'module.js': "export const wire = (button) => { button.onclick = () => app.vault.modify(file, body); };\n",
+  };
+  for (const [name, source] of Object.entries(contexts)) {
+    fs.writeFileSync(path.join(scanDir, name), source);
+  }
+  const matrix = run([scanDir], null, matrixRoot);
+  const flagged = new Set(matrix.findings.map((finding) => path.basename(finding.file)));
+  const missed = Object.keys(contexts).filter((name) => !flagged.has(name));
+  ok(`GA-P4I-CONTEXT-MATRIX every gesture context is flagged by the preflight engine${missed.length ? ` (missed: ${missed.join(', ')})` : ''}`,
+    missed.length === 0);
+  fs.rmSync(matrixRoot, { recursive: true, force: true });
+}
+
+// GA-P4I-ALLOWLIST-AUDIT — the allowlist is a narrow set of audited,
+// non-gesture automated writers: every entry must resolve to an existing
+// file, carry a specific reason, still be flagged by the lint when the
+// allowlist is ignored (a no-longer-flagged entry is rot and must be
+// pruned), and pin exactly the finding lines it excuses.
+{
+  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'lint-gesture-writes-allowlist.json'), 'utf8'));
+  const audits = raw.entries.map((entry) => {
+    const abs = path.join(ROOT, entry.path);
+    const exists = fs.existsSync(abs);
+    const findingLines = exists
+      ? lintSource(fs.readFileSync(abs, 'utf8')).map((finding) => finding.line).sort((a, b) => a - b)
+      : [];
+    const pinnedLines = (entry.lines || []).slice().sort((a, b) => a - b);
+    return {
+      path: entry.path,
+      exists,
+      reasoned: typeof entry.reason === 'string' && entry.reason.trim().length >= 20,
+      live: findingLines.length > 0,
+      exact: JSON.stringify(findingLines) === JSON.stringify(pinnedLines),
+    };
+  });
+  const broken = (key) => audits.filter((audit) => !audit[key]).map((audit) => audit.path);
+  const dead = broken('live');
+  const inexact = broken('exact');
+  ok('GA-P4I-ALLOWLIST-AUDIT every entry resolves to an existing reasoned file',
+    audits.every((audit) => audit.exists && audit.reasoned));
+  ok(`GA-P4I-ALLOWLIST-AUDIT no dead entries: each file is still flagged without the allowlist${dead.length ? ` (dead: ${dead.join(', ')})` : ''}`,
+    dead.length === 0);
+  ok(`GA-P4I-ALLOWLIST-AUDIT entries pin exactly the finding lines they excuse${inexact.length ? ` (inexact: ${inexact.join(', ')})` : ''}`,
+    inexact.length === 0);
+}
 
 const failed = results.filter(([, passed]) => !passed);
 console.log(`\n${failed.length ? 'FAIL' : 'PASS'} — gesture-write lint (${results.length - failed.length}/${results.length})`);
