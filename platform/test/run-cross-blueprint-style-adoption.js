@@ -706,6 +706,17 @@ function connectCdpSocket(endpoint) {
 }
 async function exactViewportCapture(executable, url, width, height) {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-r7a2-cdp-"));
+    // Disable spellchecking before Chrome ever starts. The spellchecker runs
+    // ASYNCHRONOUSLY against the modal's auto-focused URL input, so whether its
+    // red squiggle has painted by capture time is a scheduling race — the
+    // light/1024 CI frames differed by exactly a 2px dotted red band under
+    // "https" (rows 429-430), present in one launch and absent in the other.
+    // The linux pool's Chromium+hunspell paints it; macOS headless never does,
+    // which is why this only ever failed there. No settle loop can catch a
+    // marker that appears once, later; it has to be off at the source.
+    fs.mkdirSync(path.join(profile, "Default"), { recursive: true });
+    fs.writeFileSync(path.join(profile, "Default", "Preferences"),
+        JSON.stringify({ browser: { enable_spellchecking: false }, spellcheck: { dictionaries: [], use_spelling_service: false } }));
     const chrome = childProcess.spawn(executable, [
         "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
         "--allow-file-access-from-files", "--force-prefers-reduced-motion",
@@ -797,6 +808,13 @@ async function exactViewportCapture(executable, url, width, height) {
         // only the blinking glyph is suppressed.
         await send("Runtime.evaluate", {
             expression: "document.head.insertAdjacentHTML('beforeend','<style>*{caret-color:transparent!important}</style>')",
+        });
+        // Element-level spellcheck belt to the profile-preference suspenders
+        // above: disabling the attribute clears any markers Blink already
+        // queued for the focused input, so no dictionary or pref-loading
+        // ordering can paint a squiggle after this line.
+        await send("Runtime.evaluate", {
+            expression: "document.querySelectorAll('input,textarea,[contenteditable]').forEach((el)=>{el.spellcheck=false;})",
         });
         // The marker proves the fixture's DOM work finished — not that the frame
         // containing it has been composited. The fixture appends the marker right
