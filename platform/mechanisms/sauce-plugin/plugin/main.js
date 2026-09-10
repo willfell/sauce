@@ -32,6 +32,16 @@ function isClassFile(src) {
   return /^class\b/.test(firstRealToken(src));
 }
 
+// Parse-only class-name extraction — a conservative text scan over the first
+// real token, NEVER eval. Returns null for unusual shapes (a comment between
+// `class` and the name, an anonymous class, …) so the caller falls back to
+// the plain eval path — a wasted eval is cheaper than silently skipping a
+// loadable class.
+function extractClassName(src) {
+  const m = /^class\s+([A-Za-z_$][A-Za-z0-9_$]*)/.exec(firstRealToken(src));
+  return m ? m[1] : null;
+}
+
 // Replicate CustomJS's evalFile: eval(`(${body})`) then `new def()`.
 function instantiateClass(body) {
   // eslint-disable-next-line no-eval
@@ -40,14 +50,22 @@ function instantiateClass(body) {
   return { name: def.name, instance: new def() };
 }
 
-// Instantiate every class-file into `target` (window.customJS). Per-file
-// try/catch — a bad/non-class file is recorded, never thrown.
+// Instantiate every class-file into `target` (window.customJS). Classes the
+// registry ALREADY owns are skipped — CustomJS evals the same corpus, and
+// whichever party runs second would otherwise pay the full eval+construct
+// pass twice per boot. The ownership check happens immediately before the
+// eval+construct as one step, so a class landing mid-race is still deduped
+// and never double-constructed. Per-file try/catch — a bad/non-class file is
+// recorded, never thrown.
 function registerAll(target, files) {
   const registered = [];
+  const skipped = [];
   const failures = [];
   for (const entry of files) {
     const body = entry.body;
     if (!isClassFile(body)) continue;
+    const name = extractClassName(body);
+    if (name && target[name] != null) { skipped.push(name); continue; }
     try {
       const r = instantiateClass(body);
       if (!r.name) { failures.push({ path: entry.path, message: 'class had no name' }); continue; }
@@ -58,7 +76,7 @@ function registerAll(target, files) {
       failures.push({ path: entry.path, message: kind + ': ' + String(e && e.message).split('\n')[0] });
     }
   }
-  return { registered, failures };
+  return { registered, skipped, failures };
 }
 
 // Resolve the folder customJS loads classes from — read its configured jsFolder
@@ -126,7 +144,9 @@ async function loadCustomJsClasses(app) {
   w.customJS = w.customJS || {};
   const res = registerAll(w.customJS, files);
   const t3 = monotonicNow();
-  stages.push({ name: 'register-classes', elapsed_ms: elapsedMs(t2, t3), registered: res.registered.length, failed: res.failures.length });
+  // `loaded` = eval'd+constructed this boot; `skipped` = already owned by the
+  // registry. `registered` stays as the schema-1 alias of `loaded`.
+  stages.push({ name: 'register-classes', elapsed_ms: elapsedMs(t2, t3), registered: res.registered.length, loaded: res.registered.length, skipped: res.skipped.length, failed: res.failures.length });
   res.profile = { total_ms: elapsedMs(t0, t3), stages };
   return res;
 }
@@ -139,6 +159,7 @@ class SaucePlugin extends Plugin {
       const res = await loadCustomJsClasses(this.app);
       profile = res.profile;
       console.log('[sauce] registered ' + res.registered.length + ' customJS class(es)'
+        + (res.skipped.length ? ' (' + res.skipped.length + ' already owned by customJS, deduped)' : '')
         + (res.failures.length ? ' (' + res.failures.length + ' non-class/failed skipped)' : ''));
     } catch (e) {
       // Never throw out of onload — CustomJS fallback still populates window.customJS.
@@ -280,6 +301,7 @@ module.exports = SaucePlugin;
 module.exports.loadCustomJsClasses = loadCustomJsClasses;
 module.exports.registerAll = registerAll;
 module.exports.isClassFile = isClassFile;
+module.exports.extractClassName = extractClassName;
 module.exports.resolveScriptsFolder = resolveScriptsFolder;
 module.exports.shouldReconcile = SaucePlugin.shouldReconcile;
 module.exports.BOOT_RECEIPT_PATH = BOOT_RECEIPT_PATH;
