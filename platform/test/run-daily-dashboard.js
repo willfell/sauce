@@ -542,6 +542,135 @@ async function renderDailyTaskFixture(today, options) {
       'expected byBlueprint.project === 2, got ' + JSON.stringify(byBlueprint));
   });
 
+  // ── GA-ML4: per-slug hub queries collapse to one query per namespace root ──
+  // Pre-GA-ML4 the project/trip rollup rules ran `dv.pages('"spice/projects/<slug>"')`
+  // INSIDE rootPath(p), which ActivityFeed._query invokes once per windowed child
+  // page — so hub resolution issued a fresh Dataview query per edited child, and
+  // its cost grew with the vault's project count. These cases pin the collapsed
+  // shape: ONE root query per namespace, grouped by a path-derived slug.
+  //
+  // makeScaledRollupDv(projectCount, tripCount) records every dv.pages() source
+  // so a regression to per-slug querying is directly observable, and models
+  // Dataview folder-source semantics (a folder source returns everything nested
+  // beneath it) for both the root query and the feed's folder-union sweep.
+  function makeScaledRollupDv(projectCount, tripCount) {
+    const scaledPages = [];
+    for (let i = 0; i < projectCount; i++) {
+      const slug = 'p' + i;
+      scaledPages.push({ type: 'project', day: TODAY, name: 'Project ' + i,
+        file: { path: 'spice/projects/' + slug + '/Project.md', name: 'Project.md' } });
+      scaledPages.push({ type: 'task', day: TODAY,
+        file: { path: 'spice/projects/' + slug + '/tasks/t1.md', name: 't1.md' } });
+      scaledPages.push({ type: 'doc-note', day: TODAY,
+        file: { path: 'spice/projects/' + slug + '/docs/d1.md', name: 'd1.md' } });
+    }
+    for (let i = 0; i < tripCount; i++) {
+      const slug = 'trip' + i;
+      scaledPages.push({ type: 'trip', day: TODAY, name: 'Trip ' + i,
+        file: { path: 'spice/trips/' + slug + '/Trip.md', name: 'Trip.md' } });
+      scaledPages.push({ type: 'note', day: TODAY,
+        file: { path: 'spice/trips/' + slug + '/entries/e1.md', name: 'e1.md' } });
+    }
+    const calls = [];
+    function chain(items) {
+      const c = {
+        _arr: items.slice(),
+        where(fn) { return chain(this._arr.filter(fn)); },
+        sort(fn, dir) {
+          const s = this._arr.slice();
+          try { s.sort((a, b) => { const av = fn(a), bv = fn(b); const r = av > bv ? 1 : av < bv ? -1 : 0; return dir === 'desc' ? -r : r; }); } catch (_) {}
+          return chain(s);
+        },
+        slice(a, b) { return chain(this._arr.slice(a, b)); },
+        array() { return this._arr.slice(); },
+      };
+      c[Symbol.iterator] = function* () { for (const p of c._arr) yield p; };
+      Object.defineProperty(c, 'length', { get() { return c._arr.length; } });
+      return c;
+    }
+    const dv = {
+      _calls: calls,
+      pages(q) {
+        const src = q == null ? '' : String(q);
+        calls.push(src);
+        if (src === '') return chain(scaledPages);
+        const folders = src.split(/\s+or\s+/).map((s) => s.trim().replace(/^"|"$/g, ''));
+        const seen = new Set();
+        const out = [];
+        for (const f of folders) {
+          for (const p of scaledPages) {
+            const pth = (p && p.file && p.file.path) || '';
+            if ((pth === f || pth.indexOf(f + '/') === 0) && !seen.has(p)) { seen.add(p); out.push(p); }
+          }
+        }
+        return chain(out);
+      },
+      page(p) { return scaledPages.find((pg) => pg && pg.file && pg.file.path === p) || null; },
+      el(tag) { const e = makeDashEl(); e._tag = tag; this.container._children.push(e); return e; },
+      current() { return { file: { name: 'Journal-' + TODAY } }; },
+      container: makeDashEl(),
+    };
+    return { dv, scaledPages };
+  }
+
+  function scaledRollupQuery(projectCount, tripCount) {
+    const { dv } = makeScaledRollupDv(projectCount, tripCount);
+    const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
+    const dash = new Dash();
+    const q = realAF.query(dv, {
+      scope: 'today', asOf: TODAY, includeMtime: true, groupBy: 'blueprint', limit: 500,
+      blueprints: dash._DEFAULT_DASHBOARD_BLUEPRINTS,
+      tsKeys: ['day', 'created_at', 'status_changed_at'],
+      rollUpRoots: dash._buildRollupRules(dv),
+    });
+    return { dv, q };
+  }
+
+  const PER_SLUG_SOURCE = /^"spice\/(projects|trips)\/[^"]+"$/;
+
+  await ok('GA-ML4-ROOT-QUERY hub resolution issues one query per namespace root, never one per slug', async () => {
+    const { dv, q } = scaledRollupQuery(12, 5);
+    assert(q.total === 17, 'fixture sanity: 12 project hubs + 5 trip hubs must survive, got ' + q.total);
+    const perSlug = dv._calls.filter((s) => PER_SLUG_SOURCE.test(s));
+    assert(perSlug.length === 0,
+      'expected 0 per-slug hub queries, got ' + perSlug.length + ' e.g. ' + JSON.stringify(perSlug.slice(0, 3)));
+    const projectRoots = dv._calls.filter((s) => s === '"spice/projects"');
+    assert(projectRoots.length === 1,
+      'expected exactly 1 "spice/projects" root query, got ' + projectRoots.length);
+    const tripRoots = dv._calls.filter((s) => s === '"spice/trips"');
+    assert(tripRoots.length === 1,
+      'expected exactly 1 "spice/trips" root query, got ' + tripRoots.length);
+  });
+
+  await ok('GA-ML4-QUERY-BOUND dv.pages() count is a bounded constant, not O(projects)', async () => {
+    const small = scaledRollupQuery(3, 2);
+    const large = scaledRollupQuery(24, 9);
+    assert(small.q.total === 5 && large.q.total === 33,
+      'fixture sanity: both scales must roll up fully, got ' + small.q.total + ' and ' + large.q.total);
+    assert(small.dv._calls.length === large.dv._calls.length,
+      'expected an N-invariant dv.pages() count, got ' + small.dv._calls.length +
+      ' for 3 projects/2 trips vs ' + large.dv._calls.length + ' for 24 projects/9 trips');
+  });
+
+  await ok('GA-ML4-SLUG-FIDELITY every rolled-up child lands under its OWN slug hub', async () => {
+    const { q } = scaledRollupQuery(12, 5);
+    let rollups = 0;
+    for (const p of q.pages) {
+      if (!p._isRollUp) continue;
+      rollups++;
+      const hub = String(p.file.path);
+      const owner = hub.slice(0, hub.lastIndexOf('/') + 1);
+      const expected = p.type === 'trip' ? 1 : 2;
+      assert(p._rollUpChildren === expected,
+        hub + ' expected ' + expected + ' rolled-up children, got ' + p._rollUpChildren);
+      for (const child of p._rollUpChildrenPages) {
+        assert(String(child.file.path).indexOf(owner) === 0,
+          'child ' + child.file.path + ' mis-grouped under ' + hub);
+      }
+    }
+    assert(rollups === 17, 'expected all 17 hubs to carry their own children, got ' + rollups);
+  });
+
   await ok('SDD-ALLOWLIST-1 wiki-page, wiki-section, doc-note are in the Activity allowlist', async () => {
     const Dash = loadDashboard(windowShim, makeCustomJS().customJS);
     const dash = new Dash();
