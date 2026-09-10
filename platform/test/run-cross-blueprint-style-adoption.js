@@ -706,6 +706,17 @@ function connectCdpSocket(endpoint) {
 }
 async function exactViewportCapture(executable, url, width, height) {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-r7a2-cdp-"));
+    // Disable spellchecking before Chrome ever starts. The spellchecker runs
+    // ASYNCHRONOUSLY against the modal's auto-focused URL input, so whether its
+    // red squiggle has painted by capture time is a scheduling race — the
+    // light/1024 CI frames differed by exactly a 2px dotted red band under
+    // "https" (rows 429-430), present in one launch and absent in the other.
+    // The linux pool's Chromium+hunspell paints it; macOS headless never does,
+    // which is why this only ever failed there. No settle loop can catch a
+    // marker that appears once, later; it has to be off at the source.
+    fs.mkdirSync(path.join(profile, "Default"), { recursive: true });
+    fs.writeFileSync(path.join(profile, "Default", "Preferences"),
+        JSON.stringify({ browser: { enable_spellchecking: false }, spellcheck: { dictionaries: [], use_spelling_service: false } }));
     const chrome = childProcess.spawn(executable, [
         "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
         "--allow-file-access-from-files", "--force-prefers-reduced-motion",
@@ -787,8 +798,62 @@ async function exactViewportCapture(executable, url, width, height) {
             if (!marker) await wait(50);
         }
         assert(marker, `exact-viewport fixture emits results within ${CHROME_READY_TIMEOUT_MS}ms`);
-        const first = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
-        const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
+        // Hide the text caret before sampling pixels. The Add-link modal
+        // auto-focuses its URL input and the caret BLINKS: two independent
+        // launches sample uncorrelated blink phases, so the cross-launch
+        // determinism assertion coin-flips whenever capture timing drifts past a
+        // phase boundary — exactly what a loaded runner does (the light/1024
+        // repro captured one frame with the caret glyph and one without).
+        // Focus styling (the ring) is part of the visual contract and stays;
+        // only the blinking glyph is suppressed.
+        await send("Runtime.evaluate", {
+            expression: "document.head.insertAdjacentHTML('beforeend','<style>*{caret-color:transparent!important}</style>')",
+        });
+        // Element-level spellcheck belt to the profile-preference suspenders
+        // above: disabling the attribute clears any markers Blink already
+        // queued for the focused input, so no dictionary or pref-loading
+        // ordering can paint a squiggle after this line.
+        await send("Runtime.evaluate", {
+            expression: "document.querySelectorAll('input,textarea,[contenteditable]').forEach((el)=>{el.spellcheck=false;})",
+        });
+        // The marker proves the fixture's DOM work finished — not that the frame
+        // containing it has been composited. The fixture appends the marker right
+        // after DOM mutations (action-row clicks, the modal mount) that schedule
+        // one more paint, so on a loaded runner a capture here can still sample
+        // the frame BEFORE that paint while an independent sibling launch samples
+        // the one after it — and the cross-launch determinism assertion fails for
+        // a scheduling reason that has nothing to do with styling (the dark/1024
+        // and dark/390 release-gate failures; only ever under two concurrent
+        // suites, never re-runnable in isolation). Settle before shooting: fonts
+        // rasterized, then two animation frames so the marker mutation's paint
+        // has demonstrably been presented.
+        await send("Runtime.evaluate", {
+            expression: "(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))",
+            awaitPromise: true,
+        });
+        // Then capture until two frames taken ≥125ms APART are byte-identical,
+        // bounded by wall clock like every other wait in this function. The
+        // spacing matters as much as the equality: two back-to-back captures can
+        // land inside the same composited surface frame and agree with each
+        // other while an animation is still in flight, which lets each launch
+        // "settle" on a different mid-animation frame. 125ms spans several
+        // frames at any plausible compositor rate, so agreement across it means
+        // the page has actually stopped painting. A page that never stabilizes —
+        // a real animation, exactly what the determinism assertions exist to
+        // catch — still fails, but now names the property directly instead of
+        // depending on which frame each launch happened to sample.
+        const capture = async () => Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
+        let first = await capture();
+        await wait(125);
+        let second = await capture();
+        const settleDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+        while (!first.equals(second) && Date.now() < settleDeadline) {
+            first = second;
+            await wait(125);
+            second = await capture();
+        }
+        assert(first.equals(second),
+            `the page settles to a stable frame within ${CHROME_READY_TIMEOUT_MS}ms (${chromeTail()})`);
         return { marker, first, second };
     } finally {
         if (sendCommand) {
@@ -881,6 +946,23 @@ async function visualContract() {
             assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker.modalTitle, "Add link");
             const a = shotA.first; const b = shotB.first;
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
+            if (!a.equals(b)) {
+                // The pixels ARE the diagnosis for this class of failure — the
+                // blinking-caret bug was only identified by looking at the two
+                // differing frames. On mismatch, persist them: to a directory
+                // when SAUCE_DEBUG_SHOT_DIR is set (local repro), and to stdout
+                // as base64 otherwise (CI logs are the only artifact channel a
+                // failed runner leaves behind). ~57KB per frame, mismatch only.
+                if (process.env.SAUCE_DEBUG_SHOT_DIR) {
+                    fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-a.png`), a);
+                    fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-b.png`), b);
+                } else {
+                    console.log(`--- ${theme}/${width} cross-launch mismatch; frame A (base64 PNG) ---`);
+                    console.log(a.toString("base64"));
+                    console.log(`--- ${theme}/${width} cross-launch mismatch; frame B (base64 PNG) ---`);
+                    console.log(b.toString("base64"));
+                }
+            }
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
 
             const actionUrl = `${pathToFileURL(actionFixture).href}?theme=${theme}`;
