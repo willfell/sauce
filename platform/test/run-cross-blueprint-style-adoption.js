@@ -787,8 +787,48 @@ async function exactViewportCapture(executable, url, width, height) {
             if (!marker) await wait(50);
         }
         assert(marker, `exact-viewport fixture emits results within ${CHROME_READY_TIMEOUT_MS}ms`);
-        const first = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
-        const second = Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
+        // Hide the text caret before sampling pixels. The Add-link modal
+        // auto-focuses its URL input and the caret BLINKS: two independent
+        // launches sample uncorrelated blink phases, so the cross-launch
+        // determinism assertion coin-flips whenever capture timing drifts past a
+        // phase boundary — exactly what a loaded runner does (the light/1024
+        // repro captured one frame with the caret glyph and one without).
+        // Focus styling (the ring) is part of the visual contract and stays;
+        // only the blinking glyph is suppressed.
+        await send("Runtime.evaluate", {
+            expression: "document.head.insertAdjacentHTML('beforeend','<style>*{caret-color:transparent!important}</style>')",
+        });
+        // The marker proves the fixture's DOM work finished — not that the frame
+        // containing it has been composited. The fixture appends the marker right
+        // after DOM mutations (action-row clicks, the modal mount) that schedule
+        // one more paint, so on a loaded runner a capture here can still sample
+        // the frame BEFORE that paint while an independent sibling launch samples
+        // the one after it — and the cross-launch determinism assertion fails for
+        // a scheduling reason that has nothing to do with styling (the dark/1024
+        // and dark/390 release-gate failures; only ever under two concurrent
+        // suites, never re-runnable in isolation). Settle before shooting: fonts
+        // rasterized, then two animation frames so the marker mutation's paint
+        // has demonstrably been presented.
+        await send("Runtime.evaluate", {
+            expression: "(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))",
+            awaitPromise: true,
+        });
+        // Then capture until two CONSECUTIVE frames are byte-identical, bounded
+        // by wall clock like every other wait in this function. A page that never
+        // stabilizes — a real animation, exactly what the determinism assertions
+        // exist to catch — still fails, but now names the property directly
+        // instead of depending on which frame each launch happened to sample.
+        const capture = async () => Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
+        let first = await capture();
+        let second = await capture();
+        const settleDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
+        while (!first.equals(second) && Date.now() < settleDeadline) {
+            await wait(50);
+            first = second;
+            second = await capture();
+        }
+        assert(first.equals(second),
+            `the page settles to a stable frame within ${CHROME_READY_TIMEOUT_MS}ms (${chromeTail()})`);
         return { marker, first, second };
     } finally {
         if (sendCommand) {
@@ -881,6 +921,10 @@ async function visualContract() {
             assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker.modalTitle, "Add link");
             const a = shotA.first; const b = shotB.first;
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
+            if (process.env.SAUCE_DEBUG_SHOT_DIR && !a.equals(b)) {
+                fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-a.png`), a);
+                fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-b.png`), b);
+            }
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
 
             const actionUrl = `${pathToFileURL(actionFixture).href}?theme=${theme}`;
