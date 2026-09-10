@@ -224,6 +224,168 @@ function makeApp(tree) {
     assert(threw === false, 'fire must never throw when commands absent');
   });
 
+  // ---------- BR-*: boot-stage profiler + idle-deferred receipt ----------
+  const RECEIPT_PATH = 'ranch/boot-profile.json';
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  // Like makeApp but with a writable adapter + injectable layout/idle scheduling,
+  // so the tests can prove exactly WHEN the receipt write happens.
+  function makeBootRig(tree) {
+    const writes = [];
+    const layoutCbs = [];
+    const idleCbs = [];
+    const cleared = [];
+    const store = {};
+    const app = {
+      vault: {
+        adapter: {
+          list: async (dir) => tree[dir] || { files: [], folders: [] },
+          read: async (p) => {
+            if (typeof tree[p] !== 'string') throw new Error('ENOENT ' + p);
+            return tree[p];
+          },
+          write: async (p, c) => { store[p] = c; writes.push(p); },
+          exists: async (p) => Object.prototype.hasOwnProperty.call(store, p),
+        },
+      },
+      workspace: {
+        getActiveFile: () => null,
+        onLayoutReady: (cb) => layoutCbs.push(cb),
+      },
+    };
+    return { app, writes, layoutCbs, idleCbs, cleared, store };
+  }
+
+  function makeBootPlugin(SaucePlugin, rig) {
+    const p = new SaucePlugin();
+    p.app = rig.app;
+    p._setTimeoutFn = (fn) => { rig.idleCbs.push(fn); return rig.idleCbs.length; };
+    p._clearTimeoutFn = (id) => { rig.cleared.push(id); };
+    return p;
+  }
+
+  const BOOT_TREE = () => ({
+    'ranch/scripts': { files: ['ranch/scripts/foo.js', 'ranch/scripts/notclass.js'], folders: ['ranch/scripts/sub'] },
+    'ranch/scripts/sub': { files: ['ranch/scripts/sub/bar.js'], folders: [] },
+    'ranch/scripts/foo.js': 'class Foo { hi() { return 1; } }',
+    'ranch/scripts/notclass.js': "'use strict';\nconst x = 1;",
+    'ranch/scripts/sub/bar.js': 'class Bar { }',
+  });
+
+  await ok('BR-1 loadCustomJsClasses captures per-stage timings, file count, and bytes', async () => {
+    const mod = loadPluginModule();
+    const tree = BOOT_TREE();
+    const w = (typeof window !== 'undefined') ? window : globalThis;
+    delete w.customJS;
+    const res = await mod.loadCustomJsClasses(makeApp(tree));
+    delete w.customJS;
+    assert(res.profile && Array.isArray(res.profile.stages), 'result carries profile.stages[]');
+    const byName = {};
+    for (const s of (res.profile && res.profile.stages || [])) byName[s.name] = s;
+    const read = byName['read-class-files'];
+    assert(read && read.files === 3, 'read stage counts every .js read (3), got ' + JSON.stringify(read));
+    const expectedBytes = tree['ranch/scripts/foo.js'].length + tree['ranch/scripts/notclass.js'].length + tree['ranch/scripts/sub/bar.js'].length;
+    assert(read && read.bytes === expectedBytes, 'read stage sums body bytes (' + expectedBytes + '), got ' + (read && read.bytes));
+    const reg = byName['register-classes'];
+    assert(reg && reg.registered === 2 && reg.failed === 0, 'register stage counts registered/failed, got ' + JSON.stringify(reg));
+    for (const s of (res.profile.stages)) {
+      assert(typeof s.elapsed_ms === 'number' && s.elapsed_ms >= 0, s.name + ' has non-negative elapsed_ms');
+    }
+    assert(typeof res.profile.total_ms === 'number' && res.profile.total_ms >= 0, 'profile.total_ms is a non-negative number');
+  });
+
+  await ok('BR-2 receipt writes ONLY after layout-ready + idle deferral (zero writes before)', async () => {
+    const SaucePlugin = loadPluginModule();
+    const rig = makeBootRig(BOOT_TREE());
+    const w = (typeof window !== 'undefined') ? window : globalThis;
+    delete w.customJS;
+    const p = makeBootPlugin(SaucePlugin, rig);
+    await p.onload();
+    assert(typeof w.customJS.Foo === 'object', 'classes registered during onload');
+    assert(rig.writes.length === 0, 'zero vault writes at onload completion, got ' + JSON.stringify(rig.writes));
+    assert(rig.layoutCbs.length === 1, 'onload registered exactly one layout-ready callback');
+    rig.layoutCbs[0]();
+    await flush();
+    assert(rig.writes.length === 0, 'zero vault writes after layout-ready but before idle, got ' + JSON.stringify(rig.writes));
+    assert(rig.idleCbs.length === 1, 'layout-ready scheduled exactly one idle deferral');
+    rig.idleCbs[0]();
+    await flush();
+    assert(rig.writes.length === 1 && rig.writes[0] === RECEIPT_PATH, 'exactly one write to ' + RECEIPT_PATH + ', got ' + JSON.stringify(rig.writes));
+    const receipt = JSON.parse(rig.store[RECEIPT_PATH]);
+    assert(receipt.schema_version === 1, 'receipt carries schema_version 1');
+    assert(Array.isArray(receipt.stages) && receipt.stages.some((s) => s.name === 'read-class-files' && s.files === 3), 'receipt carries the boot stages array');
+    delete w.customJS;
+  });
+
+  await ok('BR-3 repeated boots overwrite the single receipt (no unbounded growth)', async () => {
+    const SaucePlugin = loadPluginModule();
+    const tree = BOOT_TREE();
+    const rig = makeBootRig(tree);
+    const w = (typeof window !== 'undefined') ? window : globalThis;
+    delete w.customJS;
+    const boot = async () => {
+      const p = makeBootPlugin(SaucePlugin, rig);
+      await p.onload();
+      rig.layoutCbs.pop()();
+      await flush();
+      rig.idleCbs.pop()();
+      await flush();
+    };
+    await boot();
+    delete tree['ranch/scripts/sub/bar.js'];
+    tree['ranch/scripts/sub'] = { files: [], folders: [] };
+    await boot();
+    delete w.customJS;
+    assert(rig.writes.length === 2 && rig.writes.every((x) => x === RECEIPT_PATH), 'both boots wrote the same single path');
+    const receipt = JSON.parse(rig.store[RECEIPT_PATH]);
+    const read = receipt.stages.find((s) => s.name === 'read-class-files');
+    assert(read && read.files === 2, 'receipt holds ONLY the last boot (2 files after removal), got ' + (read && read.files));
+    assert(!Array.isArray(receipt.boots), 'receipt is not an append-log of boots');
+  });
+
+  await ok('BR-4 a failing receipt write degrades to console.warn — onload chain never throws', async () => {
+    const SaucePlugin = loadPluginModule();
+    const rig = makeBootRig(BOOT_TREE());
+    rig.app.vault.adapter.write = async () => { throw new Error('disk full'); };
+    const w = (typeof window !== 'undefined') ? window : globalThis;
+    delete w.customJS;
+    const warns = [];
+    const origWarn = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    let threw = false;
+    try {
+      const p = makeBootPlugin(SaucePlugin, rig);
+      await p.onload();
+      rig.layoutCbs[0]();
+      await flush();
+      rig.idleCbs[0]();
+      await flush();
+    } catch (_e) { threw = true; }
+    finally { console.warn = origWarn; }
+    assert(threw === false, 'failed write must never throw');
+    assert(typeof w.customJS.Foo === 'object', 'classes still registered despite failed receipt');
+    assert(warns.some((m) => m.indexOf('boot-profile') >= 0), 'failure surfaced as a console.warn mentioning the receipt: ' + JSON.stringify(warns));
+    delete w.customJS;
+  });
+
+  await ok('BR-5 unload cancels the pending idle write — reload cycles cannot double-write', async () => {
+    const SaucePlugin = loadPluginModule();
+    const rig = makeBootRig(BOOT_TREE());
+    const w = (typeof window !== 'undefined') ? window : globalThis;
+    delete w.customJS;
+    const p = makeBootPlugin(SaucePlugin, rig);
+    await p.onload();
+    rig.layoutCbs[0]();
+    await flush();
+    assert(rig.idleCbs.length === 1, 'idle deferral pending before unload');
+    p.onunload();
+    assert(rig.cleared.length === 1, 'unload cancelled the pending idle timer');
+    rig.idleCbs[0]();
+    await flush();
+    assert(rig.writes.length === 0, 'a stale idle callback after unload writes nothing');
+    delete w.customJS;
+  });
+
   await ok('RC-5 onload wires listeners via registerEvent, never throws', async () => {
     const SaucePlugin = loadPluginModule();
     const events = [];
