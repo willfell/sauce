@@ -1061,43 +1061,29 @@ class SpaceDailyDashboard {
    * v0.7.0 (v0.66.0): rollup rule templates. Each rule's childMatch and
    * rootPath are wrapped at call-time with the live dv via _buildRollupRules.
    * (_ROLLUP_RULES alone is dv-agnostic so it stays cacheable.)
+   *
+   * GA-ML4: the project + trip rules declare their namespace (hubRoot/hubType)
+   * instead of carrying a per-slug `dv.pages('"spice/projects/<slug>"')` lookup.
+   * ActivityFeed._query calls rootPath(p) once per windowed child page, so the
+   * old shape issued one Dataview query per edited child and scaled with the
+   * vault's project count; _buildRollupRules now resolves hubs out of a single
+   * root query per namespace, indexed by slug. The kanban rule keeps its
+   * constant rootPathFromDv - there is no slug to resolve.
    */
   get _ROLLUP_RULES() {
     return [
       {
         type: "project",
         childMatchTemplate: (path) => /^spice\/projects\/[^/]+\//.test(path),
-        rootPathFromDv: (dv, p) => {
-          const m = String(p.file.path).match(/^spice\/projects\/([^/]+)\//);
-          if (!m) return null;
-          const slug = m[1];
-          const hubs = dv.pages('"spice/projects/' + slug + '"')
-            .where(pg => pg.type === "project")
-            .array();
-          if (hubs.length === 0) return null;
-          if (hubs.length > 1 && typeof console !== "undefined") {
-            console.warn("SpaceDailyDashboard rollup: multiple hubs in spice/projects/" + slug + "; using " + hubs[0].file.path);
-          }
-          return hubs[0].file.path;
-        },
+        hubRoot: "spice/projects",
+        hubType: "project",
         excludeTemplate: (name) => typeof name === "string" && /^Template,/i.test(name),
       },
       {
         type: "trip",
         childMatchTemplate: (path) => /^spice\/trips\/[^/]+\//.test(path),
-        rootPathFromDv: (dv, p) => {
-          const m = String(p.file.path).match(/^spice\/trips\/([^/]+)\//);
-          if (!m) return null;
-          const slug = m[1];
-          const hubs = dv.pages('"spice/trips/' + slug + '"')
-            .where(pg => pg.type === "trip")
-            .array();
-          if (hubs.length === 0) return null;
-          if (hubs.length > 1 && typeof console !== "undefined") {
-            console.warn("SpaceDailyDashboard rollup: multiple hubs in spice/trips/" + slug + "; using " + hubs[0].file.path);
-          }
-          return hubs[0].file.path;
-        },
+        hubRoot: "spice/trips",
+        hubType: "trip",
         excludeTemplate: (name) => typeof name === "string" && /^Template,/i.test(name),
       },
       {
@@ -1110,15 +1096,79 @@ class SpaceDailyDashboard {
   }
 
   /**
+   * GA-ML4: the owning slug of a namespaced page, derived from its PATH - never
+   * from a query string. A hub only owns pages that live INSIDE its slug folder,
+   * so `spice/projects/foo/Foo.md` yields "foo" while the sibling file
+   * `spice/projects/foo.md` (no nested segment) owns nothing and returns null.
+   * Getting this wrong silently moves activity between projects.
+   */
+  static _rollupSlugFromPath(root, filePath) {
+    const prefix = String(root) + "/";
+    const path = String(filePath || "");
+    if (path.indexOf(prefix) !== 0) return null;
+    const rest = path.slice(prefix.length);
+    const cut = rest.indexOf("/");
+    if (cut <= 0) return null;
+    return rest.slice(0, cut);
+  }
+
+  /**
+   * GA-ML4: ONE dv.pages() sweep of a namespace root, bucketed slug -> hub pages
+   * in Dataview's own order (so hubs[0] still picks the same hub the per-slug
+   * query did). Never throws: a cold index yields an empty index, which makes
+   * every rootPath() lookup return null. The old rule had no try/catch of its own:
+   * it let dv.pages throw and ActivityFeed._query swallowed it into a null at the
+   * `try { rootPath = rule.rootPath(p) } catch` around its rollup loop. Same result,
+   * caught one frame earlier.
+   */
+  static _indexRollupHubs(dv, root, hubType) {
+    const index = new Map();
+    let rows;
+    try {
+      const r = dv.pages('"' + root + '"');
+      if (!r) return index;
+      rows = typeof r.array === "function" ? r.array() : Array.from(r);
+    } catch (_e) { return index; }
+    for (const page of rows) {
+      if (!page || page.type !== hubType) continue;
+      const slug = SpaceDailyDashboard._rollupSlugFromPath(root, page.file && page.file.path);
+      if (!slug) continue;
+      if (!index.has(slug)) index.set(slug, []);
+      index.get(slug).push(page);
+    }
+    return index;
+  }
+
+  /**
    * v0.7.0 (v0.66.0): bind the live `dv` to each rollup-rule's child/root
    * callbacks. Yields the {type, childMatch, rootPath, exclude} shape
    * ActivityFeed.render expects.
+   *
+   * GA-ML4: namespace hub indexes are built at most ONCE per rules object and
+   * only on first use, so a render whose window contains no project (or no trip)
+   * child still issues zero hub queries.
    */
   _buildRollupRules(dv) {
+    const indexes = new Map();
+    const hubIndexFor = (root, hubType) => {
+      const key = root + " " + hubType;
+      if (!indexes.has(key)) indexes.set(key, SpaceDailyDashboard._indexRollupHubs(dv, root, hubType));
+      return indexes.get(key);
+    };
+    const resolveHub = (rule, p) => {
+      const slug = SpaceDailyDashboard._rollupSlugFromPath(rule.hubRoot, p && p.file && p.file.path);
+      if (!slug) return null;
+      const hubs = hubIndexFor(rule.hubRoot, rule.hubType).get(slug);
+      if (!hubs || hubs.length === 0) return null;
+      if (hubs.length > 1 && typeof console !== "undefined") {
+        console.warn("SpaceDailyDashboard rollup: multiple hubs in " + rule.hubRoot + "/" + slug + "; using " + hubs[0].file.path);
+      }
+      return hubs[0].file.path;
+    };
     return this._ROLLUP_RULES.map(rule => ({
       type: rule.type,
       childMatch: (p) => p && p.file && rule.childMatchTemplate(String(p.file.path)),
-      rootPath:   (p) => rule.rootPathFromDv(dv, p),
+      rootPath:   (p) => (rule.hubRoot ? resolveHub(rule, p) : rule.rootPathFromDv(dv, p)),
       exclude:    (p) => p && p.file && rule.excludeTemplate(p.file.name),
     }));
   }
