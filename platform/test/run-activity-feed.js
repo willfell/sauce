@@ -152,8 +152,11 @@ if (src.length > 0) {
   assertTrue("AF-12: customJS.BeaconCards.render delegation present",
     /customJS\.BeaconCards\.render/.test(src));
 
-  // AF-13: dv.pages() Dataview query call.
-  assertTrue("AF-13: dv.pages() query call present", /dv\.pages\(\)/.test(src));
+  // AF-13: dv.pages(<source>) Dataview query call. GA-ML3 update: the query
+  // is now folder-sourced — the call must carry a source argument. The old
+  // form of this assert (/dv\.pages\(\)/) required the UNSOURCED call and is
+  // mutually exclusive with SRC-1 below.
+  assertTrue("AF-13: sourced dv.pages(<source>) query call present", /dv\.pages\(\s*[^)\s]/.test(src));
 
   // AF-14: window.moment reference (or native Date fallback indicator).
   assertTrue("AF-14a: window.moment reference present (primary code path)",
@@ -1746,6 +1749,199 @@ try {
   assertTrue("AF-PRECOMP-3: malformed precomputed.pages falls back to _query", queryCalls === 1);
 } catch (e) {
   assertTrue("AF-PRECOMP-3: malformed precomputed falls back", false, e && e.message);
+}
+
+// ── Pass 10: GA-ML3 — sourced query window (folder-union dv.pages source) ──
+//
+// The mobile boot audit found ActivityFeed's `dv.pages().where(inWindow)` was
+// an UNSOURCED vault-wide scan (2,990+ indexed notes in headspace) with a
+// per-page moment() predicate, executed 2-3x at startup via Home + daily
+// dashboard. The fix derives a Dataview folder-union source from the
+// requested bucket types (landmine #11: one module dir per blueprint under
+// spice/), so only pages inside the buckets' folders ever reach the window
+// filter. SRC-2's dv fixture HONORS the source argument (emulating Dataview
+// folder-source semantics incl. 'or'-union de-dupe) and counts window-filter
+// invocations, proving out-of-bucket pages are never visited.
+
+console.log("\n--- Pass 10: GA-ML3 sourced query window ---");
+
+// SRC-1: source text — no unsourced dv.pages() call remains in the mechanism.
+assertTrue("SRC-1: no unsourced dv.pages() call remains in activity-feed.js",
+  !/dv\.pages\(\s*\)/.test(src),
+  "the feed query must pass a folder-union source to dv.pages(...)");
+
+// Source-honoring dv fixture. Unlike v066_makeFakeDv (which ignores the
+// source argument), this one parses the folder-union source string the way
+// Dataview does: '"a" or "b"' → pages under folder a or folder b, union
+// de-duped by page identity. It also spies on (a) every source string passed
+// to pages() and (b) every page the FIRST .where() predicate (the in-window
+// filter) is invoked on.
+function srcMakeSourcedDv(seed) {
+  const state = { sources: [], filterPaths: [], filterCalls: 0 };
+  function parseSource(q) {
+    if (q == null || q === "") return null; // Dataview: empty source = all pages
+    return String(q).split(/\s+or\s+/).map((s) => s.trim().replace(/^"|"$/g, ""));
+  }
+  function chain(items) {
+    const c = {
+      _arr: items.slice(),
+      where(fn) {
+        const wrapped = (p) => {
+          state.filterCalls++;
+          state.filterPaths.push((p && p.file && p.file.path) || "");
+          return fn(p);
+        };
+        return chain(this._arr.filter(wrapped));
+      },
+      sort(fn) { const s = this._arr.slice(); try { s.sort((a, b) => { const av = fn(a); const bv = fn(b); return av > bv ? 1 : av < bv ? -1 : 0; }); } catch (_) {} return chain(s); },
+      slice(a, b) { return chain(this._arr.slice(a, b)); },
+      array() { return this._arr.slice(); },
+    };
+    c[Symbol.iterator] = function* () { for (const p of c._arr) yield p; };
+    Object.defineProperty(c, "length", { get() { return c._arr.length; } });
+    return c;
+  }
+  const container = v066_makeFakeEl();
+  return {
+    _state: state,
+    container,
+    pages(q) {
+      state.sources.push(q == null ? null : String(q));
+      const folders = parseSource(q);
+      if (!folders) return chain(seed);
+      const seen = new Set();
+      const out = [];
+      for (const f of folders) {
+        for (const p of seed) {
+          const pth = (p && p.file && p.file.path) || "";
+          if (pth === f || pth.indexOf(f + "/") === 0) {
+            if (!seen.has(p)) { seen.add(p); out.push(p); }
+          }
+        }
+      }
+      return chain(out);
+    },
+    page(pth) { return seed.find((pg) => pg && pg.file && pg.file.path === pth) || null; },
+    el(t) { return container.createEl(t); },
+  };
+}
+
+// SRC-2: pages-spy — the query passes a folder-union source derived from the
+// requested buckets, and out-of-bucket pages never reach the window filter.
+try {
+  const inA = { file: { path: "spice/sticky-notes/in-a.md", name: "in-a" }, type: "sticky-note", created_at: "2026-05-22T10:00:00Z" };
+  const inB = { file: { path: "spice/projects/foo/Foo.md", name: "in-b" }, type: "project", created_at: "2026-05-22T11:00:00Z" };
+  const outMapped = { file: { path: "Notes/outside.md", name: "outside-mapped" }, type: "sticky-note", created_at: "2026-05-22T12:00:00Z" };
+  const outStray = { file: { path: "Archive/stray.md", name: "stray" }, type: "random-type", created_at: "2026-05-22T09:00:00Z" };
+  const dv = srcMakeSourcedDv([inA, inB, outMapped, outStray]);
+  const af = new (v066_loadAF())();
+  af.render(dv, { scope: "today", asOf: "2026-05-22", blueprints: ["sticky-note", "project"], framed: true, groupBy: "blueprint" });
+  const st = dv._state;
+  assertTrue("SRC-2a: exactly one dv.pages() call, carrying a non-empty source",
+    st.sources.length === 1 && typeof st.sources[0] === "string" && st.sources[0].length > 0,
+    "sources seen: " + JSON.stringify(st.sources));
+  assertTrue("SRC-2b: source is the folder union of the requested buckets",
+    typeof st.sources[0] === "string" &&
+    st.sources[0].indexOf('"spice/sticky-notes"') >= 0 &&
+    st.sources[0].indexOf('"spice/projects"') >= 0 &&
+    / or /.test(st.sources[0]),
+    "source was: " + JSON.stringify(st.sources[0]));
+  assertTrue("SRC-2c: window filter runs ONLY on in-source pages (2 invocations, no out-of-bucket paths)",
+    st.filterCalls === 2 &&
+    st.filterPaths.indexOf("Notes/outside.md") < 0 &&
+    st.filterPaths.indexOf("Archive/stray.md") < 0,
+    "filterCalls=" + st.filterCalls + " paths=" + JSON.stringify(st.filterPaths));
+  const html = dv.container.innerHTML;
+  assertTrue("SRC-2d: in-bucket pages render; the out-of-bucket page does NOT",
+    html.indexOf("in-a") >= 0 && html.indexOf("in-b") >= 0 && html.indexOf("outside-mapped") < 0,
+    "html=" + html.slice(0, 300));
+} catch (e) {
+  assertTrue("SRC-2a: exactly one dv.pages() call, carrying a non-empty source", false, e && e.message);
+  assertTrue("SRC-2b: source is the folder union of the requested buckets", false, e && e.message);
+  assertTrue("SRC-2c: window filter runs ONLY on in-source pages (2 invocations, no out-of-bucket paths)", false, e && e.message);
+  assertTrue("SRC-2d: in-bucket pages render; the out-of-bucket page does NOT", false, e && e.message);
+}
+
+// SRC-3: output identity — a corpus spanning EVERY configured default bucket
+// renders byte-for-byte identically through (a) the source-honoring dv and
+// (b) a legacy vault-wide dv that ignores the source argument. Proves the
+// folder-union source changes WHERE the query looks, never WHAT it returns
+// for in-bucket content. The out-of-bucket stray (unmapped type) must not
+// appear in either.
+try {
+  const af = new (v066_loadAF())();
+  const map = af._BLUEPRINT_FOLDERS;
+  const types = af._DEFAULT_BLUEPRINTS;
+  assertTrue("SRC-3a: every default bucket type has a folder mapping",
+    Array.isArray(types) && types.length > 0 && types.every((t) => Array.isArray(map[t]) && map[t].length > 0),
+    "unmapped: " + JSON.stringify((types || []).filter((t) => !map || !Array.isArray(map[t]) || map[t].length === 0)));
+  const seed = types.map((t, i) => ({
+    file: { path: map[t][0] + "/fixture-" + t + ".md", name: "fixture-" + t },
+    type: t,
+    created_at: "2026-05-22T" + String(10 + (i % 12)).padStart(2, "0") + ":" + String(i % 60).padStart(2, "0") + ":00Z",
+  }));
+  seed.push({ file: { path: "Random/stray.md", name: "fixture-stray" }, type: "stray-type", created_at: "2026-05-22T09:00:00Z" });
+  const opts = { scope: "today", asOf: "2026-05-22", blueprints: types.slice(), groupBy: "none", limit: 200 };
+  const dvSourced = srcMakeSourcedDv(seed);
+  const afSourced = new (v066_loadAF())();
+  afSourced.render(dvSourced, opts);
+  const dvLegacy = v066_makeFakeDv(seed);
+  const afLegacy = new (v066_loadAF())();
+  afLegacy.render(dvLegacy, opts);
+  assertEq("SRC-3b: sourced render output is identical to the vault-wide render output",
+    dvSourced.container.innerHTML, dvLegacy.container.innerHTML);
+  const html = dvSourced.container.innerHTML;
+  assertTrue("SRC-3c: every bucket's fixture page renders through the sourced query",
+    types.every((t) => html.indexOf("fixture-" + t) >= 0),
+    "missing: " + JSON.stringify(types.filter((t) => html.indexOf("fixture-" + t) < 0)));
+  assertTrue("SRC-3d: the out-of-bucket stray does not appear", html.indexOf("fixture-stray") < 0);
+} catch (e) {
+  assertTrue("SRC-3a: every default bucket type has a folder mapping", false, e && e.message);
+  assertTrue("SRC-3b: sourced render output is identical to the vault-wide render output", false, e && e.message);
+  assertTrue("SRC-3c: every bucket's fixture page renders through the sourced query", false, e && e.message);
+  assertTrue("SRC-3d: the out-of-bucket stray does not appear", false, e && e.message);
+}
+
+// SRC-4: overlapping bucket folders do not double-count. "project" and
+// "kanban" both source spice/projects (kanban boards live inside project
+// dirs); a board page in that shared folder must surface exactly once and be
+// window-filtered exactly once. The fixture's union emulation de-dupes by
+// page identity exactly as Dataview's 'or' source does.
+try {
+  const board = { file: { path: "spice/projects/foo/Foo Board.md", name: "shared-board" }, type: "kanban", created_at: "2026-05-22T10:00:00Z" };
+  const dv = srcMakeSourcedDv([board]);
+  const af = new (v066_loadAF())();
+  af.render(dv, { scope: "today", asOf: "2026-05-22", blueprints: ["project", "kanban"], groupBy: "none" });
+  const html = dv.container.innerHTML;
+  const occurrences = (html.match(/shared-board/g) || []).length;
+  assertTrue("SRC-4a: page in an overlapping bucket folder renders exactly once", occurrences === 1,
+    "occurrences=" + occurrences);
+  assertTrue("SRC-4b: page in an overlapping bucket folder is window-filtered exactly once",
+    dv._state.filterCalls === 1, "filterCalls=" + dv._state.filterCalls);
+} catch (e) {
+  assertTrue("SRC-4a: page in an overlapping bucket folder renders exactly once", false, e && e.message);
+  assertTrue("SRC-4b: page in an overlapping bucket folder is window-filtered exactly once", false, e && e.message);
+}
+
+// SRC-5: coverage guard — a requested bucket type with NO folder mapping
+// falls back to the vault-wide source (Dataview: empty source = all pages)
+// instead of silently dropping coverage.
+try {
+  const known = { file: { path: "spice/sticky-notes/k.md", name: "known-note" }, type: "sticky-note", created_at: "2026-05-22T10:00:00Z" };
+  const mystery = { file: { path: "Random/m.md", name: "mystery-note" }, type: "mystery-type", created_at: "2026-05-22T11:00:00Z" };
+  const dv = srcMakeSourcedDv([known, mystery]);
+  const af = new (v066_loadAF())();
+  af.render(dv, { scope: "today", asOf: "2026-05-22", blueprints: ["sticky-note", "mystery-type"], groupBy: "none" });
+  const st = dv._state;
+  assertTrue("SRC-5a: unmapped bucket widens to the vault-wide source (empty/absent source)",
+    st.sources.length === 1 && (st.sources[0] == null || st.sources[0] === ""),
+    "sources: " + JSON.stringify(st.sources));
+  const html = dv.container.innerHTML;
+  assertTrue("SRC-5b: both mapped and unmapped bucket pages still render (no coverage drop)",
+    html.indexOf("known-note") >= 0 && html.indexOf("mystery-note") >= 0);
+} catch (e) {
+  assertTrue("SRC-5a: unmapped bucket widens to the vault-wide source (empty/absent source)", false, e && e.message);
+  assertTrue("SRC-5b: both mapped and unmapped bucket pages still render (no coverage drop)", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────

@@ -2,8 +2,9 @@
 // run-daily-dashboard.js — behavioral harness for SpaceDailyDashboard perf-critical
 // query paths. Guards the 2→1 sweep reduction: the dashboard no longer runs its
 // own _getActivityCount sweep AND ActivityFeed.render's _query sweep. It now
-// calls customJS.ActivityFeed.query(dv, opts) ONCE (one unscoped dv.pages()
-// sweep), uses .total for the hasContent gate + count pill, derives the
+// calls customJS.ActivityFeed.query(dv, opts) ONCE (one dv.pages() sweep,
+// folder-union SOURCED since GA-ML3 — never unscoped/vault-wide), uses
+// .total for the hasContent gate + count pill, derives the
 // segmented-accent byBlueprint from query().pages via bucketByBlueprint(), and
 // hands the same pages back into ActivityFeed.render via precomputed.
 //
@@ -347,6 +348,13 @@ async function renderDailyTaskFixture(today, options) {
 
   // Build a dv that counts unscoped sweeps + memoizable scoped sweeps and returns
   // Dataview-DataArray-ish results (.where/.sort/.array + iterator).
+  // GA-ML3: the activity-feed sweep is now folder-union SOURCED
+  // ('"spice/a" or "spice/b"'). Any source string not pinned in scopedMap is
+  // treated as a folder-union and modeled with Dataview folder-source
+  // semantics: pages under any listed folder, union de-duped by page
+  // identity. Unscoped (no-arg / empty-string) sweeps are still counted in
+  // state.noArg so DASH-L5-1 stays revert-sensitive — a regression to an
+  // unscoped dv.pages() in activity-feed flips noArg back above 0.
   function makeDv() {
     const state = { noArg: 0, scoped: {} };
     function chain(items) {
@@ -370,7 +378,17 @@ async function renderDailyTaskFixture(today, options) {
       pages(q) {
         if (q == null || q === '') { state.noArg++; return chain(pages); }
         state.scoped[q] = (state.scoped[q] || 0) + 1;
-        return chain(scopedMap[q] || []);
+        if (Object.prototype.hasOwnProperty.call(scopedMap, q)) return chain(scopedMap[q]);
+        const folders = String(q).split(/\s+or\s+/).map((s) => s.trim().replace(/^"|"$/g, ''));
+        const seen = new Set();
+        const out = [];
+        for (const f of folders) {
+          for (const p of pages) {
+            const pth = (p && p.file && p.file.path) || '';
+            if ((pth === f || pth.indexOf(f + '/') === 0) && !seen.has(p)) { seen.add(p); out.push(p); }
+          }
+        }
+        return chain(out);
       },
       page(p) { return pages.find(pg => pg && pg.file && pg.file.path === p) || null; },
       el(tag) { const e = makeDashEl(); e._tag = tag; this.container._children.push(e); return e; },
@@ -407,13 +425,23 @@ async function renderDailyTaskFixture(today, options) {
     return { customJS, spy };
   }
 
-  await ok('DASH-L5-1 dashboard sweeps dv.pages() exactly ONCE for activity (via ActivityFeed.query)', async () => {
+  await ok('DASH-L5-1 dashboard sweeps dv.pages() exactly ONCE for activity, folder-union SOURCED (via ActivityFeed.query)', async () => {
     const { customJS, spy } = makeCustomJS();
     const dv = makeDv();
     const Dash = loadDashboard(windowShim, customJS);
     await new Dash().render(dv, undefined);
     assert(spy.queryCalls === 1, 'expected ActivityFeed.query called once, got ' + spy.queryCalls);
-    assert(dv._state.noArg === 1, 'expected exactly 1 unscoped dv.pages() sweep, got ' + dv._state.noArg);
+    // GA-ML3: the feed sweep must be SOURCED — zero unscoped/vault-wide
+    // sweeps. Revert-sensitive: an activity-feed regression to an unscoped
+    // dv.pages() lands in state.noArg and fails here.
+    assert(dv._state.noArg === 0, 'expected 0 unscoped dv.pages() sweeps (feed sweep must be sourced), got ' + dv._state.noArg);
+    // Exactly ONE folder-union sourced sweep (the feed's), distinct from the
+    // dashboard's own single-folder scoped queries pinned in scopedMap.
+    const unionSources = Object.keys(dv._state.scoped).filter((s) => / or /.test(s));
+    assert(unionSources.length === 1 && dv._state.scoped[unionSources[0]] === 1,
+      'expected exactly 1 folder-union sourced sweep, got ' + JSON.stringify(dv._state.scoped));
+    assert(unionSources[0].indexOf('"spice/projects"') >= 0 && unionSources[0].indexOf('"spice/cowork"') >= 0,
+      'union source must cover the dashboard buckets (spice/projects + spice/cowork at minimum), got ' + unionSources[0]);
   });
 
   await ok('DASH-L5-2 dashboard hands the SAME pages back to ActivityFeed.render via precomputed', async () => {
