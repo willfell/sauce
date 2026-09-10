@@ -813,18 +813,25 @@ async function exactViewportCapture(executable, url, width, height) {
             expression: "(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(()=>new Promise((resolve)=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))",
             awaitPromise: true,
         });
-        // Then capture until two CONSECUTIVE frames are byte-identical, bounded
-        // by wall clock like every other wait in this function. A page that never
-        // stabilizes — a real animation, exactly what the determinism assertions
-        // exist to catch — still fails, but now names the property directly
-        // instead of depending on which frame each launch happened to sample.
+        // Then capture until two frames taken ≥125ms APART are byte-identical,
+        // bounded by wall clock like every other wait in this function. The
+        // spacing matters as much as the equality: two back-to-back captures can
+        // land inside the same composited surface frame and agree with each
+        // other while an animation is still in flight, which lets each launch
+        // "settle" on a different mid-animation frame. 125ms spans several
+        // frames at any plausible compositor rate, so agreement across it means
+        // the page has actually stopped painting. A page that never stabilizes —
+        // a real animation, exactly what the determinism assertions exist to
+        // catch — still fails, but now names the property directly instead of
+        // depending on which frame each launch happened to sample.
         const capture = async () => Buffer.from((await send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64");
         let first = await capture();
+        await wait(125);
         let second = await capture();
         const settleDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
         while (!first.equals(second) && Date.now() < settleDeadline) {
-            await wait(50);
             first = second;
+            await wait(125);
             second = await capture();
         }
         assert(first.equals(second),
@@ -921,9 +928,22 @@ async function visualContract() {
             assert.strictEqual(marker.modals, "1"); assert.strictEqual(marker.modalTitle, "Add link");
             const a = shotA.first; const b = shotB.first;
             assert(a.length > 1000 && a.subarray(1, 4).equals(Buffer.from("PNG")), "screenshot is a non-empty PNG");
-            if (process.env.SAUCE_DEBUG_SHOT_DIR && !a.equals(b)) {
-                fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-a.png`), a);
-                fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-b.png`), b);
+            if (!a.equals(b)) {
+                // The pixels ARE the diagnosis for this class of failure — the
+                // blinking-caret bug was only identified by looking at the two
+                // differing frames. On mismatch, persist them: to a directory
+                // when SAUCE_DEBUG_SHOT_DIR is set (local repro), and to stdout
+                // as base64 otherwise (CI logs are the only artifact channel a
+                // failed runner leaves behind). ~57KB per frame, mismatch only.
+                if (process.env.SAUCE_DEBUG_SHOT_DIR) {
+                    fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-a.png`), a);
+                    fs.writeFileSync(path.join(process.env.SAUCE_DEBUG_SHOT_DIR, `${theme}-${width}-b.png`), b);
+                } else {
+                    console.log(`--- ${theme}/${width} cross-launch mismatch; frame A (base64 PNG) ---`);
+                    console.log(a.toString("base64"));
+                    console.log(`--- ${theme}/${width} cross-launch mismatch; frame B (base64 PNG) ---`);
+                    console.log(b.toString("base64"));
+                }
             }
             assert.strictEqual(crypto.createHash("sha256").update(a).digest("hex"), crypto.createHash("sha256").update(b).digest("hex"), `${theme}/${width} screenshot is deterministic`);
 
