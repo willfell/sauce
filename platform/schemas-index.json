@@ -389,6 +389,20 @@
       "notes": "v0.116.0 \u2014 Per-project To-Do note frontmatter (type: project-todo). Validated via the project manifest's rule_fragment with frontmatter_branch on type. Backfilled by applyProjectTodoBackfill in install.js."
     },
     {
+      "id": "project-meetings-frontmatter",
+      "kind": "contract",
+      "owner": {
+        "type": "blueprint",
+        "name": "project"
+      },
+      "source": "platform/blueprints/project/manifest.json",
+      "consumers": [
+        "platform/blueprints/project/helpers/project-meetings-list.js",
+        "platform/blueprints/project/helpers/project-chrome-bar.js"
+      ],
+      "notes": "Per-project Meetings page frontmatter (type: project-meetings) at spice/projects/<slug>/Meetings.md \u2014 project + project_slug + project_name identify the project whose meetings ProjectMeetingsList renders. Scaffolded by the project entity-create extra_files[] entry; backfilled by applyProjectMeetingsPageBackfill in install.js. Drift between the two is pinned by run-project-meetings-page.js."
+    },
+    {
       "id": "breadcrumb-registry",
       "kind": "data-file",
       "owner": {

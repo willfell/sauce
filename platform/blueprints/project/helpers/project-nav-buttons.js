@@ -183,6 +183,15 @@ class ProjectNavButtons {
             return { context: "links-hub", pathParts, planningIdx, projectSlug, projectDir };
         }
 
+        // Per-project Meetings page: "Meetings.md" directly under the project dir
+        // (type: project-meetings). Basename-based (mirrors the Links Hub
+        // detection) so it does not depend on the metadata cache being warm. A
+        // project literally named "Meetings" matches the type:project atlas branch
+        // above before ever reaching here.
+        if (basename === "Meetings" && pathParts.length === planningIdx + 3) {
+            return { context: "project-meetings", pathParts, planningIdx, projectSlug, projectDir };
+        }
+
         // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
         if (pathParts.length === planningIdx + 2 && basename === "Projects") {
             return { context: "projects-hub", pathParts, planningIdx };

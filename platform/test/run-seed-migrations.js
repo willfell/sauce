@@ -881,6 +881,34 @@ withTempVault((vault) => {
     const vp2cFirstPassBodies = { ...vp2cInstalledBodies };
     const vp2cFirstPassBackupPaths = [...vp2cGammaBackups];
 
+    // ===== HC-SEED-MIGRATE-PROJECT-MEETINGS-* — applyProjectMeetingsPageBackfill =====
+    // The per-project Meetings page (project-scoped meetings list) must be
+    // materialized by the REAL install run for every seed project with a
+    // type:project atlas — proving the backfill is wired into the install
+    // sequence, not merely that the function works when called directly
+    // (landmine #32).
+    {
+        const pmCases = [
+            ["spice/projects/my-cool-project/Meetings.md", "My Cool Project"],
+            ["spice/projects/flat-fixture/Meetings.md", "Flat Fixture"],
+        ];
+        for (const [rel, name] of pmCases) {
+            const exists = helpers.fileExists(vault, rel);
+            ok(`HC-SEED-MIGRATE-PROJECT-MEETINGS-1 ${rel} materialized by install`, exists);
+            if (!exists) continue;
+            const note = helpers.readNote(vault, rel);
+            const { frontmatter: pmFm } = helpers.parseFrontmatter(note);
+            ok(`HC-SEED-MIGRATE-PROJECT-MEETINGS-2 ${rel} type: project-meetings`,
+               pmFm && pmFm.type === "project-meetings");
+            ok(`HC-SEED-MIGRATE-PROJECT-MEETINGS-3 ${rel} project wikilink names the atlas`,
+               String(pmFm && pmFm.project || "").includes(`[[${name}]]`));
+            ok(`HC-SEED-MIGRATE-PROJECT-MEETINGS-4 ${rel} renders ProjectMeetingsList`,
+               note.includes('class: "ProjectMeetingsList"'));
+        }
+        ok("HC-SEED-MIGRATE-PROJECT-MEETINGS-5 backfill step recorded in install history",
+           (installedJson?.history || []).some((entry) => entry.step === "project_meetings_page_backfill"));
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     // A normal same-version install skips already-current blueprint items at
     // install.js's version gate. Mark only the project ledger entry stale so

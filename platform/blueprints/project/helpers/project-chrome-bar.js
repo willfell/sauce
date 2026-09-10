@@ -51,6 +51,7 @@ class ProjectChromeBar {
       docs: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`,
       todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
       links: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
+      calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
       plus: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`,
       minus: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`,
       gear: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h2l.4 2.3a7 7 0 0 1 2 1.2l2.2-.9 1 1.7-1.7 1.5a7 7 0 0 1 0 2.4l1.7 1.5-1 1.7-2.2-.9a7 7 0 0 1-2 1.2L13 20h-2l-.4-2.3a7 7 0 0 1-2-1.2l-2.2.9-1-1.7 1.7-1.5a7 7 0 0 1 0-2.4L3.4 8.3l1-1.7 2.2.9a7 7 0 0 1 2-1.2z"/><circle cx="12" cy="12" r="3"/></svg>`,
@@ -231,6 +232,15 @@ class ProjectChromeBar {
       return { context: "links-hub", pathParts, planningIdx, projectSlug, projectDir };
     }
 
+    // Per-project Meetings page: "Meetings.md" directly under the project dir
+    // (type: project-meetings). Basename-based (mirrors the Links Hub
+    // detection) so it does not depend on the metadata cache being warm. A
+    // project literally named "Meetings" matches the type:project atlas branch
+    // above before ever reaching here.
+    if (basename === "Meetings" && pathParts.length === planningIdx + 3) {
+      return { context: "project-meetings", pathParts, planningIdx, projectSlug, projectDir };
+    }
+
     // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
     if (pathParts.length === planningIdx + 2 && basename === "Projects") {
       return { context: "projects-hub", pathParts, planningIdx };
@@ -337,6 +347,11 @@ class ProjectChromeBar {
           overflow: [{ id: "manage-links", label: "Manage links", icon: ICON.gear }], leaf: false };
       case "doc-note":
         return { primary: null, overflow: [{ id: "move-docs", label: "Move", icon: ICON.move }], leaf: true };
+      case "project-meetings":
+        // Per-project meetings list — read-only leaf: meetings are created
+        // from the meetings blueprint, not from the project surface (user
+        // decision, sauce v0.142.x — see ProjectMeetingsPanel).
+        return { primary: null, overflow: [], leaf: true };
       // project-board / task-board / task-board-card / task-note / legacy-sub-note /
       // unknown / non-project / default — bare leaf: no primary, no overflow.
       default:
@@ -366,7 +381,7 @@ class ProjectChromeBar {
   }
 
   // ── navTarget — resolve ONE project destination path by key ─────────────────
-  // key ∈ board | docs | map | todo | links. Returns the absolute vault path for
+  // key ∈ board | docs | map | todo | links | meetings. Returns the absolute vault path for
   // that destination, gated on existence exactly where _navEntries gates it, or
   // null when the destination can't be resolved (missing map note / no To-Do note
   // / no Links Hub / cold index). Public so both _navEntries and the command
@@ -388,6 +403,10 @@ class ProjectChromeBar {
         case "links": {
           const linksHubPath = `${projectDir}/Links Hub.md`;
           return exists(linksHubPath) ? linksHubPath : null;
+        }
+        case "meetings": {
+          const meetingsPath = `${projectDir}/Meetings.md`;
+          return exists(meetingsPath) ? meetingsPath : null;
         }
         case "map": {
           const { mapNote } = this._resolveProjectNotes(projectDir);
@@ -454,6 +473,9 @@ class ProjectChromeBar {
       // To-Do — derived from mainNote.path (source of truth), gated on existence.
       const toDoPath = this.navTarget(dv, ctx, "todo");
       if (toDoPath) projDests.push({ label: "To-Do", icon: ICON.todo, path: toDoPath });
+      // Meetings — the per-project meetings page, gated on it existing.
+      const meetingsPath = this.navTarget(dv, ctx, "meetings");
+      if (meetingsPath) projDests.push({ label: "Meetings", icon: ICON.calendar, path: meetingsPath });
       // Helpful Links — gated on the Links Hub note existing.
       const linksHubPath = this.navTarget(dv, ctx, "links");
       if (linksHubPath) projDests.push({ label: "Helpful Links", icon: ICON.links, path: linksHubPath });
@@ -466,6 +488,7 @@ class ProjectChromeBar {
         // project-hub → its atlas, project-map → Map, project-board → Project Board.
         if (context === "docs-hub" && d.label === "Docs") continue;
         if (context === "links-hub" && d.label === "Helpful Links") continue;
+        if (context === "project-meetings" && d.label === "Meetings") continue;
         if (context === "project-map" && d.label === "Map") continue;
         if (context === "project-board" && d.label === "Project Board") continue;
         if ((context === "project-hub" || context === "project-todo") && mainNote && d.path === mainNote.path) continue;

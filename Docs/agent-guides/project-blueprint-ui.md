@@ -51,6 +51,7 @@ Every project surface leads with the **single `ProjectChromeBar` block**, then i
 | project map | Add workstream | Remove workstream (danger) | `ProjectWorkstreamManager` in **`contentOnly`** mode + `ProjectWorkstreams` |
 | task hub | New Note | Create/Open Board | task-note tiles |
 | links hub | Add link | Manage links | `ProjectLinksPanel` |
+| project-meetings (`Meetings.md` at project root) | — | — | `ProjectMeetingsList` (project-scoped meetings, month-grouped; leaf bar) |
 | doc-note (leaf) | — | Move | doc body |
 | board / task-note / card (leaf) | — | — | note body |
 
