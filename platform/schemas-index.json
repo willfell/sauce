@@ -647,6 +647,23 @@
         "platform/test/run-preflight-runner.js"
       ],
       "notes": "Preflight step list \u2014 id/cmd/lane/group per step, authored heaviest-first. Replaces the release:preflight && chain. Lane is serial or parallel; the serial lane runs first. group is optional; at most one step per group runs at a time in the parallel lane."
+    },
+    {
+      "id": "sauce-plugin-boot-profile-receipt",
+      "kind": "learned-state-schema",
+      "owner": {
+        "type": "mechanism",
+        "name": "sauce-plugin"
+      },
+      "source": "platform/mechanisms/sauce-plugin/plugin/main.js",
+      "accepted_versions": [
+        "1"
+      ],
+      "validator": "platform/test/run-sauce-plugin.js",
+      "consumers": [
+        "platform/test/run-sauce-plugin.js"
+      ],
+      "notes": "Per-boot stage profile the sauce plugin writes to ranch/boot-profile.json AFTER onLayoutReady plus an idle deferral (never during boot \u2014 boot-time vault writes are the disease the Mobile Load Performance epic treats). Shape: { schema_version:1, generated_by, boot_started_at, written_at, total_ms, stages:[{ name, elapsed_ms, ...per-stage fields }] } with stages resolve-scripts-folder, read-class-files (files + bytes), register-classes (registered + failed). Last boot only \u2014 repeated boots overwrite the receipt; it never grows. Runtime state in consumer vaults, not a tracked workshop file; schema encoded in _writeBootReceipt/loadCustomJsClasses in main.js."
     }
   ]
 }
