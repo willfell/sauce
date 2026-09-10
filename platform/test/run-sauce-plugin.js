@@ -288,6 +288,7 @@ function makeApp(tree) {
     assert(read && read.bytes === expectedBytes, 'read stage sums body bytes (' + expectedBytes + '), got ' + (read && read.bytes));
     const reg = byName['register-classes'];
     assert(reg && reg.registered === 2 && reg.failed === 0, 'register stage counts registered/failed, got ' + JSON.stringify(reg));
+    assert(reg && reg.loaded === 2 && reg.skipped === 0, 'register stage counts loaded/skipped (empty registry → all loaded), got ' + JSON.stringify(reg));
     for (const s of (res.profile.stages)) {
       assert(typeof s.elapsed_ms === 'number' && s.elapsed_ms >= 0, s.name + ' has non-negative elapsed_ms');
     }
@@ -384,6 +385,111 @@ function makeApp(tree) {
     await flush();
     assert(rig.writes.length === 0, 'a stale idle callback after unload writes nothing');
     delete w.customJS;
+  });
+
+  // ---------- DP-*: single-pass class-loading dedupe ----------
+  // The CustomJS community plugin evals the same corpus; whichever party runs
+  // second must skip classes the registry already owns instead of paying the
+  // full eval+construct pass again. Constructor side-effects (counters on
+  // globalThis) prove exactly which classes were constructed, and how often.
+  const dpG = (typeof window !== 'undefined') ? window : globalThis;
+  const dpBody = (name) =>
+    'class ' + name + ' { constructor() { const g = (typeof window !== "undefined") ? window : globalThis; '
+    + 'g.__dpConstructs[' + JSON.stringify(name) + '] = (g.__dpConstructs[' + JSON.stringify(name) + '] || 0) + 1; } }';
+  const DP_TREE = () => ({
+    'ranch/scripts': { files: ['ranch/scripts/foo.js', 'ranch/scripts/bar.js'], folders: [] },
+    'ranch/scripts/foo.js': dpBody('Foo'),
+    'ranch/scripts/bar.js': dpBody('Bar'),
+  });
+
+  await ok('DP-0 extractClassName is parse-only text inspection (no eval), conservative on odd shapes', async () => {
+    const mod = loadPluginModule();
+    assert(typeof mod.extractClassName === 'function', 'extractClassName is exported');
+    assert(mod.extractClassName('class Foo { }') === 'Foo', 'plain class → Foo');
+    assert(mod.extractClassName('// header\n/* block */\nclass Bar extends Baz { }') === 'Bar', 'comments then class extends → Bar');
+    assert(mod.extractClassName('class Qux{ hi() {} }') === 'Qux', 'no space before brace → Qux');
+    assert(mod.extractClassName('class /* pinned */ Weird { }') === null, 'comment between class and name → null (fallback, not a guess)');
+    assert(mod.extractClassName('class { }') === null, 'anonymous class → null');
+    assert(mod.extractClassName("'use strict';\nclass X { }") === null, 'non-class-first file → null');
+  });
+
+  await ok('DP-1 empty registry → every class evaluated and registered exactly once (cold-load kill preserved)', async () => {
+    const mod = loadPluginModule();
+    delete dpG.customJS;
+    dpG.__dpConstructs = {};
+    const res = await mod.loadCustomJsClasses(makeApp(DP_TREE()));
+    assert(typeof dpG.customJS.Foo === 'object' && typeof dpG.customJS.Bar === 'object', 'both classes registered');
+    assert(dpG.__dpConstructs.Foo === 1 && dpG.__dpConstructs.Bar === 1, 'each constructor ran exactly once: ' + JSON.stringify(dpG.__dpConstructs));
+    assert(res.registered.length === 2, 'both counted as registered');
+    assert(Array.isArray(res.skipped) && res.skipped.length === 0, 'nothing skipped on an empty registry');
+    delete dpG.customJS;
+    delete dpG.__dpConstructs;
+  });
+
+  await ok('DP-2 fully populated registry → zero evals, zero constructs, no overwrites', async () => {
+    const mod = loadPluginModule();
+    const seededFoo = { seeded: 'Foo' };
+    const seededBar = { seeded: 'Bar' };
+    dpG.customJS = { Foo: seededFoo, Bar: seededBar };
+    dpG.__dpConstructs = {};
+    const res = await mod.loadCustomJsClasses(makeApp(DP_TREE()));
+    assert(Object.keys(dpG.__dpConstructs).length === 0, 'zero constructor invocations: ' + JSON.stringify(dpG.__dpConstructs));
+    assert(dpG.customJS.Foo === seededFoo && dpG.customJS.Bar === seededBar, 'existing registry entries untouched (merged, never replaced)');
+    assert(res.registered.length === 0, 'zero registered this pass');
+    assert(res.skipped.length === 2 && res.skipped.indexOf('Foo') >= 0 && res.skipped.indexOf('Bar') >= 0, 'both skipped: ' + JSON.stringify(res.skipped));
+    delete dpG.customJS;
+    delete dpG.__dpConstructs;
+  });
+
+  await ok('DP-3 partially populated registry → only the missing classes evaluated and registered', async () => {
+    const mod = loadPluginModule();
+    const seededFoo = { seeded: 'Foo' };
+    dpG.customJS = { Foo: seededFoo };
+    dpG.__dpConstructs = {};
+    const res = await mod.loadCustomJsClasses(makeApp(DP_TREE()));
+    assert(!('Foo' in dpG.__dpConstructs), 'the already-owned class was never constructed');
+    assert(dpG.__dpConstructs.Bar === 1, 'the missing class was constructed exactly once');
+    assert(dpG.customJS.Foo === seededFoo, 'the owned entry untouched');
+    assert(typeof dpG.customJS.Bar === 'object' && dpG.customJS.Bar.seeded === undefined, 'the missing class registered fresh');
+    assert(res.registered.length === 1 && res.registered[0] === 'Bar', 'only Bar counted as registered');
+    assert(res.skipped.length === 1 && res.skipped[0] === 'Foo', 'only Foo counted as skipped');
+    delete dpG.customJS;
+    delete dpG.__dpConstructs;
+  });
+
+  await ok('DP-4 unextractable class name → falls back to the eval path, never silently skipped', async () => {
+    const mod = loadPluginModule();
+    const tree = {
+      'ranch/scripts': { files: ['ranch/scripts/weird.js'], folders: [] },
+      'ranch/scripts/weird.js':
+        'class /* pinned */ Weird { constructor() { const g = (typeof window !== "undefined") ? window : globalThis; '
+        + 'g.__dpConstructs.Weird = (g.__dpConstructs.Weird || 0) + 1; } }',
+    };
+    delete dpG.customJS;
+    dpG.__dpConstructs = {};
+    await mod.loadCustomJsClasses(makeApp(tree));
+    assert(typeof dpG.customJS.Weird === 'object', 'empty registry: unextractable file still registered via eval');
+    assert(dpG.__dpConstructs.Weird === 1, 'empty registry: constructed exactly once');
+    dpG.customJS = { Weird: { seeded: true } };
+    dpG.__dpConstructs = {};
+    await mod.loadCustomJsClasses(makeApp(tree));
+    assert(dpG.__dpConstructs.Weird === 1, 'populated registry: extraction failure still means eval (a wasted eval beats a lost class)');
+    assert(typeof dpG.customJS.Weird === 'object' && dpG.customJS.Weird.seeded === undefined, 'last-write consistency: the eval fallback re-registered');
+    delete dpG.customJS;
+    delete dpG.__dpConstructs;
+  });
+
+  await ok('DP-5 register-classes profile stage records skipped versus loaded counts', async () => {
+    const mod = loadPluginModule();
+    dpG.customJS = { Foo: { seeded: 'Foo' } };
+    dpG.__dpConstructs = {};
+    const res = await mod.loadCustomJsClasses(makeApp(DP_TREE()));
+    const reg = (res.profile.stages || []).find((s) => s.name === 'register-classes');
+    assert(reg && reg.loaded === 1, 'stage carries loaded=1, got ' + JSON.stringify(reg));
+    assert(reg && reg.skipped === 1, 'stage carries skipped=1, got ' + JSON.stringify(reg));
+    assert(reg && reg.registered === 1 && reg.failed === 0, 'schema-1 registered/failed counts preserved');
+    delete dpG.customJS;
+    delete dpG.__dpConstructs;
   });
 
   await ok('RC-5 onload wires listeners via registerEvent, never throws', async () => {
