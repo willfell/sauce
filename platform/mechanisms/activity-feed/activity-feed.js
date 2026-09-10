@@ -130,8 +130,16 @@
  *
  *   title:               string (optional) — emits an H3 above the panel
  *
- * Per landmine #11: spice/ module-directory namespace is conceptual;
- * Dataview query scope is vault-wide.
+ * GA-ML3 (mobile boot audit): the feed query is folder-SOURCED. _query derives
+ * a Dataview folder-union source ('"spice/a" or "spice/b"') from the requested
+ * bucket types via _BLUEPRINT_FOLDERS (landmine #11: every blueprint owns
+ * exactly one spice/<module>/ directory), so dv.pages(source) only visits
+ * pages inside the buckets' folders — the per-page moment() window filter no
+ * longer runs across the whole vault (2,990+ indexed notes in headspace,
+ * 2-3x at startup via Home + daily dashboard). A requested type with no
+ * folder mapping widens the source to vault-wide ("") rather than silently
+ * dropping coverage. Shim callers that forward pages as
+ * `(...args) => dv.pages(...args)` pass the source through unchanged.
  */
 
 class ActivityFeed {
@@ -443,7 +451,16 @@ class ActivityFeed {
       return Number.isFinite(mMs) && mMs >= startMs && mMs <= endMs;
     };
 
-    const windowed = dv.pages().where(inWindow).array();
+    // GA-ML3: folder-sourced query. The union source restricts the scan to
+    // the requested buckets' module directories, so out-of-bucket pages never
+    // reach the per-page inWindow predicate. Rollup children live under their
+    // root's module directory by design (childMatch rules match paths under
+    // spice/projects/, spice/trips/, spice/boards/), so they stay covered as
+    // long as their root's bucket type is requested. Shimmed callers forward
+    // `pages: (...args) => dv.pages(...args)` — the source argument passes
+    // through the shim unchanged.
+    const source = this._deriveSource(blueprints);
+    const windowed = dv.pages(source).where(inWindow).array();
     const allowSet = new Set(blueprints.map(String));
     const hasRollup = Array.isArray(rollUpRoots) && rollUpRoots.length > 0;
 
@@ -956,7 +973,80 @@ class ActivityFeed {
     } catch (_) {}
   }
 
+  /**
+   * GA-ML3: derive the Dataview source for a set of bucket types. Returns a
+   * de-duped folder-union source string ('"spice/a" or "spice/b"'). If ANY
+   * requested type has no folder mapping, returns "" (Dataview: empty source
+   * = all pages) — an unknown bucket must widen coverage to vault-wide, never
+   * silently drop it. Every shipped bucket type is folder-scoped per landmine
+   * #11 (one spice/<module>/ directory per blueprint), so production callers
+   * always get the scoped union.
+   * @param {string[]} blueprints
+   * @returns {string}
+   */
+  _deriveSource(blueprints) {
+    const map = this._BLUEPRINT_FOLDERS;
+    const list = Array.isArray(blueprints) ? blueprints : [];
+    const seen = new Set();
+    const folders = [];
+    for (const t of list) {
+      const mapped = map[String(t)];
+      if (!Array.isArray(mapped) || mapped.length === 0) return "";
+      for (const f of mapped) {
+        if (!seen.has(f)) { seen.add(f); folders.push(f); }
+      }
+    }
+    if (folders.length === 0) return "";
+    return folders.map((f) => '"' + f + '"').join(" or ");
+  }
+
   // ── Constants ──────────────────────────────────────────────────────────────
+
+  /**
+   * GA-ML3: bucket type → module folder(s) housing notes of that type.
+   * Grounded in landmine #11 (every blueprint owns exactly one directory at
+   * spice/<module>/) plus the shipped templates that stamp each `type:`.
+   * Multi-folder entries exist where one type is emitted by several
+   * blueprints (`kanban` boards ship from project, boards, and finance).
+   * cowork-daily maps to spice/daily — the daily-note template stamps
+   * `type: cowork-daily` on notes in the daily module directory.
+   */
+  get _BLUEPRINT_FOLDERS() {
+    return {
+      "daily": ["spice/daily"],
+      "cowork-daily": ["spice/daily"],
+      "meeting": ["spice/meetings"],
+      "sticky-note": ["spice/sticky-notes"],
+      "sticky-day": ["spice/sticky-notes"],
+      "to-do": ["spice/to-do"],
+      "journal": ["spice/journal"],
+      "journal-entry": ["spice/journal"],
+      "project": ["spice/projects"],
+      "doc-note": ["spice/projects"],
+      "person": ["spice/people"],
+      "team": ["spice/teams"],
+      "product": ["spice/products"],
+      "trip": ["spice/trips"],
+      "budget": ["spice/finance"],
+      "paycheck": ["spice/finance"],
+      "invoice": ["spice/finance"],
+      "kanban": ["spice/projects", "spice/boards", "spice/finance"],
+      "board-card": ["spice/boards"],
+      "wiki-page": ["spice/wiki"],
+      "wiki-section": ["spice/wiki"],
+      "reader-article": ["spice/reader"],
+      "cowork-weekly": ["spice/cowork"],
+      "cowork-weekly-synthesis": ["spice/cowork"],
+      "cowork-monthly": ["spice/cowork"],
+      "cowork-morning-briefing": ["spice/cowork"],
+      "cowork-midday-tripwire": ["spice/cowork"],
+      "cowork-eod-review": ["spice/cowork"],
+      "cowork-finance-snapshot": ["spice/cowork"],
+      "cowork-weekly-review": ["spice/cowork"],
+      "cowork-monthly-review": ["spice/cowork"],
+      "cowork-morning-briefing-cold": ["spice/cowork"],
+    };
+  }
 
   get _DEFAULT_BLUEPRINTS() {
     return [
