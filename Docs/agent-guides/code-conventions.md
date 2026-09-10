@@ -63,6 +63,40 @@ reconciler; caller-provided `mode` or `isCurrent` cannot make
 `dataview-force-refresh-views` a structural happy path. See
 `platform/mechanisms/render-safe/render-safe.js:125`.
 
+### Gesture-write lint contract
+
+The lifecycle above is enforced at build time by an Acorn-backed lint
+(`scripts/lint-gesture-writes.js`, preflight steps `lint-gesture-writes` +
+`gesture-write-lint-fixtures`). Its contract:
+
+- **Parse, never execute.** Scanned source is parsed with Acorn only; the
+  `GA-P4F-PARSE-ONLY` fixture proves no scanned code runs. String, template,
+  and regex bodies are masked before gesture detection so inert text cannot
+  suppress or forge a finding.
+- **Script/module dual parse.** Every file is parsed under both `script` and
+  `module` source types, so ESM syntax (`export`, `import`, module-only
+  spreads) cannot demote a file to the regex fallback and hide a bare write.
+- **Gesture context = executable-on-gesture.** A bare `processFrontMatter`,
+  `vault.modify`, or `vault.create` anywhere syntactically inside a gesture
+  callback (assignment handlers, `addEventListener`, property/expression
+  bodies, template interpolations, optional-chain receivers, and generators
+  that the handler actually drives) fails preflight. A generator function
+  assigned directly as a handler is deliberately out of model: invoking a
+  generator returns an iterator without running its body, so nothing executes
+  on the gesture.
+- **Narrow allowlist standard.** `scripts/lint-gesture-writes-allowlist.json`
+  is an audited exception list for non-gesture automated writers only — never
+  a way to bless a failing user gesture. Every entry pins an exact path, the
+  exact finding lines it excuses, and a specific reason (≥ 20 chars, enforced
+  at load). `GA-P4I-ALLOWLIST-AUDIT` fails preflight when an entry goes dead
+  (the lint no longer flags the file) or drifts off its pinned lines — prune
+  the entry rather than letting rot accumulate. In-file escape for a single
+  audited line: `// gesture-write-ok <specific reason>`.
+- **Fail-loud wiring.** The lint command, the fixtures harness, and both
+  preflight steps are registered in `platform/test/preflight-manifest.json`;
+  `check-orphan-harnesses` fails when a `run-*.js` harness exists without a
+  manifest registration, so the detector cannot be dropped silently.
+
 ### Dataview correctness findings ledger
 
 PERF-0 baseline, audited at repository revision
