@@ -145,7 +145,7 @@ const DELIVERY_STABLE_FIELDS = Object.freeze(
   delivery.registry.types['execution-card'].fields.map((field) => field.name),
 );
 const AMEND_CONTRACT_OPTIONS = new Set([
-  '_', 'json', 'card', 'expected-head', 'expected-origin-main', 'reason',
+  '_', 'json', 'card', 'lease-token', 'expected-head', 'expected-origin-main', 'reason',
   'add-touch-zone', 'expected-deployment', 'desired-deployment',
   'expected-batch-policy', 'desired-batch-policy',
 ]);
@@ -1208,6 +1208,26 @@ function listField(raw, key) {
   return out;
 }
 
+// YAML single-quoted scalar -> its string value. Modelled on the single-quote
+// branch of select-card's parseYamlScalar, but deliberately STRICTER: it adds a
+// length guard (a bare ' decodes to "" there) and does not strip a trailing YAML
+// comment, so a commented scalar returns null exactly as the double-quoted path
+// does. It is deliberately NOT a general YAML parser: the
+// scalar must be quote-delimited end to end, and a literal quote is only legal
+// as the doubled '' escape. A lone interior quote, a tripled run, an
+// unterminated scalar, or trailing text after the closing quote all throw so
+// deploymentField keeps returning null for anything it cannot read exactly.
+function decodeYamlSingleQuotedScalar(inline) {
+  if (inline.length < 2 || !inline.endsWith("'")) {
+    throw new Error('malformed single-quoted YAML scalar');
+  }
+  const body = inline.slice(1, -1);
+  if (body.replace(/''/g, '').includes("'")) {
+    throw new Error('malformed single-quoted YAML scalar');
+  }
+  return body.replace(/''/g, "'");
+}
+
 function deploymentField(raw) {
   const lines = frontmatter(raw).split('\n');
   const idx = lines.findIndex((s) => /^deploy_subscriptions:/.test(s));
@@ -1215,7 +1235,17 @@ function deploymentField(raw) {
   const inline = lines[idx].slice(lines[idx].indexOf(':') + 1).trim();
   if (inline) {
     try {
-      const yamlScalar = JSON.parse(inline);
+      // Two quotings reach this field and both must decode to the same map.
+      // The minting rail emits a double-quoted JSON text scalar
+      // (delivery.encodeStructuredFrontmatterValue = JSON.stringify twice).
+      // Obsidian's own YAML serializer re-quotes it with SINGLE quotes whenever
+      // something rewrites the note through processFrontMatter - kanban-status-sync's
+      // board sweep does exactly that to board cards, which is why ~18% of live
+      // cards carry the single-quoted form. JSON.parse reads only the first,
+      // so every swept card had become unamendable.
+      const yamlScalar = inline.startsWith("'")
+        ? decodeYamlSingleQuotedScalar(inline)
+        : JSON.parse(inline);
       const decoded = delivery.decodeStructuredContractFields({ deploy_subscriptions: yamlScalar });
       return decoded.errors.length ? null : decoded.card.deploy_subscriptions;
     } catch (_) {
@@ -8378,7 +8408,7 @@ module.exports = {
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
   commandBoardHealth, collectBoardHealth, commandAdopt, adoptProvenance,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
-  normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
+  deploymentField, normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
   projectionBoardDrift, auditEpicProject, projectionMetadataProblem, projectionMetadataProblemFromRaw,
   completionResult, expectedProjectedContract, collectDeployedRecoveryEvidence,
   formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,

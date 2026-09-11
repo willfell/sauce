@@ -74,6 +74,7 @@ const {
   commandAdvance, stepCard, moveBoardCard, patchFrontmatter,
   projectCard, attemptProjection, completionResult, projectionMapping, projectionBoardDrift, projectionMetadataProblem,
   collectDeployedRecoveryEvidence, formulaTagFromText, currentTapFormulaTag, tagContainsCommit, DELIVERY_STABLE_FIELDS,
+  deploymentField, requireLeaseToken, LEASE_TTL_MS,
 } = coordinator;
 const {
   normalizeStatus, parseCardStatus, parseBatchPolicy, parseCheckedColumn, selectCard,
@@ -5389,7 +5390,9 @@ function makeAmendFixture(opts = {}) {
     'parent_card: "[[Protected parent]]"', 'slice: TEST', 'depends_on:', '  - "[[Prerequisite]]"',
     ...(parked ? ['resume_condition: "Prerequisite deploys before this card resumes."'] : []),
     'touch_zones:', '  - platform/mechanisms/delivery', '  - platform/schemas-index.json',
-    'deploy_subscriptions:', '  headspace:', '    - delivery', '  accuris:', '    - delivery', '  ero:', '    - delivery',
+    ...(opts.deploymentLines || [
+      'deploy_subscriptions:', '  headspace:', '    - delivery', '  accuris:', '    - delivery', '  ero:', '    - delivery',
+    ]),
     '---', '', '## Protected active contract', '',
     'Protected active work.', '',
   ].join('\n'));
@@ -5998,6 +6001,270 @@ eq(snapshotDirectory(afterProjectionCrash.worktree), afterProjectionCrash.worktr
   eq(demoted.writes, 0, 'AMEND-EPIC-LEDGER a demoted-sibling refusal performs no ledger write');
   eq(JSON.stringify(demoted.state), demotedStateBefore,
     'AMEND-EPIC-LEDGER a demoted-sibling refusal leaves the ledger byte-identical');
+}
+
+
+// OPS-1 — the amendment rail must work on the cards the rail itself mints.
+// Two independent defects made every pre-PR touch-zone amendment impossible.
+// (A) AMEND_CONTRACT_OPTIONS omitted `lease-token`, so the verb refused the
+//     option outright while requireLeaseToken, a few lines later, DEMANDED a
+//     matching token on any leased card — unusable in both directions, with
+//     break-lease → amend-contract → resume the only audited workaround.
+// (B) deploymentField JSON.parse'd the raw inline scalar, so any card whose
+//     deploy_subscriptions had been re-serialized into the YAML single-quoted
+//     form projected `null` and executionContractProjectionProblem refused
+//     every amendment. The minting rail emits the DOUBLE-quoted form; the
+//     single-quoted form comes from Obsidian's YAML serializer whenever a
+//     processFrontMatter rewrite touches the note.
+{
+  const AMEND_LEASE_NOW = Date.parse('2026-07-16T18:00:00.000Z');
+  const amendLease = (renewedMsAgo = 60 * 1000) => ({
+    token: 'tok-amend-1',
+    acquired_at: new Date(AMEND_LEASE_NOW - renewedMsAgo).toISOString(),
+    renewed_at: new Date(AMEND_LEASE_NOW - renewedMsAgo).toISOString(),
+    holder: { host: 'amend-holder-host' },
+  });
+  const leasedAmendFixture = (opts = {}) => {
+    const fixture = makeAmendFixture({ ...opts, record: { lease: amendLease(opts.leaseAgeMs), ...opts.record } });
+    fixture.deps.leaseNowMs = () => AMEND_LEASE_NOW;
+    return fixture;
+  };
+
+  // DEFECT A, forward direction: the option is accepted and the matching token
+  // carries a leased card through without dropping the lease.
+  const leased = leasedAmendFixture();
+  const leasedResult = await commandAmendContract(
+    { root: leased.root }, { ...leased.args, 'lease-token': 'tok-amend-1' }, leased.deps,
+  );
+  eq(leasedResult.action, 'contract-amended',
+    'OPS-1 amend-contract accepts --lease-token and amends a card holding a live lease');
+  eq(leased.state.cards[AMEND_CARD].lease.token, 'tok-amend-1',
+    'OPS-1 a leased amendment keeps the caller lease rather than forcing break-lease first');
+  eq(leased.state.cards[AMEND_CARD].lease.renewed_at, new Date(AMEND_LEASE_NOW).toISOString(),
+    'OPS-1 a leased amendment renews the live lease in place');
+  eq(leased.state.cards[AMEND_CARD].deploy_subscriptions, typedDeployments,
+    'OPS-1 the leased amendment still stores the desired typed deployment map');
+  eq(leased.state.cards[AMEND_CARD].touch_zones, [
+    'platform/mechanisms/delivery', 'platform/schemas-index.json', 'platform/manifest.json',
+  ], 'OPS-1 the leased amendment still applies the requested touch zone');
+
+  // DEFECT A, reverse direction: accepting the option must NOT weaken the
+  // guard. Each refusal is checked by its exact refusal code and proven to
+  // perform zero ledger writes and leave the card and board bytes untouched.
+  for (const [label, token, code] of [
+    ['an absent lease token', undefined, 'lease_required'],
+    ['an empty lease token', '', 'lease_required'],
+    ['a whitespace-only lease token', '   ', 'lease_required'],
+    ['a wrong lease token', 'tok-someone-else', 'lease_mismatch'],
+    ['a near-miss lease token', 'tok-amend-11', 'lease_mismatch'],
+  ]) {
+    const fixture = leasedAmendFixture();
+    const cardBefore = fs.readFileSync(fixture.cardPath, 'utf8');
+    const boardBefore = fs.readFileSync(fixture.boardPath, 'utf8');
+    const stateBefore = JSON.stringify(fixture.state);
+    const refusedArgs = { ...fixture.args };
+    if (token === undefined) delete refusedArgs['lease-token'];
+    else refusedArgs['lease-token'] = token;
+    await assert.rejects(
+      () => commandAmendContract({ root: fixture.root }, refusedArgs, fixture.deps),
+      (err) => err.code === code && err.action === 'amend-contract-refused',
+      `OPS-1 amend-contract still refuses ${label} on a leased card with ${code}`,
+    );
+    count++;
+    eq(fixture.writes, 0, `OPS-1 the ${code} refusal for ${label} performs no ledger write`);
+    eq(JSON.stringify(fixture.state), stateBefore, `OPS-1 the ${code} refusal for ${label} leaves the ledger byte-identical`);
+    eq(fs.readFileSync(fixture.cardPath, 'utf8'), cardBefore, `OPS-1 the ${code} refusal for ${label} leaves the card byte-identical`);
+    eq(fs.readFileSync(fixture.boardPath, 'utf8'), boardBefore, `OPS-1 the ${code} refusal for ${label} leaves the board byte-identical`);
+  }
+
+  // A stale lease still refuses lease_stale BEFORE the token is even compared,
+  // so a returning holder re-attaches through resume and the takeover is audited.
+  {
+    const stale = leasedAmendFixture({ leaseAgeMs: LEASE_TTL_MS + 1 });
+    await assert.rejects(
+      () => commandAmendContract({ root: stale.root }, { ...stale.args, 'lease-token': 'tok-amend-1' }, stale.deps),
+      (err) => err.code === 'lease_stale' && err.action === 'amend-contract-refused',
+      'OPS-1 a stale lease refuses lease_stale even with the previously-correct token',
+    );
+    count++;
+    eq(stale.writes, 0, 'OPS-1 the lease_stale refusal performs no ledger write');
+  }
+
+  // A token supplied against an ACTIVE unleased card still refuses lease_gone:
+  // the caller believes it holds a lease that no longer exists.
+  {
+    const ghost = makeAmendFixture();
+    await assert.rejects(
+      () => commandAmendContract({ root: ghost.root }, { ...ghost.args, 'lease-token': 'tok-ghost' }, ghost.deps),
+      (err) => err.code === 'lease_gone' && err.action === 'amend-contract-refused',
+      'OPS-1 a token against an active unleased card still refuses lease_gone',
+    );
+    count++;
+    eq(ghost.writes, 0, 'OPS-1 the lease_gone refusal performs no ledger write');
+  }
+
+  // Widening the allowlist must admit exactly one option and nothing else.
+  {
+    const bogus = makeAmendFixture();
+    await assert.rejects(
+      () => commandAmendContract({ root: bogus.root }, { ...bogus.args, 'lease-tokens': 'tok' }, bogus.deps),
+      /amend-contract refuses unsupported option --lease-tokens/,
+      'OPS-1 the widened allowlist still refuses every option outside it',
+    );
+    const stillClosed = makeAmendFixture();
+    await assert.rejects(
+      () => commandAmendContract({ root: stillClosed.root }, { ...stillClosed.args, 'lease-seconds': '60' }, stillClosed.deps),
+      /amend-contract refuses unsupported option --lease-seconds/,
+      'OPS-1 accepting --lease-token never admits the rest of the lease vocabulary',
+    );
+  }
+
+  // The lease token is deliberately NOT part of the amendment request identity:
+  // an exact replay from a re-attached session with a rotated token must still
+  // be recognised as the same request and stay a no-op.
+  {
+    const replayed = leasedAmendFixture();
+    const first = await commandAmendContract(
+      { root: replayed.root }, { ...replayed.args, 'lease-token': 'tok-amend-1' }, replayed.deps,
+    );
+    eq(first.no_op, false, 'OPS-1 the first leased amendment is a real amendment');
+    const writesAfterFirst = replayed.writes;
+    replayed.state.cards[AMEND_CARD].lease = {
+      ...amendLease(), token: 'tok-amend-2',
+    };
+    const second = await commandAmendContract(
+      { root: replayed.root }, { ...replayed.args, 'lease-token': 'tok-amend-2' }, replayed.deps,
+    );
+    eq(second.no_op, true, 'OPS-1 an exact replay under a rotated lease token is still a no-op');
+    eq(replayed.writes, writesAfterFirst, 'OPS-1 the rotated-token replay performs no extra ledger write');
+  }
+
+  // DEFECT B — deploymentField at the unit boundary. The double-quoted
+  // JSON-string form is what the minting rail emits; the single-quoted form is
+  // what Obsidian's YAML serializer produces when a sweep rewrites the note
+  // through processFrontMatter. Both must decode to the same map.
+  const deploymentCard = (line) => `---\nkanban_column: In Progress\n${line}\nslice: TEST\n---\n\nbody\n`;
+  const legacyScalar = JSON.stringify(legacyDeployments);
+  eq(deploymentField(deploymentCard(`deploy_subscriptions: ${JSON.stringify(legacyScalar)}`)), legacyDeployments,
+    'OPS-1 deploymentField decodes the double-quoted JSON-string deployment scalar');
+  eq(deploymentField(deploymentCard(`deploy_subscriptions: '${legacyScalar}'`)), legacyDeployments,
+    'OPS-1 deploymentField decodes the YAML single-quoted deployment scalar to the identical map');
+  eq(deploymentField(deploymentCard(`deploy_subscriptions: '${legacyScalar}'`)),
+    deploymentField(deploymentCard(`deploy_subscriptions: ${JSON.stringify(legacyScalar)}`)),
+    'OPS-1 the two authored quotings of one deployment map are indistinguishable after decoding');
+  eq(deploymentField(deploymentCard(`deploy_subscriptions: ${JSON.stringify(JSON.stringify({ headspace: [], accuris: [], ero: [] }))}`)),
+    { headspace: [], accuris: [], ero: [] }, 'OPS-1 deploymentField still decodes the empty double-quoted map');
+  eq(deploymentField(deploymentCard(`deploy_subscriptions: '${JSON.stringify({ headspace: [], accuris: [], ero: [] })}'`)),
+    { headspace: [], accuris: [], ero: [] },
+    'OPS-1 deploymentField decodes the empty single-quoted map a processFrontMatter rewrite leaves behind');
+  eq(deploymentField(deploymentCard('deploy_subscriptions:\n  headspace:\n    - delivery\n  accuris:\n    - delivery\n  ero:\n    - delivery')),
+    legacyDeployments, 'OPS-1 the legacy nested block deployment map still decodes unchanged');
+
+  // YAML single-quoted strings escape a literal quote by doubling it. A doubled
+  // pair decodes to one literal quote; a LONE interior quote is malformed YAML
+  // and must be refused, never silently mis-parsed.
+  eq(deploymentField(deploymentCard(`deploy_subscriptions: '{"headspace":["me''s"],"accuris":[],"ero":[]}'`)),
+    { headspace: ["me's"], accuris: [], ero: [] },
+    "OPS-1 a doubled '' inside the single-quoted scalar decodes to exactly one literal quote");
+  for (const [label, line] of [
+    ['an unterminated single-quoted scalar', `deploy_subscriptions: '${legacyScalar}`],
+    ['a single-quoted scalar with trailing junk', `deploy_subscriptions: '${legacyScalar}' trailing`],
+    // Without the closing-delimiter check this slices off the trailing junk
+    // character and mis-parses the remainder as a valid map.
+    ['an unclosed scalar whose last character is junk', `deploy_subscriptions: '${legacyScalar}X`],
+    ['an unclosed scalar followed by a double quote', `deploy_subscriptions: '${legacyScalar}"`],
+    ['a lone interior quote', `deploy_subscriptions: '{"headspace":["me's"],"accuris":[],"ero":[]}'`],
+    ['a tripled quote run', `deploy_subscriptions: '{"headspace":["me'''s"],"accuris":[],"ero":[]}'`],
+    ['a bare unquoted apostrophe', "deploy_subscriptions: '"],
+    ['an empty single-quoted scalar', "deploy_subscriptions: ''"],
+    ['a single-quoted non-JSON scalar', "deploy_subscriptions: 'not json at all'"],
+    ['a single-quoted JSON array', `deploy_subscriptions: '["headspace"]'`],
+    ['a single-quoted duplicate key', `deploy_subscriptions: '{"headspace":[],"headspace":[],"accuris":[],"ero":[]}'`],
+    ['a malformed double-quoted scalar', 'deploy_subscriptions: "{\\"headspace\\":"'],
+    ['a bare unquoted scalar', 'deploy_subscriptions: headspace'],
+  ]) {
+    eq(deploymentField(deploymentCard(line)), null, `OPS-1 ${label} still yields null`);
+  }
+
+  // DEFECT B end-to-end: a card carrying each quoting style amends identically.
+  const quotingFixtures = {
+    double: makeAmendFixture({ deploymentLines: [`deploy_subscriptions: ${JSON.stringify(legacyScalar)}`] }),
+    single: makeAmendFixture({ deploymentLines: [`deploy_subscriptions: '${legacyScalar}'`] }),
+  };
+  const quotingResults = {};
+  for (const [style, fixture] of Object.entries(quotingFixtures)) {
+    quotingResults[style] = await commandAmendContract({ root: fixture.root }, fixture.args, fixture.deps);
+    eq(quotingResults[style].action, 'contract-amended',
+      `OPS-1 a card carrying the ${style}-quoted deployment scalar amends`);
+    eq(fixture.state.cards[AMEND_CARD].deploy_subscriptions, typedDeployments,
+      `OPS-1 the ${style}-quoted amendment stores the desired typed deployment map`);
+    eq(fixture.state.cards[AMEND_CARD].contract_amendments[0].old_contract.deploy_subscriptions, legacyDeployments,
+      `OPS-1 the ${style}-quoted amendment audits the exact prior deployment map`);
+  }
+  eq(
+    fs.readFileSync(quotingFixtures.single.cardPath, 'utf8'),
+    fs.readFileSync(quotingFixtures.double.cardPath, 'utf8'),
+    'OPS-1 both authored quotings converge on byte-identical amended card frontmatter',
+  );
+  const withoutFixturePaths = (record) => {
+    const copy = deepCopy(record);
+    delete copy.card_path; delete copy.worktree;
+    return copy;
+  };
+  eq(
+    withoutFixturePaths(quotingFixtures.single.state.cards[AMEND_CARD]),
+    withoutFixturePaths(quotingFixtures.double.state.cards[AMEND_CARD]),
+    'OPS-1 both authored quotings converge on an identical amended ledger record',
+  );
+  eq(quotingFixtures.single.state.cards[AMEND_CARD].card_note_sha,
+    quotingFixtures.double.state.cards[AMEND_CARD].card_note_sha,
+    'OPS-1 both authored quotings converge on one card-note digest');
+
+  // A malformed deployment scalar must still refuse the amendment outright —
+  // the projection guard is a real guard, not a casualty of the fix.
+  for (const [label, line] of [
+    ['unterminated', `deploy_subscriptions: '${legacyScalar}`],
+    ['lone interior quote', `deploy_subscriptions: '{"headspace":["deliv'ery"],"accuris":[],"ero":[]}'`],
+    ['non-JSON', "deploy_subscriptions: 'not json at all'"],
+  ]) {
+    const malformed = makeAmendFixture({ deploymentLines: [line] });
+    const malformedStateBefore = JSON.stringify(malformed.state);
+    await assert.rejects(
+      () => commandAmendContract({ root: malformed.root }, malformed.args, malformed.deps),
+      /target execution contract must match authority before amendment: projected deployment map differs from authority/,
+      `OPS-1 a ${label} deployment scalar still refuses the amendment`,
+    );
+    count++;
+    eq(malformed.writes, 0, `OPS-1 the ${label} deployment refusal performs no ledger write`);
+    eq(JSON.stringify(malformed.state), malformedStateBefore, `OPS-1 the ${label} deployment refusal leaves the ledger byte-identical`);
+  }
+
+  // A single-quoted scalar whose map simply DISAGREES with the authority still
+  // refuses — decoding it must not turn the projection check into a pass.
+  {
+    const divergent = makeAmendFixture({
+      deploymentLines: [`deploy_subscriptions: '${JSON.stringify({ headspace: ['other'], accuris: ['delivery'], ero: ['delivery'] })}'`],
+    });
+    await assert.rejects(
+      () => commandAmendContract({ root: divergent.root }, divergent.args, divergent.deps),
+      /projected deployment map differs from authority/,
+      'OPS-1 a well-formed single-quoted scalar that disagrees with authority still refuses',
+    );
+    eq(divergent.writes, 0, 'OPS-1 the divergent single-quoted refusal performs no ledger write');
+  }
+
+  // The two defects compose: the real-world shape is a leased card whose scalar
+  // has been re-serialized to single quotes, which needed BOTH fixes to amend.
+  {
+    const both = leasedAmendFixture({ deploymentLines: [`deploy_subscriptions: '${legacyScalar}'`] });
+    const bothResult = await commandAmendContract(
+      { root: both.root }, { ...both.args, 'lease-token': 'tok-amend-1' }, both.deps,
+    );
+    eq(bothResult.action, 'contract-amended',
+      'OPS-1 a leased, single-quoted card amends with no break-lease and no re-mint');
+    eq(both.state.cards[AMEND_CARD].lease.token, 'tok-amend-1',
+      'OPS-1 the composed case still holds the original lease afterwards');
+  }
 }
 
 const parkRoot = path.join(tmp, 'park');
