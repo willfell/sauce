@@ -4587,6 +4587,188 @@ async function discardCardCore(ctx, operands, d) {
   };
 }
 
+// --- Parse-verified frontmatter reading (the OPS-2b contract).
+//
+// `patchFrontmatter` is a LINE-oriented writer: it finds `^key:`, then splices
+// [idx, end) where `end` walks forward over INDENTED lines only. Any classifier
+// that derives "this key is blank" from that same walk agrees with the splice
+// and is still wrong, because several shapes YAML reads as POPULATED are not
+// indented continuations at all — a column-0 block sequence, a blank line
+// before an indented value, a column-0 comment before an indented value.
+// Filling one of those re-parents the slice AND deletes the recorded value,
+// emitting frontmatter that does not parse: in Obsidian every property on the
+// card disappears. Enumerating the known-bad shapes is what failed twice; the
+// rule below is a class-level one instead.
+//
+// A key is READABLE only when the next line YAML would actually look at is a
+// new `key:` line. Blank lines and column-0 comments are YAML-insignificant and
+// are skipped; everything else — an indented continuation, a column-0 sequence
+// item, a whitespace-only line, a `key:value` with no space after the colon
+// (which YAML reads as a plain scalar, not a mapping) — means the value is not
+// on the key's own line, so a line writer cannot read it whole. Unreadable is
+// always a report and never a write.
+const FRONTMATTER_KEY_LINE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:\s|$)/;
+
+// The frontmatter body split into lines, using the EXACT block regex that
+// `frontmatter()` and `patchFrontmatter` use, so the reader and the writer can
+// never disagree about where frontmatter begins and ends. Null when there is no
+// frontmatter block at all (including a CRLF file, which this regex rejects —
+// and which `patchFrontmatter` would therefore silently decline to patch).
+function frontmatterBodyLines(raw) {
+  const match = String(raw || '').match(/^---\n([\s\S]*?)\n---/);
+  return match ? match[1].split('\n') : null;
+}
+
+// What `key` reads as, or why it cannot be read WHOLE. `value` readings carry
+// exactly what `scalarField` would return, so every caller that only ever sees
+// ordinary single-line shapes behaves byte-for-byte as it did before.
+function frontmatterReading(raw, key) {
+  const lines = frontmatterBodyLines(raw);
+  if (!lines) return { kind: 'unparsed', reason: 'the note has no frontmatter block' };
+  const pattern = new RegExp(`^${String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`);
+  const hits = [];
+  lines.forEach((line, index) => { if (pattern.test(line)) hits.push(index); });
+  if (!hits.length) return { kind: 'absent', value: '' };
+  if (hits.length > 1) {
+    return {
+      kind: 'duplicate',
+      reason: `${key} appears ${hits.length} times in frontmatter; a line writer takes the first and a YAML reader takes the last`,
+    };
+  }
+  const idx = hits[0];
+  let next = idx + 1;
+  while (next < lines.length && (lines[next] === '' || lines[next].startsWith('#'))) next++;
+  if (next < lines.length && !FRONTMATTER_KEY_LINE.test(lines[next])) {
+    return {
+      kind: 'unparsed',
+      reason: `${key} is followed by ${JSON.stringify(lines[next])}, which is not a new frontmatter key`,
+    };
+  }
+  return { kind: 'value', value: lines[idx].slice(lines[idx].indexOf(':') + 1).trim().replace(/^['"]|['"]$/g, '') };
+}
+
+// The INDEPENDENT structural span of one key: which lines YAML attributes to
+// it. Deliberately NOT the splice's forward walk — `patchFrontmatter` stops at
+// the first line that is not INDENTED, while YAML keeps reading until a line
+// that actually OPENS a new key. A verifier that shares the writer's walk
+// verifies nothing, which is exactly what refuted this card's predecessor.
+//
+// Scoped to ONE key on purpose. A whole-block reading refuses on anything the
+// block does anywhere — a duplicate `status_changed_at` written by the
+// vault-side Kanban sync, a column-0 list item, a stray non-key line — and
+// those cannot affect a splice on a DIFFERENT, unique `^key:` line. Refusing
+// there removed real repair coverage from notes the rail exists to tolerate.
+//
+// `{ index: -1 }` means the key is absent (the writer appends). An `error`
+// means no line writer can address this key at all: it is duplicated (a line
+// writer takes the first, a YAML reader takes the last) or its value is not on
+// its own line.
+function frontmatterKeySpan(raw, key) {
+  const lines = frontmatterBodyLines(raw);
+  if (!lines) return { error: 'the note has no frontmatter block' };
+  const pattern = new RegExp(`^${String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`);
+  const hits = [];
+  lines.forEach((line, index) => { if (pattern.test(line)) hits.push(index); });
+  if (hits.length > 1) {
+    return {
+      error: `${key} appears ${hits.length} times in frontmatter; `
+        + 'a line writer takes the first and a YAML reader takes the last',
+    };
+  }
+  if (!hits.length) return { index: -1, end: -1 };
+  const index = hits[0];
+  const opensAKey = (line) => line !== '' && !line.startsWith('#') && FRONTMATTER_KEY_LINE.test(line);
+  let cursor = index + 1;
+  while (cursor < lines.length && !opensAKey(lines[cursor])) cursor++;
+  // Blank lines and column-0 comments trailing the span are YAML-insignificant
+  // and belong to nobody, so they are not part of the key's span.
+  let end = cursor;
+  while (end > index + 1 && (lines[end - 1] === '' || lines[end - 1].startsWith('#'))) end--;
+  return { index, end };
+}
+
+// The pre-write verification: null when `after` is safe to write, otherwise the
+// reason to refuse. Three checks, none of which shares the writer's walk:
+//
+//   1. Every patched key must be addressable — unique, and its value on its own
+//      line by the SPAN rule above. A key whose span is more than one line
+//      cannot be replaced by a line writer without eating a recorded value.
+//   2. The bytes the writer produced must equal the bytes a span-scoped patch
+//      produces from `before`. That is a whole-FILE comparison, so every
+//      untouched key, the key order, the note body and the trailing newline are
+//      all proven byte-identical, and a splice that consumed the wrong span
+//      cannot agree with it.
+//   3. Every patched key must READ BACK through the classifier as exactly the
+//      intended value — a third view, and the one that catches a patch value
+//      that smuggles in structure of its own.
+function frontmatterWriteRefusal(before, after, patch) {
+  const base = frontmatterBodyLines(before);
+  if (!base) return 'the note has no frontmatter block to patch';
+  const replacements = [];
+  const appends = [];
+  for (const [key, value] of Object.entries(patch)) {
+    const span = frontmatterKeySpan(before, key);
+    if (span.error) return span.error;
+    if (span.index < 0) {
+      if (value != null) appends.push(`${key}: ${value}`);
+      continue;
+    }
+    if (span.end - span.index !== 1) {
+      return `${key} carries ${span.end - span.index - 1} continuation line(s) starting `
+        + `${JSON.stringify(base[span.index + 1])}; a line writer cannot replace it whole`;
+    }
+    replacements.push({ index: span.index, line: value == null ? null : `${key}: ${value}` });
+  }
+  const expected = base.slice();
+  // Bottom-up, so a deletion never invalidates an earlier index.
+  for (const edit of replacements.sort((a, b) => b.index - a.index)) {
+    if (edit.line == null) expected.splice(edit.index, 1);
+    else expected[edit.index] = edit.line;
+  }
+  for (const line of appends) expected.push(line);
+  const expectedText = String(before).replace(/^---\n([\s\S]*?)\n---/, () => `---\n${expected.join('\n')}\n---`);
+  if (String(after) !== expectedText) {
+    const actualLines = String(after).split('\n');
+    const wantLines = expectedText.split('\n');
+    const at = actualLines.findIndex((line, index) => line !== wantLines[index]);
+    return 'the written bytes are not the span-scoped patch of the original: line '
+      + `${at + 1} is ${JSON.stringify(actualLines[at])}, not ${JSON.stringify(wantLines[at])}`;
+  }
+  for (const [key, value] of Object.entries(patch)) {
+    const reading = frontmatterReading(after, key);
+    if (value == null) {
+      if (reading.kind !== 'absent') return `${key} survives a patch that was meant to remove it`;
+      continue;
+    }
+    if (reading.kind !== 'value') {
+      return `${key} does not read back as a whole value after the patch: ${reading.reason}`;
+    }
+    const intended = String(value).trim().replace(/^['"]|['"]$/g, '');
+    if (reading.value !== intended) {
+      return `${key} did not take the intended value: ${JSON.stringify(reading.value)}`;
+    }
+  }
+  return null;
+}
+
+// Containment for one epic sub-board line. `parseBoard`'s capture (select-card)
+// admits `/` and `..`, so the CONSUMER has to contain it — and the check runs
+// BEFORE the note is read, because a path you may not write is a path you may
+// not trust to classify anything either. Mirrors canonicalEpicProjection's
+// physicalDescendant contract: lexical containment for a name that may not
+// exist (an orphan line is exactly that), physical containment with symlinks
+// resolved for one that does.
+function containedEpicSliceNote(cardsRoot, boardDir, name) {
+  const raw = String(name || '');
+  if (!raw || raw !== raw.trim() || /[\\/]/.test(raw) || raw === '.' || raw === '..') return null;
+  const notePath = path.join(boardDir, `${raw}.md`);
+  if (path.dirname(path.resolve(notePath)) !== path.resolve(boardDir)) return null;
+  if (!fs.existsSync(notePath)) return notePath;
+  try { physicalDescendant(cardsRoot, notePath, `epic slice ${raw}`); }
+  catch (_) { return null; }
+  return notePath;
+}
+
 // The canonical vault-relative bindings for one epic, derived from the physical
 // project prefix — the same authority canonicalEpicProjection validates against,
 // so "what the heal writes" and "what the contract demands" cannot drift.
@@ -4599,57 +4781,172 @@ function canonicalEpicBindings(epic, cardsRoot, parentBoardPath) {
   };
 }
 
-// Everything the heal would change, computed before any write. Two findings:
-// bindings whose value differs from the canonical vault-relative form, and epic
+// Everything the heal would change, computed before any write, plus everything
+// it deliberately refuses to change. Three findings — atlas bindings whose value
+// differs from the canonical vault-relative form, slice bindings ditto, and epic
 // sub-board lines whose slice note no longer exists (each one of which makes the
-// whole epic's projection throw "epic slice <X> note is missing").
+// whole epic's projection throw "epic slice <X> note is missing") — and one
+// report stream for every shape the writer cannot read whole.
+//
+// Two drift policies, because the two field families fail differently:
+//
+//   CANONICAL_PATH (task_parent, source_board, kanban_board, epic_board) — the
+//   value is derivable from the physical layout, so a populated-but-wrong value
+//   is rewritten and a blank is left alone. Byte-for-byte origin/main.
+//
+//   OWNER_FILL (parent_card) — the value names an OWNER, not a path. A blank is
+//   filled from the epic that physically owns the slice; a populated
+//   disagreement is REPORTED, never rewritten, because silently re-parenting a
+//   slice moves work between epics.
 function planEpicBindingHeal(cardsRoot, parentBoardPath) {
   const atlases = [];
   const slices = [];
   const orphanLines = [];
-  const drift = (raw, wanted) => {
+  const reports = [];
+  const report = (entry) => { reports.push(entry); };
+
+  const canonicalDrift = (raw, wanted, where) => {
     const fields = {};
     for (const [key, to] of wanted) {
-      const from = scalarField(raw, key);
+      const reading = frontmatterReading(raw, key);
+      if (reading.kind === 'unparsed') {
+        report({ code: 'binding_unparsed', key, detail: reading.reason, ...where });
+        continue;
+      }
+      if (reading.kind === 'duplicate') {
+        report({ code: 'binding_duplicate', key, detail: reading.reason, ...where });
+        continue;
+      }
+      if (reading.kind === 'absent') continue;
+      const from = reading.value;
       if (from && from !== to) fields[key] = { from, to };
     }
     return fields;
   };
+
+  const ownerFill = (raw, epic, where) => {
+    const reading = frontmatterReading(raw, 'parent_card');
+    if (reading.kind === 'unparsed') {
+      report({ code: 'binding_unparsed', key: 'parent_card', detail: reading.reason, ...where });
+      return null;
+    }
+    if (reading.kind === 'duplicate') {
+      report({ code: 'binding_duplicate', key: 'parent_card', detail: reading.reason, ...where });
+      return null;
+    }
+    const wanted = `[[${epic}]]`;
+    if (reading.value) {
+      if (normalizeCardLink(reading.value) === epic) return null;
+      report({
+        code: 'parent_card_conflict', key: 'parent_card', found: reading.value, expected: wanted,
+        detail: `parent_card names ${reading.value} but the slice physically belongs to ${epic}`, ...where,
+      });
+      return null;
+    }
+    // Genuinely blank. Epic resolution stays narrow: the owning epic is the
+    // directory the slice lives in, and the slice's OWN epic backlink is the
+    // only authority accepted for filling. Disagreement is a report, never a
+    // guess.
+    const backlink = frontmatterReading(raw, 'epic');
+    if (backlink.kind !== 'value' || !backlink.value) {
+      report({
+        code: 'unresolved_epic', key: 'epic',
+        detail: backlink.reason || 'the slice carries no readable epic backlink', ...where,
+      });
+      return null;
+    }
+    const named = normalizeCardLink(backlink.value);
+    if (!named || /[\\/]/.test(named) || named === '..') {
+      report({
+        code: 'unresolved_epic', key: 'epic',
+        detail: `epic backlink ${JSON.stringify(backlink.value)} is not a bare card identity`, ...where,
+      });
+      return null;
+    }
+    if (named !== epic) {
+      report({
+        code: 'epic_owner_conflict', key: 'epic', found: backlink.value, expected: wanted,
+        detail: `the slice lives under ${epic} but its epic backlink names ${named}`, ...where,
+      });
+      return null;
+    }
+    return { from: '', to: wanted };
+  };
+
+  // Nothing is queued for writing until the exact bytes that write would
+  // produce have been read back by an independent reader. A patch that would
+  // leave frontmatter this reader cannot understand becomes a report.
+  const verified = (raw, fields, where) => {
+    if (!Object.keys(fields).length) return null;
+    const patch = {};
+    for (const [key, change] of Object.entries(fields)) patch[key] = JSON.stringify(change.to);
+    const refusal = frontmatterWriteRefusal(raw, patchFrontmatter(raw, patch), patch);
+    if (refusal) {
+      report({ code: 'frontmatter_unreadable', keys: Object.keys(fields), detail: refusal, ...where });
+      return null;
+    }
+    return fields;
+  };
+
   const epics = fs.readdirSync(cardsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   for (const epic of epics) {
-    const atlasPath = path.join(cardsRoot, epic, `${epic}.md`);
-    const boardDir = path.join(cardsRoot, epic, 'board');
+    const epicRoot = path.join(cardsRoot, epic);
+    const atlasPath = path.join(epicRoot, `${epic}.md`);
+    const boardDir = path.join(epicRoot, 'board');
     const epicBoardPath = path.join(boardDir, `${epic}-board.md`);
     if (!fs.existsSync(atlasPath) || !fs.existsSync(epicBoardPath)) continue;
+    // Containment before the first read, for every surface this pass touches.
+    let physicalBoardDir;
+    try {
+      const physicalEpicRoot = physicalDescendant(cardsRoot, epicRoot, `epic ${epic}`);
+      physicalDescendant(physicalEpicRoot, atlasPath, `epic ${epic} atlas`);
+      physicalBoardDir = physicalDescendant(physicalEpicRoot, boardDir, `epic ${epic} board directory`);
+      physicalDescendant(physicalBoardDir, epicBoardPath, `epic ${epic} board`);
+    } catch (err) {
+      report({ code: 'epic_escapes_root', epic, card: null, path: epicRoot, detail: err.message });
+      continue;
+    }
     const atlasRaw = fs.readFileSync(atlasPath, 'utf8');
     if (scalarField(atlasRaw, 'type') !== 'epic') continue;
     const want = canonicalEpicBindings(epic, cardsRoot, parentBoardPath);
-    const atlasFields = drift(atlasRaw, [
+    const atlasWhere = { epic, card: null, path: atlasPath };
+    const atlasFields = verified(atlasRaw, canonicalDrift(atlasRaw, [
       ['source_board', want.parentBoard], ['kanban_board', want.parentBoard], ['epic_board', want.board],
-    ]);
-    if (Object.keys(atlasFields).length) {
+    ], atlasWhere), atlasWhere);
+    if (atlasFields) {
       atlases.push({ epic, path: atlasPath, fields: atlasFields, preimage_sha: sha256Text(atlasRaw) });
     }
     const boardRaw = fs.readFileSync(epicBoardPath, 'utf8');
     const parsed = parseBoard(boardRaw);
     for (const name of ['In Planning', 'In Progress', 'Blocked', 'Completed'].flatMap((c) => parsed[c] || [])) {
-      const notePath = path.join(boardDir, `${name}.md`);
+      const notePath = containedEpicSliceNote(cardsRoot, boardDir, name);
+      if (!notePath) {
+        report({
+          code: 'board_line_escapes_root', epic, card: name, board: epicBoardPath,
+          detail: 'the board line does not address a note inside this epic board directory',
+        });
+        continue;
+      }
       if (!fs.existsSync(notePath)) {
         orphanLines.push({ board: epicBoardPath, epic, card: name, preimage_sha: sha256Text(boardRaw) });
         continue;
       }
       const sliceRaw = fs.readFileSync(notePath, 'utf8');
       if (scalarField(sliceRaw, 'type') !== 'slice') continue;
-      const sliceFields = drift(sliceRaw, [
+      const sliceWhere = { epic, card: name, path: notePath };
+      const sliceFields = canonicalDrift(sliceRaw, [
         ['task_parent', want.atlas], ['source_board', want.board], ['kanban_board', want.board],
-      ]);
-      if (Object.keys(sliceFields).length) {
-        slices.push({ card: name, epic, path: notePath, fields: sliceFields, preimage_sha: sha256Text(sliceRaw) });
+      ], sliceWhere);
+      const parentCard = ownerFill(sliceRaw, epic, sliceWhere);
+      if (parentCard) sliceFields.parent_card = parentCard;
+      const writable = verified(sliceRaw, sliceFields, sliceWhere);
+      if (writable) {
+        slices.push({ card: name, epic, path: notePath, fields: writable, preimage_sha: sha256Text(sliceRaw) });
       }
     }
   }
-  return { atlases, slices, orphanLines };
+  return { atlases, slices, orphanLines, reports };
 }
 
 // Reusable repair for boards frozen by non-canonical bindings or orphaned
@@ -4719,11 +5016,28 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
       let state;
       try { state = loadState(ctx); } catch (_) { state = { cards: {} }; }
       let stampedAny = false;
+      // Every patch is read back by an independent reader BEFORE the first
+      // byte is written, and the whole run refuses if any of them would leave
+      // frontmatter that reader cannot understand. The planner already ran
+      // this check and the concurrent-modification guard above has proven the
+      // bytes are the ones it checked, so this is a fail-closed backstop
+      // rather than a reachable branch — but it is the difference between
+      // "verified" and "verified somewhere else, once".
+      const pending = [];
       for (const target of [...atlases, ...slices]) {
         const raw = fs.readFileSync(target.path, 'utf8');
         const patch = {};
         for (const [key, change] of Object.entries(target.fields)) patch[key] = JSON.stringify(change.to);
-        writeText(target.path, patchFrontmatter(raw, patch));
+        const next = patchFrontmatter(raw, patch);
+        const unverifiable = frontmatterWriteRefusal(raw, next, patch);
+        if (unverifiable) {
+          refuse('heal-epic-bindings-refused', 'unverifiable_write',
+            `refusing to write ${target.path}: ${unverifiable}`);
+        }
+        pending.push({ target, next });
+      }
+      for (const { target, next } of pending) {
+        writeText(target.path, next);
         // Atlas targets have no `.card` — an epic atlas is never a tracked
         // ledger record. `slices` targets do; a missing record means an
         // untracked slice, deliberately, not by accident — nothing to stamp.
@@ -4751,11 +5065,15 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
       if (stampedAny) persist(ctx, state);
     }
     return successReceipt('heal-epic-bindings', {
+      // Reports are what the verb REFUSED to touch. They are emitted
+      // identically under --dry-run, --apply and replay, and they never make a
+      // run non-no_op: a shape nobody may write is not work left to do.
       no_op: !atlases.length && !slices.length && !orphanLines.length,
       applied: apply,
       atlases: atlases.map(({ epic, path: target, fields }) => ({ epic, path: target, fields })),
       slices: slices.map(({ card, epic, path: target, fields }) => ({ card, epic, path: target, fields })),
       orphan_lines: orphanLines,
+      reports: plan.reports,
     });
   }, { staleMs: 60 * 60 * 1000 });
 }
@@ -5132,13 +5450,26 @@ function collectBoardHealth(state, opts = {}) {
   // Check 3 — binding drift + orphan sub-board lines, reused verbatim from the
   // heal planner so the sweep and the remedy can never disagree. A throw here
   // is itself a finding: the sweep's own failures must never look like health.
+  //
+  // The planner's REPORTS are surfaced too, as a count and a per-code tally.
+  // They are shapes the heal deliberately refuses to touch, so they are not
+  // work the remedy will do — the remedy answers `no_op: true` on them by
+  // design, and they must not flip `healthy` or the sweep would nag forever
+  // about something no sanctioned verb can clear. But invisible is worse than
+  // unactionable: without them the hourly sweep and Board Health.md cannot
+  // show that the advertised remedy has nothing to offer an epic, and the
+  // operator is left running a heal that reports nothing.
   let bindingDrift;
   try {
     const plan = planEpicBindingHeal(cardsRoot, boardPath);
+    const byCode = {};
+    for (const entry of plan.reports) byCode[entry.code] = (byCode[entry.code] || 0) + 1;
     bindingDrift = {
       atlases: plan.atlases.length,
       slices: plan.slices.length,
       orphan_lines: plan.orphanLines.length,
+      reports: plan.reports.length,
+      report_codes: byCode,
       remedy: BOARD_HEALTH_DRIFT_REMEDY,
     };
   } catch (err) {
@@ -8406,6 +8737,7 @@ module.exports = {
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection, deriveEpicProjection, noteProjectionMapping,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
+  frontmatterReading, frontmatterKeySpan, frontmatterWriteRefusal, containedEpicSliceNote,
   commandBoardHealth, collectBoardHealth, commandAdopt, adoptProvenance,
   stemOf, hasDeployedSupersedingSibling, deployedSupersedingSibling, tombstoneResidue, pruneCardWorkspace,
   deploymentField, normalizeDeploymentMap, moveBoardCard, removeBoardCard, patchFrontmatter, rewriteDependsOn, projectionMapping, projectCard, attemptProjection,
