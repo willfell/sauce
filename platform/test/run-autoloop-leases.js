@@ -27,6 +27,7 @@ try {
 const {
   leaseIsLive, leaseSummary, acquireLease, clearLease, LEASE_TTL_MS, commandResume, commandClaim,
   requireLeaseToken, commandRecordReview, commandPark, commandAdvance, commandBreakLease, commandDiscard,
+  cliOptionAllowlist,
   commandStatus,
 } = coordinator;
 
@@ -344,6 +345,31 @@ async function withFreshCoordinator(envOverrides, fn) {
     const state = reviewFixture(null);
     const r = await commandRecordReview({ root: '/ws' }, { ...reviewArgs }, reviewDeps(state));
     ok(r.ok, 'unleased card works tokenless');
+  }
+
+  // The guard and the CLI allowlists are two halves of one contract, and
+  // testing them apart is how the deadlock shipped twice: requireLeaseToken
+  // DEMANDS --lease-token on a leased card while the verb's allowlist refused
+  // the option outright, leaving it unusable in both directions with
+  // break-lease the only audited way through. amend-contract carried that for
+  // a release; consume-ratification carried it afterwards, and the suite below
+  // stayed green through both because calling the guard as a function never
+  // touches the allowlist. Join the halves here, and derive the verb list from
+  // the source so a newly enforced verb cannot quietly skip the check.
+  {
+    const source = fs.readFileSync(coordinatorModulePath, 'utf8');
+    const enforced = [...new Set(
+      [...source.matchAll(/requireLeaseToken\(record, args, '([a-z-]+)'/g)].map((m) => m[1]),
+    )].sort();
+    ok(enforced.length >= 8,
+      `lease-gated verbs are discoverable from the coordinator source (found ${enforced.length})`);
+    for (const verb of enforced) {
+      const allowed = cliOptionAllowlist(verb);
+      // A verb with no allowlist accepts every option, so it cannot deadlock.
+      if (allowed === null) continue;
+      ok(allowed.includes('lease-token'),
+        `${verb}: demands --lease-token on a leased card, so its allowlist must accept it`);
+    }
   }
 
   // requireLeaseToken directly: identical shared behavior for every enforced
