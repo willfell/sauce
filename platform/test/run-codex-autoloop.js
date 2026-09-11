@@ -8942,6 +8942,7 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
       if (taskParent === null) continue; // orphan: on the board, note deliberately absent
       fs.writeFileSync(path.join(boardDir, `${name}.md`), [
         '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `parent_card: "[[${epic}]]"`,
         `task_parent: ${taskParent}`,
         `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
         `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
@@ -9061,6 +9062,7 @@ eq(discardStatus.tracked.some((record) => record.card === 'Stale slice'), false,
   const canonicalTaskParent = `task_parent: ${prefix}/tasks/Broken Epic/Broken Epic.md`;
   fs.writeFileSync(notePath, [
     '---', 'type: slice', 'schema_version: 1.1.0', 'epic: "[[Broken Epic]]"',
+    'parent_card: "[[Broken Epic]]"',
     canonicalTaskParent,
     `source_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
     `kanban_board: ${prefix}/tasks/Broken Epic/board/Broken Epic-board.md`,
@@ -9152,6 +9154,7 @@ const bhScaffold = (root, { epics = {}, planning = [], progress = [], completed 
       if (status === null) continue; // orphan board line: note deliberately absent
       fs.writeFileSync(path.join(boardDir, `${name}.md`), [
         '---', 'type: slice', 'schema_version: 1.1.0', `epic: "[[${epic}]]"`,
+        `parent_card: "[[${epic}]]"`,
         `task_parent: ${prefix}/tasks/${epic}/${epic}.md`,
         `source_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
         `kanban_board: ${prefix}/tasks/${epic}/board/${epic}-board.md`,
@@ -9233,7 +9236,10 @@ const bhDeps = (fx, extra = {}) => ({
   eq(receipt.findings.untracked_members.map((f) => f.card), ['EM-4', 'EM-5', 'EM-6'],
     'BH-LEDGERLESS check 1 needs no ledger');
   eq(receipt.findings.binding_drift,
-    { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    {
+      atlases: 0, slices: 0, orphan_lines: 0, reports: 0, report_codes: {},
+      remedy: 'heal-epic-bindings --dry-run --json',
+    },
     'BH-LEDGERLESS check 3 needs no ledger');
   eq(receipt.findings.lane_divergence, [], 'BH-LEDGERLESS check 4 is skipped, not failed');
   eq(receipt.findings.projection_errors, [], 'BH-LEDGERLESS check 5 is skipped, not failed');
@@ -9342,12 +9348,47 @@ const bhDeps = (fx, extra = {}) => ({
     untracked_members: [],
     untracked_members_by_provenance: { coordinator: 0, foreign: 0 },
     unprojectable_epics: [],
-    binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy: 'heal-epic-bindings --dry-run --json' },
+    binding_drift: {
+      atlases: 0, slices: 0, orphan_lines: 0, reports: 0, report_codes: {},
+      remedy: 'heal-epic-bindings --dry-run --json',
+    },
     lane_divergence: [], projection_errors: [], foreign_writes: [],
   }, 'BH-NOOP every finding class is empty');
   eq(writes, 0, 'BH-READONLY the default invocation performs zero writes');
   ok(!fs.existsSync(path.join(fx.projectRoot, 'Board Health.md')),
     'BH-READONLY no vault note is created without --write-note');
+}
+
+// BH-BINDING-REPORTS — check 3 consumes the heal planner's REPORTS, not just
+// its write targets. A shape the heal deliberately refuses to touch makes the
+// remedy answer `no_op: true`, so without this the hourly sweep and Board
+// Health.md tell an operator nothing at all about it and the advertised
+// remedy looks broken. Surfaced as a count plus a per-code tally — and
+// deliberately NOT allowed to flip `healthy`, because no sanctioned verb can
+// clear them and a permanently-unhealthy board is a sweep nobody reads.
+{
+  const root = path.join(tmp, 'bh-binding-reports');
+  const fx = bhScaffold(root, {
+    progress: ['Calm Epic'],
+    epics: { 'Calm Epic': {
+      lanes: { 'In Planning': ['CB-2'], 'In Progress': ['CB-1'] },
+      slices: { 'CB-1': 'in_progress', 'CB-2': 'planning' },
+    } },
+  });
+  const notePath = path.join(fx.cardsRoot, 'Calm Epic', 'board', 'CB-1.md');
+  fs.writeFileSync(notePath, fs.readFileSync(notePath, 'utf8')
+    .replace('parent_card: "[[Calm Epic]]"', 'parent_card: "[[Some Other Epic]]"'));
+  const state = emptyState();
+  state.cards['CB-1'] = { card: 'CB-1', phase: 'implementing' };
+  const receipt = await coordinator.commandBoardHealth({ root, statePath: path.join(root, 'state.json') },
+    { json: true }, bhDeps(fx, { readState: () => state }));
+  eq(receipt.findings.binding_drift, {
+    atlases: 0, slices: 0, orphan_lines: 0, reports: 1,
+    report_codes: { parent_card_conflict: 1 },
+    remedy: 'heal-epic-bindings --dry-run --json',
+  }, 'BH-BINDING-REPORTS a shape the remedy refuses is visible to the sweep, with its code');
+  eq(receipt.no_op, true,
+    'BH-BINDING-REPORTS reports alone never flip the board unhealthy — no sanctioned verb can clear them');
 }
 
 // BH-SCAFFOLD / BH-BODY — Loop Station's proven write discipline, inherited
@@ -13340,6 +13381,1126 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
   ok(deleteRefusal && /Drifted epic\.md/.test(deleteRefusal.message),
     'CM-DELETE-RACE the refusal names the deleted path');
   ok(!fs.existsSync(deleteAtlasPath), 'CM-DELETE-RACE the deletion itself is left as the concurrent writer made it');
+}
+
+// --- OPS-2b: parse-verified parent_card heal ----------------------------------
+//
+// The predecessor (OPS-2) was refuted twice for the same class of mistake:
+// classifying a frontmatter key as "blank" from a walk that only recognised
+// INDENTED continuations, then splicing on that walk. Three shapes YAML reads
+// as populated — a column-0 block sequence, a blank line before an indented
+// value, a column-0 comment before an indented value — were classified blank,
+// filled, and the splice ate the recorded value, producing frontmatter that
+// does not parse at all. Every finding below is bound to a test here.
+{
+  const ops2bPrefix = 'spice/projects/test';
+  let ops2bSeq = 0;
+  const ops2bAtlasLines = (epic) => [
+    `source_board: ${ops2bPrefix}/project-board.md`,
+    `kanban_board: ${ops2bPrefix}/project-board.md`,
+    `epic_board: ${ops2bPrefix}/tasks/${epic}/board/${epic}-board.md`,
+  ];
+  const ops2bSliceLines = (epic, overrides = {}) => {
+    const base = {
+      type: 'type: slice',
+      schema_version: 'schema_version: 1.1.0',
+      epic: `epic: "[[${epic}]]"`,
+      parent_card: `parent_card: "[[${epic}]]"`,
+      task_parent: `task_parent: ${ops2bPrefix}/tasks/${epic}/${epic}.md`,
+      source_board: `source_board: ${ops2bPrefix}/tasks/${epic}/board/${epic}-board.md`,
+      kanban_board: `kanban_board: ${ops2bPrefix}/tasks/${epic}/board/${epic}-board.md`,
+      status: 'status: planning',
+      depends_on: 'depends_on: []',
+    };
+    const out = [];
+    for (const [key, line] of Object.entries(base)) {
+      if (!Object.prototype.hasOwnProperty.call(overrides, key)) { out.push(line); continue; }
+      const replacement = overrides[key];
+      if (replacement === null) continue;
+      out.push(...(Array.isArray(replacement) ? replacement : [replacement]));
+    }
+    for (const [key, replacement] of Object.entries(overrides)) {
+      if (Object.prototype.hasOwnProperty.call(base, key) || replacement === null) continue;
+      out.push(...(Array.isArray(replacement) ? replacement : [replacement]));
+    }
+    return out;
+  };
+  const ops2bScaffold = (label, epics) => {
+    const root = path.join(tmp, `ops2b-${label}-${ops2bSeq++}`);
+    const projectRoot = path.join(root, 'spice', 'projects', 'test');
+    const cardsRoot = path.join(projectRoot, 'tasks');
+    const boardPath = path.join(projectRoot, 'project-board.md');
+    fs.mkdirSync(cardsRoot, { recursive: true });
+    fs.writeFileSync(boardPath, liveBoard({ planning: Object.keys(epics) }));
+    for (const [epic, spec] of Object.entries(epics)) {
+      const boardDir = path.join(cardsRoot, epic, 'board');
+      fs.mkdirSync(boardDir, { recursive: true });
+      fs.mkdirSync(path.join(cardsRoot, epic, 'context', 'runs'), { recursive: true });
+      fs.writeFileSync(path.join(cardsRoot, epic, `${epic}.md`), [
+        '---', 'type: epic', 'schema_version: 1.1.0',
+        ...(spec.atlasLines || ops2bAtlasLines(epic)),
+        'status: planning', 'posture: claimable', '---', '', `${epic} atlas body`, '',
+      ].join('\n'));
+      const names = spec.boardLines || Object.keys(spec.slices || {});
+      fs.writeFileSync(path.join(boardDir, `${epic}-board.md`), [
+        '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${epic}]]"`, '---', '',
+        '## In Planning', ...names.map((n) => `- [ ] [[${n}]]`), '',
+        '## In Progress', '', '## Blocked', '', '## Completed', '',
+      ].join('\n'));
+      for (const [slice, lines] of Object.entries(spec.slices || {})) {
+        if (lines === null) continue;
+        fs.writeFileSync(path.join(boardDir, `${slice}.md`),
+          ['---', ...lines, '---', '', `${slice} body`, ''].join('\n'));
+      }
+    }
+    return { root, projectRoot, cardsRoot, boardPath };
+  };
+  const ops2bSlicePath = (fx, epic, slice) => path.join(fx.cardsRoot, epic, 'board', `${slice}.md`);
+  const ops2bHeal = (fx, args) => coordinator.commandHealEpicBindings(
+    { root: fx.root }, { json: true, ...args },
+    { boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn() },
+  );
+  const ops2bSnapshot = (fx) => {
+    const out = new Map();
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const target = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(target);
+        else if (entry.isFile()) out.set(target, fs.readFileSync(target, 'utf8'));
+      }
+    };
+    walk(fx.root);
+    return out;
+  };
+  const ops2bUnchanged = (before, label) => {
+    for (const [target, bytes] of before) {
+      eq(fs.readFileSync(target, 'utf8'), bytes, `${label} ${path.basename(target)} is byte-identical`);
+    }
+  };
+  const ops2bCodes = (receipt) => (receipt.reports || []).map((r) => r.code).sort();
+  const ops2bReport = (receipt, index = 0) => ((receipt.reports || [])[index] || {});
+
+  // Optional differential against a real YAML reader. NEVER a dependency: if
+  // python3 or PyYAML is missing the cross-check degrades to a skip, because a
+  // suite that silently needs an unmanaged interpreter is a worse failure than
+  // no cross-check at all.
+  const ops2bPyYaml = (() => {
+    try {
+      const probe = execFileSync('python3', ['-c', 'import yaml; print("ok")'], { encoding: 'utf8' }).trim();
+      return probe === 'ok';
+    } catch (_) { return false; }
+  })();
+  const ops2bYamlRead = (text, key) => {
+    const script = [
+      'import sys, yaml, json',
+      'raw = sys.stdin.read()',
+      'body = raw.split("---\\n", 1)[1].split("\\n---", 1)[0]',
+      'doc = yaml.safe_load(body)',
+      'print(json.dumps({"ok": True, "value": doc.get(sys.argv[1]) if isinstance(doc, dict) else None}))',
+    ].join('\n');
+    try {
+      return JSON.parse(execFileSync('python3', ['-c', script, key], { input: text, encoding: 'utf8' }));
+    } catch (_) { return { ok: false, value: null }; }
+  };
+
+  // The whole frontmatter mapping as a real YAML reader sees it, for the
+  // differential corpus below. Same skip-if-absent posture as ops2bYamlRead.
+  const ops2bYamlDoc = (text) => {
+    const script = [
+      'import sys, yaml, json',
+      'raw = sys.stdin.read()',
+      'body = raw.split("---\\n", 1)[1].split("\\n---", 1)[0]',
+      'doc = yaml.safe_load(body)',
+      'print(json.dumps({"ok": isinstance(doc, dict), "doc": doc}, default=str))',
+    ].join('\n');
+    try {
+      return JSON.parse(execFileSync('python3', ['-c', script], { input: text, encoding: 'utf8' }));
+    } catch (_) { return { ok: false, doc: null }; }
+  };
+  // OPS2B-FILL — the outcome the card exists for: a genuinely absent
+  // parent_card on a slice minted before the field was required is filled with
+  // the epic that physically owns it, and nothing else in the note moves.
+  {
+    const fx = ops2bScaffold('fill', {
+      'Owner Epic': {
+        slices: {
+          'OF-1': ops2bSliceLines('Owner Epic', { parent_card: null }),
+          'OF-2': ops2bSliceLines('Owner Epic', { parent_card: 'parent_card:' }),
+          'OF-3': ops2bSliceLines('Owner Epic', { parent_card: 'parent_card: ""' }),
+          'OF-4': ops2bSliceLines('Owner Epic'),
+        },
+      },
+    });
+    const before = new Map(['OF-1', 'OF-2', 'OF-3', 'OF-4']
+      .map((s) => [s, fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', s), 'utf8')]));
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices.map((s) => s.card), ['OF-1', 'OF-2', 'OF-3'],
+      'OPS2B-FILL every genuinely blank parent_card shape is a fill target and the populated one is not');
+    eq(dry.slices.map((s) => (s.fields.parent_card || {}).to), ['[[Owner Epic]]', '[[Owner Epic]]', '[[Owner Epic]]'],
+      'OPS2B-FILL the fill value is the owning epic as a wikilink');
+    eq(dry.slices.map((s) => (s.fields.parent_card || {}).from), ['', '', ''],
+      'OPS2B-FILL every fill reports an empty prior value');
+    eq(dry.reports, [], 'OPS2B-FILL a clean fill emits no reports');
+    for (const slice of before.keys()) {
+      eq(fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', slice), 'utf8'), before.get(slice),
+        `OPS2B-FILL dry-run writes nothing to ${slice}`);
+    }
+
+    const applied = await ops2bHeal(fx, { apply: true });
+    eq(applied.no_op, false, 'OPS2B-FILL an apply that fills is not a no-op');
+    for (const slice of ['OF-1', 'OF-2', 'OF-3']) {
+      const healed = fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', slice), 'utf8');
+      ok(/^parent_card: "\[\[Owner Epic\]\]"$/m.test(healed),
+        `OPS2B-FILL ${slice} carries the healed parent_card`);
+      eq(healed.split('\n---\n')[1], before.get(slice).split('\n---\n')[1],
+        `OPS2B-FILL ${slice} keeps its body byte-identical`);
+      ok(healed.endsWith('\n'), `OPS2B-FILL ${slice} keeps its trailing newline`);
+      if (ops2bPyYaml) {
+        eq(ops2bYamlRead(healed, 'parent_card'), { ok: true, value: '[[Owner Epic]]' },
+          `OPS2B-FILL ${slice} still parses as YAML with the healed value (PyYAML differential)`);
+      }
+    }
+    eq(fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', 'OF-4'), 'utf8'), before.get('OF-4'),
+      'OPS2B-FILL the already-bound slice is left byte-identical');
+    // Existing key order is preserved: OF-2/OF-3 had parent_card in place, so
+    // the healed line must stay where it was rather than move to the end.
+    eq(fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', 'OF-2'), 'utf8').split('\n').indexOf('parent_card: "[[Owner Epic]]"'),
+      before.get('OF-2').split('\n').indexOf('parent_card:'),
+      'OPS2B-FILL an in-place blank is healed in place, preserving key order');
+
+    const healedBytes = new Map(['OF-1', 'OF-2', 'OF-3', 'OF-4']
+      .map((s) => [s, fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', s), 'utf8')]));
+    const replay = await ops2bHeal(fx, { apply: true });
+    eq(replay.no_op, true, 'OPS2B-FILL a second apply is a true no_op');
+    for (const [slice, bytes] of healedBytes) {
+      eq(fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', slice), 'utf8'), bytes,
+        `OPS2B-FILL ${slice} is byte-stable across the replay`);
+    }
+  }
+
+  // OPS2B-CONFLICT — OWNER_FILL never re-parents. A populated disagreement is
+  // a report, because silently rewriting it moves work between epics.
+  {
+    const fx = ops2bScaffold('conflict', {
+      'Owner Epic': {
+        slices: { 'OC-1': ops2bSliceLines('Owner Epic', { parent_card: 'parent_card: "[[Some Other Card]]"' }) },
+      },
+    });
+    const before = ops2bSnapshot(fx);
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices, [], 'OPS2B-CONFLICT a populated disagreement is never a write target');
+    eq(ops2bCodes(dry), ['parent_card_conflict'], 'OPS2B-CONFLICT the disagreement is reported');
+    eq(ops2bReport(dry).card, 'OC-1', 'OPS2B-CONFLICT the report names the slice');
+    eq(ops2bReport(dry).found, '[[Some Other Card]]', 'OPS2B-CONFLICT the report carries the recorded value');
+    eq(ops2bReport(dry).expected, '[[Owner Epic]]', 'OPS2B-CONFLICT the report carries the owning epic');
+    eq(dry.no_op, true, 'OPS2B-CONFLICT reports alone never make a run non-no_op');
+    const applied = await ops2bHeal(fx, { apply: true });
+    eq(applied.no_op, true, 'OPS2B-CONFLICT an apply with only reports is still a no_op');
+    eq(ops2bCodes(applied), ['parent_card_conflict'], 'OPS2B-CONFLICT the report is emitted identically under --apply');
+    ops2bUnchanged(before, 'OPS2B-CONFLICT');
+  }
+
+  // OPS2B-UNPARSED-SHAPES — carried findings 1-4. Four shapes YAML genuinely
+  // parses as POPULATED that an indented-continuation walk calls blank. The
+  // classifier is structural, not a list of known-bad shapes: a key is
+  // unreadable whenever the next significant frontmatter line is not a new
+  // `key:` line, which covers all four at once.
+  {
+    const shapes = {
+      'COLUMN0-BLOCK-SEQUENCE': ['parent_card:', '- "[[Other Epic]]"'],
+      'BLANK-LINE-CONTINUATION': ['parent_card:', '', '  "[[Other Epic]]"'],
+      'COMMENT-LINE-CONTINUATION': ['parent_card:', '# recorded by intake', '  "[[Other Epic]]"'],
+      'INDENTED-CONTINUATION': ['parent_card:', '  "[[Other Epic]]"'],
+    };
+    let index = 0;
+    for (const [label, lines] of Object.entries(shapes)) {
+      const slice = `OU-${index++}`;
+      const fx = ops2bScaffold(`unparsed-${index}`, {
+        'Owner Epic': { slices: { [slice]: ops2bSliceLines('Owner Epic', { parent_card: lines }) } },
+      });
+      const notePath = ops2bSlicePath(fx, 'Owner Epic', slice);
+      const before = ops2bSnapshot(fx);
+      if (ops2bPyYaml) {
+        const read = ops2bYamlRead(fs.readFileSync(notePath, 'utf8'), 'parent_card');
+        ok(read.ok && read.value !== null && read.value !== '',
+          `OPS2B-${label} the fixture is a shape YAML reads as POPULATED (PyYAML differential)`);
+      }
+      const dry = await ops2bHeal(fx, { 'dry-run': true });
+      eq(dry.slices, [], `OPS2B-${label} the unreadable shape is never a write target`);
+      eq(ops2bCodes(dry), ['binding_unparsed'], `OPS2B-${label} the unreadable shape is reported`);
+      eq(ops2bReport(dry).key, 'parent_card', `OPS2B-${label} the report names the key it could not read whole`);
+      eq(ops2bReport(dry).card, slice, `OPS2B-${label} the report names the slice`);
+      const applied = await ops2bHeal(fx, { apply: true });
+      eq(ops2bCodes(applied), ['binding_unparsed'], `OPS2B-${label} the report is emitted identically under --apply`);
+      ops2bUnchanged(before, `OPS2B-${label}`);
+      if (ops2bPyYaml) {
+        ok(ops2bYamlRead(fs.readFileSync(notePath, 'utf8'), 'parent_card').ok,
+          `OPS2B-${label} the note still parses as YAML after the run (PyYAML differential)`);
+      }
+    }
+  }
+
+  // OPS2B-BOARD-LINE-ESCAPES-ROOT — parseBoard's capture admits `/` and `..`
+  // (select-card.js, out of this card's touch zones), so the CONSUMER must
+  // contain it. Containment is checked BEFORE the file is read: a path you may
+  // not write, you may not trust to classify anything. The escaping line must
+  // produce no finding of ANY class — not an atlas, not a slice, not an orphan
+  // board line — only a report.
+  {
+    const fx = ops2bScaffold('escape', {
+      'Owner Epic': {
+        boardLines: ['OE-1', '../../../escape-target', '../sibling-ghost', 'LINKED'],
+        slices: { 'OE-1': ops2bSliceLines('Owner Epic') },
+      },
+    });
+    // A real, readable, drifted slice note sitting outside the cards root.
+    const outsidePath = path.join(fx.projectRoot, 'escape-target.md');
+    fs.writeFileSync(outsidePath, ['---', ...ops2bSliceLines('Owner Epic', {
+      parent_card: null, task_parent: 'task_parent: wrong/path.md',
+    }), '---', '', 'escape body', ''].join('\n'));
+    // ...and a symlink inside the board dir pointing at it, so the physical
+    // containment rule is exercised, not just the lexical one.
+    fs.symlinkSync(outsidePath, path.join(fx.cardsRoot, 'Owner Epic', 'board', 'LINKED.md'));
+    const outsideBefore = fs.readFileSync(outsidePath, 'utf8');
+    const boardFile = path.join(fx.cardsRoot, 'Owner Epic', 'board', 'Owner Epic-board.md');
+    const boardBefore = fs.readFileSync(boardFile, 'utf8');
+
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices, [], 'OPS2B-BOARD-LINE-ESCAPES-ROOT no escaping line becomes a slice finding');
+    eq(dry.atlases, [], 'OPS2B-BOARD-LINE-ESCAPES-ROOT no escaping line becomes an atlas finding');
+    eq(dry.orphan_lines, [], 'OPS2B-BOARD-LINE-ESCAPES-ROOT no escaping line becomes an orphan-line finding');
+    eq(ops2bCodes(dry),
+      ['board_line_escapes_root', 'board_line_escapes_root', 'board_line_escapes_root'],
+      'OPS2B-BOARD-LINE-ESCAPES-ROOT every escaping line — traversal, missing traversal, and symlink — is reported');
+    eq((dry.reports || []).map((r) => r.card).sort(),
+      ['../../../escape-target', '../sibling-ghost', 'LINKED'],
+      'OPS2B-BOARD-LINE-ESCAPES-ROOT the reports name the exact board-line text');
+
+    const applied = await ops2bHeal(fx, { apply: true });
+    eq(applied.no_op, true, 'OPS2B-BOARD-LINE-ESCAPES-ROOT an escaping line alone is not work to do');
+    eq(fs.readFileSync(outsidePath, 'utf8'), outsideBefore,
+      'OPS2B-BOARD-LINE-ESCAPES-ROOT the note outside the cards root is never written');
+    eq(fs.readFileSync(boardFile, 'utf8'), boardBefore,
+      'OPS2B-BOARD-LINE-ESCAPES-ROOT the escaping board lines are never pruned as orphans');
+  }
+
+  // OPS2B-QUOTED-WHITESPACE-PATH-REGRESSION — the predecessor rotted this one
+  // silently. A quoted-whitespace canonical-path binding must behave exactly
+  // as origin/main does (main's `drift` sees a truthy value and heals it).
+  {
+    const fx = ops2bScaffold('quoted-ws', {
+      'Owner Epic': { slices: { 'OQ-1': ops2bSliceLines('Owner Epic', { task_parent: 'task_parent: "   "' }) } },
+    });
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices.map((s) => s.card), ['OQ-1'],
+      'OPS2B-QUOTED-WHITESPACE-PATH-REGRESSION a quoted-whitespace canonical path is still healed');
+    eq(((dry.slices[0] || {}).fields || {}).task_parent,
+      { from: '   ', to: `${ops2bPrefix}/tasks/Owner Epic/Owner Epic.md` },
+      'OPS2B-QUOTED-WHITESPACE-PATH-REGRESSION the plan matches origin/main byte-for-byte');
+    await ops2bHeal(fx, { apply: true });
+    ok(new RegExp(`^task_parent: "${ops2bPrefix}/tasks/Owner Epic/Owner Epic.md"$`, 'm')
+      .test(fs.readFileSync(ops2bSlicePath(fx, 'Owner Epic', 'OQ-1'), 'utf8')),
+    'OPS2B-QUOTED-WHITESPACE-PATH-REGRESSION the applied bytes match origin/main');
+  }
+
+  // OPS2B-DUPLICATE-KEY-FILL-NO-OP — a line-oriented writer resolves a
+  // duplicate key to the FIRST line; a YAML reader resolves it to the last.
+  // They cannot be made to agree, so the only safe answer is a report.
+  {
+    const fx = ops2bScaffold('duplicate', {
+      'Owner Epic': {
+        slices: {
+          'OD-1': ops2bSliceLines('Owner Epic', { parent_card: ['parent_card:', 'parent_card: "[[Other Epic]]"'] }),
+          'OD-2': ops2bSliceLines('Owner Epic', {
+            task_parent: ['task_parent: wrong/one.md', 'task_parent: wrong/two.md'],
+          }),
+        },
+      },
+    });
+    const before = ops2bSnapshot(fx);
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices, [], 'OPS2B-DUPLICATE-KEY-FILL-NO-OP a duplicated key is never a write target');
+    eq(ops2bCodes(dry), ['binding_duplicate', 'binding_duplicate'],
+      'OPS2B-DUPLICATE-KEY-FILL-NO-OP both the owner-fill and canonical-path duplicates are reported');
+    const applied = await ops2bHeal(fx, { apply: true });
+    eq(applied.no_op, true, 'OPS2B-DUPLICATE-KEY-FILL-NO-OP the apply is a no_op');
+    ops2bUnchanged(before, 'OPS2B-DUPLICATE-KEY-FILL-NO-OP');
+  }
+
+  // OPS2B-UNRELATED-DUPLICATE-KEY — the OPS-2b refutation, bound to a test. The
+  // pre-write precondition used to read the WHOLE frontmatter block and refuse
+  // whenever ANY key anywhere was duplicated or non-flat — including keys the
+  // patch never touches. `status_changed_at` / `status_prev` / `kanban_column`
+  // are written by the vault-side Kanban sync, the exact non-coordinator writer
+  // this rail exists to tolerate, and 10 live slice notes inside epic board
+  // directories carry duplicates of them today. A splice on a UNIQUE `^key:`
+  // line is provably safe regardless of what a different key does elsewhere, so
+  // refusing it only removed repair coverage origin/main had.
+  {
+    const dupEarly = 'status_changed_at: "2026-09-01T00:00"';
+    const dupLate = 'status_changed_at: "2026-09-02T00:00"';
+    // The duplicate pair straddles every binding key: one copy above them all,
+    // one copy below, so no patched key can be said to be "outside" it.
+    const withDupes = (overrides) => ops2bSliceLines('Dup Epic', {
+      type: ['type: slice', dupEarly], status_changed_at: dupLate, ...overrides,
+    });
+    const canonicalTo = {
+      task_parent: `${ops2bPrefix}/tasks/Dup Epic/Dup Epic.md`,
+      source_board: `${ops2bPrefix}/tasks/Dup Epic/board/Dup Epic-board.md`,
+      kanban_board: `${ops2bPrefix}/tasks/Dup Epic/board/Dup Epic-board.md`,
+    };
+    let dupSeq = 0;
+    for (const field of ['task_parent', 'source_board', 'kanban_board']) {
+      const fx = ops2bScaffold(`unrelated-dup-${dupSeq++}`, {
+        'Dup Epic': { slices: { 'UD-1': withDupes({ [field]: `${field}: wrong/place.md` }) } },
+      });
+      const notePath = ops2bSlicePath(fx, 'Dup Epic', 'UD-1');
+      const before = fs.readFileSync(notePath, 'utf8');
+      const dry = await ops2bHeal(fx, { 'dry-run': true });
+      eq(ops2bCodes(dry), [], `OPS2B-UNRELATED-DUP ${field} an unrelated duplicate key raises no report`);
+      eq(dry.slices.map((s) => s.card), ['UD-1'],
+        `OPS2B-UNRELATED-DUP ${field} the drifted binding is still a write target`);
+      eq(((dry.slices[0] || {}).fields || {})[field], { from: 'wrong/place.md', to: canonicalTo[field] },
+        `OPS2B-UNRELATED-DUP ${field} the drift record matches origin/main`);
+      await ops2bHeal(fx, { apply: true });
+      const after = fs.readFileSync(notePath, 'utf8');
+      eq(after, before.replace(`${field}: wrong/place.md`, `${field}: ${JSON.stringify(canonicalTo[field])}`),
+        `OPS2B-UNRELATED-DUP ${field} applies origin/main's exact bytes`);
+      eq(after.split('\n').filter((line) => line.startsWith('status_changed_at:')), [dupEarly, dupLate],
+        `OPS2B-UNRELATED-DUP ${field} both copies of the untouched duplicate survive, in order`);
+    }
+    {
+      const fx = ops2bScaffold('unrelated-dup-fill', {
+        'Dup Epic': { slices: { 'UD-2': withDupes({ parent_card: null }) } },
+      });
+      const notePath = ops2bSlicePath(fx, 'Dup Epic', 'UD-2');
+      const before = fs.readFileSync(notePath, 'utf8');
+      const dry = await ops2bHeal(fx, { 'dry-run': true });
+      eq(ops2bCodes(dry), [], 'OPS2B-UNRELATED-DUP a parent_card fill beside an unrelated duplicate raises no report');
+      eq(((dry.slices[0] || {}).fields || {}).parent_card, { from: '', to: '[[Dup Epic]]' },
+        'OPS2B-UNRELATED-DUP the blank parent_card is still a fill target');
+      await ops2bHeal(fx, { apply: true });
+      const after = fs.readFileSync(notePath, 'utf8');
+      ok(/^parent_card: "\[\[Dup Epic\]\]"$/m.test(after), 'OPS2B-UNRELATED-DUP the owner is filled');
+      eq(after.split('\n---\n')[1], before.split('\n---\n')[1], 'OPS2B-UNRELATED-DUP the body is byte-identical');
+      eq(after.split('\n').filter((line) => line.startsWith('status_changed_at:')), [dupEarly, dupLate],
+        'OPS2B-UNRELATED-DUP both copies of the untouched duplicate survive the fill');
+      if (ops2bPyYaml) {
+        eq(ops2bYamlRead(after, 'parent_card'), { ok: true, value: '[[Dup Epic]]' },
+          'OPS2B-UNRELATED-DUP the healed note still parses as YAML (PyYAML differential)');
+      }
+    }
+    {
+      const fx = ops2bScaffold('unrelated-dup-atlas', {
+        'Dup Epic': {
+          atlasLines: [
+            dupEarly,
+            'source_board: wrong/board.md',
+            `kanban_board: ${ops2bPrefix}/project-board.md`,
+            `epic_board: ${ops2bPrefix}/tasks/Dup Epic/board/Dup Epic-board.md`,
+            dupLate,
+          ],
+          slices: { 'UD-3': ops2bSliceLines('Dup Epic') },
+        },
+      });
+      const atlasPath = path.join(fx.cardsRoot, 'Dup Epic', 'Dup Epic.md');
+      const before = fs.readFileSync(atlasPath, 'utf8');
+      const dry = await ops2bHeal(fx, { 'dry-run': true });
+      eq(ops2bCodes(dry), [], 'OPS2B-UNRELATED-DUP-ATLAS an unrelated duplicate on the atlas raises no report');
+      eq(dry.atlases.map((a) => a.epic), ['Dup Epic'],
+        'OPS2B-UNRELATED-DUP-ATLAS the drifted atlas is still a write target');
+      await ops2bHeal(fx, { apply: true });
+      eq(fs.readFileSync(atlasPath, 'utf8'),
+        before.replace('source_board: wrong/board.md',
+          `source_board: ${JSON.stringify(`${ops2bPrefix}/project-board.md`)}`),
+        "OPS2B-UNRELATED-DUP-ATLAS applies origin/main's exact bytes");
+    }
+  }
+
+  // OPS2B-SCOPED-VERIFIER — scoping the precondition to the patched key's own
+  // span must not weaken a single protection it carried. The verifier stays
+  // INDEPENDENT of the writer: it recomputes the span by the YAML-significance
+  // rule (the key line plus everything up to the next line that OPENS a new
+  // key, insignificant tail trimmed) rather than by the writer's indented-only
+  // walk, reconstructs the exact bytes a span-scoped patch would produce,
+  // compares the writer's actual output to them byte-for-byte, and then re-reads
+  // the key through the classifier. A writer that consumed too much, too
+  // little, or the wrong lines cannot satisfy all three.
+  {
+    const note = (...lines) => ['---', 'type: slice', ...lines, 'status: planning', '---', '', 'body', ''].join('\n');
+    const patch = { parent_card: '"[[B]]"' };
+    const refuse = coordinator.frontmatterWriteRefusal;
+
+    const dupElsewhere = note('parent_card: "[[A]]"', 'kanban_column: a', 'kanban_column: b');
+    eq(refuse(dupElsewhere, dupElsewhere.replace('"[[A]]"', '"[[B]]"'), patch), null,
+      'OPS2B-SCOPED-VERIFIER a duplicate key the patch never touches does not block the write');
+    const garbageElsewhere = note('parent_card: "[[A]]"', 'kanban_column: a', 'stalanning');
+    eq(refuse(garbageElsewhere, garbageElsewhere.replace('"[[A]]"', '"[[B]]"'), patch), null,
+      'OPS2B-SCOPED-VERIFIER a non-key column-0 line the patch never touches does not block the write');
+
+    const dupSameKey = note('parent_card: "[[A]]"', 'parent_card: "[[C]]"');
+    ok(/appears 2 times/.test(refuse(dupSameKey, dupSameKey.replace('"[[A]]"', '"[[B]]"'), patch) || ''),
+      'OPS2B-SCOPED-VERIFIER a duplicate of the PATCHED key is still refused');
+
+    // The refusal has to come from the SPAN rule itself, not merely from some
+    // later check, so the message is pinned rather than its truthiness. A
+    // verifier whose `opensAKey` silently degraded into the writer's own
+    // "line is not indented" walk still refuses every shape below on a REPLACE
+    // patch — the byte comparison catches it — so bare truthiness here proves
+    // nothing about the independence the span rule exists to provide. The
+    // continuation count is that rule's own signature.
+    const spanRefusal = /^parent_card carries \d+ continuation line\(s\) starting /;
+    const divergentShapes = [
+      ['column-0 sequence', ['- "[[A]]"']],
+      ['indented scalar', ['  "[[A]]"']],
+      ['indented sequence', ['  - "[[A]]"']],
+      ['blank then indented', ['', '  "[[A]]"']],
+      ['comment then indented', ['# written by intake', '  "[[A]]"']],
+      ['non-key column-0 line', ['stalanning']],
+      ['key line with no space after the colon', ['foo:bar']],
+    ];
+    for (const [label, extra] of divergentShapes.slice(0, 6)) {
+      const shaped = note('parent_card:', ...extra);
+      ok(spanRefusal.test(refuse(shaped, coordinator.patchFrontmatter(shaped, patch), patch) || ''),
+        `OPS2B-SCOPED-VERIFIER the writer's own output is refused BY THE SPAN RULE when parent_card's span is a ${label}`);
+    }
+
+    const sound = note('parent_card: "[[A]]"', 'kanban_column: a');
+    ok(refuse(sound, sound.replace('"[[A]]"', '"[[B]]"').replace('kanban_column: a', 'kanban_column: b'), patch),
+      'OPS2B-SCOPED-VERIFIER a write that also moved an untouched key is refused');
+    ok(refuse(sound, sound.replace('"[[A]]"', '"[[B]]"').replace('\nbody\n', '\nrewritten\n'), patch),
+      'OPS2B-SCOPED-VERIFIER a write that also rewrote the note body is refused');
+    ok(refuse(sound, sound.replace('parent_card: "[[A]]"\nkanban_column: a\n', 'parent_card: "[[B]]"\n'), patch),
+      'OPS2B-SCOPED-VERIFIER a splice that consumed a following key is refused');
+    ok(refuse(sound, sound.replace(/^---\n/, ''), patch),
+      'OPS2B-SCOPED-VERIFIER output with no frontmatter block at all is refused');
+    ok(refuse(sound, sound, patch),
+      'OPS2B-SCOPED-VERIFIER a patch that never landed is refused');
+
+    const missing = note('kanban_column: a');
+    eq(refuse(missing, coordinator.patchFrontmatter(missing, patch), patch), null,
+      'OPS2B-SCOPED-VERIFIER appending an absent key is accepted');
+    ok(refuse(missing, missing.replace('type: slice', 'type: slice\nparent_card: "[[B]]"'), patch),
+      'OPS2B-SCOPED-VERIFIER an append that landed somewhere other than the end is refused');
+
+    const injection = { parent_card: '"[[B]]"\nposture: hijacked' };
+    ok(refuse(sound, coordinator.patchFrontmatter(sound, injection), injection),
+      'OPS2B-SCOPED-VERIFIER a patch value carrying its own newline is caught by the read-back');
+
+    // The `value == null` (delete) arm of the same verifier. No caller emits it
+    // today — both call sites pass `JSON.stringify(change.to)` and never null —
+    // so the exported helper's delete branch is reachable only from here, and it
+    // is exactly where the span rule is load-bearing ALONE: on a replace the
+    // byte comparison is a second net, but on a delete a writer that stopped at
+    // the first non-indented line produces precisely the bytes a span rule
+    // sharing that walk would predict, so the orphaned continuation lines
+    // outlive their key (`---\ntype: slice\n- "[[A]]"\nstatus: planning`) with
+    // nothing left to object. Pinned before anything ever calls it.
+    const removal = { parent_card: null };
+    for (const [label, extra] of divergentShapes) {
+      const shaped = note('parent_card:', ...extra);
+      ok(spanRefusal.test(refuse(shaped, coordinator.patchFrontmatter(shaped, removal), removal) || ''),
+        `OPS2B-SCOPED-VERIFIER-DELETE removing parent_card is refused BY THE SPAN RULE when its span is a ${label}`);
+    }
+    eq(refuse(sound, coordinator.patchFrontmatter(sound, removal), removal), null,
+      'OPS2B-SCOPED-VERIFIER-DELETE removing a key whose value is on its own line is accepted');
+  }
+
+  // OPS2B-YAML-DIFFERENTIAL — the class-level invariant the card exists to
+  // hold, checked against a REAL YAML reader across a corpus of frontmatter
+  // shapes: a note that parsed before the heal must parse after it, carrying
+  // exactly the keys it carried (plus whatever the heal filled) with every
+  // unpatched value unchanged. Skips cleanly when python3/PyYAML is absent —
+  // production code uses neither.
+  if (ops2bPyYaml) {
+    const corpus = [
+      ['plain', {}],
+      ['duplicate-unrelated-straddling', {
+        type: ['type: slice', 'status_changed_at: "2026-09-01T00:00"'],
+        status_changed_at: 'status_changed_at: "2026-09-02T00:00"',
+      }],
+      ['duplicate-unrelated-adjacent', {
+        status_prev: ['status_prev: planning', 'status_prev: in_progress'],
+      }],
+      ['duplicate-unrelated-triple', {
+        kanban_column: ['kanban_column: a', 'kanban_column: b', 'kanban_column: c'],
+      }],
+      ['column0-sequence-elsewhere', { depends_on: ['depends_on:', '- "[[GA-1]]"', '- "[[GA-2]]"'] }],
+      ['indented-sequence-elsewhere', { depends_on: ['depends_on:', '  - "[[GA-1]]"'] }],
+      // Deliberately NOT the last key: a literal block that ends the frontmatter
+      // gains a trailing newline under YAML clip-chomping the moment ANY line is
+      // appended after it, which origin/main does too. That artifact is pinned
+      // separately below; the corpus keeps the untouched-values rule exact.
+      ['literal-block-elsewhere', { status: ['notes: |', '  first', '  second', 'status: planning'] }],
+      ['blank-lines-scattered', { type: ['type: slice', ''], status: ['', 'status: planning', ''] }],
+      ['comment-lines', { type: ['# written by intake', 'type: slice'], status: ['# kanban sync', 'status: planning'] }],
+      ['colon-in-value', { title: 'title: "OPS-2b: parse-verified heal"' }],
+      ['single-quoted-value', { kanban_column: "kanban_column: 'In Progress'" }],
+      ['duplicate-and-sequence', {
+        status_changed_at: ['status_changed_at: "a"', 'status_changed_at: "b"'],
+        depends_on: ['depends_on:', '- "[[GA-1]]"'],
+      }],
+    ];
+    let corpusSeq = 0;
+    for (const [label, overrides] of corpus) {
+      for (const fill of [false, true]) {
+        const tag = `${label}/${fill ? 'fill' : 'rewrite-only'}`;
+        const fx = ops2bScaffold(`yaml-diff-${corpusSeq++}`, {
+          'Diff Epic': {
+            slices: {
+              'YD-1': ops2bSliceLines('Diff Epic', {
+                task_parent: 'task_parent: wrong/place.md',
+                ...(fill ? { parent_card: null } : {}),
+                ...overrides,
+              }),
+            },
+          },
+        });
+        const notePath = ops2bSlicePath(fx, 'Diff Epic', 'YD-1');
+        const beforeDoc = ops2bYamlDoc(fs.readFileSync(notePath, 'utf8'));
+        ok(beforeDoc.ok, `OPS2B-YAML-DIFFERENTIAL ${tag} the fixture parses as a YAML mapping (precondition)`);
+        const dry = await ops2bHeal(fx, { 'dry-run': true });
+        eq(ops2bCodes(dry), [], `OPS2B-YAML-DIFFERENTIAL ${tag} no shape in the corpus is refused`);
+        eq(dry.slices.map((s) => s.card), ['YD-1'], `OPS2B-YAML-DIFFERENTIAL ${tag} the drifted binding is a write target`);
+        await ops2bHeal(fx, { apply: true });
+        const afterDoc = ops2bYamlDoc(fs.readFileSync(notePath, 'utf8'));
+        ok(afterDoc.ok, `OPS2B-YAML-DIFFERENTIAL ${tag} the healed note still parses as a YAML mapping`);
+        const expectedKeys = fill ? [...Object.keys(beforeDoc.doc), 'parent_card'] : Object.keys(beforeDoc.doc);
+        eq(Object.keys(afterDoc.doc || {}), expectedKeys,
+          `OPS2B-YAML-DIFFERENTIAL ${tag} every key survives, in document order`);
+        for (const key of expectedKeys) {
+          if (key === 'task_parent' || (fill && key === 'parent_card')) continue;
+          eq((afterDoc.doc || {})[key], beforeDoc.doc[key],
+            `OPS2B-YAML-DIFFERENTIAL ${tag} untouched key ${key} keeps its parsed value`);
+        }
+        eq((afterDoc.doc || {}).task_parent, `${ops2bPrefix}/tasks/Diff Epic/Diff Epic.md`,
+          `OPS2B-YAML-DIFFERENTIAL ${tag} task_parent reads back canonical`);
+        if (fill) {
+          eq((afterDoc.doc || {}).parent_card, '[[Diff Epic]]',
+            `OPS2B-YAML-DIFFERENTIAL ${tag} parent_card reads back as the owning epic`);
+        }
+      }
+    }
+  }
+
+  // OPS2B-TRAILING-BLOCK-SCALAR — the one parsed value an append can move, and
+  // the proof it is inherent rather than a regression: a literal block that ENDS
+  // the frontmatter gains a clip-chomping newline the moment any line is
+  // appended after it. Every byte before the appended line is unchanged, which
+  // is exactly what origin/main's append produces, so the verifier must accept
+  // it rather than refuse a fill on any note whose last property is a block.
+  if (ops2bPyYaml) {
+    const fx = ops2bScaffold('trailing-block', {
+      'Block Epic': {
+        slices: {
+          'TB-1': ops2bSliceLines('Block Epic', {
+            parent_card: null, notes: ['notes: |', '  first', '  second'],
+          }),
+        },
+      },
+    });
+    const notePath = ops2bSlicePath(fx, 'Block Epic', 'TB-1');
+    const before = fs.readFileSync(notePath, 'utf8');
+    const beforeDoc = ops2bYamlDoc(before);
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(ops2bCodes(dry), [], 'OPS2B-TRAILING-BLOCK-SCALAR a trailing block scalar is not a refusal');
+    await ops2bHeal(fx, { apply: true });
+    const after = fs.readFileSync(notePath, 'utf8');
+    eq(after, before.replace('\n---\n', '\nparent_card: "[[Block Epic]]"\n---\n'),
+      'OPS2B-TRAILING-BLOCK-SCALAR the fill appends one line and moves no byte before it');
+    const afterDoc = ops2bYamlDoc(after);
+    eq(beforeDoc.doc.notes, 'first\nsecond', 'OPS2B-TRAILING-BLOCK-SCALAR the block clips at the document end before');
+    eq(afterDoc.doc.notes, 'first\nsecond\n',
+      'OPS2B-TRAILING-BLOCK-SCALAR the appended line gives the block its chomping newline — the only parsed change');
+    eq(afterDoc.doc.parent_card, '[[Block Epic]]', 'OPS2B-TRAILING-BLOCK-SCALAR the owner is still filled');
+  }
+
+  // OPS2B-DEFERRED-WRITE-BACKSTOP — every target is verified before the first
+  // byte is written, so a failure on the LAST target leaves every earlier one
+  // byte-identical with zero ledger writes. Driven through the reachable
+  // failure (a concurrent writer landing on the last target after planning);
+  // the ledger persist is proven deferred past every note write too.
+  {
+    const drifted = (slice) => ops2bSliceLines('Defer Epic', { task_parent: `task_parent: wrong/${slice}.md` });
+    {
+      const fx = ops2bScaffold('deferred-verify', {
+        'Defer Epic': { slices: { 'DF-1': drifted('DF-1'), 'DF-2': drifted('DF-2'), 'DF-3': drifted('DF-3') } },
+      });
+      const paths = ['DF-1', 'DF-2', 'DF-3'].map((s) => ops2bSlicePath(fx, 'Defer Epic', s));
+      const atlasPath = path.join(fx.cardsRoot, 'Defer Epic', 'Defer Epic.md');
+      const before = paths.map((p) => fs.readFileSync(p, 'utf8'));
+      const ctx = {
+        root: fx.root, stateDir: path.join(fx.root, '.state'), statePath: path.join(fx.root, '.state', 'state.json'),
+      };
+      const seed = {
+        card: 'DF-1', phase: 'implementing', card_path: paths[0],
+        touch_zones: [], dependencies: [], deploy_subscriptions: null,
+      };
+      writeState(ctx, { cards: { 'DF-1': seed } }, seed);
+      const ledgerBefore = fs.readFileSync(ctx.statePath, 'utf8');
+      let refusal = null;
+      try {
+        await coordinator.commandHealEpicBindings(ctx, { json: true, apply: true }, {
+          boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+          planHook: () => fs.appendFileSync(paths[2], 'appended by another writer\n'),
+        });
+      } catch (err) { refusal = err; }
+      eq(refusal && refusal.code, 'concurrent_modification',
+        'OPS2B-DEFERRED-WRITE-BACKSTOP a last-target failure refuses the whole run');
+      eq(fs.readFileSync(paths[0], 'utf8'), before[0],
+        'OPS2B-DEFERRED-WRITE-BACKSTOP the first earlier target is byte-identical');
+      eq(fs.readFileSync(paths[1], 'utf8'), before[1],
+        'OPS2B-DEFERRED-WRITE-BACKSTOP the second earlier target is byte-identical');
+      ok(fs.existsSync(atlasPath), 'OPS2B-DEFERRED-WRITE-BACKSTOP the atlas survives the refusal');
+      eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBefore,
+        'OPS2B-DEFERRED-WRITE-BACKSTOP zero ledger writes');
+    }
+    {
+      const fx = ops2bScaffold('deferred-persist', {
+        'Defer Epic': { slices: { 'DF-1': drifted('DF-1'), 'DF-2': drifted('DF-2'), 'DF-3': drifted('DF-3') } },
+      });
+      const paths = ['DF-1', 'DF-2', 'DF-3'].map((s) => ops2bSlicePath(fx, 'Defer Epic', s));
+      const ctx = {
+        root: fx.root, stateDir: path.join(fx.root, '.state'), statePath: path.join(fx.root, '.state', 'state.json'),
+      };
+      const seed = {
+        card: 'DF-1', phase: 'implementing', card_path: paths[0],
+        touch_zones: [], dependencies: [], deploy_subscriptions: null,
+      };
+      writeState(ctx, { cards: { 'DF-1': seed } }, seed);
+      const ledgerBefore = fs.readFileSync(ctx.statePath, 'utf8');
+      let writes = 0;
+      let persists = 0;
+      let thrown = null;
+      try {
+        await coordinator.commandHealEpicBindings(ctx, { json: true, apply: true }, {
+          boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+          writeState: (...args) => { persists++; return writeState(...args); },
+          writeText: (target, next) => {
+            writes++;
+            if (writes === 3) throw new Error('disk full on the last target');
+            return fs.writeFileSync(target, next);
+          },
+        });
+      } catch (err) { thrown = err; }
+      ok(thrown && /disk full/.test(thrown.message),
+        'OPS2B-DEFERRED-WRITE-BACKSTOP a write failure is never swallowed');
+      eq(persists, 0, 'OPS2B-DEFERRED-WRITE-BACKSTOP the ledger persist is deferred past every note write');
+      eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBefore,
+        'OPS2B-DEFERRED-WRITE-BACKSTOP the on-disk ledger is byte-for-byte unchanged');
+    }
+  }
+  // OPS2B-POST-PATCH-YAML-MUST-REPARSE — the verb validates what it is about
+  // to write with a reader INDEPENDENT of the splice, and refuses rather than
+  // emitting frontmatter that does not parse. The check is SCOPED to the keys
+  // being patched: (a) a column-0 line that is not a key at all — the exact
+  // corruption shape that exists in the live vault today — sitting outside the
+  // patched key's span cannot make the splice on that unique line unsafe, so
+  // the binding is repaired exactly as origin/main repairs it and the
+  // pre-existing corruption is left exactly as it was found; (a2) the same
+  // stray line INSIDE the patched key's span is never written; (b) the
+  // verifier itself, fed a patched text that lost a key.
+  {
+    const fx = ops2bScaffold('reparse', {
+      'Owner Epic': {
+        slices: {
+          'OP-1': ops2bSliceLines('Owner Epic', {
+            task_parent: 'task_parent: wrong/path.md', trailing: 'stalanning',
+          }),
+          'OP-2': ops2bSliceLines('Owner Epic', {
+            task_parent: ['task_parent: wrong/path.md', 'stalanning'],
+          }),
+        },
+      },
+    });
+    const outOfSpan = ops2bSlicePath(fx, 'Owner Epic', 'OP-1');
+    const inSpan = ops2bSlicePath(fx, 'Owner Epic', 'OP-2');
+    const outOfSpanBefore = fs.readFileSync(outOfSpan, 'utf8');
+    const inSpanBefore = fs.readFileSync(inSpan, 'utf8');
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices.map((s) => s.card), ['OP-1'],
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE a stray line outside the patched span does not block the repair');
+    eq(ops2bCodes(dry), ['binding_unparsed'],
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE only the note whose PATCHED key cannot be read whole is reported');
+    eq(ops2bReport(dry).card, 'OP-2', 'OPS2B-POST-PATCH-YAML-MUST-REPARSE the report names the in-span note');
+    const applied = await ops2bHeal(fx, { apply: true });
+    eq(applied.no_op, false, 'OPS2B-POST-PATCH-YAML-MUST-REPARSE the repairable note makes the apply real work');
+    eq(fs.readFileSync(outOfSpan, 'utf8'),
+      outOfSpanBefore.replace('task_parent: wrong/path.md',
+        `task_parent: ${JSON.stringify(`${ops2bPrefix}/tasks/Owner Epic/Owner Epic.md`)}`),
+      "OPS2B-POST-PATCH-YAML-MUST-REPARSE the out-of-span note takes origin/main's exact bytes");
+    ok(fs.readFileSync(outOfSpan, 'utf8').includes('\nstalanning\n'),
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE the pre-existing corruption is left exactly as it was found');
+    eq(fs.readFileSync(inSpan, 'utf8'), inSpanBefore,
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE the in-span note is byte-identical');
+
+    const sound = ['---', 'type: slice', 'parent_card: "[[A]]"', 'status: planning', '---', '', 'body', ''].join('\n');
+    const good = sound.replace('parent_card: "[[A]]"', 'parent_card: "[[B]]"');
+    eq(coordinator.frontmatterWriteRefusal(sound, good, { parent_card: '"[[B]]"' }), null,
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE a well-formed patch is accepted');
+    const ateAKey = sound.replace('parent_card: "[[A]]"\nstatus: planning\n', 'parent_card: "[[B]]"\n');
+    ok(coordinator.frontmatterWriteRefusal(sound, ateAKey, { parent_card: '"[[B]]"' }),
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE a splice that consumed a following key is refused');
+    ok(coordinator.frontmatterWriteRefusal(sound, sound.replace(/^---\n/, ''), { parent_card: '"[[B]]"' }),
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE output with no frontmatter block at all is refused');
+    ok(coordinator.frontmatterWriteRefusal(sound, sound, { parent_card: '"[[B]]"' }),
+      'OPS2B-POST-PATCH-YAML-MUST-REPARSE a patch that never landed is refused');
+  }
+
+  // OPS2B-EPIC-RESOLUTION — the owning epic is the directory the slice lives
+  // in, and the slice's own `epic` backlink is the ONLY authority accepted for
+  // filling. Disagreement is a report, never a guess.
+  {
+    const fx = ops2bScaffold('epic-resolution', {
+      'Owner Epic': {
+        slices: {
+          'OR-1': ops2bSliceLines('Owner Epic', { parent_card: null, epic: null }),
+          'OR-2': ops2bSliceLines('Owner Epic', { parent_card: null, epic: 'epic: "[[Other Epic]]"' }),
+          'OR-3': ops2bSliceLines('Owner Epic', { parent_card: null, epic: 'epic: "[[../Owner Epic]]"' }),
+          'OR-4': ops2bSliceLines('Owner Epic', { parent_card: null, epic: ['epic:', '  - "[[Owner Epic]]"'] }),
+        },
+      },
+    });
+    const before = ops2bSnapshot(fx);
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices, [], 'OPS2B-EPIC-RESOLUTION no slice with an unusable epic backlink is filled');
+    eq((dry.reports || []).map((r) => [r.card, r.code]), [
+      ['OR-1', 'unresolved_epic'],
+      ['OR-2', 'epic_owner_conflict'],
+      ['OR-3', 'unresolved_epic'],
+      ['OR-4', 'unresolved_epic'],
+    ], 'OPS2B-EPIC-RESOLUTION each unusable backlink reports its own reason');
+    await ops2bHeal(fx, { apply: true });
+    ops2bUnchanged(before, 'OPS2B-EPIC-RESOLUTION');
+  }
+
+  // OPS2B-CANONICAL-PATH-MATRIX — the CANONICAL_PATH policy must stay
+  // byte-for-byte identical to origin/main across every binding field and
+  // every ordinary value shape. main's rule, verbatim: read the key's own
+  // line, heal iff the read value is truthy AND differs from canonical.
+  {
+    const atlasFields = ['source_board', 'kanban_board', 'epic_board'];
+    const sliceFields = ['task_parent', 'source_board', 'kanban_board'];
+    const canonical = (epic) => ({
+      source_board: `${ops2bPrefix}/project-board.md`,
+      kanban_board: `${ops2bPrefix}/project-board.md`,
+      epic_board: `${ops2bPrefix}/tasks/${epic}/board/${epic}-board.md`,
+    });
+    const sliceCanonical = (epic) => ({
+      task_parent: `${ops2bPrefix}/tasks/${epic}/${epic}.md`,
+      source_board: `${ops2bPrefix}/tasks/${epic}/board/${epic}-board.md`,
+      kanban_board: `${ops2bPrefix}/tasks/${epic}/board/${epic}-board.md`,
+    });
+    const shapes = [
+      ['populated-wrong', (key) => `${key}: wrong/place.md`, 'wrong/place.md'],
+      ['populated-right', null, null],
+      ['blank-bare', (key) => `${key}:`, null],
+      ['blank-quoted', (key) => `${key}: ""`, null],
+      ['quoted-whitespace', (key) => `${key}: "   "`, '   '],
+      ['missing', () => null, null],
+    ];
+    let matrixSeq = 0;
+    for (const [shape, render, expectedFrom] of shapes) {
+      for (const field of atlasFields) {
+        const epic = 'Owner Epic';
+        const lines = ops2bAtlasLines(epic)
+          .map((line) => (line.startsWith(`${field}:`) ? (render ? render(field) : line) : line))
+          .filter((line) => line !== null);
+        const fx = ops2bScaffold(`matrix-atlas-${matrixSeq++}`, {
+          [epic]: { atlasLines: lines, slices: { 'OM-1': ops2bSliceLines(epic) } },
+        });
+        const atlasPath = path.join(fx.cardsRoot, epic, `${epic}.md`);
+        const before = fs.readFileSync(atlasPath, 'utf8');
+        const dry = await ops2bHeal(fx, { 'dry-run': true });
+        const healed = expectedFrom !== null;
+        eq(dry.atlases.length, healed ? 1 : 0,
+          `OPS2B-MATRIX atlas ${field} / ${shape} matches origin/main's finding count`);
+        if (healed) {
+          eq(((dry.atlases[0] || {}).fields || {})[field], { from: expectedFrom, to: canonical(epic)[field] },
+            `OPS2B-MATRIX atlas ${field} / ${shape} matches origin/main's drift record`);
+        }
+        eq(ops2bCodes(dry), [], `OPS2B-MATRIX atlas ${field} / ${shape} emits no report for an ordinary shape`);
+        await ops2bHeal(fx, { apply: true });
+        const after = fs.readFileSync(atlasPath, 'utf8');
+        if (healed) {
+          eq(after, before.replace(render(field), `${field}: ${JSON.stringify(canonical(epic)[field])}`),
+            `OPS2B-MATRIX atlas ${field} / ${shape} applies origin/main's exact bytes`);
+        } else {
+          eq(after, before, `OPS2B-MATRIX atlas ${field} / ${shape} leaves origin/main's exact bytes`);
+        }
+      }
+      for (const field of sliceFields) {
+        const epic = 'Owner Epic';
+        const override = render === null ? {} : { [field]: render(field) };
+        const fx = ops2bScaffold(`matrix-slice-${matrixSeq++}`, {
+          [epic]: { slices: { 'OM-1': ops2bSliceLines(epic, override) } },
+        });
+        const notePath = ops2bSlicePath(fx, epic, 'OM-1');
+        const before = fs.readFileSync(notePath, 'utf8');
+        const dry = await ops2bHeal(fx, { 'dry-run': true });
+        const healed = expectedFrom !== null;
+        eq(dry.slices.length, healed ? 1 : 0,
+          `OPS2B-MATRIX slice ${field} / ${shape} matches origin/main's finding count`);
+        if (healed) {
+          eq(((dry.slices[0] || {}).fields || {})[field], { from: expectedFrom, to: sliceCanonical(epic)[field] },
+            `OPS2B-MATRIX slice ${field} / ${shape} matches origin/main's drift record`);
+        }
+        eq(ops2bCodes(dry), [], `OPS2B-MATRIX slice ${field} / ${shape} emits no report for an ordinary shape`);
+        await ops2bHeal(fx, { apply: true });
+        const after = fs.readFileSync(notePath, 'utf8');
+        if (healed) {
+          eq(after, before.replace(render(field), `${field}: ${JSON.stringify(sliceCanonical(epic)[field])}`),
+            `OPS2B-MATRIX slice ${field} / ${shape} applies origin/main's exact bytes`);
+        } else {
+          eq(after, before, `OPS2B-MATRIX slice ${field} / ${shape} leaves origin/main's exact bytes`);
+        }
+      }
+    }
+  }
+
+  // OPS2B-ORDINARY-SHAPES — the conservative direction must not become
+  // over-reporting: the two parent_card shapes that live in the vault today
+  // (quoted and unquoted wikilinks) are ordinary values, not "unreadable".
+  {
+    const fx = ops2bScaffold('ordinary', {
+      'Owner Epic': {
+        slices: {
+          'ON-1': ops2bSliceLines('Owner Epic', { parent_card: 'parent_card: "[[Owner Epic]]"' }),
+          'ON-2': ops2bSliceLines('Owner Epic', { parent_card: 'parent_card: [[Owner Epic]]' }),
+        },
+      },
+    });
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.reports, [], 'OPS2B-ORDINARY-SHAPES quoted and unquoted wikilinks are ordinary values');
+    eq(dry.slices, [], 'OPS2B-ORDINARY-SHAPES an agreeing parent_card is not a write target');
+    eq(dry.no_op, true, 'OPS2B-ORDINARY-SHAPES an all-ordinary board is a no_op');
+  }
+
+  // OPS2B-FILL-CONCURRENCY — the concurrent-modification refusal must cover a
+  // FILL-ONLY target too: zero writes, zero ledger writes.
+  {
+    const fx = ops2bScaffold('fill-race', {
+      'Owner Epic': { slices: { 'OZ-1': ops2bSliceLines('Owner Epic', { parent_card: null }) } },
+    });
+    const notePath = ops2bSlicePath(fx, 'Owner Epic', 'OZ-1');
+    const ctx = {
+      root: fx.root, stateDir: path.join(fx.root, '.state'),
+      statePath: path.join(fx.root, '.state', 'state.json'),
+    };
+    const seed = {
+      card: 'OZ-1', phase: 'implementing', card_path: notePath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    };
+    writeState(ctx, { cards: { 'OZ-1': seed } }, seed);
+    const ledgerBefore = fs.readFileSync(ctx.statePath, 'utf8');
+    const ledgerMtime = fs.statSync(ctx.statePath).mtimeMs;
+    const foreign = `${fs.readFileSync(notePath, 'utf8')}\nappended by another writer\n`;
+    let refusal = null;
+    try {
+      await coordinator.commandHealEpicBindings(ctx, { json: true, apply: true }, {
+        boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+        planHook: () => fs.writeFileSync(notePath, foreign),
+      });
+    } catch (err) { refusal = err; }
+    eq(refusal && refusal.code, 'concurrent_modification',
+      'OPS2B-FILL-CONCURRENCY a fill-only target that moves after planning refuses');
+    eq(fs.readFileSync(notePath, 'utf8'), foreign,
+      'OPS2B-FILL-CONCURRENCY the foreign write is left intact — the refusal wrote nothing');
+    eq(fs.readFileSync(ctx.statePath, 'utf8'), ledgerBefore,
+      'OPS2B-FILL-CONCURRENCY the ledger is byte-for-byte unchanged');
+    eq(fs.statSync(ctx.statePath).mtimeMs, ledgerMtime,
+      'OPS2B-FILL-CONCURRENCY the ledger mtime is unchanged — persist was never reached');
+  }
+
+  // OPS2B-FILL-STAMP — a fill-only heal of a TRACKED slice stamps
+  // card_note_sha to the healed bytes and persists once, exactly as the
+  // canonical-path heal does.
+  {
+    const fx = ops2bScaffold('fill-stamp', {
+      'Owner Epic': { slices: { 'OS-1': ops2bSliceLines('Owner Epic', { parent_card: null }) } },
+    });
+    const notePath = ops2bSlicePath(fx, 'Owner Epic', 'OS-1');
+    const ctx = {
+      root: fx.root, stateDir: path.join(fx.root, '.state'),
+      statePath: path.join(fx.root, '.state', 'state.json'),
+    };
+    const seed = {
+      card: 'OS-1', phase: 'implementing', card_path: notePath,
+      touch_zones: [], dependencies: [], deploy_subscriptions: null,
+    };
+    writeState(ctx, { cards: { 'OS-1': seed } }, seed);
+    let persists = 0;
+    const receipt = await coordinator.commandHealEpicBindings(ctx, { json: true, apply: true }, {
+      boardPath: fx.boardPath, cardsRoot: fx.cardsRoot, withLock: async (_c, _n, fn) => fn(),
+      writeState: (...args) => { persists++; return writeState(...args); },
+    });
+    eq(receipt.slices.map((s) => s.card), ['OS-1'], 'OPS2B-FILL-STAMP the fill-only target is healed');
+    eq(persists, 1, 'OPS2B-FILL-STAMP writeState is called exactly once');
+    eq(JSON.parse(fs.readFileSync(ctx.statePath, 'utf8')).cards['OS-1'].card_note_sha,
+      crypto.createHash('sha256').update(fs.readFileSync(notePath, 'utf8')).digest('hex'),
+      'OPS2B-FILL-STAMP card_note_sha is stamped to the HEALED bytes');
+  }
+
+
+  // OPS2B-COMBINED-WRITE — a slice that needs BOTH a canonical-path rewrite and
+  // an owner fill is one verified patch, not two racing ones.
+  {
+    const fx = ops2bScaffold('combined', {
+      'Owner Epic': {
+        slices: {
+          'OW-1': ops2bSliceLines('Owner Epic', {
+            parent_card: null, task_parent: 'task_parent: wrong/place.md',
+          }),
+        },
+      },
+    });
+    const notePath = ops2bSlicePath(fx, 'Owner Epic', 'OW-1');
+    const before = fs.readFileSync(notePath, 'utf8');
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(Object.keys(dry.slices[0].fields).sort(), ['parent_card', 'task_parent'],
+      'OPS2B-COMBINED-WRITE both policies contribute to one target');
+    await ops2bHeal(fx, { apply: true });
+    const after = fs.readFileSync(notePath, 'utf8');
+    eq(after.split('\n').length, before.split('\n').length + 1,
+      'OPS2B-COMBINED-WRITE exactly one line is added and one rewritten in place');
+    ok(/^task_parent: "spice\/projects\/test\/tasks\/Owner Epic\/Owner Epic\.md"$/m.test(after),
+      'OPS2B-COMBINED-WRITE the canonical path is rewritten');
+    ok(/^parent_card: "\[\[Owner Epic\]\]"$/m.test(after), 'OPS2B-COMBINED-WRITE the owner is filled');
+    if (ops2bPyYaml) {
+      eq(ops2bYamlRead(after, 'parent_card'), { ok: true, value: '[[Owner Epic]]' },
+        'OPS2B-COMBINED-WRITE the two-key patch still parses (PyYAML differential)');
+    }
+  }
+
+  // OPS2B-CANONICAL-PATH-UNPARSED — the unreadable-shape rule is not special to
+  // parent_card. A canonical-path binding whose value is not on its own line is
+  // left exactly as origin/main leaves it (untouched — main's own-line read
+  // yields '' and its `from &&` guard skips it) but is no longer SILENT.
+  {
+    const fx = ops2bScaffold('canonical-unparsed', {
+      'Owner Epic': {
+        slices: { 'OY-1': ops2bSliceLines('Owner Epic', { task_parent: ['task_parent:', '  wrong/place.md'] }) },
+      },
+    });
+    const before = ops2bSnapshot(fx);
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    eq(dry.slices, [], 'OPS2B-CANONICAL-PATH-UNPARSED an unreadable canonical path is never written (as origin/main)');
+    eq(ops2bCodes(dry), ['binding_unparsed'], 'OPS2B-CANONICAL-PATH-UNPARSED it is reported rather than rotting silently');
+    eq(ops2bReport(dry).key, 'task_parent', 'OPS2B-CANONICAL-PATH-UNPARSED the report names the field');
+    await ops2bHeal(fx, { apply: true });
+    ops2bUnchanged(before, 'OPS2B-CANONICAL-PATH-UNPARSED');
+  }
+
+  // OPS2B-ESCAPING-LINE-IS-NEVER-READ — containment is checked BEFORE the read,
+  // so an unreadable file at an escaping path cannot even fail the run. If the
+  // planner touched it at all this throws EACCES instead of reporting.
+  {
+    const fx = ops2bScaffold('escape-unreadable', {
+      'Owner Epic': {
+        boardLines: ['OV-1', '../../../sealed'],
+        slices: { 'OV-1': ops2bSliceLines('Owner Epic') },
+      },
+    });
+    const sealed = path.join(fx.projectRoot, 'sealed.md');
+    fs.writeFileSync(sealed, ['---', ...ops2bSliceLines('Owner Epic', { parent_card: null }), '---', '', 'x', ''].join('\n'));
+    fs.chmodSync(sealed, 0o000);
+    try {
+      const dry = await ops2bHeal(fx, { 'dry-run': true });
+      eq(ops2bCodes(dry), ['board_line_escapes_root'],
+        'OPS2B-ESCAPING-LINE-IS-NEVER-READ an unreadable escaping target is reported, never opened');
+      eq(dry.no_op, true, 'OPS2B-ESCAPING-LINE-IS-NEVER-READ the run is a no_op');
+    } finally { fs.chmodSync(sealed, 0o600); }
+  }
+
+
+  // OPS2B-EPIC-SURFACE-ESCAPES-ROOT — the containment rule covers the ATLAS and
+  // BOARD-DIRECTORY finding classes too, not just board lines. A symlinked epic
+  // surface pointing out of the cards root is reported and never read as
+  // authority, exactly as canonicalEpicProjection's physicalDescendant contract
+  // demands. Without this the heal would happily rewrite bindings in a file the
+  // vault does not actually contain.
+  {
+    for (const [label, surface] of [['atlas', 'atlas'], ['board directory', 'board']]) {
+      // Both surfaces carry REAL drift, so origin/main would read and rewrite
+      // them straight through the symlink: the assertion that no finding of any
+      // class survives is load-bearing, not vacuous.
+      const fx = ops2bScaffold(`escape-${surface}`, {
+        'Owner Epic': {
+          atlasLines: [
+            'source_board: wrong/board.md', 'kanban_board: wrong/board.md',
+            `epic_board: ${ops2bPrefix}/tasks/Owner Epic/board/Owner Epic-board.md`,
+          ],
+          slices: {
+            'OX-1': ops2bSliceLines('Owner Epic', {
+              parent_card: null, task_parent: 'task_parent: wrong/place.md',
+            }),
+          },
+        },
+      });
+      const outside = path.join(fx.root, 'outside');
+      fs.mkdirSync(outside, { recursive: true });
+      if (surface === 'atlas') {
+        const real = path.join(fx.cardsRoot, 'Owner Epic', 'Owner Epic.md');
+        fs.renameSync(real, path.join(outside, 'Owner Epic.md'));
+        fs.symlinkSync(path.join(outside, 'Owner Epic.md'), real);
+      } else {
+        const real = path.join(fx.cardsRoot, 'Owner Epic', 'board');
+        fs.renameSync(real, path.join(outside, 'board'));
+        fs.symlinkSync(path.join(outside, 'board'), real);
+      }
+      const before = ops2bSnapshot(fx);
+      const dry = await ops2bHeal(fx, { 'dry-run': true });
+      eq(ops2bCodes(dry), ['epic_escapes_root'],
+        `OPS2B-EPIC-SURFACE-ESCAPES-ROOT a symlinked ${label} is reported`);
+      eq([dry.atlases, dry.slices, dry.orphan_lines], [[], [], []],
+        `OPS2B-EPIC-SURFACE-ESCAPES-ROOT a symlinked ${label} produces no finding of any class`);
+      const applied = await ops2bHeal(fx, { apply: true });
+      eq(applied.no_op, true, `OPS2B-EPIC-SURFACE-ESCAPES-ROOT the ${label} escape is a no_op apply`);
+      ops2bUnchanged(before, `OPS2B-EPIC-SURFACE-ESCAPES-ROOT ${label}`);
+    }
+  }
+
+  // OPS2B-REPORTS-STABLE — reports are emitted identically under --dry-run,
+  // --apply and replay. Deep equality of the whole stream, not just its codes.
+  {
+    const fx = ops2bScaffold('reports-stable', {
+      'Owner Epic': {
+        boardLines: ['OT-1', 'OT-2', 'OT-3', '../escape'],
+        slices: {
+          'OT-1': ops2bSliceLines('Owner Epic', { parent_card: 'parent_card: "[[Elsewhere]]"' }),
+          'OT-2': ops2bSliceLines('Owner Epic', { parent_card: ['parent_card:', '- "[[Elsewhere]]"'] }),
+          'OT-3': ops2bSliceLines('Owner Epic', { parent_card: null }),
+        },
+      },
+    });
+    const dry = await ops2bHeal(fx, { 'dry-run': true });
+    const applied = await ops2bHeal(fx, { apply: true });
+    const replay = await ops2bHeal(fx, { apply: true });
+    eq(applied.reports, dry.reports, 'OPS2B-REPORTS-STABLE --apply emits the dry-run reports verbatim');
+    eq(replay.reports, dry.reports, 'OPS2B-REPORTS-STABLE the replay emits them verbatim too');
+    eq(ops2bCodes(dry), ['binding_unparsed', 'board_line_escapes_root', 'parent_card_conflict'],
+      'OPS2B-REPORTS-STABLE every refusal class is present in one stream');
+    eq(replay.no_op, true, 'OPS2B-REPORTS-STABLE a replay carrying only reports is a true no_op');
+    eq(applied.slices.map((s) => s.card), ['OT-3'],
+      'OPS2B-REPORTS-STABLE only the genuinely blank slice was ever a write target');
+  }
+
+  // OPS2B-CLAIMABLE — the outcome in the card's own words: a slice minted
+  // before parent_card was required is unclaimable forever, and the heal is
+  // what makes it claimable. Driven through the real claim-path validator.
+  {
+    const fx = ops2bScaffold('claimable', {
+      'Owner Epic': { slices: { 'OB-1': ops2bSliceLines('Owner Epic', { parent_card: null }) } },
+    });
+    const epicBoard = path.join(fx.cardsRoot, 'Owner Epic', 'board', 'Owner Epic-board.md');
+    const bind = () => coordinator.loadCanonicalEpicSlice({
+      epic: 'Owner Epic', card: 'OB-1', boardPath: epicBoard, cardsRoot: fx.cardsRoot,
+    });
+    ok(/parent_card must be Owner Epic/.test(bind().error || ''),
+      'OPS2B-CLAIMABLE the unfilled slice is rejected by the real claim-path validator (precondition)');
+    await ops2bHeal(fx, { apply: true });
+    eq(bind().error, undefined, 'OPS2B-CLAIMABLE the healed slice binds cleanly');
+  }
 }
 
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
