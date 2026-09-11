@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.290.8",
+  "workshop_version": "0.290.9",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -174,7 +174,7 @@
     },
     {
       "name": "sauce-plugin",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "path": "mechanisms/sauce-plugin"
     },
     {
