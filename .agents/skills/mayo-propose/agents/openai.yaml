@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Propose"
+  short_description: "Mayo propose via the shared mayo plugin body"
+  default_prompt: "Use $mayo-propose — follow .agents/skills/mayo-propose/SKILL.md."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Intake"
+  short_description: "Mayo intake via the shared mayo plugin body"
+  default_prompt: "Use $mayo-intake — follow .agents/skills/mayo-intake/SKILL.md."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Run"
+  short_description: "Mayo run via the shared mayo plugin body"
+  default_prompt: "Use $mayo-run — follow .agents/skills/mayo-run/SKILL.md."

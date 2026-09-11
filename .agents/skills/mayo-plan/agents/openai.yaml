@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Plan"
+  short_description: "Mayo plan via the shared mayo plugin body"
+  default_prompt: "Use $mayo-plan — follow .agents/skills/mayo-plan/SKILL.md."

@@ -1411,6 +1411,22 @@
       "lane": "parallel"
     },
     {
+      "id": "mayo-plugin-surface",
+      "cmd": [
+        "node",
+        "platform/test/run-mayo-plugin-surface.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "mayo-codex-routers",
+      "cmd": [
+        "node",
+        "platform/test/run-mayo-codex-routers.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "loop-binding",
       "cmd": [
         "node",

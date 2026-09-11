@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Status"
+  short_description: "Mayo status via the shared mayo plugin body"
+  default_prompt: "Use $mayo-status — follow .agents/skills/mayo-status/SKILL.md."
