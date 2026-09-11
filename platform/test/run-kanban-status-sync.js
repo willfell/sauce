@@ -54,6 +54,74 @@ function assertTrue(label, cond, hint) {
   return true;
 }
 
+// ── Fake timer clock ──────────────────────────────────────────────────────
+// GA-ML5: the startup sweep is scheduled behind layout-ready + an idle deferral,
+// so the harness needs to own time. Every timer the init arms goes through the
+// injected _setTimeoutFn/_clearTimeoutFn seams and lands here — nothing in these
+// tests waits on real wall-clock time, which is what makes "no write has happened
+// yet" a decidable assertion rather than a race.
+function makeFakeClock() {
+  let now = 0;
+  let seq = 0;
+  const pending = new Map();
+  const clock = {
+    setTimeout(cb, ms) {
+      const id = ++seq;
+      pending.set(id, { cb, at: now + (Number(ms) || 0) });
+      return id;
+    },
+    clearTimeout(id) { pending.delete(id); },
+    pendingCount: () => pending.size,
+    // Remaining delay of every armed timer, soonest first.
+    nextDelays: () => Array.from(pending.values()).map((t) => t.at - now).sort((a, b) => a - b),
+    // Run every callback due at or before now+ms, in deadline order, repeatedly —
+    // a fired callback may arm the next one (the Dataview retry chain does).
+    async advance(ms, maxRounds = 500) {
+      const target = now + ms;
+      for (let round = 0; round < maxRounds; round++) {
+        const due = Array.from(pending.entries())
+          .filter(([, t]) => t.at <= target)
+          .sort((a, b) => a[1].at - b[1].at);
+        if (due.length === 0) break;
+        for (const [id, t] of due) {
+          if (!pending.has(id)) continue;
+          pending.delete(id);
+          if (t.at > now) now = t.at;
+          t.cb();
+          await Promise.resolve();
+        }
+      }
+      if (target > now) now = target;
+      await Promise.resolve();
+    },
+  };
+  return clock;
+}
+
+// Did a promise actually settle? Flushing microtasks and reporting `done` — rather
+// than plain `await` — is what keeps a never-settling sweep (e.g. an unbounded
+// Dataview retry chain) a LOUD failure instead of a silent exit-0 with no result
+// line printed.
+async function settledValue(promise, ticks = 5000) {
+  let done = false;
+  let value;
+  let rejected = false;
+  Promise.resolve(promise).then(
+    (v) => { done = true; value = v; },
+    (e) => { done = true; rejected = true; value = e; });
+  for (let i = 0; i < ticks && !done; i++) await Promise.resolve();
+  return { done, value, rejected };
+}
+
+// Flush an invoked init's sweep promise. Returns { done } so callers can assert
+// the chain terminated.
+async function flushSweep(init) {
+  if (!init || !init._startupSweepPromise) return { done: true, value: undefined, scheduled: false };
+  const settled = await settledValue(init._startupSweepPromise);
+  settled.scheduled = true;
+  return settled;
+}
+
 // ── Pass 1: manifest sanity ───────────────────────────────────────────────
 
 console.log("\n--- Pass 1: kanban-status-sync/manifest.json sanity ---");
@@ -140,13 +208,28 @@ if (fs.existsSync(INIT_PATH)) {
       /['"]kanban-status-sync:resync-now['"]/.test(initSrc));
     assertTrue("KSS-INIT-6: command name surfaces 'Sauce: Re-sync kanban boards'",
       /Sauce: Re-sync kanban boards/.test(initSrc));
-    assertTrue("KSS-INIT-7: dataview-readiness retry helper present (_waitForDataview)",
-      /_waitForDataview/.test(initSrc));
+    assertTrue("KSS-INIT-7: dataview readiness observed via a scheduled retry (_awaitDataviewThenSync)",
+      /_awaitDataviewThenSync/.test(initSrc));
     assertTrue("KSS-INIT-8: calls customJS.KanbanStatusSync.syncAllBoards",
       /customJS\.KanbanStatusSync\.syncAllBoards/.test(initSrc));
     // Mobile safety / landmine #23: must NOT read file.mtime.
     assertTrue("KSS-INIT-9: NO file.mtime usage in init (landmine #23)",
       !/file\.mtime/.test(initSrc));
+
+    // GA-ML5 shape asserts: the sweep must stay OFF the boot path. These are
+    // source-level because the failure mode they guard is a refactor that quietly
+    // re-awaits the sweep inside invoke() — cheap to reintroduce, expensive to
+    // notice (a 283-card write storm during boot).
+    assertTrue("KSS-INIT-10: invoke() never awaits the startup sweep",
+      !/await\s+this\._runStartupSync/.test(initSrc)
+      && !/await\s+this\._scheduleStartupSync/.test(initSrc)
+      && !/await\s+this\._awaitDataviewThenSync/.test(initSrc));
+    assertTrue("KSS-INIT-11: sweep is gated on workspace.onLayoutReady",
+      /onLayoutReady/.test(initSrc));
+    assertTrue("KSS-INIT-12: sweep is additionally gated on an idle deferral with a timeout fallback",
+      /_deferIdle/.test(initSrc) && /requestIdleCallback/.test(initSrc));
+    assertTrue("KSS-INIT-13: no blocking poll loop remains in the init",
+      !/\bwhile\s*\(/.test(initSrc) && !/_waitForDataview/.test(initSrc));
   }
 }
 
@@ -254,6 +337,14 @@ function syncBoardFixture(initialBoard, initialCards) {
     },
   };
   appStub.plugins = { plugins: { dataview: { api: boardsDvStub } } };
+  // GA-ML5: layout-ready queue + fake clock. The init schedules its sweep behind
+  // app.workspace.onLayoutReady (or the _onLayoutReadyFn seam) and then an idle
+  // deferral, so the fixture has to fire both hops explicitly.
+  const clock = makeFakeClock();
+  const layoutReadyQueue = [];
+  appStub.workspace = {
+    onLayoutReady(cb) { layoutReadyQueue.push(cb); },
+  };
   const windowStub = {
     app: {
       plugins: {
@@ -287,14 +378,46 @@ function syncBoardFixture(initialBoard, initialCards) {
       (appStub, { KanbanStatusSync: singleton }, function Notice() {}, windowStub);
     return new Init();
   };
+  // Every init the fixture hands out runs on the fake clock; by default the
+  // layout-ready seam is injected too, so a test can prove the gate ordering
+  // without depending on app.workspace. Pass { useAppWorkspace: true } to exercise
+  // the production wiring instead.
+  const newInit = (today, opts = {}) => {
+    const init = loadInit(today);
+    init._setTimeoutFn = clock.setTimeout;
+    init._clearTimeoutFn = clock.clearTimeout;
+    if (opts.useAppWorkspace !== true) init._onLayoutReadyFn = (cb) => layoutReadyQueue.push(cb);
+    return init;
+  };
+  const fireLayoutReady = () => {
+    const queued = layoutReadyQueue.splice(0, layoutReadyQueue.length);
+    for (const cb of queued) cb();
+  };
+  // Drive an invoked init all the way through: layout-ready, then the idle
+  // deferral (and any Dataview retries), then the sweep itself.
+  const drive = async (init) => {
+    fireLayoutReady();
+    await clock.advance(60000);
+    return flushSweep(init);
+  };
   return {
     boardPath,
     cards,
     sync: (today) => new Klass().syncBoard(boardPath, today),
     startup: async (today) => {
-      await loadInit(today).invoke();
+      const init = newInit(today);
+      await init.invoke();
+      await drive(init);
       return singleton._lastSyncResult;
     },
+    clock,
+    newInit,
+    drive,
+    fireLayoutReady,
+    layoutReadyPending: () => layoutReadyQueue.length,
+    lastResult: () => singleton._lastSyncResult,
+    hideDataview: () => { appStub.plugins.plugins.dataview = null; },
+    showDataview: () => { appStub.plugins.plugins.dataview = { api: boardsDvStub }; },
     commands,
     writes: () => writes,
   };
@@ -558,7 +681,157 @@ function fixtureBoardPath() {
   return "spice/projects/sauce/sauce-board.md";
 }
 
+// ── Pass 5: GA-ML5 — startup sweep is scheduled, never on the boot path ───
+
+// One board, one card that needs exactly one frontmatter write. Small enough that
+// "did a write happen yet?" is a crisp signal.
+function deferralFixture() {
+  const board = [
+    "---", "kanban-plugin: board", "---", "",
+    "## In Progress", "", "- [[card-one]]", "",
+  ].join("\n");
+  return syncBoardFixture(board, {
+    "card-one": {
+      status: "in-planning",
+      status_prev: "planning",
+      status_changed_at: "2026-07-15",
+      kanban_board: fixtureBoardPath(),
+      kanban_column: "In Planning",
+    },
+  });
+}
+
+async function runDeferredStartupCases() {
+  console.log("\n--- Pass 5: startup sweep deferral (GA-ML5) ---");
+
+  // 5a — the gate ordering itself. Acceptance: no processFrontMatter / vault write
+  // can fire before layout-ready AND the idle deferral have both fired.
+  {
+    const f = deferralFixture();
+    const init = f.newInit("2026-07-17");
+    const t0 = Date.now();
+    await init.invoke();
+    const elapsed = Date.now() - t0;
+    assertTrue("KSS-DEFER-1: invoke() returns promptly instead of awaiting the sweep",
+      elapsed < 1000, `${elapsed}ms elapsed`);
+    assertEq("KSS-DEFER-2: zero frontmatter writes at the moment invoke() returns", f.writes(), 0);
+    assertEq("KSS-DEFER-3: invoke() still registers the resync command synchronously",
+      f.commands.map((c) => c.id), ["kanban-status-sync:resync-now"]);
+    assertEq("KSS-DEFER-4: invoke() registers exactly one layout-ready callback", f.layoutReadyPending(), 1);
+    assertEq("KSS-DEFER-5: no timer is armed before layout-ready fires", f.clock.pendingCount(), 0);
+
+    f.fireLayoutReady();
+    assertEq("KSS-DEFER-6: zero frontmatter writes after layout-ready, before the idle deferral",
+      f.writes(), 0);
+    assertEq("KSS-DEFER-7: layout-ready arms exactly one idle deferral", f.clock.pendingCount(), 1);
+    assertEq("KSS-DEFER-8: the idle deferral carries a 1000ms timeout fallback",
+      f.clock.nextDelays(), [1000]);
+
+    await f.clock.advance(60000);
+    assertTrue("KSS-DEFER-8b: the scheduled sweep chain settles", (await flushSweep(init)).done);
+    assertTrue("KSS-DEFER-9: the sweep runs once layout-ready and the deferral have both fired",
+      f.writes() > 0, `writes=${f.writes()}`);
+    assertEq("KSS-DEFER-10: the deferred sweep produces the same result as the old boot-path sweep",
+      f.lastResult(), { synced: 1, archived: 0, boards: 1 });
+  }
+
+  // 5b — the idle handle is revocable, which is the structural proof that nothing
+  // downstream of it can have run yet.
+  {
+    const f = deferralFixture();
+    const init = f.newInit("2026-07-17");
+    await init.invoke();
+    f.fireLayoutReady();
+    assertTrue("KSS-DEFER-11: the idle deferral exposes a cancel() handle",
+      !!(init._startupIdle && typeof init._startupIdle.cancel === "function"));
+    if (init._startupIdle && typeof init._startupIdle.cancel === "function") init._startupIdle.cancel();
+    await f.clock.advance(60000);
+    assertEq("KSS-DEFER-12: cancelling the deferral prevents every frontmatter write", f.writes(), 0);
+  }
+
+  // 5c — Dataview absent: invoke() must not sit on a 30s poll. Readiness is
+  // observed through scheduled callbacks on the injected timer instead.
+  {
+    const f = deferralFixture();
+    f.hideDataview();
+    const init = f.newInit("2026-07-17");
+    const t0 = Date.now();
+    await init.invoke();
+    const elapsed = Date.now() - t0;
+    assertTrue("KSS-DEFER-13: invoke() returns promptly with Dataview absent (no 30s serial poll)",
+      elapsed < 1000, `${elapsed}ms elapsed`);
+    f.fireLayoutReady();
+    await f.clock.advance(1000);
+    assertEq("KSS-DEFER-14: Dataview-absent readiness check arms a retry on the injected timer",
+      f.clock.nextDelays(), [250]);
+    assertEq("KSS-DEFER-15: no frontmatter write while waiting for Dataview", f.writes(), 0);
+    f.showDataview();
+    await f.clock.advance(250);
+    assertTrue("KSS-DEFER-15b: the retry chain settles once Dataview appears", (await flushSweep(init)).done);
+    assertEq("KSS-DEFER-16: the sweep runs on the retry once Dataview appears",
+      f.lastResult(), { synced: 1, archived: 0, boards: 1 });
+  }
+
+  // 5d — the retry chain stays bounded (~30s of scheduled waiting) and a Dataview
+  // that never arrives never produces a write.
+  {
+    const f = deferralFixture();
+    f.hideDataview();
+    const init = f.newInit("2026-07-17");
+    await init.invoke();
+    f.fireLayoutReady();
+    await f.clock.advance(120000);
+    // The teeth of the bound: an unbounded retry chain leaves this promise
+    // forever pending, which would otherwise let the whole harness exit silently.
+    assertTrue("KSS-DEFER-16b: a never-ready Dataview makes the retry chain give up, not spin forever",
+      (await flushSweep(init)).done);
+    assertEq("KSS-DEFER-17: Dataview retries are bounded — no timer left armed", f.clock.pendingCount(), 0);
+    assertEq("KSS-DEFER-18: a Dataview that never arrives never writes frontmatter", f.writes(), 0);
+  }
+
+  // 5e — the once-per-session sweep guard survives the move off the boot path.
+  {
+    const f = deferralFixture();
+    const first = f.newInit("2026-07-17");
+    await first.invoke();
+    await f.drive(first);
+    const afterFirst = f.writes();
+    assertTrue("KSS-DEFER-19: the first deferred sweep does write", afterFirst > 0, `writes=${afterFirst}`);
+    const second = f.newInit("2026-07-17");
+    await second.invoke();
+    await f.drive(second);
+    assertEq("KSS-DEFER-20: re-initialization does not repeat the sweep", f.writes(), afterFirst);
+  }
+
+  // 5f — a repeat invoke() on one instance schedules one sweep, not two.
+  {
+    const f = deferralFixture();
+    const init = f.newInit("2026-07-17");
+    await init.invoke();
+    await init.invoke();
+    assertEq("KSS-DEFER-21: repeated invoke() on one instance schedules a single layout-ready callback",
+      f.layoutReadyPending(), 1);
+  }
+
+  // 5g — the production wiring (app.workspace.onLayoutReady) with no injected
+  // layout-ready seam, so a refactor that drops the app.workspace binding fails.
+  {
+    const f = deferralFixture();
+    const init = f.newInit("2026-07-17", { useAppWorkspace: true });
+    await init.invoke();
+    assertEq("KSS-DEFER-22: production path registers through app.workspace.onLayoutReady",
+      f.layoutReadyPending(), 1);
+    assertEq("KSS-DEFER-23: no frontmatter write before app.workspace layout-ready fires", f.writes(), 0);
+    await f.drive(init);
+    assertEq("KSS-DEFER-24: the app.workspace layout-ready path completes the sweep",
+      f.lastResult(), { synced: 1, archived: 0, boards: 1 });
+  }
+}
+
+let finished = false;
+
 function finish() {
+  finished = true;
   console.log(`\nrun-kanban-status-sync.js: ${pass} pass · ${fail} fail`);
   if (fail > 0) {
     console.log("\n--- Failures ---");
@@ -567,6 +840,17 @@ function finish() {
   }
 }
 
+// A hung await (never-settling promise) drains the event loop and exits 0 with no
+// result line. Fail loudly instead.
+process.on("exit", (code) => {
+  if (!finished && code === 0) {
+    console.log("\nrun-kanban-status-sync.js: ABORTED before finish() — a promise never settled");
+    process.exitCode = 1;
+  }
+});
+
 runStartupSyncFixture()
   .catch((err) => assertTrue("KSS-IO-0: startup sync fixture completes", false, err && err.stack))
+  .then(() => runDeferredStartupCases())
+  .catch((err) => assertTrue("KSS-DEFER-0: deferred startup cases complete", false, err && err.stack))
   .finally(finish);
