@@ -272,6 +272,40 @@ function mkRepo(config) {
   ok('LC-8 no gate env without knobs', !('SAUCE_LOOP_VERIFY_COMMANDS' in r.config.env) && !('SAUCE_LOOP_GATE' in r.config.env));
   fs.rmSync(repo, { recursive: true, force: true });
 }
+// LC-8b — a glob gate.js can never match is refused at bind time. Shape was
+// validated only as "array of strings", so `src/**/*.test.ts` bound fine and
+// then silently matched nothing: every test file in a diff counted as
+// behavioral source and Gate B refused each slice with "ships no regression
+// test". travel shipped exactly that config and could not pass its own gate.
+{
+  const c = baseConfig();
+  c.gate = { test_globs: ['src/**/*.test.ts'], exclude_globs: ['docs/**'] };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8b a **-in-the-middle test glob refuses at bind time',
+    r.ok === false && r.refusals.some((x) => x.code === 'config_bad_value' && /can never match/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+// The trap inside the trap: this one DOES take gate.js's `dir/**` branch and
+// still never matches, because the retained prefix keeps a literal asterisk.
+// A guard that only checked the trailing `/**` would wave it straight through.
+{
+  const c = baseConfig();
+  c.gate = { test_globs: ['src/**/__tests__/**'] };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8b a starred prefix ending in /** still refuses',
+    r.ok === false && r.refusals.some((x) => x.code === 'config_bad_value' && /literal \* in the directory prefix/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig();
+  c.gate = { test_globs: ['tests/**', '*.test.tsx', 'src/app/__tests__/**', 'exact/path.ts'], exclude_globs: ['docs/**', '*.md'] };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8b every shape gate.js actually matches is accepted', r.ok === true);
+  fs.rmSync(repo, { recursive: true, force: true });
+}
 {
   const c = baseConfig(); c.policy.verify_commands = ['ok', 42];
   const repo = mkRepo(c);

@@ -76,6 +76,33 @@ function readRawConfig(repoRoot) {
   return { raw, configPath };
 }
 
+// gate.js matches exactly three shapes: `dir/**` (prefix), `*.ext` (suffix),
+// and an exact path. Anything else falls through to `file === glob`, which a
+// glob containing `*` can never satisfy -- so a familiar-looking
+// `src/**/*.test.ts` silently matches nothing, every test file in a diff is
+// classified as behavioral source, and Gate B refuses the slice with "ships no
+// regression test". Refuse at bind time instead, where a human is present.
+// `src/**/__tests__/**` is the trap inside the trap: it DOES take the prefix
+// branch and still never matches, because the retained prefix keeps a literal
+// asterisk. So check the retained portion, not just the terminator.
+function unmatchableGlob(glob) {
+  if (glob === '') return 'is empty';
+  if (glob.endsWith('/**')) {
+    return glob.slice(0, -2).includes('*')
+      ? 'keeps a literal * in the directory prefix gate.js matches with startsWith; only a trailing /** is a wildcard'
+      : null;
+  }
+  if (glob.startsWith('*.')) {
+    return glob.slice(1).includes('*')
+      ? 'keeps a second * in the suffix gate.js matches with endsWith'
+      : null;
+  }
+  return glob.includes('*')
+    ? 'is neither a `dir/**` prefix nor a `*.ext` suffix, so gate.js compares it literally and it can never match'
+    : null;
+}
+
+
 function validateRaw(raw) {
   const refusals = [];
   for (const [name, get] of REQUIRED_FIELDS) {
@@ -127,6 +154,11 @@ function validateRaw(raw) {
       for (const key of ['test_globs', 'exclude_globs']) {
         if (raw.gate[key] !== undefined && (!Array.isArray(raw.gate[key]) || !raw.gate[key].every((g) => typeof g === 'string'))) {
           refusals.push(refusal('config_bad_value', `gate.${key} must be an array of strings`));
+        } else if (Array.isArray(raw.gate[key])) {
+          for (const glob of raw.gate[key]) {
+            const why = unmatchableGlob(glob);
+            if (why) refusals.push(refusal('config_bad_value', `gate.${key} entry ${JSON.stringify(glob)} ${why}`));
+          }
         }
       }
       if (raw.gate.test_command !== undefined
