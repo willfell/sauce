@@ -508,6 +508,154 @@ function makeApp(tree) {
     assert(events.length >= 1, 'onload registered ≥1 event via registerEvent: ' + events.length);
   });
 
+
+  // ---------- RC-6..RC-12: burst-aware reconcile backoff ----------
+  // A virtual clock + timer queue, so a multi-second mobile sync burst can be
+  // replayed deterministically and every force-refresh dispatch counted with its
+  // exact timestamp. Drives the plugin's existing _setTimeoutFn/_clearTimeoutFn
+  // seams plus the _nowFn clock seam.
+  function makeReconcileRig(opts) {
+    const o = opts || {};
+    const SaucePlugin = loadPluginModule();
+    let now = 0;
+    let nextId = 1;
+    const timers = new Map();
+    const dispatches = [];
+    const p = new SaucePlugin();
+    p.app = {
+      workspace: { getActiveFile: () => ({ path: 'active.md' }) },
+      commands: {
+        executeCommandById: (id) => { if (id === 'dataview:dataview-force-refresh-views') dispatches.push(now); },
+      },
+    };
+    p._nowFn = () => now;
+    p._setTimeoutFn = (fn, ms) => {
+      const id = nextId++;
+      timers.set(id, { fn, at: now + (typeof ms === 'number' ? ms : 0) });
+      return id;
+    };
+    p._clearTimeoutFn = (id) => { timers.delete(id); };
+    if (o.baseMs) p._reconcileDelayMs = o.baseMs;
+    const advance = (ms) => {
+      const target = now + ms;
+      for (;;) {
+        let bestId = null, bestAt = Infinity;
+        for (const [id, t] of timers) if (t.at <= target && t.at < bestAt) { bestAt = t.at; bestId = id; }
+        if (bestId === null) break;
+        const t = timers.get(bestId);
+        timers.delete(bestId);
+        now = t.at;
+        t.fn();
+      }
+      now = target;
+    };
+    const event = () => p._onVaultChange('bg-' + now + '.md');
+    const gaps = () => {
+      const out = [];
+      for (let i = 1; i < dispatches.length; i++) out.push(dispatches[i] - dispatches[i - 1]);
+      return out;
+    };
+    return { p, advance, event, dispatches, timers, gaps, at: () => now };
+  }
+
+  const BASE = 500;              // the reconciler's base debounce
+  const MAX_WAIT = BASE * 8;     // hard cap on how long a burst may withhold a refresh
+  const DV_DEBOUNCE = 2500;      // Dataview's own refresh debounce (the backstop we must undercut)
+
+  await ok('RC-6 sustained sync traffic (gaps at/above the base debounce) coalesces instead of a per-event refresh storm', async () => {
+    const rig = makeReconcileRig({ baseMs: BASE });
+    const GAP = 600, N = 20;                     // a mobile sync delivering a file every ~600ms
+    rig.event();
+    for (let i = 1; i < N; i++) { rig.advance(GAP); rig.event(); }
+    const lastEventAt = rig.at();
+    rig.advance(60000);
+    assert(rig.dispatches.length >= 1, 'never zero dispatches for a non-empty event sequence');
+    assert(rig.dispatches.length <= 6, N + ' events ' + GAP + 'ms apart must coalesce (<=6 dispatches), got ' + rig.dispatches.length + ' at ' + JSON.stringify(rig.dispatches));
+    const g = rig.gaps();
+    if (g.length) {
+      assert(Math.min.apply(null, g) >= BASE * 3, 'no dispatch ever follows another at the event cadence, gaps=' + JSON.stringify(g));
+      assert(Math.max.apply(null, g) <= MAX_WAIT + BASE, 'the max-wait cap bounds mid-burst staleness, gaps=' + JSON.stringify(g));
+    }
+    const after = rig.dispatches.filter((t) => t > lastEventAt);
+    assert(after.length === 1, 'exactly one trailing refresh once the burst subsides, got ' + JSON.stringify(after));
+  });
+
+  await ok('RC-7 unload clears the pending reconcile timer — nothing force-refreshes after unload', async () => {
+    const rig = makeReconcileRig({ baseMs: BASE });
+    rig.event();
+    assert(rig.timers.size === 1, 'one reconcile timer pending before unload, got ' + rig.timers.size);
+    const stale = Array.from(rig.timers.values())[0].fn;
+    rig.p.onunload();
+    assert(rig.timers.size === 0, 'unload cleared every pending reconcile timer, got ' + rig.timers.size);
+    assert(rig.p._reconcileTimer == null, 'unload dropped the timer handle');
+    rig.advance(60000);
+    stale();                                      // a callback that already escaped the queue
+    assert(rig.dispatches.length === 0, 'no force-refresh after unload, got ' + JSON.stringify(rig.dispatches));
+  });
+
+  await ok('RC-8 a single isolated event still refreshes at the base debounce (no backoff on the single-edit path)', async () => {
+    const rig = makeReconcileRig({ baseMs: BASE });
+    rig.event();
+    rig.advance(BASE - 1);
+    assert(rig.dispatches.length === 0, 'nothing fires before the base debounce elapses');
+    rig.advance(1);
+    assert(rig.dispatches.length === 1 && rig.dispatches[0] === BASE, 'exactly one refresh at t=' + BASE + ', got ' + JSON.stringify(rig.dispatches));
+    rig.advance(60000);
+    assert(rig.dispatches.length === 1, 'and it never repeats, got ' + JSON.stringify(rig.dispatches));
+  });
+
+  await ok('RC-9 once a burst subsides the next isolated edit is snappy again (burst state decays)', async () => {
+    const rig = makeReconcileRig({ baseMs: BASE });
+    rig.event();
+    for (let i = 1; i < 6; i++) { rig.advance(100); rig.event(); }
+    rig.advance(30000);
+    const before = rig.dispatches.length;
+    assert(before >= 1, 'the burst produced its trailing refresh');
+    const t0 = rig.at();
+    rig.event();
+    rig.advance(BASE - 1);
+    assert(rig.dispatches.length === before, 'post-burst isolated edit does not fire early');
+    rig.advance(1);
+    assert(rig.dispatches.length === before + 1, 'post-burst isolated edit fired, got ' + JSON.stringify(rig.dispatches));
+    assert(rig.dispatches[rig.dispatches.length - 1] === t0 + BASE, 'at the BASE debounce, not a backed-off delay: fired at +' + (rig.dispatches[rig.dispatches.length - 1] - t0));
+  });
+
+  await ok('RC-10 a fast burst (gaps below the base debounce) still yields exactly one trailing refresh, still under Dataview\'s own debounce', async () => {
+    const rig = makeReconcileRig({ baseMs: BASE });
+    rig.event();
+    for (let i = 1; i < 12; i++) { rig.advance(100); rig.event(); }
+    const lastEventAt = rig.at();
+    rig.advance(60000);
+    assert(rig.dispatches.length === 1, 'a fast burst coalesces into exactly one dispatch, got ' + JSON.stringify(rig.dispatches));
+    assert(rig.dispatches[0] > lastEventAt, 'and it is trailing (after the last event)');
+    assert(rig.dispatches[0] - lastEventAt <= DV_DEBOUNCE, 'and still beats Dataview\'s own ' + DV_DEBOUNCE + 'ms debounce: +' + (rig.dispatches[0] - lastEventAt) + 'ms');
+  });
+
+  await ok('RC-11 across every traffic profile the final state is refreshed exactly once — never zero, never a trailing storm', async () => {
+    for (const gap of [0, 50, 100, 400, 500, 600, 900, 1500, 1999, 2500, 5000]) {
+      const rig = makeReconcileRig({ baseMs: BASE });
+      rig.event();
+      for (let i = 1; i < 12; i++) { rig.advance(gap); rig.event(); }
+      const lastEventAt = rig.at();
+      rig.advance(60000);
+      assert(rig.dispatches.length >= 1, 'gap=' + gap + ': at least one refresh');
+      const after = rig.dispatches.filter((t) => t > lastEventAt);
+      assert(after.length === 1, 'gap=' + gap + ': exactly one refresh strictly after the last event, got ' + JSON.stringify(after) + ' of ' + JSON.stringify(rig.dispatches));
+      assert(rig.timers.size === 0, 'gap=' + gap + ': no timer left armed once the stream is quiet');
+    }
+  });
+
+  await ok('RC-12 reconcileBackoffMs is a pure, exported escalation: base for an isolated event, capped for a long burst', async () => {
+    const mod = loadPluginModule();
+    assert(typeof mod.reconcileBackoffMs === 'function', 'reconcileBackoffMs is exported');
+    assert(mod.reconcileBackoffMs(500, 1) === 500, 'burst of 1 -> base (single-edit path untouched)');
+    assert(mod.reconcileBackoffMs(500, 2) === 1000, 'second event -> base*2');
+    assert(mod.reconcileBackoffMs(500, 3) === 2000, 'third event -> base*4');
+    assert(mod.reconcileBackoffMs(500, 500) === 2000, 'ceiling at base*4 (== the burst window)');
+    assert(mod.reconcileBackoffMs(500, 0) === 500, 'degenerate count -> base');
+    assert(mod.reconcileBackoffMs(0, 3) === 2000, 'degenerate base -> the 500ms default');
+  });
+
   console.log(`\nrun-sauce-plugin: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-sauce-plugin threw:', e); process.exit(1); });

@@ -109,6 +109,21 @@ function elapsedMs(from, to) {
 
 const BOOT_RECEIPT_PATH = 'ranch/boot-profile.json';
 
+// Render-reconciler tuning, all expressed as multiples of the base debounce so
+// the relationships below hold by construction (see _scheduleReconcile).
+const RECONCILE_BASE_MS = 500;
+// Two events closer together than base*4 belong to the same burst. base*4 = 2s
+// sits just under Dataview's own 2.5s refresh debounce: traffic denser than
+// Dataview's own backstop is, by definition, a burst.
+const RECONCILE_BURST_WINDOW_FACTOR = 4;
+// The escalated trailing delay tops out at exactly the burst window, so any
+// event that COUNTS as part of a burst is always outlived by the armed timer.
+const RECONCILE_BACKOFF_CEILING_FACTOR = 4;
+// Hard cap: a burst can never withhold a refresh longer than base*8 past the
+// previous dispatch. Strictly greater than the burst window, which is what
+// keeps the cap deadline from ever landing in the past (see _scheduleReconcile).
+const RECONCILE_MAX_WAIT_FACTOR = 8;
+
 // Walk the customJS scripts folder, read every .js, and register the class-files
 // onto window.customJS. Also captures a per-stage boot profile (file count,
 // bytes read, elapsed ms) — timestamps only, no extra work before classes are
@@ -174,6 +189,14 @@ class SaucePlugin extends Plugin {
 
   onunload() {
     this._unloaded = true;
+    if (this._reconcileTimer != null) {
+      const clearT = this._clearTimeoutFn || (typeof clearTimeout !== 'undefined' ? clearTimeout : null);
+      try { if (clearT) clearT(this._reconcileTimer); } catch (_e) { /* never throw */ }
+      this._reconcileTimer = null;
+    }
+    this._reconcileLastEventAt = null;
+    this._reconcileBurstCount = 0;
+    this._reconcileDeadline = null;
     if (this._bootReceiptIdle) {
       try { this._bootReceiptIdle.cancel(); } catch (_e) { /* never throw */ }
       this._bootReceiptIdle = null;
@@ -275,18 +298,81 @@ class SaucePlugin extends Plugin {
     } catch (_e) { /* never throw */ }
   }
 
+  // Monotonic clock, injectable for the fake-timer harness.
+  _now() {
+    const fn = this._nowFn;
+    return typeof fn === 'function' ? fn() : monotonicNow();
+  }
+
+  // Pure: the trailing delay to arm for the Nth event of the current burst.
+  // burstCount 1 (an isolated event) always returns the untouched base debounce
+  // — the snappy single-edit path must never pay backoff. Longer bursts escalate
+  // and top out at the burst window.
+  static reconcileBackoffMs(baseMs, burstCount) {
+    const base = baseMs > 0 ? baseMs : RECONCILE_BASE_MS;
+    if (!(burstCount > 1)) return base;
+    const escalated = base * Math.pow(2, burstCount - 1);
+    return Math.min(escalated, base * RECONCILE_BACKOFF_CEILING_FACTOR);
+  }
+
+  // Burst-aware reconcile scheduling.
+  //
+  // The plain trailing debounce this replaces already coalesced FAST bursts
+  // (events closer together than the base delay keep clearing the timer). The
+  // storm it could not handle was sustained traffic whose inter-event gaps sit
+  // AT OR SLIGHTLY ABOVE the base delay — a mobile sync delivering a file every
+  // ~600ms — where every single event landed its own full force-refresh, for as
+  // long as the sync ran.
+  //
+  // Policy: capped escalating debounce.
+  //   * Burst membership is decided by the inter-event GAP, not by whether a
+  //     dispatch happened in between. An event within the burst window of the
+  //     previous event continues the burst; a longer silence starts a new one.
+  //     (The old code implicitly reset on every dispatch, which is exactly why
+  //     ~600ms traffic never looked like a burst to it.)
+  //   * The trailing delay escalates with burst length up to the burst window,
+  //     so an in-burst timer always outlives the observed gap and keeps
+  //     coalescing instead of firing between events.
+  //   * A max-wait cap bounds how stale a long burst may get: the armed timer
+  //     never fires later than max-wait past the previous dispatch. The cap can
+  //     also never pull a fire time earlier than the base debounce, so every
+  //     event is followed by a strictly-later refresh.
+  //   * Every event leaves exactly ONE timer armed; firing it clears the handle
+  //     and does not re-arm. So after any non-empty event sequence exactly one
+  //     trailing refresh fires for the final state — never zero (a lost trailing
+  //     refresh reads as stale UI, worse than the storm), never unbounded.
   _scheduleReconcile() {
     try {
       const setT = this._setTimeoutFn || (typeof setTimeout !== 'undefined' ? setTimeout : null);
       const clearT = this._clearTimeoutFn || (typeof clearTimeout !== 'undefined' ? clearTimeout : null);
       if (!setT) return;
+      const base = this._reconcileDelayMs || RECONCILE_BASE_MS;
+      const burstWindow = this._reconcileBurstWindowMs || base * RECONCILE_BURST_WINDOW_FACTOR;
+      const maxWait = this._reconcileMaxWaitMs || base * RECONCILE_MAX_WAIT_FACTOR;
+      const now = this._now();
+      const prev = this._reconcileLastEventAt;
+      if (prev == null || (now - prev) > burstWindow) {
+        this._reconcileBurstCount = 1;
+        this._reconcileDeadline = now + maxWait;
+      } else {
+        this._reconcileBurstCount = (this._reconcileBurstCount || 1) + 1;
+      }
+      this._reconcileLastEventAt = now;
+      const backoff = SaucePlugin.reconcileBackoffMs(base, this._reconcileBurstCount);
+      const deadline = this._reconcileDeadline != null ? this._reconcileDeadline : now + maxWait;
+      const fireAt = Math.min(now + backoff, Math.max(deadline, now + base));
       if (this._reconcileTimer != null && clearT) clearT(this._reconcileTimer);
-      this._reconcileTimer = setT(() => { this._reconcileTimer = null; this._fireReconcile(); }, this._reconcileDelayMs || 500);
+      this._reconcileTimer = setT(() => {
+        this._reconcileTimer = null;
+        this._reconcileDeadline = this._now() + maxWait;
+        this._fireReconcile();
+      }, fireAt - now);
     } catch (_e) { /* never throw */ }
   }
 
   _fireReconcile() {
     try {
+      if (this._unloaded) return;
       const cmds = this.app && this.app.commands;
       if (cmds && typeof cmds.executeCommandById === 'function') {
         cmds.executeCommandById('dataview:dataview-force-refresh-views');
@@ -304,4 +390,5 @@ module.exports.isClassFile = isClassFile;
 module.exports.extractClassName = extractClassName;
 module.exports.resolveScriptsFolder = resolveScriptsFolder;
 module.exports.shouldReconcile = SaucePlugin.shouldReconcile;
+module.exports.reconcileBackoffMs = SaucePlugin.reconcileBackoffMs;
 module.exports.BOOT_RECEIPT_PATH = BOOT_RECEIPT_PATH;
