@@ -171,7 +171,22 @@ const PARKED_METADATA_REBIND_OPTIONS = new Set([
 const CONTRACT_FRONTMATTER_RESTAMP_OPTIONS = new Set([
   '_', 'json', 'contract-frontmatter-restamp', 'dry-run', 'apply', 'reason', 'spec',
 ]);
-const CONSUME_RATIFICATION_OPTIONS = new Set(['_', 'json', 'card', 'artifact']);
+const CONSUME_RATIFICATION_OPTIONS = new Set(['_', 'json', 'card', 'artifact', 'lease-token']);
+// requireLeaseToken and these allowlists are two halves of one contract: a verb
+// that DEMANDS --lease-token on a leased card must also accept the option. Held
+// apart, each half looks correct on its own and the verb is unusable in both
+// directions -- amend-contract shipped exactly that deadlock, and
+// consume-ratification carried it afterwards. Exposed so the lease suite can
+// assert the halves agree instead of testing each alone.
+const VERB_OPTION_ALLOWLISTS = Object.freeze({
+  ...STRICT_CLI_OPTIONS,
+  'amend-contract': [...AMEND_CONTRACT_OPTIONS],
+  'consume-ratification': [...CONSUME_RATIFICATION_OPTIONS],
+});
+function cliOptionAllowlist(verb) {
+  const allowed = VERB_OPTION_ALLOWLISTS[verb];
+  return allowed ? [...allowed] : null;
+}
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const RATIFICATION_SCHEMA_VERSION = '1.0.0';
 const SYMBOLIC_TOUCH_ZONES = new Set(['shared-registries', 'homebrew-promotion']);
@@ -8747,6 +8762,7 @@ module.exports = {
   PARKED_METADATA_REBIND_CARDS,
   loopBindingEnv, resolveBoundDefaults, BOARD, CARDS_ROOT, VAULTS, DEPLOYMENT_VAULT_IDS, REPO,
   LEASE_TTL_MS, leaseIsLive, leaseSummary, acquireLease, clearLease, requireLeaseToken,
+  cliOptionAllowlist,
 };
 
 if (require.main === module) {
