@@ -1,0 +1,12 @@
+{
+  "name": "mayo",
+  "description": "Sauce meta-loop skill surface: /mayo:init binds a repo to a vault/board via .loop/config.json; status/review/propose/plan/execute/run/intake/block-review drive the board exclusively through the coordinator and card-intake rails. Versioned by git commit — reload with /plugin marketplace update sauce.",
+  "author": {
+    "name": "Will Fellhoelter",
+    "url": "https://github.com/willfell/sauce"
+  },
+  "homepage": "https://github.com/willfell/sauce",
+  "repository": "https://github.com/willfell/sauce",
+  "license": "MIT",
+  "keywords": ["sauce", "delivery", "board", "autoloop", "epics", "slices"]
+}
