@@ -52,16 +52,76 @@ metadata signal, polls after the write, refreshes exactly once only when the
 predicate returns true, and cleans its bounded wait. Create mode remains
 existence-based and never consults active-only `isCurrent`.
 
-Structural inserts and removals use `customJS.RenderSafe.mutateStructure(...)`.
-Its `apply()` callback must return an opaque receipt containing the exact nodes,
-parents, sibling positions, and focus target needed to undo the visible change;
-its `rollback(receipt, error)` callback restores that receipt when persistence
-rejects. The adapter delegates to `mutate`, so scroll capture remains the first
-effect and the existing write/failure rules still apply. It pins the mutation
-to background mode and leaves authoritative cleanup to Dataview's natural
-reconciler; caller-provided `mode` or `isCurrent` cannot make
-`dataview-force-refresh-views` a structural happy path. See
-`platform/mechanisms/render-safe/render-safe.js:125`.
+### The shared optimistic structural seam
+
+Structural inserts and removals use `customJS.RenderSafe.mutateStructure(...)`
+— the one seam every blueprint and mechanism shares for "a row appeared" or "a
+row went away". See `platform/mechanisms/render-safe/render-safe.js:125`.
+
+**Receipts.** `apply()` runs before persistence, performs the optimistic DOM
+insert or removal, and returns an *opaque receipt*: the exact node identities,
+their parent, their `nextSibling` anchor, the focus target to restore, and any
+caller-owned model snapshot or sequence number needed to recognise a stale
+rollback. The seam never inspects the receipt — it only hands it back — so a
+caller is free to carry whatever identity its surface needs. An `apply()` that
+throws after partially mutating the DOM must restore the children it touched
+before rethrowing: no receipt still has to mean exact, local rollback rather
+than a phantom row that duplicates on warm retry
+(`platform/mechanisms/task-entity/task-note-view.js:718` is the reference
+implementation of that guard).
+
+**Rollback.** When `write()` rejects, `rollback(receipt, error)` receives that
+exact receipt and restores identity *and* position — re-inserting the removed
+node before its recorded `nextSibling`, or removing the inserted node — instead
+of reconstructing a lookalike row from stale Dataview data. Rollback also
+restores what the gesture consumed: cleared input values, selection, disabled
+state, and toggle state. A rollback that has been overtaken by a newer render
+generation must yield to the newer still-connected control rather than stealing
+it back.
+
+**Focus and scroll.** `mutateStructure` delegates to `mutate`, so scroll capture
+is still the first effect of the gesture, before any DOM or vault change.
+Focus is the caller's to preserve: record the triggering control (or the input
+the gesture emptied) in the receipt and restore it on both the success and the
+rejection path. When a surface disappears under the user — a row that becomes
+hidden, a modal that stays mounted for retry — resolve focus to the nearest
+owned, visible, focusable target instead of dropping it to `document.body`.
+
+**No structural happy-path refresh.** The adapter pins the mutation to
+`background` mode and discards any caller-supplied `mode` or `isCurrent`, so
+authoritative cleanup is left to Dataview's natural reconciler and a successful
+structural gesture can never turn into a global
+`dataview-force-refresh-views`. That is a contract, not a default: do not
+"restore" a caller-provided mode, and do not call the refresh command from
+inside `apply`, `write`, or `rollback`.
+
+### When a global force refresh is still permitted
+
+`dataview:dataview-force-refresh-views` redraws **every** shown Dataview view in
+the vault. It is permitted only where there is nothing to apply optimistically
+*and* the refresh is not standing in for index proof. Exactly three shapes
+qualify:
+
+1. **Independently authoritative reconciliation.** The refresh fires only after
+   the index itself has been observed to catch up — create mode polling
+   `dv.page(path)` until the new page exists, or an explicit, synchronous,
+   boolean-only `isCurrent(currentPage, beforePage)` returning literal `true`.
+   This lives in `RenderSafe._prepareMutationReconcile` and in
+   `TaskDialog._reconcileAfterCreate`, which degrades to the natural tick when
+   the Dataview API is unavailable.
+2. **Non-gesture background reconciliation.** A debounced, burst-aware vault
+   watcher with no user gesture and no owned DOM — `SaucePlugin._fireReconcile`.
+3. **No vault write at all.** A client-only state flip whose dependent view is a
+   *separately owned* Dataview block the gesture holds no DOM handle for: the
+   Home day-rollover watcher (the wall clock changed, nothing was written) and
+   the projects-hub sort toggle (a `localStorage` display preference).
+
+A metadata-cache `changed` signal, an unrelated page delta, a generic page
+shape, or Dataview's own ~2.5s tick **never** authorizes a structural global
+refresh. `changed` only proves Obsidian re-parsed frontmatter; Dataview's index
+update is a separate, later async step, so refreshing on that signal can redraw
+the list from the stale pre-write index — permanently, because nothing
+re-triggers afterward.
 
 ### Gesture-write lint contract
 
@@ -85,17 +145,81 @@ The lifecycle above is enforced at build time by an Acorn-backed lint
   generator returns an iterator without running its body, so nothing executes
   on the gesture.
 - **Narrow allowlist standard.** `scripts/lint-gesture-writes-allowlist.json`
-  is an audited exception list for non-gesture automated writers only — never
-  a way to bless a failing user gesture. Every entry pins an exact path, the
-  exact finding lines it excuses, and a specific reason (≥ 20 chars, enforced
-  at load). `GA-P4I-ALLOWLIST-AUDIT` fails preflight when an entry goes dead
-  (the lint no longer flags the file) or drifts off its pinned lines — prune
-  the entry rather than letting rot accumulate. In-file escape for a single
-  audited line: `// gesture-write-ok <specific reason>`.
+  is an audited exception list, never a way to bless a gesture that could have
+  been written correctly. For the **write** rule it admits non-gesture
+  automated writers only. For the **structural** rule it also admits a gesture
+  whose own rendering surface does not survive its write, because no receipt
+  can exist for a node that is gone — a claim about mechanism, not
+  convenience, and the only such entry is enumerated below. Every entry pins an
+  exact path, the exact finding lines it excuses, and a specific reason
+  (≥ 20 chars, enforced at load). `GA-P4I-ALLOWLIST-AUDIT` fails preflight when
+  an entry goes dead (the lint no longer flags the file) or drifts off its
+  pinned lines — prune the entry rather than letting rot accumulate. In-file
+  escape for a single audited line: `// gesture-write-ok <specific reason>`
+  (write rule) or `// structural-refresh-ok <specific reason>` (structural
+  rule). Because the audit re-derives findings with the allowlist ignored, an
+  entry is only legal for a site the lint actually flags; a site the rule never
+  reaches is documented here, not in the JSON.
 - **Fail-loud wiring.** The lint command, the fixtures harness, and both
   preflight steps are registered in `platform/test/preflight-manifest.json`;
   `check-orphan-harnesses` fails when a `run-*.js` harness exists without a
   manifest registration, so the detector cannot be dropped silently.
+
+#### Structural force-refresh rule
+
+The same lint, the same scan, and the same registered `lint-gesture-writes`
+preflight step also fail every unaudited `dataview-force-refresh-views` in
+`platform/blueprints/**` and `platform/mechanisms/**`:
+
+- **Keyed on the command id, not the dispatcher.** The finding is raised at the
+  source offset of the literal `dataview-force-refresh-views`, because that id
+  has to reach `executeCommandById` somehow no matter how the call is written.
+  That makes the rule indifferent to optional chaining
+  (`app?.commands?.executeCommandById?.(…)`), computed member access
+  (`commands['executeCommandById']`), `.bind`/`.call` aliases, and template
+  literals — call shapes the parser contract already normalises for the write
+  rule. It also means hoisting the id to module scope buys nothing: the
+  occurrence simply changes from a gesture finding to a non-gesture finding,
+  and both demand an audited exception.
+- **Every occurrence is a finding; only the message differs.** Inside a gesture
+  callback the message names `RenderSafe.mutateStructure`; outside one it
+  demands a reasoned exception. Neither is a pass. A refresh dispatched from
+  inside a `mutateStructure` `apply`/`write`/`rollback` callback is still a
+  finding — the seam's no-happy-path-refresh contract is enforced, not assumed.
+- **Comments are excluded, strings are not.** Comment spans are recorded during
+  masking and skipped, so prose naming the command cannot manufacture a
+  finding. String spans are deliberately *not* skipped — the dispatched literal
+  lives in one. The in-file escape is therefore comment-only:
+  `// structural-refresh-ok <specific reason>` (reason required, same ≥ 8-char
+  shape as `gesture-write-ok`). An inert reason-shaped **string** never
+  suppresses anything.
+- **One finding per line.** A line dispatching the refresh twice is one
+  violation, so the allowlist's exact-line pinning stays expressible.
+- **Line-pinned, so it is mutation-sensitive.** Sanctioned sites live in
+  `scripts/lint-gesture-writes-allowlist.json` with exact `lines[]`.
+  `GA-P4I-ALLOWLIST-AUDIT` re-derives every entry's findings with the allowlist
+  ignored and fails preflight when an entry goes dead or drifts off its pinned
+  line — so editing a sanctioned file shifts its line and forces the exception
+  to be re-argued rather than silently inherited.
+- **Known boundary.** A command id split across concatenated fragments
+  (`'dataview-force-refresh' + '-views'`) is not matched. That is deliberate
+  obfuscation rather than a call shape anyone writes, and the same boundary
+  already applies to the write rule.
+
+#### Sanctioned force-refresh sites
+
+Every remaining `dataview-force-refresh-views` in scanned source, with the
+justification that earns its allowlist entry. Anything not on this list is a
+preflight failure.
+
+| Path:line | Category | Why it is sanctioned |
+| --- | --- | --- |
+| `platform/mechanisms/render-safe/render-safe.js:251` | Independently authoritative | RenderSafe's own bounded reconciler — the proven-index authority every other site defers to. Refreshes only after create mode observes `dv.page(path)` indexed, or an explicit mutation-specific `isCurrent` returns literal `true`. |
+| `platform/mechanisms/task-entity/task-dialog.js:1280` | Independently authoritative | `_reconcileAfterCreate` polls `dv.page(path)` until Dataview itself reports the new note indexed (or its bounded window expires) before firing. |
+| `platform/mechanisms/sauce-plugin/plugin/main.js:378` | Non-gesture | `SaucePlugin._fireReconcile`, the burst-aware background reconciler fired by the debounced vault-change timer. No gesture, no owned surface, no receipt to carry. |
+| `platform/blueprints/home/helpers/space-home.js:336` | No vault write | The day-rollover watcher on `active-leaf-change`; the wall clock is the authority and nothing was written, so there is no node to insert, remove, or roll back. |
+| `platform/blueprints/project/helpers/project-chrome-bar.js:896` | No vault write | `_toggleProjectsSort` persists only a `localStorage` display preference and repaints `ProjectsHubCards`, a separately owned Dataview block this chrome holds no DOM handle for. |
+| `platform/mechanisms/task-entity/task-note-view.js:868` | Surface does not survive the write | `TaskDialog._markDone` renames the very note this card renders inside into `spice/tasks/_done`, so no owned node survives to carry an insert/remove receipt and `mutateStructure` has nothing to roll back. Its residual gap is index proof, not optimism: the follow-up is a `RenderSafe.mutate` active-mode `isCurrent` migration. |
 
 ### Dataview correctness findings ledger
 
@@ -110,7 +234,7 @@ means the surface has no operation in that dimension.
 
 | Blueprint | Live Dataview surface(s), with implementation locator | Structural instant update | Scroll / focus | Cold-load | Query efficiency |
 | --- | --- | --- | --- | --- | --- |
-| Task entity | `TaskNoteView` (`platform/mechanisms/task-entity/task-note-view.js:45`) | **GAP PERF-1** — add and complete issue global refreshes (`:683`, `:746`) instead of optimistic row insertion/removal. | **GAP PERF-1** — capture exists, but the add input and exact row position are not restored. | **OK** — RenderSafe page fallback and malformed-child guards. | **OK** — one bulk child query per render. |
+| Task entity | `TaskNoteView` (`platform/mechanisms/task-entity/task-note-view.js:45`) | **OK** — subtask add applies an optimistic row through `RenderSafe.mutateStructure` (`:721`) with a child-identity snapshot so a failed cross-class render still rolls back exactly; the card's own "Mark done" (`:868`) keeps a global refresh because `TaskDialog._markDone` renames the host note out from under the card, leaving no surviving node for a receipt (audited allowlist entry). | **OK** — RenderSafe captures scroll first; rejection removes the exact preview row, restores the add input's text, and returns focus to it. | **OK** — RenderSafe page fallback and malformed-child guards. | **OK** — one bulk child query per render. |
 | Task entity | `TaskTodayList` (`task-today-list.js:42`), `TaskDoneTodayList` (`task-done-today-list.js:1`), `TaskProjectList` (`task-project-list.js:40`), `TaskMeetingList` (`task-meeting-list.js:33`), `TaskTripList` (`task-trip-list.js:34`) | **OK** — shared row gestures already remove/revert optimistically; PERF-1 consumes the structural receipt seam for subtask parity. | **OK** — shared row lifecycle captures scroll and keeps row-local state. | **OK** — missing RenderSafe/TaskEntity dependencies bail quietly. | **OK** — one vault-wide task query and one grouped subtask-count query, never per row. |
 | Task entity | `TaskChromeBar` (`task-chrome-bar.js:28`) | **N/A** — navigation only. | **N/A** | **OK** — path/context detection is guarded. | **N/A** |
 | To-do | `TaskDoneArchive` (`platform/blueprints/to-do/helpers/task-done-archive.js:1`), `TaskRecurringList` (`task-recurring-list.js:27`), `ToDoAllList` (`todo-all-list.js:23`), plus the task-list surfaces above | **OK** — gestures delegate to the shared task row. | **OK** — inherited from the shared row. | **OK** — guarded dependency resolution. | **OK** — one bulk task query per list. |
@@ -160,9 +284,11 @@ means the surface has no operation in that dimension.
 
 The ledger intentionally distinguishes global refresh used as a structural
 shortcut from the Home day-rollover watcher: both remain findings, but only the
-former can ever be replaced by `mutateStructure`. Later slices update their
-owned rows in place; PERF-9 turns the remaining structural-refresh rule into a
-CI check, and PERF-10 supplies measured budgets for the query gaps.
+former can ever be replaced by `mutateStructure`. Later slices updated their
+owned rows in place; PERF-9a turned the remaining structural-refresh rule into
+the CI check documented above — every surviving force-refresh site is now
+enumerated, line-pinned, and re-audited on every preflight run — and PERF-10
+supplies measured budgets for the query gaps.
 
 ## Skill / command override seam
 

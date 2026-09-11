@@ -13,7 +13,15 @@ const DEFAULT_SCAN_DIRS = [
 ];
 const DEFAULT_ALLOWLIST = path.join(__dirname, 'lint-gesture-writes-allowlist.json');
 const ALLOW_RE = /gesture-write-ok\s+\S.{7,}/;
+const STRUCTURAL_ALLOW_RE = /structural-refresh-ok\s+\S.{7,}/;
 const WRITE_RE = /\b(?:fileManager\s*(?:\.|\?\.)\s*processFrontMatter|vault\s*(?:\.|\?\.)\s*(?:modify|create))\s*(?:\?\.)?\s*\(/g;
+// The global Dataview redraw is identified by its command id, not by the
+// dispatcher expression that carries it. Keying on the id is what makes the
+// structural rule indifferent to optional chaining, computed member access,
+// bound aliases, and every other call shape the parser contract already
+// normalises: the id has to reach the dispatcher somehow, and wherever it is
+// written is where the finding lands.
+const REFRESH_COMMAND_ID = 'dataview-force-refresh-views';
 const GESTURE_ASSIGN_CONTEXT_RE = /(?:\.|\b)(?:onclick|onchange|oninput|onsubmit|onkeydown|onkeyup|onpointer(?:down|up|move)|onmousedown|onmouseup|ontouch(?:start|end|move))\s*=\s*$/i;
 const GESTURE_PROP_CONTEXT_RE = /\b(?:onClick|onChange|onInput|onSubmit|onKeyDown|onKeyUp|onPointerDown|onPointerUp|onMouseDown|onMouseUp|onTouchStart|onTouchEnd)\s*:\s*$/;
 
@@ -73,6 +81,11 @@ function parsedRegexStarts(source) {
 function maskNonCode(source) {
   const chars = source.split('');
   const allowLines = new Set();
+  const structuralAllowLines = new Set();
+  // Comment spans are recorded (not just blanked) because the structural rule
+  // reads the ORIGINAL source: masking cannot distinguish an inert comment
+  // mention of the command id from the string literal that dispatches it.
+  const commentRanges = [];
   const regexStarts = parsedRegexStarts(source);
   let line = 1;
 
@@ -152,7 +165,10 @@ function maskNonCode(source) {
       } else if (ch === '/' && next === '/') {
         let end = source.indexOf('\n', i);
         if (end < 0) end = source.length;
-        if (ALLOW_RE.test(source.slice(i, end))) allowLines.add(line);
+        const text = source.slice(i, end);
+        if (ALLOW_RE.test(text)) allowLines.add(line);
+        if (STRUCTURAL_ALLOW_RE.test(text)) structuralAllowLines.add(line);
+        commentRanges.push({ start: i, end });
         for (let cursor = i; cursor < end; cursor++) blank(cursor);
         i = end;
       } else if (ch === '/' && next === '*') {
@@ -161,7 +177,9 @@ function maskNonCode(source) {
         const commentLines = source.slice(i, end).split('\n');
         commentLines.forEach((text, index) => {
           if (ALLOW_RE.test(text)) allowLines.add(line + index);
+          if (STRUCTURAL_ALLOW_RE.test(text)) structuralAllowLines.add(line + index);
         });
+        commentRanges.push({ start: i, end });
         for (let cursor = i; cursor < end; cursor++) {
           if (chars[cursor] === '\n') line++; else blank(cursor);
         }
@@ -177,7 +195,7 @@ function maskNonCode(source) {
     return chars.length;
   };
   scanCode(0);
-  return { masked: chars.join(''), allowLines };
+  return { masked: chars.join(''), allowLines, structuralAllowLines, commentRanges };
 }
 
 function braceRanges(masked) {
@@ -415,8 +433,43 @@ function lineInfo(source, offset) {
   return { line, text: lines[line - 1] || '', previous: lines[line - 2] || '' };
 }
 
+// Structural rule: a global Dataview force refresh is never a structural
+// happy path. The finding is raised on the ORIGINAL source offset of the
+// command id, because the id is always inside a string literal and masking
+// has already erased it from `masked`. Comment spans are excluded so prose
+// that names the command cannot manufacture a finding, while string spans are
+// deliberately NOT excluded — the dispatched literal lives in one.
+//
+// Every occurrence is a finding, inside a gesture callback or not; only the
+// message differs. That is what makes hoisting the literal out of the handler
+// useless as a bypass: moving it to module scope trades a gesture finding for
+// a non-gesture finding, and both demand an audited exception.
+function structuralRefreshFindings(source, gestures, commentRanges, structuralAllowLines) {
+  const findings = [];
+  const seen = new Set();
+  for (let offset = source.indexOf(REFRESH_COMMAND_ID);
+    offset >= 0;
+    offset = source.indexOf(REFRESH_COMMAND_ID, offset + 1)) {
+    if (containing(commentRanges, offset)) continue;
+    const info = lineInfo(source, offset);
+    // One line dispatching the refresh twice is one violation: the allowlist
+    // audit pins finding lines exactly, so duplicates would make every
+    // sanctioned entry unpinnable.
+    if (seen.has(info.line)) continue;
+    if (structuralAllowLines.has(info.line) || structuralAllowLines.has(info.line - 1)) continue;
+    seen.add(info.line);
+    findings.push({
+      line: info.line,
+      message: containing(gestures, offset)
+        ? `gesture forces ${REFRESH_COMMAND_ID} — apply the insert/remove optimistically through RenderSafe.mutateStructure (receipt-bound rollback, background reconciliation) instead of globally refreshing Dataview`
+        : `${REFRESH_COMMAND_ID} outside the structural seam — a non-gesture or independently-authoritative refresh needs a reasoned allowlist entry or a structural-refresh-ok escape`,
+    });
+  }
+  return findings;
+}
+
 function lintSource(source) {
-  const { masked, allowLines } = maskNonCode(source);
+  const { masked, allowLines, structuralAllowLines, commentRanges } = maskNonCode(source);
   const ranges = braceRanges(masked);
   const gestures = callbackRanges(masked, ranges);
   const mutations = mutateRanges(masked, ranges);
@@ -433,6 +486,10 @@ function lintSource(source) {
       message: `bare ${match[0].replace(/\s*\($/, '')} in gesture callback — route the write through RenderSafe.mutate or add a reasoned gesture-write-ok escape`,
     });
   }
+  for (const finding of structuralRefreshFindings(source, gestures, commentRanges, structuralAllowLines)) {
+    findings.push(finding);
+  }
+  findings.sort((a, b) => a.line - b.line);
   return findings;
 }
 
@@ -496,7 +553,7 @@ function main() {
     process.exit(1);
   }
   if (result.findings.length === 0) {
-    console.log(`PASS lint-gesture-writes: ${result.files.length} helper file(s) scanned; no bare gesture writes.`);
+    console.log(`PASS lint-gesture-writes: ${result.files.length} helper file(s) scanned; no bare gesture writes, no unaudited structural refreshes.`);
     return;
   }
   console.error(`FAIL lint-gesture-writes: ${result.findings.length} violation(s):`);

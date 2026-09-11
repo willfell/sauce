@@ -19,6 +19,36 @@
       "path": "platform/blueprints/project/helpers/doc-leaf-actions.js",
       "reason": "Single-document relocation is a structural rename transaction whose post-rename frontmatter rewrite must remain adjacent to the rename.",
       "lines": [188]
+    },
+    {
+      "path": "platform/blueprints/home/helpers/space-home.js",
+      "reason": "The Home day-rollover watcher runs on workspace active-leaf-change and refreshes only when _shouldDayRefresh reports the recorded render day is no longer today; the wall clock is the authority, no vault write occurs, and no inserted or removed node exists for a structural receipt to roll back.",
+      "lines": [336]
+    },
+    {
+      "path": "platform/blueprints/project/helpers/project-chrome-bar.js",
+      "reason": "_toggleProjectsSort persists only the sauce.projects-hub.sort localStorage display preference and repaints ProjectsHubCards, a separately owned Dataview block this chrome instance holds no DOM handle for; no vault write can reject, so there is nothing to apply optimistically and nothing to roll back.",
+      "lines": [896]
+    },
+    {
+      "path": "platform/mechanisms/render-safe/render-safe.js",
+      "reason": "This is RenderSafe's own bounded reconciler, the single proven-index authority every other site defers to: it refreshes only after create mode observes dv.page(path) indexed, or an explicit mutation-specific isCurrent predicate returns literal true, never on a gesture and never on a bare metadata signal.",
+      "lines": [251]
+    },
+    {
+      "path": "platform/mechanisms/sauce-plugin/plugin/main.js",
+      "reason": "SaucePlugin._fireReconcile is the burst-aware background reconciler fired by the debounced vault-change timer, never by a DOM handler; there is no user gesture, no owned surface, and no optimistic DOM that a structural receipt could describe.",
+      "lines": [378]
+    },
+    {
+      "path": "platform/mechanisms/task-entity/task-dialog.js",
+      "reason": "_reconcileAfterCreate fires only after polling dv.page(path) reports the newly created note indexed, or its bounded retry window expires, so the refresh is independently authoritative over Dataview's own index rather than a gesture redrawing from stale state.",
+      "lines": [1280]
+    },
+    {
+      "path": "platform/mechanisms/task-entity/task-note-view.js",
+      "reason": "TaskDialog._markDone renames the very note this card is rendered inside into spice/tasks/_done, so the gesture's own surface does not survive the awaited write: no owned node remains to insert or remove and no receipt exists for mutateStructure to roll back. This is the only gesture-scoped refresh left; its residual gap is index proof, tracked as a RenderSafe.mutate active-mode isCurrent migration.",
+      "lines": [868]
     }
   ]
 }
