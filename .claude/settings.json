@@ -1,13 +1,13 @@
 {
   "extraKnownMarketplaces": {
-    "wac-plugins": {
+    "sauce": {
       "source": {
         "source": "github",
-        "repo": "willfell/wac.plugins"
+        "repo": "willfell/sauce"
       }
     }
   },
   "enabledPlugins": {
-    "loop@wac-plugins": true
+    "mayo@sauce": true
   }
 }
