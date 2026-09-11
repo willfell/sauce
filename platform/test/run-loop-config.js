@@ -174,6 +174,11 @@ function mkRepo(config) {
 {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-home-'));
   const c = baseConfig();
+  // A real plugin_root, so this case exercises the vault checks rather than
+  // tripping the plugin_root guard.
+  const pluginRoot = path.join(home, 'plugins/mayo');
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  c.codex.plugin_root = pluginRoot;
   const repo = mkRepo(c);
   const vaultRoot = path.join(home, 'vaults/demo-vault');
   fs.mkdirSync(path.join(vaultRoot, 'spice/projects/demo/tasks'), { recursive: true });
@@ -272,6 +277,40 @@ function mkRepo(config) {
   ok('LC-8 no gate env without knobs', !('SAUCE_LOOP_VERIFY_COMMANDS' in r.config.env) && !('SAUCE_LOOP_GATE' in r.config.env));
   fs.rmSync(repo, { recursive: true, force: true });
 }
+// LC-8b — a glob gate.js can never match is refused at bind time. Shape was
+// validated only as "array of strings", so `src/**/*.test.ts` bound fine and
+// then silently matched nothing: every test file in a diff counted as
+// behavioral source and Gate B refused each slice with "ships no regression
+// test". travel shipped exactly that config and could not pass its own gate.
+{
+  const c = baseConfig();
+  c.gate = { test_globs: ['src/**/*.test.ts'], exclude_globs: ['docs/**'] };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8b a **-in-the-middle test glob refuses at bind time',
+    r.ok === false && r.refusals.some((x) => x.code === 'config_bad_value' && /can never match/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+// The trap inside the trap: this one DOES take gate.js's `dir/**` branch and
+// still never matches, because the retained prefix keeps a literal asterisk.
+// A guard that only checked the trailing `/**` would wave it straight through.
+{
+  const c = baseConfig();
+  c.gate = { test_globs: ['src/**/__tests__/**'] };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8b a starred prefix ending in /** still refuses',
+    r.ok === false && r.refusals.some((x) => x.code === 'config_bad_value' && /literal \* in the directory prefix/.test(x.message)));
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+{
+  const c = baseConfig();
+  c.gate = { test_globs: ['tests/**', '*.test.tsx', 'src/app/__tests__/**', 'exact/path.ts'], exclude_globs: ['docs/**', '*.md'] };
+  const repo = mkRepo(c);
+  const r = LC.resolveBinding(repo, { home: HOME });
+  ok('LC-8b every shape gate.js actually matches is accepted', r.ok === true);
+  fs.rmSync(repo, { recursive: true, force: true });
+}
 {
   const c = baseConfig(); c.policy.verify_commands = ['ok', 42];
   const repo = mkRepo(c);
@@ -324,6 +363,61 @@ function mkRepo(config) {
   const r = LC.resolveBinding(repo, { home: HOME });
   ok('LC-10 invalid run_scope refuses', r.ok === false && r.refusals.some((x) => /run_scope/.test(x.message)));
   fs.rmSync(repo, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// LC-11 -- check validates codex.plugin_root.
+//
+// A binding can name a plugin_root that does not exist: the generated Codex
+// routers then tell Codex to read <plugin_root>/skills/<name>/SKILL.md and
+// resolve nothing. check() validated vault_root, board_path and cards_root but
+// never plugin_root, so a binding pointing Codex at a deleted directory was
+// reported healthy. That is how every bound repo kept pointing at
+// libexec/plugins/loop after it was deleted.
+// ---------------------------------------------------------------------------
+{
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-home-'));
+  const vaultRoot = path.join(home, 'vaults/demo-vault');
+  fs.mkdirSync(path.join(vaultRoot, 'spice/projects/demo/tasks'), { recursive: true });
+  fs.writeFileSync(path.join(vaultRoot, 'spice/projects/demo/demo-board.md'), '## In Planning\n');
+
+  const missing = baseConfig();
+  missing.codex.plugin_root = path.join(home, 'plugins/does-not-exist');
+  const repoMissing = mkRepo(missing);
+  const rMissing = LC.checkBinding(repoMissing, { home });
+  ok('LC-11 missing plugin_root refuses',
+    rMissing.ok === false && rMissing.refusals.some((x) => x.code === 'plugin_root_missing'));
+
+  // resolve stays permissive: a Claude-only user with no Codex surface should
+  // not be refused mid-run over a directory nothing will read.
+  const rResolve = LC.resolveBinding(repoMissing, { home });
+  ok('LC-11 resolve does not refuse a missing plugin_root', rResolve.ok === true);
+
+  const unset = baseConfig();
+  delete unset.codex.plugin_root;
+  const repoUnset = mkRepo(unset);
+  const rUnset = LC.checkBinding(repoUnset, { home });
+  ok('LC-11 unset plugin_root stays clean', rUnset.ok === true, JSON.stringify(rUnset.refusals || []));
+
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(repoMissing, { recursive: true, force: true });
+  fs.rmSync(repoUnset, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// LC-12 -- the plugin's resolver entry point is the same module, not a copy.
+//
+// plugins/mayo/scripts/loop-config.js and scripts/autoloop/loop-config.js were
+// byte-identical twins kept in sync by hand, with nothing checking that they
+// stayed that way. The plugin file is now a forwarder; this asserts it cannot
+// drift, and that it still forwards the CLI the resolver guards with
+// `require.main === module`.
+// ---------------------------------------------------------------------------
+{
+  const shimPath = path.resolve(__dirname, '..', '..', 'plugins', 'mayo', 'scripts', 'loop-config.js');
+  const shim = require(shimPath);
+  ok('LC-12 plugin resolver is the same module object', shim === LC);
+  ok('LC-12 plugin resolver forwards main() for the CLI', typeof shim.main === 'function');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

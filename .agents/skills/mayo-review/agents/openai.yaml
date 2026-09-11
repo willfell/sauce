@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Review"
+  short_description: "Mayo review via the shared mayo plugin body"
+  default_prompt: "Use $mayo-review — follow .agents/skills/mayo-review/SKILL.md."

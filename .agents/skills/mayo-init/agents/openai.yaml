@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Init"
+  short_description: "Mayo init via the shared mayo plugin body"
+  default_prompt: "Use $mayo-init — follow .agents/skills/mayo-init/SKILL.md."

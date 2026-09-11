@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mayo Execute"
+  short_description: "Mayo execute via the shared mayo plugin body"
+  default_prompt: "Use $mayo-execute — follow .agents/skills/mayo-execute/SKILL.md."
