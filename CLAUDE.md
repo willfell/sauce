@@ -59,6 +59,7 @@ Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-
 | Meetings | spice/meetings | /meetings |
 | Projects | spice/projects | /project |
 | Reader | spice/reader | /reader |
+| Sauce | .claude/commands/sauce.md | /sauce |
 | Sticky Notes | spice/sticky-notes | /sticky-notes |
 | Upgrade | .claude/commands/upgrade.md | /upgrade |
 | Wiki | spice/wiki | /wiki |

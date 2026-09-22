@@ -15,7 +15,7 @@
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Sauce", "path": ".claude/commands/sauce.md", "command": "/sauce" } }
   ],
   "post_install": [
-    { "type": "notice", "message": "engine@0.1.0 installed. /sauce and `sauce run <note>` are available; graph notes start from the Sauce Graph template." }
+    { "type": "notice", "message": "engine installed. /sauce and `sauce run <note>` are available; graph notes start from the Sauce Graph template." }
   ],
   "rule_fragments": []
 }

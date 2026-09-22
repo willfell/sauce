@@ -32,5 +32,5 @@ Sauce releases are cut automatically from conventional commits on `main` (see `D
 
 ### Breaking
 
-- Every consumer subscription gains `engine@0.1.0` on its next `sauce update`; `.claude/commands/sauce.md` and `.claude/skills/engine/` become installer-managed paths in every vault (a hand-authored file there is overwritten; use `.claude/commands.local/` to shadow).
+- Every consumer subscription gains the `engine` mechanism (at the catalogue version) on its next `sauce update`; `.claude/commands/sauce.md` and `.claude/skills/engine/` become installer-managed paths in every vault (a hand-authored file there is overwritten; use `.claude/commands.local/` to shadow).
 - The `/sauce-autoloop` command and its plist are gone from the workshop. Unattended cadence is `sauce run <note> --install-launchd`.
