@@ -2,7 +2,6 @@
 /**
  * run-autoloop-select — preflight harness for the Sauce Autoloop deterministic
  * helpers (scripts/autoloop/select-card.js). Zero-dep.
- * Zero-dep.
  */
 'use strict';
 const path = require('path');
