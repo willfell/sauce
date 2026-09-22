@@ -2,11 +2,12 @@
 //
 // Supported: nested maps (`key:` + deeper indent), lists (`- item` or
 // `- key: value` opening a map), scalars (strings, ints, floats, true/false/
-// null, single- or double-quoted strings), `|` block scalars, and single-line
-// inline flow maps `{ a: 1, b: two }`. Comments start with `#` at line start
-// or after whitespace. Tabs are refused. Anchors, tags, multi-document
-// streams, flow sequences and multi-line flow maps are NOT supported; the
-// error names the line so the note author can fix it in Obsidian.
+// null, single- or double-quoted strings), `|` block scalars, single-line
+// inline flow maps `{ a: 1, b: two }` and flow sequences `[a, b]`. Comments
+// start with `#` at line start or after whitespace. Tabs are refused.
+// Anchors, tags, multi-document streams and multi-line flow collections are
+// NOT supported; the error names the line so the author can fix it in
+// Obsidian.
 //
 // Zero-dep by design: the workshop's only npm dependency is @inquirer/prompts
 // and the engine must load from a brew libexec without a node_modules for it.
@@ -83,10 +84,16 @@ function flowMap(text, line) {
   return out;
 }
 
+function flowSeq(text, line) {
+  const t = text.trim();
+  if (t[t.length - 1] !== ']') throw new YamlLiteError(line, 'unbalanced flow sequence (missing ])');
+  return splitTopLevelCommas(t.slice(1, -1), line).map((part) => value(part, line));
+}
+
 function value(raw, line) {
   const t = raw.trim();
   if (t.startsWith('{')) return flowMap(t, line);
-  if (t.startsWith('[')) throw new YamlLiteError(line, 'flow sequences are not supported; use a block list');
+  if (t.startsWith('[')) return flowSeq(t, line);
   return scalar(t, line);
 }
 

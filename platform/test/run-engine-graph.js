@@ -43,6 +43,8 @@ ok('YL-7 unbalanced flow map refused with a line number', flowErr && flowErr.lin
 ok('YL-8 empty document parses to an empty map', JSON.stringify(yaml.parse('')) === '{}' && JSON.stringify(yaml.parse('# only\n')) === '{}');
 const y9 = yaml.parse('a:\n  b:\n    c: deep\n  d: 1\n');
 ok('YL-9 nested maps', y9.a.b.c === 'deep' && y9.a.d === 1);
+const y11 = yaml.parse('a: [pass, fail, 3]\nb: []\nc: [{ x: 1 }, two]\n');
+ok('YL-11 flow sequences of scalars, empty, and nested flow maps', y11.a.length === 3 && y11.a[2] === 3 && y11.b.length === 0 && y11.c[0].x === 1 && y11.c[1] === 'two');
 const y10 = yaml.parse('items:\n  - id: x\n    body: |\n      first\n      second\n    after: y\n');
 ok('YL-10 block scalar inside a list item', y10.items[0].body === 'first\nsecond\n' && y10.items[0].after === 'y');
 

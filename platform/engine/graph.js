@@ -50,6 +50,15 @@ function extractBlock(body) {
   return blocks[0];
 }
 
+// Fields that carry a command or prose are strings even when YAML would type
+// them (`run: true` is the shell command `true`, not a boolean).
+const STRING_FIELDS = ['run', 'prompt', 'ask', 'gate', 'cwd', 'worker', 'isolate', 'outcome', 'outcome_from'];
+function normalizeNode(n) {
+  if (!n || typeof n !== 'object') return n;
+  for (const f of STRING_FIELDS) if (typeof n[f] === 'boolean' || typeof n[f] === 'number') n[f] = String(n[f]);
+  return n;
+}
+
 function parseGraphNote(text) {
   const { frontmatter, body } = splitFrontmatter(text);
   const block = extractBlock(body);
@@ -57,7 +66,7 @@ function parseGraphNote(text) {
   try { graph = yaml.parse(block.text); }
   catch (e) { throw new GraphNoteError(`sauce block: ${e.message}`); }
   if (!graph || typeof graph !== 'object' || Array.isArray(graph)) throw new GraphNoteError('sauce block must be a map with nodes: and edges:');
-  graph.nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  graph.nodes = Array.isArray(graph.nodes) ? graph.nodes.map(normalizeNode) : [];
   graph.edges = Array.isArray(graph.edges) ? graph.edges : [];
   return { frontmatter, block: block.text, graph };
 }

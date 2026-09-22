@@ -1441,6 +1441,22 @@
         "platform/test/run-preflight-runner.js"
       ],
       "lane": "parallel"
+    },
+    {
+      "id": "engine-graph",
+      "cmd": [
+        "node",
+        "platform/test/run-engine-graph.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "engine-smoke",
+      "cmd": [
+        "node",
+        "platform/test/run-engine-smoke.js"
+      ],
+      "lane": "parallel"
     }
   ]
 }
