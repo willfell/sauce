@@ -75,7 +75,7 @@ function splitDiff(paths, config = null) {
     // (a deterministic re-score of the tree, refreshed when coverage lands), not
     // hand-authored behavioral source — so refreshing the stale snapshot must not be
     // miscounted as an untested behavioral change and block the regen PR.
-    if (/\.md$/.test(f) || f === 'autoloop-queue.md' || f === 'package.json' ||
+    if (/\.md$/.test(f) || f === 'package.json' ||
         f === 'package-lock.json' || f === 'platform/test/coverage-matrix.json' ||
         f === 'platform/test/preflight-manifest.json') continue;
     sourceFiles.push(f);

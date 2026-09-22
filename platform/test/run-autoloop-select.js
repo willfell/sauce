@@ -2,29 +2,17 @@
 /**
  * run-autoloop-select — preflight harness for the Sauce Autoloop deterministic
  * helpers (scripts/autoloop/select-card.js). Zero-dep.
- * (render-handoff cases are added in a later commit.)
+ * Zero-dep.
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, parseQueue, selectFromQueue, stripCardChrome,
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseDependsOn, stripCardChrome,
   normalizeStatus, parseCardStatus, parseBatchPolicy, delivery } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
-const { renderHandoff } =
-  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
-const { reconcileInFlight, slugFromRef, nextLedger } =
-  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
 const { lockState, pidAlive } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'turn-lock.js'));
-const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
-  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
 const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck, matchesGlob, parseGateConfig } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
-const { renderBlockedSection, parseBlockedResponse } =
-  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'block-note.js'));
-const { candidateId, filterCandidates, toQueueBlocks, nextArea, AREAS } =
-  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'bughunt.js'));
-const { parseLane, syncLane, laneLine, dismissInQueue, LANE } =
-  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'board-mirror.js'));
 const { cmpVersion, deployPlan, verifyDeploy } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'deploy.js'));
 
@@ -346,109 +334,6 @@ const chromeLoad = (c) => c === 'Chrome card' ? deliveryCard('Chrome card', '```
 ok('SCH-4 chrome-inflated card → broadHint null after strip (still picked)',
   (r => r.action === 'work' && r.broadHint === null)(selectCard({ boardMd: chromeBoard, loadBody: chromeLoad })));
 
-// ---- renderHandoff (RH-*) ----
-const ho = renderHandoff({
-  roundN: 7, date: '2026-06-27', mode: 'dry-run',
-  outcome: { action: 'work', card: 'Fix breadcrumb paren' },
-  board: parseBoard(BOARD),
-  recommendedNext: 'Add render harness',
-});
-ok('RH-1 has title with round', /Sauce Autoloop Turn 7/.test(ho));
-ok('RH-2 names the card', ho.includes('Fix breadcrumb paren'));
-ok('RH-3 marks dry-run', /dry-run/i.test(ho));
-ok('RH-4 lists In Planning section', ho.includes('### In Planning'));
-ok('RH-5 carries recommended next', ho.includes('Add render harness'));
-
-// ---- reconcileInFlight (RI-*) ----
-ok('RI-1 slugFromRef strips local prefix', slugFromRef('autoloop/fix-x') === 'fix-x');
-ok('RI-2 slugFromRef strips remote prefix', slugFromRef('origin/autoloop/fix-x') === 'fix-x');
-ok('RI-3 idle when nothing in flight', reconcileInFlight({}).status === 'idle');
-ok('RI-4 open PR → pr-open/wait',
-  (r => r.status === 'pr-open' && r.nextAction === 'wait' && r.card === 'fix-x')
-  (reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'OPEN', number: 5 }] })));
-ok('RI-5 bare branch → implementing/resume-or-clean',
-  (r => r.status === 'implementing' && r.nextAction === 'resume-or-clean' && r.card === 'fix-x')
-  (reconcileInFlight({ branches: ['autoloop/fix-x'] })));
-ok('RI-6 merged PR → merged/close-card',
-  (r => r.status === 'merged' && r.nextAction === 'close-card')
-  (reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] })));
-ok('RI-7 closed PR → failed/block-card',
-  (r => r.status === 'failed' && r.nextAction === 'block-card')
-  (reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'CLOSED', number: 5 }] })));
-ok('RI-8 open beats older merged (most recent by number)',
-  reconcileInFlight({ prs: [
-    { headRefName: 'autoloop/a', state: 'MERGED', number: 4 },
-    { headRefName: 'autoloop/b', state: 'OPEN', number: 5 }] }).card === 'b');
-ok('RI-9 branch whose PR merged is NOT bare (→ merged, not implementing)',
-  reconcileInFlight({ branches: ['autoloop/fix-x'],
-    prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] }).status === 'merged');
-// reconciled-PR ledger — a terminal PR fires exactly once, then the loop reaches idle (merged-deadlock fix):
-ok('RI-10 merged PR already in ledger → idle (no re-fire)',
-  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }], reconciled: [5] }).status === 'idle');
-ok('RI-11 failed PR already in ledger → idle',
-  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'CLOSED', number: 5 }], reconciled: [5] }).status === 'idle');
-ok('RI-12 ledger only skips the ledgered PR; a newer un-ledgered merged still fires',
-  (r => r.status === 'merged' && r.number === 6)(reconcileInFlight({ prs: [
-    { headRefName: 'autoloop/a', state: 'MERGED', number: 5 },
-    { headRefName: 'autoloop/b', state: 'MERGED', number: 6 }], reconciled: [5] })));
-ok('RI-13 ledger NEVER suppresses an OPEN PR (still pr-open even if number is ledgered)',
-  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'OPEN', number: 5 }], reconciled: [5] }).status === 'pr-open');
-ok('RI-14 ledger does NOT suppress a bare branch (still implementing)',
-  reconcileInFlight({ branches: ['autoloop/fix-x'], reconciled: [5] }).status === 'implementing');
-ok('RI-15 nextLedger appends + dedups (idempotent record)',
-  (a => a.length === 2 && a.includes(5) && a.includes(6))(nextLedger(nextLedger([5], 6), 5)));
-ok('RI-16 nextLedger caps to the most-recent N (runaway guard, keeps newest)',
-  (a => a.length === 2 && a[0] === 9 && a[1] === 10)(nextLedger([7, 8, 9], 10, 2)));
-ok('RI-17 a corrupt non-array ledger is coerced to empty, never throws (fail-safe read)',
-  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }], reconciled: 'oops' }).status === 'merged'
-  && (a => a.length === 1 && a[0] === 5)(nextLedger('oops', 5)));
-
-// ---- parseQueue + selectFromQueue (Q-*, SQ-*) ----
-const QUEUE = [
-  '# Autoloop queue', '',
-  '- id: cov-blueprint-cowork-customjs_behavioral',
-  '  title: Add coverage for cowork customjs_behavioral (0/9)',
-  '  category: test', '  source: coverage-matrix', '  rationale: 9 uncovered', '  status: proposed', '',
-  '- id: doc-drift-readme-foo',
-  '  title: Fix broken link "foo.md" in README.md',
-  '  category: doc', '  source: doc-drift', '  rationale: link does not resolve', '  status: done', '',
-].join('\n');
-const q = parseQueue(QUEUE);
-ok('Q-1 parses two items', q.length === 2, JSON.stringify(q.map(i => i.id)));
-ok('Q-2 captures fields', q[0].id === 'cov-blueprint-cowork-customjs_behavioral' && q[0].category === 'test' && q[0].status === 'proposed');
-ok('Q-3 captures status done', q[1].status === 'done');
-ok('Q-4 empty/garbage → []', parseQueue('# Autoloop queue\n\nnothing here').length === 0);
-ok('SQ-1 picks the open proposed item',
-  (r => r.action === 'work' && r.card === 'cov-blueprint-cowork-customjs_behavioral' && r.fromQueue === true)
-  (selectFromQueue({ queueMd: QUEUE })));
-ok('SQ-2 skips done items',
-  selectFromQueue({ queueMd: QUEUE, shippedIds: [] }).card !== 'doc-drift-readme-foo');
-ok('SQ-3 dedup via shippedIds → no-work',
-  selectFromQueue({ queueMd: QUEUE, shippedIds: ['cov-blueprint-cowork-customjs_behavioral'] }).action === 'no-work');
-ok('SQ-4 empty queue → no-work',
-  selectFromQueue({ queueMd: '# Autoloop queue\n' }).action === 'no-work');
-ok('SQ-5 broad-scope queue item skipped → no-eligible-work',
-  selectFromQueue({ queueMd: '- id: x\n  title: Audit everything redesign\n  status: proposed\n' }).action === 'no-eligible-work');
-
-// ---- scout-signals detectors (SS-*) ----
-const COV = { entries: [
-  { kind: 'blueprint', name: 'cowork', axes: { customjs_behavioral: { covered: 0, total: 9 }, install: { covered: 3, total: 3 } } },
-  { kind: 'mechanism', name: 'nav-buttons', axes: { customjs_behavioral: { covered: 2, total: 4 } } },
-] };
-const covItems = coverageGapItems(COV);
-ok('SS-1 coverage gap detected for uncovered axis', covItems.some(i => i.id === 'cov-blueprint-cowork-customjs-behavioral' && i.category === 'test'));
-ok('SS-2 fully-covered axis is NOT proposed', !covItems.some(i => i.id.includes('install')));
-const DOCS = [{ path: 'Docs/a.md', content: 'see [good](b.md) and [bad](missing.md)' }];
-const exists = (target) => target === 'b.md';
-const ddItems = docDriftItems(DOCS, exists);
-ok('SS-3 broken md link proposed', ddItems.some(i => i.category === 'doc' && i.title.includes('missing.md')));
-ok('SS-4 resolving link NOT proposed', !ddItems.some(i => i.title.includes('b.md')));
-const LM = '### 1. First trap\nbody\n### 7. Guarded trap\nbody\n';
-const hasGuard = (n) => n === '7';
-const lmItems = landmineGuardGapItems(LM, hasGuard);
-ok('SS-5 unguarded landmine proposed', lmItems.some(i => i.id === 'landmine-1-guard'));
-ok('SS-6 guarded landmine NOT proposed', !lmItems.some(i => i.id === 'landmine-7-guard'));
-
 // ---- splitDiff (SD-*) ----
 const sd = splitDiff(['scripts/autoloop/select-card.js', 'platform/test/run-foo.js', 'Docs/x.md', 'autoloop-queue.md']);
 ok('SD-1 test file classified', sd.testFiles.length === 1 && sd.testFiles[0] === 'platform/test/run-foo.js');
@@ -540,22 +425,6 @@ ok('RA-6 removal with a surviving guard test → mutation check runs → adequat
     config: { test_globs: ['tests/**'], exclude_globs: ['docs/**', '*.md'] } });
     return r.adequate === true; })());
 
-// ---- block-note (BN-*) ----
-const blockSec = renderBlockedSection({ date: '2026-06-30', reason: 'convention conflict', needs: ['change the convention or drop the ask?', 'specify the target behavior'] });
-ok('BN-1 section has the reason', blockSec.includes('convention conflict'));
-ok('BN-2 section lists the needs', blockSec.includes('specify the target behavior'));
-ok('BN-3 section has the response marker', blockSec.includes('**Your response:**'));
-ok('BN-4 no section → hasSection false', parseBlockedResponse('just a normal card body').hasSection === false);
-ok('BN-5 section + empty response → hasResponse false', parseBlockedResponse(blockSec).hasResponse === false);
-const blockReplied = blockSec + '\nLet us change the convention — allow the separator here.\n';
-ok('BN-6 section + reply → hasResponse true + text',
-  (r => r.hasResponse === true && r.response.includes('change the convention'))(parseBlockedResponse(blockReplied)));
-ok('BN-7 header string inside the reply does NOT break parsing',
-  (r => r.hasResponse === true && r.response.includes('approve'))(parseBlockedResponse(blockSec + '\nYes, approve. (re the ## Autoloop — blocked, needs your input note)\n')));
-ok('BN-8 re-blocked card → reads the LAST section reply',
-  (r => r.hasResponse === true && r.response.includes('second reply'))(parseBlockedResponse(blockSec + '\nold reply\n' + renderBlockedSection({ date: '2026-07-01', reason: 'again', needs: ['q'] }) + '\nsecond reply\n')));
-ok('BN-9 missing date/reason → no literal "undefined"', !renderBlockedSection({ needs: ['q'] }).includes('undefined'));
-
 // ---- turn-lock (TL-*) ----
 const TL_NOW = 1000000000000;
 const TL_MIN = 60 * 1000;
@@ -586,76 +455,6 @@ ok('TL-11 pidAlive: own pid alive; bad pids → unknown (null)',
 const TL_DEAD_PID = require('child_process').spawnSync(process.execPath, ['-e', '0']).pid; // spawned, exited, reaped → gone
 ok('TL-12 pidAlive: a reaped (exited) pid reads as KNOWN-dead (false)', pidAlive(TL_DEAD_PID) === false);
 ok('TL-13 pidAlive: pid 1 exists (EPERM/other-owner or signalable) → alive (true)', pidAlive(1) === true);
-
-// ---- bug-hunt (BH-*) ----
-const BH_GOOD = { title: 'Off-by-one in payoff loop', file: 'platform/x.js', symptom: 'last month skipped', repro_hint: 'plan with 1 debt', fix_sketch: 'use <=', test_sketch: 'assert final month included', severity: 'high', confidence: 0.9 };
-const fe = () => true; // pretend every named file exists
-ok('BH-1 well-formed candidate survives',
-  (r => r.survivors.length === 1 && r.rejected.length === 0)(filterCandidates({ candidates: [BH_GOOD], fileExists: fe })));
-ok('BH-2 stable id from file basename + title',
-  candidateId(BH_GOOD) === candidateId({ ...BH_GOOD, symptom: 'different wording' }));
-ok('BH-3 missing test_sketch → rejected (cannot write a regression test)',
-  (r => r.survivors.length === 0 && /test_sketch/.test(r.rejected[0].reason))(filterCandidates({ candidates: [{ ...BH_GOOD, test_sketch: '' }], fileExists: fe })));
-ok('BH-4 file that does not exist → rejected',
-  (r => r.survivors.length === 0 && /file missing/.test(r.rejected[0].reason))(filterCandidates({ candidates: [BH_GOOD], fileExists: () => false })));
-ok('BH-5 low confidence → rejected at the floor',
-  (r => r.survivors.length === 0 && /confidence/.test(r.rejected[0].reason))(filterCandidates({ candidates: [{ ...BH_GOOD, confidence: 0.3 }], fileExists: fe, minConfidence: 0.6 })));
-ok('BH-6 dedup against the existing queue (any status)',
-  (r => r.survivors.length === 0 && /already in queue/.test(r.rejected[0].reason))(filterCandidates({ candidates: [BH_GOOD], haveIds: [candidateId(BH_GOOD)], fileExists: fe })));
-ok('BH-7 duplicate within the same batch dropped once',
-  (r => r.survivors.length === 1 && r.rejected.length === 1 && /duplicate within batch/.test(r.rejected[0].reason))(filterCandidates({ candidates: [BH_GOOD, { ...BH_GOOD }], fileExists: fe })));
-ok('BH-8 maxNew caps the batch',
-  filterCandidates({ candidates: [BH_GOOD, { ...BH_GOOD, title: 'B', file: 'platform/b.js' }, { ...BH_GOOD, title: 'C', file: 'platform/c.js' }], fileExists: fe, maxNew: 2 }).survivors.length === 2);
-ok('BH-9 queue block carries category:bug + file + folded test plan',
-  (b => /category: bug/.test(b) && /file: platform\/x\.js/.test(b) && /test: assert final month included/.test(b))(toQueueBlocks(filterCandidates({ candidates: [BH_GOOD], fileExists: fe }).survivors)));
-ok('BH-10 rationale stays one line even with multiline sketches',
-  toQueueBlocks([{ ...BH_GOOD, id: 'x', symptom: 'line1\nline2', test_sketch: 'a\nb' }]).split('\n').filter(l => l.startsWith('  rationale:')).length === 1);
-ok('BH-11 nextArea rotates deterministically by turn',
-  nextArea(0).name === AREAS[0].name && nextArea(AREAS.length).name === AREAS[0].name && nextArea(1).name === AREAS[1].name);
-ok('BH-12 nextArea tolerates a non-numeric turn → first area',
-  nextArea('not-a-number').name === AREAS[0].name);
-ok('BH-13 same basename in different dirs → distinct ids (no collision)',
-  candidateId({ file: 'a/x.js', title: 'guard for null user' }) !== candidateId({ file: 'b/x.js', title: 'guard for null user' }));
-
-// ---- board-mirror (BM-*) ----
-const BM_BOARD = '# Sauce Board\n\n## In Planning\n\n- [ ] [[Real human card]]\n\n## Completed\n\n- [x] [[Old card]]\n\n## Archive\n';
-const BM_Q = [
-  { id: 'bug-x-foo', title: 'Foo bug', category: 'bug', source: 'bug-hunt', status: 'proposed' },
-  { id: 'cov-y-bar', title: 'Cover bar', category: 'test', source: 'coverage-matrix', status: 'proposed' },
-  { id: 'bug-z-done', title: 'Done bug', category: 'bug', status: 'done' },
-];
-ok('BM-1 open queue items added to a new Discovered lane',
-  (r => /## Discovered \(autoloop\)/.test(r.boardMd) && r.added.includes('bug-x-foo') && r.added.includes('cov-y-bar'))(syncLane({ boardMd: BM_BOARD, queueItems: BM_Q })));
-ok('BM-2 done/non-open items are NOT mirrored',
-  !syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd.includes('bug-z-done'));
-ok('BM-3 lane inserted before Completed, human columns untouched',
-  (md => md.indexOf('## Discovered') < md.indexOf('## Completed') && /## In Planning\n\n- \[ \] \[\[Real human card\]\]/.test(md) && md.includes('[[Old card]]'))(syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd));
-ok('BM-4 cards rendered as [[id|title]]',
-  syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd.includes('[[bug-x-foo|Foo bug]]'));
-ok('BM-5 idempotent — second sync is a no-op',
-  (r1 => { const r2 = syncLane({ boardMd: r1.boardMd, queueItems: BM_Q }); return r2.boardMd === r1.boardMd && r2.added.length === 0; })(syncLane({ boardMd: BM_BOARD, queueItems: BM_Q })));
-ok('BM-6 user-checked card → reported as dismissed + dropped from lane',
-  (() => { const seeded = syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd.replace('[ ] [[bug-x-foo', '[x] [[bug-x-foo'); const r = syncLane({ boardMd: seeded, queueItems: BM_Q }); return r.dismissed.includes('bug-x-foo') && !r.boardMd.includes('bug-x-foo'); })());
-ok('BM-7 item that left the queue is removed from the lane',
-  (() => { const seeded = syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd; const r = syncLane({ boardMd: seeded, queueItems: [BM_Q[0]] }); return r.removed.includes('cov-y-bar') && !r.boardMd.includes('cov-y-bar') && r.boardMd.includes('bug-x-foo'); })());
-ok('BM-8 parseLane reads id, title, checked state',
-  (cards => cards.length === 1 && cards[0].id === 'bug-x-foo' && cards[0].title === 'Foo bug' && cards[0].checked === true)(parseLane('## Discovered (autoloop)\n\n- [x] [[bug-x-foo|Foo bug]]\n', LANE)));
-ok('BM-9 title with ]] / | chars is sanitized in the lane line',
-  (line => !/\]\]\s*\S*\|/.test(line.replace('[[bug-q|', '')) && line.startsWith('- [ ] [[bug-q|'))(laneLine({ id: 'bug-q', title: 'a]] b | c' })));
-ok('BM-10 empty queue → lane exists but has no cards',
-  (md => /## Discovered \(autoloop\)/.test(md) && !/\[\[/.test(md.split('## Discovered')[1].split('## Completed')[0]))(syncLane({ boardMd: BM_BOARD, queueItems: [] }).boardMd));
-// kanban:settings trailer must survive even when the lane is the LAST column.
-const BM_SETTINGS = '# Board\n\n## In Planning\n\n- [ ] [[Human]]\n\n%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%';
-ok('BM-11 settings trailer survives when lane is appended last',
-  (md => md.includes('kanban-plugin') && md.includes('[[bug-x-foo|Foo bug]]') && md.indexOf('## Discovered') < md.indexOf('%% kanban:settings'))(syncLane({ boardMd: BM_SETTINGS, queueItems: BM_Q }).boardMd));
-ok('BM-12 re-sync of a settings-trailer board is idempotent + keeps settings',
-  (r1 => { const r2 = syncLane({ boardMd: r1.boardMd, queueItems: BM_Q }); return r2.boardMd === r1.boardMd && r2.boardMd.includes('kanban-plugin'); })(syncLane({ boardMd: BM_SETTINGS, queueItems: BM_Q })));
-// dismissInQueue: prefix-safe + cannot cross into the next item.
-const BM_DQ = '- id: bug-x\n  title: X\n  status: proposed\n\n- id: bug-x-foo\n  title: XF\n  status: proposed\n';
-ok('BM-13 dismiss bug-x flips ONLY bug-x, not the prefixed bug-x-foo',
-  (q => /id: bug-x\n  title: X\n  status: dismissed/.test(q) && /id: bug-x-foo\n  title: XF\n  status: proposed/.test(q))(dismissInQueue(BM_DQ, ['bug-x'])));
-ok('BM-14 dismiss a status-less item does NOT flip the next item',
-  (q => /id: cov-y\n  title: Y\n  status: proposed/.test(q))(dismissInQueue('- id: bug-ns\n  title: NS\n\n- id: cov-y\n  title: Y\n  status: proposed\n', ['bug-ns'])));
 
 // ---- deploy (DP-*) ----
 ok('DP-1 cmpVersion orders patch/minor/major + tolerates v-prefix',

@@ -38,9 +38,5 @@ node_modules/
 # Git worktrees (created via /Users/willfell/.claude/.../using-git-worktrees skill).
 .worktrees/
 .superpowers/
+.local/
 
-# Sauce Autoloop runtime state (never tracked): turn log + kill-switch sentinel + reconciled-PR ledger.
-.autoloop.log
-.autoloop-halt
-.autoloop-lock
-.autoloop-reconciled.json
