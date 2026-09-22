@@ -222,6 +222,23 @@ const r10 = nodes.runNode({ ...baseCtx, state: { ...baseCtx.state, vars: { who: 
 ok('ND-13 shell run text is substituted', r10.outcome === 'pass' && r10.result.stdout.trim() === 'me');
 ok('ND-14 prompt tail names the result path and schema', /result\.json/.test(workers.promptTail('/tmp/r/result.json')) && /sauce\.worker-result\.v1/.test(workers.promptTail('/tmp/r/result.json')));
 
+// ---- launchd (LD-*) ----
+const launchd = require(path.join(ENGINE, 'launchd.js'));
+const plist = launchd.renderPlist({ user: 'will', home: '/Users/will', nodePath: '/usr/local/bin/node', cliPath: '/opt/sauce/platform/cli/sauce-cli.js', notePath: '/Users/will/vault/spice/graphs/nightly.md', slug: 'nightly', intervalSeconds: 600 });
+ok('LD-1 plist carries the label, note path, cli, interval and no template residue',
+  plist.includes('<string>com.will.sauce-run.nightly</string>') && plist.includes('<string>/Users/will/vault/spice/graphs/nightly.md</string>') && plist.includes('<string>/opt/sauce/platform/cli/sauce-cli.js</string>') && plist.includes('<integer>600</integer>') && !plist.includes('{{$'));
+ok('LD-2 plist dict and array tags balance', (plist.match(/<dict>/g) || []).length === (plist.match(/<\/dict>/g) || []).length && (plist.match(/<array>/g) || []).length === (plist.match(/<\/array>/g) || []).length);
+const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-home-'));
+const calls = [];
+const origHome = os.homedir;
+os.homedir = () => fakeHome;
+const inst = launchd.install({ notePath: '/Users/will/vault/spice/graphs/nightly.md', intervalSeconds: 300, cliPath: '/opt/sauce/platform/cli/sauce-cli.js', launchctl: (cmd) => calls.push(cmd) });
+ok('LD-3 install writes the plist under LaunchAgents and loads it', fs.existsSync(inst.plist) && inst.plist.startsWith(path.join(fakeHome, 'Library', 'LaunchAgents')) && calls.some((c) => /launchctl load -w/.test(c)));
+const un = launchd.uninstall({ notePath: '/Users/will/vault/spice/graphs/nightly.md', launchctl: (cmd) => calls.push(cmd) });
+ok('LD-4 uninstall unloads and removes the plist', un.removed === true && !fs.existsSync(inst.plist));
+os.homedir = origHome;
+fs.rmSync(fakeHome, { recursive: true, force: true });
+
 fs.rmSync(vault, { recursive: true, force: true });
 fs.rmSync(repo, { recursive: true, force: true });
 
