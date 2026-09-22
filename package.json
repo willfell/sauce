@@ -115,6 +115,7 @@
     "test:loop-config": "node platform/test/run-loop-config.js",
     "test:engine-graph": "node platform/test/run-engine-graph.js",
     "test:engine-smoke": "node platform/test/run-engine-smoke.js",
+    "test:engine-install": "node platform/test/run-engine-install.js",
     "test:loop-binding": "node platform/test/run-loop-binding.js",
     "test:mayo-plugin-surface": "node platform/test/run-mayo-plugin-surface.js",
     "test:mayo-codex-routers": "node platform/test/run-mayo-codex-routers.js",

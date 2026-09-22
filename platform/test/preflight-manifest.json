@@ -1457,6 +1457,14 @@
         "platform/test/run-engine-smoke.js"
       ],
       "lane": "parallel"
+    },
+    {
+      "id": "engine-install",
+      "cmd": [
+        "node",
+        "platform/test/run-engine-install.js"
+      ],
+      "lane": "parallel"
     }
   ]
 }

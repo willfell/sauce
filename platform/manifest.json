@@ -206,6 +206,11 @@
       "name": "delivery",
       "version": "0.7.0",
       "path": "mechanisms/delivery"
+    },
+    {
+      "name": "engine",
+      "version": "0.1.0",
+      "path": "mechanisms/engine"
     }
   ],
   "blueprints": [

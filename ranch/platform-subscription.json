@@ -129,6 +129,10 @@
     {
       "name": "chrome-bar",
       "version": "0.4.3"
+    },
+    {
+      "name": "engine",
+      "version": "0.1.0"
     }
   ],
   "blueprints": [

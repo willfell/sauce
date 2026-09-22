@@ -158,6 +158,16 @@ module.exports = async function (tp) {
     // run 1, heal re-adds it on run 2). Wired after the install loop instead —
     // see the applyNoteChromeHeal call following pruneTemplaterStartupOrphans.
 
+    // 0. always-on mechanisms: the engine is the core, not an option, and
+    //    platform-claude carries the lifecycle commands every vault needs.
+    //    A subscription that omits either is healed here and written back so
+    //    the pin is visible in ranch/platform-subscription.json.
+    const alwaysOnAdded = ensureAlwaysOnMechanisms(subscription, manifest, installedNow.history, git);
+    if (alwaysOnAdded.length) {
+      await writeJson(app, "ranch/platform-subscription.json", subscription);
+      new Notice(`platformInstall: subscribed always-on mechanism(s) ${alwaysOnAdded.join(", ")}`, 6000);
+    }
+
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
 
@@ -1426,6 +1436,26 @@ async function writeJson(app, path, obj) {
 async function approvalGate(tp, message) {
   const choice = await tp.system.suggester(["Approve", "Skip"], [true, false], false, message);
   return choice === true;
+}
+
+const ALWAYS_ON_MECHANISMS = ["platform-claude", "engine"];
+
+// Append any always-on mechanism the subscription lacks, pinned at the
+// catalogue version. Returns the "name@version" strings it added.
+function ensureAlwaysOnMechanisms(subscription, manifest, history, git) {
+  const added = [];
+  for (const name of ALWAYS_ON_MECHANISMS) {
+    const cat = (manifest.mechanisms || []).find((m) => m.name === name);
+    if (!cat) continue;
+    if (!Array.isArray(subscription.mechanisms)) subscription.mechanisms = [];
+    if (subscription.mechanisms.some((m) => m && m.name === name)) continue;
+    subscription.mechanisms.push({ name, version: cat.version });
+    added.push(`${name}@${cat.version}`);
+  }
+  if (added.length && history) {
+    history.push({ event: "heal", step: "always_on_subscription", message: `subscribed ${added.join(", ")}`, git_commit: git ? git.commit : null, git_tag: git ? git.tag : null, git_dirty: git ? git.dirty : null, attempted_at: new Date().toISOString() });
+  }
+  return added;
 }
 
 function resolveDependencies(subscription, manifest) {
@@ -22617,6 +22647,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // by run-helper-cases.js (HC-RF1/HC-RF2/HC-RF3 cover the array-support
     // patch). Pure additive; does not affect the function-as-default export.
     module.exports.applyRuleFragment = applyRuleFragment;
+    module.exports.ensureAlwaysOnMechanisms = ensureAlwaysOnMechanisms;
+    module.exports.ALWAYS_ON_MECHANISMS = ALWAYS_ON_MECHANISMS;
     module.exports.applyBundledPlugin = applyBundledPlugin;
     module.exports.resetSourceContributions = resetSourceContributions;
     // sentinel-guarded one-time plugin-removal heals — expose for
