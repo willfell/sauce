@@ -9,7 +9,7 @@ Runs a graph note through the Sauce engine and reports the receipt. The engine o
 
 ## Pre-flight
 
-1. **Confirm vault shape.** `ranch/platform-config.json` must exist under the vault; otherwise abort with `[!warning] /sauce requires a sauce vault` and stop.
+1. **Confirm vault shape.** `ranch/platform-config.json` must exist under the vault; otherwise abort with `[!warning] Not a Sauce vault: ranch/platform-config.json not found` and stop.
 2. **Confirm the CLI.** `sauce run --help` must print usage; otherwise report `brew install willfell/sauce/sauce` (or `brew upgrade sauce`) and stop.
 
 ## Steps
