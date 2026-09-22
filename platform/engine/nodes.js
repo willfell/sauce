@@ -140,6 +140,11 @@ function runShell(ctx, node) {
     if (typeof v === 'string' && /^[a-z][a-z0-9-]*$/.test(v)) { outcome = v; summary = `${node.outcome_from}=${v}`; }
     else if (r.exit_code === 0) { outcome = 'fail'; summary = `receipt has no usable "${node.outcome_from}"`; }
   }
+  if (typeof node.outcome === 'string' && node.outcome && r.exit_code === 0) {
+    const v = vars.substitute(node.outcome, subCtx(ctx, node)).trim();
+    if (/^[a-z][a-z0-9-]*$/.test(v)) { outcome = v; summary = `outcome=${v}`; }
+    else { outcome = 'fail'; summary = `outcome expression produced "${v}", not a valid outcome`; }
+  }
   const capturedVars = receipt && node.vars_from && typeof node.vars_from === 'object'
     ? Object.fromEntries(Object.entries(node.vars_from).map(([k, p]) => [k, pick(receipt, p)]).filter(([, v]) => v !== undefined))
     : {};

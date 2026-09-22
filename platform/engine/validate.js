@@ -28,6 +28,8 @@ function validateNode(n, errors) {
   } else if (n.type === 'shell') {
     need('run');
     if (n.capture !== undefined && n.capture !== 'json') errors.push(err('bad_field', `node "${id}" capture must be "json"`, { node: id }));
+    if (n.vars_from !== undefined && (!n.vars_from || typeof n.vars_from !== 'object' || Array.isArray(n.vars_from) || Object.values(n.vars_from).some((v) => typeof v !== 'string'))) errors.push(err('bad_field', `node "${id}" vars_from must map var names to receipt paths`, { node: id }));
+    if (n.outcome !== undefined && typeof n.outcome !== 'string') errors.push(err('bad_field', `node "${id}" outcome must be a string (may use \${...})`, { node: id }));
   } else if (n.type === 'human') {
     need('ask');
   }
@@ -39,6 +41,7 @@ function validateGraph(graph) {
   const nodes = graph && Array.isArray(graph.nodes) ? graph.nodes : [];
   const edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
   if (nodes.length === 0) errors.push(err('no_nodes', 'graph has no nodes'));
+  if (graph && graph.vars !== undefined && (!graph.vars || typeof graph.vars !== 'object' || Array.isArray(graph.vars) || Object.values(graph.vars).some((v) => v !== null && typeof v === 'object'))) errors.push(err('bad_vars', 'vars must be a map of scalar defaults'));
   const ids = new Set();
   for (const n of nodes) {
     validateNode(n, errors);
@@ -59,7 +62,6 @@ function validateGraph(graph) {
   if (errors.length) return { ok: false, errors };
 
   const entries = entryNodes({ nodes, edges });
-  if (entries.length === 0) errors.push(err('no_entry', 'every node has an incoming unbounded edge; at least one node must start the run'));
 
   // A cycle every edge of which lacks `max` can never terminate.
   const unbounded = new Map();
@@ -85,11 +87,17 @@ function validateGraph(graph) {
   return { ok: errors.length === 0, errors, entries };
 }
 
-// Entry nodes start the run: every node no unbounded edge points at. A
-// retry edge (one carrying max:) back to the first node does not demote it.
+// Entry nodes start the run: the first declared node, plus every node no
+// edge points at. Declaration order is the author's intent; a retry edge
+// back to the first node never demotes it, and a node only reachable
+// through a bounded edge (a repair step) never becomes an accidental entry.
 function entryNodes(graph) {
-  const incoming = new Set((graph.edges || []).filter((e) => e.max === undefined).map((e) => e.to));
-  return (graph.nodes || []).filter((n) => n && !incoming.has(n.id)).map((n) => n.id);
+  const nodes = (graph.nodes || []).filter((n) => n && typeof n.id === 'string');
+  if (!nodes.length) return [];
+  const incoming = new Set((graph.edges || []).map((e) => e.to));
+  const out = [nodes[0].id];
+  for (const n of nodes.slice(1)) if (!incoming.has(n.id)) out.push(n.id);
+  return out;
 }
 
 module.exports = { validateGraph, entryNodes, NODE_TYPES, WORKERS };

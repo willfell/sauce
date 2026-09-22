@@ -100,8 +100,9 @@ ok('GV-6 bad on', codes(validateGraph(g([A, B], [{ from: 'a', to: 'b', on: 'PASS
 ok('GV-7 bad max', codes(validateGraph(g([A, B], [{ from: 'a', to: 'b', max: 0 }]))).includes('bad_max'));
 ok('GV-8 unbounded cycle refused', codes(validateGraph(g([A, B], [{ from: 'a', to: 'b' }, { from: 'b', to: 'a', on: 'fail' }]))).includes('unbounded_cycle'));
 ok('GV-9 bounded cycle accepted', validateGraph(g([A, B], [{ from: 'a', to: 'b' }, { from: 'b', to: 'a', on: 'fail', max: 1 }])).ok === true);
-ok('GV-10 no entry node when every node has an unbounded incoming edge', codes(validateGraph(g([A, B], [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }]))).includes('no_entry'));
-ok('GV-10b entries ignore bounded edges', validateGraph(gn.graph).entries.join(',') === 'implement');
+ok('GV-10 the first declared node is always an entry', validateGraph(g([A, B], [{ from: 'a', to: 'b' }, { from: 'b', to: 'a', max: 1 }])).entries.join(',') === 'a');
+ok('GV-10b a node only reachable through a bounded edge is not an entry', validateGraph(g([A, B, { id: 'c', type: 'shell', run: 'true' }], [{ from: 'a', to: 'b' }, { from: 'b', to: 'c', on: 'fail', max: 2 }])).entries.join(',') === 'a');
+ok('GV-10c a second node nothing points at is a parallel entry', validateGraph(g([A, B, { id: 'c', type: 'shell', run: 'true' }], [{ from: 'a', to: 'b' }])).entries.join(',') === 'a,c');
 ok('GV-11 judge needs exactly one of run/gate', codes(validateGraph(g([{ id: 'j', type: 'judge', run: 'x', gate: 'adequacy' }], []))).includes('missing_field')
   && codes(validateGraph(g([{ id: 'j', type: 'judge' }], []))).includes('missing_field'));
 ok('GV-12 unknown type', codes(validateGraph(g([{ id: 'q', type: 'robot' }], []))).includes('unknown_type'));
@@ -166,6 +167,9 @@ const vErr = throwsWith(() => vars.substitute('${vars.missing}', vctx), /missing
 ok('VR-2 unknown reference throws VarsError', vErr && vErr.name === 'VarsError');
 ok('VR-3 text without tokens untouched', vars.substitute('plain $ text {x}', vctx) === 'plain $ text {x}');
 ok('VR-4 non-string values stringified', vars.substitute('${result.claim.receipt}', vctx) === '{"lease_token":"tok"}');
+ok('VR-5 a var default may reference another var', vars.substitute('${vars.cmd}', { ...vctx, vars: { cmd: 'node ${vars.gate} --cwd ${vars.wt}', gate: '/g.js', wt: '/w' } }) === 'node /g.js --cwd /w');
+const loop = throwsWith(() => vars.substitute('${vars.a}', { vars: { a: '${vars.b}', b: '${vars.a}' } }), /settle/);
+ok('VR-6 a self-referencing var is refused, not looped', loop && loop.name === 'VarsError');
 
 // ---- isolation (IS-*) ----
 const iso = require(path.join(ENGINE, 'isolation.js'));

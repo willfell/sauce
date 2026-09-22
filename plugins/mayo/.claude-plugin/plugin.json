@@ -1,6 +1,6 @@
 {
   "name": "mayo",
-  "description": "Sauce meta-loop skill surface: /mayo:init binds a repo to a vault/board via .loop/config.json; status/review/propose/plan/execute/run/intake/block-review drive the board exclusively through the coordinator and card-intake rails. Versioned by git commit — reload with /plugin marketplace update sauce.",
+  "description": "Sauce meta-loop skill surface on top of the Sauce engine: /mayo:init binds a repo to a vault/board via .loop/config.json; status/review/propose/plan/execute/run/intake/block-review drive the board exclusively through the coordinator and card-intake rails, and /mayo:run can opt into the engine's shipped delivery-slice graph (sauce run). Requires the sauce install that ships the coordinator (brew or a local clone). Versioned by git commit — reload with /plugin marketplace update sauce.",
   "author": {
     "name": "Will Fellhoelter",
     "url": "https://github.com/willfell/sauce"

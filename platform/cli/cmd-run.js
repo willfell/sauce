@@ -192,7 +192,7 @@ async function run(ctx, args) {
     catch (e) { return refuse(flags, e.code || "run_failed", e.message); }
     const runCtx = created.ctx;
     const receipt = flags.follow
-        ? engine.follow(runCtx, { intervalSeconds: flags.interval > 0 ? flags.interval : 30, beforeSleep: (r) => (r.status === "parked" ? flags.waitHuman : true) })
+        ? engine.follow(runCtx, { intervalSeconds: flags.interval > 0 ? flags.interval : 30, waitHuman: flags.waitHuman })
         : engine.tick(runCtx);
     emit(flags, receipt, printReceipt);
     process.exitCode = receipt.status === "failed" ? 1 : 0;

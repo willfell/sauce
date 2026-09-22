@@ -102,7 +102,9 @@ function follow(ctx, options) {
   const intervalMs = Math.max(1000, (opts.intervalSeconds || 30) * 1000);
   const deadline = Date.now() + Math.max(1, opts.maxMinutes || 24 * 60) * 60 * 1000;
   let r = tick(ctx);
-  while ((r.status === 'running' || r.status === 'parked') && Date.now() < deadline) {
+  // A parked run waits for a person; follow returns at that point unless the
+  // caller asked to keep polling the note for the answer (waitHuman).
+  while ((r.status === 'running' || (r.status === 'parked' && opts.waitHuman)) && Date.now() < deadline) {
     if (opts.onParked && r.status === 'parked') opts.onParked(r);
     if (typeof opts.beforeSleep === 'function' && opts.beforeSleep(r) === false) break;
     sleepSync(intervalMs);

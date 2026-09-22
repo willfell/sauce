@@ -70,6 +70,9 @@ ok('SM-5 handoff: build prompt carries plan summary and substituted var',
   (p => /## Handoff context/.test(p) && /From node `plan`/.test(p) && /Build flaky-harness\./.test(p))(fs.readFileSync(path.join(a.ctx.runDir, 'build', 'prompt.md'), 'utf8')));
 ok('SM-6 build ran in a worktree on its own branch', fs.existsSync(path.join(wtA, 'ok.txt')) && git(['rev-parse', '--abbrev-ref', 'HEAD'], wtA) === `sauce/${a.runId}-build` && r1.worktrees.includes(wtA));
 ok('SM-7 per-node artifacts on disk', ['plan/result.json', 'plan/prompt.md', 'build/stdout.log', 'check/command.txt', 'check/stdout.log'].every((f) => fs.existsSync(path.join(a.ctx.runDir, f))));
+const aTwin = engine.createRun({ vault, notePath: NOTE_A, now: new Date(2026, 8, 22, 12, 0, 0) });
+ok('SM-3b a second run minted in the same second gets its own id and ledger', aTwin.runId === `${a.runId}-2` && engine.readEvents(vault, aTwin.runId).length === 1);
+fs.unlinkSync(path.join(engine.runsDir(vault), `${aTwin.runId}.jsonl`));
 const r1again = engine.tick(a.ctx);
 ok('SM-8 ticking a finished run is a no-op', r1again.status === 'done' && r1again.executed.length === 0 && engine.readEvents(vault, a.runId).length === evA.length);
 const noteA = fs.readFileSync(NOTE_A, 'utf8');

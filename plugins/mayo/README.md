@@ -41,3 +41,7 @@ Every skill starts by resolving this file (`scripts/loop-config.js resolve --jso
 Non-negotiables baked into every body: the coordinator is the sole board writer, card-intake the sole planning writer; Gate B + the three sequential review lenses never weaken; receipts decide truth.
 
 Full runbook: `Docs/agent-guides/mayo-plugin.md` in the sauce repo.
+
+## Engine mode (opt-in)
+
+mayo is a consumer of the Sauce engine, not a sibling. The slice pipeline `/mayo:run` drives in prose is also shipped as a graph note, `platform/engine/graphs/delivery-slice.md`, that `sauce run` executes: coordinator verbs as `shell` nodes, review lenses as `agent` nodes, repair budgets as `max:` edges. Ask `/mayo:run` to "run it through the engine" to use it. The prose path stays the default until one live epic completes cleanly through the graph and its ledger has been diffed against a coordinator run of the same shape. See `Docs/engine.md`.

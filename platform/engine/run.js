@@ -40,6 +40,17 @@ function stamp(d) {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+// Two runs minted in the same second must not share a ledger; suffix the
+// second and later ones so every run id maps to exactly one file.
+function uniqueRunId(vault, base) {
+  if (!fs.existsSync(ledger.runPath(vault, base))) return base;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${base}-${i}`;
+    if (!fs.existsSync(ledger.runPath(vault, candidate))) return candidate;
+  }
+  throw new RunError('run_id_exhausted', `could not mint a unique run id for ${base}`);
+}
+
 function loadGraphNote(notePath) {
   if (!fs.existsSync(notePath)) throw new RunError('note_missing', `graph note not found: ${notePath}`);
   const parsed = parseGraphNote(fs.readFileSync(notePath, 'utf8'));
@@ -74,15 +85,16 @@ function createRun({ vault, notePath, repo, workerOverride, env, vars, now }) {
   const abs = path.resolve(notePath);
   const parsed = loadGraphNote(abs);
   const repoAbs = repoFor(parsed.frontmatter, repo);
-  const runId = `${slugOf(abs)}-${stamp(now || new Date())}`;
+  const runId = uniqueRunId(vault, `${slugOf(abs)}-${stamp(now || new Date())}`);
+  const mergedVars = Object.assign({}, parsed.graph.vars || {}, vars || {});
   const graphHash = crypto.createHash('sha256').update(parsed.block).digest('hex').slice(0, 16);
   fs.mkdirSync(ledger.runDir(vault, runId), { recursive: true });
   ledger.appendEvent(vault, runId, {
     type: 'run.created', run_id: runId,
     graph_note: path.relative(vault, abs), graph_hash: graphHash, repo: repoAbs,
-    vars: Object.assign({}, vars || {}), worker_override: workerOverride || null, host: os.hostname(),
+    vars: mergedVars, worker_override: workerOverride || null, host: os.hostname(),
   });
-  const ctx = buildCtx({ vault, notePath: abs, runId, parsed, repo: repoAbs, workerOverride, env, vars });
+  const ctx = buildCtx({ vault, notePath: abs, runId, parsed, repo: repoAbs, workerOverride, env, vars: mergedVars });
   return { runId, ctx, parsed };
 }
 

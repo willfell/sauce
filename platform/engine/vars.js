@@ -36,9 +36,19 @@ function stringify(v) {
   return JSON.stringify(v);
 }
 
+// A var default may itself contain ${...} (the shipped delivery-slice graph
+// builds commands from other vars), so substitution repeats until the text
+// is stable, bounded to stop a self-referencing var from looping.
 function substitute(text, ctx) {
   if (typeof text !== 'string') return text;
-  return text.replace(TOKEN, (_m, ref) => stringify(lookup(ref, ctx || {})));
+  let cur = text;
+  for (let i = 0; i < 5; i++) {
+    const next = cur.replace(TOKEN, (_m, ref) => stringify(lookup(ref, ctx || {})));
+    if (next === cur) return cur;
+    cur = next;
+  }
+  if (new RegExp(TOKEN.source).test(cur)) throw new VarsError('substitution did not settle after 5 passes (self-referencing var?)');
+  return cur;
 }
 
 module.exports = { substitute, lookup, VarsError };

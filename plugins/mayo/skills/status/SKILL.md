@@ -15,6 +15,8 @@ The read-only glance at whatever board this repo is bound to. Answers "is it wor
 
 ## Steps
 
+0. If the bound vault has `ranch/engine/runs/`, run `sauce run --list --json` from the vault and fold any `running` or `parked` engine run into the digest as its own line (run id, graph note, parked node); engine runs and coordinator claims are reported side by side, never merged.
+
 1. Capture status: run `node <coordinator> status --json` (env applied, cwd = repo root) into a temp file. On a freshly bound repo with no ledger yet this legitimately reports zero tracked cards — that is a real answer, not an error.
 2. Recent releases: `git tag --sort=-creatordate | grep '^v' | head -5` (comma-join; skip silently if the repo has no version tags).
 3. Build the digest: `node <digest> --status <tmp> --fid "<config.fid_abs>" --releases <v1,v2,...>` (omit `--fid` when the binding has none — the self-ratified feed is then empty). Reading UPDATES the last-seen marker; add `--peek` when the user is only glancing mid-conversation and will want the full since-section later.

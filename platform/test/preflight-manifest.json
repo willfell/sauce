@@ -1465,6 +1465,14 @@
         "platform/test/run-engine-install.js"
       ],
       "lane": "parallel"
+    },
+    {
+      "id": "engine-delivery-graph",
+      "cmd": [
+        "node",
+        "platform/test/run-engine-delivery-graph.js"
+      ],
+      "lane": "parallel"
     }
   ]
 }
