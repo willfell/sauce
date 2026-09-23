@@ -1,11 +1,6 @@
 {
   "warnings": [
     {
-      "file": "platform/mechanisms/kanban-status-sync/kanban-status-sync.js",
-      "line": 150,
-      "snippet": "* - A column is a depth-2 heading: `## ColumnName`."
-    },
-    {
       "file": "platform/mechanisms/cowork-reconciler/reconciler-log.js",
       "line": 18,
       "snippet": "const lines = [`## ${ts} (run-id: rl-${timestamp.getTime()})`];"
@@ -36,18 +31,33 @@
       "snippet": "lines.push(\"\", \"## Violations by file\", \"\");"
     },
     {
+      "file": "platform/engine/nodes.js",
+      "line": 75,
+      "snippet": "return lines.length ? ['', '## Handoff context', '', ...lines].join('\\n') : '';"
+    },
+    {
+      "file": "platform/engine/projection.js",
+      "line": 12,
+      "snippet": "const HEADING = '## Runs';"
+    },
+    {
       "file": "platform/cli/cmd-audit.js",
-      "line": 106,
+      "line": 108,
       "snippet": "lines.push(`## ${sev} (${rows.length})`);"
     },
     {
       "file": "platform/cli/cmd-audit.js",
-      "line": 135,
+      "line": 137,
       "snippet": "lines.push(`## ${sev} (${rows.length})`);"
     },
     {
       "file": "platform/cli/cmd-audit.js",
-      "line": 167,
+      "line": 169,
+      "snippet": "lines.push(`## ${sev} (${rows.length})`);"
+    },
+    {
+      "file": "platform/cli/cmd-audit.js",
+      "line": 200,
       "snippet": "lines.push(`## ${sev} (${rows.length})`);"
     },
     {
@@ -139,16 +149,6 @@
       "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
       "line": 598,
       "snippet": "const h2 = registryContent.indexOf('## Last 7 days of materialization');"
-    },
-    {
-      "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
-      "line": 178,
-      "snippet": "if (line.startsWith(\"## \")) {"
-    },
-    {
-      "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
-      "line": 179,
-      "snippet": "currentLane = line.replace(\"## \", \"\").trim();"
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstreams.js",

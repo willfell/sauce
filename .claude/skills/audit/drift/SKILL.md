@@ -7,6 +7,10 @@ description: Audit the sauce claude_surface deployment for drift. Shells `sauce 
 
 Runs the claude-surface audit pass against the current vault. Parses the CLI report's findings + counts, groups them by severity, and emits one markdown callout per non-empty severity level. Does not auto-fix — surfaces the drift and lets the user decide which remedy applies (`/install` to re-deploy, edit `.commands.local/` to shadow, edit subscription to drop a stale mechanism, etc.).
 
+## Engine pass
+
+When the user asks whether the engine is installed (or after `/install`), also run `sauce audit --engine --vault "$(pwd)"` and render its findings the same way. A clean pass prints `Engine surface intact`; `engine_surface_missing` or `engine_dir_missing` means `sauce update` has not run against this vault since the engine mechanism became always-on.
+
 ## Pre-flight
 
 1. **Confirm vault shape.** Read `ranch/platform-config.json`. If missing, abort with `[!warning] /audit requires a sauce vault — ranch/platform-config.json not found.` and stop. Do not shell out.

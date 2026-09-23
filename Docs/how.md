@@ -366,6 +366,7 @@ The CLI entry point is `platform/cli/sauce-cli.js`. The dispatcher resolves whic
 | `update` | `platform/cli/cmd-update.js` | `git fetch + git reset --hard origin/main` inside `pantry/`. Working-tree dirty check; `--force` overrides. If `package.json` SHA changed, re-runs `npm install --omit=dev`. Re-invokes the installer phase. The only verb with substantial new logic. |
 | `status` | `platform/cli/cmd-status.js` | Read-only state report: workshop git head + dirty state + commits-behind-origin count, subscribed mechanism / blueprint counts, drift summary. No writes. Uses the v0.1.2 `gitState()` helper (landmine #14 — best-effort, never throws). |
 | `wizard` | `platform/cli/cmd-wizard.js` | Falls through to the existing `runReRunWizard()` from `bootstrap-lib/wizard.js`. No new visual code. |
+| `run` | `platform/cli/cmd-run.js` | Runs a graph note through the Sauce engine (`platform/engine/`): one tick by default, `--follow` until a terminal or `human` node, plus `--dry-run` / `--status` / `--list` / `--sweep` / `--install-launchd`. Context-free in the dispatcher like `doctor` — the vault is resolved from the note's own ancestors first, then the cwd walk, then `$SAUCE_VAULT`. Exit 0 done/parked/listed, 1 failed, 2 refusal. |
 
 Each verb file is 50-150 LOC; per v0.21.1 lesson (a) the per-verb structure (vs single 1000-LOC switch) keeps insertion points 200+ LOC apart so future cycles can dispatch parallel subagents safely.
 
