@@ -201,7 +201,7 @@ edges:
   - { from: advance, to: refresh, on: refresh-feature, max: 3 }
   - { from: refresh, to: verify-gates }
   - { from: advance, to: verify-gates, on: verify-gates, max: 2 }
-  - { from: advance, to: implement, on: needs-implementation, max: 1, budget: repair }
+  - { from: advance, to: implement, on: needs-implementation, max: 1, budget: reimplement }
   - { from: advance, to: advance, on: deploy, max: 10 }
   - { from: advance, to: done, on: complete }
   - { from: advance, to: projection-failed, on: completion-projection-failed }
@@ -214,4 +214,6 @@ edges:
   - { from: supersession-depth, to: depth-exceeded, on: fail }
   - { from: supersede, to: superseded, on: pass }
   - { from: advance, to: parked-on-dependency, on: parked }
+  - { from: advance, to: halted, on: halted }
+  - { from: advance, to: needs-inspection, on: exhausted }
 ```

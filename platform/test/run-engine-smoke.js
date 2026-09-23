@@ -129,6 +129,24 @@ const rd = engine.tick(d.ctx);
 const sD = engine.reduce(d.ctx.graph, engine.readEvents(vault, d.runId));
 ok('SM-19 exhausted retry budget ends the run failed with outcome exhausted', rd.status === 'failed' && rd.final_outcome === 'exhausted' && sD.nodes.try.attempts === 3 && sD.edge_counts['try->fix'] === 2, JSON.stringify({ rd, counts: sD.edge_counts }));
 
+// ---- Graph R: an end node named with a reserved status word is still terminal ----
+// The scheduler once inferred terminality from the status string, so a run
+// ending on an outcome literally named "parked" looked non-terminal: it kept
+// its lease, showed no checkbox, and every later tick did nothing while
+// reporting success. Terminality is a ledger fact now, and this is the case
+// that proves it.
+const NOTE_R = writeNote('reserved-word-end.md', ['---', 'type: sauce-graph', 'status: idle', '---', '', '# Reserved', '', '\`\`\`sauce', 'nodes:', '  - id: step', '    type: agent', '    worker: fake', '    prompt: x', '    fake: pass', '  - id: parked', '    type: end', '    outcome: parked', 'edges:', '  - { from: step, to: parked }', '\`\`\`', ''].join('\n'));
+const rr = engine.createRun({ vault, notePath: NOTE_R });
+const rrR = engine.tick(rr.ctx);
+const sRR = engine.reduce(rr.ctx.graph, engine.readEvents(vault, rr.runId));
+ok('SM-21 a run whose end node is named "parked" is terminal, holds no park, and shows no checkbox',
+  rrR.status === 'parked' && sRR.terminal === true && engine.isTerminal(sRR) === true && sRR.parked === null
+  && projection.readHumanAnswers(fs.readFileSync(NOTE_R, 'utf8')).length === 0,
+  JSON.stringify({ status: rrR.status, terminal: sRR.terminal, parked: sRR.parked }));
+const rrAgain = engine.tick(rr.ctx);
+ok('SM-22 and a later tick executes nothing instead of spinning forever',
+  rrAgain.executed.length === 0 && engine.readEvents(vault, rr.runId).filter((e) => e.type === 'run.ended').length === 1);
+
 // ---- Graph E: missing result.json is a fail, never a pass ----
 const NOTE_E = writeNote('no-result.md', ['---', 'type: sauce-graph', 'status: idle', '---', '', '```sauce', 'nodes:', '  - id: a', '    type: agent', '    worker: fake', '    prompt: x', '    fake: pass', '    fake_write_result: false', 'edges: []', '```', ''].join('\n'));
 const e = engine.createRun({ vault, notePath: NOTE_E });

@@ -58,10 +58,14 @@ function functionBody(src, header) {
   throw new Error(`unbalanced braces after ${header}`);
 }
 const actionsIn = (body) => Array.from(new Set((body.match(/action: '[a-z-]+'/g) || []).map((m) => m.slice(9, -1))));
-const STEP_ACTIONS = actionsIn(functionBody(COORD_SRC, 'async function stepCard('));
-const ADVANCE_TERMINALS = ['complete', 'completion-projection-failed', 'deploy-failed'].filter((a) => COORD_SRC.includes(`action: '${a}'`));
-const ADVANCE_ACTIONS = Array.from(new Set([...STEP_ACTIONS, ...ADVANCE_TERMINALS]));
-ok('DG-3 the advance action set is derived from stepCard, not hand-listed', STEP_ACTIONS.length >= 11 && STEP_ACTIONS.includes('parked') && STEP_ACTIONS.includes('phase-change'), STEP_ACTIONS.join(','));
+// Every function on the advance path, not just stepCard: the kill switch
+// (commandAdvance) and the promotion lock (promoteAndDeploy) each return
+// actions of their own, and an action nobody routes wedges a live run.
+const ADVANCE_PATH = ['async function stepCard(', 'async function commandAdvance(', 'async function promoteAndDeploy(', 'function completionResult('];
+const STEP_ACTIONS = Array.from(new Set(ADVANCE_PATH.flatMap((h) => actionsIn(functionBody(COORD_SRC, h)))));
+const ADVANCE_ACTIONS = STEP_ACTIONS;
+ok('DG-3 the advance action set is derived from every function on the advance path, not hand-listed',
+  STEP_ACTIONS.length >= 12 && ['parked', 'halted', 'phase-change', 'complete'].every((a) => STEP_ACTIONS.includes(a)), STEP_ACTIONS.sort().join(','));
 const advanceOn = outOf('advance');
 ok('DG-4 every derived advance action is an on: edge out of advance', ADVANCE_ACTIONS.every((a) => advanceOn.includes(a)), 'unrouted: ' + ADVANCE_ACTIONS.filter((a) => !advanceOn.includes(a)).join(','));
 ok('DG-4b every node an advance edge points at is terminal, a repair, or advance itself',
@@ -84,12 +88,17 @@ ok('DG-6b every leased coordinator verb in the graph carries the lease token',
   LEASED_VERBS.every((verb) => parsed.graph.nodes.filter((n) => n.type === 'shell' && n.run.includes(` ${verb} `)).every((n) => n.run.includes('--lease-token \${vars.lease_token}'))),
   LEASED_VERBS.filter((verb) => !parsed.graph.nodes.filter((n) => n.type === 'shell' && n.run.includes(` ${verb} `)).every((n) => n.run.includes('--lease-token \${vars.lease_token}'))).join(','));
 const repairEdges = parsed.graph.edges.filter((e) => e.to === 'implement' && e.max === 1);
-ok('DG-7 every repair edge shares ONE budget, so the card gets one repair in total, not one per gate',
-  repairEdges.length >= 4 && repairEdges.every((e) => e.budget === 'repair'),
-  repairEdges.filter((e) => e.budget !== 'repair').map((e) => e.from).join(','));
-ok('DG-7b exhaustion routes through the supersession-depth probe before any human supersede',
-  parsed.graph.edges.filter((e) => e.on === 'exhausted').length >= 4
-  && parsed.graph.edges.filter((e) => e.on === 'exhausted').every((e) => e.to === 'supersession-depth')
+const quorumRepairs = repairEdges.filter((e) => e.from !== 'advance');
+ok('DG-7 every quorum repair edge shares ONE budget, so the card gets one repair in total, not one per gate',
+  quorumRepairs.length >= 4 && quorumRepairs.every((e) => e.budget === 'repair'),
+  quorumRepairs.filter((e) => e.budget !== 'repair').map((e) => e.from).join(','));
+ok('DG-7c a coordinator-requested re-implementation counts on its own budget, not the quorum repair',
+  repairEdges.filter((e) => e.from === 'advance').every((e) => e.budget && e.budget !== 'repair'));
+const quorumExhausted = parsed.graph.edges.filter((e) => e.on === 'exhausted' && e.from !== 'advance');
+ok('DG-7b quorum exhaustion routes through the supersession-depth probe before any human supersede',
+  quorumExhausted.length >= 4
+  && quorumExhausted.every((e) => e.to === 'supersession-depth')
+  && parsed.graph.edges.some((e) => e.from === 'advance' && e.on === 'exhausted')
   && parsed.graph.nodes.some((n) => n.id === 'supersession-depth' && n.run.includes('supersession-depth'))
   && parsed.graph.edges.some((e) => e.from === 'supersession-depth' && e.to === 'depth-exceeded'));
 const prCmd = String((parsed.graph.vars || {}).pr_command || '');
@@ -212,6 +221,13 @@ const leased = inj.calls.filter((c) => ['record-review', 'verify-gates', 'record
 ok('DR-9h every mutating coordinator call carried the claim lease token',
   leased.length >= 6 && leased.every((c) => c.args.includes('--lease-token') && c.args[c.args.indexOf('--lease-token') + 1] === 'tok-1'),
   leased.filter((c) => !c.args.includes('--lease-token')).map((c) => c.verb).join(','));
+
+// The kill switch: commandAdvance returns halted the moment .autoloop-halt
+// exists, mid-slice. An unrouted halted ended the run reporting success.
+const hl = runGraph(scenarioFile('halted', Object.assign(JSON.parse(fs.readFileSync(happy, 'utf8')), { advance: [{ ok: true, action: 'halted', card: 'GA-1 Demo slice', reason: '.autoloop-halt present' }] })));
+const sHL = engine.reduce(hl.created.ctx.graph, engine.readEvents(vault, hl.created.runId));
+ok('DR-9i advance returning halted stops the run on its own end node, not silently',
+  hl.r.status === 'halted-by-coordinator' && engine.isTerminal(sHL) === true, JSON.stringify({ status: hl.r.status, terminal: engine.isTerminal(sHL) }));
 
 const idle = runGraph(scenarioFile('idle', { claim: [{ ok: true, action: 'no-work', reason: 'no eligible execution card' }] }));
 ok('DR-10 no-work ends the run without touching implement', idle.r.status === 'no-work' && idle.r.nodes.implement === 'idle' && idle.calls.length === 1);

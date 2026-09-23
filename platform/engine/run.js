@@ -69,6 +69,9 @@ function repoFor(frontmatter, override) {
 
 function buildCtx({ vault, notePath, runId, parsed, repo, workerOverride, env, vars }) {
   return {
+    // The names the graph's own vars: block declares. Only these are treated
+    // as graph-authored text during substitution; everything else is a leaf.
+    declaredVars: new Set(Object.keys((parsed.graph && parsed.graph.vars) || {})),
     vault,
     notePath: path.resolve(notePath),
     runId,

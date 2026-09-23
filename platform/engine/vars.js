@@ -39,44 +39,49 @@ function stringify(v) {
 // A var default may itself contain ${...} (the shipped delivery-slice graph
 // builds commands from other vars), so substitution repeats until the text
 // is stable, bounded to stop a self-referencing var from looping.
-function substitute(text, ctx) {
-  if (typeof text !== 'string') return text;
-  let cur = text;
-  for (let i = 0; i < 5; i++) {
-    const next = cur.replace(TOKEN, (_m, _raw, ref) => stringify(lookup(ref, ctx || {})));
-    if (next === cur) return cur;
-    cur = next;
-  }
-  if (new RegExp(TOKEN.source).test(cur)) throw new VarsError('substitution did not settle after 5 passes (self-referencing var?)');
-  return cur;
+// Expansion is single-pass over GRAPH-AUTHORED text. A value that came from
+// outside the graph (a captured receipt field, a worker's summary, a --var)
+// is a LEAF: it is substituted once and never re-scanned, so a ${...} inside
+// a card title is data, not a template. Only a var the graph's own `vars:`
+// block declares is itself graph-authored, so only those are expanded
+// recursively (bounded), which is what lets one default build on another.
+function isDeclared(ref, ctx) {
+  if (!ref.startsWith('vars.')) return false;
+  const declared = ctx && ctx.declaredVars;
+  const name = ref.slice(5).split('.')[0];
+  if (!declared) return false;
+  return declared instanceof Set ? declared.has(name) : Array.isArray(declared) ? declared.includes(name) : Object.prototype.hasOwnProperty.call(declared, name);
 }
 
-// Substitution into a shell command. Every substituted value is wrapped in
+function expand(text, ctx, quote, depth) {
+  if (typeof text !== 'string') return text;
+  if (depth > 5) throw new VarsError('substitution did not settle after 5 passes (self-referencing var?)');
+  return text.replace(TOKEN, (_m, raw, ref) => {
+    const value = stringify(lookup(ref, ctx || {}));
+    if (isDeclared(ref, ctx)) return expand(value, ctx, quote, depth + 1);
+    return raw ? value : quote(value);
+  });
+}
+
+function substitute(text, ctx) {
+  return expand(text, ctx, (v) => v, 0);
+}
+
+// Substitution into a shell command. Every substituted leaf is wrapped in
 // single quotes with embedded quotes escaped, so a card title or an agent's
-// free-prose summary can never break out of its operand and run commands.
-// A graph therefore writes --card ${vars.card}, never --card "${vars.card}".
+// free-prose summary cannot break out of its operand and execute anything.
+// A graph writes --card ${vars.card}, never --card "${vars.card}".
 //
-// ${raw:vars.x} opts one reference out of quoting, for a var that holds a
-// whole command fragment rather than an operand. It is deliberately ugly and
-// greppable: every raw reference is a place a graph author has taken
-// responsibility for the value's contents.
+// ${raw:vars.x} opts one reference out of quoting, for a var holding a whole
+// command fragment rather than an operand. It is honoured only in the
+// graph's own text: a raw marker arriving inside a captured value is never
+// acted on, because leaves are not re-scanned.
 function shellQuote(v) {
   return "'" + String(v).replace(/'/g, "'\\''") + "'";
 }
 
 function substituteShell(text, ctx) {
-  if (typeof text !== 'string') return text;
-  let cur = text;
-  for (let i = 0; i < 5; i++) {
-    const next = cur.replace(TOKEN, (_m, raw, ref) => {
-      const v = stringify(lookup(ref, ctx || {}));
-      return raw ? v : shellQuote(v);
-    });
-    if (next === cur) return cur;
-    cur = next;
-  }
-  if (new RegExp(TOKEN.source).test(cur)) throw new VarsError('substitution did not settle after 5 passes (self-referencing var?)');
-  return cur;
+  return expand(text, ctx, shellQuote, 0);
 }
 
 module.exports = { substitute, substituteShell, shellQuote, lookup, VarsError };

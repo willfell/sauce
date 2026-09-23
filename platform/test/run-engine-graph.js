@@ -169,7 +169,9 @@ const vErr = throwsWith(() => vars.substitute('${vars.missing}', vctx), /missing
 ok('VR-2 unknown reference throws VarsError', vErr && vErr.name === 'VarsError');
 ok('VR-3 text without tokens untouched', vars.substitute('plain $ text {x}', vctx) === 'plain $ text {x}');
 ok('VR-4 non-string values stringified', vars.substitute('${result.claim.receipt}', vctx) === '{"lease_token":"tok"}');
-ok('VR-5 a var default may reference another var', vars.substitute('${vars.cmd}', { ...vctx, vars: { cmd: 'node ${vars.gate} --cwd ${vars.wt}', gate: '/g.js', wt: '/w' } }) === 'node /g.js --cwd /w');
+ok('VR-5 a DECLARED var default may reference another var', vars.substitute('${vars.cmd}', { ...vctx, vars: { cmd: 'node ${vars.gate} --cwd ${vars.wt}', gate: '/g.js', wt: '/w' }, declaredVars: new Set(['cmd', 'gate', 'wt']) }) === 'node /g.js --cwd /w');
+ok('VR-5b an UNDECLARED var is a leaf: a template inside it is data, not markup',
+  vars.substitute('${vars.card}', { vars: { card: 'Fix ${vars.nope} handling' }, declaredVars: new Set() }) === 'Fix ${vars.nope} handling');
 ok('VR-7 substituteShell quotes every operand, so injection cannot escape it',
   vars.substituteShell('x --card ${vars.card}', { vars: { card: "GA-1 $(touch /tmp/pwned) 'quoted' Demo" } }) === "x --card 'GA-1 $(touch /tmp/pwned) '\\''quoted'\\'' Demo'",
   vars.substituteShell('x --card ${vars.card}', { vars: { card: "GA-1 $(touch /tmp/pwned) 'quoted' Demo" } }));
@@ -183,9 +185,37 @@ ok('VR-8 a quoted operand actually neutralizes command substitution in a real sh
     if (created) fsx.unlinkSync(marker);
     return !created && out.stdout.includes('$(touch');
   })());
+ok('VR-10 a raw marker arriving INSIDE an untrusted value is never honoured',
+  (() => {
+    const ctx = { vars: { card: 'X ${raw:vars.payload}', payload: "'; touch /tmp/engine-should-not-exist; echo '" }, declaredVars: new Set(['payload']) };
+    const cmd = vars.substituteShell('echo ${vars.card}', ctx);
+    return cmd === "echo 'X ${raw:vars.payload}'";
+  })(), vars.substituteShell('echo ${vars.card}', { vars: { card: 'X ${raw:vars.payload}', payload: 'p' }, declaredVars: new Set(['payload']) }));
+ok('VR-11 that escape does not execute in a real shell',
+  (() => {
+    const os = require('os'); const fsx = require('fs');
+    const marker = path.join(os.tmpdir(), `engine-raw-${Date.now()}`);
+    const ctx = { vars: { card: 'X ${raw:vars.payload}', payload: `'; touch ${marker}; echo '` }, declaredVars: new Set(['payload']) };
+    const cmd = vars.substituteShell('echo ${vars.card}', ctx);
+    require('child_process').spawnSync(cmd, { shell: true, encoding: 'utf8' });
+    const created = fsx.existsSync(marker);
+    if (created) fsx.unlinkSync(marker);
+    return !created;
+  })());
+ok('VR-12 a summary carrying a quote and a substitution stays one literal operand',
+  (() => {
+    const os = require('os'); const fsx = require('fs');
+    const marker = path.join(os.tmpdir(), `engine-sum-${Date.now()}`);
+    const ctx = { results: { lens: { summary: `it's fine $(touch ${marker}) ${'${vars.card}'}` } }, vars: { card: 'C' }, declaredVars: new Set() };
+    const cmd = vars.substituteShell('echo --summary ${result.lens.summary}', ctx);
+    require('child_process').spawnSync(cmd, { shell: true, encoding: 'utf8' });
+    const created = fsx.existsSync(marker);
+    if (created) fsx.unlinkSync(marker);
+    return !created && cmd.includes('${vars.card}');
+  })());
 ok('VR-9 ${raw:...} opts a command fragment out of quoting',
   vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node /c.js claim' } }) === 'node /c.js claim --json');
-const loop = throwsWith(() => vars.substitute('${vars.a}', { vars: { a: '${vars.b}', b: '${vars.a}' } }), /settle/);
+const loop = throwsWith(() => vars.substitute('${vars.a}', { vars: { a: '${vars.b}', b: '${vars.a}' }, declaredVars: new Set(['a', 'b']) }), /settle/);
 ok('VR-6 a self-referencing var is refused, not looped', loop && loop.name === 'VarsError');
 
 // ---- isolation (IS-*) ----

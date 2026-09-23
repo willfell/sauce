@@ -71,7 +71,7 @@ The stub coordinator for the last one is `platform/test/fixtures/engine/stub-coo
 
 ## How mayo consumes it (opt-in)
 
-`/mayo:run` keeps the prose pipeline as the default. Its "Engine mode" section runs the shipped `platform/engine/graphs/delivery-slice.md` with `sauce run … --var coordinator=… --var gate=… --follow --json` when the user asks for it or the binding sets `policy.engine: true`. Engine mode stays opt-in until one live epic completes through it and its ledger is diffed against a coordinator run. `/mayo:status` folds engine runs into the digest. Unattended cadence is `sauce run <note> --install-launchd`; the 2h cron loop and `/sauce-autoloop` are gone.
+`/mayo:run` keeps the prose pipeline as the default. Its "Engine mode" section runs the shipped `platform/engine/graphs/delivery-slice.md` with `sauce run … --var coordinator=… --var gate=… --follow --json` when the user asks for it. Engine mode stays opt-in until one live epic completes through it and its ledger is diffed against a coordinator run. `/mayo:status` folds engine runs into the digest. Unattended cadence is `sauce run <note> --install-launchd`; the 2h cron loop and `/sauce-autoloop` are gone.
 
 ## Read these next
 

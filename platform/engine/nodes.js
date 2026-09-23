@@ -19,7 +19,7 @@ function expandHome(p) {
 }
 
 function subCtx(ctx, node) {
-  return { run: { id: ctx.runId, dir: ctx.runDir }, vars: ctx.state.vars || {}, results: ctx.state.results || {}, node: { id: node.id } };
+  return { run: { id: ctx.runId, dir: ctx.runDir }, vars: ctx.state.vars || {}, results: ctx.state.results || {}, node: { id: node.id }, declaredVars: ctx.declaredVars || new Set() };
 }
 
 function nodeDir(ctx, node) {
@@ -112,7 +112,7 @@ function runCommand(ctx, node, command) {
 
 function runJudge(ctx, node) {
   const command = node.gate === 'adequacy'
-    ? `node ${JSON.stringify(GATE_JS)} verify-adequacy --base ${JSON.stringify(ctx.baseRef || 'origin/main')} --cwd ${JSON.stringify(resolveCwd(ctx, Object.assign({}, node, { isolate: 'none' }), subCtx(ctx, node)).cwd)} --json`
+    ? `node ${vars.shellQuote(GATE_JS)} verify-adequacy --base ${vars.shellQuote(ctx.baseRef || 'origin/main')} --cwd ${vars.shellQuote(resolveCwd(ctx, Object.assign({}, node, { isolate: 'none' }), subCtx(ctx, node)).cwd)} --json`
     : node.run;
   const r = runCommand(ctx, node, command);
   const outcome = r.exit_code === 0 ? 'pass' : 'fail';
