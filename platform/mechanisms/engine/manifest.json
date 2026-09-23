@@ -1,21 +1,46 @@
 {
   "name": "engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "mechanism",
   "description": "Sauce's node-based agent execution engine surface: the /sauce launcher command, the engine:run skill, the Sauce Graph template, and the ranch/engine run ledger directory. The runtime itself lives at platform/engine/ in the installed workshop and is invoked by `sauce run <note>`; this mechanism materializes only the vault-facing surface. Always-on: the installer subscribes every vault to it.",
   "skills_dir": ".claude/skills/engine",
   "depends_on": [],
   "files": [
-    { "source": "templates/Sauce Graph.md", "dest": "{{templates_path}}/Sauce Graph.md" },
-    { "source": "ranch/README.md", "dest": "ranch/engine/README.md" }
+    {
+      "source": "templates/Sauce Graph.md",
+      "dest": "{{templates_path}}/Sauce Graph.md"
+    },
+    {
+      "source": "ranch/README.md",
+      "dest": "ranch/engine/README.md"
+    }
   ],
   "claude_surface": [
-    { "kind": "command", "source": "commands/sauce.md", "dest": ".claude/commands/sauce.md" },
-    { "kind": "skill", "source": "skills/run/SKILL.md", "dest": "{{skills_dir}}/run/SKILL.md" },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Sauce", "path": ".claude/commands/sauce.md", "command": "/sauce" } }
+    {
+      "kind": "command",
+      "source": "commands/sauce.md",
+      "dest": ".claude/commands/sauce.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/run/SKILL.md",
+      "dest": "{{skills_dir}}/run/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Sauce",
+        "path": ".claude/commands/sauce.md",
+        "command": "/sauce"
+      }
+    }
   ],
   "post_install": [
-    { "type": "notice", "message": "engine installed. /sauce and `sauce run <note>` are available; graph notes start from the Sauce Graph template." }
+    {
+      "type": "notice",
+      "message": "engine installed. /sauce and `sauce run <note>` are available; graph notes start from the Sauce Graph template."
+    }
   ],
   "rule_fragments": []
 }
