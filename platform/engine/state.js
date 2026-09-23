@@ -34,6 +34,10 @@ function initial(graph, created) {
     ready: entryNodes(graph),
     parked: null,
     vars: Object.assign({}, created.vars || {}),
+    // Names whose value came from outside the graph text: a --var override at
+    // creation, or a vars_from capture off a receipt. Substitution treats
+    // these as leaves no matter what the graph's vars: block declares.
+    runtime_vars: new Set(Object.keys(created.cli_vars || {})),
     results: {},
     started_at: created.ts || null,
     ended_at: null,
@@ -65,7 +69,10 @@ function reduce(graph, events) {
         if (n.status !== 'running') break; // a finish we never saw start: ignored
         n.status = 'finished'; n.outcome = e.outcome; n.result = e.result || null;
         s.results[e.node] = e.result || null;
-        if (e.result && e.result.vars && typeof e.result.vars === 'object') Object.assign(s.vars, e.result.vars);
+        if (e.result && e.result.vars && typeof e.result.vars === 'object') {
+          Object.assign(s.vars, e.result.vars);
+          for (const k of Object.keys(e.result.vars)) s.runtime_vars.add(k);
+        }
         break;
       }
       case 'edge.fired': {

@@ -213,6 +213,14 @@ ok('VR-12 a summary carrying a quote and a substitution stays one literal operan
     if (created) fsx.unlinkSync(marker);
     return !created && cmd.includes('${vars.card}');
   })());
+ok('VR-13 a name the graph declares BUT the run replaced is a leaf, not graph-authored',
+  (() => {
+    const hostile = "'; touch /tmp/engine-must-not-run; echo '";
+    const ctx = { vars: { card: 'X ${raw:vars.payload}', payload: hostile }, declaredVars: new Set(['card', 'payload']), runtimeVars: new Set(['card']) };
+    return vars.substituteShell('echo ${vars.card}', ctx) === "echo 'X ${raw:vars.payload}'";
+  })());
+ok('VR-14 a purely declared var still composes with another declared var',
+  vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node ${vars.p} run', p: '/x.js' }, declaredVars: new Set(['cmd', 'p']), runtimeVars: new Set() }) === 'node /x.js run --json');
 ok('VR-9 ${raw:...} opts a command fragment out of quoting',
   vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node /c.js claim' } }) === 'node /c.js claim --json');
 const loop = throwsWith(() => vars.substitute('${vars.a}', { vars: { a: '${vars.b}', b: '${vars.a}' }, declaredVars: new Set(['a', 'b']) }), /settle/);

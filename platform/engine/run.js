@@ -95,7 +95,8 @@ function createRun({ vault, notePath, repo, workerOverride, env, vars, now }) {
   ledger.appendEvent(vault, runId, {
     type: 'run.created', run_id: runId,
     graph_note: path.relative(vault, abs), graph_hash: graphHash, repo: repoAbs,
-    vars: mergedVars, worker_override: workerOverride || null, host: os.hostname(),
+    vars: mergedVars, graph_vars: Object.assign({}, parsed.graph.vars || {}), cli_vars: Object.assign({}, vars || {}),
+    worker_override: workerOverride || null, host: os.hostname(),
   });
   const ctx = buildCtx({ vault, notePath: abs, runId, parsed, repo: repoAbs, workerOverride, env, vars: mergedVars });
   return { runId, ctx, parsed };

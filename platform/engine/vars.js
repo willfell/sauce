@@ -45,12 +45,24 @@ function stringify(v) {
 // a card title is data, not a template. Only a var the graph's own `vars:`
 // block declares is itself graph-authored, so only those are expanded
 // recursively (bounded), which is what lets one default build on another.
+function has(collection, name) {
+  if (!collection) return false;
+  if (collection instanceof Set) return collection.has(name);
+  if (Array.isArray(collection)) return collection.includes(name);
+  return Object.prototype.hasOwnProperty.call(collection, name);
+}
+
+// Graph-authored by PROVENANCE, not by name. A var the graph declares is its
+// own text and may reference other vars. The moment a run replaces that name
+// with a value from outside the graph (a --var override, or a vars_from
+// capture off a receipt), the value stops being graph-authored and becomes a
+// leaf, however it is named. Keying this on the name alone would let a graph
+// that both declares and captures "card" have its card title re-scanned.
 function isDeclared(ref, ctx) {
   if (!ref.startsWith('vars.')) return false;
-  const declared = ctx && ctx.declaredVars;
   const name = ref.slice(5).split('.')[0];
-  if (!declared) return false;
-  return declared instanceof Set ? declared.has(name) : Array.isArray(declared) ? declared.includes(name) : Object.prototype.hasOwnProperty.call(declared, name);
+  if (!has(ctx && ctx.declaredVars, name)) return false;
+  return !has(ctx && ctx.runtimeVars, name);
 }
 
 function expand(text, ctx, quote, depth) {

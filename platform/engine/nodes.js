@@ -19,7 +19,14 @@ function expandHome(p) {
 }
 
 function subCtx(ctx, node) {
-  return { run: { id: ctx.runId, dir: ctx.runDir }, vars: ctx.state.vars || {}, results: ctx.state.results || {}, node: { id: node.id }, declaredVars: ctx.declaredVars || new Set() };
+  return {
+    run: { id: ctx.runId, dir: ctx.runDir },
+    vars: ctx.state.vars || {},
+    results: ctx.state.results || {},
+    node: { id: node.id },
+    declaredVars: ctx.declaredVars || new Set(),
+    runtimeVars: (ctx.state && ctx.state.runtime_vars) || new Set(),
+  };
 }
 
 function nodeDir(ctx, node) {
@@ -72,7 +79,7 @@ function upstreamContext(ctx, node) {
     if (Array.isArray(r.artifacts) && r.artifacts.length) lines.push('', 'Artifacts:', ...r.artifacts.map((a) => `- ${a}`));
     lines.push('');
   }
-  return lines.length ? ['', '## Handoff context', '', ...lines].join('\n') : '';
+  return lines.length ? ['', '## Handoff context', '', ...lines].join('\n') : '';  // lint-display-markers:allow heading inside a worker prompt, not a rendered note anchor
 }
 
 function runAgent(ctx, node) {
