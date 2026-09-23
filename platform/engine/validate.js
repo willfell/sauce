@@ -56,8 +56,16 @@ function validateGraph(graph) {
       if (typeof e[end] !== 'string' || !ids.has(e[end])) errors.push(err('dangling_edge', `edge #${i + 1} ${end} "${e[end]}" is not a node`, { edge: i }));
     }
     const on = e.on === undefined ? 'pass' : e.on;
-    if (typeof on !== 'string' || !(FIXED_ON.has(on) || NAMED_ON.test(on)) || on === 'parked') errors.push(err('bad_on', `edge #${i + 1} on "${e.on}" must be pass | fail | always | exhausted | <named-outcome>`, { edge: i }));
+    if (typeof on !== 'string' || !(FIXED_ON.has(on) || NAMED_ON.test(on))) errors.push(err('bad_on', `edge #${i + 1} on "${e.on}" must be pass | fail | always | exhausted | <named-outcome>`, { edge: i }));
+    // A human node signals its park to the scheduler and never yields the
+    // outcome "parked" to the edges, so such an edge could never fire.
+    // (Any other node may legitimately produce it — the coordinator's
+    // advance verb returns action: 'parked' for a dependency-parked card.)
+    const fromNode = nodes.find((n) => n && n.id === e.from);
+    if (on === 'parked' && fromNode && fromNode.type === 'human') errors.push(err('bad_on', `edge #${i + 1} is on "parked" out of the human node "${e.from}", which never yields that outcome`, { edge: i }));
     if (e.max !== undefined && !(Number.isInteger(e.max) && e.max >= 1)) errors.push(err('bad_max', `edge #${i + 1} max must be an integer >= 1`, { edge: i }));
+    if (e.budget !== undefined && (typeof e.budget !== 'string' || !/^[a-z][a-z0-9-]*$/.test(e.budget))) errors.push(err('bad_budget', `edge #${i + 1} budget must be a lowercase name`, { edge: i }));
+    if (e.budget !== undefined && e.max === undefined) errors.push(err('bad_budget', `edge #${i + 1} names a budget but has no max:`, { edge: i }));
   });
   if (errors.length) return { ok: false, errors };
 

@@ -102,7 +102,7 @@ function runCommand(ctx, node, command) {
   const sctx = subCtx(ctx, node);
   const dir = nodeDir(ctx, node);
   const { cwd } = resolveCwd(ctx, Object.assign({}, node, { isolate: 'none' }), sctx);
-  const cmd = vars.substitute(command, sctx);
+  const cmd = vars.substituteShell(command, sctx);
   fs.writeFileSync(path.join(dir, 'command.txt'), cmd + '\n');
   const timeoutMs = (Number.isInteger(node.timeout) ? node.timeout : DEFAULT_TIMEOUT_S) * 1000;
   const r = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign({}, process.env, ctx.env || {}, { SAUCE_VAULT: ctx.vault, SAUCE_RUN_ID: ctx.runId, SAUCE_NODE_ID: node.id }) });

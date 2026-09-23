@@ -25,6 +25,7 @@ module.exports = {
   tick: scheduler.tick,
   follow: scheduler.follow,
   reduce: state.reduce,
+  isTerminal: state.isTerminal,
   listRuns: ledger.listRuns,
   readEvents: ledger.readEvents,
   runsDir: ledger.runsDir,

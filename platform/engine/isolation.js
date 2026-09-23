@@ -54,9 +54,13 @@ function worktreeBranch(repo, wt) {
   catch (_e) { return null; }
 }
 
+// null means "could not measure" — the sweep treats that as carrying work,
+// never as empty. Failing open here would delete unmerged commits.
 function commitsAhead(repo, branch, baseRef) {
-  try { return parseInt(git(repo, ['rev-list', '--count', `${baseRef}..${branch}`]), 10) || 0; }
-  catch (_e) { return 0; }
+  try {
+    const n = parseInt(git(repo, ['rev-list', '--count', `${baseRef}..${branch}`]), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch (_e) { return null; }
 }
 
 function isDirty(wt) {
@@ -75,7 +79,9 @@ function sweep({ repo, worktrees, baseRef }) {
     if (!fs.existsSync(abs)) { git(repo, ['worktree', 'prune']); continue; }
     const branch = worktreeBranch(repo, abs);
     if (isDirty(abs)) { kept.push({ path: abs, reason: 'dirty working tree' }); continue; }
-    const ahead = branch ? commitsAhead(repo, branch, base) : 0;
+    if (!branch || branch === 'HEAD') { kept.push({ path: abs, reason: 'detached HEAD — cannot prove its commits are merged' }); continue; }
+    const ahead = commitsAhead(repo, branch, base);
+    if (ahead === null) { kept.push({ path: abs, reason: `cannot measure commits ahead of ${base}` }); continue; }
     if (ahead > 0) { kept.push({ path: abs, reason: `${ahead} commit(s) ahead of ${base}` }); continue; }
     removeWorktree({ repo, path: abs, force: false });
     if (branch && branch !== 'HEAD') { try { git(repo, ['branch', '-D', branch]); } catch (_e) { /* branch may be checked out elsewhere */ } }

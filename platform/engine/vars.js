@@ -8,7 +8,7 @@ class VarsError extends Error {
   constructor(message) { super(message); this.name = 'VarsError'; }
 }
 
-const TOKEN = /\$\{([a-zA-Z_][\w-]*(?:\.[\w-]+)*)\}/g;
+const TOKEN = /\$\{(raw:)?([a-zA-Z_][\w-]*(?:\.[\w-]+)*)\}/g;
 
 function lookup(pathStr, ctx) {
   const parts = pathStr.split('.');
@@ -43,7 +43,7 @@ function substitute(text, ctx) {
   if (typeof text !== 'string') return text;
   let cur = text;
   for (let i = 0; i < 5; i++) {
-    const next = cur.replace(TOKEN, (_m, ref) => stringify(lookup(ref, ctx || {})));
+    const next = cur.replace(TOKEN, (_m, _raw, ref) => stringify(lookup(ref, ctx || {})));
     if (next === cur) return cur;
     cur = next;
   }
@@ -51,4 +51,32 @@ function substitute(text, ctx) {
   return cur;
 }
 
-module.exports = { substitute, lookup, VarsError };
+// Substitution into a shell command. Every substituted value is wrapped in
+// single quotes with embedded quotes escaped, so a card title or an agent's
+// free-prose summary can never break out of its operand and run commands.
+// A graph therefore writes --card ${vars.card}, never --card "${vars.card}".
+//
+// ${raw:vars.x} opts one reference out of quoting, for a var that holds a
+// whole command fragment rather than an operand. It is deliberately ugly and
+// greppable: every raw reference is a place a graph author has taken
+// responsibility for the value's contents.
+function shellQuote(v) {
+  return "'" + String(v).replace(/'/g, "'\\''") + "'";
+}
+
+function substituteShell(text, ctx) {
+  if (typeof text !== 'string') return text;
+  let cur = text;
+  for (let i = 0; i < 5; i++) {
+    const next = cur.replace(TOKEN, (_m, raw, ref) => {
+      const v = stringify(lookup(ref, ctx || {}));
+      return raw ? v : shellQuote(v);
+    });
+    if (next === cur) return cur;
+    cur = next;
+  }
+  if (new RegExp(TOKEN.source).test(cur)) throw new VarsError('substitution did not settle after 5 passes (self-referencing var?)');
+  return cur;
+}
+
+module.exports = { substitute, substituteShell, shellQuote, lookup, VarsError };

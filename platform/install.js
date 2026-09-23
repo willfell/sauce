@@ -1448,7 +1448,18 @@ function ensureAlwaysOnMechanisms(subscription, manifest, history, git) {
     const cat = (manifest.mechanisms || []).find((m) => m.name === name);
     if (!cat) continue;
     if (!Array.isArray(subscription.mechanisms)) subscription.mechanisms = [];
-    if (subscription.mechanisms.some((m) => m && m.name === name)) continue;
+    const existing = subscription.mechanisms.find((m) => m && m.name === name);
+    if (existing) {
+      // A pin below the catalogue is not a preference for an always-on
+      // mechanism: resolveDependencies SKIPS an item whose pin disagrees with
+      // the workshop, so leaving it would silently stop installing the very
+      // thing "always-on" promises, permanently and with exit 0.
+      if (existing.version !== cat.version) {
+        added.push(`${name}@${existing.version}->${cat.version}`);
+        existing.version = cat.version;
+      }
+      continue;
+    }
     subscription.mechanisms.push({ name, version: cat.version });
     added.push(`${name}@${cat.version}`);
   }

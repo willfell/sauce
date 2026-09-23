@@ -51,7 +51,7 @@ Refutation → ONE same-card repair, full quorum rerun. Second refutation → **
 
 ## Engine mode (opt-in)
 
-The same slice path exists as a shipped Sauce graph, `platform/engine/graphs/delivery-slice.md` beside the installed coordinator (`<coordinator>/../../../platform/engine/graphs/delivery-slice.md`). Every coordinator call in it is a `shell` node, the lenses are `agent` nodes, the one-repair-then-supersede rule is edges with `max: 1`, and `advance`'s receipt actions are named edges. When the user says "run it through the engine" (or the binding sets `policy.engine: true`), run:
+The same slice path exists as a shipped Sauce graph, `platform/engine/graphs/delivery-slice.md` beside the installed coordinator (`<coordinator>/../../../platform/engine/graphs/delivery-slice.md`). Every coordinator call in it is a `shell` node, the lenses are `agent` nodes, the one-repair-then-supersede rule is edges with `max: 1`, and `advance`'s receipt actions are named edges. When the user says "run it through the engine", run:
 
 ```text
 sauce run "<plugin_root>/../platform/engine/graphs/delivery-slice.md" --var coordinator="<coordinator>" --var gate="<gate>" --follow --json

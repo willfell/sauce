@@ -21,8 +21,10 @@ function ok(label, cond, detail) {
   if (cond) { console.log(`  ok  ${label}`); pass++; }
   else { console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); failures.push(label); fail++; }
 }
+// Returns the error ONLY when its message matches; a mismatching message is
+// reported as a distinct failure rather than silently accepted.
 function throwsWith(fn, re) {
-  try { fn(); return null; } catch (e) { return re.test(String(e.message)) ? e : e; }
+  try { fn(); return null; } catch (e) { return re.test(String(e.message)) ? e : Object.assign(new Error(`threw, but message did not match ${re}: ${e.message}`), { name: 'MessageMismatch' }); }
 }
 
 // ---- yaml-lite (YL-*) ----
@@ -168,6 +170,21 @@ ok('VR-2 unknown reference throws VarsError', vErr && vErr.name === 'VarsError')
 ok('VR-3 text without tokens untouched', vars.substitute('plain $ text {x}', vctx) === 'plain $ text {x}');
 ok('VR-4 non-string values stringified', vars.substitute('${result.claim.receipt}', vctx) === '{"lease_token":"tok"}');
 ok('VR-5 a var default may reference another var', vars.substitute('${vars.cmd}', { ...vctx, vars: { cmd: 'node ${vars.gate} --cwd ${vars.wt}', gate: '/g.js', wt: '/w' } }) === 'node /g.js --cwd /w');
+ok('VR-7 substituteShell quotes every operand, so injection cannot escape it',
+  vars.substituteShell('x --card ${vars.card}', { vars: { card: "GA-1 $(touch /tmp/pwned) 'quoted' Demo" } }) === "x --card 'GA-1 $(touch /tmp/pwned) '\\''quoted'\\'' Demo'",
+  vars.substituteShell('x --card ${vars.card}', { vars: { card: "GA-1 $(touch /tmp/pwned) 'quoted' Demo" } }));
+ok('VR-8 a quoted operand actually neutralizes command substitution in a real shell',
+  (() => {
+    const os = require('os'); const fsx = require('fs');
+    const marker = path.join(os.tmpdir(), `engine-inject-${Date.now()}`);
+    const cmd = vars.substituteShell('echo ${vars.card}', { vars: { card: `A $(touch ${marker}) B` } });
+    const out = require('child_process').spawnSync(cmd, { shell: true, encoding: 'utf8' });
+    const created = fsx.existsSync(marker);
+    if (created) fsx.unlinkSync(marker);
+    return !created && out.stdout.includes('$(touch');
+  })());
+ok('VR-9 ${raw:...} opts a command fragment out of quoting',
+  vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node /c.js claim' } }) === 'node /c.js claim --json');
 const loop = throwsWith(() => vars.substitute('${vars.a}', { vars: { a: '${vars.b}', b: '${vars.a}' } }), /settle/);
 ok('VR-6 a self-referencing var is refused, not looped', loop && loop.name === 'VarsError');
 
@@ -188,6 +205,15 @@ const sw = iso.sweep({ repo, worktrees: [wt1.path, wt2.path], baseRef: 'main' })
 ok('IS-3 sweep removes the clean worktree and keeps the one with commits ahead',
   sw.removed.length === 1 && sw.removed[0] === wt1.path && sw.kept.length === 1 && sw.kept[0].path === wt2.path && /ahead/.test(sw.kept[0].reason), JSON.stringify(sw));
 ok('IS-4 removed worktree is gone from disk and git', !fs.existsSync(wt1.path) && !git(['worktree', 'list']).includes('r1-build'));
+const wt3 = iso.createWorktree({ repo, dest: path.join(repo, '.worktrees', 'sauce', 'r1-detached'), branch: 'sauce/r1-detached', base: 'main' });
+execFileSync('git', ['checkout', '--detach', 'HEAD'], { cwd: wt3.path, stdio: ['ignore', 'pipe', 'pipe'] });
+const swDetached = iso.sweep({ repo, worktrees: [wt3.path], baseRef: 'main' });
+ok('IS-6 a detached-HEAD worktree is kept, never swept on an unprovable branch',
+  swDetached.removed.length === 0 && /detached/.test(swDetached.kept[0].reason) && fs.existsSync(wt3.path), JSON.stringify(swDetached));
+iso.removeWorktree({ repo, path: wt3.path, force: true });
+const swUnmeasurable = iso.sweep({ repo, worktrees: [wt2.path], baseRef: 'refs/heads/no-such-base' });
+ok('IS-7 an unmeasurable base keeps the worktree rather than assuming it is empty',
+  swUnmeasurable.removed.length === 0 && /cannot measure/.test(swUnmeasurable.kept[0].reason), JSON.stringify(swUnmeasurable));
 iso.removeWorktree({ repo, path: wt2.path, force: true });
 ok('IS-5 removeWorktree with force drops a worktree with commits', !fs.existsSync(wt2.path));
 

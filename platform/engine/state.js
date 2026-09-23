@@ -6,7 +6,20 @@ const { entryNodes } = require('./validate.js');
 
 const TERMINAL = new Set(['done', 'failed', 'halted']);
 
-function edgeKey(e) { return `${e.from}->${e.to}`; }
+// An edge's budget counter. Edges naming the same budget share one counter,
+// so "one repair per card" is expressible across several gates instead of
+// one-per-edge (six gates each with max:1 is six repairs, not one).
+function edgeKey(e) { return e && typeof e.budget === 'string' && e.budget ? `budget:${e.budget}` : `${e.from}->${e.to}`; }
+
+// The key an edge.fired event counts under. The event carries its own
+// budget (written since budgets shipped); older events are resolved against
+// the graph so a ledger written before that still replays correctly.
+function eventEdgeKey(graph, e) {
+  if (typeof e.budget === 'string' && e.budget) return `budget:${e.budget}`;
+  const on = e.on === undefined ? 'pass' : e.on;
+  const edge = (graph.edges || []).find((x) => x.from === e.from && x.to === e.to && (x.on === undefined ? 'pass' : x.on) === on);
+  return edgeKey(edge || e);
+}
 
 function initial(graph, created) {
   const nodes = {};
@@ -25,6 +38,10 @@ function initial(graph, created) {
     started_at: created.ts || null,
     ended_at: null,
     final_outcome: null,
+    // Terminal is a fact the ledger records, never inferred from the status
+    // string: an end node may be named 'parked' (or any other reserved word)
+    // and that must still end the run.
+    terminal: false,
   };
 }
 
@@ -52,7 +69,10 @@ function reduce(graph, events) {
         break;
       }
       case 'edge.fired': {
-        const k = `${e.from}->${e.to}`;
+        // Count under the SAME key matchEdges reads, or a shared budget is
+        // incremented under one name and checked under another, and the
+        // budget never exhausts.
+        const k = eventEdgeKey(graph, e);
         s.edge_counts[k] = (s.edge_counts[k] || 0) + 1;
         if (known.has(e.to)) {
           s.nodes[e.to].status = 'idle';
@@ -70,15 +90,15 @@ function reduce(graph, events) {
         if (known.has(e.node)) { const n = s.nodes[e.node]; n.status = 'finished'; n.outcome = e.outcome || 'pass'; n.result = e.result || { summary: `answered ${e.outcome || 'pass'}` }; s.results[e.node] = n.result; }
         break;
       }
-      case 'run.halted': { s.status = 'halted'; s.ended_at = e.ts || null; s.ready = []; break; }
-      case 'run.ended': { s.status = e.status || 'done'; s.final_outcome = e.outcome || null; s.ended_at = e.ts || null; s.ready = []; break; }
+      case 'run.halted': { s.status = 'halted'; s.ended_at = e.ts || null; s.ready = []; s.parked = null; s.terminal = true; break; }
+      case 'run.ended': { s.status = e.status || 'done'; s.final_outcome = e.outcome || null; s.ended_at = e.ts || null; s.ready = []; s.parked = null; s.terminal = true; break; }
       default: break;
     }
   }
   return s;
 }
 
-function isTerminal(state) { return state.status !== 'running' && state.status !== 'parked'; }
+function isTerminal(state) { return state.terminal === true; }
 
 function readyNodes(graph, state) {
   return state.ready.filter((id) => state.nodes[id] && state.nodes[id].status !== 'running');

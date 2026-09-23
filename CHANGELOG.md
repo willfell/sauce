@@ -6,6 +6,7 @@ Sauce releases are cut automatically from conventional commits on `main` (see `D
 
 ### Added
 
+- **Edge budgets and shell-safe substitution.** `budget: <name>` lets several edges share one `max` counter (the delivery graph's "one repair per card"), and substitution into a `run:` command shell-quotes every value, with `${raw:...}` as the explicit opt-out for command fragments.
 - **The engine.** `platform/engine/`: a graph note (`type: sauce-graph` plus one fenced `sauce` block) declares typed nodes (`agent`, `judge`, `shell`, `human`, `end`) and edges (`on:` outcome, `max:` retry budget). `sauce run <note>` ticks it: agent nodes run Claude Code or Codex in their own git worktree and publish `result.json` by rename; judges and shells are exit-code steps; a human node parks the run on a checkbox in the note; the run's ledger is one append-only JSONL file at `ranch/engine/runs/<run-id>.jsonl`. Reference: `Docs/engine.md`.
 - **`sauce run`** with `--follow`, `--wait-human`, `--dry-run`, `--status`, `--list`, `--sweep`, `--worker fake|claude-code|codex`, `--var k=v`, `--repo`, `--install-launchd` / `--uninstall-launchd`, `--json`.
 - **`/sauce`** slash command and the `engine:run` skill, materialized into every vault by the new always-on `engine` mechanism, with a `Sauce Graph` template and `ranch/engine/`.

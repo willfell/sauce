@@ -85,7 +85,11 @@ function routeOutcome(ctx, graph, current, nodeId, outcome) {
     if (!m.fired.length) { endRun(ctx, 'exhausted', nodeId); return; }
   }
   if (!m.fired.length) { endRun(ctx, outcome, nodeId); return; }
-  for (const e of m.fired) ledger.appendEvent(ctx.vault, ctx.runId, { type: 'edge.fired', from: e.from, to: e.to, on: e.on === undefined ? 'pass' : e.on });
+  for (const e of m.fired) {
+    const ev = { type: 'edge.fired', from: e.from, to: e.to, on: e.on === undefined ? 'pass' : e.on };
+    if (typeof e.budget === 'string' && e.budget) ev.budget = e.budget;
+    ledger.appendEvent(ctx.vault, ctx.runId, ev);
+  }
 }
 
 function receipt(ctx, current, executed) {

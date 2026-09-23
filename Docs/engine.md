@@ -90,7 +90,8 @@ edges:
 ```
 
 - `on` is `pass`, `fail`, `always`, `exhausted`, or any lowercase hyphenated name a worker or receipt can produce.
-- `max` is a per-edge traversal budget for the run. Exceeding it produces the outcome `exhausted` on the source node, which follows an `on: exhausted` edge if there is one or ends the run as `failed`.
+- `max` is a traversal budget for the run. Exceeding it produces the outcome `exhausted` on the source node, which follows an `on: exhausted` edge if there is one or ends the run as `failed`.
+- `budget: <name>` makes several edges share one `max` counter. Without it each edge counts alone, so five gates that each allow one repair allow five repairs in total. The shipped delivery graph puts every repair edge on `budget: repair`, which is how "one repair per card, then supersede" is expressed. An edge naming a budget must also carry `max`.
 - Several matching edges all fire (fan-out). A node with several incoming edges starts when any one fires; joins are not implemented yet.
 - A handoff is an edge between two `agent` nodes. The downstream prompt receives the upstream summary, head, and artifacts under a `## Handoff context` heading, and its worktree branches from the upstream head when there is one.
 - The validator refuses a cycle that has no `max:` on any of its edges, an edge to an unknown node, an unknown node type, and a missing required field. `sauce run --dry-run` reports every error with the node or edge it belongs to.
@@ -100,6 +101,8 @@ The run starts at the first declared node, plus any node no edge points at.
 ## Variables
 
 `${run.id}`, `${run.dir}`, `${vars.<name>}`, `${result.<node>.<path>}`, and `${node.id}` are substituted in `prompt`, `run`, `cwd`, `outcome`, and `ask`. An unknown reference is an error, never an empty string. A var default may reference another var; substitution repeats until stable, bounded so a self-reference is refused.
+
+**Substitution into a command is shell-quoted.** In `run:`, every substituted value is wrapped in single quotes with embedded quotes escaped, so a card title, a path, or an agent's free-prose summary cannot break out of its operand and execute something. Write `--card ${vars.card}`, not `--card "${vars.card}"`. When a var holds a whole command fragment rather than an operand, opt that one reference out with `${raw:vars.name}`. It is deliberately conspicuous: every raw reference is a place the graph author has taken responsibility for the value.
 
 `shell` nodes with `capture: json` and `vars_from` are how a receipt from one tool feeds the next node. The shipped delivery graph captures `lease_token`, `worktree`, and `branch` from the coordinator's claim receipt this way.
 
@@ -188,7 +191,7 @@ sauce run <note> --uninstall-launchd
 
 When the note declares `repo:`, an `agent` node runs in its own git worktree at `<repo>/.worktrees/sauce/<run-id>-<node-id>` on branch `sauce/<run-id>-<node-id>`, branched from `origin/main` or from the upstream node's head on a handoff. `isolate: none` runs in the repo root, and `cwd:` overrides both (the shipped delivery graph uses `cwd: ${vars.worktree}` to work inside the coordinator's own checkout).
 
-Workers run with the isolation scope as their working directory, stdin closed, a timeout, and `SAUCE_VAULT` exported. The Claude Code adapter runs `claude -p <prompt> --permission-mode acceptEdits --max-turns <n>`; the Codex adapter runs `codex exec --json <prompt>`. Every prompt ends with the same instruction: write `result.json` at a given path, by temp file and rename. The engine reads that file and nothing else. `sauce run <note> --sweep` removes worktrees of finished runs whose trees are clean and have no commits ahead of the base; anything else is kept and named.
+Workers run with the isolation scope as their working directory, stdin closed, a timeout, and `SAUCE_VAULT` exported. The Claude Code adapter runs `claude -p <prompt> --permission-mode acceptEdits --max-turns <n>`; the Codex adapter runs `codex exec --json <prompt>`. Every prompt ends with the same instruction: write `result.json` at a given path, by temp file and rename. The engine reads that file and nothing else. `sauce run <note> --sweep` removes worktrees of finished runs whose trees are clean and have no commits ahead of the base; anything else is kept and named. It fails closed: a dirty tree, a detached HEAD, or a base it cannot measure against all keep the worktree, because the alternative is deleting unmerged commits.
 
 ## The shipped delivery graph
 
@@ -204,6 +207,7 @@ The `mayo` plugin runs it on request (`/mayo:run`, "run it through the engine").
 - Workers block the tick. A long Claude Code session holds `sauce run` for its duration.
 - No join or fan-in nodes yet, and no sub-graphs. Fan-out works; waiting for all branches does not.
 - The `claude-code` and `codex` adapters are thin shell-outs; the only worker the harnesses exercise end to end is `fake`.
+- Agent workers run whatever a graph's prompt tells them to, with your local privileges. Treat a graph note from someone else the way you would treat a shell script from someone else.
 - The delivery-slice graph is opt-in and has not yet driven a live epic.
 - `sauce audit --engine` checks the install, not the graphs; a graph is validated when it runs.
 

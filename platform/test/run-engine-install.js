@@ -38,6 +38,12 @@ const claudeVersion = catalogue.mechanisms.find((m) => m.name === 'platform-clau
   const before = JSON.stringify(sub);
   const again = installer.ensureAlwaysOnMechanisms(sub, catalogue, history, {});
   ok('AO-3 already-subscribed → no-op, no history row', again.length === 0 && JSON.stringify(sub) === before && history.length === 1);
+  const stale = { mechanisms: [{ name: 'engine', version: '0.0.1' }, { name: 'platform-claude', version: claudeVersion }], blueprints: [] };
+  const staleHistory = [];
+  const staleAdded = installer.ensureAlwaysOnMechanisms(stale, catalogue, staleHistory, {});
+  ok('AO-3b a stale always-on pin is repaired to the catalogue version, not left to be skipped forever',
+    staleAdded.join(',') === `engine@0.0.1->${engineVersion}` && stale.mechanisms.find((m) => m.name === 'engine').version === engineVersion && staleHistory.length === 1,
+    JSON.stringify({ added: staleAdded, pin: stale.mechanisms.find((m) => m.name === 'engine').version }));
   const noMech = { mechanisms: undefined, blueprints: [] };
   const added2 = installer.ensureAlwaysOnMechanisms(noMech, catalogue, [], {});
   ok('AO-4 tolerates a subscription without mechanisms[]', added2.length === 2 && noMech.mechanisms.length === 2);
