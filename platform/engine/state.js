@@ -34,10 +34,12 @@ function initial(graph, created) {
     ready: entryNodes(graph),
     parked: null,
     vars: Object.assign({}, created.vars || {}),
-    // Names whose value came from outside the graph text: a --var override at
-    // creation, or a vars_from capture off a receipt. Substitution treats
-    // these as leaves no matter what the graph's vars: block declares.
-    runtime_vars: new Set(Object.keys(created.cli_vars || {})),
+    // Names a RUN replaced with data from outside any author: a vars_from
+    // capture off a receipt, or a worker's result vars. Substitution treats
+    // these as leaves whatever the graph's vars: block declares. A --var the
+    // operator typed is author-supplied and lives in cli_vars instead.
+    runtime_vars: new Set(),
+    cli_vars: new Set(Object.keys(created.cli_vars || {})),
     results: {},
     started_at: created.ts || null,
     ended_at: null,

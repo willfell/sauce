@@ -39,33 +39,55 @@ const outOf = (id) => parsed.graph.edges.filter((e) => e.from === id).map((e) =>
 // an action the graph does not route wedges a live run. `stepCard` is what
 // the advance verb calls; the terminal actions advance itself returns are
 // added from the verb's own body.
-function functionBody(src, header) {
-  const start = src.indexOf(header);
-  if (start < 0) throw new Error(`coordinator source has no ${header}`);
-  // Skip the parameter list before looking for the body brace: a default
-  // parameter (opts = {}) otherwise closes the scan on its own braces.
-  let p = src.indexOf('(', start), pd = 0, bodyStart = -1;
+// The action set is DERIVED by following the coordinator's own call graph,
+// not by listing function names here. Twice now an action went unrouted
+// because the list of places to look was written by hand: `parked` lives in
+// stepCard, `halted` in commandAdvance and promoteAndDeploy, and
+// `releasePrWaitReceipt` is returned straight out of stepCard. Seeded at the
+// advance verb, this walks every function returned in tail position and
+// collects their action literals, so a new helper is covered the day it is
+// written.
+function bodyOf(src, name) {
+  const header = new RegExp('(?:async\\s+)?function\\s+' + name + '\\s*\\(');
+  const m = header.exec(src);
+  if (!m) return null;
+  let p = src.indexOf('(', m.index), pd = 0, bodyStart = -1;
   for (let j = p; j < src.length; j++) {
     if (src[j] === '(') pd++;
     else if (src[j] === ')') { pd--; if (pd === 0) { bodyStart = src.indexOf('{', j); break; } }
   }
-  if (bodyStart < 0) throw new Error(`no body brace after ${header}`);
-  let depth = 0;
+  if (bodyStart < 0) return null;
+  let d = 0;
   for (let j = bodyStart; j < src.length; j++) {
-    if (src[j] === '{') depth++;
-    else if (src[j] === '}') { depth--; if (depth === 0) return src.slice(bodyStart, j + 1); }
+    if (src[j] === '{') d++;
+    else if (src[j] === '}') { d--; if (d === 0) return src.slice(bodyStart, j + 1); }
   }
-  throw new Error(`unbalanced braces after ${header}`);
+  return null;
 }
 const actionsIn = (body) => Array.from(new Set((body.match(/action: '[a-z-]+'/g) || []).map((m) => m.slice(9, -1))));
-// Every function on the advance path, not just stepCard: the kill switch
-// (commandAdvance) and the promotion lock (promoteAndDeploy) each return
-// actions of their own, and an action nobody routes wedges a live run.
-const ADVANCE_PATH = ['async function stepCard(', 'async function commandAdvance(', 'async function promoteAndDeploy(', 'function completionResult('];
-const STEP_ACTIONS = Array.from(new Set(ADVANCE_PATH.flatMap((h) => actionsIn(functionBody(COORD_SRC, h)))));
-const ADVANCE_ACTIONS = STEP_ACTIONS;
-ok('DG-3 the advance action set is derived from every function on the advance path, not hand-listed',
-  STEP_ACTIONS.length >= 12 && ['parked', 'halted', 'phase-change', 'complete'].every((a) => STEP_ACTIONS.includes(a)), STEP_ACTIONS.sort().join(','));
+const tailCalls = (body) => Array.from(new Set((body.match(/return\s+(?:await\s+)?[a-zA-Z][a-zA-Z0-9]*\s*\(/g) || [])
+  .map((m) => m.replace(/return\s+(?:await\s+)?/, '').replace(/\s*\($/, ''))));
+function walkActions(src, seeds, maxDepth) {
+  const seen = new Set(), actions = new Set(), visited = [];
+  const visit = (name, depth) => {
+    if (seen.has(name) || depth > maxDepth) return;
+    seen.add(name);
+    const body = bodyOf(src, name);
+    if (!body) return;
+    visited.push(name);
+    for (const a of actionsIn(body)) actions.add(a);
+    for (const callee of tailCalls(body)) visit(callee, depth + 1);
+  };
+  for (const s of seeds) visit(s, 0);
+  return { actions: Array.from(actions), visited };
+}
+const walked = walkActions(COORD_SRC, ['commandAdvance', 'stepCard'], 3);
+const ADVANCE_ACTIONS = walked.actions;
+ok('DG-3 the advance action set is walked from the coordinator call graph, not listed here',
+  ADVANCE_ACTIONS.length >= 13
+  && ['parked', 'halted', 'phase-change', 'complete', 'waiting'].every((a) => ADVANCE_ACTIONS.includes(a))
+  && ['stepCard', 'commandAdvance', 'promoteAndDeploy', 'completionResult', 'releasePrWaitReceipt'].every((f) => walked.visited.includes(f)),
+  'visited=' + walked.visited.join(',') + ' actions=' + ADVANCE_ACTIONS.sort().join(','));
 const advanceOn = outOf('advance');
 ok('DG-4 every derived advance action is an on: edge out of advance', ADVANCE_ACTIONS.every((a) => advanceOn.includes(a)), 'unrouted: ' + ADVANCE_ACTIONS.filter((a) => !advanceOn.includes(a)).join(','));
 ok('DG-4b every node an advance edge points at is terminal, a repair, or advance itself',
@@ -94,6 +116,10 @@ ok('DG-7 every quorum repair edge shares ONE budget, so the card gets one repair
   quorumRepairs.filter((e) => e.budget !== 'repair').map((e) => e.from).join(','));
 ok('DG-7c a coordinator-requested re-implementation counts on its own budget, not the quorum repair',
   repairEdges.filter((e) => e.from === 'advance').every((e) => e.budget && e.budget !== 'repair'));
+const selfEdges = parsed.graph.edges.filter((e) => e.from === 'advance' && e.to === 'advance');
+ok('DG-7d the two advance self-edges count on separate budgets, so one cannot spend the other',
+  selfEdges.length === 2 && new Set(selfEdges.map((e) => e.budget)).size === 2 && selfEdges.every((e) => typeof e.budget === 'string' && e.budget),
+  JSON.stringify(selfEdges.map((e) => ({ on: e.on, budget: e.budget }))));
 const quorumExhausted = parsed.graph.edges.filter((e) => e.on === 'exhausted' && e.from !== 'advance');
 ok('DG-7b quorum exhaustion routes through the supersession-depth probe before any human supersede',
   quorumExhausted.length >= 4

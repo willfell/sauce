@@ -6,7 +6,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { slugOf } = require('./run.js');
 
 const TEMPLATE_PATH = path.join(__dirname, 'sauce-engine.plist.sample');
@@ -20,6 +20,14 @@ function renderPlist({ user, home, nodePath, cliPath, notePath, slug, intervalSe
     .replaceAll('{{$note_path}}', notePath)
     .replaceAll('{{$slug}}', slug)
     .replaceAll('{{$interval}}', String(intervalSeconds));
+}
+
+// launchctl is invoked with an argv, never a shell string. The plist path is
+// built from $HOME and $USER, so any shell-string form has to quote values it
+// does not control; argv has no quoting problem to get wrong. (CodeQL
+// js/shell-command-injection-from-environment flagged the previous form.)
+function defaultLaunchctl(args) {
+  return execFileSync('launchctl', args, { stdio: 'inherit' });
 }
 
 function plistPathFor({ user, home, slug }) {
@@ -38,9 +46,9 @@ function install({ notePath, intervalSeconds, cliPath, launchctl }) {
   const plistPath = plistPathFor({ user, home, slug });
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
   fs.writeFileSync(plistPath, plist, 'utf8');
-  const run = launchctl || ((cmd) => execSync(cmd, { stdio: 'inherit', shell: '/bin/bash' }));
-  try { run(`launchctl unload -w ${JSON.stringify(plistPath)} 2>/dev/null || true`); } catch (_e) { /* not loaded yet */ }
-  run(`launchctl load -w ${JSON.stringify(plistPath)}`);
+  const run = launchctl || defaultLaunchctl;
+  try { run(['unload', '-w', plistPath]); } catch (_e) { /* not loaded yet */ }
+  run(['load', '-w', plistPath]);
   return { plist: plistPath, label: `com.${user}.sauce-run.${slug}`, interval: intervalSeconds || 900, log: path.join(home, 'Library', 'Logs', `sauce-run.${slug}.log`), message: `loaded com.${user}.sauce-run.${slug} every ${intervalSeconds || 900}s (plist ${plistPath})` };
 }
 
@@ -48,9 +56,9 @@ function uninstall({ notePath, launchctl }) {
   const { user, home } = identity();
   const slug = slugOf(path.resolve(notePath));
   const plistPath = plistPathFor({ user, home, slug });
-  const run = launchctl || ((cmd) => execSync(cmd, { stdio: 'inherit', shell: '/bin/bash' }));
+  const run = launchctl || defaultLaunchctl;
   if (fs.existsSync(plistPath)) {
-    try { run(`launchctl unload -w ${JSON.stringify(plistPath)} 2>/dev/null || true`); } catch (_e) { /* ok */ }
+    try { run(['unload', '-w', plistPath]); } catch (_e) { /* ok */ }
     fs.unlinkSync(plistPath);
     return { plist: plistPath, removed: true, message: `unloaded and removed ${plistPath}` };
   }

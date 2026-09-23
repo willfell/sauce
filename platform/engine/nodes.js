@@ -25,6 +25,7 @@ function subCtx(ctx, node) {
     results: ctx.state.results || {},
     node: { id: node.id },
     declaredVars: ctx.declaredVars || new Set(),
+    cliVars: (ctx.state && ctx.state.cli_vars) || new Set(),
     runtimeVars: (ctx.state && ctx.state.runtime_vars) || new Set(),
   };
 }

@@ -219,8 +219,12 @@ ok('VR-13 a name the graph declares BUT the run replaced is a leaf, not graph-au
     const ctx = { vars: { card: 'X ${raw:vars.payload}', payload: hostile }, declaredVars: new Set(['card', 'payload']), runtimeVars: new Set(['card']) };
     return vars.substituteShell('echo ${vars.card}', ctx) === "echo 'X ${raw:vars.payload}'";
   })());
-ok('VR-14 a purely declared var still composes with another declared var',
-  vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node ${vars.p} run', p: '/x.js' }, declaredVars: new Set(['cmd', 'p']), runtimeVars: new Set() }) === 'node /x.js run --json');
+ok('VR-15 an author-supplied path is expanded AND quoted, so a space cannot split it',
+  vars.substituteShell('node ${vars.coordinator} claim', { vars: { coordinator: '/Users/w/My Repo/c.js' }, declaredVars: new Set(['coordinator']), runtimeVars: new Set() }) === "node '/Users/w/My Repo/c.js' claim");
+ok('VR-16 a --var override is author text: its body still expands, its leaves still quote',
+  vars.substituteShell('${raw:vars.pr_command}', { vars: { pr_command: 'cd ${vars.worktree} && push', worktree: '/w' }, declaredVars: new Set(['pr_command']), cliVars: new Set(['pr_command']), runtimeVars: new Set(['worktree']) }) === "cd '/w' && push");
+ok('VR-14 a declared fragment composes with another var, and the operand inside it is still quoted',
+  vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node ${vars.p} run', p: '/x.js' }, declaredVars: new Set(['cmd', 'p']), runtimeVars: new Set() }) === "node '/x.js' run --json");
 ok('VR-9 ${raw:...} opts a command fragment out of quoting',
   vars.substituteShell('${raw:vars.cmd} --json', { vars: { cmd: 'node /c.js claim' } }) === 'node /c.js claim --json');
 const loop = throwsWith(() => vars.substitute('${vars.a}', { vars: { a: '${vars.b}', b: '${vars.a}' }, declaredVars: new Set(['a', 'b']) }), /settle/);
@@ -301,7 +305,19 @@ const calls = [];
 const origHome = os.homedir;
 os.homedir = () => fakeHome;
 const inst = launchd.install({ notePath: '/Users/will/vault/spice/graphs/nightly.md', intervalSeconds: 300, cliPath: '/opt/sauce/platform/cli/sauce-cli.js', launchctl: (cmd) => calls.push(cmd) });
-ok('LD-3 install writes the plist under LaunchAgents and loads it', fs.existsSync(inst.plist) && inst.plist.startsWith(path.join(fakeHome, 'Library', 'LaunchAgents')) && calls.some((c) => /launchctl load -w/.test(c)));
+ok('LD-3 install writes the plist under LaunchAgents and loads it by argv, never a shell string',
+  fs.existsSync(inst.plist) && inst.plist.startsWith(path.join(fakeHome, 'Library', 'LaunchAgents'))
+  && calls.some((c) => Array.isArray(c) && c[0] === 'load' && c[1] === '-w' && c[2] === inst.plist),
+  JSON.stringify(calls));
+ok('LD-3b a plist path containing shell metacharacters is passed through untouched',
+  (() => {
+    const seen = [];
+    const weird = launchd.install({ notePath: path.join(fakeHome, "a $(touch /tmp/ld-pwned) b.md"), intervalSeconds: 300, cliPath: '/opt/sauce/cli.js', launchctl: (a) => seen.push(a) });
+    const passed = seen.every((a) => Array.isArray(a) && a[a.length - 1] === weird.plist);
+    const noShell = !require('fs').existsSync('/tmp/ld-pwned');
+    try { require('fs').unlinkSync(weird.plist); } catch (_e) { /* ok */ }
+    return passed && noShell;
+  })());
 const un = launchd.uninstall({ notePath: '/Users/will/vault/spice/graphs/nightly.md', launchctl: (cmd) => calls.push(cmd) });
 ok('LD-4 uninstall unloads and removes the plist', un.removed === true && !fs.existsSync(inst.plist));
 os.homedir = origHome;

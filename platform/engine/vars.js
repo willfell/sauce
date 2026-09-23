@@ -52,17 +52,25 @@ function has(collection, name) {
   return Object.prototype.hasOwnProperty.call(collection, name);
 }
 
-// Graph-authored by PROVENANCE, not by name. A var the graph declares is its
-// own text and may reference other vars. The moment a run replaces that name
-// with a value from outside the graph (a --var override, or a vars_from
-// capture off a receipt), the value stops being graph-authored and becomes a
-// leaf, however it is named. Keying this on the name alone would let a graph
-// that both declares and captures "card" have its card title re-scanned.
-function isDeclared(ref, ctx) {
+// Two INDEPENDENT questions decide what happens to a substituted value, and
+// conflating them is how this went wrong twice:
+//
+//   1. Is the value a TEMPLATE? Only author-supplied text may contain further
+//      ${...} references and be expanded: the graph's own vars: block, and a
+//      --var the operator typed. A value captured off a receipt (vars_from)
+//      or written by a worker is data, never markup, and is never re-scanned.
+//   2. Is the reference an OPERAND or a command FRAGMENT? Operands are quoted;
+//      ${raw:...} says this one reference is a fragment and must not be.
+//
+// A path is author-supplied AND an operand, so it is expanded and then quoted:
+// that is what keeps `--var coordinator=/Users/me/My Repo/c.js` from splitting
+// on the space. A command fragment is author-supplied and raw, so its body is
+// expanded (quoting the leaves inside it) and the fragment itself is not.
+function isAuthored(ref, ctx) {
   if (!ref.startsWith('vars.')) return false;
   const name = ref.slice(5).split('.')[0];
-  if (!has(ctx && ctx.declaredVars, name)) return false;
-  return !has(ctx && ctx.runtimeVars, name);
+  if (has(ctx && ctx.runtimeVars, name)) return false;   // captured off a receipt: data
+  return has(ctx && ctx.declaredVars, name) || has(ctx && ctx.cliVars, name);
 }
 
 function expand(text, ctx, quote, depth) {
@@ -70,8 +78,9 @@ function expand(text, ctx, quote, depth) {
   if (depth > 5) throw new VarsError('substitution did not settle after 5 passes (self-referencing var?)');
   return text.replace(TOKEN, (_m, raw, ref) => {
     const value = stringify(lookup(ref, ctx || {}));
-    if (isDeclared(ref, ctx)) return expand(value, ctx, quote, depth + 1);
-    return raw ? value : quote(value);
+    // Expansion (question 1) and quoting (question 2) are decided separately.
+    const expanded = isAuthored(ref, ctx) ? expand(value, ctx, quote, depth + 1) : value;
+    return raw ? expanded : quote(expanded);
   });
 }
 

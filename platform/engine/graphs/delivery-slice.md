@@ -193,7 +193,7 @@ edges:
   - { from: verify-gates, to: supersession-depth, on: exhausted }
   - { from: pr, to: record-pr }
   - { from: record-pr, to: advance }
-  - { from: advance, to: advance, on: phase-change, max: 40 }
+  - { from: advance, to: advance, on: phase-change, max: 40, budget: phase-change }
   - { from: advance, to: wait, on: waiting, max: 200 }
   - { from: wait, to: advance }
   - { from: advance, to: fix-ci, on: fix-ci, max: 2 }
@@ -202,7 +202,7 @@ edges:
   - { from: refresh, to: verify-gates }
   - { from: advance, to: verify-gates, on: verify-gates, max: 2 }
   - { from: advance, to: implement, on: needs-implementation, max: 1, budget: reimplement }
-  - { from: advance, to: advance, on: deploy, max: 10 }
+  - { from: advance, to: advance, on: deploy, max: 10, budget: deploy }
   - { from: advance, to: done, on: complete }
   - { from: advance, to: projection-failed, on: completion-projection-failed }
   - { from: advance, to: blocked, on: blocked }
