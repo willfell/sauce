@@ -38,6 +38,26 @@ flowchart LR
 
 Nodes run to completion inside a tick. Edges decide what runs next, with per-edge retry budgets; a cycle with no budget is refused before anything starts. A worker's verdict is the `result.json` it publishes by rename, never a parsed transcript. A `human` node parks the run on a checkbox in the note and resumes when you tick it. State is one append-only file per run in the vault, so Obsidian Sync carries it between machines.
 
+## What it looks like
+
+Work lives in the vault, so you read it the way you read any other note, including on a phone. These show the project blueprint's read-only views over the delivery board that the coordinator drives and the `mayo` plugin fronts, drawn from the same card notes the coordinator writes.
+
+<p align="center">
+  <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note in Obsidian on a phone, titled Delivery Coordinator Rail Repairs. A dependency graph lists three slice cards: OPS-3c in progress, OPS-1 done, OPS-2b done. Below them a rollup bar labelled active, with chips reading 2 deployed, 1 in flight, 1 planned.">
+</p>
+
+One epic and its slices, with a rollup underneath. The graph draws three cards while the rollup counts four: the fourth is a slice that was superseded by OPS-3c and left out of the graph.
+
+<p align="center">
+  <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A partial view of a dependency graph in Obsidian. Two slice cards are legible, PERF-9a in progress and PERF-10a done. To their right is a dashed node whose label is cut off by the edge of the screenshot. Further cards and an incoming arrow are partly hidden behind the mobile toolbar and the frame edge. Filter chips above read Stuck and Dim done.">
+</p>
+
+A wider graph, cropped. The dashed node is a stub standing in for a dependency that lives in another epic, drawn as a placeholder instead of pulling that epic's work into this view. `Stuck` and `Dim done` fade parts of the graph rather than removing them, so the shape stays put while your attention moves.
+
+Card status is a projection of the coordinator's ledger rather than something typed by hand. It can still be written by something else, and the loop expects that: dragging a card in the Kanban board on your phone changes the note, and the coordinator records a foreign write against the hash it last wrote instead of quietly trusting it. A board-health check surfaces those, and the `adopt` verb is how out-of-band work gets back on the rail.
+
+The engine's own surface is the same idea one level down: a graph note's `## Runs` section, showing each node's outcome and any checkbox waiting on you. See [`Docs/engine.md`](Docs/engine.md).
+
 ## Install
 
 Requires macOS or Linux with [Homebrew](https://brew.sh), Node 18+, and the `claude` or `codex` CLI for real agent nodes (the `fake` worker needs neither).
