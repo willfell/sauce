@@ -40,21 +40,21 @@ Nodes run to completion inside a tick. Edges decide what runs next, with per-edg
 
 ## What it looks like
 
-Work lives in the vault, so you read it the way you read any other note, including on a phone. These show **GraphView**, the project blueprint's read-only view over the delivery board that the coordinator drives and the `mayo` plugin fronts. It draws the dependency graph out of the same card notes the coordinator writes.
+Work lives in the vault, so you read it the way you read any other note, including on a phone. These show the project blueprint's read-only views over the delivery board that the coordinator drives and the `mayo` plugin fronts, drawn from the same card notes the coordinator writes.
 
 <p align="center">
   <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note in Obsidian on a phone, titled Delivery Coordinator Rail Repairs. A dependency graph lists three slice cards: OPS-3c in progress, OPS-1 done, OPS-2b done. Below them a rollup bar labelled active, with chips reading 2 deployed, 1 in flight, 1 planned.">
 </p>
 
-One epic and its slices. The rollup counts four pieces of work while the graph draws three, because a superseded slice leaves a tombstone in the ledger and is deliberately not drawn: the graph shows what is live, the rollup counts what happened.
+One epic and its slices, with a rollup underneath. The graph draws three cards while the rollup counts four: the fourth is a slice that was superseded by OPS-3c and left out of the graph.
 
 <p align="center">
-  <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A partial view of a dependency graph in Obsidian. Two slice cards are legible, PERF-9a in progress and PERF-10a done, with an arrow from PERF-10a toward a dashed node whose label is cut off by the right edge of the screenshot. Further cards and an incoming arrow are partly hidden behind the mobile toolbar and the frame edge. Filter chips above read Stuck and Dim done.">
+  <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A partial view of a dependency graph in Obsidian. Two slice cards are legible, PERF-9a in progress and PERF-10a done. To their right is a dashed node whose label is cut off by the edge of the screenshot. Further cards and an incoming arrow are partly hidden behind the mobile toolbar and the frame edge. Filter chips above read Stuck and Dim done.">
 </p>
 
-A wider graph, cropped. Dependencies that live in another epic are drawn as dashed stubs rather than pulled in whole, which is why the node on the right is a placeholder pointing at an epic elsewhere. `Dim done` fades what already finished; `Stuck` dims everything except blocked work, its upstream, and the graph roots, so what remains bright is what someone has to unblock.
+A wider graph, cropped. The dashed node is a stub standing in for a dependency that lives in another epic, drawn as a placeholder instead of pulling that epic's work into this view. `Stuck` and `Dim done` fade parts of the graph rather than removing them, so the shape stays put while your attention moves.
 
-Card status is a projection of the coordinator's ledger rather than something typed by hand. It can still be written by something else, and the interesting part is that the loop expects that: dragging a card in the Kanban board on your phone will change the note, and the coordinator records it as a foreign write against the hash it last wrote instead of quietly trusting it. There is a whole audit verb and a board-health check for exactly this.
+Card status is a projection of the coordinator's ledger rather than something typed by hand. It can still be written by something else, and the loop expects that: dragging a card in the Kanban board on your phone changes the note, and the coordinator records a foreign write against the hash it last wrote instead of quietly trusting it. A board-health check surfaces those, and the `adopt` verb is how out-of-band work gets back on the rail.
 
 The engine's own surface is the same idea one level down: a graph note's `## Runs` section, showing each node's outcome and any checkbox waiting on you. See [`Docs/engine.md`](Docs/engine.md).
 
