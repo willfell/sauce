@@ -40,21 +40,23 @@ Nodes run to completion inside a tick. Edges decide what runs next, with per-edg
 
 ## What it looks like
 
-Work lives in the vault, so you read it the way you read any other note, including on a phone. These are the **delivery board** that the `mayo` plugin drives: epics, their slices, and the dependencies between them, rendered by the project blueprint from the same card notes the coordinator writes.
+Work lives in the vault, so you read it the way you read any other note, including on a phone. These show **GraphView**, the project blueprint's read-only view over the delivery board that the coordinator drives and the `mayo` plugin fronts. It draws the dependency graph out of the same card notes the coordinator writes.
 
 <p align="center">
-  <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A dependency graph in Obsidian. Two slice cards, PERF-9a in progress and PERF-10a done, connected by an arrow to a dashed cross-epic node labelled Delivery Coordinator Rail. Filter chips above read Stuck and Dim done.">
+  <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note in Obsidian on a phone, titled Delivery Coordinator Rail Repairs. A dependency graph lists three slice cards: OPS-3c in progress, OPS-1 done, OPS-2b done. Below them a rollup bar labelled active, with chips reading 2 deployed, 1 in flight, 1 planned.">
 </p>
 
-A slice depends on another slice, which depends on an epic that lives somewhere else. The dashed node is a dependency outside this epic, drawn as a stub rather than pretended into the graph. `Stuck` filters to work nothing can start, `Dim done` fades what already shipped.
+One epic and its slices. The rollup counts four pieces of work while the graph draws three, because a superseded slice leaves a tombstone in the ledger and is deliberately not drawn: the graph shows what is live, the rollup counts what happened.
 
 <p align="center">
-  <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note in Obsidian on a phone, titled Delivery Coordinator Rail Repairs. Three slice cards are listed: OPS-3c in progress, OPS-1 done, OPS-2b done. Below them a rollup bar reads active, with chips for 2 deployed, 1 in flight, 1 planned.">
+  <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A partial view of a dependency graph in Obsidian. Two slice cards are legible, PERF-9a in progress and PERF-10a done, with an arrow from PERF-10a toward a dashed node whose label is cut off by the right edge of the screenshot. Further cards and an incoming arrow are partly hidden behind the mobile toolbar and the frame edge. Filter chips above read Stuck and Dim done.">
 </p>
 
-One epic, its slices, and a rollup of where they actually are. The status on each card is a projection of the coordinator's ledger, not something typed by hand, so it cannot drift from what shipped.
+A wider graph, cropped. Dependencies that live in another epic are drawn as dashed stubs rather than pulled in whole, which is why the node on the right is a placeholder pointing at an epic elsewhere. `Dim done` fades what already finished; `Stuck` dims everything except blocked work, its upstream, and the graph roots, so what remains bright is what someone has to unblock.
 
-The engine's own surface is the same idea one level down: a graph note's `## Runs` section, showing each node's outcome and any checkbox waiting on you. See [`Docs/engine.md`](Docs/engine.md) for the shape of that.
+Card status is a projection of the coordinator's ledger rather than something typed by hand. It can still be written by something else, and the interesting part is that the loop expects that: dragging a card in the Kanban board on your phone will change the note, and the coordinator records it as a foreign write against the hash it last wrote instead of quietly trusting it. There is a whole audit verb and a board-health check for exactly this.
+
+The engine's own surface is the same idea one level down: a graph note's `## Runs` section, showing each node's outcome and any checkbox waiting on you. See [`Docs/engine.md`](Docs/engine.md).
 
 ## Install
 
