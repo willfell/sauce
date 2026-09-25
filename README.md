@@ -38,6 +38,24 @@ flowchart LR
 
 Nodes run to completion inside a tick. Edges decide what runs next, with per-edge retry budgets; a cycle with no budget is refused before anything starts. A worker's verdict is the `result.json` it publishes by rename, never a parsed transcript. A `human` node parks the run on a checkbox in the note and resumes when you tick it. State is one append-only file per run in the vault, so Obsidian Sync carries it between machines.
 
+## What it looks like
+
+Work lives in the vault, so you read it the way you read any other note, including on a phone. These are the **delivery board** that the `mayo` plugin drives: epics, their slices, and the dependencies between them, rendered by the project blueprint from the same card notes the coordinator writes.
+
+<p align="center">
+  <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A dependency graph in Obsidian. Two slice cards, PERF-9a in progress and PERF-10a done, connected by an arrow to a dashed cross-epic node labelled Delivery Coordinator Rail. Filter chips above read Stuck and Dim done.">
+</p>
+
+A slice depends on another slice, which depends on an epic that lives somewhere else. The dashed node is a dependency outside this epic, drawn as a stub rather than pretended into the graph. `Stuck` filters to work nothing can start, `Dim done` fades what already shipped.
+
+<p align="center">
+  <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note in Obsidian on a phone, titled Delivery Coordinator Rail Repairs. Three slice cards are listed: OPS-3c in progress, OPS-1 done, OPS-2b done. Below them a rollup bar reads active, with chips for 2 deployed, 1 in flight, 1 planned.">
+</p>
+
+One epic, its slices, and a rollup of where they actually are. The status on each card is a projection of the coordinator's ledger, not something typed by hand, so it cannot drift from what shipped.
+
+The engine's own surface is the same idea one level down: a graph note's `## Runs` section, showing each node's outcome and any checkbox waiting on you. See [`Docs/engine.md`](Docs/engine.md) for the shape of that.
+
 ## Install
 
 Requires macOS or Linux with [Homebrew](https://brew.sh), Node 18+, and the `claude` or `codex` CLI for real agent nodes (the `fake` worker needs neither).
