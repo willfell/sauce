@@ -547,6 +547,13 @@ function pathIdentity(value) {
 function sliceStatus(slice) {
   const raw = slice && (slice.status || slice.phase);
   if (raw === 'deployed') return 'completed';
+  // A superseded slice's note carries status: archived. It is not a registry
+  // status, so normalizeStatus returns null and it used to fall through to
+  // planning, counting a dead slice as work not yet started (#857). GraphView
+  // already excludes archived alongside discarded (graph-view.js); the rollup
+  // now agrees with it. Scoped here, not in normalizeStatus, because the
+  // coordinator also calls normalizeStatus and must keep its own semantics.
+  if (raw === 'archived') return 'discarded';
   if (raw === 'implementing' || raw === 'claimed') return 'in_progress';
   return normalizeStatus(raw) || 'planning';
 }
