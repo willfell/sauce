@@ -182,6 +182,31 @@ fs.unlinkSync(path.join(wtA, 'ok.txt'));
 const sw = cli([NOTE_A, '--sweep', '--json']);
 ok('CLI-9 --sweep removes the finished clean worktree', sw.code === 0 && (j => j.removed.length === 1 && j.removed[0] === wtA)(JSON.parse(sw.out)) && !fs.existsSync(wtA), sw.out.slice(0, 300));
 
+// ---- CLI resume: "tick the box, then run again" must mean the SAME run ----
+// The engine-level cases above tick one in-memory ctx, which is why nobody
+// noticed the CLI minted a brand-new run on the second invocation: the parked
+// run was orphaned and the human's answer was never applied. These go through
+// the CLI end to end, the way a person actually answers a human node.
+const NOTE_H = writeNote('cli-human.md', ['---', 'type: sauce-graph', 'status: idle', '---', '', '# Human', '', '```sauce', 'nodes:', '  - id: draft', '    type: agent', '    worker: fake', '    prompt: x', '    fake: pass', '  - id: approve', '    type: human', '    ask: Ship it?', '  - id: shipped', '    type: end', '    outcome: shipped', 'edges:', '  - { from: draft, to: approve }', '  - { from: approve, to: shipped, on: pass }', '```', ''].join('\n'));
+const h1 = JSON.parse(cli([NOTE_H, '--json']).out);
+ok('CLI-10 a human node parks the run through the CLI', h1.status === 'parked' && h1.parked && h1.parked.node === 'approve', JSON.stringify(h1).slice(0, 200));
+fs.writeFileSync(NOTE_H, fs.readFileSync(NOTE_H, 'utf8').replace(`- [ ] run:${h1.run_id} node:approve`, `- [x] run:${h1.run_id} node:approve`));
+const h2 = JSON.parse(cli([NOTE_H, '--json']).out);
+ok('CLI-11 running the note again RESUMES the parked run and applies the tick',
+  h2.run_id === h1.run_id && h2.status === 'shipped' && h2.nodes.approve === 'pass',
+  JSON.stringify({ first: h1.run_id, second: h2.run_id, status: h2.status }));
+ok('CLI-12 resuming minted no second run', engine.listRuns(vault).filter((r) => r.graph_note === 'spice/graphs/cli-human.md').length === 1);
+const h3 = JSON.parse(cli([NOTE_H, '--new', '--json']).out);
+ok('CLI-13 --new starts a fresh run even though an earlier one exists', h3.run_id !== h1.run_id && h3.status === 'parked', JSON.stringify({ run: h3.run_id, status: h3.status }));
+// A run whose worker died mid-node is left marked running; guessing would be wrong either way.
+engine.readEvents(vault, h3.run_id);
+require(path.join(ENGINE, 'ledger.js')).appendEvent(vault, h3.run_id, { type: 'human.answered', node: 'approve', outcome: 'pass' });
+const stuck = engine.createRun({ vault, notePath: NOTE_H, now: new Date(2031, 0, 1, 0, 0, 0) });
+require(path.join(ENGINE, 'ledger.js')).appendEvent(vault, stuck.runId, { type: 'node.started', node: 'draft', attempt: 1 });
+const h4 = cli([NOTE_H, '--json']);
+ok('CLI-14 a latest run still marked running is refused rather than resumed or replaced',
+  h4.code === 2 && /run_in_flight/.test(h4.out) && /--new/.test(h4.out), h4.out.slice(0, 240));
+
 fs.rmSync(vault, { recursive: true, force: true });
 fs.rmSync(repo, { recursive: true, force: true });
 

@@ -119,6 +119,7 @@ sauce run <note> --sweep               # remove finished, clean worktrees of thi
 sauce run <note> --worker fake         # rehearse: every agent node uses the test double
 sauce run <note> --var k=v             # override a graph var
 sauce run <note> --json                # receipt only, for scripts and /sauce
+sauce run <note> --new                 # start fresh even when the latest run is parked
 ```
 
 `sauce run` finds the vault from the note's own path, so it works from any directory. Exit codes: 0 when the run is done, parked, or listed; 1 when it failed; 2 for a refusal (`vault_missing`, `note_missing`, `graph_invalid`, `repo_missing`, `usage`).
@@ -172,7 +173,7 @@ Ledger: `ranch/engine/runs/fix-flaky-harness-20260922-140220.jsonl`
 <!-- @sauce:runs END -->
 ```
 
-Tick the box and run `sauce run <note>` again; the engine records `human.answered` and continues. To stop a run, set `status: halted` in the note's frontmatter; the next tick records `run.halted` and exits. The `## Runs` region is the only part of the note the engine rewrites.
+Tick the box and run `sauce run <note>` again. Running a note whose latest run is parked **resumes that same run**: the engine records `human.answered` and continues from the human node. Pass `--new` to start over instead. A latest run still marked `running` is refused with `run_in_flight` rather than guessed at, because it may be executing elsewhere or its worker may have died. To stop a run, set `status: halted` in the note's frontmatter; the next tick records `run.halted` and exits. The `## Runs` region is the only part of the note the engine rewrites.
 
 ## Scheduling
 
