@@ -26,6 +26,7 @@ jobs:
           - platform: macos
             runner: [self-hosted, macOS, ARM64]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     env:
       SAUCE_PREFLIGHT_JOBS: '4'
     steps:
@@ -66,6 +67,7 @@ jobs:
   pr-title-bump:
     if: github.event_name == 'pull_request'
     runs-on: sauce
+    timeout-minutes: 10
     steps:
       - name: Checkout sauce repo
         uses: actions/checkout@v4
@@ -88,6 +90,7 @@ jobs:
     if: github.event_name != 'pull_request'
     continue-on-error: true
     runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 15
     env:
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
