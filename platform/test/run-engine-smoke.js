@@ -196,6 +196,19 @@ ok('CLI-11 running the note again RESUMES the parked run and applies the tick',
   h2.run_id === h1.run_id && h2.status === 'shipped' && h2.nodes.approve === 'pass',
   JSON.stringify({ first: h1.run_id, second: h2.run_id, status: h2.status }));
 ok('CLI-12 resuming minted no second run', engine.listRuns(vault).filter((r) => r.graph_note === 'spice/graphs/cli-human.md').length === 1);
+// Park a fresh run, then EDIT the graph before ticking: resuming would replay
+// the old run against new edges, so it has to be refused, and --new still works.
+const NOTE_G = writeNote('cli-edited.md', fs.readFileSync(NOTE_H, 'utf8').replace(/## Runs[\s\S]*$/, ''));
+const g1 = JSON.parse(cli([NOTE_G, '--json']).out);
+const edited = fs.readFileSync(NOTE_G, 'utf8').replace('    ask: Ship it?', '    ask: Ship it now?').replace(`- [ ] run:${g1.run_id} node:approve`, `- [x] run:${g1.run_id} node:approve`);
+fs.writeFileSync(NOTE_G, edited);
+const g2 = cli([NOTE_G, '--json']);
+ok('CLI-15 a graph edited while its run was parked is refused, not silently re-routed',
+  g1.status === 'parked' && g2.code === 2 && /graph_changed/.test(g2.out) && /--new/.test(g2.out)
+  && engine.readEvents(vault, g1.run_id).every((e) => e.type !== 'human.answered'),
+  g2.out.slice(0, 240));
+const g3 = JSON.parse(cli([NOTE_G, '--new', '--json']).out);
+ok('CLI-16 --new runs the edited graph as a fresh run', g3.run_id !== g1.run_id && g3.status === 'parked', JSON.stringify({ run: g3.run_id, status: g3.status }));
 const h3 = JSON.parse(cli([NOTE_H, '--new', '--json']).out);
 ok('CLI-13 --new starts a fresh run even though an earlier one exists', h3.run_id !== h1.run_id && h3.status === 'parked', JSON.stringify({ run: h3.run_id, status: h3.status }));
 // A run whose worker died mid-node is left marked running; guessing would be wrong either way.

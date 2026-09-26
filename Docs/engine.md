@@ -173,7 +173,7 @@ Ledger: `ranch/engine/runs/fix-flaky-harness-20260922-140220.jsonl`
 <!-- @sauce:runs END -->
 ```
 
-Tick the box and run `sauce run <note>` again. Running a note whose latest run is parked **resumes that same run**: the engine records `human.answered` and continues from the human node. Pass `--new` to start over instead. A latest run still marked `running` is refused with `run_in_flight` rather than guessed at, because it may be executing elsewhere or its worker may have died. To stop a run, set `status: halted` in the note's frontmatter; the next tick records `run.halted` and exits. The `## Runs` region is the only part of the note the engine rewrites.
+Tick the box and run `sauce run <note>` again. Running a note whose latest run is parked **resumes that same run**: the engine records `human.answered` and continues from the human node. Pass `--new` to start over instead. A latest run still marked `running` is refused with `run_in_flight` rather than guessed at, because it may be executing elsewhere or its worker may have died. If you edited the `sauce` block while the run sat parked, resuming is refused with `graph_changed`: the old run would otherwise replay against the new edges and could route somewhere it was never planned to go. Revert the edit to resume, or pass `--new`. To stop a run, set `status: halted` in the note's frontmatter; the next tick records `run.halted` and exits. The `## Runs` region is the only part of the note the engine rewrites.
 
 ## Scheduling
 

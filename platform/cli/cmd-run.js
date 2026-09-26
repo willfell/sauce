@@ -199,6 +199,15 @@ async function run(ctx, args) {
     let runCtx;
     const latest = flags.fresh ? null : engine.latestRunFor(vault, notePath);
     if (latest && latest.status === "parked") {
+        // Resuming replays the old run's events against the graph as it is
+        // NOW. If the sauce block was edited while the run sat parked, the
+        // remaining edges may route somewhere the run was never planned to go,
+        // so a changed graph is refused instead of silently re-routed.
+        const created = engine.readEvents(vault, latest.run_id).find((e) => e.type === "run.created") || {};
+        const nowHash = require(path.join(ENGINE, "run.js")).graphHashOf(parsed.block);
+        if (created.graph_hash && created.graph_hash !== nowHash) {
+            return refuse(flags, "graph_changed", `the sauce block changed since run ${latest.run_id} parked (${created.graph_hash} -> ${nowHash}), so resuming it could route somewhere it was never planned to go. Revert the edit to resume it, or pass --new to start a fresh run on the edited graph.`, { run_id: latest.run_id });
+        }
         try { runCtx = engine.openRun({ vault, notePath, runId: latest.run_id, workerOverride: flags.worker }).ctx; }
         catch (e) { return refuse(flags, e.code || "run_failed", e.message); }
     } else if (latest && latest.status === "running") {
