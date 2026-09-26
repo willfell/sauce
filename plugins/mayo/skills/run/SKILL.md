@@ -49,6 +49,18 @@ Claim → isolated worktree → implement within `touch_zones` (regression test 
 
 Refutation → ONE same-card repair, full quorum rerun. Second refutation → **before minting, probe the lineage**: `node <coordinator> supersession-depth --card "<card>" --json`; if `at_limit`, this slice has been superseded to the ceiling without converging — do NOT supersede again, escalate to the Director to decompose it or make an explicit scope call. Otherwise supersede at mint via `/mayo:intake` (carried findings + binding fixtures) and execute the returned discard through the coordinator. A discard that returns `awaiting_user_decision` with `supersession_depth_exceeded` is a hard stop, not a retry — surface it and move on. Coordinator return values (`parked`, `fix-ci`, `verify-gates`, `refresh-feature`, `waiting`, `deploy`, `complete`, `completion-projection-failed`, `blocked-external`, `needs-inspection`) are handled exactly as the coordinator prescribes — its receipt, not intuition, is authoritative.
 
+## Engine mode (opt-in)
+
+The same slice path exists as a shipped Sauce graph, `platform/engine/graphs/delivery-slice.md` beside the installed coordinator (`<coordinator>/../../../platform/engine/graphs/delivery-slice.md`). Every coordinator call in it is a `shell` node, the lenses are `agent` nodes, the one-repair-then-supersede rule is edges with `max: 1`, and `advance`'s receipt actions are named edges. When the user says "run it through the engine", run:
+
+```text
+sauce run "<plugin_root>/../platform/engine/graphs/delivery-slice.md" --var coordinator="<coordinator>" --var gate="<gate>" --follow --json
+```
+
+from the bound repo, with `config.env` exported. Relay the receipt exactly as the prose path would: `done` is a completed slice, a run parked on `supersede` is the second refutation waiting for the Director, and any named end (`no-work`, `at-capacity`, `all-work-leased`, `blocked`) is reported and the turn stops. The ledger lives in the bound vault at `ranch/engine/runs/`.
+
+The prose path above stays the default until one live epic completes cleanly through the graph and its ledger has been diffed against a coordinator run of the same shape; do not switch a binding's default on your own.
+
 ## Laws (bindings inherit them; the FID is the authority)
 
 - The coordinator and intake are the ONLY writers. Never hand-edit boards, cards, or coordinator state.

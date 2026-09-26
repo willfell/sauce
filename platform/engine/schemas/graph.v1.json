@@ -1,0 +1,127 @@
+{
+  "$id": "sauce.graph.v1",
+  "title": "Sauce graph block",
+  "description": "The fenced sauce block of a graph note. Parsed by platform/engine/graph.js, validated by platform/engine/validate.js.",
+  "type": "object",
+  "required": [
+    "nodes"
+  ],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "type": {
+            "enum": [
+              "agent",
+              "judge",
+              "shell",
+              "human",
+              "end"
+            ]
+          },
+          "worker": {
+            "enum": [
+              "claude-code",
+              "codex",
+              "fake"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "isolate": {
+            "enum": [
+              "worktree",
+              "none"
+            ]
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "run": {
+            "type": "string"
+          },
+          "gate": {
+            "enum": [
+              "adequacy"
+            ]
+          },
+          "capture": {
+            "enum": [
+              "json"
+            ]
+          },
+          "outcome_from": {
+            "type": "string"
+          },
+          "vars_from": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "ask": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_turns": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "on": {
+            "type": "string",
+            "pattern": "^(pass|fail|always|exhausted|[a-z][a-z0-9-]*)$"
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "budget": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "Edges naming the same budget share one max counter, so a budget can span several gates."
+          }
+        }
+      }
+    }
+  }
+}

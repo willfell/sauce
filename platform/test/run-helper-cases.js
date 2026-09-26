@@ -8130,7 +8130,7 @@ async function caseHCV0890VersionD() {
   const mechanisms = Array.isArray(m.mechanisms) ? m.mechanisms
     : (Array.isArray(m.items) ? m.items.filter(x => x.kind === "mechanism")
       : (m.catalogue && Array.isArray(m.catalogue.mechanisms) ? m.catalogue.mechanisms : []));
-  assertEqual(mechCount, 34, "HC-V0890-VERSION-D: mechanism count = 34 (includes modal)");
+  assertEqual(mechCount, 35, "HC-V0890-VERSION-D: mechanism count = 35 (includes engine)");
   assertTrue("HC-V0890-VERSION-D: catalogue includes modal mechanism",
     mechanisms.some(x => x && x.name === "modal"));
 }
@@ -8685,7 +8685,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 34, "HC-V0891-VERSION-D: mechanism count = 34 (includes modal)");
+  assertEqual(mechs.length, 35, "HC-V0891-VERSION-D: mechanism count = 35 (includes engine)");
   assertTrue("HC-V0891-VERSION-D: catalogue includes modal mechanism",
     mechs.some(x => x && x.name === "modal"));
 }

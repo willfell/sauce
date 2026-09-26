@@ -12,6 +12,7 @@ This is the **workshop vault** — the canonical home for the vault platform. Me
 | Setting up Claude Cowork scheduled jobs | [cowork-onboarding.md](cowork-onboarding.md) → [cowork-consumer-extensions.md](cowork-consumer-extensions.md) |
 | Adding a new mechanism or blueprint | [how.md](how.md) → [landmines.md](landmines.md) → [plans/2026-05-02-vault-platform-design.md](plans/2026-05-02-vault-platform-design.md) |
 | Debugging a failed install | [landmines.md](landmines.md) → [how.md](how.md) (installer section) |
+| Evaluating Sauce as agent tooling | [engine.md](engine.md) → [comparison.md](comparison.md) |
 | Catching up on history | [plans/2026-05-02-customjs-guard-rollout.md](plans/2026-05-02-customjs-guard-rollout.md) → [plans/2026-05-02-vault-platform-design.md](plans/2026-05-02-vault-platform-design.md) → [plans/2026-05-02-vault-platform-implementation.md](plans/2026-05-02-vault-platform-implementation.md) |
 
 ## Documents
@@ -22,6 +23,8 @@ This is the **workshop vault** — the canonical home for the vault platform. Me
 - **[how.md](how.md)** — How it works. Architecture, concepts, data flow.
 - **[use.md](use.md)** — How to use it. Daily operations: install, audit, add a mechanism, onboard a consumer.
 - **[landmines.md](landmines.md)** — Traps we already hit. **Read before any new work.**
+- **[engine.md](engine.md)** — The Sauce engine, standalone reference: graph notes, node types, workers, the run ledger, `sauce run`.
+- **[comparison.md](comparison.md)** — How Sauce compares to Gas Town, beads-superpowers, and plain agent loops.
 
 ### Plans (chronological history)
 

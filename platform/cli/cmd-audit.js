@@ -29,6 +29,7 @@ exports._parseFlags = function(argv) {
         claudeSurface: false,
         entityCreate: false,
         frontmatterAlignment: false,
+        engine: false,
         workshopPath: null,
         strict: false,
         help: false,
@@ -47,6 +48,7 @@ exports._parseFlags = function(argv) {
         else if (a === "--claude-surface") flags.claudeSurface = true;
         else if (a === "--entity-create") flags.entityCreate = true;
         else if (a === "--frontmatter-alignment") flags.frontmatterAlignment = true;
+        else if (a === "--engine") flags.engine = true;
         else if (a === "--workshop") flags.workshopPath = argv[++i];
         else if (a.startsWith("--workshop=")) flags.workshopPath = a.slice(11);
         else if (a === "--strict") flags.strict = true;
@@ -183,7 +185,36 @@ function formatEntityCreateReport(result) {
     return lines.join("\n") + "\n";
 }
 
-exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, untrackedCheck, quiet, claudeSurface, entityCreate, frontmatterAlignment, workshopPath, strict }) {
+const ENGINE_SEVERITY_ORDER = ["HIGH", "MEDIUM", "LOW"];
+
+function formatEngineReport(result) {
+    const { findings, counts } = result;
+    const lines = [];
+    lines.push("# sauce audit --engine");
+    lines.push("");
+    lines.push(`Counts: ${Object.entries(counts).map(([k, v]) => `${k}=${v}`).join(", ")}; runs_checked=${result.runs_checked}`);
+    lines.push("");
+    for (const sev of ENGINE_SEVERITY_ORDER) {
+        const rows = findings.filter(f => f.severity === sev);
+        if (rows.length === 0) continue;
+        lines.push(`## ${sev} (${rows.length})`);
+        lines.push("");
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            lines.push(`${i + 1}. \`${r.path}\` — ${r.code}: ${r.message}`);
+        }
+        lines.push("");
+    }
+    if (findings.length === 0) {
+        lines.push(`Engine surface intact; ${result.runs_checked} run ledger(s) readable.`);
+        lines.push("");
+    }
+    // JSON summary footer for skill parsers.
+    lines.push(`<!-- summary:${JSON.stringify({ counts, findings_total: findings.length, runs_checked: result.runs_checked })} -->`);
+    return lines.join("\n") + "\n";
+}
+
+exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, untrackedCheck, quiet, claudeSurface, entityCreate, frontmatterAlignment, engine, workshopPath, strict }) {
     // Test entry-point used by run-audit.js / run-cli.js. Throws Error with
     // .exitCode set (1 = violations, 2 = error) instead of calling process.exit.
     const installedJsonPath = path.join(vaultPath, "ranch/platform-installed.json");
@@ -200,7 +231,7 @@ exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, u
     // (1) Default rule-fragment pass — runs unless an explicit pass flag is set alone.
     // To preserve original behavior, the default pass runs when none of the explicit
     // pass flags is set. When a specific flag is set, only that pass runs.
-    const anyExplicitPass = claudeSurface || entityCreate || frontmatterAlignment;
+    const anyExplicitPass = claudeSurface || entityCreate || frontmatterAlignment || engine;
     if (!anyExplicitPass) {
         const { runAudit } = require("../audit/walker");
         const { formatReport } = require("../audit/report");
@@ -222,6 +253,11 @@ exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, u
         const faResult = await walkFrontmatterAlignment(vaultPath, { workshopPath });
         combinedMd += formatFrontmatterAlignmentReport(faResult);
         if (faResult.findings.length > 0) hasFindings = true;
+    } else if (engine) {
+        const { walkEngine } = require("../audit/engine-walker");
+        const enResult = await walkEngine(vaultPath, { workshopPath });
+        combinedMd += formatEngineReport(enResult);
+        if (enResult.findings.length > 0) hasFindings = true;
     }
 
     let summary = null;
@@ -257,7 +293,7 @@ exports.run = async function(ctx, args) {
             "usage: sauce audit [--vault <path>] [--blueprint <name>] [--output-file <path>]\n" +
             "                   [--no-untracked-check] [--quiet] [--strict]\n" +
             "                   [--claude-surface [--workshop <path>]]\n" +
-            "                   [--entity-create] [--frontmatter-alignment]\n" +
+            "                   [--entity-create] [--frontmatter-alignment] [--engine]\n" +
             "\n" +
             "Passes (mutually exclusive; default = rule-fragment pass):\n" +
             "  (default)               Rule-fragment audit: blueprint conformance + untracked dirs.\n" +
@@ -272,6 +308,10 @@ exports.run = async function(ctx, args) {
             "                          legacy_key_used (HIGH), non_iso_timestamp (HIGH),\n" +
             "                          unquoted_wikilink (MEDIUM), missing_canonical_key (MEDIUM),\n" +
             "                          discriminator_tag_present (INFO), temporal_tag_present (INFO).\n" +
+            "  --engine                Engine install check: engine_dir_missing (HIGH),\n" +
+            "                          engine_surface_missing (HIGH), engine_surface_stale (MEDIUM),\n" +
+            "                          engine_version_drift (MEDIUM), engine_ledger_unparsable (MEDIUM),\n" +
+            "                          engine_worktree_orphan (LOW).\n" +
             "\n" +
             "Exit codes: 0 = clean, 1 = findings, 2 = error."
         );
@@ -288,6 +328,7 @@ exports.run = async function(ctx, args) {
             claudeSurface: flags.claudeSurface,
             entityCreate: flags.entityCreate,
             frontmatterAlignment: flags.frontmatterAlignment,
+            engine: flags.engine,
             workshopPath: flags.workshopPath ? path.resolve(process.cwd(), flags.workshopPath) : null,
             strict: flags.strict,
         });

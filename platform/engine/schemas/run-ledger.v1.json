@@ -1,0 +1,27 @@
+{
+  "$id": "sauce.run-ledger.v1",
+  "title": "Sauce run ledger event",
+  "description": "One JSON line of ranch/engine/runs/<run-id>.jsonl. Append-only; replayed by platform/engine/state.js. A trailing partial line is ignored on read.",
+  "type": "object",
+  "required": ["ts", "type"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "type": { "enum": ["run.created", "node.started", "node.finished", "edge.fired", "run.parked", "human.answered", "run.halted", "run.ended"] },
+    "run_id": { "type": "string" },
+    "graph_note": { "type": "string" },
+    "graph_hash": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "repo": { "type": ["string", "null"] },
+    "vars": { "type": "object" },
+    "worker_override": { "type": ["string", "null"] },
+    "host": { "type": "string" },
+    "node": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "outcome": { "type": "string" },
+    "result": { "type": ["object", "null"] },
+    "from": { "type": "string" },
+    "to": { "type": "string" },
+    "on": { "type": "string" },
+    "ask": { "type": "string" },
+    "status": { "type": "string" }
+  }
+}

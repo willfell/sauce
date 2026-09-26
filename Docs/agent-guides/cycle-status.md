@@ -9,12 +9,13 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.282.1` (closed 2026-08-04)
-- **Most recent cycle:** loop-integrity workstream 3 — a rail that fits: the `adopt` verb (verified out-of-band completion carrying PR + merge-SHA provenance, new terminal `adopted` ledger phase, projection refresh), stamp-provenance classification of untracked board members in `board-health`, `card_note_sha`/`foreign_write` detection of non-coordinator card writes, and a stable `concurrent_modification` refusal across the bulk-rewrite verbs. See `Docs/plans/2026-08-04-v0.283.0-ws3-a-rail-that-fits-result.md`.
+- **Workshop version:** `0.291.1` (last closed release)
+- **In flight:** engine reintegration on branch `cycle/v0.292.0-engine-reintegration` — the Sauce engine runtime (`platform/engine/`), the always-on `engine` mechanism, `sauce run` / `sauce audit --engine`, and the retirement of the autoloop cron surface. Design: `Docs/plans/engine-reintegration.md`; agent guide: `Docs/agent-guides/engine.md`.
+- **Most recent narrated cycle:** loop-integrity workstream 3 — a rail that fits: the `adopt` verb (verified out-of-band completion carrying PR + merge-SHA provenance, new terminal `adopted` ledger phase, projection refresh), stamp-provenance classification of untracked board members in `board-health`, `card_note_sha`/`foreign_write` detection of non-coordinator card writes, and a stable `concurrent_modification` refusal across the bulk-rewrite verbs. See `Docs/plans/2026-08-04-v0.283.0-ws3-a-rail-that-fits-result.md`.
 
 - **Workshop version (previous):** `0.282.0` (closed 2026-08-04) — loop-integrity workstream 2 — one source of truth: canonical path derivation, board-vs-ledger authority, and the release bump each reduced to one physical implementation (`delivery.topology.*`, `resolveSliceAuthority`, PR-title bump gate). See `Docs/plans/2026-08-04-v0.282.1-ws2-one-source-of-truth-result.md`.
 
-## Mechanisms (30)
+## Mechanisms (35)
 
 | Name | Version | Role |
 | --- | --- | --- |
@@ -48,6 +49,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 | `menu-popover` | 0.3.0 | Shared ⋯ menu popover |
 | `chrome-bar` | 0.4.1 | Shared breadcrumb+Go+primary+⋯ chrome bar factory |
 | `section-explorer` | 0.6.0 | Shared section/doc management (move, bulk-select, delete) |
+| `engine` | 0.1.0 | Node-based agent execution engine surface (/sauce, template, ranch/engine); always-on |
 
 > Per-mechanism history and rationale: `Docs/cycle-history.md`. Source of truth for versions: `platform/manifest.json`.
 
@@ -77,6 +79,15 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 ## Test harnesses
 
 172 harness files under `platform/test/run-*.js` (174 steps in `platform/test/preflight-manifest.json`), one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
+
+Engine harnesses (added in the engine-reintegration cycle; all in the preflight manifest and `package.json`):
+
+| Script | File | Cases |
+| --- | --- | :---: |
+| `test:engine-graph` | `platform/test/run-engine-graph.js` | 81 |
+| `test:engine-smoke` | `platform/test/run-engine-smoke.js` | 30 |
+| `test:engine-install` | `platform/test/run-engine-install.js` | 17 |
+| `test:engine-delivery-graph` | `platform/test/run-engine-delivery-graph.js` (stub coordinator at `platform/test/fixtures/engine/stub-coordinator.js`) | 19 |
 
 ## In-flight / next-candidate queue
 

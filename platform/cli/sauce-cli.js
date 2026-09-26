@@ -23,6 +23,7 @@ const VERBS = {
     "migrate-frontmatter": "./cmd-migrate-frontmatter.js",
     "cleanup-project-type": "./cmd-cleanup-project-type.js",
     "reconcile-cowork": "./cmd-reconcile-cowork.js",
+    run:       "./cmd-run.js",
     help:      "./cmd-help.js"
 };
 
@@ -141,6 +142,13 @@ async function dispatch(argv, opts) {
         const testCtx = opts || {};
         await cmd.run(testCtx, rest);
         process.exitCode = process.exitCode || 0;
+        return;
+    }
+    if (verb === "run") {
+        // Context-free: the engine resolves the vault from the graph note's own
+        // ancestors before falling back to the cwd walk / $SAUCE_VAULT.
+        const cmd = require(VERBS.run);
+        await cmd.run(null, rest);
         return;
     }
     if (verb === "doctor") {

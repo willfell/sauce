@@ -1,5 +1,5 @@
 {
-  "_comment": "Workshop-wide schema registry \u2014 every schema-shaped surface tracked at dev time. See Docs/agent-guides/schemas.md for authoring guidance. Verified by scripts/lint-schemas.js (release:preflight gate). v0.113.0 (workshop 0.113.0).",
+  "_comment": "Workshop-wide schema registry — every schema-shaped surface tracked at dev time. See Docs/agent-guides/schemas.md for authoring guidance. Verified by scripts/lint-schemas.js (release:preflight gate). v0.113.0 (workshop 0.113.0).",
   "schema_version": 1,
   "schemas": [
     {
@@ -22,7 +22,7 @@
         "platform/blueprints/cowork/skills/orchestrators/eod-review/SKILL.md",
         "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
       ],
-      "notes": "EOD review sidecar \u2014 JSON Schema draft-07. Latest accepted version 1.4.0 (v0.101.0 sparse-signal-feedback)."
+      "notes": "EOD review sidecar — JSON Schema draft-07. Latest accepted version 1.4.0 (v0.101.0 sparse-signal-feedback)."
     },
     {
       "id": "cowork-morning-briefing-sidecar",
@@ -147,7 +147,7 @@
       "consumers": [
         "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
       ],
-      "notes": "Canonical 7-entry kind\u2192title display map (v0.95.0). loadKindTitles() reads this; CANONICAL_TITLES const is the in-helper fallback."
+      "notes": "Canonical 7-entry kind→title display map (v0.95.0). loadKindTitles() reads this; CANONICAL_TITLES const is the in-helper fallback."
     },
     {
       "id": "cowork-kind-patterns",
@@ -207,7 +207,7 @@
         "platform/blueprints/cowork/helpers/learn-from-checks-helper.js",
         "platform/blueprints/cowork/skills/orchestrators/reconcile-cowork/SKILL.md"
       ],
-      "notes": "learned_weights schema is encoded as normalizeLearnedWeightsV3 / V4 / V5 migrators inside ingest-feedback-helper.js. Schema 5 (v0.101.0) added per-cadence satisfaction series; schema 4 (v0.99.0) added silence-reset migration; schema 3 (v0.98.2) added nested per-kind entity maps. Migration is always purely additive \u2014 counters intact across version bumps."
+      "notes": "learned_weights schema is encoded as normalizeLearnedWeightsV3 / V4 / V5 migrators inside ingest-feedback-helper.js. Schema 5 (v0.101.0) added per-cadence satisfaction series; schema 4 (v0.99.0) added silence-reset migration; schema 3 (v0.98.2) added nested per-kind entity maps. Migration is always purely additive — counters intact across version bumps."
     },
     {
       "id": "finance-rule-fragments",
@@ -224,7 +224,7 @@
         "platform/blueprints/finance/helpers/monthly-overview.js",
         "platform/blueprints/finance/helpers/finance-math.js"
       ],
-      "notes": "11 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Paycheck is month-keyed: requires `month` (^\\d{4}-\\d{2}$), naming `^Paycheck-\\d{4}-\\d{2}\\.md$`, optional `deposits[]` ({date, amount}); each `expenses[]` row carries a 1-based `deposit` index tying it to which check pays it. Legacy `pay_period_start`/`pay_period_end` are downgraded to optional (archived/pre-cutover notes). paycheck-defaults carries a `deposit_schedule[]` ({day, amount}) that seeds a new month's deposits. Budget fragment carries optional `debt_allocations[]` + `savings_allocations[]` arrays (finance month-reality WS2 \u2014 per-row plan/override allocations, never summed into the discretionary envelope). Validates frontmatter on per-blueprint paths via the validator mechanism."
+      "notes": "11 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Paycheck is month-keyed: requires `month` (^\\d{4}-\\d{2}$), naming `^Paycheck-\\d{4}-\\d{2}\\.md$`, optional `deposits[]` ({date, amount}); each `expenses[]` row carries a 1-based `deposit` index tying it to which check pays it. Legacy `pay_period_start`/`pay_period_end` are downgraded to optional (archived/pre-cutover notes). paycheck-defaults carries a `deposit_schedule[]` ({day, amount}) that seeds a new month's deposits. Budget fragment carries optional `debt_allocations[]` + `savings_allocations[]` arrays (finance month-reality WS2 — per-row plan/override allocations, never summed into the discretionary envelope). Validates frontmatter on per-blueprint paths via the validator mechanism."
     },
     {
       "id": "reader-rule-fragments",
@@ -254,7 +254,7 @@
       "consumers": [
         "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
       ],
-      "notes": "24 rule_fragments \u2014 largest bundle. Covers 7 atomic-note types (cowork-morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review / finance-snapshot / scheduled-jobs) + hub types + memory types."
+      "notes": "24 rule_fragments — largest bundle. Covers 7 atomic-note types (cowork-morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review / finance-snapshot / scheduled-jobs) + hub types + memory types."
     },
     {
       "id": "project-rule-fragments",
@@ -314,7 +314,7 @@
       "consumers": [
         "platform/blueprints/finance/helpers/finance-nav.js"
       ],
-      "notes": "Finance has 4 new_entity_button entries: budget / paycheck / invoice / debt. Each declares prompts[] (text/date/number/select fields), destination, frontmatter_template, inline_body. The paycheck button prompts for a single `month` (type:month, like the invoice/budget buttons) and scaffolds Paycheck-{{month}}.md with `month`, `deposits: []`, `expenses: []` \u2014 deposits are materialized on first render from the Paycheck Defaults `deposit_schedule`; each seeded expense carries a 1-based `deposit` index. entity-create@0.7.1 consumes seed_from_defaults.resolve_wikilinks (v0.108.0)."
+      "notes": "Finance has 4 new_entity_button entries: budget / paycheck / invoice / debt. Each declares prompts[] (text/date/number/select fields), destination, frontmatter_template, inline_body. The paycheck button prompts for a single `month` (type:month, like the invoice/budget buttons) and scaffolds Paycheck-{{month}}.md with `month`, `deposits: []`, `expenses: []` — deposits are materialized on first render from the Paycheck Defaults `deposit_schedule`; each seeded expense carries a 1-based `deposit` index. entity-create@0.7.1 consumes seed_from_defaults.resolve_wikilinks (v0.108.0)."
     },
     {
       "id": "cowork-vault-config-engagement",
@@ -329,7 +329,7 @@
         "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md",
         "platform/blueprints/cowork/skills/orchestrators/eod-review/SKILL.md"
       ],
-      "notes": "Engagement shape read out of consumer vault-config.md: {id, label, type, priorities[], rendering[], tripwire_aspects[], overrides{}, ...}. Layered preferences tree (bundle \u2a01 overrides \u2a01 ad_hoc \u2192 final). v0.95.0 introduced overrides; per-key wins on objects, REPLACES on arrays."
+      "notes": "Engagement shape read out of consumer vault-config.md: {id, label, type, priorities[], rendering[], tripwire_aspects[], overrides{}, ...}. Layered preferences tree (bundle ⨁ overrides ⨁ ad_hoc → final). v0.95.0 introduced overrides; per-key wins on objects, REPLACES on arrays."
     },
     {
       "id": "finance-monthly-overview-page-read",
@@ -342,7 +342,7 @@
       "consumers": [
         "platform/blueprints/finance/templates/Budget Template.md"
       ],
-      "notes": "MonthlyOverview reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && !p.file.path.includes('/_archive/') && p.month === monthKey) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Month-keyed paychecks attribute by `month`; legacy per-check notes (no `month`) fall back to the pay_period_end (start fallback) window; archived legacy notes under /_archive/ are excluded. Income = \u03a3 deposits[].amount for the month-keyed shape, falling back to the scalar paycheck_amount for legacy notes. Paycheck expenses[*] carry a per-expense `deposit` (1-based index into deposits[]); expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
+      "notes": "MonthlyOverview reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && !p.file.path.includes('/_archive/') && p.month === monthKey) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Month-keyed paychecks attribute by `month`; legacy per-check notes (no `month`) fall back to the pay_period_end (start fallback) window; archived legacy notes under /_archive/ are excluded. Income = Σ deposits[].amount for the month-keyed shape, falling back to the scalar paycheck_amount for legacy notes. Paycheck expenses[*] carry a per-expense `deposit` (1-based index into deposits[]); expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
     },
     {
       "id": "finance-plan-state-read",
@@ -371,7 +371,7 @@
         "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
         "platform/blueprints/to-do/templates/Recurring Tasks.md"
       ],
-      "notes": "v0.116.0 \u2014 Recurring Tasks registry frontmatter (type: to-do-recurring). Validated via the to-do manifest's rule_fragment for path_glob 'spice/to-do/Recurring Tasks.md'."
+      "notes": "v0.116.0 — Recurring Tasks registry frontmatter (type: to-do-recurring). Validated via the to-do manifest's rule_fragment for path_glob 'spice/to-do/Recurring Tasks.md'."
     },
     {
       "id": "project-todo-frontmatter",
@@ -386,7 +386,7 @@
         "platform/blueprints/to-do/helpers/todo-daily-project-groups.js",
         "platform/blueprints/to-do/helpers/todo-leaf-actions.js"
       ],
-      "notes": "v0.116.0 \u2014 Per-project To-Do note frontmatter (type: project-todo). Validated via the project manifest's rule_fragment with frontmatter_branch on type. Backfilled by applyProjectTodoBackfill in install.js."
+      "notes": "v0.116.0 — Per-project To-Do note frontmatter (type: project-todo). Validated via the project manifest's rule_fragment with frontmatter_branch on type. Backfilled by applyProjectTodoBackfill in install.js."
     },
     {
       "id": "project-meetings-frontmatter",
@@ -400,7 +400,7 @@
         "platform/blueprints/project/helpers/project-meetings-list.js",
         "platform/blueprints/project/helpers/project-chrome-bar.js"
       ],
-      "notes": "Per-project Meetings page frontmatter (type: project-meetings) at spice/projects/<slug>/Meetings.md \u2014 project + project_slug + project_name identify the project whose meetings ProjectMeetingsList renders. Scaffolded by the project entity-create extra_files[] entry; backfilled by applyProjectMeetingsPageBackfill in install.js. Drift between the two is pinned by run-project-meetings-page.js."
+      "notes": "Per-project Meetings page frontmatter (type: project-meetings) at spice/projects/<slug>/Meetings.md — project + project_slug + project_name identify the project whose meetings ProjectMeetingsList renders. Scaffolded by the project entity-create extra_files[] entry; backfilled by applyProjectMeetingsPageBackfill in install.js. Drift between the two is pinned by run-project-meetings-page.js."
     },
     {
       "id": "breadcrumb-registry",
@@ -452,7 +452,7 @@
       "consumers": [
         "platform/mechanisms/task-entity/task-entity.js"
       ],
-      "notes": "v0.1.0 \u2014 Note-per-task frontmatter (type: task). One tiny note per task under spice/tasks/task-<id>.md (path_glob 'spice/tasks/**', which also covers the _trash/ and _done/ sub-areas \u2014 trashed/done notes keep type:task so the same branch validates them). Required keys: type / title / status. Optional keys: scheduled / due / priority / project / project_slug / trip / trip_slug / source / source_note / links / created_at / completed_at. `trip` (a `[[Name]]` link display field) + `trip_slug` (plain-string filter key) are the trip-linkage parallel to project/project_slug \u2014 additive, empty-string-not-omitted. `links` is an ARRAY of markdown link STRINGS (a note link '[[Note]]', a web link '[label](url)' or '<url>') that TaskNoteView renders in a LINKS section INSIDE the card; composeNote emits it as an empty YAML flow array `[]` when none (not omitted), serialized by TaskDialog.renderNote as a JSON-compatible flow array so it round-trips through Dataview/Obsidian. composeNote writes schema-exact frontmatter (empty-string, not omitted, for blank dates; `[]` for blank links); parseNote normalizes status\u2192open + blank dates\u2192null + coerces links[] (strings and/or Dataview Link objects) to a clean string array via TaskEntity._normLinks. Contract encoded in TaskEntity.validatePayload (task-entity.js)."
+      "notes": "v0.1.0 — Note-per-task frontmatter (type: task). One tiny note per task under spice/tasks/task-<id>.md (path_glob 'spice/tasks/**', which also covers the _trash/ and _done/ sub-areas — trashed/done notes keep type:task so the same branch validates them). Required keys: type / title / status. Optional keys: scheduled / due / priority / project / project_slug / trip / trip_slug / source / source_note / links / created_at / completed_at. `trip` (a `[[Name]]` link display field) + `trip_slug` (plain-string filter key) are the trip-linkage parallel to project/project_slug — additive, empty-string-not-omitted. `links` is an ARRAY of markdown link STRINGS (a note link '[[Note]]', a web link '[label](url)' or '<url>') that TaskNoteView renders in a LINKS section INSIDE the card; composeNote emits it as an empty YAML flow array `[]` when none (not omitted), serialized by TaskDialog.renderNote as a JSON-compatible flow array so it round-trips through Dataview/Obsidian. composeNote writes schema-exact frontmatter (empty-string, not omitted, for blank dates; `[]` for blank links); parseNote normalizes status→open + blank dates→null + coerces links[] (strings and/or Dataview Link objects) to a clean string array via TaskEntity._normLinks. Contract encoded in TaskEntity.validatePayload (task-entity.js)."
     },
     {
       "id": "trips-rule-fragments",
@@ -468,7 +468,7 @@
         "platform/blueprints/trips/helpers/trip-sections-cards.js",
         "platform/blueprints/trips/helpers/trip-section-kinds.js"
       ],
-      "notes": "2 rule_fragments covering 3 frontmatter types. (1) path_glob spice/trips/*/*.md with frontmatter_branch: 'trip' (atlas note, filename <Trip Name>.md) requires type:trip, name, start_date (^\\d{4}-\\d{2}-\\d{2}), end_date (same), location; optional people[], created_at, cssclasses:[wide]. 'trip-section' (filename <Trip Name> \u2014 <Section>.md) requires type:trip-section, section_kind (enum flights|stay|packing-list|to-do|notes|custom \u2014 TripSectionKinds is the single source of truth for label/icon/order), section (display label), trip (wikilink to atlas), trip_slug (folder slug); optional created_at. (2) path_glob spice/trips/Trips.md ('trips-hub') requires cssclasses:[wide]; canonical type:trips-hub, tags:[trips-hub]. applyTripsConformanceHeal migrates legacy atlas/section names (Trip Atlas.md / Trip Flights.md) and legacy created: to created_at: ISO+TZ. Introduced v0.3.0 / workshop v0.181.0."
+      "notes": "2 rule_fragments covering 3 frontmatter types. (1) path_glob spice/trips/*/*.md with frontmatter_branch: 'trip' (atlas note, filename <Trip Name>.md) requires type:trip, name, start_date (^\\d{4}-\\d{2}-\\d{2}), end_date (same), location; optional people[], created_at, cssclasses:[wide]. 'trip-section' (filename <Trip Name> — <Section>.md) requires type:trip-section, section_kind (enum flights|stay|packing-list|to-do|notes|custom — TripSectionKinds is the single source of truth for label/icon/order), section (display label), trip (wikilink to atlas), trip_slug (folder slug); optional created_at. (2) path_glob spice/trips/Trips.md ('trips-hub') requires cssclasses:[wide]; canonical type:trips-hub, tags:[trips-hub]. applyTripsConformanceHeal migrates legacy atlas/section names (Trip Atlas.md / Trip Flights.md) and legacy created: to created_at: ISO+TZ. Introduced v0.3.0 / workshop v0.181.0."
     },
     {
       "id": "doc-search-mechanism",
@@ -484,7 +484,7 @@
         "platform/blueprints/project/helpers/projects-hub-cards.js",
         "platform/blueprints/wiki/helpers/wiki-tree.js"
       ],
-      "notes": "DocSearch.render(dv, opts) \u2192 filterContext { text, tags:Set, hasActiveFilter, resultsContainer }; DocSearch.matches(page, ctx) pure predicate. opts: scopePath, recursive, entityType (default doc-note), onChange, hideTags, persist, placeholder, tagExclude. Graduated verbatim from the project blueprint helper at this release."
+      "notes": "DocSearch.render(dv, opts) → filterContext { text, tags:Set, hasActiveFilter, resultsContainer }; DocSearch.matches(page, ctx) pure predicate. opts: scopePath, recursive, entityType (default doc-note), onChange, hideTags, persist, placeholder, tagExclude. Graduated verbatim from the project blueprint helper at this release."
     },
     {
       "id": "section-explorer-links-frontmatter",
@@ -502,7 +502,7 @@
         "platform/blueprints/project/helpers/project-chrome-bar.js",
         "platform/install.js"
       ],
-      "notes": "v0.1.0 \u2014 `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware). v0.210: contract extended to LEAF types wiki-page + doc-note \u2014 links[] rendered as clickable cards + an '\uff0b Add link' pill via SectionExplorer.renderNoteLinks (invoked by WikiChromeBar/ProjectChromeBar after the bar). NOT backfilled on leaf notes: the links key is created lazily on first write via processFrontMatter."
+      "notes": "v0.1.0 — `links: []` frontmatter on wiki-hub / wiki-section / docs-hub / section-hub notes. Array of {url, text} entries (text defaults to url; duplicate url rejected), same shape as ProjectLinksManager's links contract but scoped to whichever hub/section note is open (not a dedicated Link Hub note). Backfilled on every existing note by install.js's _healSectionLinksFrontmatter (idempotent, quote-strip aware). v0.210: contract extended to LEAF types wiki-page + doc-note — links[] rendered as clickable cards + an '＋ Add link' pill via SectionExplorer.renderNoteLinks (invoked by WikiChromeBar/ProjectChromeBar after the bar). NOT backfilled on leaf notes: the links key is created lazily on first write via processFrontMatter."
     },
     {
       "id": "delivery-execution-card-contract",
@@ -646,7 +646,7 @@
         "scripts/check-orphan-harnesses.js",
         "platform/test/run-preflight-runner.js"
       ],
-      "notes": "Preflight step list \u2014 id/cmd/lane/group per step, authored heaviest-first. Replaces the release:preflight && chain. Lane is serial or parallel; the serial lane runs first. group is optional; at most one step per group runs at a time in the parallel lane."
+      "notes": "Preflight step list — id/cmd/lane/group per step, authored heaviest-first. Replaces the release:preflight && chain. Lane is serial or parallel; the serial lane runs first. group is optional; at most one step per group runs at a time in the parallel lane."
     },
     {
       "id": "sauce-plugin-boot-profile-receipt",
@@ -663,7 +663,54 @@
       "consumers": [
         "platform/test/run-sauce-plugin.js"
       ],
-      "notes": "Per-boot stage profile the sauce plugin writes to ranch/boot-profile.json AFTER onLayoutReady plus an idle deferral (never during boot \u2014 boot-time vault writes are the disease the Mobile Load Performance epic treats). Shape: { schema_version:1, generated_by, boot_started_at, written_at, total_ms, stages:[{ name, elapsed_ms, ...per-stage fields }] } with stages resolve-scripts-folder, read-class-files (files + bytes), register-classes (registered + failed). Last boot only \u2014 repeated boots overwrite the receipt; it never grows. Runtime state in consumer vaults, not a tracked workshop file; schema encoded in _writeBootReceipt/loadCustomJsClasses in main.js."
+      "notes": "Per-boot stage profile the sauce plugin writes to ranch/boot-profile.json AFTER onLayoutReady plus an idle deferral (never during boot — boot-time vault writes are the disease the Mobile Load Performance epic treats). Shape: { schema_version:1, generated_by, boot_started_at, written_at, total_ms, stages:[{ name, elapsed_ms, ...per-stage fields }] } with stages resolve-scripts-folder, read-class-files (files + bytes), register-classes (registered + failed). Last boot only — repeated boots overwrite the receipt; it never grows. Runtime state in consumer vaults, not a tracked workshop file; schema encoded in _writeBootReceipt/loadCustomJsClasses in main.js."
+    },
+    {
+      "id": "sauce.graph.v1",
+      "kind": "contract",
+      "owner": {
+        "type": "mechanism",
+        "name": "engine"
+      },
+      "source": "platform/engine/schemas/graph.v1.json",
+      "validator": "platform/test/run-engine-graph.js",
+      "consumers": [
+        "platform/engine/graph.js",
+        "platform/engine/validate.js",
+        "platform/cli/cmd-run.js"
+      ],
+      "notes": "The fenced sauce block of a graph note (type: sauce-graph): typed nodes (agent | judge | shell | human | end) and edges with on: outcome and optional max: retry budget. Parsed from the documented YAML subset by platform/engine/yaml-lite.js; validate.js refuses unknown types, dangling edges, and cycles without a max: budget before a run is minted."
+    },
+    {
+      "id": "sauce.run-ledger.v1",
+      "kind": "learned-state-schema",
+      "owner": {
+        "type": "mechanism",
+        "name": "engine"
+      },
+      "source": "platform/engine/schemas/run-ledger.v1.json",
+      "validator": "platform/test/run-engine-smoke.js",
+      "consumers": [
+        "platform/engine/ledger.js",
+        "platform/engine/state.js",
+        "platform/cli/cmd-audit.js"
+      ],
+      "notes": "One append-only JSONL file per run at <vault>/ranch/engine/runs/<run-id>.jsonl. Events: run.created, node.started, node.finished, edge.fired, run.parked, human.answered, run.halted, run.ended. No index file exists; sauce run --list replays the files. Designed for Obsidian Sync: nothing is rewritten and a partial trailing line is ignored on read."
+    },
+    {
+      "id": "sauce.worker-result.v1",
+      "kind": "contract",
+      "owner": {
+        "type": "mechanism",
+        "name": "engine"
+      },
+      "source": "platform/engine/schemas/worker-result.v1.json",
+      "validator": "platform/test/run-engine-graph.js",
+      "consumers": [
+        "platform/engine/workers/index.js",
+        "platform/engine/nodes.js"
+      ],
+      "notes": "result.json an agent worker (claude-code, codex, fake) publishes by temp-file + rename in the node run directory. outcome is pass, fail, or a named outcome the graph declares; missing, partial, or schema-mismatched files count as fail so a crashed worker can never read as success."
     }
   ]
 }

@@ -254,76 +254,44 @@ These are flipped on manually in the GitHub UI under **Settings → Branches →
 - ☑ **Restrict who can push to matching branches** — limit to your account.
 - (Optional) **Require signed commits** if you use a GPG/SSH signing key.
 
-## Sauce Pipeline
+## Running work through the engine
 
-The **Sauce Pipeline** is an endless self-pacing loop that picks one card off the project board at `~/obsidian/headspace-sauce/spice/projects/sauce/`, runs a full Sauce cycle on it, and writes a handoff for the next round. Full design rationale: `Docs/plans/2026-05-15-sauce-pipeline-design.md`. Slash command body: `.claude/commands/sauce-pipeline.md`.
+The Sauce engine runs a **graph note** — an ordinary vault note whose frontmatter carries `type: sauce-graph` (plus `repo:` for the git checkout agent nodes work in, and `status:`) and whose body holds one `sauce` code block of `nodes:` and `edges:`. Nodes are `agent` (claude-code or codex, usually in its own git worktree), `judge` (a command whose exit code decides pass/fail), `shell`, `human` (parks the run until you tick a checkbox), or `end`; edges are named (`on: pass` / `on: fail`) and any cycle must carry `max: N`. Start from the `Sauce Graph` template (materialized by the always-on `engine` mechanism) or `/sauce` in the vault. Standalone reference: `Docs/engine.md`.
 
-### Start the loop
+### `sauce run`
 
 ```
-/loop /sauce-pipeline
+sauce run <note>                       one tick, then exit
+sauce run <note> --follow              keep ticking until a terminal node (stops at a human node unless --wait-human)
+sauce run <note> --dry-run             validate + print the plan; writes nothing
+sauce run <note> --status              latest run's projection, read-only
+sauce run --list                       every run in the vault, newest first
+sauce run <note> --sweep               remove finished, clean worktrees of this note's runs
+sauce run <note> --install-launchd [--interval <s>]   unattended cadence; --uninstall-launchd removes it
+flags: --worker <fake|claude-code|codex>  --repo <path>  --var k=v  --interval <s>  --json
 ```
 
-`/loop` (no interval) self-paces — it sleeps after each round and wakes up to fire `/sauce-pipeline` again. The user picks which card to work on at the start of every round; the rest is autonomous through tag + push + handoff.
-
-### Stop the loop
-
-- Type `/loop stop` in the active chat.
-- Close the chat.
-- Pick `skip (end the loop)` at any round's Phase B pick prompt.
-- A blocked card or empty Planning column also halts the loop (no wake-up scheduled).
-- A non-empty In Progress column at Phase A start (carry-over from a prior round that didn't close cleanly) halts the loop — resume the carry-over card or move it back to Planning manually before restarting.
-
-### What one round does
-
-A round is 5 phases. See `.claude/commands/sauce-pipeline.md` for the operational instructions.
-
-| Phase | What | Interactive? |
-|---|---|---|
-| A — Orient | Read the latest handoff in `Docs/prompts/`. Read board state from the consumer vault. | No |
-| B — Pick | Present the Planning column + a recommendation; user picks. Move card to In Progress. | **Yes** |
-| C — Cycle | Run brainstorming → design → plan → stages → tag → push. Existing Sauce discipline. | No (autonomous) |
-| D — Close | Move card to Completed on both boards. Set `completed_in_version` frontmatter. Append 2-line summary block to card body. | No |
-| E — Handoff | Write `Docs/prompts/YYYY-MM-DD-sauce-pipeline-vNN-handoff.md`. Commit + push. Schedule next wake-up. | No |
+`sauce run` is context-free: the vault is resolved from the note's own ancestors first, so an absolute note path works from anywhere. Exit 0 = done/parked/listed, 1 = the run failed, 2 = usage or refusal (unknown node type, dangling edge, unbounded cycle).
 
 ### Where state lives
 
-- **Handoff archive:** `Docs/prompts/sauce-pipeline-*-handoff.md` (workshop repo). One file per round; latest by filename = current.
-- **Board state:** consumer vault — top-level `sauce-board.md` + workstream sub-boards (file-level writes; vault is not git-tracked).
-- **Cycle artifacts:** `Docs/plans/<date>-<topic>-design.md`, `<date>-vNN-<topic>-plan.md`, `<date>-vNN-result.md` (existing Sauce convention).
-- **Audit trail:** `git log` + `git tag` on `origin/main`.
+- **Ledger:** `<vault>/ranch/engine/runs/<run-id>.jsonl` — one append-only JSONL file per run, never rewritten, no index file (`--list` replays them). Per-node artifacts (`prompt.md`, `result.json`, `stdout.log`) sit under `runs/<run-id>/<node-id>/`.
+- **Projection:** the engine writes a `## Runs` section into the graph note between `<!-- @sauce:runs BEGIN -->` / `<!-- @sauce:runs END -->` markers. A parked human node appears there as `- [ ] run:<id> node:<n> — <ask>`; tick the box and the next tick resumes.
+- **Worktrees:** agent nodes run in `<repo>/.worktrees/sauce/<run>-<node>`; `--sweep` removes finished ones but keeps any tree that is dirty or ahead of its base.
 
-### Cautions
+### Halting
 
-- **Do NOT hand-edit the consumer vault while the loop is running.** Concurrent edits could conflict with the loop's writes. Pause first.
-- **The loop bumps `workshop_version` per round.** Each card shipped becomes one tagged release.
-- **Some cards are too big for one round.** Phase B has a sanity-check that asks you to scope-narrow before moving such a card to In Progress.
-- **Mid-cycle blockers move the card to a Blocked column and stop the loop.** You unblock manually + restart.
+Set `status: halted` in the graph note's frontmatter. The next tick records the halt and exits; do not delete or edit a ledger.
 
-### First-run smoke procedure
+### Unattended cadence (launchd)
 
-The first time you run `/loop /sauce-pipeline`, verify each phase fires correctly. Do this with a small card to keep the cycle short.
+`sauce run <note> --install-launchd --interval 300` writes a per-note launchd job from `platform/engine/sauce-engine.plist.sample` that ticks the graph on that interval; `--uninstall-launchd` removes it. This replaces the retired `/sauce-autoloop` cron loop and `sauce-autoloop.plist.sample`.
 
-1. **Confirm board state.** Open `~/obsidian/headspace-sauce/spice/projects/sauce/sauce-board.md` in Obsidian. Confirm at least one card is in the In Planning column. Recommended pick for first smoke: **"Frontmatter Default Doesn't Show"** under the Convenience Functionality workstream — narrow scope, single setting flip.
-2. **Open a fresh chat in the workshop repo.** `cd ~/Documents/GitHub/sauce` and start a new Claude Code session.
-3. **Type `/loop /sauce-pipeline`.** The loop starts.
-4. **Phase A check.** Claude reports: "No prior handoff found (first round). Planning column has: [list of cards]." (For first-ever invocation only.)
-5. **Phase B check.** Claude calls `AskUserQuestion` with each Planning card as an option + a recommendation marked. Pick the small card. Claude moves it to In Progress on both the project board AND the workstream sub-board, and sets `status: in_progress` on the card frontmatter.
-6. **Phase C check (long).** Claude invokes `superpowers:brainstorming`, then `superpowers:writing-plans`, then executes the plan. This is a full Sauce cycle — could take 30 min to several hours depending on card. Verify per-stage commits land on `origin/main`.
-7. **Phase D check.** After the cycle tags (e.g. `v0.47.0`), the card moves Completed on both boards. The 2-line summary block is appended to the card body. The frontmatter has `completed_in_version: v0.47.0`.
-8. **Phase E check.** A new handoff exists at `Docs/prompts/YYYY-MM-DD-sauce-pipeline-v0.47.0-handoff.md`, is committed, and pushed.
-9. **Wake-up check.** Claude calls `ScheduleWakeup(delaySeconds=270, prompt="/sauce-pipeline", reason=...)` at round end. Within ~5 min, round 2 fires automatically.
-10. **Stop the loop.** Type `/loop stop` once smoke is verified. The loop ends without firing further rounds.
+### Auditing
 
-### Dry-run smoke (faster — Phases A + B only)
+`sauce audit --engine` is a read-only walk: `engine_dir_missing` / `engine_surface_missing` (HIGH), `engine_surface_stale` / `engine_version_drift` / `engine_ledger_unparsable` (MEDIUM), `engine_worktree_orphan` (LOW). It never modifies a ledger or a worktree.
 
-If you want to verify the orient + pick phases without committing to a full cycle:
-
-1. Run `/loop /sauce-pipeline`.
-2. Verify Phase A reads board correctly.
-3. At the Phase B AskUserQuestion prompt, pick `skip (end the loop)`.
-4. Verify the loop writes a "user skipped" handoff and does NOT call ScheduleWakeup.
-5. Loop dies clean. Phase A + B verified without running a real cycle.
+The engine never writes boards or cards. Delivery work still goes through the coordinator — `/mayo:run` can opt into the shipped `platform/engine/graphs/delivery-slice.md` graph, where every coordinator call is a `shell` node.
 
 ## Connecting Claude Cowork (scheduled jobs)
 

@@ -1,6 +1,6 @@
 {
   "name": "sauce",
-  "version": "0.291.1",
+  "version": "0.292.1",
   "private": true,
   "description": "Sauce vault platform workshop (canonical source). bootstrap.js requires @inquirer/prompts; harnesses (run-helper-cases/run-renderer/run-bootstrap) stay zero-dep.",
   "engines": {
@@ -113,6 +113,10 @@
     "test:meeting-chrome-bar": "node platform/test/run-meeting-chrome-bar.js",
     "test:prune-orphan-breadcrumb": "node platform/test/run-prune-orphan-breadcrumb.js",
     "test:loop-config": "node platform/test/run-loop-config.js",
+    "test:engine-graph": "node platform/test/run-engine-graph.js",
+    "test:engine-smoke": "node platform/test/run-engine-smoke.js",
+    "test:engine-install": "node platform/test/run-engine-install.js",
+    "test:engine-delivery-graph": "node platform/test/run-engine-delivery-graph.js",
     "test:loop-binding": "node platform/test/run-loop-binding.js",
     "test:mayo-plugin-surface": "node platform/test/run-mayo-plugin-surface.js",
     "test:mayo-codex-routers": "node platform/test/run-mayo-codex-routers.js",
@@ -123,5 +127,9 @@
     "@xenova/transformers": "^2.17.2",
     "acorn": "^8.18.0",
     "ajv": "^8.12.0"
+  },
+  "overrides": {
+    "protobufjs": "^7.6.3",
+    "sharp": "^0.35.4"
   }
 }

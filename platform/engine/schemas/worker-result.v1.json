@@ -1,0 +1,15 @@
+{
+  "$id": "sauce.worker-result.v1",
+  "title": "Sauce worker result",
+  "description": "result.json an agent node's worker publishes (temp file + rename) in ranch/engine/runs/<run-id>/<node-id>/. Read by platform/engine/workers/index.js; a missing or malformed file is a fail.",
+  "type": "object",
+  "required": ["schema", "outcome"],
+  "properties": {
+    "schema": { "const": "sauce.worker-result.v1" },
+    "outcome": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array", "items": { "type": "string" } },
+    "head": { "type": ["string", "null"] },
+    "vars": { "type": "object" }
+  }
+}

@@ -11,7 +11,7 @@ load_when: Touching mechanisms, blueprints, the installer, the distribution mode
 
 Sauce is a **workshop vault** that ships a platform installed into **consumer vaults** (currently `barebones`, `accuris-sauce`, `ero-sauce`, `headspace-sauce`). The workshop is also its own first consumer — it self-installs as a regression target ("dogfood"). No personal content lives in the workshop.
 
-Distribution: Homebrew tap `willfell/homebrew-sauce` + an `sh` CLI installed via `brew install sauce`. The `sauce` CLI exposes `install`, `audit`, `migrate`, `upgrade`, `bootstrap` against a target vault directory. See `Docs/use.md` § Onboarding for the full lifecycle.
+Distribution: Homebrew tap `willfell/homebrew-sauce` + an `sh` CLI installed via `brew install sauce`. The `sauce` CLI exposes `install`, `audit` (incl. `audit --engine`), `migrate`, `upgrade`, `bootstrap`, and `run` against a target vault directory. See `Docs/use.md` § Onboarding for the full lifecycle.
 
 ## Two building blocks
 
@@ -19,6 +19,8 @@ Distribution: Homebrew tap `willfell/homebrew-sauce` + an `sh` CLI installed via
 | --- | --- | --- | --- |
 | **Mechanism** | Cross-cutting code, no `module_directory`. Shared infrastructure consumed by ≥1 blueprint. | `platform/mechanisms/<name>/` | `customjs-guard`, `nav-buttons`, `icons`, `entity-create` |
 | **Blueprint** | Note-type bundle. Owns one `module_directory` under `spice/<dir>/` in the consumer. | `platform/blueprints/<name>/` | `daily`, `meetings`, `project`, `to-do`, `cowork` |
+
+The engine runtime at `platform/engine/` is neither: it is shipped like `platform/cli/` (in the brew libexec, never copied into vaults), with a thin `engine` mechanism materializing only the vault surface (`/sauce`, the run skill, the `Sauce Graph` template, `ranch/engine/`). See [engine.md](engine.md).
 
 Every blueprint MUST declare `module_directory` in its manifest. All files it materializes (install-time or runtime via templates/commands/nav-button actions) live under `spice/<module_directory>/`. Cross-module data flows via wikilinks ONLY — no module writes into another module's directory. Mechanisms are exempt (they install under `ranch/...`).
 
@@ -34,6 +36,10 @@ Installer behavior:
 - Writes outputs into the consumer's `spice/<module>/` or `ranch/<sub>/`.
 - Records each operation in `platform-installed.json` (auto-managed; never hand-edit).
 - Applies allowlisted `.obsidian/` edits via helpers (`applyTemplaterHotkeys`, `applySlashCommanderBindings`, `applyCustomJsStartupScripts`, etc.). The allowlist is **18 paths + CLAUDE.md marker regions** per landmine #12.
+
+### Always-on mechanisms
+
+`ensureAlwaysOnMechanisms` (`platform/install.js`, `ALWAYS_ON_MECHANISMS = ["platform-claude", "engine"]`) runs on every install: any subscription lacking either mechanism gets it appended at the catalogue version from `platform/manifest.json`, `ranch/platform-subscription.json` is written back, and an `always_on_subscription` history row records what was added. This is a formal rule, not a convention — a consumer cannot unsubscribe from `platform-claude` or `engine` by editing the subscription file.
 
 ### Bundled first-party plugin (`bundled_plugin`)
 
