@@ -314,11 +314,12 @@ function atomicWriteJson(file, value) {
 // construction for every gate this implementation creates; it exists purely to
 // stop `.reclaim/` growing without bound. A creator that is alive, or whose
 // liveness is UNKNOWN, keeps its gate forever: the uncertain case fails closed.
-// LOCK_RECLAIM_GATE_TTL_MS survives only as the fallback for entries this code
-// never writes -- a foreign-host stamp (whose pid is meaningless here) or a
-// legacy/corrupt entry -- and `reclaimLockDirectory` re-verifies its own gate's
-// identity around the swap so even those cannot silently authorise a second
-// destroyer.
+// A creator on another host, boot, or pid namespace cannot be probed from here,
+// so its gate is kept at any age too: a generation wedged until that gate is
+// removed by hand, never a second destroyer. LOCK_RECLAIM_GATE_TTL_MS survives
+// only as the fallback for entries that name no creator at all (legacy or
+// corrupt), and `reclaimLockDirectory` re-verifies its own gate's identity
+// around the swap so even those cannot silently authorise a second destroyer.
 //
 // THE `wx` WRITE IS NOT ATOMIC, AND NOTHING HERE MAY ASSUME IT IS. An earlier
 // revision of this comment claimed a gate this code writes is "never observable
@@ -342,6 +343,66 @@ const LOCK_RECLAIM_GATE_TTL_MS = 60 * 1000;
 const LOCK_ACQUIRE_ATTEMPTS = 4;
 const STATE_WRITE_LOCK_STALE_MS = 30 * 1000;
 
+// WHICH HOST a stamp came from, for the one question that depends on it: can a
+// pid in the stamp be probed here? The hostname cannot answer that. On macOS it
+// changes with the network, so a live process suspended across a network
+// switch would read as foreign and lose its gate to the TTL sweep. And a
+// reboot keeps the hostname while recycling every pid. The answer instead is
+// the boot session plus the pid namespace: stable for as long as a pid means
+// the same process, different on another machine, after a reboot, and in
+// another container sharing this kernel. Stamps without it (other rails,
+// older coordinators) and processes that cannot read it fall back to the
+// hostname, which is what every stamp was compared by before.
+let cachedMachineId;
+function localMachineId() {
+  if (cachedMachineId === undefined) cachedMachineId = readMachineId();
+  return cachedMachineId;
+}
+
+function readMachineId() {
+  // Fault-injection seam: models a sandbox that denies the read (Codex's
+  // seatbelt does not allow kern.bootsessionuuid).
+  if (process.env.SAUCE_AUTOLOOP_MACHINE_ID_UNAVAILABLE === '1') return null;
+  try {
+    if (process.platform === 'linux') {
+      const boot = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      const pidNamespace = fs.readlinkSync('/proc/self/ns/pid');
+      return boot && pidNamespace ? `linux:${boot}:${pidNamespace}` : null;
+    }
+    if (process.platform === 'darwin') {
+      const boot = execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
+      }).trim();
+      return boot ? `darwin:${boot}` : null;
+    }
+  } catch (_) { /* unreadable: fall back to the hostname */ }
+  return null;
+}
+
+function hostStamp() {
+  const machine = localMachineId();
+  return machine ? { host: os.hostname(), machine } : { host: os.hostname() };
+}
+
+// 'this', 'foreign', or 'unknown'. Only two machine ids can prove a stamp
+// foreign. A hostname mismatch cannot, because this host may simply have been
+// renamed, and a missing id is ordinary (older stamps, other rails, and any
+// process sandboxed away from the boot session). 'unknown' is treated as
+// possibly this host by every caller: a pid that is alive here keeps what it
+// holds, and nothing is reclaimed early on its account.
+function stampHostRelation(stamp) {
+  if (!stamp || typeof stamp !== 'object') return 'unknown';
+  const mine = localMachineId();
+  const theirs = typeof stamp.machine === 'string' && stamp.machine ? stamp.machine : null;
+  if (mine && theirs) return mine === theirs ? 'this' : 'foreign';
+  if (typeof stamp.host === 'string' && stamp.host === os.hostname()) return 'this';
+  return 'unknown';
+}
+
+function stampIsThisHost(stamp) {
+  return stampHostRelation(stamp) === 'this';
+}
+
 function lockOwnerPath(lockPath) { return path.join(lockPath, 'owner.json'); }
 
 function readLockOwnerRaw(lockPath) {
@@ -356,9 +417,12 @@ function parseLockOwner(raw) {
 
 // Names one generation of a lock directory. A token is already unique per
 // acquisition; without one, the directory's identity (dev/inode) and creation
-// timestamps plus the owner bytes distinguish a stale directory from the fresh
-// directory that replaced it -- a replacement always carries a ctime of "now"
-// while anything reclaimable is older than the staleness window.
+// timestamps plus the owner bytes are the best available name -- and they are
+// NOT a complete one. Linux reuses a freed inode immediately and stamps ctime
+// from a coarse clock (birthtime is often 0), so an ownerless directory removed
+// and re-created within one tick is metadata-identical to its predecessor. The
+// reclaim compare therefore never trusts the key alone: it also re-proves the
+// generation stale (see reclaimLockDirectory), and a successor is always fresh.
 function lockGenerationKey(stat, raw, owner) {
   if (!stat) return 'absent';
   if (owner && typeof owner.token === 'string' && owner.token) {
@@ -462,9 +526,9 @@ function stallForFaultInjection(stage) {
 // cannot resume, so removing it is correctness-neutral: any racer that then
 // re-wins that name still has to pass the generation compare, which the dead
 // creator either never consumed or already invalidated. A creator that is alive
-// — or whose liveness is UNKNOWN — keeps its gate at any age. The TTL is the
-// fallback for entries this code never writes: a foreign-host stamp (a pid is
-// meaningless off its own host) or a legacy/unparseable entry.
+// — or whose liveness is UNKNOWN, or who cannot be probed from this host at
+// all — keeps its gate at any age. The TTL is only for entries that name no
+// creator: a legacy or unparseable entry.
 function sweepLockReclaimGates(gateRoot, now = Date.now()) {
   let entries = [];
   try { entries = fs.readdirSync(gateRoot); } catch (_) { return; }
@@ -474,9 +538,17 @@ function sweepLockReclaimGates(gateRoot, now = Date.now()) {
     try {
       const observed = observeReclaimGate(gate);
       if (!observed.exists) continue;
-      if (observed.creator && typeof observed.creator.host === 'string' && observed.creator.host === os.hostname()) {
-        if (!ownerProvablyDeadOnThisHost(observed.creator)) continue; // alive or unknown → the winner may still be mid-steal
-        fs.rmSync(gate, { recursive: true, force: true });
+      // A gate whose creator can be identified is removed only once that
+      // creator is provably dead on this host, never on age. A creator on
+      // another host, another boot, or another pid namespace cannot be probed
+      // from here, and expiring its gate would authorise a second destroyer
+      // while it may still be mid-steal. Such a gate is kept (a generation
+      // wedged until the gate is removed by hand) rather than risk two
+      // holders. The TTL is only for entries that name no creator at all.
+      if (observed.creator) {
+        if (stampHostRelation(observed.creator) === 'this' && ownerProvablyDeadOnThisHost(observed.creator)) {
+          fs.rmSync(gate, { recursive: true, force: true });
+        }
         continue;
       }
       if (now - observed.mtimeMs <= ttl) continue;
@@ -489,11 +561,68 @@ function sweepLockReclaimGates(gateRoot, now = Date.now()) {
 // 'reclaimed' = this process now owns a fresh empty directory;
 // 'lost'      = another process owns the lock (clean refusal);
 // 'vanished'  = the lock released itself, so the caller retries the atomic create.
-function reclaimLockDirectory(ctx, name, lockPath, observedKey) {
+// Destroys the generation at lockPath only while it is still the one observed.
+// Removing by path alone is not enough: the observed owner can release between
+// the compare and the destroy, and a fresh acquirer can create and enter the
+// successor in that gap. So:
+// - the owner record must still hold the observed bytes, both when read and
+//   once taken; it is moved out by rename (atomic), and if what was taken is
+//   not the observed record it is handed back with link(2), which never
+//   overwrites;
+// - anything else inside is debris of the dead generation (a writer's
+//   interrupted temp file, a .DS_Store) and is cleared; only an owner.json can
+//   make a directory someone's, so one appearing there is never touched;
+// - the directory is then removed with a NON-recursive rmdir, which fails
+//   rather than destroy an owner record that arrived in the meantime.
+// The worst case left is removing a brand-new, still-empty directory a racing
+// acquirer just made: its owner write then fails (ENOENT) or lands in our
+// replacement first, and the O_EXCL claim admits exactly one of us.
+// 'destroyed' | 'lost' (the path holds some other generation) | 'vanished'.
+function destroyObservedGeneration(lockPath, observedRaw) {
+  const ownerPath = lockOwnerPath(lockPath);
+  const gone = () => (fs.existsSync(lockPath) ? 'lost' : 'vanished');
+  let tomb = null;
+  const handBack = () => {
+    if (!tomb) return;
+    try { fs.linkSync(tomb, ownerPath); fs.unlinkSync(tomb); } catch (_) { /* fail closed: leave it where it can be found */ }
+  };
+  if (observedRaw !== null) {
+    let current = null;
+    try { current = fs.readFileSync(ownerPath, 'utf8'); }
+    catch (err) { if (err.code === 'ENOENT') return gone(); throw err; }
+    if (current !== observedRaw) return 'lost';
+    tomb = path.join(path.dirname(lockPath), `.${path.basename(lockPath)}.owner-${crypto.randomUUID()}`);
+    try { fs.renameSync(ownerPath, tomb); }
+    catch (err) { tomb = null; if (err.code === 'ENOENT') return gone(); throw err; }
+    let taken = null;
+    try { taken = fs.readFileSync(tomb, 'utf8'); } catch (_) { taken = null; }
+    if (taken !== observedRaw) { handBack(); return 'lost'; }
+  }
+  const failed = (err) => {
+    handBack();
+    if (err.code === 'ENOENT') return 'vanished';
+    if (err.code === 'ENOTEMPTY' || err.code === 'EEXIST') return 'lost';
+    throw err;
+  };
+  let entries = [];
+  try { entries = fs.readdirSync(lockPath); }
+  catch (err) { return failed(err); }
+  for (const entry of entries) {
+    if (entry === 'owner.json') continue;
+    try { fs.rmSync(path.join(lockPath, entry), { recursive: true, force: true }); } catch (_) { /* rmdir below decides */ }
+  }
+  try { fs.rmdirSync(lockPath); }
+  catch (err) { return failed(err); }
+  if (tomb) { try { fs.unlinkSync(tomb); } catch (_) { /* garbage beside the lock, never in its path */ } }
+  return 'destroyed';
+}
+
+function reclaimLockDirectory(ctx, name, lockPath, observedKey, staleMs, birth = {}) {
   const gateRoot = lockReclaimGateRoot(ctx);
   fs.mkdirSync(gateRoot, { recursive: true });
   sweepLockReclaimGates(gateRoot);
   const gatePath = path.join(gateRoot, `${String(name).replace(/[^A-Za-z0-9._-]+/g, '_')}.${observedKey}`);
+  birth.gatePath = gatePath;
   // Creating the gate and stamping its creator are NOT one operation -- see the
   // header: `wx` is open+write+close and the sweep routinely observes the
   // zero-byte window. It keeps such a gate (unstamped -> creator null -> TTL
@@ -501,7 +630,7 @@ function reclaimLockDirectory(ctx, name, lockPath, observedKey) {
   // not this write, are what stop a second destroyer. The nonce makes the bytes
   // unique per attempt, so byte equality alone identifies our own gate.
   const stampRaw = `${JSON.stringify({
-    pid: process.pid, host: os.hostname(), started_at: new Date().toISOString(),
+    pid: process.pid, ...hostStamp(), started_at: new Date().toISOString(),
     lock: name, key: observedKey, nonce: crypto.randomUUID(),
   }, null, 2)}\n`;
   try { fs.writeFileSync(gatePath, stampRaw, { flag: 'wx' }); }
@@ -518,6 +647,12 @@ function reclaimLockDirectory(ctx, name, lockPath, observedKey) {
     const current = observeLockDirectory(lockPath);
     if (!current.exists) return 'vanished';
     if (current.key !== observedKey) return 'lost';
+    // The key can collide across ownerless generations (see lockGenerationKey),
+    // so staleness is re-proved on THIS observation. Whatever replaced the
+    // generation the caller judged stale was created after that judgement and
+    // is fresh, so a colliding successor is refused here instead of destroyed.
+    // An omitted staleMs never proves an ownerless directory stale: fail closed.
+    if (!lockDirectoryIsStale(lockPath, current.owner, staleMs)) return 'lost';
     stallForFaultInjection('compare');
     // Belt to the ownership rule's braces: if anything revoked our gate before
     // we touched the directory, we are no longer the only authorised destroyer.
@@ -525,7 +660,9 @@ function reclaimLockDirectory(ctx, name, lockPath, observedKey) {
     if (!reclaimGateStillOurs(gatePath, mine)) { ownsGate = false; return 'lost'; }
     consumed = true; // past this point the generation is ours to destroy
     stallForFaultInjection('swap');
-    fs.rmSync(lockPath, { recursive: true, force: true });
+    const destroyed = destroyObservedGeneration(lockPath, current.raw);
+    if (destroyed !== 'destroyed') return destroyed;
+    birth.at = claimClock(); // the replacement generation's age is measured from here (see claimedInTime)
     try { fs.mkdirSync(lockPath); }
     catch (err) { if (err.code === 'EEXIST') return 'lost'; throw err; }
     // Same check after the swap. A mismatch here means a second destroyer was
@@ -543,6 +680,34 @@ function reclaimLockDirectory(ctx, name, lockPath, observedKey) {
     // clears it once this process is provably gone.
     if (!consumed && ownsGate) { try { fs.rmSync(gatePath, { recursive: true, force: true }); } catch (_) {} }
   }
+}
+
+// A directory is judged stale while ownerless only once staleMs has passed
+// since its mkdir, so a claim confirmed within half that window cannot have
+// been observed as a stale ownerless generation by any reclaimer. A claimant
+// that took longer (suspended between mkdir and its owner write) may be racing
+// a reclaimer already past its compare, and must not enter. It leaves its own
+// record in place rather than removing it: a removal here could land on the
+// reclaimer's fresh directory, and a record whose process exits is reclaimed
+// at once as a dead owner.
+//
+// Elapsed time is the LARGER of two clocks. The wall clock is what a
+// reclaimer's mtime judgement runs on and it keeps counting through system
+// sleep, but it can step backward (an NTP correction, a VM restore) and hide
+// the delay. The monotonic clock never steps backward but stops during sleep
+// on macOS and Linux. Each covers the other's blind spot.
+function claimClock() {
+  return { wall: Date.now(), mono: process.hrtime.bigint() };
+}
+
+function claimElapsedMs(since) {
+  const wall = Date.now() - since.wall;
+  const mono = Number((process.hrtime.bigint() - since.mono) / 1000000n);
+  return Math.max(wall, mono);
+}
+
+function claimedInTime(createdAt, staleMs) {
+  return claimElapsedMs(createdAt) < staleMs / 2;
 }
 
 // Installs the owner record with O_EXCL and confirms it survived. True only
@@ -579,10 +744,12 @@ function writeState(ctx, state, changedRecord, options = {}) {
   const lockPath = path.join(ctx.stateDir, 'locks', 'state-write.lock');
   const deadline = Date.now() + 5000;
   const token = crypto.randomUUID();
-  const record = { pid: process.pid, host: os.hostname(), started_at: new Date().toISOString(), token };
+  const record = { pid: process.pid, ...hostStamp(), started_at: new Date().toISOString(), token };
   let held = false;
+  let lostGate = null;
   while (!held) {
     let created = false;
+    let createdAt = claimClock();
     try { fs.mkdirSync(lockPath); created = true; }
     catch (err) {
       if (err.code !== 'EEXIST') throw err;
@@ -591,12 +758,20 @@ function writeState(ctx, state, changedRecord, options = {}) {
         // Compare-and-set: only the process that wins this generation's steal
         // gate may replace the directory, so a second writer cannot delete the
         // reclaimer's fresh lock and write the ledger beside it.
-        created = reclaimLockDirectory(ctx, 'state-write', lockPath, observed.key) === 'reclaimed';
+        const birth = {};
+        created = reclaimLockDirectory(ctx, 'state-write', lockPath, observed.key, STATE_WRITE_LOCK_STALE_MS, birth) === 'reclaimed';
+        if (created) createdAt = birth.at;
+        else if (birth.gatePath && fs.existsSync(birth.gatePath)) lostGate = birth.gatePath;
       }
     }
     if (created) held = claimLockDirectory(lockPath, record);
+    if (held && !claimedInTime(createdAt, STATE_WRITE_LOCK_STALE_MS)) {
+      throw new Error('state-write lock claim was delayed past half its staleness window; refusing to write the ledger');
+    }
     if (held) break;
-    if (Date.now() >= deadline) throw new Error('timed out acquiring state-write lock');
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out acquiring state-write lock${lostGate ? ` (its stale generation is reserved by ${lostGate}; if no process is still reclaiming it, remove that file)` : ''}`);
+    }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   try {
@@ -637,7 +812,7 @@ const pidLiveness = turnLockPidAlive;
 // merely keeps the lock held — never toward reclaiming a live owner's lock.
 function ownerProvablyDeadOnThisHost(owner) {
   if (!owner || typeof owner !== 'object') return false;
-  if (typeof owner.host !== 'string' || owner.host !== os.hostname()) return false;
+  if (!stampIsThisHost(owner)) return false;
   return pidLiveness(Number(owner.pid)) === false;
 }
 
@@ -648,9 +823,17 @@ function lockIsStale(owner, now = Date.now(), staleMs = 30 * 60 * 1000) {
   if (ownerProvablyDeadOnThisHost(owner)) return true;
   const age = now - Date.parse(owner.started_at);
   if (!Number.isFinite(age) || age <= staleMs) return false;
-  if (owner.host && owner.host !== os.hostname()) return true;
+  if (stampHostRelation(owner) === 'foreign') return true;
   // Past the window, time alone justifies reclaiming unless the owner is known
   // alive; only a definite `true` (including EPERM) holds the lock.
+  //
+  // That includes EPERM at any age, and deliberately so. EPERM does not mean
+  // "another user": a sandboxed same-user peer (Codex's seatbelt denies
+  // cross-sandbox signals) answers EPERM too, so no age bound can tell a
+  // suspended live coordinator from a daemon that inherited a recycled pid.
+  // The cost is a lock that stays wedged until broken by hand; the
+  // alternative is two writers in the ledger. Telling a recycled pid apart
+  // needs the owner's process start time recorded beside the pid.
   return pidLiveness(Number(owner.pid)) !== true;
 }
 
@@ -740,6 +923,7 @@ function requireLeaseToken(record, args, verb, nowMs) {
 
 function lockDirectoryIsStale(lockPath, owner, staleMs) {
   if (owner) return lockIsStale(owner, Date.now(), staleMs);
+  if (!Number.isFinite(staleMs)) return false;
   try { return Date.now() - fs.statSync(lockPath).mtimeMs > staleMs; }
   catch (_) { return false; }
 }
@@ -750,22 +934,29 @@ async function withLock(ctx, name, fn, opts = {}) {
   const staleMs = opts.staleMs || 30 * 60 * 1000;
   const token = crypto.randomUUID();
   const record = {
-    pid: process.pid, host: os.hostname(), started_at: new Date().toISOString(),
+    pid: process.pid, ...hostStamp(), started_at: new Date().toISOString(),
     card: opts.card || null, command: process.argv.slice(2).join(' '), token,
   };
   let held = false;
   let lastOwner = null;
+  let createdAt = claimClock();
   for (let attempt = 0; attempt < LOCK_ACQUIRE_ATTEMPTS && !held; attempt += 1) {
+    createdAt = claimClock();
     try { fs.mkdirSync(lockPath); held = true; break; }
     catch (err) { if (err.code !== 'EEXIST') throw err; }
     const observed = observeLockDirectory(lockPath);
     lastOwner = observed.owner;
     if (!observed.exists) continue; // released between mkdir and the read -- retry the atomic create
     if (!lockDirectoryIsStale(lockPath, observed.owner, staleMs)) throw lockHeldError(name, observed.owner);
-    const outcome = reclaimLockDirectory(ctx, name, lockPath, observed.key);
-    if (outcome === 'reclaimed') { held = true; break; }
+    const birth = {};
+    const outcome = reclaimLockDirectory(ctx, name, lockPath, observed.key, staleMs, birth);
+    if (outcome === 'reclaimed') { createdAt = birth.at; held = true; break; }
     // 'lost' = another process won this generation and owns the lock now.
-    if (outcome === 'lost') throw lockHeldError(name, observed.owner, 'reclaimed by another process');
+    if (outcome === 'lost') {
+      const reserved = birth.gatePath && fs.existsSync(birth.gatePath)
+        ? `; its generation is reserved by ${birth.gatePath} -- if no process is still reclaiming it, remove that file` : '';
+      throw lockHeldError(name, observed.owner, `reclaimed by another process${reserved}`);
+    }
     // 'vanished' = the stale lock released itself under us -- retry cleanly.
   }
   if (!held) throw lockHeldError(name, lastOwner, 'contended');
@@ -773,6 +964,9 @@ async function withLock(ctx, name, fn, opts = {}) {
   // record and still seeing our own token there.
   if (!claimLockDirectory(lockPath, record)) {
     throw lockHeldError(name, observeLockDirectory(lockPath).owner, 'claimed by another process');
+  }
+  if (!claimedInTime(createdAt, staleMs)) {
+    throw lockHeldError(name, record, 'claim delayed past half the staleness window');
   }
   try { return await fn(); }
   finally { releaseLockDirectory(lockPath, token); }
@@ -9092,7 +9286,7 @@ async function main() {
 
 module.exports = {
   EXIT_CODES, parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, pidLiveness, ownerProvablyDeadOnThisHost, lockIsStale, lockDirectoryIsStale, withLock,
-  lockReclaimGateRoot, observeLockDirectory, observeReclaimGate, sweepLockReclaimGates, reclaimLockDirectory, normalizeZone, zonesOverlap, conflictsWithActive,
+  lockReclaimGateRoot, observeLockDirectory, localMachineId, stampIsThisHost, stampHostRelation, observeReclaimGate, sweepLockReclaimGates, reclaimLockDirectory, normalizeZone, zonesOverlap, conflictsWithActive,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
   discardedDependencyProblem, resolveSupersessionTail,

@@ -3432,11 +3432,15 @@ ok(!lockIsStale(oldLive), 'live pid retains old lock');
   const deadGate = plant('dead', { pid: deadReclaimerPid, host: os.hostname(), started_at: new Date().toISOString() });
   const unknownGate = plant('unknown', { pid: 0, host: os.hostname(), started_at: new Date().toISOString() });
   const foreignGate = plant('foreign', { pid: deadReclaimerPid, host: `${os.hostname()}-elsewhere`, started_at: new Date().toISOString() });
+  const debrisGate = path.join(gateProbe, 'debris');
+  fs.writeFileSync(debrisGate, 'not-json');
+  fs.utimesSync(debrisGate, (Date.now() - 10 * 60 * 1000) / 1000, (Date.now() - 10 * 60 * 1000) / 1000);
   sweepLockReclaimGates(gateProbe);
   ok(fs.existsSync(liveGate), 'OPS-3b a long-expired steal gate whose creator is alive is never revoked');
   ok(fs.existsSync(unknownGate), 'OPS-3b a steal gate whose creator liveness is unknown fails closed and is kept');
   ok(!fs.existsSync(deadGate), 'OPS-3b a steal gate whose same-host creator is provably dead is swept');
-  ok(!fs.existsSync(foreignGate), 'OPS-3b a foreign-host steal gate falls back to the TTL');
+  ok(fs.existsSync(foreignGate), 'OPS-3c a foreign-host steal gate is kept at any age: its creator cannot be probed from here');
+  ok(!fs.existsSync(debrisGate), 'OPS-3c a steal gate that names no creator falls back to the TTL');
   fs.rmSync(gateProbe, { recursive: true, force: true });
 }
 

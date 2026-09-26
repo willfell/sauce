@@ -50,7 +50,7 @@ function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, 
 // reds instead of passing quietly.
 // Scoped to THIS harness on purpose. 174 other harnesses share the gap and the
 // rail-level fix (run-preflight.js scoring `code === 0`) is escalated separately.
-const ASSERTION_FLOOR = 420;
+const ASSERTION_FLOOR = 519;
 let finished = false;
 const strayChildren = new Set();
 function finish() {
@@ -822,6 +822,25 @@ async function withFreshCoordinator(envOverrides, fn) {
     eq(lockIsStale(owner({ pid: 1, started_at: at(STALE + 60 * 1000) }), LNOW, STALE), false,
       'OPS3 EPERM/other-user pid is ALIVE: lock past the window is STILL held (fail closed)');
 
+    // ...at ANY age. EPERM is also what a sandboxed same-user peer answers, so
+    // no age bound separates a suspended live coordinator from a recycled pid;
+    // a wedged lock is the chosen failure, not two ledger writers. process.kill
+    // is stubbed so EPERM is deterministic even where the suite runs as root.
+    {
+      const EPERM_PID = 424243;
+      const realKill = process.kill;
+      process.kill = (pid, sig) => {
+        if (pid === EPERM_PID && sig === 0) { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; }
+        return realKill.call(process, pid, sig);
+      };
+      try {
+        for (const windows of [2, 8, 100]) {
+          eq(lockIsStale(owner({ pid: EPERM_PID, started_at: at(windows * STALE + 60 * 1000) }), LNOW, STALE), false,
+            `OPS3c an EPERM pid past ${windows} windows still holds: fail closed at any age`);
+        }
+      } finally { process.kill = realKill; }
+    }
+
     // 3. different host → pid numbers are meaningless; only the window may reclaim.
     eq(lockIsStale(owner({ pid: DEAD_PID, host: 'other-host' }), LNOW, STALE), false,
       'OPS3 foreign-host lock is NOT reclaimed early even though the pid is dead here');
@@ -829,6 +848,41 @@ async function withFreshCoordinator(envOverrides, fn) {
       'OPS3 foreign-host fresh lock is held');
     eq(lockIsStale(owner({ pid: DEAD_PID, host: 'other-host', started_at: at(STALE + 1) }), LNOW, STALE), true,
       'OPS3 foreign-host lock past the window keeps its existing stale semantics');
+    eq(lockIsStale(owner({ pid: process.pid, host: 'other-host', machine: 'other-boot', started_at: at(STALE + 1) }), LNOW, STALE), true,
+      'OPS3c a PROVABLY foreign lock (another machine id) past the window is reclaimed even when its pid number is alive here');
+    eq(lockIsStale(owner({ pid: process.pid, host: 'other-host', started_at: at(STALE + 1) }), LNOW, STALE), false,
+      'OPS3c a hostname mismatch alone proves nothing (this host may have been renamed): a pid alive here keeps the lock');
+
+    // Host identity is the boot session plus pid namespace, not the hostname.
+    // A renamed host (macOS renames itself when the network changes) is still
+    // this host; the same hostname on another boot is not, because every pid
+    // was recycled by the reboot.
+    {
+      const { localMachineId } = coordinator;
+      const MINE = localMachineId();
+      ok(typeof MINE === 'string' && MINE.length > 0, 'OPS3c fixture: this platform exposes a boot-session machine identity');
+      ok(process.platform !== 'linux' || MINE.endsWith(`:${fs.readlinkSync('/proc/self/ns/pid')}`),
+        'OPS3c on Linux the identity includes the pid namespace, so containers sharing a kernel are told apart');
+      // Read independently of the coordinator: the identity must be built from
+      // the kernel's per-boot random id, which is what makes it differ across
+      // reboots and machines. A pid namespace alone is a constant on any host
+      // outside a container.
+      const bootSession = process.platform === 'linux'
+        ? fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()
+        : require('child_process').execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], { encoding: 'utf8' }).trim();
+      ok(bootSession.length >= 32 && MINE.includes(bootSession),
+        'OPS3c the identity carries this boot session\'s kernel id, so it changes across reboots and machines');
+      eq(lockIsStale(owner({ pid: DEAD_PID, host: 'renamed-host', machine: MINE }), LNOW, STALE), true,
+        'OPS3c a renamed host is still this host: its provably dead owner is reclaimed early');
+      eq(lockIsStale(owner({ host: 'renamed-host', machine: MINE, started_at: at(STALE + 60 * 1000) }), LNOW, STALE), false,
+        'OPS3c a renamed host is still this host: its LIVE owner past the window keeps the lock');
+      eq(lockIsStale(owner({ machine: 'other-boot', started_at: at(STALE + 60 * 1000) }), LNOW, STALE), true,
+        'OPS3c the same hostname on another boot is foreign: its recycled pid cannot hold the lock past the window');
+      eq(lockIsStale(owner({ machine: 'other-boot' }), LNOW, STALE), false,
+        'OPS3c an owner from another boot is held inside the window like any foreign owner');
+      eq(lockIsStale(owner({ pid: DEAD_PID, machine: 'other-boot' }), LNOW, STALE), false,
+        'OPS3c a pid from another boot is never probed for early reclaim');
+    }
     {
       const o = owner({ pid: DEAD_PID });
       delete o.host;
@@ -1198,7 +1252,7 @@ async function withFreshCoordinator(envOverrides, fn) {
   {
     const {
       withLock, observeLockDirectory, observeReclaimGate, sweepLockReclaimGates,
-      lockReclaimGateRoot, reclaimLockDirectory,
+      lockReclaimGateRoot, reclaimLockDirectory, lockDirectoryIsStale,
     } = coordinator;
     const HOST = os.hostname();
     const DEAD_PID = require('child_process').spawnSync(process.execPath, ['-e', '0']).pid;
@@ -1259,8 +1313,24 @@ async function withFreshCoordinator(envOverrides, fn) {
       const garbageFresh = put('garbage-fresh', '{not json', 0);
       const legacyAged = put('legacy-aged', 'legacy-directory', AGED);
       const legacyFresh = put('legacy-fresh', 'legacy-directory', 0);
+      const MINE = coordinator.localMachineId();
+      const renamedLiveAged = put('renamed-live-aged', { ...liveCreator(), host: 'renamed-host', machine: MINE }, AGED);
+      const renamedDeadFresh = put('renamed-dead-fresh', { ...deadCreator(), host: 'renamed-host', machine: MINE }, 0);
+      const otherBootAged = put('other-boot-aged', { ...liveCreator(), machine: 'other-boot' }, AGED);
+      const otherBootFresh = put('other-boot-fresh', { ...liveCreator(), machine: 'other-boot' }, 0);
+      const unnamedLiveAged = put('unidentified-renamed-live-aged', { ...liveCreator(), host: 'renamed-host' }, AGED);
 
       sweepLockReclaimGates(probe);
+
+      eq(fs.existsSync(renamedLiveAged), true,
+        'OPS3c the sweep KEEPS the expired gate of a live creator whose host was renamed since (network change)');
+      eq(fs.existsSync(renamedDeadFresh), false,
+        'OPS3c a renamed host is still this host: a provably dead creator releases its gate at once');
+      eq(fs.existsSync(otherBootAged), true,
+        'OPS3c a gate stamped on another boot or pid namespace is KEPT at any age: its creator cannot be probed from here, so age never revokes it');
+      eq(fs.existsSync(otherBootFresh), true, 'OPS3c ...and is kept when fresh');
+      eq(fs.existsSync(unnamedLiveAged), true,
+        'OPS3c an expired gate with no machine id under another hostname is KEPT while its pid is alive here: it may be this host renamed');
 
       eq(fs.existsSync(liveAged), true,
         'OPS3b the sweep KEEPS a long-expired gate whose stamped creator is alive on this host');
@@ -1271,8 +1341,9 @@ async function withFreshCoordinator(envOverrides, fn) {
         'OPS3b the sweep removes a gate whose same-host creator is provably dead');
       eq(fs.existsSync(deadFresh), false,
         'OPS3b a provably-dead creator releases its gate immediately, with no TTL wait');
-      eq(fs.existsSync(foreignAged), false, 'OPS3b a foreign-host stamp falls back to the TTL');
-      eq(fs.existsSync(foreignFresh), true, 'OPS3b a fresh foreign-host stamp is inside its TTL and kept');
+      eq(fs.existsSync(foreignAged), true,
+        'OPS3c a stamp under another hostname is KEPT at any age, even with a pid dead here: that pid may belong to a live process elsewhere');
+      eq(fs.existsSync(foreignFresh), true, 'OPS3b a fresh foreign-host stamp is kept');
       eq(fs.existsSync(garbageAged), false, 'OPS3b an unparseable gate falls back to the TTL');
       eq(fs.existsSync(garbageFresh), true, 'OPS3b a fresh unparseable gate is inside its TTL and kept');
       eq(fs.existsSync(legacyAged), false, 'OPS3b a legacy directory-shaped gate falls back to the TTL');
@@ -1327,11 +1398,15 @@ async function withFreshCoordinator(envOverrides, fn) {
         'OPS3b the gate left behind is the successor’s, not the dead creator’s');
     }
 
-    // 5. Same-host gates with unknown liveness, and fresh foreign/unparseable
-    //    gates, all keep the generation reserved rather than guessing.
+    // 5. Same-host gates with unknown liveness, foreign gates at ANY age, and
+    //    fresh unparseable gates all keep the generation reserved rather than
+    //    guessing. A foreign creator cannot be probed from here, so no age
+    //    proves it gone.
     for (const [label, creator, ageMs] of [
       ['an unknown-liveness same-host creator', { pid: 0, host: HOST, started_at: new Date().toISOString() }, AGED],
       ['a fresh foreign-host creator', { pid: DEAD_PID, host: `${HOST}-elsewhere`, started_at: new Date().toISOString() }, 0],
+      ['an expired foreign-host creator', { pid: DEAD_PID, host: `${HOST}-elsewhere`, started_at: new Date().toISOString() }, AGED],
+      ['an expired creator from another boot', { pid: DEAD_PID, host: HOST, machine: 'other-boot', started_at: new Date().toISOString() }, AGED],
       ['a fresh unparseable stamp', 'not-json-at-all', 0],
       ['a fresh legacy directory gate', 'legacy-directory', 0],
     ]) {
@@ -1343,10 +1418,9 @@ async function withFreshCoordinator(envOverrides, fn) {
       eq(result.code, 'LOCKED', `OPS3b the refusal for ${label} is a clean LOCKED`);
     }
 
-    // 6. The TTL fallback still applies to entries this code never writes, so
-    //    foreign and legacy debris cannot wedge a generation forever.
+    // 6. The TTL fallback still applies to entries that name no creator, so
+    //    unparseable and legacy debris cannot wedge a generation forever.
     for (const [label, creator] of [
-      ['an expired foreign-host creator', { pid: DEAD_PID, host: `${HOST}-elsewhere`, started_at: new Date().toISOString() }],
       ['an expired unparseable stamp', 'not-json-at-all'],
       ['an expired legacy directory gate', 'legacy-directory'],
     ]) {
@@ -1635,13 +1709,72 @@ async function withFreshCoordinator(envOverrides, fn) {
     {
       const keyDir = path.join(gateRoot3b, 'locks', 'generation-key.lock');
       const ownerFile = path.join(keyDir, 'owner.json');
-      fs.mkdirSync(keyDir, { recursive: true });
-      const ownerless1 = observeLockDirectory(keyDir).key;
+      // Two ownerless generations CAN share a key: Linux reuses the freed inode
+      // at once and stamps ctime from a coarse clock, and this assertion used to
+      // demand otherwise and failed there. What the key exists to protect is
+      // that a reclaimer holding a stale generation's key never destroys the
+      // successor. That is asserted here with the collision FORCED, by
+      // reporting identical dev/ino/ctime/birthtime for both generations, so it
+      // is exercised on every platform rather than only where the kernel
+      // happens to collide.
+      const realStat = fs.statSync;
+      const frozen = realStat(gateRoot3b);
+      const collide = (p, ...rest) => {
+        const st = realStat(p, ...rest);
+        if (!st || path.resolve(String(p)) !== path.resolve(keyDir)) return st;
+        return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+          dev: frozen.dev, ino: frozen.ino, ctimeMs: frozen.ctimeMs, birthtimeMs: frozen.birthtimeMs,
+        });
+      };
+      try {
+        fs.statSync = collide;
+        fs.mkdirSync(keyDir, { recursive: true });
+        backdate(keyDir, AGED);
+        const staleKey = observeLockDirectory(keyDir).key;
+        ok(lockDirectoryIsStale(keyDir, null, AGED / 2), 'OPS3b fixture: the first ownerless generation is stale');
+        fs.rmSync(keyDir, { recursive: true, force: true });
+        fs.mkdirSync(keyDir, { recursive: true });
+        eq(observeLockDirectory(keyDir).key, staleKey,
+          'OPS3b fixture: the fresh successor collides with the stale generation key, as it can on Linux');
+        eq(reclaimLockDirectory(ctx3b, 'generation-key', keyDir, staleKey, AGED / 2), 'lost',
+          'OPS3b a reclaimer whose stale key collides with a fresh ownerless successor loses instead of destroying it');
+        eq(fs.existsSync(keyDir), true, 'OPS3b the fresh successor survives the colliding reclaim');
+        backdate(keyDir, AGED);
+        eq(reclaimLockDirectory(ctx3b, 'generation-key', keyDir, staleKey, AGED / 2), 'reclaimed',
+          'OPS3b control: once that successor is itself stale, the same key reclaims it, so the refusal above is not vacuous');
+        eq(reclaimLockDirectory(ctx3b, 'generation-key-nostale', keyDir, observeLockDirectory(keyDir).key), 'lost',
+          'OPS3b a reclaim that names no staleness window never proves an ownerless directory stale');
+      } finally { fs.statSync = realStat; }
       fs.rmSync(keyDir, { recursive: true, force: true });
       fs.mkdirSync(keyDir, { recursive: true });
-      const ownerless2 = observeLockDirectory(keyDir).key;
-      ok(ownerless1 !== ownerless2,
-        'OPS3b two generations of an ownerless lock directory are keyed apart by the directory itself');
+
+      // writeState must hand ITS window to the reclaim re-check. The dead-pid
+      // cases elsewhere are reclaimed at any window, so they cannot notice a
+      // call site that drops it; an ownerless lock and a foreign-host owner,
+      // both past the 30s state-write window, can -- without the window the
+      // re-check never proves them stale and every ledger write times out.
+      {
+        const { writeState } = coordinator;
+        const seeds = [
+          ['ownerless', null],
+          ['foreign-host', `${JSON.stringify({ pid: 424242, host: 'another-host', started_at: new Date(Date.now() - 120 * 1000).toISOString() })}\n`],
+        ];
+        for (const [label, body] of seeds) {
+          const dir = fs.mkdtempSync(path.join(os.tmpdir(), `ops3c-state-write-${label}-`));
+          const ctxW = { stateDir: dir, statePath: path.join(dir, 'state.json') };
+          const swLock = path.join(dir, 'locks', 'state-write.lock');
+          fs.mkdirSync(swLock, { recursive: true });
+          if (body) fs.writeFileSync(path.join(swLock, 'owner.json'), body);
+          backdate(swLock, 120 * 1000);
+          let failure = null;
+          try { writeState(ctxW, { schema_version: 1, cards: { X: { card: 'X' } } }, null); }
+          catch (err) { failure = err.message; }
+          eq(failure, null, `OPS3c writeState reclaims a ${label} state-write lock past its 30s window`);
+          eq(Object.keys(JSON.parse(fs.readFileSync(ctxW.statePath, 'utf8')).cards), ['X'],
+            `OPS3c the write behind a reclaimed ${label} state-write lock lands in the ledger`);
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
 
       const legacy = (pid) => `${JSON.stringify({ pid, host: HOST, started_at: new Date().toISOString() }, null, 2)}\n`;
       fs.writeFileSync(ownerFile, legacy(111));
@@ -1661,19 +1794,9 @@ async function withFreshCoordinator(envOverrides, fn) {
       ok(tokened1 !== tokened2, 'OPS3b two acquisitions of the same lock are keyed apart by their tokens');
       ok(tokened1.startsWith('t.'), 'OPS3b a tokened generation keys off the acquisition-unique token');
       ok(legacy1.startsWith('d.'), 'OPS3b an ownerless/legacy generation falls back to the directory digest');
-      // DISCLOSED UNPINNED: dropping dev/ino from that digest survives this suite.
-      // It is NOT an equivalent mutant — on a filesystem with coarse timestamps
-      // two generations of one lock path can share ctime and birthtime, and the
-      // weakened digest then names them both, which is exactly the TOCTOU the
-      // compare exists to catch. It is unpinned because no deterministic fixture
-      // exists here: nothing in POSIX can set ctime or birthtime, and 500
-      // consecutive create/stat/remove/create pairs on this machine's APFS temp
-      // filesystem produced 0 pairs sharing both (re-measured for this card; the
-      // predecessor measured 0 of 200). An assertion that recomputed the digest
-      // and compared it would pin the IMPLEMENTATION, not the behaviour, so none
-      // is written. The behavioural consequence that CAN be reached is pinned
-      // instead, in the case immediately below: a reclaimer carrying a stale
-      // generation key must lose to the live generation that replaced it.
+      // The digest is a best-effort name, not a complete identity: generations
+      // CAN collide on it, which is why the forced-collision case above pins the
+      // behaviour that matters (a colliding reclaim loses) rather than the digest.
       eq(observeLockDirectory(path.join(gateRoot3b, 'locks', 'never-existed.lock')).key, 'absent',
         'OPS3b an absent lock names no generation');
       fs.rmSync(keyDir, { recursive: true, force: true });
@@ -1701,6 +1824,22 @@ async function withFreshCoordinator(envOverrides, fn) {
         'OPS3b a reclaimer carrying a stale generation key loses to the live generation that replaced it');
       eq(fs.readFileSync(ownerFile, 'utf8'), liveOwner,
         'OPS3b the live holder keeps its lock and its owner record, byte for byte');
+      fs.rmSync(lockPath, { recursive: true, force: true });
+      // The staleness re-check alone refuses the live holder above, so it does
+      // not prove the key compare exists. Here the successor is ALSO stale:
+      // only the key tells the reclaimer it never observed this generation,
+      // whose own gate another reclaimer can win.
+      fs.rmSync(lockPath, { recursive: true, force: true });
+      fs.mkdirSync(lockPath, { recursive: true });
+      const staleSuccessor = `${JSON.stringify({
+        pid: DEAD_PID, host: HOST, started_at: new Date(Date.now() - 90 * 1000).toISOString(),
+      }, null, 2)}\n`;
+      fs.writeFileSync(ownerFile, staleSuccessor);
+      ok(observeLockDirectory(lockPath).key !== staleKey, 'OPS3c fixture: the stale successor is a different generation');
+      eq(reclaimLockDirectory(ctx3b, name, lockPath, staleKey, 30 * 1000), 'lost',
+        'OPS3c a reclaimer never destroys a stale generation it did not observe');
+      eq(fs.readFileSync(ownerFile, 'utf8'), staleSuccessor,
+        'OPS3c the unobserved stale generation is left for its own reclaimer, byte for byte');
       fs.rmSync(lockPath, { recursive: true, force: true });
       eq(reclaimLockDirectory(ctx3b, name, lockPath, `${staleKey}-released`), 'vanished',
         'OPS3b a lock that released itself reports vanished, so the caller retries the atomic create');
@@ -1759,11 +1898,11 @@ async function withFreshCoordinator(envOverrides, fn) {
     //     them. That asymmetry is the whole reason the validation is one-sided.
     {
       const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3b-ttl-'));
+      // The TTL now applies only to entries that name no creator, so the
+      // override is exercised on unparseable debris.
       const foreignGate = (label) => {
         const p = path.join(probe, label);
-        fs.writeFileSync(p, `${JSON.stringify({
-          pid: DEAD_PID, host: `${HOST}-elsewhere`, started_at: new Date().toISOString(),
-        }, null, 2)}\n`);
+        fs.writeFileSync(p, 'not-json-at-all');
         return p;
       };
       const previousTtl = process.env.SAUCE_AUTOLOOP_LOCK_GATE_TTL_MS;
@@ -1774,18 +1913,531 @@ async function withFreshCoordinator(envOverrides, fn) {
           process.env.SAUCE_AUTOLOOP_LOCK_GATE_TTL_MS = value;
           sweepLockReclaimGates(probe);
           eq(fs.existsSync(gate), true,
-            `OPS3b a ${JSON.stringify(value)} gate-TTL override is rejected for the default, not applied: the fresh foreign gate survives`);
+            `OPS3b a ${JSON.stringify(value)} gate-TTL override is rejected for the default, not applied: the fresh unparseable gate survives`);
         });
         const honoured = foreignGate('honoured');
         backdate(honoured, 5000);
         process.env.SAUCE_AUTOLOOP_LOCK_GATE_TTL_MS = '1000';
         sweepLockReclaimGates(probe);
         eq(fs.existsSync(honoured), false, 'OPS3b a POSITIVE gate-TTL override is honoured');
+        const identified = path.join(probe, 'identified-foreign');
+        fs.writeFileSync(identified, `${JSON.stringify({ pid: DEAD_PID, host: `${HOST}-elsewhere`, started_at: new Date().toISOString() })}\n`);
+        backdate(identified, 5000);
+        sweepLockReclaimGates(probe);
+        eq(fs.existsSync(identified), true, 'OPS3c no TTL override revokes a gate whose creator is named but cannot be probed');
       } finally {
         if (previousTtl === undefined) delete process.env.SAUCE_AUTOLOOP_LOCK_GATE_TTL_MS;
         else process.env.SAUCE_AUTOLOOP_LOCK_GATE_TTL_MS = previousTtl;
       }
       fs.rmSync(probe, { recursive: true, force: true });
+    }
+
+    // 12b. A DELAYED CLAIMANT. An ownerless directory becomes reclaimable once
+    //      its window passes, and a directory is ownerless between its creator's
+    //      mkdir and owner write. A creator suspended across that window can
+    //      then land its owner record in the generation a reclaimer has
+    //      already compared and is about to destroy, and both enter. A
+    //      claimant that took half the window or more must refuse instead.
+    {
+      const name = 'delayed-claim';
+      const STALE_MS = 1500;
+      const delayedRunner = path.join(gateRoot3b, 'delayed-claimant.js');
+      fs.writeFileSync(delayedRunner, [
+        "'use strict';",
+        "const fs = require('fs');",
+        "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+        "const coordinator = require(process.argv[2]);",
+        "const [stateDir, lockName, who, holdMs, staleMs, log, skewFile] = process.argv.slice(3);",
+        "const realNow = Date.now;",
+        "Date.now = () => realNow() + (skewFile && fs.existsSync(skewFile) ? Number(fs.readFileSync(skewFile, 'utf8')) : 0);",
+        "const rec = (ev, extra) => fs.appendFileSync(log, JSON.stringify({ who, ev, at: Date.now(), ...(extra || {}) }) + '\\n');",
+        "(async () => {",
+        "  try {",
+        "    await coordinator.withLock({ stateDir }, lockName, async () => {",
+        "      rec('enter');",
+        "      const until = Date.now() + Number(holdMs);",
+        "      while (Date.now() < until) { /* hold */ }",
+        "      rec('exit');",
+        "    }, { staleMs: Number(staleMs) });",
+        "  } catch (err) { rec('refused', { code: (err && err.code) || 'error', message: String(err && err.message) }); }",
+        "})();",
+      ].join('\n'));
+      const sig = (tag) => path.join(gateRoot3b, `delayed-${tag}`);
+      // Replayed with the claimant's wall clock stepped BACK past its own delay
+      // (an NTP correction, a VM restore): the monotonic clock must still see it.
+      for (const [label, skewMs] of [['steady clock', 0], ['wall clock stepped back 5s', -5000]]) {
+      const log = path.join(gateRoot3b, `delayed-claim-${skewMs}.log`);
+      const skewFile = path.join(gateRoot3b, `delayed-claim-skew-${skewMs}`);
+      const tag = (t) => `${t}${skewMs}`;
+      const spawnDelayed = (who, env) => spawnProcess(
+        process.execPath, [delayedRunner, coordinatorModulePath, gateRoot3b, name, who, '1500', String(STALE_MS), log, who === 'claimant' ? skewFile : ''],
+        { stdio: 'ignore', env: { ...process.env, ...env } },
+      );
+      const claimant = spawnDelayed('claimant', stallEnv('claim-write', sig(tag('a-reached')), sig(tag('a-go'))));
+      const claimantDone = settle(claimant);
+      ok(await awaitFile(sig(tag('a-reached')), claimant), `OPS3c fixture: the claimant is suspended between its mkdir and its owner write (${label})`);
+      await sleep(STALE_MS * 2);
+      const reclaimer = spawnDelayed('reclaimer', stallEnv('swap', sig(tag('b-reached')), sig(tag('b-go'))));
+      const reclaimerDone = settle(reclaimer);
+      ok(await awaitFile(sig(tag('b-reached')), reclaimer),
+        `OPS3c fixture: a reclaimer judged the ownerless generation stale and passed its compare and gate re-check (${label})`);
+      // The reclaimer is released the moment the claimant has DECIDED (entered
+      // or refused), so a claimant that wrongly enters is still holding when
+      // the reclaimer swaps and claims, and the overlap below is observable.
+      fs.writeFileSync(skewFile, String(skewMs));
+      fs.writeFileSync(sig(tag('a-go')), '1');
+      const decidedBy = Date.now() + CHILD_SIGNAL_BOUND_MS;
+      while (!(fs.existsSync(log) && readEvents(log).some((e) => e.who === 'claimant')) && !childGone(claimant) && Date.now() < decidedBy) await sleep(5);
+      fs.writeFileSync(sig(tag('b-go')), '1');
+      await settleWithin(claimantDone, 'OPS3c delayed claimant');
+      await settleWithin(reclaimerDone, 'OPS3c reclaimer of the delayed claimant');
+      const events = readEvents(log);
+      eq(overlapCount(events), 0, `OPS3c a delayed claimant and the reclaimer of its generation are never inside together (${label})`);
+      eq(events.filter((e) => e.who === 'claimant').map((e) => e.ev), ['refused'],
+        `OPS3c a claimant confirmed after half the staleness window refuses instead of entering (${label})`);
+      // The claimant's record landed in the generation after the reclaimer
+      // compared it, so it is no longer the generation the reclaimer observed:
+      // the reclaimer refuses rather than destroy it. The lock is not lost --
+      // the refused claimant exits, and its record is then a dead owner's.
+      eq(events.filter((e) => e.who === 'reclaimer').map((e) => e.ev), ['refused'],
+        `OPS3c a reclaimer never destroys a generation that gained an owner after its compare (${label})`);
+      const follower = spawnDelayed('follower', {});
+      await settleWithin(settle(follower), 'OPS3c follower of the refused claimant');
+      eq(readEvents(log).filter((e) => e.who === 'follower').map((e) => e.ev), ['enter', 'exit'],
+        `OPS3c once the refused claimant has exited, the next acquirer takes the lock from its dead record (${label})`);
+      fs.rmSync(path.join(gateRoot3b, 'locks', `${name}.lock`), { recursive: true, force: true });
+      }
+
+      // A reclaimer suspended mid-swap for longer than half the window, with
+      // nothing else happening, still takes the lock: its claim is timed from
+      // the mkdir that created the replacement, not from when it began.
+      {
+        const lone = seedStale('lone-reclaim');
+        const loneLog = path.join(gateRoot3b, 'lone-reclaim.log');
+        const loneRacer = spawnProcess(
+          process.execPath, [delayedRunner, coordinatorModulePath, gateRoot3b, 'lone-reclaim', 'lone', '0', String(STALE_MS), loneLog, ''],
+          { stdio: 'ignore', env: { ...process.env, ...stallEnv('swap', sig('lone-reached'), sig('lone-go')) } },
+        );
+        const loneDone = settle(loneRacer);
+        ok(await awaitFile(sig('lone-reached'), loneRacer), 'OPS3c fixture: the lone reclaimer is suspended mid-swap');
+        await sleep(STALE_MS);
+        fs.writeFileSync(sig('lone-go'), '1');
+        await settleWithin(loneDone, 'OPS3c lone reclaimer');
+        eq(readEvents(loneLog).map((e) => e.ev), ['enter', 'exit'],
+          'OPS3c a reclaim suspended mid-swap past half the window still takes the lock: it is timed from its own mkdir');
+        fs.rmSync(lone, { recursive: true, force: true });
+      }
+
+      // The swap destroys the generation it OBSERVED, never whatever the path
+      // holds by then. Each case suspends a reclaimer after its compare and
+      // gate re-check, changes the lock under it, and releases it.
+      {
+        const TWO_HOURS = 2 * 60 * 60 * 1000;
+        // (a) The observed owner (foreign, so stale past the window without a
+        //     probe) releases normally, and an ordinary acquirer creates and
+        //     enters the successor. The reclaimer must not destroy it.
+        const handName = 'swap-handoff';
+        const handLock = path.join(gateRoot3b, 'locks', `${handName}.lock`);
+        fs.mkdirSync(handLock, { recursive: true });
+        fs.writeFileSync(path.join(handLock, 'owner.json'), `${JSON.stringify({
+          pid: DEAD_PID, host: 'far-host', machine: 'far-machine', started_at: new Date(Date.now() - TWO_HOURS).toISOString(), token: 'far-token',
+        }, null, 2)}\n`);
+        const handLog = path.join(gateRoot3b, 'swap-handoff.log');
+        const reclaimer = spawnRacer(handName, 'reclaimer', 0, handLog, stallEnv('swap', sig('hand-reached'), sig('hand-go')));
+        const reclaimerDone = settle(reclaimer);
+        ok(await awaitFile(sig('hand-reached'), reclaimer), 'OPS3c fixture: the reclaimer passed its compare and is about to destroy');
+        fs.rmSync(handLock, { recursive: true, force: true });
+        const acquirer = spawnRacer(handName, 'acquirer', 1500, handLog, {});
+        const acquirerDone = settle(acquirer);
+        const enteredBy = Date.now() + CHILD_SIGNAL_BOUND_MS;
+        while (!(fs.existsSync(handLog) && readEvents(handLog).some((e) => e.who === 'acquirer')) && !childGone(acquirer) && Date.now() < enteredBy) await sleep(5);
+        fs.writeFileSync(sig('hand-go'), '1');
+        await settleWithin(reclaimerDone, 'OPS3c swap-handoff reclaimer');
+        await settleWithin(acquirerDone, 'OPS3c swap-handoff acquirer');
+        const handEvents = readEvents(handLog);
+        eq(overlapCount(handEvents), 0, 'OPS3c a reclaimer and the acquirer of the successor its owner released into are never inside together');
+        eq(handEvents.filter((e) => e.who === 'reclaimer').map((e) => [e.ev, e.code || null]), [['refused', 'LOCKED']],
+          'OPS3c a reclaimer whose observed owner released under it refuses instead of destroying the successor');
+        eq(handEvents.filter((e) => e.who === 'acquirer').map((e) => e.ev), ['enter', 'exit', 'acquired'],
+          'OPS3c the successor\'s holder runs to completion undisturbed');
+        eq(fs.existsSync(handLock), false, 'OPS3c ...and releases normally: its owner record was handed back intact');
+
+        // (b) An ownerless stale generation is replaced by one that already has
+        //     an owner. A non-recursive remove cannot take it.
+        const bareName = 'swap-bare';
+        const bareLock = path.join(gateRoot3b, 'locks', `${bareName}.lock`);
+        fs.mkdirSync(bareLock, { recursive: true });
+        backdate(bareLock, TWO_HOURS);
+        const bareLog = path.join(gateRoot3b, 'swap-bare.log');
+        const bareReclaimer = spawnRacer(bareName, 'reclaimer', 0, bareLog, stallEnv('swap', sig('bare-reached'), sig('bare-go')));
+        const bareDone = settle(bareReclaimer);
+        ok(await awaitFile(sig('bare-reached'), bareReclaimer), 'OPS3c fixture: the ownerless reclaimer is about to destroy');
+        fs.rmdirSync(bareLock);
+        fs.mkdirSync(bareLock);
+        const successor = `${JSON.stringify({ pid: process.pid, host: HOST, started_at: new Date().toISOString(), token: 'successor' }, null, 2)}\n`;
+        fs.writeFileSync(path.join(bareLock, 'owner.json'), successor);
+        fs.writeFileSync(sig('bare-go'), '1');
+        await settleWithin(bareDone, 'OPS3c swap-bare reclaimer');
+        eq(readEvents(bareLog).map((e) => [e.ev, e.code || null]), [['refused', 'LOCKED']], 'OPS3c an ownerless reclaim never destroys a successor that already has an owner (a clean LOCKED)');
+        eq(fs.readFileSync(path.join(bareLock, 'owner.json'), 'utf8'), successor, 'OPS3c ...whose owner record is untouched');
+        fs.rmSync(bareLock, { recursive: true, force: true });
+
+        // (c) Debris inside the observed generation (a writer's interrupted temp
+        //     file, a .DS_Store) belongs to that dead generation: it is cleared,
+        //     the lock is reclaimed, and nothing is left beside it.
+        const junkName = 'swap-junk';
+        const junkLock = seedStale(junkName);
+        fs.writeFileSync(path.join(junkLock, 'owner.json.1.2.tmp'), 'partial');
+        fs.writeFileSync(path.join(junkLock, '.DS_Store'), 'x');
+        const junkLog = path.join(gateRoot3b, 'swap-junk.log');
+        const junkReclaimer = spawnRacer(junkName, 'reclaimer', 0, junkLog, {});
+        await settleWithin(settle(junkReclaimer), 'OPS3c swap-junk reclaimer');
+        eq(readEvents(junkLog).map((e) => e.ev), ['enter', 'exit', 'acquired'],
+          'OPS3c a dead generation holding debris is still reclaimed: the debris is cleared with it');
+        eq(fs.readdirSync(path.join(gateRoot3b, 'locks')).filter((e) => e.startsWith(`.${junkName}.lock.owner-`)), [],
+          'OPS3c the owner record set aside during the swap is cleaned up once the swap succeeds');
+        fs.rmSync(junkLock, { recursive: true, force: true });
+
+        // (d) The generation vanishes on its own while the reclaimer is at the
+        //     swap (its owner released, or an ownerless one was cleared). That
+        //     is not a refusal: the reclaimer retries the atomic create.
+        for (const [label, ownerless] of [['owned', false], ['ownerless', true]]) {
+          const vName = `swap-vanish-${label}`;
+          let vLock;
+          if (ownerless) {
+            vLock = path.join(gateRoot3b, 'locks', `${vName}.lock`);
+            fs.mkdirSync(vLock, { recursive: true });
+            backdate(vLock, TWO_HOURS);
+          } else vLock = seedStale(vName);
+          const vLog = path.join(gateRoot3b, `${vName}.log`);
+          const vReclaimer = spawnRacer(vName, 'reclaimer', 0, vLog, stallEnv('swap', sig(`${vName}-reached`), sig(`${vName}-go`)));
+          const vDone = settle(vReclaimer);
+          ok(await awaitFile(sig(`${vName}-reached`), vReclaimer), `OPS3c fixture: the ${label} reclaimer is at the swap`);
+          fs.rmSync(vLock, { recursive: true, force: true });
+          fs.writeFileSync(sig(`${vName}-go`), '1');
+          await settleWithin(vDone, `OPS3c ${label} vanish reclaimer`);
+          eq(readEvents(vLog).map((e) => e.ev), ['enter', 'exit', 'acquired'],
+            `OPS3c a ${label} generation that vanished at the swap is retried and acquired, not refused or crashed`);
+          fs.rmSync(vLock, { recursive: true, force: true });
+        }
+      }
+
+      // A lock that disappears under a claimant is a clean refusal, not a crash:
+      // the claimant's directory vanishes while it is suspended at the owner
+      // write, and it must report LOCKED rather than throw ENOENT.
+      {
+        const vanishName = 'claim-vanishes';
+        const vanishLog = path.join(gateRoot3b, 'claim-vanishes.log');
+        const racer = spawnRacer(vanishName, 'vanisher', 0, vanishLog, stallEnv('claim-write', sig('v-reached'), sig('v-go')));
+        const racerDone = settle(racer);
+        ok(await awaitFile(sig('v-reached'), racer), 'OPS3c fixture: the claimant is suspended at its owner write');
+        fs.rmSync(path.join(gateRoot3b, 'locks', `${vanishName}.lock`), { recursive: true, force: true });
+        fs.writeFileSync(sig('v-go'), '1');
+        await settleWithin(racerDone, 'OPS3c claimant whose lock vanished');
+        eq(readEvents(vanishLog).map((e) => [e.ev, e.code || null]), [['refused', 'LOCKED']],
+          'OPS3c a claimant whose lock directory vanished refuses with LOCKED instead of crashing');
+      }
+
+      // A stale lock that releases itself mid-reclaim is retried, not refused:
+      // the reclaimer is suspended after winning the gate, the dead owner's
+      // directory disappears, and the next atomic create must take the lock.
+      {
+        const retryName = 'reclaim-vanishes';
+        const retryLog = path.join(gateRoot3b, 'reclaim-vanishes.log');
+        const retryLock = seedStale(retryName);
+        const racer = spawnRacer(retryName, 'retrier', 0, retryLog, stallEnv('gate-stamped', sig('r-reached'), sig('r-go')));
+        const racerDone = settle(racer);
+        ok(await awaitFile(sig('r-reached'), racer), 'OPS3c fixture: the reclaimer holds the gate of a dead-owner lock');
+        fs.rmSync(retryLock, { recursive: true, force: true });
+        fs.writeFileSync(sig('r-go'), '1');
+        await settleWithin(racerDone, 'OPS3c reclaimer whose stale lock vanished');
+        eq(readEvents(retryLog).map((e) => e.ev), ['enter', 'exit', 'acquired'],
+          'OPS3c a stale lock that vanished mid-reclaim is retried and acquired, not refused');
+      }
+
+      // writeState carries the same guard with its own 30s window. Its clock is
+      // skewed forward while it is suspended at the owner write, so the claim
+      // is confirmed "20s after" its mkdir without the suite waiting 20s.
+      const writerDir = path.join(gateRoot3b, 'delayed-ledger');
+      fs.mkdirSync(writerDir, { recursive: true });
+      const statePath = path.join(writerDir, 'state.json');
+      const skewFile = path.join(gateRoot3b, 'delayed-ledger-skew');
+      const resultFile = path.join(gateRoot3b, 'delayed-ledger-result.json');
+      const ledgerRunner = path.join(gateRoot3b, 'delayed-ledger-writer.js');
+      fs.writeFileSync(ledgerRunner, [
+        "'use strict';",
+        "const fs = require('fs');",
+        "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+        "const [modulePath, stateDir, statePath, skewFile, resultFile] = process.argv.slice(2);",
+        "const realNow = Date.now;",
+        "Date.now = () => realNow() + (fs.existsSync(skewFile) ? Number(fs.readFileSync(skewFile, 'utf8')) : 0);",
+        "const coordinator = require(modulePath);",
+        "let outcome;",
+        "try { coordinator.writeState({ stateDir, statePath }, { schema_version: 1, cards: { LATE: { card: 'LATE' } } }, null); outcome = { wrote: true }; }",
+        "catch (err) { outcome = { wrote: false, message: String(err && err.message) }; }",
+        "fs.writeFileSync(`${resultFile}.part`, JSON.stringify(outcome));",
+        "fs.renameSync(`${resultFile}.part`, resultFile);",
+      ].join('\n'));
+      const writer = spawnProcess(
+        process.execPath, [ledgerRunner, coordinatorModulePath, writerDir, statePath, skewFile, resultFile],
+        { stdio: 'ignore', env: { ...process.env, ...stallEnv('claim-write', sig('w-reached'), sig('w-go')) } },
+      );
+      const writerDone = settle(writer);
+      ok(await awaitFile(sig('w-reached'), writer), 'OPS3c fixture: the ledger writer is suspended between its mkdir and its owner write');
+      fs.writeFileSync(skewFile, '20000');
+      fs.writeFileSync(sig('w-go'), '1');
+      await settleWithin(writerDone, 'OPS3c delayed ledger writer');
+      const ledgerOutcome = fs.existsSync(resultFile) ? JSON.parse(fs.readFileSync(resultFile, 'utf8')) : { wrote: 'no result' };
+      eq(ledgerOutcome.wrote, false, 'OPS3c a ledger writer whose claim is confirmed past half the 30s window refuses to write');
+      eq(fs.existsSync(statePath), false, 'OPS3c the refused ledger write never reaches the ledger');
+      const leftRecord = path.join(writerDir, 'locks', 'state-write.lock', 'owner.json');
+      eq(fs.existsSync(leftRecord) ? JSON.parse(fs.readFileSync(leftRecord, 'utf8')).pid : null, writer.pid,
+        'OPS3c the refused ledger writer leaves its own record in place instead of removing it (a removal could land on a reclaimer\'s fresh directory)');
+
+      // WHEN each generation's clock starts. A process suspended right after
+      // the mkdir that created a generation must count that suspension, so the
+      // clock is read BEFORE the mkdir. The child below jumps both of its
+      // clocks forward the instant its lock mkdir returns (a model of being
+      // suspended there), optionally fakes one EEXIST from that mkdir, and
+      // optionally has its wall clock skewed while stalled at a seam.
+      const probeRunner = path.join(gateRoot3b, 'clock-probe.js');
+      fs.writeFileSync(probeRunner, [
+        "'use strict';",
+        "const fs = require('fs');",
+        "const path = require('path');",
+        "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+        "const [modulePath, mode, stateDir, lockName, jumpMs, fakeEexist, skewFile, resultFile, extras] = process.argv.slice(2);",
+        "const extra = new Set(String(extras || '').split(',').filter(Boolean));",
+        "let jump = 0;",
+        "const realNow = Date.now;",
+        "Date.now = () => realNow() + jump + (fs.existsSync(skewFile) ? Number(fs.readFileSync(skewFile, 'utf8')) : 0);",
+        "const realHr = process.hrtime.bigint;",
+        "process.hrtime.bigint = () => realHr() + BigInt(jump) * 1000000n;",
+        "const lockPath = path.join(stateDir, 'locks', `${lockName}.lock`);",
+        "const realMkdir = fs.mkdirSync;",
+        "let faked = fakeEexist !== '1';",
+        "fs.mkdirSync = function (p, ...rest) {",
+        "  if (p === lockPath && !faked) { faked = true; const e = new Error('EEXIST: faked'); e.code = 'EEXIST'; throw e; }",
+        "  const made = realMkdir.call(fs, p, ...rest);",
+        "  if (p === lockPath) jump += Number(jumpMs);",
+        "  return made;",
+        "};",
+        "if (extra.has('racer-after-rm')) {",
+        "  const realRmdir = fs.rmdirSync;",
+        "  let raced = false;",
+        "  fs.rmdirSync = function (p, ...rest) { const out = realRmdir.call(fs, p, ...rest); if (p === lockPath && !raced) { raced = true; realMkdir.call(fs, lockPath); } return out; };",
+        "}",
+        "if (extra.has('swap-at-take')) {",
+        "  const ownerPath = path.join(lockPath, 'owner.json');",
+        "  const realRename = fs.renameSync;",
+        "  const realLink = fs.linkSync;",
+        "  fs.renameSync = function (src, dest) { if (src === ownerPath) fs.writeFileSync(ownerPath, 'replaced-after-read'); return realRename.call(fs, src, dest); };",
+        "  fs.linkSync = function (src, dest) { if (dest === ownerPath) fs.writeFileSync(ownerPath, 'successor-record'); return realLink.call(fs, src, dest); };",
+        "}",
+        "if (extra.has('replace-at-take')) {",
+        "  const ownerPath = path.join(lockPath, 'owner.json');",
+        "  const realRename = fs.renameSync;",
+        "  fs.renameSync = function (src, dest) { if (src === ownerPath) fs.writeFileSync(ownerPath, 'replaced-after-read'); return realRename.call(fs, src, dest); };",
+        "}",
+        "if (extra.has('link-fails')) {",
+        "  fs.linkSync = function () { const e = new Error('EIO: link failed'); e.code = 'EIO'; throw e; };",
+        "}",
+        "if (extra.has('hidden-dir')) {",
+        "  const realStat = fs.statSync;",
+        "  fs.statSync = function (p, ...rest) { if (p === lockPath) { const e = new Error('ENOENT: hidden'); e.code = 'ENOENT'; throw e; } return realStat.call(fs, p, ...rest); };",
+        "}",
+        "const coordinator = require(modulePath);",
+        "(async () => {",
+        "  let outcome;",
+        "  try {",
+        "    if (mode === 'withLock') await coordinator.withLock({ stateDir }, lockName, async () => {});",
+        "    else coordinator.writeState({ stateDir, statePath: path.join(stateDir, 'state.json') }, { schema_version: 1, cards: { P: { card: 'P' } } }, null);",
+        "    outcome = { entered: true };",
+        "  } catch (err) { outcome = { entered: false, code: (err && err.code) || null, message: String(err && err.message) }; }",
+        "  fs.writeFileSync(`${resultFile}.part`, JSON.stringify(outcome));",
+        "  fs.renameSync(`${resultFile}.part`, resultFile);",
+        "})();",
+      ].join('\n'));
+      const HOUR = 60 * 60 * 1000;
+      const runProbe = async (label, { mode, lockName, jumpMs = 0, fakeEexist = false, seedDead = false, stall = null, skewDuringStall = 0, extras = [], preCreate = false, onStall = null, debris = false, reserveGate = false }) => {
+        const dir = path.join(gateRoot3b, `clock-probe-${label}`);
+        fs.mkdirSync(path.join(dir, 'locks'), { recursive: true });
+        if (preCreate) fs.mkdirSync(path.join(dir, 'locks', `${lockName}.lock`), { recursive: true });
+        if (seedDead) {
+          const seeded = path.join(dir, 'locks', `${lockName}.lock`);
+          fs.mkdirSync(seeded, { recursive: true });
+          fs.writeFileSync(path.join(seeded, 'owner.json'), `${JSON.stringify({ pid: DEAD_PID, host: HOST, started_at: new Date(Date.now() - 1000).toISOString() }, null, 2)}\n`);
+          if (debris) fs.writeFileSync(path.join(seeded, `owner.json.${DEAD_PID}.1.tmp`), 'partial');
+          if (reserveGate) {
+            const reservedBy = path.join(lockReclaimGateRoot({ stateDir: dir }), `${lockName}.${observeLockDirectory(seeded).key}`);
+            fs.mkdirSync(path.dirname(reservedBy), { recursive: true });
+            fs.writeFileSync(reservedBy, `${JSON.stringify({ pid: process.pid, ...(coordinator.localMachineId() ? { machine: coordinator.localMachineId() } : {}), host: HOST, started_at: new Date().toISOString() })}\n`);
+          }
+        }
+        const skewFile = path.join(dir, 'skew');
+        const result = path.join(dir, 'result.json');
+        const env = stall ? stallEnv(stall, sig(`${label}-reached`), sig(`${label}-go`)) : {};
+        const child = spawnProcess(
+          process.execPath, [probeRunner, coordinatorModulePath, mode, dir, lockName, String(jumpMs), fakeEexist ? '1' : '0', skewFile, result, extras.join(',')],
+          { stdio: 'ignore', env: { ...process.env, ...env } },
+        );
+        const done = settle(child);
+        if (stall) {
+          ok(await awaitFile(sig(`${label}-reached`), child), `OPS3c fixture: the ${label} probe reached its ${stall} seam`);
+          if (onStall) onStall(dir);
+          fs.writeFileSync(skewFile, String(skewDuringStall));
+          fs.writeFileSync(sig(`${label}-go`), '1');
+        }
+        await settleWithin(done, `OPS3c ${label} probe`);
+        return fs.existsSync(result) ? JSON.parse(fs.readFileSync(result, 'utf8')) : { entered: 'no result' };
+      };
+      eq((await runProbe('withlock-fresh', { mode: 'withLock', lockName: 'probe', jumpMs: HOUR })).entered, false,
+        'OPS3c withLock counts a suspension right after the mkdir that created its lock');
+      eq((await runProbe('withlock-reclaim', { mode: 'withLock', lockName: 'probe', jumpMs: HOUR, seedDead: true })).entered, false,
+        'OPS3c withLock counts a suspension right after the mkdir that REPLACED a dead owner\'s lock');
+      eq((await runProbe('ledger-fresh', { mode: 'writeState', lockName: 'state-write', jumpMs: 20000 })).entered, false,
+        'OPS3c writeState counts a suspension right after the mkdir that created its lock');
+      eq((await runProbe('ledger-reclaim', { mode: 'writeState', lockName: 'state-write', jumpMs: 20000, seedDead: true })).entered, false,
+        'OPS3c writeState counts a suspension right after the mkdir that REPLACED a dead owner\'s lock');
+      eq((await runProbe('ledger-reclaim-late', { mode: 'writeState', lockName: 'state-write', seedDead: true, stall: 'swap', skewDuringStall: 20000 })).entered, true,
+        'OPS3c writeState times a reclaim from the reclaim\'s own mkdir, so a long wait before the swap does not refuse it');
+      eq((await runProbe('withlock-vanished', { mode: 'withLock', lockName: 'probe', fakeEexist: true })).entered, true,
+        'OPS3c withLock retries the atomic create when the lock it collided with is gone by the time it looks');
+
+      // Two refusals that matter because sweep-worktrees.js claims these same
+      // locks WITHOUT O_EXCL: it mkdirs, then writes owner.json plainly and
+      // enters. A coordinator that treated either situation below as "held"
+      // would be inside beside it.
+      const racedSwap = await runProbe('swap-raced', { mode: 'withLock', lockName: 'selector', seedDead: true, extras: ['racer-after-rm'] });
+      eq([racedSwap.entered, racedSwap.code], [false, 'LOCKED'],
+        'OPS3c a directory another rail created between the swap\'s rm and mkdir is theirs: the reclaimer refuses');
+      const hidden = await runProbe('contended', { mode: 'withLock', lockName: 'selector', preCreate: true, extras: ['hidden-dir'] });
+      eq([hidden.entered, hidden.code], [false, 'LOCKED'],
+        'OPS3c a create that never succeeds within the attempt budget is refused, never claimed into whatever directory is there');
+
+      // The owner record changes after it was read and before it is taken: what
+      // was taken is handed back with link(2), and if a successor's record has
+      // appeared by then, that record is never overwritten.
+      {
+        const probeDir = path.join(gateRoot3b, 'clock-probe-swap-at-take');
+        const took = await runProbe('swap-at-take', { mode: 'withLock', lockName: 'probe', seedDead: true, extras: ['swap-at-take'] });
+        eq([took.entered, took.code], [false, 'LOCKED'], 'OPS3c an owner record that changed after it was read is not destroyed: a clean LOCKED');
+        eq(fs.readFileSync(path.join(probeDir, 'locks', 'probe.lock', 'owner.json'), 'utf8'), 'successor-record',
+          'OPS3c handing a taken record back never overwrites a record that appeared meanwhile');
+      }
+
+      // With nothing in the way, a record taken by mistake is actually handed
+      // back: the path ends up holding exactly the record that was taken.
+      {
+        const probeDir = path.join(gateRoot3b, 'clock-probe-replace-at-take');
+        const replaced = await runProbe('replace-at-take', { mode: 'withLock', lockName: 'probe', seedDead: true, extras: ['replace-at-take'] });
+        eq([replaced.entered, replaced.code], [false, 'LOCKED'], 'OPS3c a record replaced between the read and the take is refused');
+        const handed = path.join(probeDir, 'locks', 'probe.lock', 'owner.json');
+        eq(fs.existsSync(handed) ? fs.readFileSync(handed, 'utf8') : 'missing', 'replaced-after-read',
+          'OPS3c ...and the record it took is handed back to the path, byte for byte');
+        eq(fs.readdirSync(path.join(probeDir, 'locks')).filter((e) => e.startsWith('.probe.lock.owner-')), [],
+          'OPS3c ...leaving nothing set aside');
+      }
+
+      // An owner record that already differs when the swap begins is never
+      // taken at all, so even a hand-back that cannot happen (the reclaimer
+      // killed mid-swap, modelled by a failing link) cannot strip it.
+      {
+        const probeDir = path.join(gateRoot3b, 'clock-probe-changed-before-take');
+        const changed = await runProbe('changed-before-take', {
+          mode: 'withLock', lockName: 'probe', seedDead: true, extras: ['link-fails'], stall: 'swap',
+          onStall: (dir) => fs.writeFileSync(path.join(dir, 'locks', 'probe.lock', 'owner.json'), 'successor-record'),
+        });
+        eq([changed.entered, changed.code], [false, 'LOCKED'], 'OPS3c a record that changed before the swap began is refused without being touched');
+        const survivor = path.join(probeDir, 'locks', 'probe.lock', 'owner.json');
+        eq(fs.existsSync(survivor) ? fs.readFileSync(survivor, 'utf8') : 'missing', 'successor-record',
+          'OPS3c ...so it survives even when nothing could be handed back');
+      }
+
+      // Debris from main's own interrupted temp-file write no longer blocks the
+      // ledger lock, and a generation reserved by a live reclaimer's gate
+      // refuses with the gate's path, so the manual remedy is findable.
+      eq((await runProbe('ledger-debris', { mode: 'writeState', lockName: 'state-write', seedDead: true, debris: true })).entered, true,
+        'OPS3c a dead ledger owner with an interrupted temp file beside it is reclaimed and the write lands');
+      const reservedLock = await runProbe('reserved-withlock', { mode: 'withLock', lockName: 'probe', seedDead: true, reserveGate: true });
+      ok(reservedLock.entered === false && reservedLock.code === 'LOCKED' && reservedLock.message.includes(path.join('locks', '.reclaim', 'probe.')),
+        'OPS3c a withLock refusal on a reserved generation names the gate file to remove');
+      const reservedLedger = await runProbe('reserved-ledger', { mode: 'writeState', lockName: 'state-write', seedDead: true, reserveGate: true });
+      ok(reservedLedger.entered === false && reservedLedger.message.includes(path.join('locks', '.reclaim', 'state-write.')),
+        'OPS3c a ledger timeout on a reserved generation names the gate file to remove');
+
+      // Every stamp this coordinator writes carries its host identity, so a
+      // later hostname change cannot orphan it.
+      {
+        const stampDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3c-stamp-'));
+        let stamped = null;
+        await withLock({ stateDir: stampDir }, 'stamp-machine', async () => {
+          stamped = JSON.parse(fs.readFileSync(path.join(stampDir, 'locks', 'stamp-machine.lock', 'owner.json'), 'utf8'));
+        });
+        eq([stamped.host, stamped.machine], [HOST, coordinator.localMachineId()],
+          'OPS3c a lock owner record carries both the hostname and the boot-session identity');
+
+        // The reclaim gate and the ledger lock's owner record carry it too.
+        const reclaimDir = path.join(stampDir, 'gate-stamp');
+        const stale = path.join(reclaimDir, 'locks', 'gate-stamp.lock');
+        fs.mkdirSync(stale, { recursive: true });
+        fs.writeFileSync(path.join(stale, 'owner.json'), `${JSON.stringify({ pid: DEAD_PID, host: HOST, started_at: new Date().toISOString() })}\n`);
+        await withLock({ stateDir: reclaimDir }, 'gate-stamp', async () => {});
+        const gates = fs.readdirSync(lockReclaimGateRoot({ stateDir: reclaimDir }));
+        eq(gates.length, 1, 'OPS3c fixture: the reclaim left its consumed gate');
+        const gateStamp = JSON.parse(fs.readFileSync(path.join(lockReclaimGateRoot({ stateDir: reclaimDir }), gates[0]), 'utf8'));
+        eq(gateStamp.machine, coordinator.localMachineId(), 'OPS3c a reclaim gate stamp carries the boot-session identity');
+        let ledgerOwner = null;
+        await runProbe('ledger-stamp', {
+          mode: 'writeState', lockName: 'state-write', stall: 'claim-readback',
+          onStall: (dir) => { ledgerOwner = JSON.parse(fs.readFileSync(path.join(dir, 'locks', 'state-write.lock', 'owner.json'), 'utf8')); },
+        });
+        eq(ledgerOwner && ledgerOwner.machine, coordinator.localMachineId(), 'OPS3c a ledger lock owner record carries the boot-session identity');
+        fs.rmSync(stampDir, { recursive: true, force: true });
+      }
+
+      // A process that cannot read its own identity (Codex's seatbelt denies
+      // kern.bootsessionuuid) writes stamps without one and must fail closed:
+      // under another hostname, a live owner is still possibly this host.
+      {
+        const sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3c-sandboxed-'));
+        const sandboxResult = path.join(sandboxDir, 'result.json');
+        const sandboxRunner = path.join(sandboxDir, 'sandboxed.js');
+        fs.writeFileSync(sandboxRunner, [
+          "'use strict';",
+          "const fs = require('fs');",
+          "const path = require('path');",
+          "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+          "const [modulePath, dir, peerPid, peerMachine, resultFile] = process.argv.slice(2);",
+          "const c = require(modulePath);",
+          "(async () => {",
+          "  const peer = { pid: Number(peerPid), host: 'renamed-host', machine: peerMachine, started_at: new Date(Date.now() - 3600 * 1000).toISOString() };",
+          "  const gateRoot = c.lockReclaimGateRoot({ stateDir: dir });",
+          "  fs.mkdirSync(gateRoot, { recursive: true });",
+          "  const gate = path.join(gateRoot, 'peer.g.x');",
+          "  fs.writeFileSync(gate, JSON.stringify(peer));",
+          "  const old = (Date.now() - 3600 * 1000) / 1000;",
+          "  fs.utimesSync(gate, old, old);",
+          "  c.sweepLockReclaimGates(gateRoot);",
+          "  let stamp = null;",
+          "  await c.withLock({ stateDir: dir }, 'sandboxed', async () => { stamp = JSON.parse(fs.readFileSync(path.join(dir, 'locks', 'sandboxed.lock', 'owner.json'), 'utf8')); });",
+          "  const out = { id: c.localMachineId(), stale: c.lockIsStale(peer, Date.now(), 1000), gateKept: fs.existsSync(gate), stampHasMachine: Object.prototype.hasOwnProperty.call(stamp, 'machine') };",
+          "  fs.writeFileSync(`${resultFile}.part`, JSON.stringify(out));",
+          "  fs.renameSync(`${resultFile}.part`, resultFile);",
+          "})();",
+        ].join('\n'));
+        const child = spawnProcess(
+          process.execPath, [sandboxRunner, coordinatorModulePath, sandboxDir, String(process.pid), coordinator.localMachineId(), sandboxResult],
+          { stdio: 'ignore', env: { ...process.env, SAUCE_AUTOLOOP_MACHINE_ID_UNAVAILABLE: '1' } },
+        );
+        await settleWithin(settle(child), 'OPS3c sandboxed identity probe');
+        const out = fs.existsSync(sandboxResult) ? JSON.parse(fs.readFileSync(sandboxResult, 'utf8')) : {};
+        eq(out.id, null, 'OPS3c fixture: the sandboxed process has no machine identity');
+        eq(out.stale, false, 'OPS3c without its own identity, a process never judges a renamed host\'s live owner foreign');
+        eq(out.gateKept, true, 'OPS3c without its own identity, a process never TTL-sweeps a renamed host\'s live gate');
+        eq(out.stampHasMachine, false, 'OPS3c a process without an identity writes stamps without one, never a guessed one');
+        fs.rmSync(sandboxDir, { recursive: true, force: true });
+      }
     }
 
     // 13. writeState's `state-write` lock — the LEDGER lock. It routes through the
