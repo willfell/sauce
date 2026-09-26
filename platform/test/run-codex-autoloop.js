@@ -49,7 +49,7 @@ assert.strictEqual(
   'LOOP-BOUND-TOPOLOGY-PREWARMED-CACHE-LEAK restores caller topology environment byte-for-byte',
 );
 const {
-  emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, normalizeZone, zonesOverlap,
+  emptyState, atomicWriteJson, writeState, durablePathBarrier, lockIsStale, lockDirectoryIsStale, sweepLockReclaimGates, normalizeZone, zonesOverlap,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   parseArgs,
   conflictsWithActive, parseExecutionMeta, validateExecutionMeta,
@@ -3408,11 +3408,37 @@ ok(/status: in_progress/.test(patched), 'patches existing frontmatter key');
 ok(/kanban_column: In Progress/.test(patched), 'adds missing frontmatter key');
 
 const recentDead = { pid: 99999999, host: os.hostname(), started_at: new Date().toISOString() };
-ok(!lockIsStale(recentDead), 'recent dead lock waits for stale threshold');
+ok(lockIsStale(recentDead), 'recent dead SAME-HOST lock is reclaimed immediately, no 30m wait (OPS-3)');
 const oldDead = { ...recentDead, started_at: new Date(Date.now() - 31 * 60 * 1000).toISOString() };
 ok(lockIsStale(oldDead), 'old dead lock is stale');
 const oldLive = { pid: process.pid, host: os.hostname(), started_at: oldDead.started_at };
 ok(!lockIsStale(oldLive), 'live pid retains old lock');
+
+// OPS-3b: the steal gate that serialises a reclaim's destroy is NOT a lease.
+// Expiring one whose winner is still mid-steal authorises a second destroyer for
+// the same generation and puts two processes inside the critical section, so the
+// sweep is keyed on the creator being provably dead, never on age alone.
+{
+  const gateProbe = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-gate-sweep-'));
+  const deadReclaimerPid = require('child_process').spawnSync(process.execPath, ['-e', '0']).pid;
+  const plant = (label, creator) => {
+    const gate = path.join(gateProbe, label);
+    fs.writeFileSync(gate, `${JSON.stringify(creator)}\n`);
+    const when = (Date.now() - 10 * 60 * 1000) / 1000;
+    fs.utimesSync(gate, when, when);
+    return gate;
+  };
+  const liveGate = plant('live', { pid: process.pid, host: os.hostname(), started_at: new Date().toISOString() });
+  const deadGate = plant('dead', { pid: deadReclaimerPid, host: os.hostname(), started_at: new Date().toISOString() });
+  const unknownGate = plant('unknown', { pid: 0, host: os.hostname(), started_at: new Date().toISOString() });
+  const foreignGate = plant('foreign', { pid: deadReclaimerPid, host: `${os.hostname()}-elsewhere`, started_at: new Date().toISOString() });
+  sweepLockReclaimGates(gateProbe);
+  ok(fs.existsSync(liveGate), 'OPS-3b a long-expired steal gate whose creator is alive is never revoked');
+  ok(fs.existsSync(unknownGate), 'OPS-3b a steal gate whose creator liveness is unknown fails closed and is kept');
+  ok(!fs.existsSync(deadGate), 'OPS-3b a steal gate whose same-host creator is provably dead is swept');
+  ok(!fs.existsSync(foreignGate), 'OPS-3b a foreign-host steal gate falls back to the TTL');
+  fs.rmSync(gateProbe, { recursive: true, force: true });
+}
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-codex-loop-'));
 const file = path.join(tmp, 'state.json');
