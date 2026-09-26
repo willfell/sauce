@@ -19,6 +19,7 @@ jobs:
   prepare-release:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):') && !startsWith(github.event.head_commit.message, 'docs(prompts):')) }}
     runs-on: sauce
+    timeout-minutes: 30
     env:
       SAUCE_PREFLIGHT_JOBS: '4'
     steps:
@@ -85,6 +86,7 @@ jobs:
   tag-and-ship:
     if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: sauce
+    timeout-minutes: 30
     env:
       SAUCE_PREFLIGHT_JOBS: '4'
     steps:
@@ -178,6 +180,7 @@ jobs:
   rebaseline-seed:
     if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: sauce
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
