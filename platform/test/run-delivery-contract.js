@@ -204,6 +204,22 @@ eq('BGR-CONTRACT-PARKED-IS-WAITING parked counts as waiting and rolls up like bl
   active: waitingLifecycle.counts.active,
   state: waitingLifecycle.state,
 }, { waiting: 1, active: 0, state: 'blocked' });
+// #857: a superseded slice carries status: archived on its note. GraphView
+// already treats archived like discarded and leaves it out; the rollup did
+// not know the word, fell through to planning, and reported a dead slice as
+// work not yet started. That is the "1 planned" in the README screenshot.
+const archivedLifecycle = api.deriveEpicLifecycle([
+  { card: 'OPS-1', status: 'completed' }, { card: 'OPS-2b', status: 'completed' },
+  { card: 'OPS-3c', status: 'in_progress' }, { card: 'OPS-3b', status: 'archived' },
+]);
+eq('ROLLUP-ARCHIVED-857 an archived slice is excluded from the rollup, never counted as planned', {
+  total: archivedLifecycle.counts.total,
+  planned: archivedLifecycle.counts.planned,
+  done: archivedLifecycle.counts.done,
+  active: archivedLifecycle.counts.active,
+}, { total: 3, planned: 0, done: 2, active: 1 });
+eq('ROLLUP-ARCHIVED-857b an epic whose only remaining slices are archived is not reported as having planned work',
+  api.deriveEpicLifecycle([{ status: 'completed' }, { status: 'archived' }]).counts.planned, 0);
 eq('BGR-CONTRACT-ALL-DISCARDED-IS-PLANNED an epic emptied by discards is planned, not done',
   api.deriveEpicLifecycle([{ status: 'discarded' }]).state, 'planned');
 const discardedSliceVerdict = api.validateSlice({ ...api.registry.fixtures.slice.base, status: 'discarded' });
