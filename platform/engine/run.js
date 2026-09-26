@@ -90,7 +90,7 @@ function createRun({ vault, notePath, repo, workerOverride, env, vars, now }) {
   const repoAbs = repoFor(parsed.frontmatter, repo);
   const runId = uniqueRunId(vault, `${slugOf(abs)}-${stamp(now || new Date())}`);
   const mergedVars = Object.assign({}, parsed.graph.vars || {}, vars || {});
-  const graphHash = crypto.createHash('sha256').update(parsed.block).digest('hex').slice(0, 16);
+  const graphHash = graphHashOf(parsed.block);
   fs.mkdirSync(ledger.runDir(vault, runId), { recursive: true });
   ledger.appendEvent(vault, runId, {
     type: 'run.created', run_id: runId,
@@ -129,4 +129,10 @@ function dryRunPlan(parsed, repo) {
   };
 }
 
-module.exports = { createRun, openRun, latestRunFor, resolveVaultForNote, loadGraphNote, dryRunPlan, slugOf, RunError, expandHome };
+// The fingerprint recorded on run.created. One definition, so the hash a run
+// was started under and the hash a resume compares against cannot drift.
+function graphHashOf(block) {
+  return crypto.createHash('sha256').update(String(block)).digest('hex').slice(0, 16);
+}
+
+module.exports = { createRun, openRun, latestRunFor, resolveVaultForNote, loadGraphNote, dryRunPlan, slugOf, graphHashOf, RunError, expandHome };
