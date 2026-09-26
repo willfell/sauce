@@ -378,6 +378,146 @@ ok('GA-P4F-PARSE-ONLY scanned source is never executed',
     inexact.length === 0);
 }
 
+// PERF-9a — the structural half of the contract: a gesture that applies an
+// insert or remove by dispatching dataview:dataview-force-refresh-views instead
+// of routing through RenderSafe.mutateStructure is a finding. The rule keys on
+// the command id at its source offset, not on the dispatcher expression, so the
+// fixtures below pin the bypass shapes that expression matching would miss
+// (optional chaining, bind aliases, computed member access, template
+// interpolation, hoisting the id to module scope) alongside the escape grammar
+// and the sanctioned-site allowlist.
+{
+  const REFRESH = 'dataview:dataview-force-refresh-views';
+
+  ok('PERF-9A-STRUCTURAL-GESTURE a structural gesture that force-refreshes fails', (() => {
+    const findings = lintSource(`
+  row.addEventListener('click', async () => {
+    await TaskDialog.markDone(filePath);
+    app.commands.executeCommandById('${REFRESH}');
+  });
+`);
+    return findings.length === 1
+      && findings[0].line === 4
+      && /RenderSafe\.mutateStructure/.test(findings[0].message);
+  })());
+
+  ok('PERF-9A-STRUCTURAL-GESTURE the migrated shared-seam call site passes', lintSource(`
+  row.addEventListener('click', async () => {
+    await renderSafe.mutateStructure({
+      path: filePath,
+      apply: () => { const node = list.insertBefore(draw(), anchor); return { parent: list, node, nextSibling: anchor }; },
+      write: async () => TaskDialog.markDone(filePath),
+      rollback: (receipt) => { receipt.parent.insertBefore(receipt.node, receipt.nextSibling); receipt.node.remove(); },
+    });
+  });
+`).length === 0);
+
+  ok('PERF-9A-OPTIONAL-CHAIN-BYPASS optional chaining does not defeat the rule', (() => {
+    const findings = lintSource(`
+  button.onclick = async () => {
+    await app?.commands?.executeCommandById?.('${REFRESH}');
+  };
+`);
+    return findings.length === 1
+      && findings[0].line === 3
+      && /RenderSafe\.mutateStructure/.test(findings[0].message);
+  })());
+
+  ok('PERF-9A-ALIAS-BYPASS a bound or computed dispatcher alias does not defeat the rule', (() => {
+    const findings = lintSource(`
+  button.onclick = async () => {
+    const fire = app.commands.executeCommandById.bind(app.commands);
+    fire('${REFRESH}');
+    app.commands['executeCommandById']('${REFRESH}');
+  };
+`);
+    return findings.length === 2 && findings[0].line === 4 && findings[1].line === 5;
+  })());
+
+  ok('PERF-9A-ALIAS-BYPASS hoisting the id out of the handler still fails, as a non-gesture finding', (() => {
+    const findings = lintSource(`
+  const REFRESH_ID = '${REFRESH}';
+  button.onclick = async () => {
+    app.commands.executeCommandById(REFRESH_ID);
+  };
+`);
+    return findings.length === 1
+      && findings[0].line === 2
+      && /outside the structural seam/.test(findings[0].message);
+  })());
+
+  ok('PERF-9A-TEMPLATE-BYPASS a template-literal command id does not defeat the rule', lintSource([
+    'button.onclick = async () => {',
+    '  await app.commands.executeCommandById(`dataview:${"dataview-force-refresh-views"}`);',
+    '};',
+  ].join('\n')).length === 1);
+
+  ok('PERF-9A-INERT-STRING-BYPASS a reason-shaped string cannot suppress a finding', (() => {
+    const findings = lintSource(`
+  button.onclick = async () => {
+    const note = "structural-refresh-ok the index is already current here";
+    app.commands.executeCommandById('${REFRESH}');
+  };
+`);
+    return findings.length === 1 && findings[0].line === 4;
+  })());
+
+  ok('PERF-9A-INERT-STRING-BYPASS a reasonless structural-refresh-ok marker is rejected', lintSource(`
+  button.onclick = async () => {
+    // structural-refresh-ok
+    app.commands.executeCommandById('${REFRESH}');
+  };
+`).length === 1);
+
+  ok('PERF-9A-ESCAPE a reasoned structural-refresh-ok comment excuses exactly its line', lintSource(`
+  button.onclick = async () => {
+    // structural-refresh-ok the wall clock rolled the render day, no write occurred
+    app.commands.executeCommandById('${REFRESH}');
+  };
+`).length === 0);
+
+  ok('PERF-9A-COMMENT-MENTION prose naming the command cannot manufacture a finding', lintSource(`
+  button.onclick = async () => {
+    // Never dispatch dataview:dataview-force-refresh-views from this handler.
+    await renderSafe.mutateStructure({ apply, write, rollback });
+  };
+`).length === 0);
+
+  ok('PERF-9A-NON-GESTURE a background reconciler is still a finding, with the non-gesture message', (() => {
+    const findings = lintSource(`
+  function _fireReconcile(app) {
+    app.commands.executeCommandById('${REFRESH}');
+  }
+`);
+    return findings.length === 1
+      && findings[0].line === 3
+      && /outside the structural seam/.test(findings[0].message);
+  })());
+
+  ok('PERF-9A-MUTATE-SEAM mutateStructure cannot launder a refresh through its write callback', lintSource(`
+  button.onclick = async () => {
+    await renderSafe.mutateStructure({
+      apply: () => ({ parent, node }),
+      write: async () => { await persist(); app.commands.executeCommandById('${REFRESH}'); },
+      rollback: (receipt) => receipt.node.remove(),
+    });
+  };
+`).length === 1);
+
+  ok('PERF-9A-ONE-FINDING-PER-LINE a double dispatch on one line is one pinnable finding', lintSource(`
+  button.onclick = () => { run('${REFRESH}'); run('${REFRESH}'); };
+`).length === 1);
+
+  ok('PERF-9A-ALLOWLIST every sanctioned force-refresh site is enumerated with exact lines', [
+    ['platform/blueprints/home/helpers/space-home.js', 336],
+    ['platform/blueprints/project/helpers/project-chrome-bar.js', 896],
+    ['platform/mechanisms/render-safe/render-safe.js', 251],
+    ['platform/mechanisms/sauce-plugin/plugin/main.js', 378],
+    ['platform/mechanisms/task-entity/task-dialog.js', 1280],
+    ['platform/mechanisms/task-entity/task-note-view.js', 868],
+  ].every(([file, line]) => allowlist.has(file) && allowlist.get(file).lines.has(line)));
+}
+
 const failed = results.filter(([, passed]) => !passed);
 console.log(`\n${failed.length ? 'FAIL' : 'PASS'} — gesture-write lint (${results.length - failed.length}/${results.length})`);
 process.exitCode = failed.length ? 1 : 0;
