@@ -12,7 +12,11 @@
 //   sauce run <note> --sweep          remove finished, clean worktrees of this note's runs
 //   sauce run <note> --install-launchd [--interval <s>]   unattended cadence via launchd
 //   sauce run <note> --uninstall-launchd
+//   sauce run <note> --new            start a fresh run even when the latest one is parked
 //   flags: --worker <fake|claude-code|codex>  --repo <path>  --var k=v  --interval <s>  --json
+//
+// Running a note whose latest run is parked RESUMES that run, so "tick the
+// box, then run again" applies the answer instead of starting over.
 //
 // Exit codes: 0 done/parked/listed, 1 the run failed, 2 usage or refusal.
 
@@ -23,7 +27,7 @@ const ENGINE = path.resolve(__dirname, "..", "engine");
 
 function parseFlags(argv) {
     const f = { note: null, follow: false, dryRun: false, status: false, list: false, sweep: false, json: false,
-        worker: null, repo: null, vars: {}, interval: 30, waitHuman: false, installLaunchd: false, uninstallLaunchd: false, help: false, vault: null };
+        worker: null, repo: null, vars: {}, interval: 30, waitHuman: false, fresh: false, installLaunchd: false, uninstallLaunchd: false, help: false, vault: null };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === "--help" || a === "-h") f.help = true;
@@ -34,6 +38,7 @@ function parseFlags(argv) {
         else if (a === "--sweep") f.sweep = true;
         else if (a === "--json") f.json = true;
         else if (a === "--wait-human") f.waitHuman = true;
+        else if (a === "--new") f.fresh = true;
         else if (a === "--install-launchd") f.installLaunchd = true;
         else if (a === "--uninstall-launchd") f.uninstallLaunchd = true;
         else if (a === "--worker") f.worker = argv[++i];
@@ -187,10 +192,32 @@ async function run(ctx, args) {
         return out;
     }
 
-    let created;
-    try { created = engine.createRun({ vault, notePath, repo, workerOverride: flags.worker, vars: flags.vars }); }
-    catch (e) { return refuse(flags, e.code || "run_failed", e.message); }
-    const runCtx = created.ctx;
+    // A parked latest run is waiting on exactly the answer the operator just
+    // gave, so it is resumed rather than replaced. A run still marked running
+    // is refused, not guessed at: it may be executing in another process, or
+    // its worker may have died, and only the operator can tell which.
+    let runCtx;
+    const latest = flags.fresh ? null : engine.latestRunFor(vault, notePath);
+    if (latest && latest.status === "parked") {
+        // Resuming replays the old run's events against the graph as it is
+        // NOW. If the sauce block was edited while the run sat parked, the
+        // remaining edges may route somewhere the run was never planned to go,
+        // so a changed graph is refused instead of silently re-routed.
+        const created = engine.readEvents(vault, latest.run_id).find((e) => e.type === "run.created") || {};
+        const nowHash = require(path.join(ENGINE, "run.js")).graphHashOf(parsed.block);
+        if (created.graph_hash && created.graph_hash !== nowHash) {
+            return refuse(flags, "graph_changed", `the sauce block changed since run ${latest.run_id} parked (${created.graph_hash} -> ${nowHash}), so resuming it could route somewhere it was never planned to go. Revert the edit to resume it, or pass --new to start a fresh run on the edited graph.`, { run_id: latest.run_id });
+        }
+        try { runCtx = engine.openRun({ vault, notePath, runId: latest.run_id, workerOverride: flags.worker }).ctx; }
+        catch (e) { return refuse(flags, e.code || "run_failed", e.message); }
+    } else if (latest && latest.status === "running") {
+        return refuse(flags, "run_in_flight", `the latest run ${latest.run_id} is still marked running: it may be executing elsewhere, or its worker died. Pass --new to start a fresh run.`, { run_id: latest.run_id });
+    } else {
+        let created;
+        try { created = engine.createRun({ vault, notePath, repo, workerOverride: flags.worker, vars: flags.vars }); }
+        catch (e) { return refuse(flags, e.code || "run_failed", e.message); }
+        runCtx = created.ctx;
+    }
     const receipt = flags.follow
         ? engine.follow(runCtx, { intervalSeconds: flags.interval > 0 ? flags.interval : 30, waitHuman: flags.waitHuman })
         : engine.tick(runCtx);
