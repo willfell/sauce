@@ -291,7 +291,7 @@ Set `status: halted` in the graph note's frontmatter. The next tick records the 
 
 `sauce audit --engine` is a read-only walk: `engine_dir_missing` / `engine_surface_missing` (HIGH), `engine_surface_stale` / `engine_version_drift` / `engine_ledger_unparsable` (MEDIUM), `engine_worktree_orphan` (LOW). It never modifies a ledger or a worktree.
 
-The engine never writes boards or cards. Delivery work still goes through the coordinator — `/mayo:run` can opt into the shipped `platform/engine/graphs/delivery-slice.md` graph, where every coordinator call is a `shell` node.
+The engine never writes boards or cards. Delivery work still goes through the coordinator — `/sauce:loop` can opt into the shipped `platform/engine/graphs/delivery-slice.md` graph, where every coordinator call is a `shell` node.
 
 ## Connecting Claude Cowork (scheduled jobs)
 

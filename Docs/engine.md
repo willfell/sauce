@@ -6,7 +6,7 @@ The engine is just Sauce. The CLI verb is `sauce run`, the slash command is `/sa
 
 ## The problem
 
-Sauce already ran agents against a Kanban board: a launchd job fired a Claude session every two hours, later a deterministic coordinator claimed cards, isolated them in git worktrees, gated them behind a mutation check and a three-lens review quorum, and shipped them through CI, release, tag, tap, and deploy. That worked, and it is still here as the `mayo` plugin.
+Sauce already ran agents against a Kanban board: a launchd job fired a Claude session every two hours, later a deterministic coordinator claimed cards, isolated them in git worktrees, gated them behind a mutation check and a three-lens review quorum, and shipped them through CI, release, tag, tap, and deploy. That worked, and it is still here as the `sauce` plugin.
 
 What did not scale was the shape of the work. Every new shape (a review quorum, a retry with a budget, a handoff from one agent to another, a "wait for me" step) meant more prose in a prompt or more code in a coordinator that had grown past thirteen thousand lines. The engine moves the shape into data: a note declares typed nodes and edges, the engine runs it, and results land back in the note.
 
@@ -198,7 +198,7 @@ Workers run with the isolation scope as their working directory, stdin closed, a
 
 `platform/engine/graphs/delivery-slice.md` is the coordinator's slice pipeline as a graph: claim, implement, adequacy gate, three review lenses each recorded through `record-review`, `verify-gates`, PR, and `advance` through CI, release, tag, tap, brew, and deploy to complete. One same-card repair per gate is an edge with `max: 1`; a second refutation parks on a `supersede` human node. Every action the coordinator's `advance` can return is a named edge, and a harness checks that against the coordinator source.
 
-The `mayo` plugin runs it on request (`/mayo:run`, "run it through the engine"). The prose pipeline stays the default until one live epic completes cleanly through the graph and its ledger has been diffed against a coordinator run of the same shape.
+The `sauce` plugin runs it on request (`/sauce:loop`, "run it through the engine"). The prose pipeline stays the default until one live epic completes cleanly through the graph and its ledger has been diffed against a coordinator run of the same shape.
 
 ## Limitations
 

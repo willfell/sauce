@@ -118,8 +118,8 @@
     "test:engine-install": "node platform/test/run-engine-install.js",
     "test:engine-delivery-graph": "node platform/test/run-engine-delivery-graph.js",
     "test:loop-binding": "node platform/test/run-loop-binding.js",
-    "test:mayo-plugin-surface": "node platform/test/run-mayo-plugin-surface.js",
-    "test:mayo-codex-routers": "node platform/test/run-mayo-codex-routers.js",
+    "test:sauce-plugin-surface": "node platform/test/run-sauce-plugin-surface.js",
+    "test:sauce-codex-routers": "node platform/test/run-sauce-codex-routers.js",
     "test:preflight-runner": "node platform/test/run-preflight-runner.js"
   },
   "dependencies": {

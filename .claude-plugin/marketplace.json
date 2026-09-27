@@ -4,11 +4,11 @@
     "name": "Will Fellhoelter",
     "url": "https://github.com/willfell"
   },
-  "description": "Sauce platform marketplace — the mayo plugin centralizes the meta-loop (board-governed epic/slice delivery) skill surface for every repo and agent runtime.",
+  "description": "Sauce platform marketplace — the sauce plugin centralizes the meta-loop (board-governed epic/slice delivery) skill surface for every repo and agent runtime.",
   "plugins": [
     {
-      "name": "mayo",
-      "source": "./plugins/mayo",
+      "name": "sauce",
+      "source": "./plugins/sauce",
       "description": "Board-governed delivery loop: bind a repo to a vault/board (.loop/config.json), then plan, mint, execute, and review epics/slices through the sanctioned coordinator + card-intake rails."
     }
   ]

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Status"
+  short_description: "Sauce status via the shared sauce plugin body"
+  default_prompt: "Use $sauce-status — follow .agents/skills/sauce-status/SKILL.md."

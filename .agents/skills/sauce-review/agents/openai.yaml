@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Review"
+  short_description: "Sauce review via the shared sauce plugin body"
+  default_prompt: "Use $sauce-review — follow .agents/skills/sauce-review/SKILL.md."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Propose"
+  short_description: "Sauce propose via the shared sauce plugin body"
+  default_prompt: "Use $sauce-propose — follow .agents/skills/sauce-propose/SKILL.md."

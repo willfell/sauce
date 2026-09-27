@@ -1,5 +1,5 @@
 ---
-purpose: The Sauce engine — runtime layout under platform/engine/, the invariants an agent must not break, the harnesses, how the `engine` mechanism materializes the vault surface, and how mayo consumes it.
+purpose: The Sauce engine — runtime layout under platform/engine/, the invariants an agent must not break, the harnesses, how the `engine` mechanism materializes the vault surface, and how the sauce plugin consumes it.
 load_when: Touching platform/engine/, platform/cli/cmd-run.js, platform/audit/engine-walker.js, the `engine` mechanism, or the shipped delivery-slice graph; debugging a `sauce run` or a `## Runs` projection.
 ---
 
@@ -28,7 +28,7 @@ The runtime is a zero-dependency Node library at `platform/engine/`, shipped in 
 | `projection.js` | Writes the `## Runs` marker section and the human checkbox; honours `status: halted`. |
 | `run.js` | `createRun`; run id `<slug>-<yyyymmdd-hhmmss>`, suffixed on collision. |
 | `launchd.js` + `sauce-engine.plist.sample` | Unattended cadence via a per-note launchd job. |
-| `graphs/delivery-slice.md` | The coordinator slice pipeline as a graph; opt-in from `/mayo:run`. |
+| `graphs/delivery-slice.md` | The coordinator slice pipeline as a graph; opt-in from `/sauce:loop`. |
 | `schemas/{graph.v1,run-ledger.v1,worker-result.v1}.json` | Registered in `platform/schemas-index.json` as `sauce.graph.v1`, `sauce.run-ledger.v1`, `sauce.worker-result.v1`. |
 
 CLI: `platform/cli/cmd-run.js` (`sauce run`, context-free in the dispatcher — vault resolved from the note's ancestors first). Audit: `platform/audit/engine-walker.js` (`sauce audit --engine`, read-only). Mechanism: `platform/mechanisms/engine/`.
@@ -69,11 +69,11 @@ The stub coordinator for the last one is `platform/test/fixtures/engine/stub-coo
 
 `engine` is **always-on**. `ensureAlwaysOnMechanisms` in `platform/install.js` appends `platform-claude` and `engine` at their catalogue versions to any subscription lacking them, writes `ranch/platform-subscription.json` back, and records a `always_on_subscription` history row. Consumers cannot opt out by editing the subscription; `platform-claude` is formally always-on by the same rule, not by convention.
 
-## How mayo consumes it (opt-in)
+## How the sauce plugin consumes it (opt-in)
 
-`/mayo:run` keeps the prose pipeline as the default. Its "Engine mode" section runs the shipped `platform/engine/graphs/delivery-slice.md` with `sauce run … --var coordinator=… --var gate=… --follow --json` when the user asks for it. Engine mode stays opt-in until one live epic completes through it and its ledger is diffed against a coordinator run. `/mayo:status` folds engine runs into the digest. Unattended cadence is `sauce run <note> --install-launchd`; the 2h cron loop and `/sauce-autoloop` are gone.
+`/sauce:loop` keeps the prose pipeline as the default. Its "Engine mode" section runs the shipped `platform/engine/graphs/delivery-slice.md` with `sauce run … --var coordinator=… --var gate=… --follow --json` when the user asks for it. Engine mode stays opt-in until one live epic completes through it and its ledger is diffed against a coordinator run. `/sauce:status` folds engine runs into the digest. Unattended cadence is `sauce run <note> --install-launchd`; the 2h cron loop and `/sauce-autoloop` are gone.
 
 ## Read these next
 
 - `Docs/engine.md` — the standalone engine reference (graph grammar, node types, worker contract, ledger events).
-- `Docs/agent-guides/mayo-plugin.md` — the plugin that consumes the engine.
+- `Docs/agent-guides/sauce-plugin.md` — the plugin that consumes the engine.

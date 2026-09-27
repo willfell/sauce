@@ -176,7 +176,7 @@ function mkRepo(config) {
   const c = baseConfig();
   // A real plugin_root, so this case exercises the vault checks rather than
   // tripping the plugin_root guard.
-  const pluginRoot = path.join(home, 'plugins/mayo');
+  const pluginRoot = path.join(home, 'plugins/sauce');
   fs.mkdirSync(pluginRoot, { recursive: true });
   c.codex.plugin_root = pluginRoot;
   const repo = mkRepo(c);
@@ -407,14 +407,14 @@ function mkRepo(config) {
 // ---------------------------------------------------------------------------
 // LC-12 -- the plugin's resolver entry point is the same module, not a copy.
 //
-// plugins/mayo/scripts/loop-config.js and scripts/autoloop/loop-config.js were
+// plugins/sauce/scripts/loop-config.js and scripts/autoloop/loop-config.js were
 // byte-identical twins kept in sync by hand, with nothing checking that they
 // stayed that way. The plugin file is now a forwarder; this asserts it cannot
 // drift, and that it still forwards the CLI the resolver guards with
 // `require.main === module`.
 // ---------------------------------------------------------------------------
 {
-  const shimPath = path.resolve(__dirname, '..', '..', 'plugins', 'mayo', 'scripts', 'loop-config.js');
+  const shimPath = path.resolve(__dirname, '..', '..', 'plugins', 'sauce', 'scripts', 'loop-config.js');
   const shim = require(shimPath);
   ok('LC-12 plugin resolver is the same module object', shim === LC);
   ok('LC-12 plugin resolver forwards main() for the CLI', typeof shim.main === 'function');

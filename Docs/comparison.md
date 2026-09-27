@@ -16,7 +16,7 @@ Where Gas Town is the better fit: many parallel workers on several repos, a merg
 
 beads-superpowers wires Jesse Vincent's Superpowers skills to Yegge's beads tracker. Skills enforce workflows for testing, debugging, design, and execution. Every task becomes a `bd` bead in a local Dolt database, so memory persists across sessions and "where are we" resumes where the last session stopped. Critical review findings block progress and every close needs evidence.
 
-Where Sauce borrows: the idea that a skill should leave a record as it runs. Sauce's mayo plugin does this against a board in the vault, and the engine's `record-review` step records each review lens.
+Where Sauce borrows: the idea that a skill should leave a record as it runs. Sauce's own `sauce` plugin does this against a board in the vault, and the engine's `record-review` step records each review lens.
 
 Where Sauce differs: the record is a note, not a bead. There is no external tracker. The unit of work is a note with a graph in it, and the run ledger sits beside it. Gates are graph nodes with retry budgets, not skill-level checkpoints. A `judge` node is a deterministic command; exit 0 passes. The engine never parses a verdict from free text, and a missing or malformed `result.json` is a fail.
 
@@ -34,6 +34,6 @@ Where a plain loop is the better fit: one repo, one prompt, no branching. If a g
 
 ## Where Sauce stands
 
-Sauce is MIT, pre-1.0, and solo-developed. It runs on one machine. Isolation is worktrees only, with no container or VM sandbox. Workers block the tick. There are no join or fan-in nodes yet. The delivery-slice graph that expresses the mayo pipeline is opt-in and has not yet finished a live epic. The strongest reason to pick it is that your work already lives in an Obsidian vault and you want the record of agent work to live there too.
+Sauce is MIT, pre-1.0, and solo-developed. It runs on one machine. Isolation is worktrees only, with no container or VM sandbox. Workers block the tick. There are no join or fan-in nodes yet. The delivery-slice graph that expresses the delivery-loop pipeline is opt-in and has not yet finished a live epic. The strongest reason to pick it is that your work already lives in an Obsidian vault and you want the record of agent work to live there too.
 
 Sources: the Gas Town GitHub README and the beads-superpowers GitHub README were fetched on 2026-09-22; the Medium post "Welcome to Gas Town" returned 403 and the beads-superpowers GitHub Pages site returned 404, so claims about those two are kept generic.
