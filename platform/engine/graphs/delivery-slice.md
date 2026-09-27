@@ -125,7 +125,7 @@ nodes:
     outcome_from: status
   - id: supersede
     type: human
-    ask: Second refutation on this slice. Supersede it via /mayo:intake (carried findings + binding fixtures) and discard the predecessor?
+    ask: Second refutation on this slice. Supersede it via /sauce:intake (carried findings + binding fixtures) and discard the predecessor?
   - id: depth-exceeded
     type: end
     outcome: supersession-depth-exceeded

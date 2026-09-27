@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Execute"
+  short_description: "Sauce execute via the shared sauce plugin body"
+  default_prompt: "Use $sauce-execute — follow .agents/skills/sauce-execute/SKILL.md."

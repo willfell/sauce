@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Plan"
+  short_description: "Sauce plan via the shared sauce plugin body"
+  default_prompt: "Use $sauce-plan — follow .agents/skills/sauce-plan/SKILL.md."

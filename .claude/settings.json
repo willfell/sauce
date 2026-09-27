@@ -8,6 +8,6 @@
     }
   },
   "enabledPlugins": {
-    "mayo@sauce": true
+    "sauce@sauce": true
   }
 }

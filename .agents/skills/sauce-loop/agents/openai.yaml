@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Loop"
+  short_description: "Sauce loop via the shared sauce plugin body"
+  default_prompt: "Use $sauce-loop — follow .agents/skills/sauce-loop/SKILL.md."

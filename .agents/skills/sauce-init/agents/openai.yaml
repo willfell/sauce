@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Init"
+  short_description: "Sauce init via the shared sauce plugin body"
+  default_prompt: "Use $sauce-init — follow .agents/skills/sauce-init/SKILL.md."

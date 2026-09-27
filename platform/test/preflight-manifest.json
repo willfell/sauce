@@ -1411,18 +1411,18 @@
       "lane": "parallel"
     },
     {
-      "id": "mayo-plugin-surface",
+      "id": "sauce-plugin-surface",
       "cmd": [
         "node",
-        "platform/test/run-mayo-plugin-surface.js"
+        "platform/test/run-sauce-plugin-surface.js"
       ],
       "lane": "parallel"
     },
     {
-      "id": "mayo-codex-routers",
+      "id": "sauce-codex-routers",
       "cmd": [
         "node",
-        "platform/test/run-mayo-codex-routers.js"
+        "platform/test/run-sauce-codex-routers.js"
       ],
       "lane": "parallel"
     },

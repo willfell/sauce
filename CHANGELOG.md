@@ -2,6 +2,18 @@
 
 Sauce releases are cut automatically from conventional commits on `main` (see `Docs/agent-guides/build-test-verify.md` § Release workflow). This file carries the human-readable notes for releases that change how you use Sauce; the full per-cycle record is `Docs/cycle-history.md`, and the git tags are the source of truth for versions.
 
+## Unreleased (plugin rename, PR title `feat(plugin)!`)
+
+### Changed
+
+- **The delivery plugin is `sauce`.** The plugin this repo publishes from its `sauce` marketplace is renamed from `mayo` to `sauce`: install with `/plugin install sauce@sauce`, invoke as `/sauce:<skill>`, and Codex reads generated `.agents/skills/sauce-*` routers. The one-autonomous-turn skill is `/sauce:loop` (was `/mayo:run`), so it no longer reads like the engine's `/sauce` command or the `sauce run <note>` CLI. Every other skill keeps its name: `init`, `status`, `review`, `propose`, `plan`, `execute`, `intake`, `block-review`. The binding contract stays `.loop/config.json`; only `codex.plugin_root` moves from `plugins/mayo` to `plugins/sauce`.
+- Agent guide `Docs/agent-guides/mayo-plugin.md` is now `sauce-plugin.md`; harnesses `test:mayo-plugin-surface` and `test:mayo-codex-routers` are `test:sauce-plugin-surface` and `test:sauce-codex-routers`.
+
+### Migration
+
+- Bound repos: after `brew upgrade sauce`, set `codex.plugin_root` to `/opt/homebrew/opt/sauce/libexec/plugins/sauce`, regenerate routers with `node <plugin_root>/scripts/gen-codex-routers.js --repo . --json` (delete the old `mayo-*` directories), and enable `sauce@sauce` in `.claude/settings.json`.
+- Claude Code: `claude plugin uninstall mayo@sauce` then `claude plugin install sauce@sauce`, and `/reload-plugins`.
+
 ## Unreleased (engine reintegration, PR title `feat(engine)!`)
 
 ### Added

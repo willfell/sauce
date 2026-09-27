@@ -40,7 +40,7 @@ Nodes run to completion inside a tick. Edges decide what runs next, with per-edg
 
 ## What it looks like
 
-Work lives in the vault, so you read it the way you read any other note, including on a phone. These show the project blueprint's read-only views over the delivery board that the coordinator drives and the `mayo` plugin fronts, drawn from the same card notes the coordinator writes.
+Work lives in the vault, so you read it the way you read any other note, including on a phone. These show the project blueprint's read-only views over the delivery board that the coordinator drives and the `sauce` plugin fronts, drawn from the same card notes the coordinator writes.
 
 <p align="center">
   <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note titled Delivery Coordinator Rail Repairs. A dependency graph lists three slice cards, OPS-1, OPS-2b and OPS-3c, each marked done. Below them a rollup labelled done shows a full progress bar and a chip reading 3 deployed.">
@@ -81,7 +81,7 @@ Upgrade with `brew upgrade willfell/sauce/sauce && sauce update`.
 
 ## Plugins
 
-Plugins sit on top of the engine. The one that ships in this repo is **mayo** (`plugins/mayo`), the delivery-loop skill surface for Claude Code and Codex: bind a repo to a Kanban board in a vault (`/mayo:init`), turn requirements into epics and slices (`/mayo:intake`, `/mayo:plan`), and drive them through a deterministic coordinator with an adequacy gate, a three-lens review quorum, and receipts all the way to deploy (`/mayo:run`, `/mayo:status`, `/mayo:review`). Its slice pipeline is also shipped as a graph, `platform/engine/graphs/delivery-slice.md`; running it through the engine is opt-in in this release. Install with `/plugin marketplace add willfell/sauce` then `/plugin install mayo@sauce`. See `Docs/agent-guides/mayo-plugin.md`.
+Plugins sit on top of the engine. The one that ships in this repo is **sauce** (`plugins/sauce`), the delivery-loop skill surface for Claude Code and Codex: bind a repo to a Kanban board in a vault (`/sauce:init`), turn requirements into epics and slices (`/sauce:intake`, `/sauce:plan`), and drive them through a deterministic coordinator with an adequacy gate, a three-lens review quorum, and receipts all the way to deploy (`/sauce:loop`, `/sauce:status`, `/sauce:review`). Its slice pipeline is also shipped as a graph, `platform/engine/graphs/delivery-slice.md`; running it through the engine is opt-in in this release. Install with `/plugin marketplace add willfell/sauce` then `/plugin install sauce@sauce`. See `Docs/agent-guides/sauce-plugin.md`.
 
 ## The vault platform
 
@@ -92,7 +92,7 @@ Under the engine, Sauce is still the platform it started as: **mechanisms** (cro
 | `platform/engine/` | The engine runtime (shipped in the brew `libexec`) |
 | `platform/mechanisms/`, `platform/blueprints/` | Canonical platform source |
 | `platform/cli/` | The `sauce` CLI (`run`, `bootstrap`, `update`, `audit`, ...) |
-| `plugins/mayo/` | The delivery-loop plugin |
+| `plugins/sauce/` | The delivery-loop plugin |
 | `ranch/` | Runtime plumbing materialized into consumer vaults |
 | `spice/` | Module-directory namespace for blueprint content (consumer-side) |
 | `Docs/` | All documentation; start at `Docs/Index.md` |
@@ -103,7 +103,7 @@ Under the engine, Sauce is still the platform it started as: **mechanisms** (cro
 - [`Docs/comparison.md`](Docs/comparison.md) — how Sauce compares to Gas Town-style orchestration, beads-superpowers, and plain Claude Code loops.
 - [`Docs/getting-started.md`](Docs/getting-started.md) — zero to a working vault, end to end.
 - [`Docs/Index.md`](Docs/Index.md) — full doc index (`why.md`, `how.md`, `use.md`, `landmines.md`).
-- [`Docs/agent-guides/mayo-plugin.md`](Docs/agent-guides/mayo-plugin.md) — the mayo plugin runbook.
+- [`Docs/agent-guides/sauce-plugin.md`](Docs/agent-guides/sauce-plugin.md) — the sauce plugin runbook.
 
 ## Status
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sauce Intake"
+  short_description: "Sauce intake via the shared sauce plugin body"
+  default_prompt: "Use $sauce-intake — follow .agents/skills/sauce-intake/SKILL.md."
