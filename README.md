@@ -43,10 +43,10 @@ Nodes run to completion inside a tick. Edges decide what runs next, with per-edg
 Work lives in the vault, so you read it the way you read any other note, including on a phone. These show the project blueprint's read-only views over the delivery board that the coordinator drives and the `mayo` plugin fronts, drawn from the same card notes the coordinator writes.
 
 <p align="center">
-  <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note in Obsidian on a phone, titled Delivery Coordinator Rail Repairs. A dependency graph lists three slice cards: OPS-3c in progress, OPS-1 done, OPS-2b done. Below them a rollup bar labelled active, with chips reading 2 deployed, 1 in flight, 1 planned.">
+  <img src="Docs/images/epic-atlas-slices-rollup.png" width="320" alt="An epic note titled Delivery Coordinator Rail Repairs. A dependency graph lists three slice cards, OPS-1, OPS-2b and OPS-3c, each marked done. Below them a rollup labelled done shows a full progress bar and a chip reading 3 deployed.">
 </p>
 
-One epic and its slices, with a rollup underneath. In this screenshot the graph draws three cards while the rollup counts four. That fourth count was a bug: OPS-3b had been superseded by OPS-3c, and the rollup was counting it as planned work. Captioning this image is how it was found; it was fixed in v0.292.1 (#857), and the screenshot predates the fix.
+One epic and its slices, with a rollup underneath. All three slices are done, and the rollup counts three deployed. Slices they superseded are not drawn and not counted.
 
 <p align="center">
   <img src="Docs/images/dependency-graph-cross-epic.png" width="720" alt="A partial view of a dependency graph in Obsidian. Two slice cards are legible, PERF-9a in progress and PERF-10a done. To their right is a dashed node whose label is cut off by the edge of the screenshot. Further cards and an incoming arrow are partly hidden behind the mobile toolbar and the frame edge. Filter chips above read Stuck and Dim done.">
