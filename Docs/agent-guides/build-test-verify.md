@@ -179,6 +179,11 @@ Every job in this repo runs on the Mac mini. Nothing runs on GitHub-hosted runne
 | `release.yml` | `prepare-release` | A |
 | `release.yml` | `tag-and-ship` | A |
 | `release.yml` | `rebaseline-seed` | A |
+| `ci.yml` | `lint / actionlint` (reusable, `with: runner: sauce`) | A |
+
+`platform/test/run-ci-runner-policy.js` (preflight step `ci-runner-policy`) enforces this **per job**: every `runs-on` must resolve statically to the allowed self-hosted labels (a bare `${{ matrix.X }}` resolves; `vars`/`inputs`/fallback expressions and `group:` mappings are refused), every reusable-workflow call must be an allowlisted callee that is passed `with: runner:`, every `runs-on` job must set `timeout-minutes` in 1..60, and no workflow may trigger on `pull_request_target` or `workflow_run`. Its mutation fixtures prove each rule still fires. The reusable-call rule exists because dropping `with: runner:` silently falls back to the callee's `ubuntu-latest` default — and the callee's own runner-policy step skips itself in exactly that case. Adding a new pool label or reusable workflow means extending `ALLOWED_LABELS` / `REUSABLE_WITH_RUNNER_INPUT` in that harness.
+
+One job type is outside the workflow files and still runs GitHub-hosted: **Dependabot security updates** (`dynamic/dependabot/dependabot-updates`, `ubuntu-latest`). They are free because the repo is public; moving them requires the repo's "Dependabot on self-hosted runners" setting plus a Linux runner labelled `dependabot` with Docker, which Pool A deliberately lacks.
 
 CodeQL is on Pool B by necessity, not preference: GitHub publishes no linux-arm64 CodeQL bundle (`codeql-bundle-v2.26.2` ships `linux64` / `osx64` / `win64` only), and the Colima VM registers `qemu-x86_64` binfmt rather than Rosetta, so emulating it would be the slow path. Everything touching Homebrew is on B for the same reason it needs macOS.
 
