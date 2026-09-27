@@ -50,7 +50,7 @@ function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, 
 // reds instead of passing quietly.
 // Scoped to THIS harness on purpose. 174 other harnesses share the gap and the
 // rail-level fix (run-preflight.js scoring `code === 0`) is escalated separately.
-const ASSERTION_FLOOR = 519;
+const ASSERTION_FLOOR = 579;
 let finished = false;
 const strayChildren = new Set();
 function finish() {
@@ -1847,8 +1847,8 @@ async function withFreshCoordinator(envOverrides, fn) {
 
     // 11. The owner record is the identity that admits a process to `fn`, and the
     //     third-rail threat model that motivates the gate re-checks applies here
-    //     too: sweep-worktrees.js writes these same directories with the pre-CAS
-    //     shape. Entering requires having CREATED the record (O_EXCL) and still
+    //     too: a pre-CAS coordinator (or a hand) can write these same
+    //     directories without O_EXCL. Entering requires having CREATED the record (O_EXCL) and still
     //     reading OUR OWN token back out of it — two conditions, one per stage.
     for (const stage of ['claim-write', 'claim-readback']) {
       const name = `owner-record-${stage}`;
@@ -2304,10 +2304,10 @@ async function withFreshCoordinator(envOverrides, fn) {
       eq((await runProbe('withlock-vanished', { mode: 'withLock', lockName: 'probe', fakeEexist: true })).entered, true,
         'OPS3c withLock retries the atomic create when the lock it collided with is gone by the time it looks');
 
-      // Two refusals that matter because sweep-worktrees.js claims these same
-      // locks WITHOUT O_EXCL: it mkdirs, then writes owner.json plainly and
-      // enters. A coordinator that treated either situation below as "held"
-      // would be inside beside it.
+      // Two refusals that matter because a rail outside this protocol (a
+      // pre-CAS coordinator, which mkdirs and then installs owner.json by
+      // tmp+rename, never O_EXCL) can claim these same locks. A coordinator that treated either
+      // situation below as "held" would be inside beside it.
       const racedSwap = await runProbe('swap-raced', { mode: 'withLock', lockName: 'selector', seedDead: true, extras: ['racer-after-rm'] });
       eq([racedSwap.entered, racedSwap.code], [false, 'LOCKED'],
         'OPS3c a directory another rail created between the swap\'s rm and mkdir is theirs: the reclaimer refuses');
@@ -2374,8 +2374,8 @@ async function withFreshCoordinator(envOverrides, fn) {
         await withLock({ stateDir: stampDir }, 'stamp-machine', async () => {
           stamped = JSON.parse(fs.readFileSync(path.join(stampDir, 'locks', 'stamp-machine.lock', 'owner.json'), 'utf8'));
         });
-        eq([stamped.host, stamped.machine], [HOST, coordinator.localMachineId()],
-          'OPS3c a lock owner record carries both the hostname and the boot-session identity');
+        eq([stamped.host, stamped.machine, stamped.pid_start], [HOST, coordinator.localMachineId(), coordinator.localPidStart()],
+          'OPS3c a lock owner record carries the hostname, the boot-session identity and its start time (OPS3d)');
 
         // The reclaim gate and the ledger lock's owner record carry it too.
         const reclaimDir = path.join(stampDir, 'gate-stamp');
@@ -2386,13 +2386,20 @@ async function withFreshCoordinator(envOverrides, fn) {
         const gates = fs.readdirSync(lockReclaimGateRoot({ stateDir: reclaimDir }));
         eq(gates.length, 1, 'OPS3c fixture: the reclaim left its consumed gate');
         const gateStamp = JSON.parse(fs.readFileSync(path.join(lockReclaimGateRoot({ stateDir: reclaimDir }), gates[0]), 'utf8'));
-        eq(gateStamp.machine, coordinator.localMachineId(), 'OPS3c a reclaim gate stamp carries the boot-session identity');
+        eq([gateStamp.machine, gateStamp.pid_start], [coordinator.localMachineId(), coordinator.localPidStart()],
+          'OPS3c a reclaim gate stamp carries the boot-session identity and its creator\'s start time (OPS3d)');
         let ledgerOwner = null;
+        let ledgerOwnerStart = null;
         await runProbe('ledger-stamp', {
           mode: 'writeState', lockName: 'state-write', stall: 'claim-readback',
-          onStall: (dir) => { ledgerOwner = JSON.parse(fs.readFileSync(path.join(dir, 'locks', 'state-write.lock', 'owner.json'), 'utf8')); },
+          onStall: (dir) => {
+            ledgerOwner = JSON.parse(fs.readFileSync(path.join(dir, 'locks', 'state-write.lock', 'owner.json'), 'utf8'));
+            ledgerOwnerStart = coordinator.readPidStart(ledgerOwner.pid);
+          },
         });
-        eq(ledgerOwner && ledgerOwner.machine, coordinator.localMachineId(), 'OPS3c a ledger lock owner record carries the boot-session identity');
+        eq(ledgerOwner && [ledgerOwner.machine, ledgerOwner.pid_start], [coordinator.localMachineId(), ledgerOwnerStart],
+          'OPS3c a ledger lock owner record carries the boot-session identity and its writer\'s start time (OPS3d)');
+        ok(typeof ledgerOwnerStart === 'string', 'OPS3d fixture: the suspended ledger writer\'s start time is readable');
         fs.rmSync(stampDir, { recursive: true, force: true });
       }
 
@@ -2867,6 +2874,474 @@ async function withFreshCoordinator(envOverrides, fn) {
       }
 
       fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+
+    // 14. OPS-3d. Every stamp records when its process started, so a pid that
+    //     was recycled after its owner exited is told apart from that owner.
+    //     The recycled cases use this live process with a start time that is
+    //     not its own, which is exactly what a recycled pid looks like from
+    //     outside, so no probe needs stubbing.
+    {
+      const { localPidStart, readPidStart, procStatStartTime, lockIsStale, ownerProvablyDeadOnThisHost } = coordinator;
+      const MINE = coordinator.localMachineId();
+      const OWN_START = localPidStart();
+      // Everything but the time itself: on Linux that includes the reader's
+      // time namespace, which is the last ':' before the ticks.
+      const readerPrefix = (value) => value.slice(0, (value.startsWith('linux-stat:') ? value.lastIndexOf(':') : value.indexOf(':')) + 1);
+      const scheme = typeof OWN_START === 'string' ? readerPrefix(OWN_START) : '';
+      const TIME_NS = (() => { try { return fs.readlinkSync('/proc/self/ns/time'); } catch (_) { return 'none'; } })();
+      const WRONG_START = `${scheme}not-this-process`;
+      const WINDOW = 30 * 60 * 1000;
+      const stampOf = (ageMs, over = {}) => ({
+        pid: process.pid, host: HOST, machine: MINE, started_at: new Date(Date.now() - ageMs).toISOString(), ...over,
+      });
+
+      eq(procStatStartTime('4242 (a) b) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 10'), '987654',
+        'OPS3d the Linux start time is field 22 of /proc/<pid>/stat, counted from the LAST ")" because the command name may contain one');
+      eq(procStatStartTime('no command name here'), null, 'OPS3d an unparseable stat line yields no start time');
+
+      const independent = process.platform === 'linux'
+        ? (() => { const line = fs.readFileSync(`/proc/${process.pid}/stat`, 'utf8'); return `linux-stat:${TIME_NS}:${line.slice(line.lastIndexOf(")") + 2).split(" ")[19]}`; })()
+        : `darwin-lstart:${execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } }).trim().replace(/\s+/g, ' ')}`;
+      eq(OWN_START, independent, 'OPS3d this process reads its own start time as the kernel reports it');
+      const otherZone = execFileSync(process.execPath, ['-e',
+        'delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY; process.stdout.write(String(require(process.argv[1]).readPidStart(Number(process.argv[2]))));',
+        coordinatorModulePath, String(process.pid)],
+      { encoding: 'utf8', env: { ...process.env, TZ: 'Pacific/Kiritimati', LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8' } });
+      eq(otherZone, OWN_START, 'OPS3d a process in another time zone and locale reads the same start time for the same pid');
+
+      eq(lockIsStale(stampOf(60 * 1000, { pid_start: WRONG_START }), Date.now(), WINDOW), true,
+        'OPS3d a live pid whose start time differs from the stamp is recycled: its owner is provably dead, reclaimed inside the window');
+      eq(ownerProvablyDeadOnThisHost(stampOf(0, { pid_start: WRONG_START })), true,
+        'OPS3d a recycled pid on this host is provably dead');
+      eq(lockIsStale(stampOf(60 * 1000, { pid_start: OWN_START }), Date.now(), WINDOW), false,
+        'OPS3d a live pid with the stamp\'s own start time is that owner: held');
+      eq(lockIsStale(stampOf(8 * WINDOW, { pid_start: OWN_START }), Date.now(), WINDOW), false,
+        'OPS3d ...and held at any age');
+      eq(lockIsStale(stampOf(8 * WINDOW), Date.now(), WINDOW), false,
+        'OPS3d a stamp that records no start time is judged by the pid alone, as before: held');
+      eq(lockIsStale(stampOf(8 * WINDOW, { pid_start: 'another-reader:12345' }), Date.now(), WINDOW), false,
+        'OPS3d a start time read another way is not comparable and proves nothing: held');
+      {
+        const unknownHost = stampOf(8 * WINDOW, { host: 'renamed-host', pid_start: WRONG_START });
+        delete unknownHost.machine;
+        eq(lockIsStale(unknownHost, Date.now(), WINDOW), false,
+          'OPS3d a start-time mismatch proves nothing when the host relation is unknown: a pid alive here holds');
+      }
+
+      // The recycled rule needs BOTH machine ids, and equal: only that proves
+      // the two processes share a pid namespace. A hostname match ('this' by
+      // fallback) does not, and the pid may name an unrelated process there.
+      {
+        const hostnameOnly = stampOf(60 * 1000, { pid_start: WRONG_START });
+        delete hostnameOnly.machine;
+        eq(lockIsStale(hostnameOnly, Date.now(), WINDOW), false,
+          'OPS3d a stamp that matches by hostname alone (it carries no machine id) never has its pid judged recycled: held');
+        const judged = JSON.parse(execFileSync(process.execPath, ['-e', [
+          'delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;',
+          'const c = require(process.argv[1]);',
+          'const stamp = JSON.parse(process.argv[2]);',
+          'process.stdout.write(JSON.stringify({ id: c.localMachineId(), relation: c.stampHostRelation(stamp), start: c.readPidStart(stamp.pid), stale: c.lockIsStale(stamp, Date.now(), 30 * 60 * 1000), dead: c.ownerProvablyDeadOnThisHost(stamp) }));',
+        ].join('\n'), coordinatorModulePath, JSON.stringify(stampOf(60 * 1000, { pid_start: WRONG_START }))],
+        { encoding: 'utf8', env: { ...process.env, SAUCE_AUTOLOOP_MACHINE_ID_UNAVAILABLE: '1' } }));
+        eq([judged.id, judged.relation, typeof judged.start], [null, 'this', 'string'],
+          'OPS3d fixture: a checker without a machine id matches the stamp by hostname and can read the pid\'s start time');
+        eq([judged.stale, judged.dead], [false, false],
+          'OPS3d ...yet it never judges a live pid recycled on a hostname match: the owner holds');
+      }
+
+      // The coordinator's default window, which stepCard's and commandClaim's
+      // selector lock rely on, is 30 minutes. Probed with an owner on another
+      // machine, which no pid probe can shorten.
+      {
+        const foreignAt = (minutes) => ({
+          pid: process.pid, host: 'far-host', machine: 'another-machine',
+          started_at: new Date(Date.now() - minutes * 60 * 1000).toISOString(),
+        });
+        eq([lockIsStale(foreignAt(29)), lockIsStale(foreignAt(31))], [false, true],
+          'OPS3d lockIsStale\'s default window is 30 minutes: held at 29, reclaimed at 31');
+        const seedAt = (name, minutes) => {
+          const dir = path.join(gateRoot3b, 'locks', `${name}.lock`);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'owner.json'), `${JSON.stringify(foreignAt(minutes), null, 2)}\n`);
+          return dir;
+        };
+        const tryDefault = (name) => {
+          try { coordinator.releaseLock(coordinator.acquireLock(ctx3b, name)); return 'acquired'; }
+          catch (err) { return err.code || 'error'; }
+        };
+        seedAt('default-window-29', 29);
+        seedAt('default-window-31', 31);
+        eq([tryDefault('default-window-29'), tryDefault('default-window-31')], ['LOCKED', 'acquired'],
+          'OPS3d acquireLock\'s default window is 30 minutes: refused at 29, taken at 31');
+      }
+
+      // EPERM, which holds at any age, is overturned only by a readable,
+      // different start time. pid 1 exists everywhere and its start time is
+      // readable; process.kill is stubbed so it answers EPERM even as root.
+      {
+        const initStart = readPidStart(1);
+        ok(typeof initStart === 'string' && initStart.startsWith(scheme), 'OPS3d fixture: pid 1\'s start time is readable here');
+        const realKill = process.kill;
+        process.kill = (pid, sig) => {
+          if (pid === 1 && sig === 0) { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; }
+          return realKill.call(process, pid, sig);
+        };
+        try {
+          eq(lockIsStale(stampOf(8 * WINDOW, { pid: 1, pid_start: `${scheme}not-pid-1` }), Date.now(), WINDOW), true,
+            'OPS3d an EPERM pid whose start time differs from the stamp is recycled: reclaimed');
+          eq(lockIsStale(stampOf(8 * WINDOW, { pid: 1, pid_start: initStart }), Date.now(), WINDOW), false,
+            'OPS3d an EPERM pid with the stamp\'s start time still holds at any age');
+        } finally { process.kill = realKill; }
+      }
+
+      {
+        const gateProbe = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-gates-'));
+        const recycledGate = path.join(gateProbe, 'recycled');
+        const liveGate = path.join(gateProbe, 'live');
+        fs.writeFileSync(recycledGate, JSON.stringify(stampOf(0, { pid_start: WRONG_START })));
+        fs.writeFileSync(liveGate, JSON.stringify(stampOf(0, { pid_start: OWN_START })));
+        sweepLockReclaimGates(gateProbe);
+        eq(fs.existsSync(recycledGate), false, 'OPS3d the gate sweep removes a gate whose creator\'s pid was recycled');
+        eq(fs.existsSync(liveGate), true, 'OPS3d ...and keeps one whose creator is still that process');
+        fs.rmSync(gateProbe, { recursive: true, force: true });
+      }
+
+      {
+        const recycledLock = path.join(gateRoot3b, 'locks', 'recycled-owner.lock');
+        fs.mkdirSync(recycledLock, { recursive: true });
+        fs.writeFileSync(path.join(recycledLock, 'owner.json'), `${JSON.stringify(stampOf(0, { pid_start: WRONG_START }), null, 2)}\n`);
+        eq((await attempt3b('recycled-owner')).acquired, true,
+          'OPS3d withLock reclaims a lock whose owner pid was recycled, without waiting out the window');
+      }
+
+      // A process that cannot read start times behaves exactly as before.
+      {
+        const noStartDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-no-start-'));
+        const noStartResult = path.join(noStartDir, 'result.json');
+        const noStartRunner = path.join(noStartDir, 'no-start.js');
+        fs.writeFileSync(noStartRunner, [
+          "'use strict';",
+          "const fs = require('fs');",
+          "const path = require('path');",
+          "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+          "const [modulePath, dir, peerJson, resultFile] = process.argv.slice(2);",
+          "const c = require(modulePath);",
+          "(async () => {",
+          "  const peer = JSON.parse(peerJson);",
+          "  const window = 30 * 60 * 1000;",
+          "  const gateRoot = c.lockReclaimGateRoot({ stateDir: dir });",
+          "  fs.mkdirSync(gateRoot, { recursive: true });",
+          "  const gate = path.join(gateRoot, 'peer.g.x');",
+          "  fs.writeFileSync(gate, JSON.stringify(peer));",
+          "  c.sweepLockReclaimGates(gateRoot);",
+          "  let stamp = null;",
+          "  await c.withLock({ stateDir: dir }, 'no-start', async () => { stamp = JSON.parse(fs.readFileSync(path.join(dir, 'locks', 'no-start.lock', 'owner.json'), 'utf8')); });",
+          "  const out = {",
+          "    own: c.localPidStart(),",
+          "    inside: c.lockIsStale(peer, Date.now(), window),",
+          "    past: c.lockIsStale({ ...peer, started_at: new Date(Date.now() - 8 * window).toISOString() }, Date.now(), window),",
+          "    gateKept: fs.existsSync(gate),",
+          "    stampHasStart: Object.prototype.hasOwnProperty.call(stamp, 'pid_start'),",
+          "  };",
+          "  fs.writeFileSync(`${resultFile}.part`, JSON.stringify(out));",
+          "  fs.renameSync(`${resultFile}.part`, resultFile);",
+          "})();",
+        ].join('\n'));
+        const child = spawnProcess(
+          process.execPath, [noStartRunner, coordinatorModulePath, noStartDir, JSON.stringify(stampOf(60 * 1000, { pid_start: WRONG_START })), noStartResult],
+          { stdio: 'ignore', env: { ...process.env, SAUCE_AUTOLOOP_PID_START_UNAVAILABLE: '1' } },
+        );
+        await settleWithin(settle(child), 'OPS3d start-time-unavailable probe');
+        const out = fs.existsSync(noStartResult) ? JSON.parse(fs.readFileSync(noStartResult, 'utf8')) : {};
+        eq(out.own, null, 'OPS3d fixture: the process cannot read start times');
+        eq([out.inside, out.past], [false, false],
+          'OPS3d without readable start times, a live pid holds inside and past the window, as before (fail closed)');
+        eq(out.gateKept, true, 'OPS3d ...its gate is kept');
+        eq(out.stampHasStart, false, 'OPS3d ...and its own stamps carry no start time rather than a guessed one');
+        fs.rmSync(noStartDir, { recursive: true, force: true });
+      }
+
+      // On Linux, a command name that contains ") " must not shift the field.
+      {
+        let verdict = true;
+        if (process.platform === 'linux') {
+          const titleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-title-'));
+          const ready = path.join(titleDir, 'ready');
+          const go = path.join(titleDir, 'go');
+          const renamed = path.join(titleDir, 'renamed');
+          const child = spawnProcess(process.execPath, ['-e', [
+            "const fs = require('fs');",
+            "const [ready, go, renamed] = process.argv.slice(1);",
+            "fs.writeFileSync(ready, '1');",
+            "const until = Date.now() + 60000;",
+            "while (!fs.existsSync(go) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);",
+            "process.title = 'x) y z';",
+            "fs.writeFileSync(renamed, '1');",
+            "setTimeout(() => {}, 60000);",
+          ].join('\n'), ready, go, renamed], { stdio: 'ignore' });
+          const childDone = settle(child);
+          verdict = await awaitFile(ready, child);
+          const before = fs.readFileSync(`/proc/${child.pid}/stat`, 'utf8').split(' ')[21];
+          fs.writeFileSync(go, '1');
+          verdict = verdict && await awaitFile(renamed, child);
+          const statNow = fs.readFileSync(`/proc/${child.pid}/stat`, 'utf8');
+          verdict = verdict && statNow.includes('(x) y z)') && readPidStart(child.pid) === `linux-stat:${TIME_NS}:${before}`;
+          child.kill('SIGKILL');
+          await settleWithin(childDone, 'OPS3d renamed child');
+          fs.rmSync(titleDir, { recursive: true, force: true });
+        }
+        ok(verdict, 'OPS3d on Linux a command name containing ") " does not shift the start-time field');
+      }
+
+      // Linux reports a start time relative to the READER's time namespace, so
+      // two readers in different namespaces disagree about one live process.
+      // A child whose time namespace link reads differently (patched before
+      // the coordinator loads) judges this live process's stamp, carrying a
+      // start time that is not the one this namespace reads.
+      //
+      // The same child harness models a /proc mount from another pid namespace
+      // (`unshare -p -f` without --mount-proc): /proc/self names a pid other
+      // than getpid(), so /proc/<pid> would name unrelated processes. Such a
+      // process must neither stamp a start time nor judge one.
+      {
+        let sameNamespace = { stale: true, own: 'x', stamped: true };
+        let otherNamespace = { stale: false };
+        let foreignProc = { stale: false, own: null, stamped: false };
+        let unmountedProc = { stale: false, own: null, stamped: false };
+        let noTimens = { own: 'linux-stat:none:0' };
+        const failClosed = { stale: false, own: null, stamped: false };
+        const nspidCases = { 'nspid-two': failClosed, 'nspid-absent': failClosed, 'nspid-other': failClosed, 'status-throws': failClosed };
+        if (process.platform === 'linux') {
+          const shifted = OWN_START.replace(/\d+$/, (ticks) => String(Number(ticks) + 100000));
+          const judgeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-judge-'));
+          const judge = (patch) => JSON.parse(execFileSync(process.execPath, ['-e', [
+            "const fs = require('fs');",
+            "const path = require('path');",
+            "const [modulePath, patch, stampJson, dir] = process.argv.slice(1);",
+            "const real = fs.readlinkSync;",
+            "if (patch === 'timens') fs.readlinkSync = function (p, ...rest) { return p === '/proc/self/ns/time' ? 'time:[4026599999]' : real.call(fs, p, ...rest); };",
+            "if (patch === 'proc-self') fs.readlinkSync = function (p, ...rest) { return p === '/proc/self' ? String(process.pid + 7919) : real.call(fs, p, ...rest); };",
+            "const enoent = () => { const e = new Error('ENOENT: patched'); e.code = 'ENOENT'; throw e; };",
+            "if (patch === 'proc-self-throws') fs.readlinkSync = function (p, ...rest) { return p === '/proc/self' ? enoent() : real.call(fs, p, ...rest); };",
+            "if (patch === 'no-timens') fs.readlinkSync = function (p, ...rest) { return p === '/proc/self/ns/time' ? enoent() : real.call(fs, p, ...rest); };",
+            "const realRead = fs.readFileSync;",
+            "const withNspid = (nspid) => { fs.readFileSync = function (p, ...rest) { if (p !== '/proc/self/status') return realRead.call(fs, p, ...rest); const body = String(realRead.call(fs, p, 'utf8')).split('\\n').filter((l) => !l.startsWith('NSpid:')); if (nspid !== null) body.push(`NSpid:\\t${nspid}`); return body.join('\\n'); }; };",
+            "if (patch === 'nspid-two') withNspid(`${process.pid + 7919}\\t${process.pid}`);",
+            "if (patch === 'nspid-absent') withNspid(null);",
+            "if (patch === 'nspid-other') withNspid(String(process.pid + 7919));",
+            "if (patch === 'status-throws') fs.readFileSync = function (p, ...rest) { return p === '/proc/self/status' ? enoent() : realRead.call(fs, p, ...rest); };",
+            "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+            "const c = require(modulePath);",
+            "const held = c.acquireLock({ stateDir: path.join(dir, patch) }, 'judge');",
+            "const record = JSON.parse(fs.readFileSync(path.join(held.lockPath, 'owner.json'), 'utf8'));",
+            "c.releaseLock(held);",
+            "process.stdout.write(JSON.stringify({ stale: c.lockIsStale(JSON.parse(stampJson), Date.now(), 30 * 60 * 1000), own: c.localPidStart(), stamped: Object.prototype.hasOwnProperty.call(record, 'pid_start') }));",
+          ].join('\n'), coordinatorModulePath, patch, JSON.stringify(stampOf(60 * 1000, { pid_start: shifted })), judgeDir], { encoding: 'utf8' }));
+          sameNamespace = judge('none');
+          otherNamespace = judge('timens');
+          foreignProc = judge('proc-self');
+          unmountedProc = judge('proc-self-throws');
+          noTimens = judge('no-timens');
+          for (const patch of Object.keys(nspidCases)) nspidCases[patch] = judge(patch);
+          fs.rmSync(judgeDir, { recursive: true, force: true });
+        }
+        // Depth, not number: a /proc from an ancestor namespace can give this
+        // process the same pid number there, and only NSpid tells them apart.
+        for (const [patch, label] of [
+          ['nspid-two', 'NSpid lists two namespaces (the /proc is an ancestor\'s, even though the pid number matches)'],
+          ['nspid-absent', 'NSpid is absent (a kernel before 4.1)'],
+          ['nspid-other', 'NSpid has one field that is not our pid'],
+          ['status-throws', '/proc/self/status cannot be read'],
+        ]) {
+          const r = nspidCases[patch];
+          ok(r.stale === false && r.own === null && r.stamped === false,
+            `OPS3d when ${label}, a process stamps no start time and never judges an owner recycled`);
+        }
+        ok(unmountedProc.stale === false && unmountedProc.own === null && unmountedProc.stamped === false,
+          'OPS3d a process for which /proc/self does not resolve (a /proc of a pid namespace it is not in) stamps no start time and never judges an owner recycled');
+        ok(/^linux-stat:none:\d+$/.test(String(noTimens.own)),
+          `OPS3d a kernel without time namespaces tags start times 'none' (${noTimens.own})`);
+        ok(sameNamespace.stale === true, 'OPS3d fixture: read from the same time namespace, a different start time proves the pid recycled');
+        ok(otherNamespace.stale === false,
+          'OPS3d a reader in another time namespace never compares start times with this one: the live owner holds');
+        ok(typeof sameNamespace.own === 'string' && sameNamespace.stamped === true,
+          'OPS3d fixture: with its own /proc, the harness child reads and stamps its start time');
+        ok(foreignProc.stale === false,
+          'OPS3d a process whose /proc belongs to another pid namespace never judges an owner recycled: the live owner holds');
+        ok(foreignProc.own === null && foreignProc.stamped === false,
+          'OPS3d ...and it reads no start time of its own and stamps none, rather than an unrelated process\'s');
+      }
+
+      // ps that hangs is abandoned after its timeout, and the start time reads
+      // as unknown rather than stalling the acquire.
+      {
+        let verdict = true;
+        let took = 0;
+        if (process.platform === 'darwin') {
+          const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-ps-'));
+          const fakePs = path.join(fakeDir, 'ps');
+          fs.writeFileSync(fakePs, '#!/bin/sh\nexec sleep 30\n');
+          fs.chmodSync(fakePs, 0o755);
+          // Timed inside the child, around the read alone, so node startup and
+          // the module load are not counted against the 2s claim.
+          const out = JSON.parse(execFileSync(process.execPath, ['-e',
+            'delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY; const c = require(process.argv[1]); const t0 = Date.now(); const read = c.readPidStart(1); process.stdout.write(JSON.stringify({ read, took: Date.now() - t0 }));',
+            coordinatorModulePath], { encoding: 'utf8', env: { ...process.env, SAUCE_AUTOLOOP_PID_START_PS: fakePs } }));
+          took = out.took;
+          verdict = out.read === null && took >= 1500 && took < 4000;
+          fs.rmSync(fakeDir, { recursive: true, force: true });
+        }
+        ok(verdict, `OPS3d a ps that hangs is abandoned after its 2s timeout and proves nothing (${took}ms)`);
+      }
+    }
+
+    // 15. OPS-3d. Release ends only its own generation. Checking the token and
+    //     then removing by path let a holder that resumed after its lock was
+    //     broken and re-taken destroy the successor.
+    {
+      const { acquireLock, releaseLock } = coordinator;
+      const locksDir = path.join(gateRoot3b, 'locks');
+      const setAside = (name) => fs.readdirSync(locksDir).filter((e) => e.startsWith(`.${name}.lock.release-`));
+      const stalledRelease = async (name, stage, atStall) => {
+        const log = path.join(gateRoot3b, `${name}.log`);
+        const reached = path.join(gateRoot3b, `${name}.reached`);
+        const go = path.join(gateRoot3b, `${name}.go`);
+        const racer = spawnRacer(name, 'holder', 0, log, stallEnv(stage, reached, go));
+        const done = settle(racer);
+        ok(await awaitFile(reached, racer), `OPS3d fixture: the ${name} holder is suspended at its ${stage} seam`);
+        const context = atStall(path.join(locksDir, `${name}.lock`));
+        fs.writeFileSync(go, '1');
+        await settleWithin(done, `OPS3d ${name} holder`);
+        return context;
+      };
+
+      {
+        const name = 'release-successor';
+        const lockPath = path.join(locksDir, `${name}.lock`);
+        const successor = await stalledRelease(name, 'release', () => {
+          fs.rmSync(lockPath, { recursive: true, force: true });
+          const held = acquireLock(ctx3b, name);
+          return { held, raw: fs.readFileSync(path.join(lockPath, 'owner.json'), 'utf8') };
+        });
+        const survivor = path.join(lockPath, 'owner.json');
+        eq(fs.existsSync(survivor) ? fs.readFileSync(survivor, 'utf8') : 'missing', successor.raw,
+          'OPS3d a release that resumes after its lock was broken and re-taken leaves the successor\'s record exactly as it was');
+        eq(setAside(name), [], 'OPS3d ...and sets nothing aside');
+        eq(releaseLock(successor.held), true, 'OPS3d the successor still releases its own lock');
+        eq(fs.existsSync(lockPath), false, 'OPS3d ...which removes it');
+      }
+
+      {
+        const name = 'release-late-record';
+        const lockPath = path.join(locksDir, `${name}.lock`);
+        await stalledRelease(name, 'release-taken', () => {
+          fs.writeFileSync(path.join(lockPath, 'owner.json'), 'delayed-claimant-record');
+          fs.writeFileSync(path.join(lockPath, 'owner.json.1.2.tmp'), 'partial');
+        });
+        eq(fs.existsSync(lockPath) ? fs.readdirSync(lockPath) : 'missing', ['owner.json'],
+          'OPS3d a record that arrives after release took its own is never destroyed; only debris is cleared');
+        eq(fs.readFileSync(path.join(lockPath, 'owner.json'), 'utf8'), 'delayed-claimant-record',
+          'OPS3d ...and that record is left exactly as it was');
+        eq(setAside(name), [], 'OPS3d ...and release sets nothing aside');
+        fs.rmSync(lockPath, { recursive: true, force: true });
+      }
+
+      {
+        const name = 'release-debris';
+        const lockPath = path.join(locksDir, `${name}.lock`);
+        await stalledRelease(name, 'release-taken', () => {
+          fs.writeFileSync(path.join(lockPath, '.DS_Store'), 'finder');
+        });
+        eq(fs.existsSync(lockPath), false, 'OPS3d release clears its own generation\'s debris and removes the directory');
+      }
+
+      {
+        const name = 'release-blink';
+        const held = acquireLock(ctx3b, name);
+        const ownerPath = path.join(held.lockPath, 'owner.json');
+        const aside = path.join(gateRoot3b, `${name}.aside`);
+        fs.renameSync(ownerPath, aside);
+        const realRead = fs.readFileSync;
+        let reads = 0;
+        fs.readFileSync = function (p, ...rest) {
+          if (p === ownerPath && ++reads === 2) fs.renameSync(aside, ownerPath);
+          return realRead.call(fs, p, ...rest);
+        };
+        let released;
+        try { released = releaseLock(held); } finally { fs.readFileSync = realRead; }
+        eq([released, fs.existsSync(held.lockPath)], [true, false],
+          'OPS3d a release whose record is briefly missing re-reads it and releases');
+      }
+
+      {
+        const name = 'release-rename-blink';
+        const held = acquireLock(ctx3b, name);
+        const ownerPath = path.join(held.lockPath, 'owner.json');
+        const realRename = fs.renameSync;
+        let missed = false;
+        fs.renameSync = function (src, ...rest) {
+          if (src === ownerPath && !missed) { missed = true; const e = new Error('ENOENT: taken'); e.code = 'ENOENT'; throw e; }
+          return realRename.call(fs, src, ...rest);
+        };
+        let released;
+        try { released = releaseLock(held); } finally { fs.renameSync = realRename; }
+        eq([released, fs.existsSync(held.lockPath)], [true, false],
+          'OPS3d a record missing at the take is re-read, and release completes');
+      }
+
+      {
+        const name = 'release-gone';
+        const held = acquireLock(ctx3b, name);
+        fs.renameSync(path.join(held.lockPath, 'owner.json'), path.join(gateRoot3b, `${name}.aside`));
+        const t0 = Date.now();
+        const released = releaseLock(held);
+        const took = Date.now() - t0;
+        eq(released, false, 'OPS3d a record that never comes back is not released');
+        ok(took >= 40 && took < 500, `OPS3d ...after a re-read bounded near 50ms (${took}ms)`);
+        eq(fs.existsSync(held.lockPath), true, 'OPS3d ...and the directory is left in place for the dead-owner reclaim');
+      }
+
+      // The record changes after release read it and before it took it, and a
+      // successor's record appears before the hand-back: link(2) never
+      // overwrites, so the successor's bytes survive.
+      {
+        const name = 'release-handback-successor';
+        const held = acquireLock(ctx3b, name);
+        const ownerPath = path.join(held.lockPath, 'owner.json');
+        const realRename = fs.renameSync;
+        const realLink = fs.linkSync;
+        fs.renameSync = function (src, ...rest) {
+          if (src === ownerPath) fs.writeFileSync(ownerPath, 'replaced-after-read');
+          return realRename.call(fs, src, ...rest);
+        };
+        fs.linkSync = function (src, dest) {
+          if (dest === ownerPath) fs.writeFileSync(ownerPath, 'successor-record');
+          return realLink.call(fs, src, dest);
+        };
+        let released;
+        try { released = releaseLock(held); } finally { fs.renameSync = realRename; fs.linkSync = realLink; }
+        eq(released, false, 'OPS3d a release that took a record not its own releases nothing');
+        eq(fs.readFileSync(ownerPath, 'utf8'), 'successor-record',
+          'OPS3d ...and handing that record back never overwrites a successor record that appeared meanwhile');
+      }
+
+      // A record that is not ours when release begins is never taken at all,
+      // so a releaser that cannot hand it back (killed mid-release, modelled
+      // by a failing link) cannot strip it.
+      {
+        const name = 'release-foreign';
+        const held = acquireLock(ctx3b, name);
+        const ownerPath = path.join(held.lockPath, 'owner.json');
+        fs.writeFileSync(ownerPath, 'someone-elses-record');
+        const realLink = fs.linkSync;
+        fs.linkSync = () => { const e = new Error('EIO: link failed'); e.code = 'EIO'; throw e; };
+        let released;
+        try { released = releaseLock(held); } finally { fs.linkSync = realLink; }
+        eq(released, false, 'OPS3d a release whose record is no longer its own releases nothing');
+        eq(fs.existsSync(ownerPath) ? fs.readFileSync(ownerPath, 'utf8') : 'missing', 'someone-elses-record',
+          'OPS3d ...and never takes that record, so it survives even when nothing could be handed back');
+      }
     }
 
     fs.rmSync(gateRoot3b, { recursive: true, force: true });

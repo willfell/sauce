@@ -4,12 +4,15 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 const {
+  acquireSweepLocks,
   executeSweep,
   liveProcessPaths,
+  releaseSweepLocks,
   sweepContext,
 } = require('../../scripts/autoloop/sweep-worktrees');
+const coordinator = require('../../scripts/autoloop/codex-coordinator');
 
 const MAXBUF = 16 * 1024 * 1024;
 let passed = 0;
@@ -276,7 +279,7 @@ try {
   const noop = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
   check('repeat dry-run is a clean no-op for removable candidates', noop.safe_to_remove.length === 0);
 
-  function holdLock(name) {
+  function holdLock(name, over = {}) {
     const lock = path.join(ctx.locksDir, `${name}.lock`);
     fs.mkdirSync(lock, { recursive: true });
     write(path.join(lock, 'owner.json'), `${JSON.stringify({
@@ -284,6 +287,7 @@ try {
       host: os.hostname(),
       started_at: new Date().toISOString(),
       command: `held ${name} behavioral test`,
+      ...over,
     })}\n`);
     return lock;
   }
@@ -312,6 +316,170 @@ try {
   check('concurrent sweep is refused with lock owner evidence',
     lockRefusal.action === 'refused-concurrent' && lockRefusal.lock === 'worktree-sweep');
   dropHeldLock(lockRoot);
+
+  // The sweep shares selector and homebrew-promotion with the coordinator, so
+  // it claims, reclaims and releases them by the coordinator's protocol.
+  const lockPathOf = (name) => path.join(ctx.locksDir, `${name}.lock`);
+  const DEAD_PID = spawnSync(process.execPath, ['-e', '0']).pid;
+  const ownStart = coordinator.localPidStart();
+  const startScheme = typeof ownStart !== 'string' ? ''
+    : ownStart.slice(0, (ownStart.startsWith('linux-stat:') ? ownStart.lastIndexOf(':') : ownStart.indexOf(':')) + 1);
+
+  const EPERM_PID = 424243;
+  const realKill = process.kill;
+  process.kill = (pid, sig) => {
+    if (pid === EPERM_PID && sig === 0) { const e = new Error('EPERM'); e.code = 'EPERM'; throw e; }
+    return realKill.call(process, pid, sig);
+  };
+  try {
+    const epermLock = holdLock('selector', {
+      pid: EPERM_PID, started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    });
+    const epermRun = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+    check('a selector owner that answers EPERM holds at any age: the sweep refuses instead of reclaiming it',
+      epermRun.action === 'refused-concurrent' && epermRun.lock === 'selector'
+        && fs.existsSync(path.join(epermLock, 'owner.json')));
+    fs.rmSync(epermLock, { recursive: true, force: true });
+  } finally { process.kill = realKill; }
+
+  const deadLock = holdLock('selector', { pid: DEAD_PID });
+  const deadRun = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('a selector lock whose same-host owner is provably dead is reclaimed at once, not after 30 minutes',
+    deadRun.action === 'dry-run' && !fs.existsSync(deadLock));
+  fs.rmSync(deadLock, { recursive: true, force: true });
+
+  const recycledLock = holdLock('selector', {
+    machine: coordinator.localMachineId(), pid_start: `${startScheme}not-this-process`,
+  });
+  const recycledRun = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('a selector owner whose pid was recycled (its start time differs) is reclaimed by the sweep',
+    recycledRun.action === 'dry-run' && !fs.existsSync(recycledLock));
+  fs.rmSync(recycledLock, { recursive: true, force: true });
+
+  // The coordinator validates its loop binding when it loads. A malformed one
+  // must neither break loading the sweep nor escape as an uncaught throw: it is
+  // reported through the CLI's own {action: "error"} contract, with exit 2.
+  {
+    const sweepModule = require.resolve('../../scripts/autoloop/sweep-worktrees');
+    const badEnv = { ...process.env, SAUCE_LOOP_VAULTS: 'bad' };
+    const loaded = spawnSync(process.execPath, ['-e', 'require(process.argv[1]);', sweepModule], { encoding: 'utf8', env: badEnv });
+    check('the sweep module loads under a malformed SAUCE_LOOP_VAULTS', loaded.status === 0, loaded.stderr);
+    const cli = spawnSync(process.execPath, [sweepModule, '--repo', repo, '--dry-run'], { encoding: 'utf8', env: badEnv });
+    let reported = null;
+    try { reported = JSON.parse(cli.stderr); } catch (_) { reported = null; }
+    check('under a malformed SAUCE_LOOP_VAULTS the CLI reports {action: "error"} and exits 2, with no stack trace',
+      cli.status === 2 && reported && reported.action === 'error' && /SAUCE_LOOP_VAULTS/.test(reported.error)
+        && cli.stdout === '' && !/\n\s+at /.test(cli.stderr),
+      `status=${cli.status} stderr=${cli.stderr}`);
+  }
+
+  const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000).toISOString();
+  const foreignFresh = holdLock('selector', { machine: 'another-machine', started_at: minutesAgo(29) });
+  const foreignFreshRun = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('a selector owner on another machine, 29 minutes old, is inside the 30-minute window: the sweep refuses',
+    foreignFreshRun.action === 'refused-concurrent' && foreignFreshRun.lock === 'selector'
+      && fs.existsSync(path.join(foreignFresh, 'owner.json')));
+  check('the refusal reports the owner in the coordinator\'s LOCKED wording',
+    /^lock selector held by pid \d+ on \S+/.test(foreignFreshRun.error || ''), foreignFreshRun.error);
+  check('the sweep creates the coordinator\'s receipts directory beside its locks',
+    fs.existsSync(path.join(ctx.stateDir, 'receipts')) && fs.statSync(path.join(ctx.stateDir, 'receipts')).isDirectory());
+  fs.rmSync(foreignFresh, { recursive: true, force: true });
+  const foreignOld = holdLock('selector', { machine: 'another-machine', started_at: minutesAgo(31) });
+  const foreignOldRun = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] });
+  check('the same owner past 30 minutes is taken by the sweep',
+    foreignOldRun.action === 'dry-run' && !fs.existsSync(foreignOld));
+  fs.rmSync(foreignOld, { recursive: true, force: true });
+
+  {
+    const held = acquireSweepLocks(ctx);
+    const record = JSON.parse(fs.readFileSync(path.join(lockPathOf('selector'), 'owner.json'), 'utf8'));
+    check('the sweep stamps its owner record as the coordinator does: a token, its machine and its start time',
+      typeof record.token === 'string' && record.token.length > 0
+        && record.machine === coordinator.localMachineId() && record.pid_start === ownStart);
+    fs.rmSync(lockPathOf('selector'), { recursive: true, force: true });
+    const successor = coordinator.acquireLock(ctx, 'selector');
+    const successorRaw = fs.readFileSync(path.join(lockPathOf('selector'), 'owner.json'), 'utf8');
+    releaseSweepLocks(held);
+    check('releasing the sweep never removes a selector lock someone else holds by then',
+      fs.existsSync(path.join(lockPathOf('selector'), 'owner.json'))
+        && fs.readFileSync(path.join(lockPathOf('selector'), 'owner.json'), 'utf8') === successorRaw
+        && !fs.existsSync(lockPathOf('worktree-sweep')) && !fs.existsSync(lockPathOf('homebrew-promotion')));
+    coordinator.releaseLock(successor);
+  }
+
+  // Two processes, on a handshake: a child sweep is suspended at a seam of the
+  // shared protocol while this process acts as the coordinator.
+  const runner = path.join(tmp, 'sweep-locks.js');
+  write(runner, [
+    "'use strict';",
+    "const fs = require('fs');",
+    "const [modulePath, repoPath, resultFile] = process.argv.slice(2);",
+    "const sweep = require(modulePath);",
+    "let out;",
+    "try {",
+    "  const held = sweep.acquireSweepLocks(sweep.sweepContext(repoPath));",
+    "  out = { acquired: true };",
+    "  sweep.releaseSweepLocks(held);",
+    "} catch (error) { out = { acquired: false, code: error.code || null, lock: error.lock || null }; }",
+    "fs.writeFileSync(`${resultFile}.part`, JSON.stringify(out));",
+    "fs.renameSync(`${resultFile}.part`, resultFile);",
+  ].join('\n'));
+  const waitFor = (files, boundMs = 120000) => {
+    const until = Date.now() + boundMs;
+    while (Date.now() < until) {
+      const found = files.find((file) => fs.existsSync(file));
+      if (found) return found;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+    return null;
+  };
+  const stalledSweep = (label, stage, atStall) => {
+    const reached = path.join(tmp, `${label}.reached`);
+    const go = path.join(tmp, `${label}.go`);
+    const result = path.join(tmp, `${label}.result.json`);
+    const child = spawn(process.execPath, [runner, require.resolve('../../scripts/autoloop/sweep-worktrees'), repo, result], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        SAUCE_AUTOLOOP_RECLAIM_STALL_AT: stage,
+        SAUCE_AUTOLOOP_RECLAIM_STALL_MS: '600000',
+        SAUCE_AUTOLOOP_RECLAIM_STALL_REACHED_FILE: reached,
+        SAUCE_AUTOLOOP_RECLAIM_STALL_UNTIL_FILE: go,
+      },
+    });
+    try {
+      const first = waitFor([reached, result]);
+      const stalled = first === reached;
+      const seen = stalled ? atStall() : null;
+      fs.writeFileSync(go, '1');
+      const done = waitFor([result]);
+      return { stalled, seen, outcome: done ? JSON.parse(fs.readFileSync(result, 'utf8')) : null };
+    } finally { try { child.kill('SIGKILL'); } catch (_) { /* already gone */ } }
+  };
+
+  {
+    const squatter = `${JSON.stringify({ pid: process.pid, host: os.hostname(), started_at: new Date().toISOString(), token: 'coordinator-token' })}\n`;
+    const run = stalledSweep('excl', 'claim-write', () => {
+      write(path.join(lockPathOf('worktree-sweep'), 'owner.json'), squatter);
+    });
+    check('the sweep installs its owner record with O_EXCL: a record that got there first is never overwritten',
+      run.stalled && run.outcome && run.outcome.acquired === false && run.outcome.code === 'LOCKED'
+        && fs.readFileSync(path.join(lockPathOf('worktree-sweep'), 'owner.json'), 'utf8') === squatter,
+      JSON.stringify(run));
+    fs.rmSync(lockPathOf('worktree-sweep'), { recursive: true, force: true });
+  }
+
+  {
+    holdLock('selector', { pid: DEAD_PID });
+    const run = stalledSweep('mid-reclaim', 'swap', () => {
+      try { coordinator.releaseLock(coordinator.acquireLock(ctx, 'selector')); return 'acquired'; }
+      catch (error) { return error.code || 'error'; }
+    });
+    check('while the sweep is mid-reclaim of a dead owner\'s selector lock, the coordinator cannot take that lock',
+      run.stalled && run.seen === 'LOCKED' && run.outcome && run.outcome.acquired === true, JSON.stringify(run));
+    check('...and the sweep, once resumed, holds and releases it cleanly',
+      !fs.existsSync(lockPathOf('selector')) && !fs.existsSync(lockPathOf('worktree-sweep')));
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

@@ -7,12 +7,27 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
+// Loaded on first use, not at module load: the coordinator validates its loop
+// binding when it loads, and a malformed binding must reach the CLI's own
+// {action: 'error'} contract instead of crashing the require.
+let coordinatorModule = null;
+function coordinatorLocks() {
+  if (!coordinatorModule) {
+    try { coordinatorModule = require('./codex-coordinator'); }
+    catch (error) {
+      const unavailable = new Error(`coordinator lock protocol unavailable: ${error.message}`);
+      unavailable.code = 'COORDINATOR_UNAVAILABLE';
+      throw unavailable;
+    }
+  }
+  return coordinatorModule;
+}
 
 const MAXBUF = 64 * 1024 * 1024;
 const LOCK_NAMES = ['worktree-sweep', 'selector', 'homebrew-promotion'];
+const SWEEP_LOCK_STALE_MS = 30 * 60 * 1000;
 // Terminal phases whose records never own a live worktree. `adopted` is
 // currently unreachable here — the caller short-circuits on `!record.worktree`
 // first, and adopt refuses any card that already has a record, so an adoption
@@ -283,56 +298,24 @@ function buildReport(ctx, options = {}) {
   return report;
 }
 
-function pidAlive(pid) {
-  try { process.kill(Number(pid), 0); return Number(pid) > 0; } catch (_) { return false; }
-}
-
-function removeLockDirectory(lockPath) {
-  const ownerPath = path.join(lockPath, 'owner.json');
-  try { fs.unlinkSync(ownerPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  fs.rmdirSync(lockPath);
-}
-
-function acquireLock(ctx, name, now = Date.now()) {
-  fs.mkdirSync(ctx.locksDir, { recursive: true });
-  const lockPath = path.join(ctx.locksDir, `${name}.lock`);
-  try { fs.mkdirSync(lockPath); }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    let owner = null;
-    try { owner = JSON.parse(fs.readFileSync(path.join(lockPath, 'owner.json'), 'utf8')); } catch (_) {}
-    const age = owner && owner.started_at ? now - Date.parse(owner.started_at) : 0;
-    const stale = Number.isFinite(age) && age > 30 * 60 * 1000
-      && (!owner.host || owner.host === os.hostname()) && !pidAlive(owner.pid);
-    if (!stale) {
-      const held = new Error(`lock ${name} is held`);
-      held.code = 'LOCKED'; held.lock = name; held.owner = owner; throw held;
-    }
-    removeLockDirectory(lockPath);
-    fs.mkdirSync(lockPath);
-  }
-  fs.writeFileSync(path.join(lockPath, 'owner.json'), `${JSON.stringify({
-    pid: process.pid,
-    host: os.hostname(),
-    started_at: new Date(now).toISOString(),
-    command: process.argv.slice(2).join(' '),
-  }, null, 2)}\n`);
-  return { name, lockPath };
-}
-
+// The selector and homebrew-promotion locks are shared with the coordinator,
+// so they are claimed, reclaimed and released by the coordinator's own
+// protocol: an O_EXCL owner record, a gated compare-and-set reclaim, and a
+// release that ends only this sweep's generation. Two rails with two protocols
+// on one lock could both hold it.
 function acquireSweepLocks(ctx) {
   const held = [];
   try {
-    for (const name of LOCK_NAMES) held.push(acquireLock(ctx, name));
+    for (const name of LOCK_NAMES) held.push(coordinatorLocks().acquireLock(ctx, name, { staleMs: SWEEP_LOCK_STALE_MS }));
     return held;
   } catch (error) {
-    for (const lock of held.reverse()) removeLockDirectory(lock.lockPath);
+    for (const lock of held.reverse()) coordinatorLocks().releaseLock(lock);
     throw error;
   }
 }
 
 function releaseSweepLocks(held) {
-  for (const lock of [...held].reverse()) removeLockDirectory(lock.lockPath);
+  for (const lock of [...held].reverse()) coordinatorLocks().releaseLock(lock);
 }
 
 function executeSweep(options = {}) {
@@ -342,6 +325,7 @@ function executeSweep(options = {}) {
   let held;
   try { held = acquireSweepLocks(ctx); }
   catch (error) {
+    if (error.code === 'COORDINATOR_UNAVAILABLE') throw error;
     const report = emptyReport(ctx, mode);
     report.action = 'refused-concurrent';
     report.lock = error.lock || 'unknown';

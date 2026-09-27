@@ -275,18 +275,14 @@ function atomicWriteJson(file, value) {
 //      O_EXCL (`flag: 'wx'`) and reads it back: entering `fn` requires having
 //      CREATED the identity file and still seeing its own token. Anything else
 //      is a clean LOCKED refusal, never a silent second entry.
-//   5. Release is token-conditional: a process only removes a lock directory
-//      whose owner record is still the one it wrote.
+//   5. Release is generation-conditional: a process takes its own owner record
+//      by rename, and removes only the directory that record was in.
 //
-// THIS IS NOT THE ONLY RAIL WRITING THESE DIRECTORIES. `scripts/autoloop/
-// sweep-worktrees.js` keeps its own acquireLock/removeLockDirectory with the
-// pre-CAS shape (read a stale owner, rmSync, mkdirSync, unconditional release)
-// and its own local `pidAlive` that reads EPERM as dead, and it writes into the
-// SAME `<stateDir>/locks` for `selector` and `homebrew-promotion` -- two of the
-// three names it takes and both of the two this file takes. So the exclusion
-// argued for here holds between coordinator processes; it does NOT hold between
-// a coordinator and a concurrent worktree sweep, and the claim that "the two
-// lock rails cannot drift" covers this file and turn-lock.js only.
+// `scripts/autoloop/sweep-worktrees.js` writes into the SAME `<stateDir>/locks`
+// for `selector` and `homebrew-promotion`, and it claims and releases them
+// through acquireLock/releaseLock below, so the exclusion argued for here holds
+// between a coordinator and a concurrent worktree sweep too. A coordinator from
+// before this protocol (tmp+rename owner writes, no O_EXCL) is still outside it.
 //
 // Gates are garbage, not leases: a gate is removed only once its CREATOR is
 // provably gone. THE GOVERNING PRINCIPLE IS THAT A SAFETY MECHANISM MUST NOT
@@ -379,9 +375,131 @@ function readMachineId() {
   return null;
 }
 
-function hostStamp() {
+// WHEN the stamping process started, so a recycled pid can be told from the
+// process that wrote the stamp. A pid alone cannot: once its owner exits, the
+// number is free for any later process, which then answers the liveness probe
+// (alive, or EPERM) on the dead owner's behalf and wedges its lock for good.
+// The value is opaque and prefixed by how it was read. Linux: field 22
+// (starttime, clock ticks since boot) of /proc/<pid>/stat, tagged with the
+// reader's time namespace (see localTimeNamespace). macOS: `ps -o
+// lstart`, pinned to UTC and the C locale so that two processes with
+// different TZ or LANG read the same process identically. A value that cannot
+// be read (a sandbox, a restricted /proc, no ps) is omitted from stamps and
+// proves nothing when checking one.
+let cachedOwnPidStart;
+function localPidStart() {
+  if (cachedOwnPidStart === undefined) cachedOwnPidStart = readPidStart(process.pid);
+  return cachedOwnPidStart;
+}
+
+// The comm field (2) is parenthesised and may itself contain spaces and ')',
+// so fields are counted from the LAST ')'. The first token after it is field 3.
+function procStatStartTime(statLine) {
+  if (typeof statLine !== 'string') return null;
+  const close = statLine.lastIndexOf(')');
+  if (close < 0) return null;
+  const start = statLine.slice(close + 1).trim().split(/\s+/)[22 - 3];
+  return /^\d+$/.test(start || '') ? start : null;
+}
+
+// Linux reports starttime relative to the READER's time namespace (the boottime
+// offset is added per reader), and the machine id does not include it. So two
+// readers in different time namespaces read different values for one live
+// process. The reader's namespace is part of every Linux value, and values
+// read from different namespaces never compare.
+let cachedTimeNamespace;
+function localTimeNamespace() {
+  if (cachedTimeNamespace === undefined) {
+    try { cachedTimeNamespace = fs.readlinkSync('/proc/self/ns/time'); }
+    catch (_) { cachedTimeNamespace = 'none'; }
+  }
+  return cachedTimeNamespace;
+}
+
+// Everything in a start-time value except the time itself: two values compare
+// only when this matches. On Linux the time is the last ':'-field (the
+// namespace link itself contains ':'); on macOS it follows the first ':'
+// (lstart contains ':').
+function pidStartReader(value) {
+  if (typeof value !== 'string') return '';
+  const cut = value.startsWith('linux-stat:') ? value.lastIndexOf(':') : value.indexOf(':');
+  return cut > 0 ? value.slice(0, cut) : '';
+}
+
+// Stamps record getpid(), which is a pid in this process's own pid namespace,
+// but /proc/<pid> resolves through the pid namespace of the /proc MOUNT. They
+// differ under `unshare -p -f` without --mount-proc, or in any sandbox that
+// keeps its parent's /proc, and then /proc/<pid> names an unrelated process.
+// A matching pid NUMBER proves nothing: a /proc from an ancestor namespace can
+// give this process the same number there by chance. The proof is DEPTH. The
+// NSpid line of /proc/self/status lists this process's pid in every namespace
+// from the mount's down to its own, so exactly one field, equal to getpid(),
+// means the mount is in our namespace. No NSpid line (kernels before 4.1), an
+// unreadable status, or anything else: no start time is read, for stamps or
+// for checks, and liveness fails closed.
+function procIsInOurPidNamespace() {
+  try {
+    if (fs.readlinkSync('/proc/self') !== String(process.pid)) return false;
+    const line = fs.readFileSync('/proc/self/status', 'utf8').split('\n').find((l) => l.startsWith('NSpid:'));
+    if (!line) return false;
+    const fields = line.slice('NSpid:'.length).trim().split(/\s+/).filter(Boolean);
+    return fields.length === 1 && fields[0] === String(process.pid);
+  } catch (_) { return false; }
+}
+
+const PID_START_PS_TIMEOUT_MS = 2000;
+function readPidStart(pid) {
+  // Fault-injection seam: models a process that cannot read start times at all
+  // (a sandbox that denies ps, a /proc mounted with hidepid).
+  if (process.env.SAUCE_AUTOLOOP_PID_START_UNAVAILABLE === '1') return null;
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  try {
+    if (process.platform === 'linux') {
+      if (!procIsInOurPidNamespace()) return null;
+      const start = procStatStartTime(fs.readFileSync(n === process.pid ? '/proc/self/stat' : `/proc/${n}/stat`, 'utf8'));
+      return start ? `linux-stat:${localTimeNamespace()}:${start}` : null;
+    }
+    if (process.platform === 'darwin') {
+      // Fault-injection seam: substitutes the ps binary, so a test can make it
+      // hang and observe the timeout.
+      const ps = process.env.SAUCE_AUTOLOOP_PID_START_PS || '/bin/ps';
+      const start = execFileSync(ps, ['-o', 'lstart=', '-p', String(n)], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: PID_START_PS_TIMEOUT_MS,
+        env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' },
+      }).trim().replace(/\s+/g, ' ');
+      return start ? `darwin-lstart:${start}` : null;
+    }
+  } catch (_) { /* unreadable: proves nothing */ }
+  return null;
+}
+
+function pidStartOf(pid) {
+  return Number(pid) === process.pid ? localPidStart() : readPidStart(pid);
+}
+
+// True only when the stamp records a start time, the pid's current start time
+// is readable here and read the same way, and the two differ: the pid now
+// names a different process. Anything less proves nothing, and the caller
+// falls back to the pid probe alone. Meaningful only for a stamp from this host.
+function stampPidRecycled(stamp) {
+  const recorded = stamp && typeof stamp.pid_start === 'string' && stamp.pid_start ? stamp.pid_start : null;
+  if (!recorded) return false;
+  const current = pidStartOf(stamp.pid);
+  if (!current) return false;
+  if (!pidStartReader(recorded) || pidStartReader(recorded) !== pidStartReader(current)) return false;
+  return current !== recorded;
+}
+
+// The identity every stamp carries: the pid, the host it is meaningful on, and
+// when that process started.
+function processStamp() {
   const machine = localMachineId();
-  return machine ? { host: os.hostname(), machine } : { host: os.hostname() };
+  const pidStart = localPidStart();
+  return {
+    pid: process.pid, host: os.hostname(),
+    ...(machine ? { machine } : {}), ...(pidStart ? { pid_start: pidStart } : {}),
+  };
 }
 
 // 'this', 'foreign', or 'unknown'. Only two machine ids can prove a stamp
@@ -496,6 +614,10 @@ function reclaimGateStillOurs(gatePath, mine) {
 //   'claim-write'    -- after the lock directory exists, before the O_EXCL
 //                       owner-record write
 //   'claim-readback' -- after that write, before its read-back
+//   'release'        -- after release has read its own token, before it takes
+//                       the owner record
+//   'release-taken'  -- after release has taken and verified its record,
+//                       before it clears debris and removes the directory
 // Inert unless SAUCE_AUTOLOOP_RECLAIM_STALL_MS names a positive number of ms.
 //
 // The stall is a HANDSHAKE, not a sleep, whenever the test supplies files.
@@ -630,7 +752,7 @@ function reclaimLockDirectory(ctx, name, lockPath, observedKey, staleMs, birth =
   // not this write, are what stop a second destroyer. The nonce makes the bytes
   // unique per attempt, so byte equality alone identifies our own gate.
   const stampRaw = `${JSON.stringify({
-    pid: process.pid, ...hostStamp(), started_at: new Date().toISOString(),
+    ...processStamp(), started_at: new Date().toISOString(),
     lock: name, key: observedKey, nonce: crypto.randomUUID(),
   }, null, 2)}\n`;
   try { fs.writeFileSync(gatePath, stampRaw, { flag: 'wx' }); }
@@ -724,17 +846,64 @@ function claimLockDirectory(lockPath, record) {
   return Boolean(confirmed) && confirmed.token === record.token;
 }
 
-// Never deletes a lock directory another process legitimately owns.
+// Never deletes a lock directory another process legitimately owns. Checking
+// the token and then removing by path is not enough: between the two, this
+// generation can be broken and a successor created and entered at the same
+// path. So release ends only its OWN generation, the way
+// destroyObservedGeneration does:
+// - the owner record is read, and must carry our token;
+// - it is moved out by rename and read again. If what was taken is not ours it
+//   is handed back with link(2), which never overwrites;
+// - anything else inside is debris of our generation and is cleared, and the
+//   directory goes with a NON-recursive rmdir. If a record arrived meanwhile
+//   (a claimant delayed since an earlier generation), the rmdir fails and the
+//   directory is left to it: our generation has still ended.
+// A record that is briefly missing (another process's take-and-hand-back
+// window) is re-read for RELEASE_REREAD_MS before release gives up. Giving up
+// leaves our record in place, and a record whose process exits is reclaimed
+// as a dead owner.
+const RELEASE_REREAD_MS = 50;
+const RELEASE_REREAD_STEP_MS = 5;
 function releaseLockDirectory(lockPath, token) {
-  const owner = parseLockOwner(readLockOwnerRaw(lockPath));
-  if (!owner || owner.token !== token) return false;
-  fs.rmSync(lockPath, { recursive: true, force: true });
+  const ownerPath = lockOwnerPath(lockPath);
+  const since = claimClock();
+  const retry = () => {
+    if (!fs.existsSync(lockPath) || claimElapsedMs(since) >= RELEASE_REREAD_MS) return false;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RELEASE_REREAD_STEP_MS);
+    return true;
+  };
+  const tomb = path.join(path.dirname(lockPath), `.${path.basename(lockPath)}.release-${crypto.randomUUID()}`);
+  for (;;) {
+    let raw = null;
+    try { raw = fs.readFileSync(ownerPath, 'utf8'); }
+    catch (err) { if (err.code === 'ENOENT' && retry()) continue; return false; }
+    const owner = parseLockOwner(raw);
+    if (!owner || owner.token !== token) return false;
+    stallForFaultInjection('release');
+    try { fs.renameSync(ownerPath, tomb); break; }
+    catch (err) { if (err.code === 'ENOENT' && retry()) continue; return false; }
+  }
+  const taken = parseLockOwner((() => { try { return fs.readFileSync(tomb, 'utf8'); } catch (_) { return null; } })());
+  if (!taken || taken.token !== token) {
+    try { fs.linkSync(tomb, ownerPath); fs.unlinkSync(tomb); } catch (_) { /* fail closed: leave it where it can be found */ }
+    return false;
+  }
+  stallForFaultInjection('release-taken');
+  let entries = [];
+  try { entries = fs.readdirSync(lockPath); } catch (_) { entries = []; }
+  for (const entry of entries) {
+    if (entry === 'owner.json') continue;
+    try { fs.rmSync(path.join(lockPath, entry), { recursive: true, force: true }); } catch (_) { /* rmdir below decides */ }
+  }
+  try { fs.rmdirSync(lockPath); } catch (_) { /* a record arrived: the directory is its claimant's now */ }
+  try { fs.unlinkSync(tomb); } catch (_) { /* garbage beside the lock, never in its path */ }
   return true;
 }
 
 function lockHeldError(name, owner, detail) {
   const err = new Error(`lock ${name} held by pid ${owner && owner.pid ? owner.pid : '?'} on ${owner && owner.host ? owner.host : '?'}${detail ? ` (${detail})` : ''}`);
   err.code = 'LOCKED';
+  err.lock = name;
   err.owner = owner || null;
   return err;
 }
@@ -744,7 +913,7 @@ function writeState(ctx, state, changedRecord, options = {}) {
   const lockPath = path.join(ctx.stateDir, 'locks', 'state-write.lock');
   const deadline = Date.now() + 5000;
   const token = crypto.randomUUID();
-  const record = { pid: process.pid, ...hostStamp(), started_at: new Date().toISOString(), token };
+  const record = { ...processStamp(), started_at: new Date().toISOString(), token };
   let held = false;
   let lostGate = null;
   while (!held) {
@@ -808,12 +977,30 @@ const pidLiveness = turnLockPidAlive;
 // Fail-closed reclaim predicate: true ONLY when the owner record names THIS host
 // and that pid is provably gone here. A pid is meaningless across hosts, so a
 // foreign or absent host answers false; so does any unknown liveness (bad pid,
-// EPERM, unexpected errno). Pid reuse can only push this toward "alive", which
-// merely keeps the lock held — never toward reclaiming a live owner's lock.
+// EPERM, unexpected errno). Pid reuse pushes this toward "alive", which merely
+// keeps the lock held, unless the stamp's recorded start time proves the pid
+// now names another process (see stampProcessLiveness).
 function ownerProvablyDeadOnThisHost(owner) {
   if (!owner || typeof owner !== 'object') return false;
   if (!stampIsThisHost(owner)) return false;
-  return pidLiveness(Number(owner.pid)) === false;
+  return stampProcessLiveness(owner) === false;
+}
+
+// pidLiveness for the process a stamp names, with one addition: a pid that
+// answers (alive, or EPERM) for a stamp carrying THIS process's machine id,
+// whose recorded start time differs from that pid's current one, is a recycled
+// pid, and the stamping process is provably gone. Only equal machine ids prove
+// the two processes share a pid namespace (the id includes it on Linux). A
+// hostname-fallback 'this' proves no such thing: the pid may name an
+// unrelated process in another namespace, so its start time says nothing about
+// the owner. When the ids are missing or the start time is missing or
+// unreadable, this is pidLiveness exactly, so a pid that answers still holds.
+function stampProcessLiveness(stamp) {
+  const alive = pidLiveness(Number(stamp.pid));
+  if (alive !== true) return alive;
+  const mine = localMachineId();
+  const sameMachine = Boolean(mine) && typeof stamp.machine === 'string' && stamp.machine === mine;
+  return sameMachine && stampPidRecycled(stamp) ? false : true;
 }
 
 function lockIsStale(owner, now = Date.now(), staleMs = 30 * 60 * 1000) {
@@ -832,9 +1019,10 @@ function lockIsStale(owner, now = Date.now(), staleMs = 30 * 60 * 1000) {
   // cross-sandbox signals) answers EPERM too, so no age bound can tell a
   // suspended live coordinator from a daemon that inherited a recycled pid.
   // The cost is a lock that stays wedged until broken by hand; the
-  // alternative is two writers in the ledger. Telling a recycled pid apart
-  // needs the owner's process start time recorded beside the pid.
-  return pidLiveness(Number(owner.pid)) !== true;
+  // alternative is two writers in the ledger. A recycled pid is told apart by
+  // the owner's recorded start time (stampProcessLiveness), and only when that
+  // time is recorded and readable, so an EPERM owner without one still holds.
+  return stampProcessLiveness(owner) !== true;
 }
 
 function leaseIsLive(lease, nowMs, ttlMs = LEASE_TTL_MS) {
@@ -928,13 +1116,17 @@ function lockDirectoryIsStale(lockPath, owner, staleMs) {
   catch (_) { return false; }
 }
 
-async function withLock(ctx, name, fn, opts = {}) {
+// Takes `<stateDir>/locks/<name>.lock` and returns the handle releaseLock needs,
+// or throws LOCKED. Split from withLock so a rail that holds several locks in
+// sequence (sweep-worktrees.js takes worktree-sweep, selector and
+// homebrew-promotion) claims them by exactly this protocol.
+function acquireLock(ctx, name, opts = {}) {
   ensureStateDir(ctx);
   const lockPath = path.join(ctx.stateDir, 'locks', `${name}.lock`);
   const staleMs = opts.staleMs || 30 * 60 * 1000;
   const token = crypto.randomUUID();
   const record = {
-    pid: process.pid, ...hostStamp(), started_at: new Date().toISOString(),
+    ...processStamp(), started_at: new Date().toISOString(),
     card: opts.card || null, command: process.argv.slice(2).join(' '), token,
   };
   let held = false;
@@ -968,8 +1160,17 @@ async function withLock(ctx, name, fn, opts = {}) {
   if (!claimedInTime(createdAt, staleMs)) {
     throw lockHeldError(name, record, 'claim delayed past half the staleness window');
   }
+  return { name, lockPath, token };
+}
+
+function releaseLock(held) {
+  return releaseLockDirectory(held.lockPath, held.token);
+}
+
+async function withLock(ctx, name, fn, opts = {}) {
+  const held = acquireLock(ctx, name, opts);
   try { return await fn(); }
-  finally { releaseLockDirectory(lockPath, token); }
+  finally { releaseLock(held); }
 }
 
 function normalizeZone(zone) {
@@ -9285,7 +9486,8 @@ async function main() {
 }
 
 module.exports = {
-  EXIT_CODES, parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, pidLiveness, ownerProvablyDeadOnThisHost, lockIsStale, lockDirectoryIsStale, withLock,
+  EXIT_CODES, parseArgs, emptyState, atomicWriteJson, writeState, durablePathBarrier, pidLiveness, ownerProvablyDeadOnThisHost, lockIsStale, lockDirectoryIsStale, withLock, acquireLock, releaseLock,
+  localPidStart, readPidStart, procStatStartTime, stampProcessLiveness,
   lockReclaimGateRoot, observeLockDirectory, localMachineId, stampIsThisHost, stampHostRelation, observeReclaimGate, sweepLockReclaimGates, reclaimLockDirectory, normalizeZone, zonesOverlap, conflictsWithActive,
   cardGateLockName, legacyCardGateLockName, withCardGateLock,
   normalizeCardLink, sameParentConflict, parseExecutionMeta, validateExecutionMeta, dependencySatisfied, successfulDeploymentReceipts,
