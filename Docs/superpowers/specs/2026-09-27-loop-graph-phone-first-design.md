@@ -67,7 +67,7 @@ On a phone, one epic and the whole plan each read on one screen: the shape of th
   4. Write via `RenderSafe.mutate({ path, mode: 'background', optimistic, write: () => vault.process(file, replaceBlock), revert })`. `replaceBlock` re-locates the block inside the freshly read content and replaces only the fenced JSON text; every other byte is preserved. Failure → one Notice, the card returns to undecided.
   Items whose `why` says the artifact is missing render no Decide; they show the coordinator command to run from the repo (`backfill-ratifications --json`) with a copy button.
 - **Priority.** A section listing In Planning epics from `<projectDir>/<slug>-board.md` (the same lane parser GraphView project scope uses) in board order with ▲ / ▼, and the painted lanes (In Progress, Blocked) read-only with `painted by the coordinator`. `_moveEpicLine(boardFile, epic, direction)` inside `RenderSafe.mutate` + `vault.process`: find the `## In Planning` heading and the next `## ` heading; collect the `- [ ] [[…]]` lines between them; refuse if the epic line is missing, appears twice, or the move would leave the lane; swap the two line strings; assert that the result differs from the input at exactly those two line indices before returning it. Optimistic reorder in the DOM; failure reverts and shows one Notice. The coordinator's candidate order is In Progress then In Planning by line order, so the swap changes what is claimed next.
-- **Text.** The retired `/delivery-status` name is replaced with `/mayo:status` wherever the station prints an instruction.
+- **Text.** The retired `/delivery-status` name is replaced with `/sauce:status` wherever the station prints an instruction.
 
 ### 6.3 Navigation, templates, dashboard
 
@@ -160,7 +160,7 @@ Every guard ships with a named fixture that is red without the change and a docu
 
 ## 10. Slices
 
-Two chains that run in parallel because their touch zones differ, then the cohesion tail. Suggested prefix `PH`. Sketch only; `/mayo:plan` owns the contract-grade decomposition.
+Two chains that run in parallel because their touch zones differ, then the cohesion tail. Suggested prefix `PH`. Sketch only; `/sauce:plan` owns the contract-grade decomposition.
 
 | # | Outcome | Touch zones | Depends on | Profile |
 | :--: | --- | --- | :--: | :--: |
@@ -180,7 +180,7 @@ Board position: In Planning, at the top. FL-2..FL-5 are discarded at mint with `
 - The Board Health note's body calls a `BoardHealth` class that does not ship; it renders "not loaded" in every vault. Coordinator-side (`codex-coordinator.js` scaffold); one slice in a separate epic, or fold the health line into the station payload.
 - Three Needs-you items have no ratification artifact today, so the park-time scaffold is not firing. Coordinator-side.
 - Slice notes minted by intake carry only a chrome bar above raw contract frontmatter; a slim status header (chip, wait reason, back-to-graph link) belongs there. Candidate for sub-project 2 or a follow-up here.
-- The mayo skill bodies that say "open the atlas GraphView" (`plan`, `block-review`) should also name the Loop Station once it is in the Go menu. Text-only; GV-R3 precedent.
+- The sauce plugin's skill bodies that say "open the atlas GraphView" (`plan`, `block-review`) should also name the Loop Station once it is in the Go menu. Text-only; GV-R3 precedent.
 
 ## 12. Risks
 
