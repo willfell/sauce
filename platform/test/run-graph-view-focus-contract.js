@@ -27,7 +27,9 @@ const pkg = JSON.parse(fs.readFileSync(PACKAGE, 'utf8'));
 // Docs/superpowers/specs/2026-08-10-parallel-preflight-design.md); that
 // sanctioned edit changed the pinned file's byte content, so the anti-mutation
 // digest below was recomputed to match.
-const EXPECTED_BEHAVIOR_SHA256 = 'cbd716996e4b2187c2fdde935762e4e56857a299ec2c678535741a6e799ac1fe';
+// Re-pinned 2026-09-28 (PH-1d): platform/test/run-graph-view.js changed; the
+// BL-6 recorder and the exactPredicates strings below are byte-unchanged in it.
+const EXPECTED_BEHAVIOR_SHA256 = '0487d2d80c9467d22b37e4af318c6b138ee9333ebc7bd7e97fb15d8a705bd025';
 
 const exactPredicates = [
   ["epic no-op", "bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0, 'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');"],
