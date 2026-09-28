@@ -407,6 +407,35 @@ try {
     coordinator.releaseLock(successor);
   }
 
+  // Rollback goes through the same conditional release. Here the sweep holds
+  // worktree-sweep and selector, its selector lock is broken and re-taken by
+  // a successor, and then homebrew-promotion turns out to be held, so the
+  // sweep rolls back. The successor's selector lock must survive that.
+  {
+    const promotion = holdLock('homebrew-promotion');
+    const realAcquire = coordinator.acquireLock;
+    let successor = null;
+    coordinator.acquireLock = function (lockCtx, name, ...rest) {
+      if (name === 'homebrew-promotion') {
+        fs.rmSync(lockPathOf('selector'), { recursive: true, force: true });
+        successor = realAcquire.call(coordinator, lockCtx, 'selector');
+      }
+      return realAcquire.call(coordinator, lockCtx, name, ...rest);
+    };
+    let refusal = null;
+    try { refusal = executeSweep({ repo, currentWorktree: currentManaged, processPaths: [] }); }
+    finally { coordinator.acquireLock = realAcquire; }
+    const survivor = path.join(lockPathOf('selector'), 'owner.json');
+    check('a sweep that rolls back never removes a selector lock a successor took meanwhile',
+      refusal && refusal.action === 'refused-concurrent' && refusal.lock === 'homebrew-promotion'
+        && successor && fs.existsSync(survivor)
+        && JSON.parse(fs.readFileSync(survivor, 'utf8')).token === successor.token
+        && !fs.existsSync(lockPathOf('worktree-sweep')),
+      JSON.stringify(refusal && refusal.action));
+    if (successor) coordinator.releaseLock(successor);
+    fs.rmSync(promotion, { recursive: true, force: true });
+  }
+
   // Two processes, on a handshake: a child sweep is suspended at a seam of the
   // shared protocol while this process acts as the coordinator.
   const runner = path.join(tmp, 'sweep-locks.js');

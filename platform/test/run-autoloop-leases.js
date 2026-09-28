@@ -50,7 +50,7 @@ function eq(actual, expected, label) { assert.deepStrictEqual(actual, expected, 
 // reds instead of passing quietly.
 // Scoped to THIS harness on purpose. 174 other harnesses share the gap and the
 // rail-level fix (run-preflight.js scoring `code === 0`) is escalated separately.
-const ASSERTION_FLOOR = 579;
+const ASSERTION_FLOOR = 584;
 let finished = false;
 const strayChildren = new Set();
 function finish() {
@@ -3111,7 +3111,7 @@ async function withFreshCoordinator(envOverrides, fn) {
         let unmountedProc = { stale: false, own: null, stamped: false };
         let noTimens = { own: 'linux-stat:none:0' };
         const failClosed = { stale: false, own: null, stamped: false };
-        const nspidCases = { 'nspid-two': failClosed, 'nspid-absent': failClosed, 'nspid-other': failClosed, 'status-throws': failClosed };
+        const nspidCases = { 'nspid-same-twice': failClosed, 'nspid-two': failClosed, 'nspid-absent': failClosed, 'nspid-other': failClosed, 'status-throws': failClosed };
         if (process.platform === 'linux') {
           const shifted = OWN_START.replace(/\d+$/, (ticks) => String(Number(ticks) + 100000));
           const judgeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-judge-'));
@@ -3128,6 +3128,7 @@ async function withFreshCoordinator(envOverrides, fn) {
             "const realRead = fs.readFileSync;",
             "const withNspid = (nspid) => { fs.readFileSync = function (p, ...rest) { if (p !== '/proc/self/status') return realRead.call(fs, p, ...rest); const body = String(realRead.call(fs, p, 'utf8')).split('\\n').filter((l) => !l.startsWith('NSpid:')); if (nspid !== null) body.push(`NSpid:\\t${nspid}`); return body.join('\\n'); }; };",
             "if (patch === 'nspid-two') withNspid(`${process.pid + 7919}\\t${process.pid}`);",
+            "if (patch === 'nspid-same-twice') withNspid(`${process.pid}\\t${process.pid}`);",
             "if (patch === 'nspid-absent') withNspid(null);",
             "if (patch === 'nspid-other') withNspid(String(process.pid + 7919));",
             "if (patch === 'status-throws') fs.readFileSync = function (p, ...rest) { return p === '/proc/self/status' ? enoent() : realRead.call(fs, p, ...rest); };",
@@ -3149,7 +3150,8 @@ async function withFreshCoordinator(envOverrides, fn) {
         // Depth, not number: a /proc from an ancestor namespace can give this
         // process the same pid number there, and only NSpid tells them apart.
         for (const [patch, label] of [
-          ['nspid-two', 'NSpid lists two namespaces (the /proc is an ancestor\'s, even though the pid number matches)'],
+          ['nspid-same-twice', 'NSpid lists the SAME pid at two levels (an ancestor\'s /proc, where this process has the same number: the fu4 case)'],
+          ['nspid-two', 'NSpid lists two different pids (an ancestor\'s /proc)'],
           ['nspid-absent', 'NSpid is absent (a kernel before 4.1)'],
           ['nspid-other', 'NSpid has one field that is not our pid'],
           ['status-throws', '/proc/self/status cannot be read'],
@@ -3173,26 +3175,62 @@ async function withFreshCoordinator(envOverrides, fn) {
           'OPS3d ...and it reads no start time of its own and stamps none, rather than an unrelated process\'s');
       }
 
-      // ps that hangs is abandoned after its timeout, and the start time reads
-      // as unknown rather than stalling the acquire.
+      // The ps timeout is 2s, pinned by outcome rather than by a stopwatch. A
+      // fake ps (behind the seam) that answers after 3s is abandoned and proves
+      // nothing, which a 5s, 10s or missing timeout would not do. One that
+      // answers after 0.2s is heard, which a timeout cut to nothing would not
+      // do. Neither outcome depends on how loaded the machine is.
       {
-        let verdict = true;
-        let took = 0;
+        let slow = null;
+        let quick = 'darwin-lstart:Sun Sep 27 16:12:03 2026';
         if (process.platform === 'darwin') {
           const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-ps-'));
-          const fakePs = path.join(fakeDir, 'ps');
-          fs.writeFileSync(fakePs, '#!/bin/sh\nexec sleep 30\n');
-          fs.chmodSync(fakePs, 0o755);
-          // Timed inside the child, around the read alone, so node startup and
-          // the module load are not counted against the 2s claim.
-          const out = JSON.parse(execFileSync(process.execPath, ['-e',
-            'delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY; const c = require(process.argv[1]); const t0 = Date.now(); const read = c.readPidStart(1); process.stdout.write(JSON.stringify({ read, took: Date.now() - t0 }));',
-            coordinatorModulePath], { encoding: 'utf8', env: { ...process.env, SAUCE_AUTOLOOP_PID_START_PS: fakePs } }));
-          took = out.took;
-          verdict = out.read === null && took >= 1500 && took < 4000;
+          const fakePs = (name, seconds) => {
+            const file = path.join(fakeDir, name);
+            fs.writeFileSync(file, `#!/usr/bin/perl\nselect(undef, undef, undef, ${seconds});\nprint "Sun Sep 27 16:12:03 2026\\n";\n`);
+            fs.chmodSync(file, 0o755);
+            return file;
+          };
+          const readWith = (ps) => execFileSync(process.execPath, ['-e',
+            'delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY; process.stdout.write(JSON.stringify(require(process.argv[1]).readPidStart(1)));',
+            coordinatorModulePath], { encoding: 'utf8', env: { ...process.env, SAUCE_AUTOLOOP_PID_START_PS: ps } });
+          slow = JSON.parse(readWith(fakePs('slow-ps', 3)));
+          quick = JSON.parse(readWith(fakePs('quick-ps', 0.2)));
           fs.rmSync(fakeDir, { recursive: true, force: true });
         }
-        ok(verdict, `OPS3d a ps that hangs is abandoned after its 2s timeout and proves nothing (${took}ms)`);
+        ok(slow === null, 'OPS3d a ps that answers only after 3s is abandoned at the 2s timeout and proves nothing');
+        ok(quick === 'darwin-lstart:Sun Sep 27 16:12:03 2026', `OPS3d a ps that answers within 0.2s is heard (${quick})`);
+      }
+
+      // Our own start time is read once per process and cached: stamping
+      // several locks and judging our own stamp several times reads it once.
+      // Counted through the ps seam on macOS and at /proc/self/stat on Linux.
+      {
+        const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops3d-cache-'));
+        const countFile = path.join(cacheDir, 'ps-count');
+        const countingPs = path.join(cacheDir, 'ps');
+        fs.writeFileSync(countingPs, `#!/usr/bin/perl\nopen(my $f, '>>', '${countFile}'); print $f "x\\n"; close($f);\nprint "Sun Sep 27 16:12:03 2026\\n";\n`);
+        fs.chmodSync(countingPs, 0o755);
+        const out = JSON.parse(execFileSync(process.execPath, ['-e', [
+          "const fs = require('fs');",
+          "const [modulePath, dir] = process.argv.slice(1);",
+          "let procReads = 0;",
+          "const realRead = fs.readFileSync;",
+          "fs.readFileSync = function (p, ...rest) { if (p === '/proc/self/stat') procReads += 1; return realRead.call(fs, p, ...rest); };",
+          "delete process.env.SAUCE_LOOP_BOARD_TOPOLOGY;",
+          "const c = require(modulePath);",
+          "const own = c.localPidStart();",
+          "const stamp = { pid: process.pid, host: require('os').hostname(), machine: c.localMachineId(), started_at: new Date().toISOString(), pid_start: own };",
+          "for (let i = 0; i < 3; i += 1) c.lockIsStale(stamp, Date.now(), 30 * 60 * 1000);",
+          "for (let i = 0; i < 2; i += 1) c.releaseLock(c.acquireLock({ stateDir: dir }, 'cache'));",
+          "process.stdout.write(JSON.stringify({ own, procReads }));",
+        ].join('\n'), coordinatorModulePath, cacheDir], { encoding: 'utf8', env: { ...process.env, SAUCE_AUTOLOOP_PID_START_PS: countingPs } }));
+        const reads = process.platform === 'darwin'
+          ? (fs.existsSync(countFile) ? fs.readFileSync(countFile, 'utf8').split('\n').filter(Boolean).length : 0)
+          : out.procReads;
+        ok(typeof out.own === 'string' && reads === 1,
+          `OPS3d our own start time is read once and cached across stamps and self-checks (${reads} reads)`);
+        fs.rmSync(cacheDir, { recursive: true, force: true });
       }
     }
 
@@ -3256,6 +3294,24 @@ async function withFreshCoordinator(envOverrides, fn) {
         eq(fs.existsSync(lockPath), false, 'OPS3d release clears its own generation\'s debris and removes the directory');
       }
 
+      // The re-read window runs on a clock that advances only when release
+      // waits. These cases then sequence deterministically however loaded the
+      // machine is, and the window is measured in waits, not wall time.
+      const onFakeClock = (fn) => {
+        const realNow = Date.now;
+        const realHr = process.hrtime.bigint;
+        const realWait = Atomics.wait;
+        const wall0 = realNow();
+        const mono0 = realHr();
+        let advanced = 0;
+        let waits = 0;
+        Date.now = () => wall0 + advanced;
+        process.hrtime.bigint = () => mono0 + BigInt(advanced) * 1000000n;
+        Atomics.wait = (_array, _index, _value, ms) => { waits += 1; advanced += Number(ms) || 0; return 'timed-out'; };
+        try { const result = fn(); return { result, waits }; }
+        finally { Date.now = realNow; process.hrtime.bigint = realHr; Atomics.wait = realWait; }
+      };
+
       {
         const name = 'release-blink';
         const held = acquireLock(ctx3b, name);
@@ -3269,7 +3325,7 @@ async function withFreshCoordinator(envOverrides, fn) {
           return realRead.call(fs, p, ...rest);
         };
         let released;
-        try { released = releaseLock(held); } finally { fs.readFileSync = realRead; }
+        try { released = onFakeClock(() => releaseLock(held)).result; } finally { fs.readFileSync = realRead; }
         eq([released, fs.existsSync(held.lockPath)], [true, false],
           'OPS3d a release whose record is briefly missing re-reads it and releases');
       }
@@ -3285,7 +3341,7 @@ async function withFreshCoordinator(envOverrides, fn) {
           return realRename.call(fs, src, ...rest);
         };
         let released;
-        try { released = releaseLock(held); } finally { fs.renameSync = realRename; }
+        try { released = onFakeClock(() => releaseLock(held)).result; } finally { fs.renameSync = realRename; }
         eq([released, fs.existsSync(held.lockPath)], [true, false],
           'OPS3d a record missing at the take is re-read, and release completes');
       }
@@ -3294,11 +3350,9 @@ async function withFreshCoordinator(envOverrides, fn) {
         const name = 'release-gone';
         const held = acquireLock(ctx3b, name);
         fs.renameSync(path.join(held.lockPath, 'owner.json'), path.join(gateRoot3b, `${name}.aside`));
-        const t0 = Date.now();
-        const released = releaseLock(held);
-        const took = Date.now() - t0;
+        const { result: released, waits } = onFakeClock(() => releaseLock(held));
         eq(released, false, 'OPS3d a record that never comes back is not released');
-        ok(took >= 40 && took < 500, `OPS3d ...after a re-read bounded near 50ms (${took}ms)`);
+        ok(waits >= 5 && waits <= 20, `OPS3d ...after re-reading for about 50ms in 5ms steps (${waits} waits)`);
         eq(fs.existsSync(held.lockPath), true, 'OPS3d ...and the directory is left in place for the dead-owner reclaim');
       }
 
@@ -3340,6 +3394,23 @@ async function withFreshCoordinator(envOverrides, fn) {
         try { released = releaseLock(held); } finally { fs.linkSync = realLink; }
         eq(released, false, 'OPS3d a release whose record is no longer its own releases nothing');
         eq(fs.existsSync(ownerPath) ? fs.readFileSync(ownerPath, 'utf8') : 'missing', 'someone-elses-record',
+          'OPS3d ...and never takes that record, so it survives even when nothing could be handed back');
+      }
+
+      // The same with a VALID owner record carrying another token, so it is
+      // the token comparison, not a parse failure, that refuses the take.
+      {
+        const name = 'release-foreign-token';
+        const held = acquireLock(ctx3b, name);
+        const ownerPath = path.join(held.lockPath, 'owner.json');
+        const foreign = `${JSON.stringify({ pid: process.pid, host: HOST, started_at: new Date().toISOString(), token: 'someone-elses-token' }, null, 2)}\n`;
+        fs.writeFileSync(ownerPath, foreign);
+        const realLink = fs.linkSync;
+        fs.linkSync = () => { const e = new Error('EIO: link failed'); e.code = 'EIO'; throw e; };
+        let released;
+        try { released = releaseLock(held); } finally { fs.linkSync = realLink; }
+        eq(released, false, 'OPS3d a release whose valid owner record carries another token releases nothing');
+        eq(fs.existsSync(ownerPath) ? fs.readFileSync(ownerPath, 'utf8') : 'missing', foreign,
           'OPS3d ...and never takes that record, so it survives even when nothing could be handed back');
       }
     }
