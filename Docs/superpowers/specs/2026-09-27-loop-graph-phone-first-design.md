@@ -1,7 +1,7 @@
 # Loop graph, phone-first — the graph and the station as one narrow-width surface
 
 **Date:** 2026-09-27
-**Status:** Approved in conversation by the Director (brainstorm session); written spec awaiting review
+**Status:** Approved by the Director 2026-09-28 with the rail corrections recorded in §11; minted on the sauce board as epic "Loop Graph Phone-First" (PH-1..PH-8)
 **Companion:** interactive comparison and mocks at https://claude.ai/artifact/HCGvS7yoM6KVtffEDfm9yT (private)
 **Builds on:** `2026-08-01-graph-view-design.md` (GraphView), `2026-07-26-operator-experience-design.md` (EpicDashboard readability + Loop Station), the GraphView Readability / Blocking Lens / Visual Polish epics (shipped), GraphView Frontier Lens (FL-1c parked, FL-2..FL-5 queued)
 **Sub-project 1 of 5** in the loop-cohesion program (2: onboarding to first epic, 3: engine graph rendered by GraphView, 4: marketing kit, 5: notifications and cadence). Those are separate specs.
@@ -24,7 +24,7 @@ On a phone, one epic and the whole plan each read on one screen: the shape of th
 | Desktop | Keep today's rank columns byte-identical; add the same frontier list beneath | One grammar at both widths without shrinking desktop chips for no gain. |
 | Done work | Fold done rows into a count strip once an epic is past half done; a completed epic opens folded; the map still draws done pills | Attention goes to the frontier; the strip expands on tap. |
 | Detail | An inline card under the map or canvas, not an overlay sheet | A body-fixed sheet fights Obsidian's reading-view scroller and the ghost-click guard; the existing popover primitive is for menus. One panel builder serves both widths. |
-| Phone gestures | **Ratify** (Accept / Accept provisionally / Later) and **Reprioritize** (In Planning up / down) on the Loop Station | Both are the Director's own inputs made thumb-sized. No "Send back": the receipt enum is `accepted \| provisionally_accepted` and a refusal has no machine path. No scaffold from the phone: the artifact needs the ledger's gate HEAD, which lives in the repo. |
+| Phone gestures | **Ratify** (Accept / Later) and **Reprioritize** (In Planning up / down) on the Loop Station | Both are the Director's own inputs made thumb-sized. The contract enum is `accepted \| provisionally_accepted`, but the coordinator's consume path accepts only `accepted` today, so the phone offers no provisional decision until a coordinator slice widens consume (§11). No "Send back": a refusal has no machine path. No scaffold from the phone: the artifact needs the ledger's gate HEAD, which lives in the repo. |
 | Needs-you ownership on the station | OperatorStation only; project-scope GraphView marks parked pills but lists nothing | One Needs-you per note, and it is the one with the Decide gesture and ratification links. |
 | Slice rows on the atlas | GraphView's frontier list owns them; EpicDashboard drops its Slices section and keeps the summary card + context tiles | One list per note; the graph's rows carry more (root cause, hops, next, ready). |
 | Frontier Lens | Supersede FL-2..FL-5 at mint with carried findings into PH-2 / PH-3; FL-1c stays as PH-2's dependency | FL-2..5 are queued against the same file and blocked behind a parked card whose artifact is missing; their intent lands here. |
@@ -55,24 +55,24 @@ On a phone, one epic and the whole plan each read on one screen: the shape of th
 - **Compact geometry** `_compactGeometry(nodes, ranks, width)` (pure): `colW = clamp(floor((W − 2·pad − (R−1)·gap) / R), 40, 140)`, pill height 26, row gap 8, `pad` 2, `gap` 10. Short ids (shared alphabetic prefix through the dash stripped, e.g. `GA-ML8` → `ML8`) when `colW < 72`. Canvas width `= min(W, natural)`; when `R·40 + (R−1)·gap + 2·pad > W` the map scrolls horizontally with 40px pills. That fallback is documented, warning-free, and pinned by a fixture.
 - **Compact map** `_renderCompactMap(root, result, api, source, warnings, geometry)`: pills carry the shared status class, colour and glyph channel (via `_statusPresentation`), stub pills dashed, stuck pills a 2px error hairline on the left, parked pills the needs-you glyph. The existing `_edgeSvg` draws the edges; the existing `_selectionController` registers pills as chips so Stuck / Dim done, chain highlight, two-tap open, canvas-tap deselect, and cluster focus work unchanged. Toolbar above, legend below (BL-5 / VP-3 placement).
 - **Frontier list** `_renderFrontierList(root, nodes, analysis, laneOrder, { scope })`, both widths, after the legend. Groups in order, zero-count groups omitted: **Needs you** (parked; epic scope only), **Next up** (first ready in lane order, else draw order), **In progress**, **Blocked** (planned with a stuck upstream; row says `blocked by <root> · N hops up`), **Ready**, **Queued** (planned, not ready, not stuck; row says `after <deps>`). Rows reuse EpicDashboard's row grammar (mono id chip, title link, status pill, wait line). **Done** folds into a strip (`N done · show`) when `done / live ≥ 0.5` or all done; otherwise done rows list under a Done label. Tapping a row selects the node exactly as tapping its pill does. Readiness, root causes, hop counts, and counts come from `GraphInsights` (FL-1c); grouping is widget-side set arithmetic.
-- **Detail card** `_renderDetailInline(host, node, …)`: the VP-4 labeled-rows panel (WAITING ON / UNMET PREREQUISITES / OUTCOME / GATES) plus ROOT CAUSE (FL-3's block: root blocker with its own glyph, status, jump link, hop count) and an OUTCOME row on every width (today's Outcome lives only in a hover tooltip). Actions: Open slice, Close. Mounted directly under the map on narrow and under the canvas on wide.
+- **Detail card** `_renderDetailInline(host, node, …)`: the VP-4 labeled-rows panel (WAITING ON / UNMET PREREQUISITES / OUTCOME / GATES) plus ROOT CAUSE (FL-3's block: root blocker with its own glyph, status, jump link, hop count) and an OUTCOME row on every width (the panel builder already renders it once outcomes are loaded; the compact presentation loads them the same way). Actions: Open slice, Close. Mounted directly under the map on narrow and under the canvas on wide.
 - **Project scope**: narrow renders one compact map per live epic stacked under the cluster header (BL-6 focus and the FL-4 `done/total` fraction + mini bar preserved), cross-epic edges drawn between compact pills, and one union frontier list across clusters with an epic chip per row and **no Needs-you group**. Wide keeps FL-5's global per-rank width rule.
 
 ### 6.2 OperatorStation (`platform/blueprints/project/helpers/operator-station.js`)
 
-- **Decide.** Each Needs-you item with an artifact gets a Decide button that opens an inline card: one line of plain-language context (the `why`), then Accept, Accept provisionally, Later, an authority field prefilled from `director_handle` (default `director`), and a muted line naming exactly what will be written. `_writeRatification(file, decision, authority)`:
+- **Decide.** Each Needs-you item with an artifact gets a Decide button that opens an inline card: one line of plain-language context (the `why`), then Accept and Later, an authority field prefilled from `director_handle` (default `director`), and a muted line naming exactly what will be written. `_writeRatification(file, decision, authority)`:
   1. Read the note. Locate the exact section `## Ratification — <full card name>` (the heading the coordinator writes). Require exactly one fenced `delivery-ratification` block in that section. Parse its JSON. Refuse if any key is outside the allowed set or if `decision` is already non-empty (already decided → no-op, card shows "decided, waiting for the coordinator").
-  2. Set `decision`, `accepted_at` (ISO-8601 with numeric offset, e.g. `2026-09-27T12:48:00-06:00`), `authority`. Re-serialise with the same two-space `JSON.stringify` the coordinator used, so the diff is three values.
+  2. Set `decision` to `accepted`, `accepted_at` (ISO-8601 with numeric offset, e.g. `2026-09-27T12:48:00-06:00`), `authority`. Re-serialise with the same two-space `JSON.stringify` the coordinator used, so the diff is three values.
   3. Validate `{ ...payload, artifact_path, section_heading, artifact_sha256: <64 zeros>, section_sha256: <64 zeros> }` with the delivery API's `validateRatificationReceipt` (the station already loads the contract module). Zero digests satisfy the shape only; the coordinator recomputes real digests at consume time. Any error → refuse inline with the reason, zero writes.
   4. Write via `RenderSafe.mutate({ path, mode: 'background', optimistic, write: () => vault.process(file, replaceBlock), revert })`. `replaceBlock` re-locates the block inside the freshly read content and replaces only the fenced JSON text; every other byte is preserved. Failure → one Notice, the card returns to undecided.
-  Items whose `why` says the artifact is missing render no Decide; they show the coordinator command to run from the repo (`backfill-ratifications --json`) with a copy button.
+  Items whose `ratification` field is null (their `why` says the artifact is missing) render no Decide; they show the coordinator command to run from the repo (`backfill-ratifications --json`) with a copy button. The station never calls `parseRatificationArtifact`: its mobile load path evaluates the contract with a crypto stub that throws, and `validateRatificationReceipt` with zero digests is the only contract call it needs.
 - **Priority.** A section listing In Planning epics from `<projectDir>/<slug>-board.md` (the same lane parser GraphView project scope uses) in board order with ▲ / ▼, and the painted lanes (In Progress, Blocked) read-only with `painted by the coordinator`. `_moveEpicLine(boardFile, epic, direction)` inside `RenderSafe.mutate` + `vault.process`: find the `## In Planning` heading and the next `## ` heading; collect the `- [ ] [[…]]` lines between them; refuse if the epic line is missing, appears twice, or the move would leave the lane; swap the two line strings; assert that the result differs from the input at exactly those two line indices before returning it. Optimistic reorder in the DOM; failure reverts and shows one Notice. The coordinator's candidate order is In Progress then In Planning by line order, so the swap changes what is claimed next.
-- **Text.** The retired `/delivery-status` name is replaced with `/sauce:status` wherever the station prints an instruction.
+- **Text.** The retired `/delivery-status` and `delivery:status` names are replaced with `/sauce:status` wherever the station prints an instruction. This lands in PH-5, which already owns the station file; in PH-7 it would push the touch zones past the six-zone cap.
 
 ### 6.3 Navigation, templates, dashboard
 
 - `ProjectChromeBar` Go ▾ gains **Loop Station**, existence-gated like the other destinations.
-- `platform/blueprints/project/templates/Epic.md` carries the GraphView block before EpicDashboard (intake-minted atlases already do; the shipped `applyEpicScaffoldHeal` and `applyEpicAtlasGraphFirstHeal` already cover existing atlases). The seed-vault `Gamma Epic.md` fixture is corrected to the same order.
+- `platform/blueprints/project/templates/Epic.md` gains the GraphView block between ProjectChromeBar and EpicDashboard (today the template has no GraphView block at all; intake-minted atlases already mount it graph-first, and the shipped `applyEpicAtlasGraphFirstHeal` covers existing atlases). The seed-vault `Gamma Epic.md` stays in its old order on purpose: it is the migration input that `VP-2C-SEED-1..9` in `run-seed-migrations.js` already prove is healed once, backed up, and byte-stable on the second install, so PH-7 touches neither the seed nor the installer.
 - `EpicDashboard` drops `_renderSlices`; keeps the lifecycle chip, segmented bar, count chips, and the Context pack / Runs / Lessons / Decisions / Docs tiles. Its 390px visual fixture is regenerated.
 
 ## 7. Data flow
@@ -136,23 +136,25 @@ Every guard ships with a named fixture that is red without the change and a docu
 
 - `PH5-ROUNDTRIP-VALIDATOR-OK`: a pending artifact in the coordinator's exact scaffold shape → station Accept → the output passes the real `delivery.parseRatificationArtifact(markdown, heading, { artifact_path })` with `ok: true`, and the coordinator's `consume-ratification` against a temp vault + fixture state consumes it.
 - `PH5-BYTES-OUTSIDE-BLOCK-IDENTICAL`: full-file diff shows exactly the three value changes.
-- `PH5-PROVISIONAL`: the second button writes `provisionally_accepted` and validates.
+- `PH5-DECISION-ENUM-GUARD`: the gesture writes `accepted` only; a mutant writing `provisionally_accepted` or `rejected` is RED because the round-trip consume refuses it (`ratification-decision-mismatch`); Later writes nothing.
+- `PH5-AUTHORITY-HANDLE`: `variables.director_handle` in `ranch/platform-config.json` prefills the authority field; absent, malformed, or unreadable config prefills `director`; the edited value is what is written.
 - `PH5-REFUSE-BEFORE-WRITE`: one case each for missing heading, two blocks, invalid JSON, unexpected key, already decided, invalid authority; zero writes recorded by the vault stub.
 - `PH5-REPLAY-NOOP`: Accept twice → one write.
-- `PH5-RENDERSAFE-MUTATE-ROUTE`: source scan finds the write only inside a `RenderSafe.mutate` call; `scripts/lint-gesture-writes.js` passes with zero new allowlist entries.
+- `PH5-RENDERSAFE-MUTATE-ROUTE`: a source scan in the station harness proves every `vault.process` sits inside the `write` property of a `RenderSafe.mutate` call (the lint's write pattern does not match `vault.process`, so this scan is the guard); `scripts/lint-gesture-writes.js` passes with zero new allowlist entries.
 - `PH5-FAILURE-NOTICE-REVERT`: a rejecting `vault.process` → one Notice, card undecided.
-- `PH5-MISSING-ARTIFACT-COMMAND`: an item whose `why` names a missing artifact renders the command and no Decide button.
+- `PH5-MISSING-ARTIFACT-COMMAND`: an item whose `ratification` is null renders the command and no Decide button; an item naming a pending artifact renders Decide beside the existing Ratify link.
+- `PH5-NO-RETIRED-COMMAND-TEXT`: source scan for printed `delivery-status` / `delivery:status` text in `operator-station.js` is empty.
+- `PH5-ROUNDTRIP-VALIDATOR-OK` builds its artifact with the coordinator's exported `scaffoldPendingRatifications` against a temp vault and an in-memory parked record with a passing gate receipt, never a hand-typed fixture.
 - `PH6-SWAP-ONLY-TWO-LINES`: against a byte copy of the real parent board (blank runs, `%% kanban:settings` block, EpicCreateAction block), move down → exactly two lines differ.
 - `PH6-REFUSE-MISSING-OR-DUPLICATE` and `PH6-REFUSE-LANE-BOUNDARY`.
 - `PH6-PAINTED-LANES-READ-ONLY`: In Progress and Blocked rows have no arrows.
 - `PH6-SELECTOR-READS-NEW-ORDER`: the coordinator's lane parser over the written board yields the new In Planning order.
-- Mutants (RED): accept a decision of `rejected`; write when already decided; swap across a lane boundary; call `vault.process` outside `RenderSafe.mutate` (lint red).
+- Mutants (RED): write `provisionally_accepted` or `rejected`; write when already decided; skip the validator; swap across a lane boundary; move `vault.process` outside `RenderSafe.mutate` (source scan red).
 
 ### 9.5 Cohesion and hygiene
 
-- `PH7-TEMPLATE-GRAPH-FIRST`: `Epic.md` emits GraphView before EpicDashboard; an `HC-…-SEED-MIGRATE` family proves a seeded atlas in the old order is healed and a healed one is byte-stable on replay.
+- `PH7-TEMPLATE-GRAPH-FIRST`: `Epic.md` mounts ProjectChromeBar, GraphView, EpicDashboard in that order exactly once each, asserted beside `ES2D-ENTITY-SCAFFOLD` in `run-epic-dashboard.js`; `VP-2C-SEED-1..9` stay green with the seed untouched.
 - `PH7-GO-MENU-LOOP-STATION-GATED`: the destination appears only when the note exists (chrome-bar harness).
-- `PH7-NO-RETIRED-COMMAND-TEXT`: source scan for `delivery-status` / `delivery:status` in `operator-station.js` is empty.
 - `PH8-SUMMARY-AND-TILES-ONLY`: EpicDashboard renders no Slices label; count chips and tiles keep their assertions; the 390px fixture is regenerated and the CDP geometry proof stays green.
 - Every graph slice re-pins `run-graph-view-focus-contract.js`'s digest of the harness and updates the exact-text sentinels in `run-graph-view-contract.js` in the same commit.
 - `lint-display-markers`, `lint-note-chrome`, `lint-cold-load`, `lint-gesture-writes`, `lint-schemas` green with no baseline growth.
@@ -165,15 +167,15 @@ Two chains that run in parallel because their touch zones differ, then the cohes
 | # | Outcome | Touch zones | Depends on | Profile |
 | :--: | --- | --- | :--: | :--: |
 | PH-1 | Width resolver, compact map at epic scope, inline detail card with Outcome | `graph-view.js`, `run-graph-view.js`, `run-graph-view-focus-contract.js` (re-pin) | — | standard |
-| PH-2 | Frontier list and done strip, both widths, epic scope; carries FL-2 and FL-3 findings | `graph-view.js`, `run-graph-view.js` | FL-1c | standard |
+| PH-2 | Frontier list and done strip, both widths, epic scope; carries FL-2 and FL-3 findings | `graph-view.js`, `run-graph-view.js`, focus-contract and contract re-pins | FL-1c, PH-1 | standard |
 | PH-3 | Project scope: compact clusters, union list without Needs you, cross-epic edges; carries FL-4 and FL-5 findings | `graph-view.js`, `run-graph-view.js` | PH-2 | standard |
 | PH-4 | Visual proof harness at 390 and 1024, light and dark, in preflight | `platform/test/visual/graph-view.html`, `run-graph-view-visual.js`, `preflight-manifest.json`, `package.json` | PH-3 | standard |
-| PH-5 | Decide gesture with validator gate and coordinator round-trip proof | `operator-station.js`, `run-operator-station.js`, `visual/operator-station.html` | — | heavy |
+| PH-5 | Decide gesture with validator gate and coordinator round-trip proof; retired command text | `operator-station.js`, `run-operator-station.js`, `visual/operator-station.html` | — | heavy |
 | PH-6 | Priority gesture with byte-exact swap and selector-order proof | `operator-station.js`, `run-operator-station.js` | PH-5 | heavy |
-| PH-7 | Cohesion: Epic template, seed fixture and migrate family, Go ▾ entry, retired command text | `templates/Epic.md`, seed vault, `run-seed-migrations.js`, `project-chrome-bar.js`, `run-project-chrome-bar.js`, `operator-station.js` | PH-6 | standard |
+| PH-7 | Cohesion: Epic template graph-first block, Go ▾ Loop Station entry | `templates/Epic.md`, `run-epic-dashboard.js`, `project-chrome-bar.js`, `run-project-chrome-bar.js` | PH-6 | standard |
 | PH-8 | EpicDashboard keeps summary and tiles, drops Slices | `epic-dashboard.js`, `run-epic-dashboard.js`, `visual/epic-dashboard.html` | PH-2 | standard |
 
-Board position: In Planning, at the top. FL-2..FL-5 are discarded at mint with `carried_findings` naming FL-2's ready/next markers, FL-3's triage line, needs-you marker and root-cause block, FL-4's cluster progress, and FL-5's global per-rank width rule; each name must appear in a PH-2 or PH-3 fixture.
+Board position: In Planning, at the top. FL-2..FL-5 are discarded at mint with `carried_findings` naming FL-2's ready/next markers, FL-3's triage line, needs-you marker and root-cause block, FL-4's cluster progress, and FL-5's global per-rank width rule; each name must appear in a PH-2 or PH-3 fixture. A card names one `supersedes` predecessor on the rail, so PH-2 supersedes FL-2 and PH-3 supersedes FL-4 formally, and FL-3 and FL-5 are discarded with the same coordinator verb naming the same successors and carried fixtures.
 
 ## 11. Findings recorded, not fixed here
 
@@ -181,6 +183,8 @@ Board position: In Planning, at the top. FL-2..FL-5 are discarded at mint with `
 - Three Needs-you items have no ratification artifact today, so the park-time scaffold is not firing. Coordinator-side.
 - Slice notes minted by intake carry only a chrome bar above raw contract frontmatter; a slim status header (chip, wait reason, back-to-graph link) belongs there. Candidate for sub-project 2 or a follow-up here.
 - The sauce plugin's skill bodies that say "open the atlas GraphView" (`plan`, `block-review`) should also name the Loop Station once it is in the Go menu. Text-only; GV-R3 precedent.
+- The coordinator's consume path accepts only `decision: accepted` while the contract enum also lists `provisionally_accepted`. Widening consume, then re-adding the provisional button to Decide, is one coordinator-side slice.
+- `scripts/lint-gesture-writes.js` matches `processFrontMatter`, `vault.modify`, and `vault.create` but not `vault.process`; two shipped helpers already call `vault.process` inside gestures. Extending the pattern is a lint slice with its own allowlist review.
 
 ## 12. Risks
 
