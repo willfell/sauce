@@ -36,7 +36,7 @@ Every skill starts by resolving this file (`scripts/loop-config.js resolve --jso
 
 ## Skills
 
-`init` · `status` · `review` · `propose` · `plan` (prompts for id prefix + board priority before minting) · `execute` (in-session, sub-agent per slice, full quorum) · `loop` (one bounded autonomous turn) · `intake`.
+`init` · `status` · `review` · `propose` · `plan` (prompts for id prefix + board priority before minting) · `execute` (in-session, sub-agent per slice, full quorum) · `loop` (one bounded autonomous turn) · `intake` · `block-review` (detect + heal dangling `depends_on` rot).
 
 Non-negotiables baked into every body: the coordinator is the sole board writer, card-intake the sole planning writer; Gate B + the three sequential review lenses never weaken; receipts decide truth.
 

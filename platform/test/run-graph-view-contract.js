@@ -86,6 +86,262 @@ for (const [label, predicate] of [
 check(!/\bassert(?:\.ok)?\s*\(\s*true\b/.test(behavior),
   'BL5C-SENTINEL-NO-UNCONDITIONAL-ASSERT: behavior harness contains no assert(true) substitution');
 
+// PH-1 phone-first sentinels (independent of the behavioral harness's own
+// scans): the width resolver's order, the DOM-measurement containment, the
+// cold-load one-shot installer's source shape, the compact map's reuse of the
+// edge and selection seams, the inline detail card, and the behavior
+// harness's PH-1 markers.
+const resolver = section(widget, '  _resolveWidth(dv, overrides) {', '\n  // Cold-load one-shot (PH-1c).');
+const disarmColdLoad = section(widget, '  _disarmColdLoad(container) {', '\n  // An armed one-shot is two observers');
+const oneShot = section(widget, '  _installColdLoadObserver(dv, overrides, root, resolved) {', '\n  async render(dv, overrides) {');
+const renderEntry = section(widget, '  async render(dv, overrides) {', '\n  // The body of render().');
+const renderBody = section(widget, '  async _renderAtWidth(dv, overrides, decided) {', '\n}\n');
+const compactMap = section(widget, '  async _renderCompactMap(root, result, api, source, warnings, geometry) {', '\n  // One id pill per slice');
+const inlineCard = section(widget, '  _renderDetailInline(host, node, context) {', '\n  // Stuck filtering consumes GraphInsights closures only.');
+check(resolver.length > 0 && disarmColdLoad.length > 0 && oneShot.length > 0 && renderEntry.length > 0 && renderBody.length > 0
+  && compactMap.length > 0 && inlineCard.length > 0,
+'PH1-SENTINEL-SEAMS: _resolveWidth, _disarmColdLoad, the cold-load one-shot installer, render, _renderAtWidth, _renderCompactMap, and _renderDetailInline are present');
+const returnOrder = ['source: "override"', 'source: "measured"', 'source: "mobile-class"'].map((token) => resolver.indexOf(token));
+check(returnOrder.every((index) => index >= 0)
+  && returnOrder[0] < returnOrder[1] && returnOrder[1] < returnOrder[2]
+  && resolver.indexOf('overrides.containerWidth') < resolver.indexOf('clientWidth')
+  && resolver.indexOf('clientWidth') < resolver.indexOf('_isMobileBody()')
+  && resolver.indexOf('_isMobileBody()') < resolver.lastIndexOf('return wide;'),
+'PH1-SENTINEL-WIDTH-ORDER: width resolves override, then measured clientWidth, then the is-mobile body class, then default');
+check(resolver.includes('narrow: false, source: "default"') && (resolver.match(/return wide;/g) || []).length === 2,
+  'PH1-SENTINEL-WIDTH-DEFAULT: the default resolution is wide, on the fall-through and on any throw');
+check(resolver.includes('const explicit = typeof raw === "number" ? raw : NaN;')
+  && resolver.includes('try { measured = Number(dv?.container?.clientWidth); } catch (_e) { measured = NaN; }')
+  && resolver.indexOf('catch (_e) { measured = NaN; }') < resolver.indexOf('if (this._isMobileBody())'),
+'PH1-SENTINEL-UNREADABLE-IS-UNMEASURED: only a number is an override, and a width read that throws is unmeasured and still reaches the is-mobile check');
+check(!widget.replace(resolver, '').includes('clientWidth') && !widget.replace(oneShot, '').includes('ResizeObserver')
+  && !widget.replace(oneShot, '').includes('MutationObserver') && !/matchMedia|\bdv\.current\b|isConnected/.test(widget),
+'PH1-SENTINEL-MEASUREMENT-CONTAINED: clientWidth appears only inside _resolveWidth, ResizeObserver and MutationObserver only inside the one-shot installer, and matchMedia, dv.current, and isConnected nowhere');
+check(disarmColdLoad.includes('if (container && typeof container === "object") this._coldLoads?.get(container)?.disarm();')
+  && oneShot.includes('this._disarmColdLoad(container);\n      if (!this._coldLoads) this._coldLoads = new WeakMap();')
+  && oneShot.includes('owners.set(container, armed);')
+  && oneShot.includes('if (owners.get(container) === armed) owners.delete(container);')
+  && renderBody.indexOf('this._disarmColdLoad(dv && typeof dv === "object" ? dv.container : null);') >= 0
+  && renderBody.indexOf('this._disarmColdLoad(') < renderBody.indexOf('const RS = globalThis.customJS?.RenderSafe;')
+  && (widget.match(/this\._coldLoads\s*=[^=]/g) || []).length === 1
+  && (oneShot.match(/this\._[A-Za-z]+\s*=[^=]/g) || []).join() === 'this._coldLoads = ',
+'PH1-SENTINEL-PER-CONTAINER-DISARM: the armed one-shot is owned per mount container in one WeakMap keyed by dv.container, every render disarms its container\'s one-shot before it reads RenderSafe, and every install disarms it too');
+check(oneShot.includes('const removed = () => root.parentNode !== container;')
+  && oneShot.includes('if (removed()) return null;')
+  && oneShot.includes('if (removed()) { armed.disarm(); return; }')
+  && oneShot.includes('if (removed()) armed.disarm();')
+  && oneShot.includes('childList.observe(container, { childList: true });')
+  && (oneShot.match(/new Mutation\(/g) || []).length === 1
+  && (oneShot.match(/resize\.observe\(root\);/g) || []).length === 1,
+'PH1-SENTINEL-CHILDLIST-WATCH: removal is root.parentNode !== container, seen by a childList watch on the container and re-checked in the resize callback, and an already-removed root arms nothing');
+check(oneShot.includes('const unmeasured = resolved?.source === "default" || resolved?.source === "mobile-class";')
+  && oneShot.includes('if (!root || !container || typeof container !== "object" || !unmeasured || typeof Resize !== "function") return null;')
+  && oneShot.includes('const fresh = this._resolveWidth(dv, overrides);\n          if (fresh.source !== "measured") return;\n          armed.disarm();\n          this._renderAtWidth(dv, overrides, fresh);')
+  && renderEntry.includes('return this._renderAtWidth(dv, overrides, null);')
+  && renderBody.includes('const resolved = decided && decided.source === "measured" ? decided : this._resolveWidth(dv, overrides);')
+  && (oneShot.match(/this\._renderAtWidth\(/g) || []).length === 1
+  && (widget.match(/this\._renderAtWidth\(dv, overrides, fresh\)/g) || []).length === 1
+  && !/contentRect|entries|this\.render\(/.test(oneShot),
+'PH1-SENTINEL-RESOLVED-HANDOFF: only an unmeasured render arms; a notification re-resolves the same measurement (never the notification box), and the first measured resolution disarms before the only _renderAtWidth call in the installer, which is handed that resolution so the re-render reads no width');
+check((oneShot.match(/\.disconnect\(\)/g) || []).length === 2
+  && !widget.replace(oneShot, '').includes('.disconnect(')
+  && oneShot.includes('try { resize?.disconnect(); } catch (_e) { /* already disconnected */ }')
+  && oneShot.includes('try { childList?.disconnect(); } catch (_e) { /* already disconnected */ }')
+  && oneShot.includes('armed?.disarm();\n      return null;'),
+'PH1-SENTINEL-ONE-DISARM: one disarm routine disconnects both observers, and the installer\'s catch calls it');
+for (const identifier of [
+  '_flipStreak', '_flipStreaks', '_widthFlipAllowed', 'settleCheck', 'boundedCheck', 'bistable', 'withinBand',
+  'sawCompactWide', 'sawWideNarrow', '_handoffWidthRender', '_beginWidthRender', '_resetWidthState', '_widthState',
+  '_widthHandoffs', '_installWidthObserver', 'setTimeout', 'clearTimeout', 'setInterval', 'requestAnimationFrame',
+]) check(!widget.includes(identifier), `PH1-SENTINEL-NO-CONTINUOUS-OBSERVER: graph-view.js contains no ${identifier}`);
+check(!/\bband\b|\bsettle|\bstreak|\bdebounce/i.test(widget),
+  'PH1-SENTINEL-NO-CONTINUOUS-OBSERVER: graph-view.js carries no band, settle, streak, or debounce state');
+check(renderBody.indexOf('const resolved = ') >= 0
+  && renderBody.indexOf('const resolved = ') < renderBody.indexOf('previous?.remove?.();')
+  && (renderBody.match(/this\._resolveWidth\(/g) || []).length === 1
+  && renderBody.includes('this._installColdLoadObserver(dv, overrides, root, resolved);')
+  && (widget.match(/this\._installColdLoadObserver\(/g) || []).length === 1,
+'PH1-SENTINEL-ONE-LAYOUT-STATE: a render resolves the width at most once, before removing the previous root, and is the only caller of the one-shot installer');
+check(compactMap.includes('this._edgeSvg(') && compactMap.includes('this._selectionController({')
+  && compactMap.includes('this._loadOutcomes(') && !/new\s+ResizeObserver|querySelector|getBoundingClientRect|offsetWidth/.test(compactMap),
+'PH1-SENTINEL-COMPACT-REUSE: the compact map calls _edgeSvg, _selectionController, and _loadOutcomes, and contains no new ResizeObserver, querySelector, getBoundingClientRect, or offsetWidth');
+check(inlineCard.includes('this._renderDetailPanel(host,') && !/position:\s*fixed|document\.body|appendChild/.test(inlineCard),
+  'PH1-SENTINEL-INLINE-CARD: the detail card is the shared labeled-rows builder on its host, never a body-fixed overlay');
+check(!/position:\s*fixed/.test(widget), 'PH1-SENTINEL-NO-FIXED: GraphView positions nothing fixed');
+for (const marker of [
+  'PH1C-WIDTH-RESOLUTION', 'PH1C-NO-SIDEWAYS-SCROLL', 'PH1C-SHORT-ID-RULE', 'PH1C-FALLBACK-DOCUMENTED',
+  'PH1C-WIDE-BYTE-IDENTICAL', 'PH1C-DETAIL-INLINE-OUTCOME', 'PH1C-NO-CONTINUOUS-OBSERVER', 'PH1C-ONE-SHOT-COLD-LOAD',
+  'PH1C-UNMEASURED-RECOVERS', 'PH1C-ONE-SHOT-NO-LEAK', 'PH1C-ONE-SHOT-USES-ITS-MEASUREMENT', 'PH1C-ONE-SHOT-LATE-ATTACH',
+]) check(behavior.includes(marker), `PH1-SENTINEL-BEHAVIOR-MARKER: missing ${marker}`);
+for (const token of [
+  'PH1-OBSERVER-DISAGREEMENT-LOOP', 'PH1-FLIP-CAP-LOST-CROSSING', 'PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT',
+  'PH1B-PERMANENT-HOLD', 'PH1B-FALSE-BISTABLE-PROOF', 'PH1B-THROWING-GETTER-DROPS-CROSSING',
+  'PH1-BROWSER-LIKE-OBSERVER-STUB', 'PH1-EIGHT-RANKS-OVERFLOW', 'PH1-OVERRIDE-NUMBER-ONLY', 'PH1-WIDE-DIGEST-PINS',
+  'PH1-GLYPH-SITE-COUNT-FIVE',
+]) {
+  check(new RegExp(`['\`][^'\`\\n]*${token}|// MUTATION GUARD: [^\\n]*${token}`).test(behavior),
+    `PH1-SENTINEL-CARRIED-FINDING: ${token} appears in a string literal or a MUTATION GUARD comment`);
+}
+for (const mutant of [
+  'PH1-MUTANT-DROP-CLAMP', 'PH1-MUTANT-THRESHOLD-INCLUSIVE', 'PH1-MUTANT-SKIP-MOBILE-CLASS', 'PH1C-MUTANT-COERCED-OVERRIDE',
+  'PH1C-MUTANT-OBSERVER-AFTER-MEASURED', 'PH1C-MUTANT-ONE-SHOT-TWICE', 'PH1-MUTANT-FIXED-OVERLAY',
+  'PH1-MUTANT-RERENDER-EVERY-TICK', 'PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT', 'PH1C-MUTANT-KEEP-PARTIAL-HOST',
+  'PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY', 'PH1C-MUTANT-PER-INSTANCE-KEY', 'PH1C-MUTANT-ISCONNECTED-REMOVAL',
+  'PH1C-MUTANT-RERENDER-REREADS',
+]) {
+  check(behavior.includes(`// MUTATION GUARD: ${mutant} turns RED`)
+    && new RegExp(`['\`]${mutant}[ :(]`).test(behavior),
+  `PH1-SENTINEL-MUTANT: ${mutant} is named in a MUTATION GUARD comment and leads a string literal`);
+}
+// PH-1d sentinels: the listed PH1D-* markers, the listed PH1C-* finding tokens,
+// the listed PH-1d mutants' MUTATION GUARD comments, and the behavior
+// harness's assertion floor and exit guard.
+for (const marker of [
+  'PH1D-GEOMETRY-BOUNDARIES', 'PH1D-PILL-PRESENTATION', 'PH1D-ONE-SHOT-BRANCHES', 'PH1D-FAIL-SOFT-ROLLBACK',
+  'PH1D-HARNESS-FLOOR',
+]) check(new RegExp(`['\`]${marker} \\(PH1C-`).test(behavior), `PH1D-SENTINEL-BEHAVIOR-MARKER: ${marker} (PH1C-...) leads a string literal`);
+for (const token of [
+  'PH1C-SHORT-ID-BOUNDARY', 'PH1C-SCROLL-BOUNDARY', 'PH1C-SIBLING-CHANGE-KEEPS-ARMED', 'PH1C-RESIZE-CALLBACK-REMOVAL',
+  'PH1C-FAIL-SOFT-WARNING-ROLLBACK', 'PH1C-PILL-TINTS', 'PH1C-SVG-SIZED-TO-CANVAS', 'PH1C-RENDER-START-DISARM',
+  'PH1C-ARM-ONLY-WHILE-ATTACHED', 'PH1C-HARNESS-NOT-VACUOUS', 'PH1C-NEEDS-YOU-NOT-ON-STUB',
+]) {
+  check(new RegExp(`['\`]PH1D-[A-Z-]+ \\(${token}\\): `).test(behavior),
+    `PH1D-SENTINEL-CARRIED-FINDING: ${token} appears in parentheses after a PH1D-* marker that leads a string literal`);
+}
+for (const mutant of [
+  'PH1D-MUTANT-SHORT-ID-BELOW-71', 'PH1D-MUTANT-SHORT-ID-BELOW-73', 'PH1D-MUTANT-SHORT-ID-INCLUSIVE',
+  'PH1D-MUTANT-SCROLL-INCLUSIVE', 'PH1D-MUTANT-ALLOWANCE-ALWAYS', 'PH1D-MUTANT-ALLOWANCE-NEVER',
+  'PH1D-MUTANT-SCROLLER-PADDING-FIXED', 'PH1D-MUTANT-UNTINTED-BORDER', 'PH1D-MUTANT-UNTINTED-BACKGROUND',
+  'PH1D-MUTANT-SVG-SIZED-TO-W', 'PH1D-MUTANT-NEEDS-YOU-ON-STUB', 'PH1D-MUTANT-DISARM-ON-ANY-CHILDLIST',
+  'PH1D-MUTANT-RESIZE-IGNORES-REMOVAL', 'PH1D-MUTANT-NO-RENDER-START-DISARM', 'PH1D-MUTANT-ARM-AFTER-REMOVAL',
+  'PH1D-MUTANT-NO-WARNING-ROLLBACK', 'PH1D-MUTANT-NARROW-NEVER-SETTLES', 'PH1D-MUTANT-COLD-LOAD-NEVER-SETTLES',
+]) {
+  check(behavior.includes(`// MUTATION GUARD: ${mutant} turns RED`),
+    `PH1D-SENTINEL-MUTANT: ${mutant} is named in a MUTATION GUARD comment`);
+}
+// PH-1d repair markers and their mutants. An entry with IDs carries them in
+// parentheses after the marker; a null entry carries none.
+for (const [marker, ids] of [
+  ['PH1D-RESOLVED-WIDTH-BOUND', 'F10, F12'], ['PH1D-COLUMN-FORMULA', 'G21, G50'], ['PH1D-NARROW-WARNINGS', 'F11'],
+  ['PH1D-HAIRLINE-CASCADE', 'P23'], ['PH1D-COMPACT-HOST-GRID', 'C12'], ['PH1D-RESIZE-REMOVAL-UNMEASURED', 'O25'],
+  ['PH1D-OBSERVE-FAILURE', 'O28'], ['PH1D-SHORT-ID-UNPARSEABLE', 'L04'], ['PH1D-GLYPH-COLOUR', 'P12'],
+  ['PH1D-MOBILE-CLASS-READ', null], ['PH1D-COMPACT-DECLARATIONS', null], ['PH1D-STUB-VIOLATIONS', null],
+  ['PH1D-FAILSOFT-CHROME', null], ['PH1D-STUB-CLOSE', null], ['PH1D-ROLLBACK-TO-BEFORE', null],
+  ['PH1D-MEASURED-WIDE-PIN', null], ['PH1D-EMPTY-NARROW', null],
+  ['PH1D-MEASURED-FINITE', null], ['PH1D-RESOLVER-FAULT', null], ['PH1D-POSITIVE-WIDTHS', null],
+  ['PH1D-ARGS-OBJECT-ONLY', null], ['PH1D-GEOMETRY-RANKS', null], ['PH1D-HANDOFF-BOUNDARY', null],
+  ['PH1D-ONE-SHOT-HANDOFF-BOUNDARY', null], ['PH1D-ONE-SHOT-AFTER-RENDER-ERROR', null],
+  ['PH1D-ONE-SHOT-SINGLE-OWNER', null], ['PH1D-ONE-SHOT-ROOT-MOVED', null], ['PH1D-EARLY-RETURN-DISARM', null],
+  ['PH1D-ONE-SHOT-MEASURED-ONLY', null], ['PH1D-ONE-SHOT-KEEPS-ARGS', null],
+  ['PH1D-FRACTIONAL-WIDTH', null], ['PH1D-MANY-RANKS', null], ['PH1D-MULTI-ROW', null], ['PH1D-STUB-ROWS', null],
+  ['PH1D-EDGE-BEND', null], ['PH1D-VERY-WIDE', null], ['PH1D-TINY-WIDTH', null], ['PH1D-CARD-UNDER-CANVAS', null],
+  ['PH1D-DETAIL-BUTTONS', null], ['PH1D-ONE-SHOT-SAME-PRESENTATION', null], ['PH1D-MUTATION-API-NOT-A-FUNCTION', null],
+  ['PH1D-CONTAINER-REPLACED', null],
+  ['PH1D-COMPACT-WIDE-PARITY', null], ['PH1D-CARD-UNDER-MAP', null], ['PH1D-SHORT-ID-STUB', null],
+  ['PH1D-NONCANONICAL-STATUS', null], ['PH1D-ONE-DISARM', null], ['PH1D-ROOT-MOVED-DURING-RENDER', null],
+  ['PH1D-DECIDED-RENDER-DISARMS', null], ['PH1D-PARTIAL-RENDER-ARMS-NOTHING', null],
+  ['PH1D-SHORT-ID-MIXED', null], ['PH1D-STUB-WITHOUT-LABEL', null], ['PH1D-ONE-INSTANCE-TWO-EPICS', null],
+  ['PH1D-NO-RESIZE-LISTENERS', null], ['PH1D-PROJECT-SCOPE-WIDTH', null],
+  ['PH1D-INTERACT-WHILE-ARMED', null], ['PH1D-UNRECOGNIZED-STATUSES', null],
+]) {
+  const lead = ids ? `${marker} \\(${ids}\\): ` : `${marker}: `;
+  check(new RegExp(`['\`]${lead}`).test(behavior),
+    `PH1D-SENTINEL-REPAIR-MARKER: ${marker}${ids ? ` (${ids})` : ''} leads a string literal`);
+}
+for (const mutant of [
+  'PH1D-MUTANT-COMPACT-WIDTH-390', 'PH1D-MUTANT-COMPACT-WIDTH-CAPPED', 'PH1D-MUTANT-NUMERATOR-SINGLE-PAD',
+  'PH1D-MUTANT-NUMERATOR-PLUS-ONE', 'PH1D-MUTANT-COLUMN-BY-INDEX', 'PH1D-MUTANT-ZERO-WIDTH-ACCEPTED',
+  'PH1D-MUTANT-NARROW-WARNINGS-DROPPED', 'PH1D-MUTANT-HAIRLINE-BEFORE-SHORTHAND', 'PH1D-MUTANT-HOST-NO-MIN-WIDTH',
+  'PH1D-MUTANT-REMOVAL-AFTER-MEASURED-RETURN', 'PH1D-MUTANT-OBSERVE-FAILURE-KEEPS-ARMED', 'PH1D-MUTANT-SKIP-UNPARSEABLE-ID',
+  'PH1D-MUTANT-IDLESS-LABEL-EMPTY', 'PH1D-MUTANT-GLYPH-UNCOLOURED', 'PH1D-MUTANT-NO-CLASSNAME-FALLBACK',
+  'PH1D-MUTANT-CLASSNAME-SUBSTRING', 'PH1D-MUTANT-CLASSLIST-OR-CLASSNAME', 'PH1D-MUTANT-MOBILE-READ-FAULT-IS-MOBILE',
+  'PH1D-MUTANT-PILL-DECLARATION', 'PH1D-MUTANT-PILL-OUTSIDE-CANVAS', 'PH1D-MUTANT-ID-SPAN-DECLARATION',
+  'PH1D-MUTANT-MAP-DECLARATION', 'PH1D-MUTANT-MISSING-STATUS-DETAIL', 'PH1D-MUTANT-INERT-PILL-WITHOUT-INSIGHTS',
+  'PH1D-MUTANT-OWNERSHIP-PER-INSTALL', 'PH1D-MUTANT-OWNERSHIP-NOT-RECORDED', 'PH1D-MUTANT-FAILSOFT-REMOVES-EVERY-CHILD',
+  'PH1D-MUTANT-STUB-WITHOUT-CLOSE', 'PH1D-MUTANT-ROLLBACK-TO-ZERO', 'PH1D-MUTANT-MEASURED-WIDE-ATTRIBUTE',
+  'PH1D-MUTANT-EMPTY-NARROW-THROWS', 'PH1D-MUTANT-MEASURED-NOT-FINITE', 'PH1D-MUTANT-RESOLVER-RETHROWS',
+  'PH1D-MUTANT-OVERRIDE-AT-LEAST-ONE', 'PH1D-MUTANT-MEASURED-AT-LEAST-ONE', 'PH1D-MUTANT-MEASURED-PARSEINT',
+  'PH1D-MUTANT-ARGS-ANY-TRUTHY', 'PH1D-MUTANT-RANKS-ARGUMENT-IGNORED', 'PH1D-MUTANT-DERIVED-RANKS-DESCENDING',
+  'PH1D-MUTANT-ZERO-RANKS', 'PH1D-MUTANT-EMPTY-SET-SHARES-PREFIX', 'PH1D-MUTANT-COMPACT-RANKS-UNSORTED',
+  'PH1D-MUTANT-HANDOFF-MINUS-ONE', 'PH1D-MUTANT-HANDOFF-PLUS-ONE', 'PH1D-MUTANT-HANDOFF-EVEN', 'PH1D-MUTANT-HANDOFF-FLOOR',
+  'PH1D-MUTANT-ONE-SHOT-HANDOFF-MINUS-ONE', 'PH1D-MUTANT-ONE-SHOT-HANDOFF-PLUS-ONE', 'PH1D-MUTANT-ONE-SHOT-HANDOFF-EVEN',
+  'PH1D-MUTANT-NO-ARM-AFTER-RENDER-ERROR', 'PH1D-MUTANT-ARM-ONLY-WHEN-PRESENTED-OR-WIDE', 'PH1D-MUTANT-ARM-ONLY-AFTER-DRAWN-GRAPH',
+  'PH1D-MUTANT-NO-INSTALL-DISARM', 'PH1D-MUTANT-INSTALL-AFTER-CHROME', 'PH1D-MUTANT-INSTALL-BEFORE-AWAITS',
+  'PH1D-MUTANT-REMOVED-MEANS-NO-PARENT', 'PH1D-MUTANT-DISARM-AFTER-PAGE-CHECK', 'PH1D-MUTANT-DISARM-AFTER-SCOPE-CHECK',
+  'PH1D-MUTANT-INSTALL-IN-PROJECT-SCOPE', 'PH1D-MUTANT-FIRE-ON-OVERRIDE', 'PH1D-MUTANT-RERENDER-DROPS-ARGS',
+  'PH1D-MUTANT-GEOMETRY-WIDTH-ROUNDED', 'PH1D-MUTANT-GEOMETRY-WIDTH-CEIL', 'PH1D-MUTANT-COLUMN-NUMERATOR-ROUNDED',
+  'PH1D-MUTANT-COLUMN-NUMERATOR-CEIL', 'PH1D-MUTANT-SCROLL-TEST-ROUNDED', 'PH1D-MUTANT-SCROLL-TEST-CEIL',
+  'PH1D-MUTANT-HANDOFF-ROUNDED', 'PH1D-MUTANT-HANDOFF-CEIL', 'PH1D-MUTANT-RANK-CAP-12', 'PH1D-MUTANT-ROW-GAP-ONCE',
+  'PH1D-MUTANT-HEIGHT-ROW-GAP-ONCE', 'PH1D-MUTANT-ROW-COUNT-DISTINCT', 'PH1D-MUTANT-ROW-COUNT-WITHOUT-STUBS',
+  'PH1D-MUTANT-STUBS-IN-ROW-0', 'PH1D-MUTANT-BEND-THIRD-OF-SPAN', 'PH1D-MUTANT-VERY-WIDE-OVERRIDE-IGNORED',
+  'PH1D-MUTANT-VERY-WIDE-MEASUREMENT-IGNORED', 'PH1D-MUTANT-TINY-OVERRIDE-IGNORED', 'PH1D-MUTANT-TINY-MEASUREMENT-IGNORED',
+  'PH1D-MUTANT-TINY-GEOMETRY-REFUSED', 'PH1D-MUTANT-TINY-GEOMETRY-RAISED', 'PH1D-MUTANT-CARD-WITHOUT-SCROLLER-ANCHOR',
+  'PH1D-MUTANT-CLOSE-BUTTON-DECLARATION', 'PH1D-MUTANT-OPEN-BUTTON-DECLARATION', 'PH1D-MUTANT-ONE-SHOT-HANDS-ROUNDED',
+  'PH1D-MUTANT-ONE-SHOT-HANDS-CEIL', 'PH1D-MUTANT-HANDED-WIDTH-ROUNDED', 'PH1D-MUTANT-HANDED-WIDTH-CEIL',
+  'PH1D-MUTANT-ONE-SHOT-HANDS-FLOOR', 'PH1D-MUTANT-SKIP-WIDE-TO-WIDE', 'PH1D-MUTANT-SKIP-UNCHANGED-WIDTH',
+  'PH1D-MUTANT-MUTATION-API-TRUTHY', 'PH1D-MUTANT-FIRE-WITHOUT-DISARM', 'PH1D-MUTANT-FIRE-DISCONNECTS-RESIZE-ONLY',
+  'PH1D-MUTANT-REMOVAL-AGAINST-CURRENT-CONTAINER',
+  'PH1D-MUTANT-COMPACT-STUB-UNREGISTERED', 'PH1D-MUTANT-COMPACT-REGISTER-SLICES-AFTER-LEGEND',
+  'PH1D-MUTANT-COMPACT-ANALYSIS-WITHOUT-STUBS', 'PH1D-MUTANT-COMPACT-CONTROLLER-WITHOUT-CROSS-EDGES',
+  'PH1D-MUTANT-COMPACT-CONTROLLER-WITHOUT-STUBS', 'PH1D-MUTANT-COMPACT-STUB-REGISTERED-COMPLETED',
+  'PH1D-MUTANT-DIM-DONE-DIMS-STUBS', 'PH1D-MUTANT-COMPACT-LEGEND-REVERSED', 'PH1D-MUTANT-FILTERS-OVERRIDE-SELECTION',
+  'PH1D-MUTANT-COMPACT-STUB-REGISTERED-BLOCKED', 'PH1D-MUTANT-COMPACT-SUMMARY-WITHOUT-STUBS',
+  'PH1D-MUTANT-STUB-IN-LAST-COLUMN', 'PH1D-MUTANT-DEPENDENTS-RAW-COMPLETED', 'PH1D-MUTANT-STUB-PILL-OPENS-CARD-NAME',
+  'PH1D-MUTANT-LEGEND-ABOVE-MAP-WITH-STUBS', 'PH1D-MUTANT-STUB-FULL-ID-WHEN-SHORT', 'PH1D-MUTANT-NEEDS-YOU-RAW-STATUS',
+  'PH1D-MUTANT-HAIRLINE-RAW-STATUS', 'PH1D-MUTANT-HAIRLINE-LOWERCASED-STATUS', 'PH1D-MUTANT-OWNER-NEVER-DELETED',
+  'PH1D-MUTANT-DISARM-AFTER-RERENDER', 'PH1D-MUTANT-REMOVAL-DISCONNECTS-RESIZE-ONLY',
+  'PH1D-MUTANT-ARM-WHEN-ROOT-HAS-A-PARENT', 'PH1D-MUTANT-DECIDED-RENDER-SKIPS-DISARM',
+  'PH1D-MUTANT-INSTALL-BEFORE-WARNINGS', 'PH1D-MUTANT-COMPACT-UNRECOGNIZED-AS-PLANNING',
+  'PH1D-MUTANT-COMPACT-PILL-WITHOUT-STATUS-CLASS', 'PH1D-MUTANT-BOTH-FILTERS-IGNORE-STUCK',
+  'PH1D-MUTANT-BOTH-FILTERS-IGNORE-DIM-DONE',
+  'PH1D-MUTANT-SHORT-ID-PREFIX-FROM-SLICES', 'PH1D-MUTANT-IDLESS-STUB-ALLOWS-SHORT-IDS', 'PH1D-MUTANT-FOREIGN-STUB-STRIPPED',
+  'PH1D-MUTANT-SHORT-ID-SLICE-PREFIX-ONLY', 'PH1D-MUTANT-SHORT-IDS-FIVE-RANKS', 'PH1D-MUTANT-STUB-TOOLTIP-LABEL-ONLY',
+  'PH1D-MUTANT-COMPACT-SELECT-ON-INSTANCE', 'PH1D-MUTANT-COMPACT-OUTCOMES-ON-INSTANCE', 'PH1D-MUTANT-COMPACT-OUTCOMES-BY-COUNT',
+  'PH1D-MUTANT-WIDE-OUTCOMES-ON-INSTANCE', 'PH1D-MUTANT-MEASURED-PILLS-OPEN', 'PH1D-MUTANT-MEASURED-NO-OUTCOMES',
+  'PH1D-MUTANT-MOBILE-CLASS-UNREGISTERED', 'PH1D-MUTANT-MOBILE-CLASS-NO-OUTCOMES', 'PH1D-MUTANT-MOBILE-CLASS-PILLS-OPEN',
+  'PH1D-MUTANT-HANDOFF-PILLS-OPEN', 'PH1D-MUTANT-HANDOFF-UNREGISTERED', 'PH1D-MUTANT-HANDOFF-NO-OUTCOMES',
+  'PH1D-MUTANT-HANDOFF-SOURCE-LOST', 'PH1D-MUTANT-WINDOW-RESIZE-LISTENER', 'PH1D-MUTANT-WORKSPACE-RESIZE-LISTENER',
+  'PH1D-MUTANT-VIEWPORT-RESIZE-LISTENER', 'PH1D-MUTANT-PROJECT-BLANK-WHEN-NARROW', 'PH1D-MUTANT-PROJECT-EXTRA-HOST-WHEN-NARROW',
+  'PH1D-MUTANT-NARROW-DROPS-LAYOUT-WARNINGS-WITH-STUBS', 'PH1D-MUTANT-WARN-ONCE-PER-STATUS', 'PH1D-MUTANT-WARNING-DETAIL-TRIMMED',
+  'PH1D-MUTANT-LEGEND-SKIPS-STATUSLESS', 'PH1D-MUTANT-SELECT-DISARMS', 'PH1D-MUTANT-ONE-SHOT-SKIPS-OPEN-CARD',
+  'PH1D-MUTANT-ONE-SHOT-SKIPS-DIMMED', 'PH1D-MUTANT-RERENDER-KEEPS-ROOT-WITH-CARD', 'PH1D-MUTANT-OPEN-CARD-DISARMS-WITHOUT-RERENDER',
+  'PH1D-MUTANT-DIMMED-DISARMS-WITHOUT-RERENDER', 'PH1D-MUTANT-CLEAR-DISARMS', 'PH1D-MUTANT-OPEN-SLICE-DISARMS',
+  'PH1D-MUTANT-FILTER-TOGGLE-DISARMS', 'PH1D-MUTANT-PILL-TAP-DISARMS',
+]) {
+  check(new RegExp(`// MUTATION GUARD: ${mutant}(?: \\([A-Z0-9, ]+\\))? turns RED`).test(behavior),
+    `PH1D-SENTINEL-REPAIR-MUTANT: ${mutant} is named in a MUTATION GUARD comment`);
+}
+check(behavior.includes('const ph1StubViolations = [];')
+  && behavior.includes("ph1StubViolations.push('PH1-BROWSER-LIKE-OBSERVER-STUB: the widget watches its container childList only');")
+  && !/\bassert\([^;]*'PH1-BROWSER-LIKE-OBSERVER-STUB: the widget watches its container childList only'\);/.test(behavior)
+  && behavior.includes('assert.deepStrictEqual(ph1StubViolations, [], `PH1D-STUB-VIOLATIONS: ${label}:'),
+'PH1D-SENTINEL-STUB-VIOLATIONS: the childList-only stub check records into ph1StubViolations rather than asserting, and the settled() assertion checks that record is empty');
+const floorMatch = behavior.match(/\nconst ASSERTION_FLOOR = (\d+);\n/);
+check(Boolean(floorMatch) && Number(floorMatch[1]) > 0
+  && behavior.includes("const nodeAssert = require('assert');")
+  && !/\bconst assert = require\(/.test(behavior)
+  && /\nconst assert = Object\.assign\(counted\(nodeAssert\), nodeAssert, /.test(behavior)
+  && behavior.includes("process.on('exit', (code) => {")
+  && behavior.includes('if (harnessPassed || code !== 0) return;')
+  && behavior.includes('if (assertionCount < ASSERTION_FLOOR) {')
+  && (behavior.match(/\bfinishHarness\(\);/g) || []).length === 1
+  && /\n {2}finishHarness\(\);\n\}\n\nmain\(\)\.catch\(/.test(behavior)
+  && (behavior.match(/graph-view: all checks passed/g) || []).length === 1,
+'PH1D-SENTINEL-HARNESS-FLOOR: the behavior harness wraps assert in a counter, pins a positive ASSERTION_FLOOR, calls finishHarness() once as the last statement of main(), prints the pass line once, and installs the exit guard');
+
+check(JSON.stringify([...new Set(behavior.match(/PH1B-[A-Z-]+/g) || [])].sort()) === JSON.stringify([
+  'PH1B-FALSE-BISTABLE-PROOF', 'PH1B-PERMANENT-HOLD', 'PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT', 'PH1B-THROWING-GETTER-DROPS-CROSSING',
+]), 'PH1-SENTINEL-PH1C-LABELS: the PH1B-* tokens in the behavior harness are exactly the four listed');
+check((behavior.match(/class BrowserLikeResizeObserver \{/g) || []).length === 1
+  && behavior.includes('global.ResizeObserver = BrowserLikeResizeObserver;')
+  && (behavior.match(/class BrowserLikeMutationObserver \{/g) || []).length === 1
+  && behavior.includes('global.MutationObserver = BrowserLikeMutationObserver;')
+  && !/class ResizeObserverStub|PH1-RESIZE-THRESHOLD-ONLY|PH1-OBSERVER-OSCILLATION-BREAKER|PH1-MUTANT-NO-FLIP-CAP|PH1B-OBSERVER-CONVERGES|PH1B-CONVERGES/.test(behavior),
+'PH1-SENTINEL-BROWSER-LIKE-STUB: the behavior harness defines BrowserLikeResizeObserver and BrowserLikeMutationObserver once each, installs them as the globals, and matches none of the listed patterns');
+check(/const PH1_WIDE_DIGESTS = \{[\s\S]*?\n\};/.test(behavior)
+  && (behavior.match(/[0-9a-f]{64}/g) || []).length >= 10,
+'PH1-SENTINEL-WIDE-PINS: PH1_WIDE_DIGESTS is an object literal and the harness carries at least ten 64-hex literals');
+
 check(pkg.scripts?.['test:graph-view-contract'] === 'node platform/test/run-graph-view-contract.js',
   'BL5B-SENTINEL-REGISTRY: focused contract script is registered');
 // The release:preflight registration surface moved from a package.json chain
