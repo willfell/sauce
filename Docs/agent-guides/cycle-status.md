@@ -64,13 +64,13 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 | `boards` | 0.3.0 | — | `spice/boards/` |
 | `cowork` | 0.41.0 | `/cowork` | `spice/cowork/` |
 | `daily` | 0.27.1 | `/daily` | `spice/daily/` |
-| `journal` | 0.5.3 | — | `spice/journal/` |
+| `journal` | 0.5.3 | `/journal` | `spice/journal/` |
 | `meetings` | 0.19.4 | `/meetings` | `spice/meetings/` |
 | `people` | 0.9.0 | — | `spice/people/` |
-| `products` | 0.4.0 | — | `spice/products/` |
+| `products` | 0.4.0 | `/products` | `spice/products/` |
 | `project` | 1.64.0 | `/project` | `spice/projects/` |
 | `sticky-notes` | 0.11.7 | `/sticky-notes` | `spice/sticky-notes/` |
-| `teams` | 0.4.0 | — | `spice/teams/` |
+| `teams` | 0.4.0 | `/teams` | `spice/teams/` |
 | `to-do` | 0.29.1 | — | `spice/to-do/` |
 | `trips` | 0.10.3 | — | `spice/trips/` |
 | `finance` | 0.23.2 | — | `spice/finance/` |

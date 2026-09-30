@@ -58,9 +58,9 @@ cd /Users/willfell/obsidian/<vault-name>
 sauce update --bump-pins   # rewrites ranch/platform-subscription.json pins AND re-runs the installer
 ```
 
-The `sauce update --bump-pins` command preserves explicit version pins (anything not at `latest`) but advances `latest` pins to the workshop's current version, then runs the installer itself. After it finishes, run `sauce status` from inside the consumer vault to confirm drift is gone.
+The `sauce update --bump-pins` command rewrites every subscribed blueprint and mechanism pin to the version in the installed workshop's `platform/manifest.json` (`--keep-comparators` keeps a pin's comparator prefix such as `^`), then runs the installer itself. Components the vault does not subscribe to are reported and skipped. After it finishes, run `sauce status` from inside the consumer vault to confirm drift is gone.
 
-**There is no `sauce install` verb.** The CLI's full verb list is `bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|cleanup-project-type|reconcile-cowork|audit|vault|reinstall|doctor|link|unlink|seed|run|help` (`sauce help`). `sauce reinstall --all` re-runs the installer across every registered vault. To run the installer directly against a vault without going through `update` (the usual dogfood / heal-verification path, and what you want when the workshop is a local clone rather than the brew copy):
+**There is no `sauce install` verb.** The CLI's full verb list is `bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|cleanup-project-type|reconcile-cowork|audit|vault|reinstall|doctor|link|unlink|seed|run|help` (the `VERBS` table in `platform/cli/sauce-cli.js`; `sauce help` currently lists only nine of them). `sauce reinstall --all` re-runs the installer across every registered vault. To run the installer directly against a vault without going through `update` (the usual dogfood / heal-verification path, and what you want when the workshop is a local clone rather than the brew copy):
 
 ```bash
 node /opt/homebrew/opt/sauce/libexec/platform/install.js --vault <vault-path> --auto-approve

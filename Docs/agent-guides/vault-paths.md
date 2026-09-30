@@ -99,7 +99,7 @@ These paths appear in dated handoff / plan / result / prompt docs under `Docs/pl
 Before any write to a vault, run `ls <vault-path>` to confirm shape:
 
 - **Workshop** expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `plugins/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you are NOT in the workshop. STOP.
-- **Consumer** expected top-level: `spice/`, `ranch/`, `.claude/`, `.obsidian/`, plus the consumer's own personal content. No `platform/` or `commands/` (and no in-vault `pantry/` — that layout was retired in v0.36.0).
+- **Consumer** expected top-level: `spice/`, `ranch/`, `.claude/`, `.obsidian/`, plus the consumer's own personal content. No `platform/` or `commands/`. An in-vault `pantry/` is the retired pre-v0.36.0 layout; it is inert if it remains, as it still does in `ero-sauce`.
 
 The router's "Vault identity check" section enforces this as a pre-write gate.
 

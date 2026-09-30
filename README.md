@@ -4,7 +4,7 @@
 
 Sauce is an operating system for an Obsidian vault that you and your agents both use.
 
-It installs a versioned set of **blueprints** (daily notes, projects, meetings, tasks, finance, trips, wiki, reading queue, people, and more) and shared **mechanisms** into any vault through Homebrew. Every blueprint works by hand in Obsidian, with hubs, buttons, templates, and boards. Most also ship slash commands and skills, so Claude Code or Codex can work on the same notes you do. On top of that sit scheduled briefings (cowork), a graph engine that runs agent work from a note (`sauce run`), and a delivery loop that drives a Kanban board through review and release.
+It installs a versioned set of **blueprints** (daily notes, projects, meetings, tasks, finance, trips, wiki, reading queue, people, and more) and shared **mechanisms** into any vault through Homebrew. Every blueprint works by hand in Obsidian, with hubs, buttons, templates, and boards. Most also ship Claude Code slash commands and skills, so an agent can work on the same notes you do. On top of that sit scheduled briefings (cowork), a graph engine that runs agent work from a note (`sauce run`), and a delivery loop that drives a Kanban board through review and release.
 
 ## What you get
 
@@ -38,7 +38,7 @@ The point of Sauce is that there is one vault and two ways to work in it. Neithe
 
 **By hand, in Obsidian.** You open a hub, press a navigation button, press "New meeting", use a hotkey, drag a card across a Kanban board, or tick a checkbox on your phone. Notes are created from templates with the right frontmatter, and hubs find them by folder and frontmatter.
 
-**By agent, from a terminal or a schedule.** Claude Code or Codex runs a slash command or a skill against the same vault. The installer writes a router table into the vault's `CLAUDE.md`, so an agent knows where each kind of note lives and which command owns it without searching.
+**By agent, from a terminal or a schedule.** Claude Code runs a slash command or a skill against the same vault. Codex and other agents can read and write the same Markdown, but the installer ships the commands, skills, and router for Claude Code only. The installer writes a router table into the vault's `CLAUDE.md`, so an agent knows where each kind of note lives and which command owns it without searching.
 
 The same artifact answers to both:
 
