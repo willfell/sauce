@@ -46,4 +46,4 @@ Ask one question at a time; offer detected defaults. Gather:
 
 ## Read-only bind (observe mode)
 
-Binding a repo whose board is driven by ANOTHER loop implementation (e.g. a project not yet migrated to the shared coordinator) is legitimate: write the config, run `check`, use `/sauce:status` — but warn that write-path skills (`plan`, `execute`, `run`, `intake`) must not be used until the project's owner migrates it onto the shared rails. Record `"observe_only": true` under `policy` in that case; write-path skills refuse when they see it.
+Binding a repo whose board is driven by ANOTHER loop implementation (e.g. a project not yet migrated to the shared coordinator) is legitimate: write the config, run `check`, use `/sauce:status` — but warn that write-path skills (`plan`, `execute`, `loop`, `intake`) must not be used until the project's owner migrates it onto the shared rails. Record `"observe_only": true` under `policy` in that case; write-path skills refuse when they see it.

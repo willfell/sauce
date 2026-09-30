@@ -39,7 +39,7 @@ Before `--apply`, inspect the dry-run plan. Refuse any plan that: would alter an
 
 ## Supersede a predecessor
 
-Supersession discards the predecessor at mint time (board line + note deleted; tombstone only), so its learning must be carried by the successor or the successor is unmintable. On the superseding slice set `supersedes` (predecessor title), non-empty `carried_findings`, and non-empty `binding_fixtures` covering every carried finding name exactly (the script refuses otherwise: `supersede_coverage_missing` / `supersede_missing_fields`). The receipt includes `post_apply_instructions: [{discard: {card, superseded_by}}]` — intake never touches coordinator state; the loop executes the discard via `node <coordinator> discard --superseded-by <successor> --carried-fixture <fixture>`.
+Supersession discards the predecessor at mint time (board line + note deleted; tombstone only), so its learning must be carried by the successor or the successor is unmintable. On the superseding slice set `supersedes` (predecessor title), non-empty `carried_findings`, and non-empty `binding_fixtures` covering every carried finding name exactly (the script refuses otherwise: `supersede_coverage_missing` / `supersede_missing_fields`). The receipt includes `post_apply_instructions: [{discard: {card, superseded_by}}]` — intake never touches coordinator state; the loop executes the discard via `node <coordinator> discard --card "<predecessor>" --reason "<why>" --superseded-by "<successor>" --carried-fixture "<fixture>" --json`.
 
 ## Epic-native placement (post-cutover)
 
