@@ -9,7 +9,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.294.0` (last closed release)
+- **Workshop version:** `0.295.1` (last closed release)
 - **Most recent narrated cycle:** engine reintegration (shipped v0.292.0) — the Sauce engine runtime (`platform/engine/`), the always-on `engine` mechanism, `sauce run` / `sauce audit --engine`, and the retirement of the autoloop cron surface. Design: `Docs/plans/engine-reintegration.md`; agent guide: `Docs/agent-guides/engine.md`. See `Docs/plans/2026-09-22-v0.292.0-engine-reintegration-result.md`. v0.293.0 then renamed the delivery plugin from `mayo` to `sauce` (`/sauce:loop` replaces `/mayo:run`).
 
 - **Workshop version (previous):** `0.283.0` (closed 2026-08-05) — loop-integrity workstream 3 — a rail that fits: the `adopt` verb (verified out-of-band completion carrying PR + merge-SHA provenance, new terminal `adopted` ledger phase, projection refresh), stamp-provenance classification of untracked board members in `board-health`, `card_note_sha`/`foreign_write` detection of non-coordinator card writes, and a stable `concurrent_modification` refusal across the bulk-rewrite verbs. See `Docs/plans/2026-08-04-v0.283.0-ws3-a-rail-that-fits-result.md`.
@@ -68,7 +68,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 | `meetings` | 0.19.4 | `/meetings` | `spice/meetings/` |
 | `people` | 0.9.0 | — | `spice/people/` |
 | `products` | 0.4.0 | `/products` | `spice/products/` |
-| `project` | 1.64.0 | `/project` | `spice/projects/` |
+| `project` | 1.65.0 | `/project` | `spice/projects/` |
 | `sticky-notes` | 0.11.7 | `/sticky-notes` | `spice/sticky-notes/` |
 | `teams` | 0.4.0 | `/teams` | `spice/teams/` |
 | `to-do` | 0.29.1 | — | `spice/to-do/` |
