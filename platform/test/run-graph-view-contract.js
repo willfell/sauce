@@ -86,82 +86,106 @@ for (const [label, predicate] of [
 check(!/\bassert(?:\.ok)?\s*\(\s*true\b/.test(behavior),
   'BL5C-SENTINEL-NO-UNCONDITIONAL-ASSERT: behavior harness contains no assert(true) substitution');
 
-// PH-1 phone-first sentinels (independent of the behavioral harness's own
-// scans): the width resolver's order, the DOM-measurement containment, the
-// cold-load one-shot installer's source shape, the compact map's reuse of the
-// edge and selection seams, the inline detail card, and the behavior
-// harness's PH-1 markers.
-const resolver = section(widget, '  _resolveWidth(dv, overrides) {', '\n  // Cold-load one-shot (PH-1c).');
-const disarmColdLoad = section(widget, '  _disarmColdLoad(container) {', '\n  // An armed one-shot is two observers');
-const oneShot = section(widget, '  _installColdLoadObserver(dv, overrides, root, resolved) {', '\n  async render(dv, overrides) {');
+// PH-1 phone-first and PH-9c live-resize sentinels (independent of the
+// behavioral harness's own scans): the width resolver's order and its
+// scroller measurement, the DOM-measurement containment, the pane-width
+// watch's source shape and scoped timers, the compact map's reuse of the edge
+// and selection seams, the inline detail card, and the behavior harness's
+// markers.
+const escapeRegExp = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const resolver = section(widget, '  _resolveWidth(dv, overrides) {', '\n  // Disconnects the pane-width watch');
+const noteScroller = section(widget, '  _noteScroller(container) {', '\n  // Resolved ONCE per render');
+const disconnectWatch = section(widget, '  _disconnectWidthWatch(container) {', '\n  // Live pane resize (PH-9c).');
+const paneWatch = section(widget, '  _watchPaneWidth(dv, overrides, root, resolved) {', '\n  async render(dv, overrides) {');
 const renderEntry = section(widget, '  async render(dv, overrides) {', '\n  // The body of render().');
 const renderBody = section(widget, '  async _renderAtWidth(dv, overrides, decided) {', '\n}\n');
 const compactMap = section(widget, '  async _renderCompactMap(root, result, api, source, warnings, geometry) {', '\n  // One id pill per slice');
 const inlineCard = section(widget, '  _renderDetailInline(host, node, context) {', '\n  // Stuck filtering consumes GraphInsights closures only.');
-check(resolver.length > 0 && disarmColdLoad.length > 0 && oneShot.length > 0 && renderEntry.length > 0 && renderBody.length > 0
-  && compactMap.length > 0 && inlineCard.length > 0,
-'PH1-SENTINEL-SEAMS: _resolveWidth, _disarmColdLoad, the cold-load one-shot installer, render, _renderAtWidth, _renderCompactMap, and _renderDetailInline are present');
+check(resolver.length > 0 && noteScroller.length > 0 && disconnectWatch.length > 0 && paneWatch.length > 0 && renderEntry.length > 0
+  && renderBody.length > 0 && compactMap.length > 0 && inlineCard.length > 0,
+'PH1-SENTINEL-SEAMS: _resolveWidth, _noteScroller, _disconnectWidthWatch, the pane-width watch installer, render, _renderAtWidth, _renderCompactMap, and _renderDetailInline are present');
 const returnOrder = ['source: "override"', 'source: "measured"', 'source: "mobile-class"'].map((token) => resolver.indexOf(token));
 check(returnOrder.every((index) => index >= 0)
   && returnOrder[0] < returnOrder[1] && returnOrder[1] < returnOrder[2]
-  && resolver.indexOf('overrides.containerWidth') < resolver.indexOf('clientWidth')
-  && resolver.indexOf('clientWidth') < resolver.indexOf('_isMobileBody()')
+  && resolver.indexOf('overrides.containerWidth') < resolver.indexOf('this._noteScroller(container)')
+  && resolver.lastIndexOf('offsetWidth') < resolver.indexOf('_isMobileBody()')
+  && resolver.lastIndexOf('clientWidth') < resolver.indexOf('_isMobileBody()')
   && resolver.indexOf('_isMobileBody()') < resolver.lastIndexOf('return wide;'),
-'PH1-SENTINEL-WIDTH-ORDER: width resolves override, then measured clientWidth, then the is-mobile body class, then default');
+'PH1-SENTINEL-WIDTH-ORDER: width resolves override, then the note scroller\'s content width (the container\'s clientWidth without a scroller or a computed style), then the is-mobile body class, then default');
 check(resolver.includes('narrow: false, source: "default"') && (resolver.match(/return wide;/g) || []).length === 2,
   'PH1-SENTINEL-WIDTH-DEFAULT: the default resolution is wide, on the fall-through and on any throw');
 check(resolver.includes('const explicit = typeof raw === "number" ? raw : NaN;')
-  && resolver.includes('try { measured = Number(dv?.container?.clientWidth); } catch (_e) { measured = NaN; }')
-  && resolver.indexOf('catch (_e) { measured = NaN; }') < resolver.indexOf('if (this._isMobileBody())'),
-'PH1-SENTINEL-UNREADABLE-IS-UNMEASURED: only a number is an override, and a width read that throws is unmeasured and still reaches the is-mobile check');
-check(!widget.replace(resolver, '').includes('clientWidth') && !widget.replace(oneShot, '').includes('ResizeObserver')
-  && !widget.replace(oneShot, '').includes('MutationObserver') && !/matchMedia|\bdv\.current\b|isConnected/.test(widget),
-'PH1-SENTINEL-MEASUREMENT-CONTAINED: clientWidth appears only inside _resolveWidth, ResizeObserver and MutationObserver only inside the one-shot installer, and matchMedia, dv.current, and isConnected nowhere');
-check(disarmColdLoad.includes('if (container && typeof container === "object") this._coldLoads?.get(container)?.disarm();')
-  && oneShot.includes('this._disarmColdLoad(container);\n      if (!this._coldLoads) this._coldLoads = new WeakMap();')
-  && oneShot.includes('owners.set(container, armed);')
-  && oneShot.includes('if (owners.get(container) === armed) owners.delete(container);')
-  && renderBody.indexOf('this._disarmColdLoad(dv && typeof dv === "object" ? dv.container : null);') >= 0
-  && renderBody.indexOf('this._disarmColdLoad(') < renderBody.indexOf('const RS = globalThis.customJS?.RenderSafe;')
-  && (widget.match(/this\._coldLoads\s*=[^=]/g) || []).length === 1
-  && (oneShot.match(/this\._[A-Za-z]+\s*=[^=]/g) || []).join() === 'this._coldLoads = ',
-'PH1-SENTINEL-PER-CONTAINER-DISARM: the armed one-shot is owned per mount container in one WeakMap keyed by dv.container, every render disarms its container\'s one-shot before it reads RenderSafe, and every install disarms it too');
-check(oneShot.includes('const removed = () => root.parentNode !== container;')
-  && oneShot.includes('if (removed()) return null;')
-  && oneShot.includes('if (removed()) { armed.disarm(); return; }')
-  && oneShot.includes('if (removed()) armed.disarm();')
-  && oneShot.includes('childList.observe(container, { childList: true });')
-  && (oneShot.match(/new Mutation\(/g) || []).length === 1
-  && (oneShot.match(/resize\.observe\(root\);/g) || []).length === 1,
-'PH1-SENTINEL-CHILDLIST-WATCH: removal is root.parentNode !== container, seen by a childList watch on the container and re-checked in the resize callback, and an already-removed root arms nothing');
-check(oneShot.includes('const unmeasured = resolved?.source === "default" || resolved?.source === "mobile-class";')
-  && oneShot.includes('if (!root || !container || typeof container !== "object" || !unmeasured || typeof Resize !== "function") return null;')
-  && oneShot.includes('const fresh = this._resolveWidth(dv, overrides);\n          if (fresh.source !== "measured") return;\n          armed.disarm();\n          this._renderAtWidth(dv, overrides, fresh);')
+  && resolver.includes('      try {\n        const container = dv?.container;\n        const scroller = this._noteScroller(container);\n        const style = scroller && typeof globalThis.getComputedStyle === "function"\n          ? globalThis.getComputedStyle(scroller)\n          : null;\n        if (!style) {\n          measured = Number(container?.clientWidth);\n        } else {\n          const px = (name) => Number.parseFloat(style[name]);\n          const padding = px("paddingLeft") + px("paddingRight");\n          measured = String(style.scrollbarGutter || "").includes("stable")\n            ? Number(scroller.clientWidth) - padding\n            : Number(scroller.offsetWidth) - px("borderLeftWidth") - px("borderRightWidth") - padding;\n        }\n      } catch (_e) { measured = NaN; }')
+  && resolver.includes('return { width: measured, narrow: this._isNarrow(measured), source: "measured" };')
+  && resolver.indexOf('catch (_e) { measured = NaN; }') < resolver.indexOf('if (this._isMobileBody())')
+  && noteScroller.includes('const found = typeof container?.closest === "function"\n      ? container.closest(".markdown-preview-view, .cm-scroller")\n      : null;'),
+'PH9B-RESOLVER-SENTINEL (PH9-RESOLVER-SENTINEL-OFFSETWIDTH): only a number is an override; the measurement is the content width of dv.container.closest(".markdown-preview-view, .cm-scroller") from its computed style (clientWidth less padding under a stable scrollbar gutter, otherwise offsetWidth less borders and padding) with dv.container.clientWidth as the fallback, and a read that throws is unmeasured and still reaches the is-mobile check');
+check(!widget.replace(resolver, '').includes('clientWidth') && !widget.replace(resolver, '').includes('offsetWidth')
+  && !widget.replace(resolver, '').includes('getComputedStyle')
+  && !widget.replace(noteScroller, '').includes('.closest(')
+  && !widget.replace(paneWatch, '').includes('ResizeObserver') && !widget.replace(paneWatch, '').includes('MutationObserver')
+  && !/matchMedia|\bdv\.current\b|isConnected/.test(widget),
+'PH1-SENTINEL-MEASUREMENT-CONTAINED: clientWidth, offsetWidth, and getComputedStyle appear only inside _resolveWidth, .closest( calls appear only inside _noteScroller, ResizeObserver and MutationObserver only inside the watch installer, and matchMedia, dv.current, and isConnected nowhere');
+check(disconnectWatch.includes('if (container && typeof container === "object") this._widthWatches?.get(container)?.disconnect();')
+  && paneWatch.includes('this._disconnectWidthWatch(container);\n      if (!this._widthWatches) this._widthWatches = new WeakMap();')
+  && paneWatch.includes('owners.set(container, watch);')
+  && paneWatch.includes('if (owners.get(container) === watch) owners.delete(container);')
+  && renderBody.indexOf('this._disconnectWidthWatch(dv && typeof dv === "object" ? dv.container : null);') >= 0
+  && renderBody.indexOf('this._disconnectWidthWatch(') < renderBody.indexOf('const RS = globalThis.customJS?.RenderSafe;')
+  && (widget.match(/this\._widthWatches\s*=[^=]/g) || []).length === 1
+  && (paneWatch.match(/this\._[A-Za-z]+\s*=[^=]/g) || []).join() === 'this._widthWatches = ,this._paneWatches = ',
+'PH9C-SENTINEL-PER-CONTAINER-WATCH: the pane-width watch is owned per mount container in one WeakMap keyed by dv.container, every render disconnects its container\'s watch before it reads RenderSafe, and every install disconnects it too');
+check(paneWatch.includes('const removed = () => root.parentNode !== container;')
+  && paneWatch.includes('if (removed()) return null;')
+  && paneWatch.indexOf('if (removed()) return null;') < paneWatch.indexOf('this._disconnectWidthWatch(container);')
+  && paneWatch.includes('gone: () => removed() || (target !== container && this._noteScroller(container) !== target),')
+  && paneWatch.includes('if (watch.gone()) { watch.disconnect(); return; }')
+  && paneWatch.includes('if (removed()) watch.disconnect();')
+  && paneWatch.includes('for (const peer of [...peers]) if (peer.gone()) peer.disconnect();')
+  && paneWatch.includes('childList.observe(container, { childList: true });')
+  && (paneWatch.match(/new Mutation\(/g) || []).length === 1
+  && (paneWatch.match(/resize\.observe\(target\);/g) || []).length === 1
+  && paneWatch.includes('const target = this._noteScroller(container) || container;'),
+'PH9C-SENTINEL-WATCH-LIFECYCLE: one resize observer on the note scroll container (or the mount container), removal is root.parentNode !== container seen by a childList watch on the container and re-checked at every step, a container that left its scroll container is gone, a new watch disconnects gone watches on its scroll container, and an already-removed root watches nothing');
+check(paneWatch.includes('|| resolved.source === "override" || typeof Resize !== "function") return null;')
+  && paneWatch.includes('const drawnNarrow = resolved.narrow === true;\n      const drawnWidth = resolved.source === "measured" ? resolved.width : NaN;')
+  && paneWatch.includes('resize = new Resize(() => step("notify"));')
+  && paneWatch.includes('          const fresh = this._resolveWidth(dv, overrides);\n          if (fresh.source !== "measured") {\n            if (kind !== "recheck") arm(250, "recheck");\n            return;\n          }\n          if (fresh.narrow === drawnNarrow && (!fresh.narrow || fresh.width === drawnWidth)) { stopTimer(); return; }\n          if (kind === "notify") { arm(120, "debounce"); return; }\n          watch.disconnect();\n          this._renderAtWidth(dv, overrides, fresh);')
   && renderEntry.includes('return this._renderAtWidth(dv, overrides, null);')
   && renderBody.includes('const resolved = decided && decided.source === "measured" ? decided : this._resolveWidth(dv, overrides);')
-  && (oneShot.match(/this\._renderAtWidth\(/g) || []).length === 1
+  && (paneWatch.match(/this\._renderAtWidth\(/g) || []).length === 1
   && (widget.match(/this\._renderAtWidth\(dv, overrides, fresh\)/g) || []).length === 1
-  && !/contentRect|entries|this\.render\(/.test(oneShot),
-'PH1-SENTINEL-RESOLVED-HANDOFF: only an unmeasured render arms; a notification re-resolves the same measurement (never the notification box), and the first measured resolution disarms before the only _renderAtWidth call in the installer, which is handed that resolution so the re-render reads no width');
-check((oneShot.match(/\.disconnect\(\)/g) || []).length === 2
-  && !widget.replace(oneShot, '').includes('.disconnect(')
-  && oneShot.includes('try { resize?.disconnect(); } catch (_e) { /* already disconnected */ }')
-  && oneShot.includes('try { childList?.disconnect(); } catch (_e) { /* already disconnected */ }')
-  && oneShot.includes('armed?.disarm();\n      return null;'),
-'PH1-SENTINEL-ONE-DISARM: one disarm routine disconnects both observers, and the installer\'s catch calls it');
+  && !/contentRect|entries|this\.render\(/.test(paneWatch),
+'PH9C-SENTINEL-RESOLVED-HANDOFF: a notification only triggers a step, which, unless the watch is gone, re-resolves the same measurement (never the notification box); unmeasured keeps the drawn presentation and, except at the re-check, arms the re-check; a different presentation (wide against compact, or a compact width other than the width the render measured, which an unmeasured render lacks) arms the debounce at a notification and, at the debounce or the re-check, disconnects before the only _renderAtWidth call in the installer, which is handed that resolution so the re-render reads no width');
+check((paneWatch.match(/\.disconnect\(\)/g) || []).length === 7
+  && !widget.replace(paneWatch, '').replace(disconnectWatch, '').includes('.disconnect(')
+  && paneWatch.includes('try { stopTimer(); } catch (_e) { /* already cleared */ }')
+  && paneWatch.includes('try { resize?.disconnect(); } catch (_e) { /* already disconnected */ }')
+  && paneWatch.includes('try { childList?.disconnect(); } catch (_e) { /* already disconnected */ }')
+  && paneWatch.includes('watch?.disconnect();\n      return null;'),
+'PH9C-SENTINEL-ONE-DISCONNECT: one disconnect routine clears the pending timer and disconnects both observers, and the installer\'s catch calls it');
+// PH9B-SCOPED-TIMER-BAN (PH9-TIMER-BAN-SCOPED): PH-1c's blanket timer and
+// band/settle/streak/debounce bans become one scoped ban: the 120ms debounce
+// and the 250ms re-check are the only timers, armed inside the watch.
+check((paneWatch.match(/globalThis\.setTimeout\(/g) || []).length === 1
+  && (paneWatch.match(/globalThis\.clearTimeout\(/g) || []).length === 1
+  && !/setTimeout|clearTimeout/.test(widget.replace(paneWatch, ''))
+  && JSON.stringify((paneWatch.match(/\barm\((\d+),/g) || []).sort()) === JSON.stringify(['arm(120,', 'arm(250,']),
+'PH9B-SCOPED-TIMER-BAN: setTimeout and clearTimeout appear once each, inside the watch installer, and the only delays are the 120ms debounce and the 250ms re-check');
 for (const identifier of [
   '_flipStreak', '_flipStreaks', '_widthFlipAllowed', 'settleCheck', 'boundedCheck', 'bistable', 'withinBand',
   'sawCompactWide', 'sawWideNarrow', '_handoffWidthRender', '_beginWidthRender', '_resetWidthState', '_widthState',
-  '_widthHandoffs', '_installWidthObserver', 'setTimeout', 'clearTimeout', 'setInterval', 'requestAnimationFrame',
-]) check(!widget.includes(identifier), `PH1-SENTINEL-NO-CONTINUOUS-OBSERVER: graph-view.js contains no ${identifier}`);
-check(!/\bband\b|\bsettle|\bstreak|\bdebounce/i.test(widget),
-  'PH1-SENTINEL-NO-CONTINUOUS-OBSERVER: graph-view.js carries no band, settle, streak, or debounce state');
+  '_widthHandoffs', '_installWidthObserver', '_installColdLoadObserver', '_disarmColdLoad', '_coldLoads',
+  'setInterval', 'requestAnimationFrame',
+]) check(!widget.includes(identifier), `PH9B-SCOPED-TIMER-BAN: graph-view.js contains no ${identifier}`);
+check(!/band|settle|streak|hold|bistable/i.test(widget),
+  'PH9B-SCOPED-TIMER-BAN: graph-view.js names no band, settle, streak, hold, or bistable state');
 check(renderBody.indexOf('const resolved = ') >= 0
   && renderBody.indexOf('const resolved = ') < renderBody.indexOf('previous?.remove?.();')
   && (renderBody.match(/this\._resolveWidth\(/g) || []).length === 1
-  && renderBody.includes('this._installColdLoadObserver(dv, overrides, root, resolved);')
-  && (widget.match(/this\._installColdLoadObserver\(/g) || []).length === 1,
-'PH1-SENTINEL-ONE-LAYOUT-STATE: a render resolves the width at most once, before removing the previous root, and is the only caller of the one-shot installer');
+  && renderBody.includes('this._watchPaneWidth(dv, overrides, root, resolved);')
+  && (widget.match(/this\._watchPaneWidth\(/g) || []).length === 1,
+'PH1-SENTINEL-ONE-LAYOUT-STATE: a render resolves the width at most once, before removing the previous root, and is the only caller of the watch installer');
 check(compactMap.includes('this._edgeSvg(') && compactMap.includes('this._selectionController({')
   && compactMap.includes('this._loadOutcomes(') && !/new\s+ResizeObserver|querySelector|getBoundingClientRect|offsetWidth/.test(compactMap),
 'PH1-SENTINEL-COMPACT-REUSE: the compact map calls _edgeSvg, _selectionController, and _loadOutcomes, and contains no new ResizeObserver, querySelector, getBoundingClientRect, or offsetWidth');
@@ -173,13 +197,30 @@ for (const marker of [
   'PH1C-WIDE-BYTE-IDENTICAL', 'PH1C-DETAIL-INLINE-OUTCOME', 'PH1C-NO-CONTINUOUS-OBSERVER', 'PH1C-ONE-SHOT-COLD-LOAD',
   'PH1C-UNMEASURED-RECOVERS', 'PH1C-ONE-SHOT-NO-LEAK', 'PH1C-ONE-SHOT-USES-ITS-MEASUREMENT', 'PH1C-ONE-SHOT-LATE-ATTACH',
 ]) check(behavior.includes(marker), `PH1-SENTINEL-BEHAVIOR-MARKER: missing ${marker}`);
+// PH-9c and PH-9d markers each lead a string literal.
+for (const marker of [
+  'PH9-PRESENTATION-INDEPENDENT-MEASUREMENT', 'PH9-OBSERVER-CONVERGES', 'PH9-DRAG-ENDS-CORRECT', 'PH9-SCROLLBAR-CANNOT-FLIP',
+  'PH9-UNREADABLE-KEEPS-AND-RECHECKS', 'PH9-LIFECYCLE', 'PH9B-OBSERVER-AFTER-MEASURED', 'PH9B-SCOPED-TIMER-BAN',
+  'PH9B-RESOLVER-SENTINEL', 'PH9C-SETTLED-INVARIANT', 'PH9C-ONE-SHOT-EQUIVALENTS', 'PH9D-CONTENT-WIDTH',
+  'PH9D-BOUNDED-WIDTH-CLAIMS',
+]) check(new RegExp(`['\`]${escapeRegExp(marker)}[ :(]`).test(behavior), `PH9C-SENTINEL-BEHAVIOR-MARKER: ${marker} leads a string literal`);
+// PH9C-ONE-SHOT-EQUIVALENTS: each PH-1c one-shot token listed below is
+// carried in parentheses after PH9C-ONE-SHOT-EQUIVALENTS in a string literal.
+for (const token of [
+  'PH1C-SIBLING-CHANGE-KEEPS-ARMED', 'PH1C-RESIZE-CALLBACK-REMOVAL', 'PH1C-RENDER-START-DISARM', 'PH1C-ARM-ONLY-WHILE-ATTACHED',
+  'PH1C-ONE-SHOT-NO-LEAK', 'PH1C-ONE-SHOT-USES-ITS-MEASUREMENT', 'PH1C-ONE-SHOT-LATE-ATTACH', 'PH1C-ONE-SHOT-COLD-LOAD',
+  'PH1C-UNMEASURED-RECOVERS',
+]) {
+  check(new RegExp(`['\`]PH9C-ONE-SHOT-EQUIVALENTS \\(${escapeRegExp(token)}\\): `).test(behavior),
+    `PH9C-SENTINEL-ONE-SHOT-EQUIVALENT: ${token} appears in parentheses after PH9C-ONE-SHOT-EQUIVALENTS in a string literal`);
+}
 for (const token of [
   'PH1-OBSERVER-DISAGREEMENT-LOOP', 'PH1-FLIP-CAP-LOST-CROSSING', 'PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT',
   'PH1B-PERMANENT-HOLD', 'PH1B-FALSE-BISTABLE-PROOF', 'PH1B-THROWING-GETTER-DROPS-CROSSING',
   'PH1-BROWSER-LIKE-OBSERVER-STUB', 'PH1-EIGHT-RANKS-OVERFLOW', 'PH1-OVERRIDE-NUMBER-ONLY', 'PH1-WIDE-DIGEST-PINS',
   'PH1-GLYPH-SITE-COUNT-FIVE',
 ]) {
-  check(new RegExp(`['\`][^'\`\\n]*${token}|// MUTATION GUARD: [^\\n]*${token}`).test(behavior),
+  check(new RegExp(`['\`][^'\`\\n]*${escapeRegExp(token)}|// MUTATION GUARD: [^\\n]*${escapeRegExp(token)}`).test(behavior),
     `PH1-SENTINEL-CARRIED-FINDING: ${token} appears in a string literal or a MUTATION GUARD comment`);
 }
 for (const mutant of [
@@ -190,22 +231,46 @@ for (const mutant of [
   'PH1C-MUTANT-RERENDER-REREADS',
 ]) {
   check(behavior.includes(`// MUTATION GUARD: ${mutant} turns RED`)
-    && new RegExp(`['\`]${mutant}[ :(]`).test(behavior),
+    && new RegExp(`['\`]${escapeRegExp(mutant)}[ :(]`).test(behavior),
   `PH1-SENTINEL-MUTANT: ${mutant} is named in a MUTATION GUARD comment and leads a string literal`);
+}
+// The card's documented PH-9c mutants and the watch's own mutants are each
+// named in a MUTATION GUARD comment.
+for (const mutant of [
+  'PH9C-MUTANT-CONTAINER-CLIENTWIDTH', 'PH9C-MUTANT-SCROLLER-CLIENTWIDTH', 'PH9C-MUTANT-READING-VIEW-ONLY',
+  'PH9C-MUTANT-EDITOR-ONLY', 'PH9C-MUTANT-ZERO-SCROLLER-FALLS-BACK', 'PH9C-MUTANT-THROW-FALLS-BACK',
+  'PH9C-MUTANT-CLOSEST-REQUIRED', 'PH9C-MUTANT-WATCH-MOUNT-CONTAINER', 'PH9C-MUTANT-WATCH-ON-OVERRIDE',
+  'PH9C-MUTANT-DEBOUNCE-SKIPS-RERESOLVE', 'PH9C-MUTANT-UNREADABLE-DEFAULTS-WIDE', 'PH9C-MUTANT-UNREADABLE-NO-RECHECK',
+  'PH9C-MUTANT-UNREADABLE-KEEPS-PENDING-DEBOUNCE', 'PH9C-MUTANT-RECHECK-REPEATS', 'PH9C-MUTANT-DISCONNECT-KEEPS-TIMER',
+  'PH9C-MUTANT-RERUN-KEEPS-OBSERVER', 'PH9C-MUTANT-NO-PANE-PRUNE', 'PH9C-MUTANT-PRUNE-EVERY-PEER',
+  'PH9C-MUTANT-KEEPS-LEFT-PANE', 'PH9C-MUTANT-DRAWN-FROM-DOM', 'PH9C-MUTANT-DEBOUNCE-119', 'PH9C-MUTANT-DEBOUNCE-121',
+  'PH9C-MUTANT-RECHECK-249', 'PH9C-MUTANT-RECHECK-251',
+  'PH9D-MUTANT-IGNORE-PADDING', 'PH9D-MUTANT-ONE-SIDE-PADDING', 'PH9D-MUTANT-STABLE-IGNORED', 'PH9D-MUTANT-GUTTER-EXACT-MATCH',
+  'PH9D-MUTANT-BORDER-BOX-THRESHOLD', 'PH9D-MUTANT-CLIENTWIDTH-SCROLLBAR', 'PH9D-MUTANT-IGNORE-BORDERS',
+  'PH9D-MUTANT-NO-CSSOM-USES-SCROLLER', 'PH9D-MUTANT-NARROW-ONLY-PRESENTATION', 'PH9D-MUTANT-UNMEASURED-NEVER-RERENDERS',
+  'PH9D-MUTANT-WIDTH-WITHOUT-DEBOUNCE', 'PH9D-MUTANT-STABLE-SUBTRACTS-BORDERS', 'PH9D-MUTANT-PADDING-PARSEINT',
+  'PH9D-MUTANT-LEFT-PADDING-TWICE', 'PH9D-MUTANT-RIGHT-PADDING-TWICE', 'PH9D-MUTANT-LEFT-BORDER-TWICE',
+  'PH9D-MUTANT-RIGHT-BORDER-TWICE', 'PH9D-MUTANT-GONE-ONLY-WITHOUT-SCROLLER',
+  'PH9D-MUTANT-INTERACTION-CANCELS-DEBOUNCE', 'PH9D-MUTANT-INTERACTION-DEFERS-TO-RECHECK', 'PH9D-MUTANT-INTERACTION-CANCELS-RECHECK',
+  'PH9D-MUTANT-WIDENING-DEBOUNCE-119', 'PH9D-MUTANT-PEERS-CLEARED', 'PH9D-MUTANT-PRUNE-FIRST-GONE-ONLY',
+  'PH9D-MUTANT-PRUNE-LAST-PEER-ONLY', 'PH9D-MUTANT-DRAWN-STATE-ON-INSTANCE', 'PH9D-MUTANT-COMPACT-WIDTH-TOLERANCE',
+  'PH9D-MUTANT-STABLE-READS-CONTAINER', 'PH9D-MUTANT-STABLE-THROW-USES-OFFSET', 'PH9D-MUTANT-PANE-SET-COPIED',
+]) {
+  check(behavior.includes(`// MUTATION GUARD: ${mutant} turns RED`),
+    `PH9C-SENTINEL-MUTANT: ${mutant} is named in a MUTATION GUARD comment`);
 }
 // PH-1d sentinels: the listed PH1D-* markers, the listed PH1C-* finding tokens,
 // the listed PH-1d mutants' MUTATION GUARD comments, and the behavior
 // harness's assertion floor and exit guard.
 for (const marker of [
-  'PH1D-GEOMETRY-BOUNDARIES', 'PH1D-PILL-PRESENTATION', 'PH1D-ONE-SHOT-BRANCHES', 'PH1D-FAIL-SOFT-ROLLBACK',
+  'PH1D-GEOMETRY-BOUNDARIES', 'PH1D-PILL-PRESENTATION', 'PH9C-ONE-SHOT-EQUIVALENTS', 'PH1D-FAIL-SOFT-ROLLBACK',
   'PH1D-HARNESS-FLOOR',
-]) check(new RegExp(`['\`]${marker} \\(PH1C-`).test(behavior), `PH1D-SENTINEL-BEHAVIOR-MARKER: ${marker} (PH1C-...) leads a string literal`);
+]) check(new RegExp(`['\`]${escapeRegExp(marker)} \\(PH1C-`).test(behavior), `PH1D-SENTINEL-BEHAVIOR-MARKER: ${marker} (PH1C-...) leads a string literal`);
 for (const token of [
-  'PH1C-SHORT-ID-BOUNDARY', 'PH1C-SCROLL-BOUNDARY', 'PH1C-SIBLING-CHANGE-KEEPS-ARMED', 'PH1C-RESIZE-CALLBACK-REMOVAL',
-  'PH1C-FAIL-SOFT-WARNING-ROLLBACK', 'PH1C-PILL-TINTS', 'PH1C-SVG-SIZED-TO-CANVAS', 'PH1C-RENDER-START-DISARM',
-  'PH1C-ARM-ONLY-WHILE-ATTACHED', 'PH1C-HARNESS-NOT-VACUOUS', 'PH1C-NEEDS-YOU-NOT-ON-STUB',
+  'PH1C-SHORT-ID-BOUNDARY', 'PH1C-SCROLL-BOUNDARY', 'PH1C-FAIL-SOFT-WARNING-ROLLBACK', 'PH1C-PILL-TINTS',
+  'PH1C-SVG-SIZED-TO-CANVAS', 'PH1C-HARNESS-NOT-VACUOUS', 'PH1C-NEEDS-YOU-NOT-ON-STUB',
 ]) {
-  check(new RegExp(`['\`]PH1D-[A-Z-]+ \\(${token}\\): `).test(behavior),
+  check(new RegExp(`['\`]PH1D-[A-Z-]+ \\(${escapeRegExp(token)}\\): `).test(behavior),
     `PH1D-SENTINEL-CARRIED-FINDING: ${token} appears in parentheses after a PH1D-* marker that leads a string literal`);
 }
 for (const mutant of [

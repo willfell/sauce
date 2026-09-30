@@ -33,8 +33,8 @@ const path = require('path');
 // exit code is 1 and stderr names the "PH1D-HARNESS-FLOOR
 // (PH1C-HARNESS-NOT-VACUOUS)" abort.
 // MUTATION GUARD: PH1D-MUTANT-COLD-LOAD-NEVER-SETTLES turns RED here the same
-// way if the one-shot's re-render (the render handed a measurement) never
-// settles, so the cold-load fixtures' drain waits forever.
+// way if the pane-width watch's re-render (the render handed a measurement)
+// never settles, so the pane-width fixtures' drain waits forever.
 let assertionCount = 0;
 const counted = (check) => (...args) => {
   assertionCount += 1;
@@ -44,7 +44,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 2243;
+const ASSERTION_FLOOR = 3270;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -109,6 +109,15 @@ function element(tag = 'div', options = {}) {
       if (name === 'class') this.className = String(value);
     },
     querySelector() { return null; },
+    // PH-9c: a model of Element.closest for a comma-separated list of
+    // .class selectors; the element itself counts.
+    closest(selector) {
+      const wanted = String(selector).split(',').map((part) => part.trim().replace(/^\./, ''));
+      for (let cursor = this; cursor; cursor = cursor.parent) {
+        if (String(cursor.className || '').split(/\s+/).some((name) => wanted.includes(name))) return cursor;
+      }
+      return null;
+    },
     remove() {
       this.removed = true;
       if (this.parent) {
@@ -1827,7 +1836,7 @@ async function main() {
     'BL4-MUTANT-PANEL-AT-REST: a fresh render has no selection artifact and is byte-identical at rest');
 
   // ---- PH-1 phone-first (MX env, W=390): compact map + inline detail card ----
-  // document.body is stubbed from here through the one-shot fixtures so the
+  // document.body is stubbed from here through the pane-width fixtures so the
   // is-mobile class and a body-mounted card are both observable.
   const ph1Body = element('body');
   let ph1MobileClass = false;
@@ -1983,7 +1992,7 @@ async function main() {
   global.app = savedAppMX;
   global.customJS = savedCustomJSMX;
 
-  // ---- PH-1 phone-first: width resolver, compact geometry, cold-load one-shot ----
+  // ---- PH-1 phone-first: width resolver and compact geometry ----
   // The main Graph Epic env is live again.
   const ph1View = new GraphView({ dashboard, lifecycleApi, insights: realInsights });
   const resolve = (dv, overrides) => ph1View._resolveWidth(dv, overrides);
@@ -3333,7 +3342,7 @@ async function main() {
   // at a containerWidth override of 1024, and its compact drawing is render()
   // reached through one width source per run: a containerWidth override of
   // 390 (the run below), and a measured clientWidth of 390, an unmeasured
-  // clientWidth of 0 with the is-mobile body class, and a cold-load one-shot
+  // clientWidth of 0 with the is-mobile body class, and a pane-width watch
   // re-render at 390 (the runs in PH1D-COMPACT-WIDE-PARITY (width sources)).
   // The two direct-draw fixtures are drawn with _renderCompactGraph at 390
   // (compact) and _renderGraph, which takes no width (wide).
@@ -4258,28 +4267,41 @@ async function main() {
     `PH1D-NONCANONICAL-STATUS: the ${JSON.stringify(raw)} pill ${needsYou ? 'carries' : 'does not carry'} the needs-you class, and its effective left border is the 2px error hairline`);
   }
 
-  // ---- PH1C: no continuous observer, one cold-load one-shot ----
+  // ---- PH9C: one live pane-width watch per epic-scope mount ----
   // PH1-BROWSER-LIKE-OBSERVER-STUB: BrowserLikeResizeObserver models a
   // browser ResizeObserver. observe() owes one notification, delivered at the
-  // next layout frame (ph1Frame) with the target's current content-box width,
-  // not synchronously. After that it notifies only when a frame finds the
-  // observed width changed. A disconnected observer is silent. A detached (or
-  // off-document) target reports 0, so removing a laid-out root notifies
-  // once, with 0, and removing a zero-box root after its first notification
-  // notifies nothing. The container's clientWidth is a model
+  // next layout frame (ph1Frame) with the target's current box, not
+  // synchronously. After that it notifies only when a frame finds the
+  // observed box changed; it never sends a size-less tick. A disconnected
+  // observer is silent, and so is one whose target sits in a collected
+  // subtree. A detached (or off-document) target reports 0.
+  // Two kinds of target are modelled. A note pane (mountPane) is a
+  // .markdown-preview-view (or .cm-scroller) element created with one mount
+  // container. Its offsetWidth is its border box (pane.ph9Width). Inside the
+  // border box sit its left and right borders (pane.ph9BorderLeft,
+  // pane.ph9BorderRight), its scrollbar space, and its left and right
+  // padding (pane.ph9PadLeft, pane.ph9PadRight). The scrollbar space is
+  // the reserved gutter (pane.ph9Reserved) when the pane's scrollbar gutter
+  // is stable, and otherwise the scrollbar shown while `root` is drawn in its
+  // container (pane.ph9Gutter(root, pane)). Its clientWidth is the border box
+  // less the borders and the scrollbar space; every offsetWidth and
+  // clientWidth read is counted in pane.ph9Reads, and
+  // pane.ph9ThrowOn(readNumber) makes chosen reads throw. Its observed box is
+  // the content box (the clientWidth less the padding); no readable line
+  // width is modelled. getComputedStyle(pane)
+  // reports that padding, those borders, and scrollbarGutter 'auto', or the
+  // fixture's stable value ('stable' unless it names another).
+  // A bare mount container (mountContainer) has a modelled clientWidth
   // (container.ph1Width: a number or a function of the drawn root;
-  // container.ph1Throws makes that many upcoming reads throw and
-  // container.ph1ThrowOn(readNumber) throws on chosen reads; every read is
-  // counted in container.ph1Reads), and the root's content box is modelled
-  // independently (container.ph1Content) so the two can disagree.
-  // BrowserLikeMutationObserver watches one container's childList and, at the
-  // next frame, delivers one record of the children removed and added since
-  // the last frame, before any resize notification. Timers run on a stubbed
-  // clock (ph1Clock) so ten quiet seconds are deterministic and pending
-  // timers are countable. A callback that throws is recorded in the
-  // observer's thrown list instead of propagating. ph1Collect(container)
-  // marks a detached container collected, and observers whose target is
-  // inside it stop counting as live.
+  // container.ph1Throws and container.ph1ThrowOn inject throwing reads,
+  // counted in container.ph1Reads), and its observed box is
+  // container.ph1Content when set, its clientWidth otherwise.
+  // BrowserLikeMutationObserver watches one container's childList and, at
+  // the next frame, delivers one record of the children removed and added
+  // since the last frame, before any resize notification. Timers run on a
+  // stubbed clock (ph1Clock). A callback that throws is recorded in the
+  // observer's thrown list instead of propagating. ph1Collect(node) marks a
+  // detached node collected; ph9Discard(node) detaches and collects it.
   const ph1Observers = [];
   // PH1D-STUB-VIOLATIONS: a stub check that threw inside an observer method
   // could be caught by the widget's own try/catch, so a misuse of either stub
@@ -4288,15 +4310,19 @@ async function main() {
   const ph1StubViolations = [];
   const hasGraph = (root) => Boolean(root && byClass(root, 'graph-view-canvas').length);
   const isWideGraph = (root) => hasGraph(root) && !byClass(root, 'graph-view-compact').length;
+  const collected = (node) => {
+    for (let cursor = node; cursor; cursor = cursor.parent) if (cursor.ph1Collected) return true;
+    return false;
+  };
   const ph1Layout = {
     clientWidthOf(container) {
       const model = container.ph1Width;
       return typeof model === 'function' ? model(container.children[0] || null, container) : (Number(model) || 0);
     },
     contentWidthOf(target) {
-      if (!target || !target.isConnected || !target.parent) return 0;
-      const model = target.parent.ph1Content;
-      return model == null ? ph1Layout.clientWidthOf(target.parent) : Number(model);
+      if (!target || !target.isConnected) return 0;
+      if (target.ph9Pane) return target.ph9InnerNow();
+      return target.ph1Content == null ? ph1Layout.clientWidthOf(target) : Number(target.ph1Content);
     },
   };
   class BrowserLikeResizeObserver {
@@ -4312,14 +4338,14 @@ async function main() {
     }
     get live() { return Boolean(this.target) && this.disconnected === 0; }
     observe(target) {
-      if (this.target) ph1StubViolations.push('PH1-BROWSER-LIKE-OBSERVER-STUB: a ResizeObserver observes one root once');
+      if (this.target) ph1StubViolations.push('PH1-BROWSER-LIKE-OBSERVER-STUB: a ResizeObserver observes one target once');
       this.target = target;
       this.owesFirst = true;
     }
     unobserve() {}
     disconnect() { this.disconnected += 1; }
     frame() {
-      if (!this.live) return;
+      if (!this.live || collected(this.target)) return;
       const width = ph1Layout.contentWidthOf(this.target);
       if (!this.owesFirst && width === this.lastWidth) return;
       this.owesFirst = false;
@@ -4354,7 +4380,7 @@ async function main() {
     takeRecords() { return []; }
     disconnect() { this.disconnected += 1; }
     frame() {
-      if (!this.live) return;
+      if (!this.live || collected(this.target)) return;
       const now = [...this.target.children];
       const removedNodes = this.seen.filter((node) => !now.includes(node));
       const addedNodes = now.filter((node) => !this.seen.includes(node));
@@ -4372,6 +4398,7 @@ async function main() {
   const savedMutationObserver = global.MutationObserver;
   const savedSetTimeout = global.setTimeout;
   const savedClearTimeout = global.clearTimeout;
+  const savedGetComputedStyle = Object.getOwnPropertyDescriptor(global, 'getComputedStyle');
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const ph1Clock = {
     now: 0, timers: [], nextId: 1,
@@ -4392,7 +4419,7 @@ async function main() {
   global.ResizeObserver = BrowserLikeResizeObserver;
   global.MutationObserver = BrowserLikeMutationObserver;
   global.setTimeout = (fn, ms) => {
-    const timer = { id: ph1Clock.nextId, fn, due: ph1Clock.now + (Number(ms) || 0), cleared: false, fired: false };
+    const timer = { id: ph1Clock.nextId, fn, ms: Number(ms) || 0, due: ph1Clock.now + (Number(ms) || 0), cleared: false, fired: false };
     ph1Clock.nextId += 1;
     ph1Clock.timers.push(timer);
     return timer.id;
@@ -4419,19 +4446,22 @@ async function main() {
       await ph1Frame();
     }
   };
-  const collected = (node) => {
-    for (let cursor = node; cursor; cursor = cursor.parent) if (cursor.ph1Collected) return true;
-    return false;
+  const ph1Collect = (node) => {
+    assert(!node.isConnected, 'ph1Collect: only a detached node can be collected');
+    node.ph1Collected = true;
   };
-  const ph1Collect = (container) => {
-    assert(!container.isConnected, 'ph1Collect: only a detached container can be collected');
-    container.ph1Collected = true;
+  const ph9Discard = (...nodes) => {
+    for (const node of nodes) {
+      node.offDocument = true;
+      ph1Collect(node);
+    }
   };
   const liveOf = (kind) => ph1Observers.filter((observer) => observer instanceof kind && observer.live && !collected(observer.target));
   const liveResize = () => liveOf(BrowserLikeResizeObserver);
   const liveMutation = () => liveOf(BrowserLikeMutationObserver);
   const liveObservers = () => [...liveResize(), ...liveMutation()];
   const pendingTimers = () => ph1Clock.pending().length;
+  const pendingDelays = () => ph1Clock.pending().map((timer) => timer.ms);
   const mountContainer = (width, content = null) => {
     const container = element();
     container.querySelector = (selector) => (selector === ':scope > .graph-view-root'
@@ -4456,12 +4486,72 @@ async function main() {
     });
     return container;
   };
+  // A note pane created with one mount container. `gutter(root, pane)` is the
+  // scrollbar shown, in px, while `root` is drawn in the container; options
+  // give the padding and border on each side (pad and border for both sides,
+  // or padLeft, padRight, borderLeft, and borderRight) and a stable gutter's
+  // reserved width; inset narrows the mount container's client width by
+  // that many px. With the defaults (no padding, no border, no stable gutter) the
+  // measured width is the pane's offsetWidth, so the dynamic scenarios read
+  // literally.
+  const mountPane = (width, gutter = () => 0, paneClass = 'markdown-preview-view', { pad = 0, border = 0, padLeft = pad, padRight = pad, borderLeft = border, borderRight = border, stable = false, reserved = 0, gutterValue = 'stable', inset = 0 } = {}) => {
+    const pane = element('div', { cls: paneClass });
+    pane.ph9Pane = true;
+    pane.ph9Width = width;
+    pane.ph9Gutter = gutter;
+    pane.ph9PadLeft = padLeft;
+    pane.ph9PadRight = padRight;
+    pane.ph9BorderLeft = borderLeft;
+    pane.ph9BorderRight = borderRight;
+    pane.ph9Stable = stable;
+    pane.ph9Reserved = reserved;
+    pane.ph9Reads = 0;
+    pane.ph9ThrowOn = null;
+    const scrollbarFor = (root) => (pane.ph9Stable ? pane.ph9Reserved : pane.ph9Gutter(root, pane));
+    const borders = () => pane.ph9BorderLeft + pane.ph9BorderRight;
+    pane.ph9Inner = (root) => pane.ph9Width - borders() - scrollbarFor(root) - pane.ph9PadLeft - pane.ph9PadRight;
+    const container = mountContainer((root) => pane.ph9Inner(root) - inset);
+    pane.ph9InnerNow = () => pane.ph9Inner(container.children[0] || null);
+    container.parent = pane;
+    pane.children.push(container);
+    const read = (value) => {
+      pane.ph9Reads += 1;
+      if (typeof pane.ph9ThrowOn === 'function' && pane.ph9ThrowOn(pane.ph9Reads)) throw new Error('pane width unreadable');
+      return value();
+    };
+    Object.defineProperty(pane, 'offsetWidth', { configurable: true, get() { return read(() => pane.ph9Width); } });
+    Object.defineProperty(pane, 'clientWidth', {
+      configurable: true,
+      get() { return read(() => pane.ph9Width - borders() - scrollbarFor(container.children[0] || null)); },
+    });
+    pane.ph9Style = () => ({
+      paddingLeft: `${pane.ph9PadLeft}px`, paddingRight: `${pane.ph9PadRight}px`,
+      borderLeftWidth: `${pane.ph9BorderLeft}px`, borderRightWidth: `${pane.ph9BorderRight}px`,
+      scrollbarGutter: pane.ph9Stable ? gutterValue : 'auto',
+    });
+    return { pane, container };
+  };
+  // A model of getComputedStyle: a pane reports its own style; any other
+  // element reports no padding, no border, and an auto scrollbar gutter.
+  const ph9ComputedStyle = (node) => (typeof node?.ph9Style === 'function' ? node.ph9Style() : {
+    paddingLeft: '0px', paddingRight: '0px', borderLeftWidth: '0px', borderRightWidth: '0px', scrollbarGutter: 'auto',
+  });
+  global.getComputedStyle = ph9ComputedStyle;
+  const ph9TargetOf = (container) => (container?.parent?.ph9Pane ? container.parent : container);
   // Counts _renderAtWidth calls (renders) and, separately, the render() calls
   // the harness itself made (initiated). Each trace entry classifies the
   // child that call added to its mount container before returning its
-  // promise.
-  const countingView = () => {
+  // promise. With `delay`, every render waits that many ms of the stubbed
+  // clock before it reads the lifecycle API, and is not awaited by
+  // ph1Drain (the clock must advance for it to finish).
+  const countingView = ({ delay = 0 } = {}) => {
     const view = new GraphView({ lifecycleApi, insights: new GraphInsights() });
+    if (delay) {
+      view._lifecycleApi = async function delayedLifecycleApi(...args) {
+        await new Promise((resolve) => global.setTimeout(resolve, delay));
+        return GraphView.prototype._lifecycleApi.apply(this, args);
+      };
+    }
     const renderAtWidth = view._renderAtWidth.bind(view);
     view.renders = 0;
     view.initiated = 0;
@@ -4476,7 +4566,7 @@ async function main() {
         view.trace.push(drawn && byClass(drawn, 'graph-view-compact').length ? 'compact' : 'wide');
         return result;
       });
-      ph1InFlight.push(inFlight);
+      if (!delay) ph1InFlight.push(inFlight);
       return inFlight;
     };
     view.render = (...args) => {
@@ -4491,34 +4581,56 @@ async function main() {
     return JSON.stringify(domShape(container.children[0]));
   };
   const isCompact = (container) => byClass(container.children[0], 'graph-view-compact').length === 1;
-  // Ten quiet seconds (a frame each second), then the pinned end state: no
-  // recorded stub misuse, zero pending timers, zero live observers of either
-  // kind, the exact render trace and count, and, when a container is passed,
-  // its drawn presentation.
+  // The 120ms debounce elapses (its re-render, if any, finishes), then one
+  // frame delivers the new watch's observe() notification.
+  const ph9Debounce = async () => {
+    await ph1Clock.advance(120);
+    await ph1Drain();
+    await ph1Frame();
+  };
+  // PH9C-SETTLED-INVARIANT: ten quiet seconds (a frame each second), then
+  // the pinned end state: no recorded stub misuse, zero pending timers,
+  // exactly one live ResizeObserver per live epic-scope mount (options.watched,
+  // by default the passed container), each on that mount's note scroll
+  // container (its pane) or, without one, the mount container itself; one
+  // live childList watch per watched mount (options.childLists overrides the
+  // count); the exact render trace and count (a null trace pins only the end
+  // presentation, options.ends); and, when a container is passed, its drawn
+  // presentation.
   const ph1Receipts = [];
-  const settled = async (label, view, trace, container = null) => {
+  const settled = async (label, view, trace, container = null, options = {}) => {
+    const watched = options.watched || (container ? [container] : []);
+    const targets = watched.map((mount, index) => options.targets?.[index] || ph9TargetOf(mount));
+    const childLists = options.childLists ?? watched.length;
     await ph1Quiet();
     const runs = view.trace.reduce((out, entry) => { const last = out[out.length - 1]; if (last && last[0] === entry) last[1] += 1; else out.push([entry, 1]); return out; }, []);
     ph1Receipts.push(`${label} => ${runs.map(([entry, count]) => (count > 1 ? `${entry} x${count}` : entry)).join(' > ')} | renders ${view.renders} (initiated ${view.initiated}) | live resize ${liveResize().length} | live childList ${liveMutation().length} | pending timers ${pendingTimers()}`);
     assert.deepStrictEqual(ph1StubViolations, [], `PH1D-STUB-VIOLATIONS: ${label}: no observer-stub misuse was recorded`);
-    assert.strictEqual(pendingTimers(), 0, `${label}: nothing pending after ten quiet seconds`);
-    assert.strictEqual(liveObservers().length, 0, `${label}: zero live observers of either kind after ten quiet seconds`);
-    assert.deepStrictEqual(view.trace, trace, `${label}: render trace is exactly ${trace.join(' -> ')}`);
-    assert.strictEqual(view.renders, trace.length, `${label}: exactly ${trace.length} render(s)`);
+    assert.strictEqual(pendingTimers(), 0, `PH9C-SETTLED-INVARIANT: ${label}: nothing pending after ten quiet seconds`);
+    const liveTargets = liveResize().map((observer) => observer.target);
+    assert(liveTargets.length === targets.length
+      && targets.every((target) => liveTargets.filter((entry) => entry === target).length === targets.filter((entry) => entry === target).length),
+    `PH9C-SETTLED-INVARIANT: ${label}: exactly ${targets.length} live ResizeObserver(s), one per live epic-scope mount, on its note scroll container (or its mount container when it has none)`);
+    assert(liveMutation().length === childLists && liveMutation().every((observer) => watched.includes(observer.target)),
+      `PH9C-SETTLED-INVARIANT: ${label}: exactly ${childLists} live childList watch(es), each on a watched mount container`);
+    if (trace) {
+      assert.deepStrictEqual(view.trace, trace, `${label}: render trace is exactly ${trace.join(' -> ')}`);
+      assert.strictEqual(view.renders, trace.length, `${label}: exactly ${trace.length} render(s)`);
+    }
     if (container) {
-      assert.strictEqual(isCompact(container), trace[trace.length - 1] === 'compact',
-        `${label}: ends ${trace[trace.length - 1]}`);
+      const ends = trace ? trace[trace.length - 1] : options.ends;
+      assert.strictEqual(isCompact(container), ends === 'compact', `${label}: ends ${ends}`);
     }
   };
 
   // Stub self-tests.
   {
-    const probe = element();
-    const probeRoot = probe.createEl('div');
+    const holder = element();
+    const probe = holder.createEl('div');
     probe.ph1Width = 700;
     const seen = [];
     const probeObserver = new BrowserLikeResizeObserver((entries) => seen.push(entries.map((entry) => entry.contentRect.width)));
-    probeObserver.observe(probeRoot);
+    probeObserver.observe(probe);
     const synchronous = seen.length;
     await ph1Frame();
     await ph1Frame();
@@ -4526,25 +4638,51 @@ async function main() {
     await ph1Frame();
     probe.ph1Content = 650;
     await ph1Frame();
-    probeRoot.remove();
+    probe.remove();
     await ph1Frame();
     await ph1Frame();
     probeObserver.disconnect();
     const silent = new BrowserLikeResizeObserver((entries) => seen.push(['silent', ...entries]));
-    silent.observe(probe.createEl('div'));
+    silent.observe(holder.createEl('div'));
     silent.disconnect();
-    const zeroBox = element();
-    const zeroRoot = zeroBox.createEl('div');
+    const zeroHolder = element();
+    const zeroBox = zeroHolder.createEl('div');
+    zeroBox.ph1Width = 0;
     const zeroSeen = [];
     const zeroObserver = new BrowserLikeResizeObserver((entries) => zeroSeen.push(entries[0].contentRect.width));
-    zeroObserver.observe(zeroRoot);
+    zeroObserver.observe(zeroBox);
     await ph1Frame();
-    zeroRoot.remove();
+    zeroBox.remove();
     await ph1Frame();
     zeroObserver.disconnect();
     assert(synchronous === 0 && JSON.stringify(seen) === JSON.stringify([[700], [650], [0]])
       && JSON.stringify(zeroSeen) === JSON.stringify([0]) && liveObservers().length === 0 && pendingTimers() === 0,
     'PH1-BROWSER-LIKE-OBSERVER-STUB: observe() owes one notification delivered at the next frame, then one per size change and none for an unchanged size; a detached target reports a zero box once, and a zero-box target removed reports nothing; a disconnected observer is silent; every notification carries a size');
+    const { pane, container } = mountPane(610, (root) => (root ? 15 : 0));
+    const paneSeen = [];
+    const paneObserver = new BrowserLikeResizeObserver((entries) => paneSeen.push(entries[0].contentRect.width));
+    paneObserver.observe(pane);
+    await ph1Frame();
+    const drawnRoot = container.createEl('div');
+    await ph1Frame();
+    const insideClientWidth = container.clientWidth;
+    pane.ph9Width = 625;
+    await ph1Frame();
+    pane.ph9ThrowOn = (read) => read === 2;
+    const reads = [pane.offsetWidth];
+    try { reads.push(pane.offsetWidth); } catch (_error) { reads.push('threw'); }
+    reads.push(pane.offsetWidth);
+    drawnRoot.remove();
+    pane.ph9Width = 640;
+    await ph1Frame();
+    paneObserver.disconnect();
+    ph9Discard(pane);
+    await ph1Frame();
+    assert(JSON.stringify(paneSeen) === JSON.stringify([610, 595, 610, 640]) && insideClientWidth === 595
+      && JSON.stringify(reads) === JSON.stringify([625, 'threw', 625]) && pane.ph9Reads === 3
+      && container.closest('.markdown-preview-view, .cm-scroller') === pane && pane.closest('.cm-scroller') === null
+      && element().closest('.markdown-preview-view, .cm-scroller') === null && liveObservers().length === 0,
+    'PH1-BROWSER-LIKE-OBSERVER-STUB: a note pane notifies with its content box (its border box less its borders, its scrollbar space, and its padding), its container reads that content box as clientWidth, its offsetWidth is the border box with counted and injectable throwing reads, and closest() finds it from its container');
     const watched = element();
     const first = watched.createEl('div');
     const records = [];
@@ -4572,53 +4710,318 @@ async function main() {
     doubleObserve.disconnect();
     assert.deepStrictEqual(ph1StubViolations.splice(0), [
       'PH1-BROWSER-LIKE-OBSERVER-STUB: the widget watches its container childList only',
-      'PH1-BROWSER-LIKE-OBSERVER-STUB: a ResizeObserver observes one root once',
+      'PH1-BROWSER-LIKE-OBSERVER-STUB: a ResizeObserver observes one target once',
     ], 'PH1D-STUB-VIOLATIONS: the stubs record a subtree watch and a second observe() instead of throwing');
     assert(liveObservers().length === 0, 'PH1D-STUB-VIOLATIONS: the misuse probes leave no live observer');
   }
 
-  // ---- PH1C-NO-CONTINUOUS-OBSERVER ----
-  // A render whose width came from a measurement or an override arms
-  // nothing: zero live observers and zero pending timers, at once and after
-  // ten quiet seconds.
-  // MUTATION GUARD: PH1C-MUTANT-OBSERVER-AFTER-MEASURED turns RED if a
-  // measured (or pinned) render installs an observer.
+  // ---- PH9-PRESENTATION-INDEPENDENT-MEASUREMENT ----
+  // _resolveWidth measures the content width of
+  // dv.container.closest(".markdown-preview-view, .cm-scroller") and falls
+  // back to dv.container.clientWidth when no scroller or no computed style
+  // is found. A 610
+  // pane with no padding, no border, and no stable gutter, whose container
+  // reads 610 with no graph and 595 or 593 with one drawn (15px and 17px
+  // scrollbars), resolves the same wide measurement in every state.
+  // MUTATION GUARD: PH9C-MUTANT-CONTAINER-CLIENTWIDTH turns RED at
+  // "PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a 610 pane ..." if the width
+  // is measured as dv.container.clientWidth instead of the scroller's
+  // content width.
+  // MUTATION GUARD: PH9C-MUTANT-SCROLLER-CLIENTWIDTH turns RED at the same
+  // label if the scroller's clientWidth is measured as it is (without its
+  // padding subtracted, and, without a stable gutter, less the scrollbar the
+  // graph shows) instead of its content width.
+  // MUTATION GUARD: PH9C-MUTANT-READING-VIEW-ONLY turns RED at
+  // "PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a .cm-scroller pane ..." if
+  // the scroller lookup drops .cm-scroller.
+  // MUTATION GUARD: PH9C-MUTANT-EDITOR-ONLY turns RED at
+  // "PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a 610 pane ..." if the lookup
+  // drops .markdown-preview-view.
+  // MUTATION GUARD: PH9C-MUTANT-ZERO-SCROLLER-FALLS-BACK turns RED at
+  // "PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a found scroller whose
+  // offsetWidth is 0 ..." if a zero scroller width falls back to the
+  // container's clientWidth.
+  // MUTATION GUARD: PH9C-MUTANT-THROW-FALLS-BACK turns RED at
+  // "PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a scroller whose offsetWidth
+  // throws ..." if a throwing scroller read falls back to the container's
+  // clientWidth.
+  // MUTATION GUARD: PH9C-MUTANT-CLOSEST-REQUIRED turns RED at
+  // "PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a container without closest
+  // ..." if a container that cannot be searched is unmeasured instead of
+  // measured by its clientWidth.
   {
-    const container = mountContainer(900);
-    const view = countingView();
-    await view.render({ container });
-    await ph1Drain();
-    assert(liveObservers().length === 0 && pendingTimers() === 0 && view.renders === 1 && !isCompact(container),
-      'PH1C-MUTANT-OBSERVER-AFTER-MEASURED (PH1C-NO-CONTINUOUS-OBSERVER): a measured 900 render draws wide and leaves zero live observers and zero pending timers');
-    await settled('PH1C-NO-CONTINUOUS-OBSERVER: measured 900', view, ['wide'], container);
+    const probe = new GraphView();
+    for (const [paneClass, label] of [['markdown-preview-view', 'a 610 pane'], ['cm-scroller', 'a .cm-scroller pane']]) {
+      for (const gutter of [15, 17]) {
+        const { pane, container } = mountPane(610, (root) => (hasGraph(root) ? gutter : 0), paneClass);
+        const empty = probe._resolveWidth({ container }, undefined);
+        const emptyInner = container.clientWidth;
+        const root = container.createEl('div');
+        root.createEl('div', { cls: 'graph-view-canvas' });
+        const drawn = probe._resolveWidth({ container }, {});
+        const drawnInner = container.clientWidth;
+        assert(emptyInner === 610 && drawnInner === 610 - gutter
+          && JSON.stringify([empty, drawn]) === JSON.stringify([
+            { width: 610, narrow: false, source: 'measured' }, { width: 610, narrow: false, source: 'measured' },
+          ]) && pane.ph9Reads === 2,
+        `PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: ${label} whose container reads 610 with no graph and ${610 - gutter} with one drawn (a ${gutter}px scrollbar) resolves the same wide measurement, 610, in both states`);
+      }
+    }
+    for (const [W, narrow] of [[599, true], [599.5, true], [599.99, true], [600, false]]) {
+      const { container } = mountPane(W, () => 15);
+      assert.deepStrictEqual(probe._resolveWidth({ container }, {}), { width: W, narrow, source: 'measured' },
+        `PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a pane with no padding, borders, or stable gutter whose offsetWidth is ${W} resolves a ${narrow ? 'narrow' : 'wide'} measurement of ${W} (its container reads ${W - 15} beside a 15px scrollbar)`);
+    }
+    {
+      const { container } = mountPane(900);
+      assert.deepStrictEqual(probe._resolveWidth({ container }, { containerWidth: 390 }), { width: 390, narrow: true, source: 'override' },
+        'PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: an override still beats the pane measurement');
+      assert.deepStrictEqual(probe._resolveWidth({ container }, { containerWidth: 599.996 }), { width: 599.996, narrow: true, source: 'override' },
+        'PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: an override of 599.996 resolves narrow');
+    }
+    {
+      const bare = mountContainer(500);
+      assert.deepStrictEqual(probe._resolveWidth({ container: bare }, {}), { width: 500, narrow: true, source: 'measured' },
+        'PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: with no scroller around it the mount container\'s clientWidth decides');
+      const plain = { clientWidth: 500 };
+      assert.deepStrictEqual(probe._resolveWidth({ container: plain }, {}), { width: 500, narrow: true, source: 'measured' },
+        'PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a container without closest is measured by its clientWidth');
+    }
+    for (const mobile of [false, true]) {
+      ph1MobileClass = mobile;
+      const { pane, container } = mountPane(0);
+      container.ph1Width = 500;
+      const zero = probe._resolveWidth({ container }, {});
+      pane.ph9Width = 700;
+      pane.ph9ThrowOn = () => true;
+      const thrown = probe._resolveWidth({ container }, {});
+      ph1MobileClass = false;
+      const unmeasured = mobile ? { width: 390, narrow: true, source: 'mobile-class' } : { width: 1024, narrow: false, source: 'default' };
+      assert.deepStrictEqual(zero, unmeasured,
+        `PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a found scroller whose offsetWidth is 0 is unmeasured ${mobile ? 'on an is-mobile body' : 'without is-mobile'} even though its container reads 500`);
+      assert.deepStrictEqual(thrown, unmeasured,
+        `PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a scroller whose offsetWidth throws is unmeasured ${mobile ? 'on an is-mobile body' : 'without is-mobile'} even though its container reads 500`);
+    }
+    {
+      const closestThrows = mountContainer(500);
+      closestThrows.closest = () => { throw new Error('closest unreadable'); };
+      assert.deepStrictEqual(probe._resolveWidth({ container: closestThrows }, {}), { width: 1024, narrow: false, source: 'default' },
+        'PH9-PRESENTATION-INDEPENDENT-MEASUREMENT: a scroller lookup that throws is unmeasured');
+    }
   }
+
+  // ---- PH9D-CONTENT-WIDTH ----
+  // Evidence, Obsidian 1.13.7's app.css: .markdown-preview-view, and the
+  // .cm-scroller of a .markdown-source-view under .view-content or in a
+  // hover popover, carry padding: var(--file-margins); --file-margins-x is
+  // 32px by default and 24px under .is-mobile, and --file-margins is 20px in
+  // the side docks; .markdown-preview-view and
+  // .markdown-source-view.mod-cm6 .cm-scroller carry scrollbar-gutter:
+  // stable. The measured width is the scroller's content width: its
+  // clientWidth less its padding when its computed scrollbar gutter includes
+  // "stable", and otherwise its offsetWidth less its borders and padding.
+  // The 600 threshold applies to that width.
+  // MUTATION GUARD: PH9D-MUTANT-IGNORE-PADDING turns RED at
+  // "PH9D-CONTENT-WIDTH: a 390 phone reading view with 24px margins ..." if the
+  // scroller's padding is not subtracted.
+  // MUTATION GUARD: PH9D-MUTANT-ONE-SIDE-PADDING turns RED at the same label
+  // if only the left padding is subtracted.
+  // MUTATION GUARD: PH9D-MUTANT-STABLE-IGNORED turns RED at
+  // "PH9D-CONTENT-WIDTH: a desktop reading view (32px margins, 12px stable
+  // gutter) ..." if a stable gutter is measured as part of the content.
+  // MUTATION GUARD: PH9D-MUTANT-GUTTER-EXACT-MATCH turns RED at
+  // "PH9D-CONTENT-WIDTH: a scroller whose gutter is stable both-edges ..." if
+  // only a computed value of exactly "stable" counts as stable.
+  // MUTATION GUARD: PH9D-MUTANT-BORDER-BOX-THRESHOLD turns RED at
+  // "PH9D-CONTENT-WIDTH: the 600 threshold applies to the content width ..."
+  // if the border box decides narrow or wide.
+  // MUTATION GUARD: PH9D-MUTANT-CLIENTWIDTH-SCROLLBAR turns RED at
+  // "PH9D-CONTENT-WIDTH: without a stable gutter ..." if the scrollbar the
+  // graph shows is subtracted (the scroller's clientWidth less padding).
+  // MUTATION GUARD: PH9D-MUTANT-IGNORE-BORDERS turns RED at the same label if
+  // the scroller's borders are not subtracted.
+  // MUTATION GUARD: PH9D-MUTANT-NO-CSSOM-USES-SCROLLER turns RED at
+  // "PH9D-CONTENT-WIDTH: without getComputedStyle ..." if a scroller whose
+  // style cannot be read is measured by its offsetWidth.
   {
-    const container = mountContainer(390);
+    const probe = new GraphView();
+    const desktop = { pad: 32, stable: true, reserved: 12 };
+    for (const [label, W, paneClass, options, expected] of [
+      ['a 390 phone reading view with 24px margins and overlay scrollbars resolves 342', 390, 'markdown-preview-view', { pad: 24, stable: true, reserved: 0 }, 342],
+      ['a desktop reading view (32px margins, 12px stable gutter) 700 wide resolves 624', 700, 'markdown-preview-view', desktop, 624],
+      ['a Live Preview editor (.cm-scroller, 32px margins, 12px stable gutter) 500 wide resolves 424', 500, 'cm-scroller', desktop, 424],
+      ['a side-dock reading view (20px margins, 12px stable gutter) 300 wide resolves 248', 300, 'markdown-preview-view', { pad: 20, stable: true, reserved: 12 }, 248],
+      ['a scroller whose gutter is stable both-edges (32px margins, 12px on each edge) 500 wide resolves 412', 500, 'markdown-preview-view', { pad: 32, stable: true, reserved: 24, gutterValue: 'stable both-edges' }, 412],
+    ]) {
+      const { container } = mountPane(W, (root) => (hasGraph(root) ? 15 : 0), paneClass, options);
+      const resolved = probe._resolveWidth({ container }, {});
+      const inner = container.clientWidth;
+      assert(JSON.stringify(resolved) === JSON.stringify({ width: expected, narrow: expected < 600, source: 'measured' }) && inner === expected,
+        `PH9D-CONTENT-WIDTH: ${label}, the width its mount container reads`);
+    }
+    {
+      const popover = element('div', { cls: 'popover hover-popover' });
+      const { pane, container } = mountPane(450, () => 0, 'markdown-preview-view', desktop);
+      pane.parent = popover;
+      popover.children.push(pane);
+      assert.deepStrictEqual(probe._resolveWidth({ container }, {}), { width: 374, narrow: true, source: 'measured' },
+        'PH9D-CONTENT-WIDTH: a hover popover\'s reading view (32px margins, 12px stable gutter) 450 wide resolves 374');
+    }
+    for (const [W, expected] of [[675, { width: 599, narrow: true }], [675.5, { width: 599.5, narrow: true }], [676, { width: 600, narrow: false }]]) {
+      const { container } = mountPane(W, () => 0, 'markdown-preview-view', desktop);
+      assert.deepStrictEqual(probe._resolveWidth({ container }, {}), { ...expected, source: 'measured' },
+        `PH9D-CONTENT-WIDTH: the 600 threshold applies to the content width: a desktop reading view ${W} wide (content ${expected.width}) resolves ${expected.narrow ? 'narrow' : 'wide'}`);
+    }
+    {
+      const { pane, container } = mountPane(612, (root) => (hasGraph(root) ? 15 : 0), 'markdown-preview-view', { pad: 32, border: 1 });
+      const empty = probe._resolveWidth({ container }, {});
+      const emptyInner = container.clientWidth;
+      const root = container.createEl('div');
+      root.createEl('div', { cls: 'graph-view-canvas' });
+      const drawn = probe._resolveWidth({ container }, {});
+      const drawnInner = container.clientWidth;
+      assert(JSON.stringify([empty, drawn]) === JSON.stringify([
+        { width: 546, narrow: true, source: 'measured' }, { width: 546, narrow: true, source: 'measured' },
+      ]) && emptyInner === 546 && drawnInner === 531 && pane.ph9Reads === 2,
+      'PH9D-CONTENT-WIDTH: without a stable gutter, a 612 pane with 1px borders and 32px margins resolves 546 whether or not the graph shows its 15px scrollbar (its container reads 546, then 531)');
+    }
+    {
+      const savedStyle = Object.getOwnPropertyDescriptor(global, 'getComputedStyle');
+      delete global.getComputedStyle;
+      const resolved = probe._resolveWidth({ container: { clientWidth: 342, closest: () => ({ offsetWidth: 390, clientWidth: 390 }) } }, {});
+      Object.defineProperty(global, 'getComputedStyle', savedStyle);
+      assert.deepStrictEqual(resolved, { width: 342, narrow: true, source: 'measured' },
+        'PH9D-CONTENT-WIDTH: without getComputedStyle, a scroller measuring 390 around a container measuring 342 resolves 342, the container\'s width');
+    }
+    // Asymmetric panes: 1px left and 3px right borders, 23.75px left and
+    // 24.5px right padding.
+    // MUTATION GUARD: PH9D-MUTANT-STABLE-SUBTRACTS-BORDERS turns RED at
+    // "PH9D-CONTENT-WIDTH: under a stable gutter ..." if the stable branch
+    // also subtracts the borders.
+    // MUTATION GUARD: PH9D-MUTANT-PADDING-PARSEINT turns RED at the same label
+    // if the computed padding is read with parseInt.
+    // MUTATION GUARD: PH9D-MUTANT-LEFT-PADDING-TWICE turns RED at the same
+    // label if the left padding is subtracted twice and the right not at all.
+    // MUTATION GUARD: PH9D-MUTANT-RIGHT-PADDING-TWICE turns RED at the same
+    // label if the right padding is subtracted twice and the left not at all.
+    // MUTATION GUARD: PH9D-MUTANT-LEFT-BORDER-TWICE turns RED at
+    // "PH9D-CONTENT-WIDTH: without a stable gutter, the offset width less each
+    // side's border ..." if the left border is subtracted twice and the right
+    // not at all.
+    // MUTATION GUARD: PH9D-MUTANT-RIGHT-BORDER-TWICE turns RED at the same
+    // label if the right border is subtracted twice and the left not at all.
+    const asymmetric = { padLeft: 23.75, padRight: 24.5, borderLeft: 1, borderRight: 3 };
+    for (const [W, expected] of [[664, { width: 599.75, narrow: true }], [665, { width: 600.75, narrow: false }]]) {
+      const { container } = mountPane(W, () => 0, 'markdown-preview-view', { ...asymmetric, stable: true, reserved: 12 });
+      assert.deepStrictEqual(probe._resolveWidth({ container }, {}), { ...expected, source: 'measured' },
+        `PH9D-CONTENT-WIDTH: under a stable gutter, the client width less each side's padding once, fractional, with no border subtracted: a ${W} pane (1px and 3px borders, a 12px gutter, 23.75px and 24.5px padding, client width ${W - 16}) resolves ${expected.width}`);
+    }
+    for (const [W, expected] of [[652, { width: 599.75, narrow: true }], [653, { width: 600.75, narrow: false }]]) {
+      const { container } = mountPane(W, (root) => (hasGraph(root) ? 15 : 0), 'markdown-preview-view', asymmetric);
+      const empty = probe._resolveWidth({ container }, {});
+      const root = container.createEl('div');
+      root.createEl('div', { cls: 'graph-view-canvas' });
+      const drawn = probe._resolveWidth({ container }, {});
+      assert.deepStrictEqual([empty, drawn], [{ ...expected, source: 'measured' }, { ...expected, source: 'measured' }],
+        `PH9D-CONTENT-WIDTH: without a stable gutter, the offset width less each side's border and padding once, fractional: a ${W} pane (1px and 3px borders, 23.75px and 24.5px padding) resolves ${expected.width} with and without the graph's 15px scrollbar`);
+    }
+  }
+  // The drawn compact maps pin these literals (from the card formula,
+  // chained slices GA-H1 ... GA-H<R>):
+  //   phone reading view 390 (24px margins, is-mobile), 5 ranks at 342:
+  //     59px pills with short ids, canvas 339;
+  //   desktop reading view 675 (content 599), 4 ranks: 140px pills with full
+  //     ids, canvas 594;
+  //   side-dock reading view 300 (content 248), 3 ranks: 74px pills with
+  //     full ids, canvas 246;
+  //   Live Preview 500 (content 424), 5 ranks: 76px pills with full ids,
+  //     canvas 424;
+  //   no stable gutter, 612 with 1px borders (content 546), 5 ranks: 100px
+  //     pills with full ids, canvas 544, in a container reading 531 while the
+  //     graph shows its 15px scrollbar.
+  {
+    const savedAppContent = global.app;
+    const savedCustomJSContent = global.customJS;
+    for (const [label, W, paneClass, options, mobile, R, colW, lefts, ids, canvasWidth, inner] of [
+      ['a 390 phone with 24px margins', 390, 'markdown-preview-view', { pad: 24, stable: true, reserved: 0 }, true, 5, 59, [2, 71, 140, 209, 278], 'short', 339, 342],
+      ['a desktop reading view 675 wide', 675, 'markdown-preview-view', { pad: 32, stable: true, reserved: 12 }, false, 4, 140, [2, 152, 302, 452], 'full', 594, 599],
+      ['a side-dock reading view 300 wide', 300, 'markdown-preview-view', { pad: 20, stable: true, reserved: 12 }, false, 3, 74, [2, 86, 170], 'full', 246, 248],
+      ['a Live Preview editor 500 wide', 500, 'cm-scroller', { pad: 32, stable: true, reserved: 12 }, false, 5, 76, [2, 88, 174, 260, 346], 'full', 424, 424],
+      ['a 612 pane without a stable gutter', 612, 'markdown-preview-view', { pad: 32, border: 1 }, false, 5, 100, [2, 112, 222, 332, 442], 'full', 544, 531],
+    ]) {
+      ph1dUseEnv(ph1dChainEnv(R));
+      ph1MobileClass = mobile;
+      const { pane, container } = mountPane(W, (root) => (hasGraph(root) ? 15 : 0), paneClass, options);
+      await new GraphView({ lifecycleApi, insights: new GraphInsights() }).render({ container });
+      ph1MobileClass = false;
+      const drawing = ph1dCompactDrawing(container.children[0]);
+      const containerWidth = container.clientWidth;
+      assert.deepStrictEqual({ drawing, containerWidth }, { drawing: ph1dExpectedDrawing(colW, lefts, ids, canvasWidth, 0), containerWidth: inner },
+        `PH9D-CONTENT-WIDTH: ${label} draws ${R} chained slices as ${colW}px pills with ${ids} ids on a ${canvasWidth}px canvas, and its container reads ${inner}`);
+      if (options.stable) {
+        const drawnCanvas = Number.parseFloat(/width:([\d.]+)px/.exec(drawing.canvas || '')?.[1]);
+        assert(drawnCanvas <= containerWidth,
+          `PH9D-CONTENT-WIDTH: ${label}: the drawn ${drawnCanvas}px canvas is no wider than its container's ${containerWidth}px client width`);
+      }
+      ph9Discard(pane);
+    }
+    global.app = savedAppContent;
+    global.customJS = savedCustomJSContent;
+  }
+
+  // ---- PH9B-OBSERVER-AFTER-MEASURED (PH1C-NO-CONTINUOUS-OBSERVER inverted) ----
+  // A measured render watches its pane: exactly one live ResizeObserver, on
+  // the note scroll container, one childList watch on its mount container,
+  // and nothing pending; its observe() notification re-resolves the drawn
+  // presentation and arms nothing. A containerWidth override watches
+  // nothing, and later pane changes render nothing.
+  // MUTATION GUARD: PH1C-MUTANT-OBSERVER-AFTER-MEASURED turns RED at
+  // "PH1C-MUTANT-OBSERVER-AFTER-MEASURED (PH9B-OBSERVER-AFTER-MEASURED): a
+  // measured 900 render ..." if a measured render watches nothing (only an
+  // unmeasured render would).
+  // MUTATION GUARD: PH9C-MUTANT-WATCH-MOUNT-CONTAINER turns RED at the same
+  // label if the watch observes the mount container although a note scroll
+  // container was found.
+  // MUTATION GUARD: PH9C-MUTANT-WATCH-ON-OVERRIDE turns RED at
+  // "PH9B-OBSERVER-AFTER-MEASURED: an override 1024 over a measured 390 pane
+  // ..." if a render pinned by an override watches.
+  for (const [W, drawn] of [[900, 'wide'], [390, 'compact']]) {
+    const { pane, container } = mountPane(W);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    assert(liveObservers().length === 0 && pendingTimers() === 0 && isCompact(container),
-      'PH1C-NO-CONTINUOUS-OBSERVER: a measured 390 render draws compact and leaves zero live observers and zero pending timers');
-    await settled('PH1C-NO-CONTINUOUS-OBSERVER: measured 390', view, ['compact'], container);
+    const resize = liveResize();
+    const watch = liveMutation();
+    assert(resize.length === 1 && resize[0].target === pane && watch.length === 1 && watch[0].target === container
+      && pendingTimers() === 0 && view.renders === 1 && isCompact(container) === (drawn === 'compact'),
+    `PH1C-MUTANT-OBSERVER-AFTER-MEASURED (PH9B-OBSERVER-AFTER-MEASURED): a measured ${W} render draws ${drawn} and leaves exactly one live ResizeObserver, on the note scroll container, one childList watch on its mount container, and zero pending timers`);
+    await ph1Frame();
+    assert(resize[0].notifications === 1 && view.renders === 1 && pendingTimers() === 0,
+      `PH9B-OBSERVER-AFTER-MEASURED: the observe() notification after a measured ${W} render re-resolves ${W}, the drawn presentation, and arms nothing`);
+    await settled(`PH9B-OBSERVER-AFTER-MEASURED: measured ${W}`, view, [drawn], container);
+    ph9Discard(pane);
   }
   for (const [label, measured, override, drawn] of [
     ['override 1024 over a measured 390 pane', 390, 1024, 'wide'],
     ['override 390 over a measured 900 pane', 900, 390, 'compact'],
     ['override 390 over an unmeasured (0) pane', 0, 390, 'compact'],
   ]) {
-    const container = mountContainer(measured);
+    const { pane, container } = mountPane(measured);
     const view = countingView();
     await view.render({ container }, { containerWidth: override });
     await ph1Drain();
     assert(liveObservers().length === 0 && pendingTimers() === 0,
-      `PH1C-NO-CONTINUOUS-OBSERVER: an ${label} leaves zero live observers and zero pending timers`);
-    container.ph1Width = measured ? 1400 - measured : 590;
+      `PH9B-OBSERVER-AFTER-MEASURED: an ${label} watches nothing and leaves zero pending timers`);
+    pane.ph9Width = measured ? 1400 - measured : 590;
     await ph1Frame();
-    await settled(`PH1C-NO-CONTINUOUS-OBSERVER: ${label}`, view, [drawn], container);
+    await ph1Clock.advance(400);
+    await settled(`PH9B-OBSERVER-AFTER-MEASURED: ${label}`, view, [drawn], container, { watched: [] });
+    ph9Discard(pane);
   }
-  // PH1-OBSERVER-DISAGREEMENT-LOOP: container clientWidth and root content box
-  // straddle 600, and content-box ticks after the measured render initiate no
-  // render.
+  // PH1-OBSERVER-DISAGREEMENT-LOOP: with no scroller the watch observes its
+  // mount container. Its content box and its clientWidth straddle 600, and
+  // content-box ticks after the measured render re-resolve the unchanged
+  // clientWidth and render nothing.
   for (const [clientWidth, contentWidth] of [[600, 599.75], [590, 610], [610, 590]]) {
     const container = mountContainer(clientWidth, contentWidth);
     const view = countingView();
@@ -4626,137 +5029,958 @@ async function main() {
     for (const tick of [contentWidth - 0.25, contentWidth, contentWidth - 0.5]) {
       container.ph1Content = tick;
       await ph1Frame();
+      await ph1Clock.advance(130);
     }
-    await settled(`PH1-OBSERVER-DISAGREEMENT-LOOP (PH1C-NO-CONTINUOUS-OBSERVER): container ${clientWidth} / root content ${contentWidth}`,
+    await settled(`PH1-OBSERVER-DISAGREEMENT-LOOP (PH9C-SETTLED-INVARIANT): container ${clientWidth} / observed box ${contentWidth}`,
       view, [clientWidth < 600 ? 'compact' : 'wide'], container);
+    ph9Discard(container);
   }
-  // PH1-FLIP-CAP-LOST-CROSSING: 600px crossings 400ms and 1500ms apart after a
-  // measured render initiate no render.
-  for (const cadence of [400, 1500]) {
-    const container = mountContainer(900);
-    const view = countingView();
-    await view.render({ container });
-    for (const width of [500, 900, 500, 900]) {
-      container.ph1Width = width;
-      await ph1Clock.advance(cadence);
-      await ph1Frame();
-    }
-    await settled(`PH1-FLIP-CAP-LOST-CROSSING (PH1C-NO-CONTINUOUS-OBSERVER): crossings every ${cadence}ms ending at 900`,
-      view, ['wide'], container);
-  }
-  // PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT: a pane scrollbar that appears only
-  // while a graph is drawn (610 empty, 595 drawn); the one render draws wide
-  // and nothing re-renders.
-  {
-    const container = mountContainer((root) => (hasGraph(root) ? 595 : 610));
-    const view = countingView();
-    await view.render({ container });
-    assert.strictEqual(container.clientWidth, 595,
-      'PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT: the drawn graph moved the pane from 610 to 595');
-    await settled('PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT (PH1C-NO-CONTINUOUS-OBSERVER): 610 empty / 595 drawn',
-      view, ['wide'], container);
-  }
-  // PH1B-PERMANENT-HOLD: the pane moves 900 -> 610 -> 500 after a measured
-  // render with nothing following, then a Dataview refresh measures 500 and
-  // draws compact.
-  {
-    const container = mountContainer(900);
-    const view = countingView();
-    await view.render({ container });
-    for (const width of [610, 500]) {
-      container.ph1Width = width;
-      await ph1Clock.advance(200);
-      await ph1Frame();
-    }
-    assert(view.renders === 1 && !isCompact(container),
-      'PH1B-PERMANENT-HOLD: pane changes after a measured render initiate no render');
-    await view.render({ container });
-    await settled('PH1B-PERMANENT-HOLD (PH1C-NO-CONTINUOUS-OBSERVER): 900 -> 610 -> 500, then one Dataview refresh',
-      view, ['wide', 'compact'], container);
-  }
-  // PH1B-FALSE-BISTABLE-PROOF: on a pane that measures 590 under the wide
-  // graph and 605 under the compact map, each Dataview render draws what its
-  // own measurement says, and width changes between them initiate no render.
-  {
-    const container = mountContainer((root) => (isWideGraph(root) ? 590 : 605));
-    const view = countingView();
-    await view.render({ container });
-    await ph1Frame();
-    await view.render({ container });
-    await ph1Frame();
-    const model = container.ph1Width;
-    for (const width of [610, 590, model]) {
-      container.ph1Width = width;
-      await ph1Frame();
-    }
-    await view.render({ container });
-    await settled('PH1B-FALSE-BISTABLE-PROOF (PH1C-NO-CONTINUOUS-OBSERVER): three Dataview renders on a 590-wide / 605-compact pane',
-      view, ['wide', 'compact', 'wide'], container);
-  }
-  for (const identifier of [
-    '_flipStreak', '_flipStreaks', '_widthFlipAllowed', 'settleCheck', 'boundedCheck', 'bistable', 'withinBand',
-    'sawCompactWide', 'sawWideNarrow', '_handoffWidthRender', '_beginWidthRender', '_resetWidthState', '_widthState',
-    '_widthHandoffs', 'setTimeout', 'clearTimeout', 'setInterval', 'requestAnimationFrame',
-  ]) {
-    assert(!widgetSource.includes(identifier),
-      `PH1C-NO-CONTINUOUS-OBSERVER: graph-view.js contains no ${identifier}`);
-  }
-  assert(!/\bband\b|\bsettle|\bstreak|\bdebounce/i.test(widgetSource),
-    'PH1C-NO-CONTINUOUS-OBSERVER: graph-view.js carries no band, settle, streak, or debounce state');
 
-  // ---- PH1C-ONE-SHOT-COLD-LOAD ----
-  // An unmeasured render arms one one-shot: one resize observer on its root
-  // and one childList watch on its container. Each resize notification
-  // re-resolves the same measurement render() uses; while that is unmeasured
-  // nothing happens; the first time it is measured the one-shot disarms and
-  // re-renders exactly once, and that measured render arms nothing.
+  // Drives a pane on the stubbed clock: one frame every 10ms from 0 to
+  // `until`; each change is [ms, width] or [ms, action].
+  const ph9Drive = async (pane, changes, until) => {
+    for (let at = 0; at <= until; at += 10) {
+      for (const [when, change] of changes) {
+        if (when !== at) continue;
+        if (typeof change === 'function') change();
+        else pane.ph9Width = change;
+      }
+      ph1Deliver();
+      await settle();
+      await ph1Clock.advance(10);
+    }
+  };
+  // A scenario: a pane at `start`, one render (finished, and its observe()
+  // notification delivered), the drive, then settled().
+  const ph9Scenario = async (label, { start, changes, until, trace = null, ends = null, delay = 0, gutter, paneClass = 'markdown-preview-view', paneOptions = {}, compactAtEnd = null }) => {
+    const { pane, container } = mountPane(start, gutter, paneClass, paneOptions);
+    const view = countingView({ delay });
+    const rendering = view.render({ container });
+    if (delay) await ph1Clock.advance(delay);
+    await rendering;
+    await ph1Drain();
+    await ph1Frame();
+    await ph9Drive(pane, changes.map(([when, change]) => [when, change === 'rerun' ? () => { view.render({ container }); } : change]), until);
+    await settled(label, view, trace, container, { ends });
+    const widths = changes.filter(([, change]) => typeof change === 'number');
+    const final = widths.length ? widths[widths.length - 1][1] : start;
+    assert.strictEqual(isCompact(container), compactAtEnd ?? final < 600,
+      `${label}: the drawn map is ${(compactAtEnd ?? final < 600) ? 'compact' : 'wide'} at the final pane width ${final}`);
+    ph9Discard(pane);
+    return view;
+  };
+
+  // ---- PH9-OBSERVER-CONVERGES ----
+  // One frame every 10ms. Each notification, unless the watch is gone,
+  // re-resolves the pane's content width; one that resolves a different
+  // measured presentation (re)starts a 120ms debounce, which, unless the
+  // watch is gone, re-resolves the width again and re-renders only if the
+  // presentation (the wide map, or the compact map at the width it was
+  // measured at) differs from the one the render resolved.
+  // PH1-FLIP-CAP-LOST-CROSSING: crossings 400ms and 1500ms apart ending at
+  // 900 each render once and end wide.
+  // MUTATION GUARD: PH1C-MUTANT-ONE-SHOT-TWICE turns RED at
+  // "PH1C-MUTANT-ONE-SHOT-TWICE (PH9-OBSERVER-CONVERGES): a crossing that
+  // reverses inside the debounce ..." if a notification re-renders at once instead of (re)starting the
+  // 120ms debounce, so one crossing and its reversal render twice.
+  // MUTATION GUARD: PH9C-MUTANT-DEBOUNCE-SKIPS-RERESOLVE turns RED at
+  // "PH9-OBSERVER-CONVERGES: 700 -> 590, then 605 with a scrollbar ..." if the
+  // debounce decides from the measurement its notification resolved instead
+  // of re-resolving.
+  // MUTATION GUARD: PH1D-MUTANT-SKIP-WIDE-TO-WIDE turns RED at
+  // "PH9-OBSERVER-CONVERGES: 900 -> 700 ..." if the watch re-renders when the
+  // measurement resolves the drawn presentation.
+  for (const [label, spec] of [
+    ['700 -> 500 re-renders once', { start: 700, changes: [[0, 500]], until: 400, trace: ['wide', 'compact'] }],
+    ['900 -> 700 does not re-render', { start: 900, changes: [[0, 700]], until: 400, trace: ['wide'] }],
+    ['PH1-FLIP-CAP-LOST-CROSSING: four crossings 400ms apart ending at 900', {
+      start: 900, changes: [[0, 500], [400, 900], [800, 500], [1200, 900]], until: 1600,
+      trace: ['wide', 'compact', 'wide', 'compact', 'wide'],
+    }],
+    ['PH1-FLIP-CAP-LOST-CROSSING: crossings every 1500ms ending at 900', {
+      start: 900, changes: [[0, 500], [1500, 900], [3000, 500], [4500, 900]], until: 4900,
+      trace: ['wide', 'compact', 'wide', 'compact', 'wide'],
+    }],
+    ['a slow resize 700 -> 610 -> 590 -> 560 in 200ms steps ends compact', {
+      start: 700, changes: [[0, 610], [200, 590], [400, 560]], until: 800, trace: ['wide', 'compact', 'compact'],
+    }],
+    ['PH1C-MUTANT-ONE-SHOT-TWICE (PH9-OBSERVER-CONVERGES): a crossing that reverses inside the debounce renders nothing (700 -> 590 -> 700 at 110ms)', {
+      start: 700, changes: [[0, 590], [110, 700]], until: 400, trace: ['wide'],
+    }],
+    ['a crossing that reverses inside the debounce renders nothing (500 -> 610 -> 500 at 60ms)', {
+      start: 500, changes: [[0, 610], [60, 500]], until: 400, trace: ['compact'],
+    }],
+    ['600 -> 599.5 re-renders once, compact', { start: 600, changes: [[0, 599.5]], until: 400, trace: ['wide', 'compact'] }],
+    ['600 -> 599.99 re-renders once, compact', { start: 600, changes: [[0, 599.99]], until: 400, trace: ['wide', 'compact'] }],
+    ['599.5 -> 600 re-renders once, wide', { start: 599.5, changes: [[0, 600]], until: 400, trace: ['compact', 'wide'] }],
+    ['a desktop reading view (32px margins, 12px stable gutter) narrowed from 776 to 675 (content 599) re-renders compact once', {
+      start: 776, changes: [[0, 675]], until: 400, trace: ['wide', 'compact'], paneOptions: { pad: 32, stable: true, reserved: 12 },
+      gutter: (root) => (hasGraph(root) ? 15 : 0), compactAtEnd: true,
+    }],
+    ['a desktop reading view (32px margins, 12px stable gutter) widened from 675 to 676 (content 600) re-renders wide once', {
+      start: 675, changes: [[0, 676]], until: 400, trace: ['compact', 'wide'], paneOptions: { pad: 32, stable: true, reserved: 12 },
+      gutter: (root) => (hasGraph(root) ? 15 : 0), compactAtEnd: false,
+    }],
+    ['a 390 phone with 24px margins widened to 648 (content 600) re-renders wide once', {
+      start: 390, changes: [[0, 648]], until: 400, trace: ['compact', 'wide'], paneOptions: { pad: 24, stable: true, reserved: 0 },
+      compactAtEnd: false,
+    }],
+    ['700 -> 590, then 605 with a scrollbar that keeps the observed box at 590, ends wide', {
+      start: 700, changes: [[0, 590], [60, 605]], until: 400, trace: ['wide'],
+      gutter: (_root, pane) => (pane.ph9Width === 605 ? 15 : 0),
+    }],
+  ]) {
+    await ph9Scenario(label.startsWith('PH1C-MUTANT-') ? label : `PH9-OBSERVER-CONVERGES: ${label}`, spec);
+  }
+  {
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9Width = 590;
+    await ph1Frame();
+    assert.deepStrictEqual(pendingDelays(), [120], 'PH9-OBSERVER-CONVERGES: a notification that crosses to 590 arms one 120ms debounce');
+    pane.ph9Width = 700;
+    await ph1Frame();
+    assert(pendingTimers() === 0 && view.renders === 1,
+      'PH9-OBSERVER-CONVERGES: a notification back at the drawn presentation cancels the pending debounce');
+    pane.ph9Width = 590;
+    await ph1Frame();
+    await ph1Clock.advance(60);
+    pane.ph9Width = 580;
+    await ph1Frame();
+    await ph1Clock.advance(119);
+    assert(view.renders === 1 && JSON.stringify(pendingDelays()) === JSON.stringify([120]),
+      'PH9-OBSERVER-CONVERGES: each notification restarts the 120ms debounce, so 119ms after the last one nothing has rendered');
+    await ph1Clock.advance(1);
+    await ph1Drain();
+    assert(view.renders === 2 && isCompact(container) && pendingTimers() === 0,
+      'PH9-OBSERVER-CONVERGES: 120ms after the last notification the debounce re-renders compact once');
+    await settled('PH9-OBSERVER-CONVERGES: the debounce restarts on each notification', view, ['wide', 'compact'], container);
+    ph9Discard(pane);
+  }
+
+  // ---- PH9D-CONTENT-WIDTH: the watch redraws a compact map at the measured width ----
+  // Literals from the card formula, chained slices GA-H1 ... GA-H<R>:
+  //   a 390 phone cold load (24px margins, is-mobile, the pane measuring 0
+  //     at render): the 390 guess draws 122px pills with full ids on a 390
+  //     canvas (3 ranks) or 69px pills with short ids on a 389 canvas (5
+  //     ranks); the pane laying out at 390 (content 342) re-renders once:
+  //     106px pills with full ids on a 342 canvas, or 59px pills with short
+  //     ids on a 339 canvas;
+  //   a desktop reading view (32px margins, 12px stable gutter), 5 ranks,
+  //     narrowed from 666 (content 590: 109px pills with full ids on a 589
+  //     canvas) to 476 (content 400) re-renders once: 71px pills with short
+  //     ids on a 399 canvas;
+  //   the same pane dragged from 666 to 476 in 50ms steps re-renders once,
+  //     after the debounce, at content 400.
+  // MUTATION GUARD: PH9D-MUTANT-NARROW-ONLY-PRESENTATION turns RED at
+  // "PH9D-CONTENT-WIDTH: a 390 phone cold load with 24px margins and 3
+  // chained slices ..." if the watch compares only compact against wide.
+  // MUTATION GUARD: PH9D-MUTANT-UNMEASURED-NEVER-RERENDERS turns RED at the
+  // same label if a compact map drawn from an unmeasured resolution is never
+  // redrawn at a measured width.
+  // MUTATION GUARD: PH9D-MUTANT-WIDTH-WITHOUT-DEBOUNCE turns RED at
+  // "PH9D-CONTENT-WIDTH: the same pane dragged from 666 to 476 ..." if a
+  // compact-to-compact width change re-renders at the notification instead
+  // of arming the 120ms debounce.
+  {
+    const savedAppWatch = global.app;
+    const savedCustomJSWatch = global.customJS;
+    for (const [R, coldColW, coldLefts, coldIds, coldCanvas, colW, lefts, ids, canvasWidth] of [
+      [3, 122, [2, 134, 266], 'full', 390, 106, [2, 118, 234], 'full', 342],
+      [5, 69, [2, 81, 160, 239, 318], 'short', 389, 59, [2, 71, 140, 209, 278], 'short', 339],
+    ]) {
+      ph1dUseEnv(ph1dChainEnv(R));
+      ph1MobileClass = true;
+      const { pane, container } = mountPane(0, () => 0, 'markdown-preview-view', { pad: 24, stable: true, reserved: 0 });
+      const view = countingView();
+      await view.render({ container });
+      await ph1Drain();
+      const cold = ph1dCompactDrawing(container.children[0]);
+      await ph1Frame();
+      pane.ph9Width = 390;
+      await ph1Frame();
+      await ph9Debounce();
+      ph1MobileClass = false;
+      assert.deepStrictEqual(
+        { cold, drawing: ph1dCompactDrawing(container.children[0]), renders: view.renders, containerWidth: container.clientWidth },
+        { cold: ph1dExpectedDrawing(coldColW, coldLefts, coldIds, coldCanvas, 0), drawing: ph1dExpectedDrawing(colW, lefts, ids, canvasWidth, 0), renders: 2, containerWidth: 342 },
+        `PH9D-CONTENT-WIDTH: a 390 phone cold load with 24px margins and ${R} chained slices draws the ${coldCanvas}px guess, then re-renders once when the pane measures 342: ${colW}px pills with ${ids} ids on a ${canvasWidth}px canvas`);
+      await settled(`PH9D-CONTENT-WIDTH: a 390 phone cold load with ${R} chained slices`, view, ['compact', 'compact'], container);
+      ph9Discard(pane);
+    }
+    ph1dUseEnv(ph1dChainEnv(5));
+    const desktop = { pad: 32, stable: true, reserved: 12 };
+    {
+      const { pane, container } = mountPane(666, () => 0, 'markdown-preview-view', desktop);
+      const view = countingView();
+      await view.render({ container });
+      await ph1Drain();
+      const before = ph1dCompactDrawing(container.children[0]);
+      await ph1Frame();
+      pane.ph9Width = 476;
+      await ph1Frame();
+      await ph9Debounce();
+      assert.deepStrictEqual(
+        { before, after: ph1dCompactDrawing(container.children[0]), renders: view.renders, containerWidth: container.clientWidth },
+        { before: ph1dExpectedDrawing(109, [2, 121, 240, 359, 478], 'full', 589, 0), after: ph1dExpectedDrawing(71, [2, 83, 164, 245, 326], 'short', 399, 0), renders: 2, containerWidth: 400 },
+        'PH9D-CONTENT-WIDTH: a desktop reading view (32px margins, 12px stable gutter) with 5 chained slices narrowed from 666 (content 590) to 476 (content 400) re-renders once: 109px pills on a 589px canvas, then 71px pills with short ids on a 399px canvas');
+      await settled('PH9D-CONTENT-WIDTH: a desktop reading view narrowed from 666 to 476', view, ['compact', 'compact'], container);
+      ph9Discard(pane);
+    }
+    {
+      const { pane, container } = mountPane(666, () => 0, 'markdown-preview-view', desktop);
+      const view = countingView();
+      await view.render({ container });
+      await ph1Drain();
+      await ph1Frame();
+      await ph9Drive(pane, [[0, 626], [50, 586], [100, 546], [150, 506], [200, 476]], 400);
+      assert.deepStrictEqual({ drawing: ph1dCompactDrawing(container.children[0]), renders: view.renders },
+        { drawing: ph1dExpectedDrawing(71, [2, 83, 164, 245, 326], 'short', 399, 0), renders: 2 },
+        'PH9D-CONTENT-WIDTH: the same pane dragged from 666 to 476 in 50ms steps re-renders once, after the debounce, at content 400: 71px pills with short ids on a 399px canvas');
+      await settled('PH9D-CONTENT-WIDTH: the same pane dragged from 666 to 476', view, ['compact', 'compact'], container);
+      ph9Discard(pane);
+    }
+    global.app = savedAppWatch;
+    global.customJS = savedCustomJSWatch;
+  }
+
+  // ---- PH9-DRAG-ENDS-CORRECT ----
+  // PH1B-FALSE-BISTABLE-PROOF: the pane is dragged across 600 (590 and 610
+  // alternately) every 300ms and every 150ms for five seconds, with renders
+  // taking 0ms and 200ms of the stubbed clock, then stops at 605, 610, 619,
+  // 640, 595, 581, or 560. A 17px scrollbar shows only under the wide graph,
+  // on a pane with no padding, borders, or stable gutter.
+  // Each run ends on the side of the final width with nothing pending and
+  // one live watch, and renders at most once per width change.
+  for (const cadence of [300, 150]) {
+    for (const delay of [0, 200]) {
+      for (const final of [605, 610, 619, 640, 595, 581, 560]) {
+        const changes = [];
+        for (let at = 0, index = 0; at < 5000; at += cadence, index += 1) changes.push([at, index % 2 ? 610 : 590]);
+        changes.push([5000, final]);
+        const view = await ph9Scenario(
+          `PH9-DRAG-ENDS-CORRECT (PH1B-FALSE-BISTABLE-PROOF): a drag every ${cadence}ms with ${delay}ms renders, stopping at ${final}`,
+          { start: 610, changes, until: 5500, ends: final < 600 ? 'compact' : 'wide', delay, gutter: (root) => (isWideGraph(root) ? 17 : 0) },
+        );
+        assert(view.initiated === 1 && view.renders >= 2 && view.renders <= changes.length + 1,
+          `PH9-DRAG-ENDS-CORRECT: a drag every ${cadence}ms with ${delay}ms renders, stopping at ${final}, renders at most once per width change (${view.renders} renders for ${changes.length} changes)`);
+      }
+    }
+  }
+
+  // ---- PH9-SCROLLBAR-CANNOT-FLIP ----
+  // PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT: panes of 610, 608, 600, and 599.5,
+  // with no padding, borders, or stable gutter, whose scrollbar appears only
+  // while a graph is drawn, only under the wide graph, or only under the
+  // compact map: each renders exactly once and never oscillates, although
+  // the container's clientWidth moves with the scrollbar.
+  // MUTATION GUARD: PH9C-MUTANT-CONTAINER-CLIENTWIDTH turns RED here too.
+  // MUTATION GUARD: PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT turns RED here too
+  // if the watch re-renders on the observer entry's box.
+  for (const W of [610, 608, 600, 599.5]) {
+    for (const [desc, gutter] of [
+      ['15px scrollbar while a graph is drawn', (root) => (hasGraph(root) ? 15 : 0)],
+      ['17px scrollbar only under the wide graph', (root) => (isWideGraph(root) ? 17 : 0)],
+      ['15px scrollbar only under the compact map', (root) => (hasGraph(root) && !isWideGraph(root) ? 15 : 0)],
+    ]) {
+      const drawn = W < 600 ? 'compact' : 'wide';
+      const label = `PH9-SCROLLBAR-CANNOT-FLIP (PH1B-SCROLLBAR-DEPENDENT-MEASUREMENT): a ${W} pane with a ${desc}`;
+      const { pane, container } = mountPane(W, gutter);
+      const view = countingView();
+      await view.render({ container });
+      await ph1Frame();
+      const inner = container.clientWidth;
+      await settled(label, view, [drawn], container);
+      assert(inner === W - gutter(container.children[0], pane),
+        `${label}: the drawn ${drawn} root leaves the container reading ${inner}`);
+      ph9Discard(pane);
+    }
+  }
+  // S9, S9b: the pane moves while a 200ms observer-driven re-render is in
+  // flight; S10: a Dataview re-run lands while the pane narrows to 590.
+  // PH1B-PERMANENT-HOLD: 900 -> 610 -> 500 with nothing following ends
+  // compact.
+  for (const [label, spec] of [
+    ['S9: 700 -> 590, with 620 and 595 during the 200ms re-render', {
+      start: 700, delay: 200, changes: [[0, 590], [170, 620], [270, 595]], until: 800, trace: ['wide', 'compact', 'compact'],
+      gutter: (root) => (hasGraph(root) ? 15 : 0),
+    }],
+    ['S9: 700 -> 590, with 595 and 620 during the 200ms re-render', {
+      start: 700, delay: 200, changes: [[0, 590], [170, 595], [270, 620]], until: 800, trace: ['wide', 'compact', 'wide'],
+      gutter: (root) => (hasGraph(root) ? 15 : 0),
+    }],
+    ['S9b: 560 -> 640, with 585 and 625 during the 200ms re-render', {
+      start: 560, delay: 200, changes: [[0, 640], [170, 585], [270, 625]], until: 800, trace: ['compact', 'wide'],
+      gutter: (root) => (isWideGraph(root) ? 17 : 0),
+    }],
+    ['S10: a Dataview re-run at 0 while the pane narrows to 590 at 50', {
+      start: 700, delay: 200, changes: [[0, 'rerun'], [50, 590]], until: 800, trace: ['wide', 'wide', 'compact'],
+    }],
+    ['S10: the pane narrows to 590 at 0 and a Dataview re-run lands at 50', {
+      start: 700, delay: 200, changes: [[0, 590], [50, 'rerun']], until: 800, trace: ['wide', 'compact'],
+    }],
+    ['S10: a Dataview re-run with 0ms renders at 50 while a debounce is pending', {
+      start: 700, changes: [[0, 590], [50, 'rerun']], until: 400, trace: ['wide', 'compact'],
+    }],
+    ['PH1B-PERMANENT-HOLD: 900 -> 610 -> 500 with nothing following ends compact', {
+      start: 900, changes: [[0, 610], [200, 500]], until: 600, trace: ['wide', 'compact'],
+    }],
+  ]) {
+    await ph9Scenario(`PH9-SCROLLBAR-CANNOT-FLIP: ${label}`, spec);
+  }
+
+  // ---- PH9-UNREADABLE-KEEPS-AND-RECHECKS ----
+  // PH1B-THROWING-GETTER-DROPS-CROSSING: the pane (no stable gutter, so its
+  // offsetWidth is the width read) throws once,
+  // at a chosen read, while the pane crosses 600. The reads, in order: 1 the
+  // render, 2 its observe() notification, 3 the crossing notification, 4 the
+  // debounce check. The drawn presentation is kept, one 250ms re-check is
+  // armed, and the next readable measurement decides.
+  // MUTATION GUARD: PH9C-MUTANT-UNREADABLE-DEFAULTS-WIDE turns RED at
+  // "PH9-UNREADABLE-KEEPS-AND-RECHECKS (PH1B-THROWING-GETTER-DROPS-CROSSING):
+  // a throw at the crossing notification ..." if an unreadable measurement
+  // resolves as wide.
+  // MUTATION GUARD: PH9C-MUTANT-UNREADABLE-NO-RECHECK turns RED at the same
+  // label if an unreadable measurement arms no re-check.
+  for (const [label, throwAt, crossTo, midTrace, trace] of [
+    ['a throw at the crossing notification', 3, 500, ['wide'], ['wide', 'compact']],
+    ['a throw at the debounce check', 4, 500, ['wide'], ['wide', 'compact']],
+    ['a throw at the crossing notification, narrow to wide', 3, 700, ['compact'], ['compact', 'wide']],
+  ]) {
+    const start = crossTo < 600 ? 700 : 500;
+    const { pane, container } = mountPane(start);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9ThrowOn = (read) => read === throwAt;
+    pane.ph9Width = crossTo;
+    await ph1Frame();
+    if (throwAt === 4) await ph1Clock.advance(120);
+    assert(pane.ph9Reads === throwAt && JSON.stringify(view.trace) === JSON.stringify(midTrace) && view.renders === 1
+      && JSON.stringify(pendingDelays()) === JSON.stringify([250]) && isCompact(container) === (midTrace[0] === 'compact'),
+    `PH9-UNREADABLE-KEEPS-AND-RECHECKS (PH1B-THROWING-GETTER-DROPS-CROSSING): ${label} keeps the drawn ${midTrace[0]} presentation and arms one 250ms re-check`);
+    await ph1Clock.advance(249);
+    assert(view.renders === 1, `PH9-UNREADABLE-KEEPS-AND-RECHECKS: ${label}: nothing renders 249ms after the unreadable read`);
+    await ph1Clock.advance(1);
+    await ph1Drain();
+    assert(view.renders === 2 && pane.ph9Reads === throwAt + 1 && isCompact(container) === (crossTo < 600),
+      `PH9-UNREADABLE-KEEPS-AND-RECHECKS: ${label}: 250ms later the re-check reads ${crossTo} and re-renders once`);
+    await settled(`PH9-UNREADABLE-KEEPS-AND-RECHECKS: ${label}`, view, trace, container);
+    ph9Discard(pane);
+  }
+  // An unreadable notification while the debounce is pending replaces the
+  // debounce with the re-check.
+  // MUTATION GUARD: PH9C-MUTANT-UNREADABLE-KEEPS-PENDING-DEBOUNCE turns RED at
+  // "PH9-UNREADABLE-KEEPS-AND-RECHECKS: an unreadable notification while the
+  // debounce is pending ..." if the pending debounce is kept instead.
+  {
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9Width = 500;
+    await ph1Frame();
+    pane.ph9ThrowOn = (read) => read === 4;
+    pane.ph9Width = 490;
+    await ph1Frame();
+    assert(pane.ph9Reads === 4 && view.renders === 1 && JSON.stringify(pendingDelays()) === JSON.stringify([250]),
+      'PH9-UNREADABLE-KEEPS-AND-RECHECKS: an unreadable notification while the debounce is pending replaces it with one 250ms re-check');
+    await ph1Clock.advance(250);
+    await ph1Drain();
+    await settled('PH9-UNREADABLE-KEEPS-AND-RECHECKS: an unreadable notification while the debounce is pending', view, ['wide', 'compact'], container);
+    ph9Discard(pane);
+  }
+  // A throw at the render's own measurement: the render resolves unmeasured
+  // and draws the default wide presentation; the watch's observe()
+  // notification reads 500 and the debounce re-renders compact once.
+  // A throw at the first notification after an observer-driven re-render
+  // keeps the re-rendered presentation and re-checks.
+  {
+    const { pane, container } = mountPane(500);
+    pane.ph9ThrowOn = (read) => read === 1;
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    assert(view.renders === 1 && !isCompact(container) && JSON.stringify(pendingDelays()) === JSON.stringify([120]),
+      'PH9-UNREADABLE-KEEPS-AND-RECHECKS: a throw at the render\'s own measurement draws the default wide presentation and the observe() notification reading 500 arms the debounce');
+    await ph9Debounce();
+    await settled('PH9-UNREADABLE-KEEPS-AND-RECHECKS: a throw at the render\'s own measurement', view, ['wide', 'compact'], container);
+    ph9Discard(pane);
+  }
+  {
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9Width = 500;
+    await ph1Frame();
+    pane.ph9ThrowOn = (read) => read === 5;
+    await ph1Clock.advance(120);
+    await ph1Drain();
+    pane.ph9Width = 700;
+    await ph1Frame();
+    assert(pane.ph9Reads === 5 && view.renders === 2 && isCompact(container) && JSON.stringify(pendingDelays()) === JSON.stringify([250]),
+      'PH9-UNREADABLE-KEEPS-AND-RECHECKS: a throw at the first notification after an observer-driven re-render keeps the compact map and arms one re-check');
+    await ph1Clock.advance(250);
+    await ph1Drain();
+    await settled('PH9-UNREADABLE-KEEPS-AND-RECHECKS: a throw at the first notification after an observer-driven re-render',
+      view, ['wide', 'compact', 'wide'], container);
+    ph9Discard(pane);
+  }
+  // A pane that measures 0 (hidden) is unmeasured: the drawn map is kept,
+  // one re-check still reads 0, and nothing is pending until the pane shows
+  // again at 700, which re-renders wide once.
+  // MUTATION GUARD: PH9C-MUTANT-RECHECK-REPEATS turns RED at
+  // "PH9-UNREADABLE-KEEPS-AND-RECHECKS: a pane hidden at 0 ..." if a re-check
+  // that is still unmeasured arms another re-check.
+  {
+    const { pane, container } = mountPane(500);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9Width = 0;
+    await ph1Frame();
+    await ph1Clock.advance(250);
+    await ph1Drain();
+    await ph1Clock.advance(1000);
+    assert(view.renders === 1 && isCompact(container) && pendingTimers() === 0 && liveResize().length === 1,
+      'PH9-UNREADABLE-KEEPS-AND-RECHECKS: a pane hidden at 0 keeps the compact map, and after its one re-check still reads 0 nothing is pending');
+    pane.ph9Width = 700;
+    await ph1Frame();
+    await ph9Debounce();
+    await settled('PH9-UNREADABLE-KEEPS-AND-RECHECKS: a pane hidden at 0, then shown at 700', view, ['compact', 'wide'], container);
+    ph9Discard(pane);
+  }
+
+  // ---- PH9-LIFECYCLE ----
+  // Removing the root while a debounce or a re-check is pending disconnects
+  // the watch and renders nothing, through the childList record and, with
+  // no mutation-observer API, when the timer fires.
+  // MUTATION GUARD: PH9C-MUTANT-DISCONNECT-KEEPS-TIMER turns RED at
+  // "PH9-LIFECYCLE: removing the root while a debounce is pending ..." if
+  // disconnecting leaves the pending timer armed.
+  for (const [label, pendingKind, withMutation] of [
+    ['removing the root while a debounce is pending', 'debounce', true],
+    ['removing the root while a re-check is pending', 'recheck', true],
+    ['with no MutationObserver API, removing the root while a debounce is pending', 'debounce', false],
+    ['with no MutationObserver API, removing the root while a re-check is pending', 'recheck', false],
+  ]) {
+    if (!withMutation) global.MutationObserver = undefined;
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    if (pendingKind === 'recheck') pane.ph9ThrowOn = (read) => read === 3;
+    pane.ph9Width = 500;
+    await ph1Frame();
+    const [resize] = liveResize();
+    const armedDelays = pendingDelays();
+    container.children[0].remove();
+    await ph1Frame();
+    if (withMutation) {
+      assert(resize.disconnected === 1 && liveObservers().length === 0 && pendingTimers() === 0,
+        `PH9-LIFECYCLE: ${label} disconnects the watch and clears its timer on the next frame`);
+    }
+    await ph1Clock.advance(300);
+    await ph1Drain();
+    global.MutationObserver = BrowserLikeMutationObserver;
+    assert(JSON.stringify(armedDelays) === JSON.stringify([pendingKind === 'debounce' ? 120 : 250]) && resize.disconnected === 1
+      && liveObservers().length === 0 && view.renders === 1 && container.children.length === 0 && resize.thrown.length === 0,
+    `PH9-LIFECYCLE: ${label} disconnects and renders nothing`);
+    await settled(`PH9-LIFECYCLE: ${label}`, view, ['wide']);
+    ph9Discard(pane);
+  }
+  // A Dataview re-run that replaces the root disconnects the previous
+  // observer as it starts, clearing a pending debounce, while the re-run's
+  // own 200ms render is still in flight; fifty Dataview re-runs on the same
+  // container leave exactly one live observer and zero pending timers.
+  // MUTATION GUARD: PH9C-MUTANT-RERUN-KEEPS-OBSERVER turns RED at
+  // "PH9-LIFECYCLE: a Dataview re-run that replaces the root ..." if the
+  // previous observer stays connected on a Dataview re-run.
+  {
+    const { pane, container } = mountPane(700);
+    const view = countingView({ delay: 200 });
+    const initial = view.render({ container });
+    await ph1Clock.advance(200);
+    await initial;
+    await ph1Frame();
+    const [previous] = liveResize();
+    pane.ph9Width = 500;
+    await ph1Frame();
+    const rerun = view.render({ container });
+    assert(previous.disconnected === 1 && liveObservers().length === 0 && JSON.stringify(pendingDelays()) === JSON.stringify([200]),
+      'PH9-LIFECYCLE: a Dataview re-run that replaces the root disconnects the previous observer as it starts and clears its pending debounce');
+    await ph1Clock.advance(200);
+    await rerun;
+    assert(view.renders === 2 && isCompact(container) && liveResize().length === 1 && liveResize()[0] !== previous
+      && liveResize()[0].target === pane && liveMutation().length === 1 && container.children.length === 1,
+    'PH9-LIFECYCLE: the re-run draws compact once and leaves one watch on the pane');
+    let most = 0;
+    for (let run = 0; run < 50; run += 1) {
+      const next = view.render({ container });
+      await ph1Clock.advance(200);
+      await next;
+      await ph1Frame();
+      most = Math.max(most, liveResize().length, liveMutation().length);
+    }
+    assert(most === 1 && liveResize().length === 1 && liveMutation().length === 1 && pendingTimers() === 0 && view.renders === 52,
+      'PH9-LIFECYCLE: fifty Dataview re-runs on the same container leave exactly one live observer after every render and zero pending timers');
+    await settled('PH9-LIFECYCLE: fifty Dataview re-runs on the same container', view, ['wide', ...Array(51).fill('compact')], container);
+    ph9Discard(pane);
+  }
+  // A new mount container replacing the old one inside the same pane (the
+  // old one leaves with its root inside): the new watch disconnects the old
+  // one as it is installed. A mount container that leaves its pane with its
+  // root inside disconnects at its pane's next notification.
+  // MUTATION GUARD: PH9C-MUTANT-NO-PANE-PRUNE turns RED at "PH9-LIFECYCLE: a
+  // new mount container in the same pane ..." if a new watch leaves a gone
+  // watch on the same pane connected.
+  // MUTATION GUARD: PH9C-MUTANT-KEEPS-LEFT-PANE turns RED at "PH9-LIFECYCLE:
+  // a mount container that left its pane ..." if a watch whose container
+  // left the pane it watches stays connected.
+  {
+    const { pane, container: old } = mountPane(700);
+    const view = countingView();
+    await view.render({ container: old });
+    await ph1Frame();
+    const [oldResize] = liveResize();
+    old.remove();
+    const replacement = mountContainer((root) => pane.ph9Inner(root));
+    replacement.parent = pane;
+    pane.children.push(replacement);
+    await view.render({ container: replacement });
+    await ph1Drain();
+    assert(oldResize.disconnected === 1 && liveResize().length === 1 && liveResize()[0].target === pane
+      && liveMutation().length === 1 && liveMutation()[0].target === replacement,
+    'PH9-LIFECYCLE: a new mount container in the same pane disconnects the watch of the one it replaced as its own watch is installed');
+    await settled('PH9-LIFECYCLE: a new mount container in the same pane', view, ['wide', 'wide'], replacement,
+      { targets: [pane] });
+    ph9Discard(pane);
+  }
+  {
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    const [resize] = liveResize();
+    container.remove();
+    pane.ph9Width = 500;
+    await ph1Frame();
+    assert(resize.disconnected === 1 && liveObservers().length === 0 && pendingTimers() === 0 && view.renders === 1,
+      'PH9-LIFECYCLE: a mount container that left its pane with its root inside disconnects at the pane\'s next notification and renders nothing');
+    await settled('PH9-LIFECYCLE: a mount container that left its pane', view, ['wide']);
+    ph9Discard(pane);
+  }
+  // A mount container moved, root inside, from a 700 pane into a 900 pane:
+  // the old pane's next notification disconnects its watch and renders
+  // nothing; after a Dataview re-run, the new pane narrowing to 500
+  // re-renders compact once.
+  // MUTATION GUARD: PH9D-MUTANT-GONE-ONLY-WITHOUT-SCROLLER turns RED at
+  // "PH9-LIFECYCLE: a mount container moved into another pane ..." if a
+  // container inside a different scroll container stays watched by its old
+  // one.
+  {
+    const { pane: first, container } = mountPane(700);
+    const { pane: second, container: spare } = mountPane(900);
+    spare.remove();
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    const [resize] = liveResize();
+    second.insertBefore(container, null);
+    first.ph9Width = 680;
+    await ph1Frame();
+    await ph1Clock.advance(1000);
+    await ph1Drain();
+    assert(resize.disconnected === 1 && liveObservers().length === 0 && pendingTimers() === 0 && view.renders === 1
+      && container.closest('.markdown-preview-view, .cm-scroller') === second,
+    'PH9-LIFECYCLE: a mount container moved into another pane disconnects its old pane\'s watch at that pane\'s next notification and renders nothing');
+    await view.render({ container });
+    await ph1Frame();
+    assert(liveResize().length === 1 && liveResize()[0].target === second && view.renders === 2,
+      'PH9-LIFECYCLE: a Dataview re-run of the moved container watches the new pane');
+    second.ph9Width = 500;
+    await ph1Frame();
+    await ph9Debounce();
+    assert(view.renders === 3 && isCompact(container),
+      'PH9-LIFECYCLE: the new pane narrowing to 500 re-renders the moved container compact once');
+    await settled('PH9-LIFECYCLE: a mount container moved into another pane', view, ['wide', 'wide', 'compact'], container,
+      { targets: [second] });
+    ph9Discard(first, second);
+  }
+  // Two mount containers in one pane (two graph blocks in one note) each
+  // keep their own watch on the pane, and both follow a crossing.
+  // MUTATION GUARD: PH9C-MUTANT-PRUNE-EVERY-PEER turns RED at "PH9-LIFECYCLE:
+  // two mount containers in one pane ..." if a new watch disconnects every
+  // watch on its pane, gone or not.
+  // MUTATION GUARD: PH1C-MUTANT-PER-INSTANCE-KEY turns RED at the same label
+  // if the watch is owned per GraphView instance instead of per container.
+  // MUTATION GUARD: PH9D-MUTANT-PANE-SET-COPIED turns RED at "PH9-LIFECYCLE:
+  // ten alternating Dataview re-runs ..." if each install copies the pane's
+  // watch set, so a disconnected watch stays in the copy.
+  {
+    const { pane, container: first } = mountPane(700);
+    const second = mountContainer((root) => pane.ph9Inner(root));
+    second.parent = pane;
+    pane.children.push(second);
+    const view = countingView();
+    await view.render({ container: first });
+    await view.render({ container: second });
+    await ph1Frame();
+    assert(liveResize().length === 2 && liveResize().every((observer) => observer.target === pane) && liveMutation().length === 2,
+      'PH9-LIFECYCLE: two mount containers in one pane each keep their own watch on the pane');
+    pane.ph9Width = 500;
+    await ph1Frame();
+    await ph9Debounce();
+    assert(isCompact(first) && isCompact(second) && view.renders === 4 && liveResize().length === 2,
+      'PH9-LIFECYCLE: two mount containers in one pane both re-render compact once when the pane crosses to 500');
+    await settled('PH9-LIFECYCLE: two mount containers in one pane', view, ['wide', 'wide', 'compact', 'compact'], null,
+      { watched: [first, second], targets: [pane, pane] });
+    for (let run = 0; run < 10; run += 1) await view.render({ container: run % 2 ? second : first });
+    await ph1Drain();
+    assert(view._paneWatches.get(pane).size === 2 && liveResize().length === 2,
+      'PH9-LIFECYCLE: ten alternating Dataview re-runs of two mount containers in one pane leave the pane\'s watch set holding exactly its two live watches');
+    ph9Discard(pane);
+  }
+  // A compact map that fails and falls back to wide: the watch compares
+  // against the presentation the render resolved (compact at 500), so a
+  // notification that still measures 500 re-renders nothing, and the pane
+  // narrowing to 480 re-renders once.
+  // MUTATION GUARD: PH9C-MUTANT-DRAWN-FROM-DOM turns RED at "PH9-LIFECYCLE:
+  // a 500 pane whose compact map always fails ..." if the watch compares
+  // against the presentation found in the drawn DOM.
+  {
+    const { pane, container } = mountPane(500, (_root, target) => target.ph9Bar || 0);
+    const view = countingView();
+    view._compactGeometry = () => { throw new Error('compact geometry fault'); };
+    await view.render({ container });
+    await ph1Frame();
+    assert(liveResize().length === 1 && liveResize()[0].target === pane,
+      'PH9-LIFECYCLE: a 500 pane whose compact map always fails watches the pane with one resize observer after the render that recorded the fault');
+    const [resize] = liveResize();
+    pane.ph9Bar = 15;
+    await ph1Frame();
+    await ph1Clock.advance(1000);
+    await ph1Drain();
+    assert(view.renders === 1 && resize.notifications === 2 && !isCompact(container) && hasGraph(container.children[0]) && pendingTimers() === 0,
+      'PH9-LIFECYCLE: a 500 pane whose compact map always fails draws the wide fallback once, and a notification that still measures 500 re-renders nothing');
+    pane.ph9Width = 480;
+    await ph1Frame();
+    await ph9Debounce();
+    assert(view.renders === 2 && !isCompact(container) && hasGraph(container.children[0]),
+      'PH9-LIFECYCLE: the pane narrowing to 480 re-renders the failing compact map once, to the wide fallback');
+    await settled('PH9-LIFECYCLE: a compact map that always fails', view, ['wide', 'wide'], container);
+    ph9Discard(pane);
+  }
+
+  // ---- PH9D: interaction, pruning, multiple widgets, cutoffs, throws ----
+  // MUTATION GUARD: PH9D-MUTANT-INTERACTION-CANCELS-DEBOUNCE turns RED at
+  // "PH9-OBSERVER-CONVERGES: a chip tap 60ms into a pending debounce ..."
+  // (and at the stuck filter toggle and canvas tap labels) if that
+  // interaction cancels the pending debounce.
+  // MUTATION GUARD: PH9D-MUTANT-INTERACTION-DEFERS-TO-RECHECK turns RED at
+  // the chip tap label if a tap replaces the pending debounce with a 250ms
+  // re-check.
+  for (const [what, act] of [
+    ['a chip tap', (root) => bubblingClick(byClass(root, 'graph-view-chip')[0])],
+    ['a stuck filter toggle', (root) => bubblingClick(byClass(root, 'graph-view-filter-stuck')[0])],
+    ['a canvas tap', (root) => bubblingClick(byClass(root, 'graph-view-canvas')[0])],
+  ]) {
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9Width = 590;
+    await ph1Frame();
+    await ph1Clock.advance(60);
+    act(container.children[0]);
+    const afterTap = pendingDelays();
+    await ph1Clock.advance(60);
+    await ph1Drain();
+    assert(JSON.stringify(afterTap) === JSON.stringify([120]) && view.renders === 2 && isCompact(container),
+      `PH9-OBSERVER-CONVERGES: ${what} 60ms into a pending debounce leaves the 120ms debounce pending, and 120ms after the 590 notification the map re-renders compact once`);
+    await settled(`PH9-OBSERVER-CONVERGES: ${what} 60ms into a pending debounce`, view, ['wide', 'compact'], container);
+    ph9Discard(pane);
+  }
+  // MUTATION GUARD: PH9D-MUTANT-INTERACTION-CANCELS-RECHECK turns RED at
+  // "PH9-UNREADABLE-KEEPS-AND-RECHECKS: a chip tap 100ms into a pending
+  // re-check ..." if a tap cancels a pending re-check.
+  {
+    const { pane, container } = mountPane(700);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9ThrowOn = (read) => read === 3;
+    pane.ph9Width = 590;
+    await ph1Frame();
+    await ph1Clock.advance(100);
+    bubblingClick(byClass(container.children[0], 'graph-view-chip')[0]);
+    const afterTap = pendingDelays();
+    await ph1Clock.advance(150);
+    await ph1Drain();
+    assert(JSON.stringify(afterTap) === JSON.stringify([250]) && view.renders === 2 && isCompact(container),
+      'PH9-UNREADABLE-KEEPS-AND-RECHECKS: a chip tap 100ms into a pending re-check leaves it pending, and 250ms after the unreadable notification the re-check reads 590 and re-renders compact once');
+    await settled('PH9-UNREADABLE-KEEPS-AND-RECHECKS: a chip tap 100ms into a pending re-check', view, ['wide', 'compact'], container);
+    ph9Discard(pane);
+  }
+  // MUTATION GUARD: PH9D-MUTANT-WIDENING-DEBOUNCE-119 turns RED at
+  // "PH9-OBSERVER-CONVERGES: a pane widened from 500 to 700 ..." if the
+  // debounce toward wide is 119ms.
+  {
+    const { pane, container } = mountPane(500);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9Width = 700;
+    await ph1Frame();
+    const delays = pendingDelays();
+    await ph1Clock.advance(119);
+    await ph1Drain();
+    const at119 = view.renders;
+    await ph1Clock.advance(1);
+    await ph1Drain();
+    assert(JSON.stringify(delays) === JSON.stringify([120]) && at119 === 1 && view.renders === 2 && !isCompact(container),
+      'PH9-OBSERVER-CONVERGES: a pane widened from 500 to 700 arms one 120ms debounce, nothing renders 119ms later, and at 120ms the map re-renders wide once');
+    await settled('PH9-OBSERVER-CONVERGES: a pane widened from 500 to 700', view, ['compact', 'wide'], container);
+    ph9Discard(pane);
+  }
+  // MUTATION GUARD: PH9D-MUTANT-PEERS-CLEARED turns RED at "PH9-LIFECYCLE:
+  // two mount containers in one 700 pane, the first leaving ..." if a pane's
+  // watch set is cleared after a prune.
+  // MUTATION GUARD: PH9D-MUTANT-PRUNE-FIRST-GONE-ONLY turns RED at
+  // "PH9-LIFECYCLE: three mount containers in one 700 pane, two leaving ..."
+  // if a prune stops after the first gone watch.
+  // MUTATION GUARD: PH9D-MUTANT-PRUNE-LAST-PEER-ONLY turns RED at the same
+  // label if a prune checks only the last watch.
+  for (const [label, total, leaving] of [
+    ['two mount containers in one 700 pane, the first leaving with its root, then a third mounting', 2, 1],
+    ['three mount containers in one 700 pane, two leaving with their roots, then a fourth mounting', 3, 2],
+  ]) {
+    const { pane, container: c1 } = mountPane(700);
+    const mount = () => {
+      const added = mountContainer((root) => pane.ph9Inner(root));
+      added.parent = pane;
+      pane.children.push(added);
+      return added;
+    };
+    const mounts = [c1];
+    while (mounts.length < total) mounts.push(mount());
+    const view = countingView();
+    for (const mounted of mounts) await view.render({ container: mounted });
+    await ph1Frame();
+    const watches = liveResize();
+    const gone = mounts.slice(0, leaving);
+    for (const left of gone) left.remove();
+    const added = mount();
+    await view.render({ container: added });
+    await ph1Drain();
+    const kept = [...mounts.slice(leaving), added];
+    assert(watches.slice(0, leaving).every((observer) => observer.disconnected === 1) && liveResize().length === kept.length
+      && liveResize().every((observer) => observer.target === pane),
+    `PH9-LIFECYCLE: ${label} disconnects each gone watch as the new one is installed and leaves ${kept.length} live watches on the pane`);
+    await settled(`PH9-LIFECYCLE: ${label}`, view, Array(total + 1).fill('wide'), null, { watched: kept, targets: kept.map(() => pane) });
+    ph9Discard(pane, ...gone);
+  }
+  // MUTATION GUARD: PH9D-MUTANT-DRAWN-STATE-ON-INSTANCE turns RED at
+  // "PH9-LIFECYCLE: one instance draws compact maps in a 500 pane and a 400
+  // pane ..." if the drawn width is kept on the instance, and at
+  // "PH9-LIFECYCLE: one instance draws a compact map in a 500 pane, then a
+  // wide map in a 700 pane ..." if the drawn compact-or-wide state is.
+  {
+    const savedAppWidgets = global.app;
+    const savedCustomJSWidgets = global.customJS;
+    ph1dUseEnv(ph1dChainEnv(5));
+    const { pane: first, container: a } = mountPane(500);
+    const { pane: second, container: b } = mountPane(400);
+    const view = countingView();
+    await view.render({ container: a });
+    await ph1Frame();
+    await view.render({ container: b });
+    await ph1Frame();
+    first.ph9Width = 400;
+    await ph1Frame();
+    await ph9Debounce();
+    assert.deepStrictEqual({ drawing: ph1dCompactDrawing(a.children[0]), renders: view.renders },
+      { drawing: ph1dExpectedDrawing(71, [2, 83, 164, 245, 326], 'short', 399, 0), renders: 3 },
+      'PH9-LIFECYCLE: one instance draws compact maps in a 500 pane and a 400 pane; the 500 pane narrowing to 400 redraws its map once: 71px pills with short ids on a 399px canvas');
+    await settled('PH9-LIFECYCLE: one instance, compact maps in a 500 pane and a 400 pane', view, ['compact', 'compact', 'compact'], null,
+      { watched: [a, b], targets: [first, second] });
+    ph9Discard(first, second);
+    global.app = savedAppWidgets;
+    global.customJS = savedCustomJSWidgets;
+  }
+  {
+    const { pane: wide, container: a } = mountPane(700);
+    const { pane: narrow, container: b } = mountPane(500);
+    const view = countingView();
+    await view.render({ container: b });
+    await ph1Frame();
+    await view.render({ container: a });
+    await ph1Frame();
+    narrow.ph9Width = 800;
+    await ph1Frame();
+    await ph9Debounce();
+    assert(view.renders === 3 && !isCompact(b) && !isCompact(a),
+      'PH9-LIFECYCLE: one instance draws a compact map in a 500 pane, then a wide map in a 700 pane; the 500 pane widening to 800 redraws its map wide once');
+    await settled('PH9-LIFECYCLE: one instance, a compact map in a 500 pane and a wide map in a 700 pane', view, ['compact', 'wide', 'wide'], null,
+      { watched: [b, a], targets: [narrow, wide] });
+    ph9Discard(wide, narrow);
+  }
+  // MUTATION GUARD: PH9D-MUTANT-COMPACT-WIDTH-TOLERANCE turns RED at
+  // "PH9D-CONTENT-WIDTH: a 393 phone pane ... moved to 390 ..." if compact
+  // widths within 3px compare equal, and at the "moved to 392" label if
+  // widths within 1px do.
+  {
+    const savedAppTolerance = global.app;
+    const savedCustomJSTolerance = global.customJS;
+    for (const [to, content] of [[390, 342], [392, 344]]) {
+      ph1dUseEnv(ph1dChainEnv(3));
+      const { pane, container } = mountPane(393, () => 0, 'markdown-preview-view', { pad: 24, stable: true, reserved: 0 });
+      const view = countingView();
+      await view.render({ container });
+      await ph1Drain();
+      const before = ph1dCompactDrawing(container.children[0]);
+      await ph1Frame();
+      pane.ph9Width = to;
+      await ph1Frame();
+      await ph9Debounce();
+      assert.deepStrictEqual({ before, after: ph1dCompactDrawing(container.children[0]), renders: view.renders },
+        { before: ph1dExpectedDrawing(107, [2, 119, 236], 'full', 345, 0), after: ph1dExpectedDrawing(106, [2, 118, 234], 'full', 342, 0), renders: 2 },
+        `PH9D-CONTENT-WIDTH: a 393 phone pane with 24px margins and 3 chained slices, drawn at content 345 (107px pills on a 345px canvas), moved to ${to} (content ${content}) redraws once: 106px pills on a 342px canvas`);
+      await settled(`PH9D-CONTENT-WIDTH: a 393 phone pane moved to ${to}`, view, ['compact', 'compact'], container);
+      ph9Discard(pane);
+    }
+    global.app = savedAppTolerance;
+    global.customJS = savedCustomJSTolerance;
+  }
+  // MUTATION GUARD: PH9D-MUTANT-STABLE-READS-CONTAINER turns RED at
+  // "PH9D-CONTENT-WIDTH: a 700 desktop pane ... whose mount container is
+  // inset 48px ..." if the stable branch reads the mount container's client
+  // width.
+  {
+    const { pane, container } = mountPane(700, () => 0, 'markdown-preview-view', { pad: 32, stable: true, reserved: 12, inset: 48 });
+    assert.deepStrictEqual({ resolved: new GraphView()._resolveWidth({ container }, {}), containerWidth: container.clientWidth },
+      { resolved: { width: 624, narrow: false, source: 'measured' }, containerWidth: 576 },
+      'PH9D-CONTENT-WIDTH: a 700 desktop pane (32px margins, 12px stable gutter) whose mount container is inset 48px (client width 576) resolves 624 wide');
+    ph9Discard(pane);
+  }
+  // MUTATION GUARD: PH9D-MUTANT-STABLE-THROW-USES-OFFSET turns RED at
+  // "PH9-UNREADABLE-KEEPS-AND-RECHECKS: a stable-gutter pane whose client
+  // width throws ..." if a throwing client width read falls back to the
+  // offset width.
+  {
+    const { pane, container } = mountPane(700, () => 0, 'markdown-preview-view', { pad: 32, stable: true, reserved: 12 });
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    pane.ph9ThrowOn = (read) => read === 3;
+    pane.ph9Width = 600;
+    await ph1Frame();
+    const delays = pendingDelays();
+    const reads = pane.ph9Reads;
+    const kept = view.renders;
+    await ph1Clock.advance(250);
+    await ph1Drain();
+    assert(reads === 3 && JSON.stringify(delays) === JSON.stringify([250]) && kept === 1 && view.renders === 2 && isCompact(container),
+      'PH9-UNREADABLE-KEEPS-AND-RECHECKS: a stable-gutter pane whose client width throws at the 600 notification keeps the wide map and arms one 250ms re-check, which reads content 524 and re-renders compact once');
+    await settled('PH9-UNREADABLE-KEEPS-AND-RECHECKS: a stable-gutter pane whose client width throws', view, ['wide', 'compact'], container);
+    ph9Discard(pane);
+  }
+
+  // ---- PH9B-SCOPED-TIMER-BAN ----
+  // The only timers are the 120ms debounce and the 250ms re-check, armed
+  // through one setTimeout call and cleared through one clearTimeout call,
+  // both inside the watch installer; there is no interval, no animation
+  // frame, and no band, settle, streak, hold, or bistable state.
+  {
+    const installer = widgetSource.match(/\n {2}_watchPaneWidth\(dv, overrides, root, resolved\) \{[\s\S]*?\n {2}\}\n/)?.[0] || '';
+    const outside = widgetSource.replace(installer, '');
+    assert(installer.length > 0
+      && (installer.match(/globalThis\.setTimeout\(/g) || []).length === 1 && (installer.match(/globalThis\.clearTimeout\(/g) || []).length === 1
+      && !/setTimeout|clearTimeout/.test(outside)
+      && JSON.stringify((installer.match(/\barm\((\d+),/g) || []).map((call) => Number(call.slice(4, -1))).sort((a, b) => a - b)) === JSON.stringify([120, 250]),
+    'PH9B-SCOPED-TIMER-BAN: setTimeout and clearTimeout appear once each, inside the watch installer, and the only delays armed are 120 and 250');
+    for (const identifier of [
+      '_flipStreak', '_flipStreaks', '_widthFlipAllowed', 'settleCheck', 'boundedCheck', 'bistable', 'withinBand',
+      'sawCompactWide', 'sawWideNarrow', '_handoffWidthRender', '_beginWidthRender', '_resetWidthState', '_widthState',
+      '_widthHandoffs', 'setInterval', 'requestAnimationFrame',
+    ]) {
+      assert(!widgetSource.includes(identifier), `PH9B-SCOPED-TIMER-BAN: graph-view.js contains no ${identifier}`);
+    }
+    assert(!/band|settle|streak|hold|bistable/i.test(widgetSource),
+      'PH9B-SCOPED-TIMER-BAN: graph-view.js names no band, settle, streak, hold, or bistable state anywhere');
+  }
+
+  // ---- PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD) ----
+  // The PH-1c cold load, through the continuous watch. A render at
+  // clientWidth 0 with no note scroll container draws default wide and
+  // watches its mount container. Each notification re-resolves the same
+  // measurement render() uses: while it is unmeasured the drawn map is kept
+  // and one re-check is armed; when the pane lays out at 590 the 120ms
+  // debounce re-renders compact exactly once, and that render watches anew.
+  // MUTATION GUARD: PH1-MUTANT-RERENDER-EVERY-TICK turns RED at
+  // "PH1-MUTANT-RERENDER-EVERY-TICK (PH9C-ONE-SHOT-EQUIVALENTS): the
+  // observe() notification ..." if an unmeasured notification arms the
+  // debounce or re-renders instead of keeping the drawn map and arming the
+  // re-check.
+  // MUTATION GUARD: PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT turns RED at
+  // "PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT (PH9C-ONE-SHOT-EQUIVALENTS): a
+  // notification with a 300px box ..." if the watch re-renders on the
+  // observer entry's box without re-resolving.
+  // MUTATION GUARD: PH9C-MUTANT-DEBOUNCE-119 turns RED at
+  // "PH9C-ONE-SHOT-EQUIVALENTS: 119ms after the notification at 590 ..." if
+  // the debounce is 119ms.
+  // MUTATION GUARD: PH9C-MUTANT-DEBOUNCE-121 turns RED at
+  // "PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): 120ms after the
+  // notification at 590 ..." if the debounce is 121ms.
+  // MUTATION GUARD: PH9C-MUTANT-RECHECK-249 turns RED at
+  // "PH9C-ONE-SHOT-EQUIVALENTS: 249ms after the unmeasured notification ..."
+  // if the re-check is 249ms.
+  // MUTATION GUARD: PH9C-MUTANT-RECHECK-251 turns RED at
+  // "PH9C-ONE-SHOT-EQUIVALENTS: 250ms after the unmeasured notification ..."
+  // if the re-check is 251ms.
   {
     const container = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    const armed = liveResize();
-    const watch = liveMutation();
-    assert(view.renders === 1 && !isCompact(container) && armed.length === 1 && armed[0].target === container.children[0]
-      && watch.length === 1 && watch[0].target === container && pendingTimers() === 0,
-    'PH1C-ONE-SHOT-COLD-LOAD: a render at clientWidth 0 without is-mobile renders wide and installs exactly one observer, on its root, plus one childList watch on its container');
-    const oneShot = armed[0];
-    // MUTATION GUARD: PH1-MUTANT-RERENDER-EVERY-TICK turns RED if the one-shot
-    // re-renders on a notification whose re-resolved measurement is still
-    // unmeasured.
+    const [resize] = liveResize();
+    const [watch] = liveMutation();
+    assert(view.renders === 1 && !isCompact(container) && liveResize().length === 1 && resize.target === container
+      && liveMutation().length === 1 && watch.target === container && pendingTimers() === 0,
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): a render at clientWidth 0 with no note scroll container renders wide and watches with exactly one ResizeObserver, on its mount container, plus one childList watch');
     await ph1Frame();
-    assert(oneShot.notifications === 1 && view.renders === 1 && oneShot.live,
-      'PH1-MUTANT-RERENDER-EVERY-TICK (PH1C-ONE-SHOT-COLD-LOAD): the observe() notification re-resolves 0 and does nothing');
-    // MUTATION GUARD: PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT turns RED if the
-    // one-shot decides from the notification's content box instead of
-    // re-resolving the measurement render() uses.
+    assert(resize.notifications === 1 && view.renders === 1 && resize.live && JSON.stringify(pendingDelays()) === JSON.stringify([250]),
+      'PH1-MUTANT-RERENDER-EVERY-TICK (PH9C-ONE-SHOT-EQUIVALENTS): the observe() notification re-resolves 0, keeps the drawn map, and arms one 250ms re-check');
+    await ph1Clock.advance(249);
+    assert(pendingTimers() === 1 && container.ph1Reads === 2,
+      'PH9C-ONE-SHOT-EQUIVALENTS: 249ms after the unmeasured notification the re-check has not read the width');
+    await ph1Clock.advance(1);
+    assert(pendingTimers() === 0 && container.ph1Reads === 3 && view.renders === 1 && resize.live,
+      'PH9C-ONE-SHOT-EQUIVALENTS: 250ms after the unmeasured notification the re-check reads 0 once more, keeps the map, and leaves nothing pending');
     container.ph1Content = 300;
     await ph1Frame();
-    assert(oneShot.notifications === 2 && view.renders === 1 && oneShot.live && liveResize().length === 1,
-      'PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT (PH1C-ONE-SHOT-COLD-LOAD): a notification with a positive content box while clientWidth still reads 0 does not re-render and keeps observing');
-    container.ph1Content = 0;
-    await ph1Frame();
-    await ph1Quiet();
-    assert(oneShot.notifications === 3 && view.renders === 1 && oneShot.live && pendingTimers() === 0,
-      'PH1C-ONE-SHOT-COLD-LOAD: notifications while the re-resolved measurement is still zero do nothing, through ten quiet seconds');
+    await ph1Clock.advance(1000);
+    await ph1Drain();
+    assert(resize.notifications === 2 && view.renders === 1 && resize.live && pendingTimers() === 0,
+      'PH1C-MUTANT-OBSERVER-OWN-MEASUREMENT (PH9C-ONE-SHOT-EQUIVALENTS): a notification with a 300px box while clientWidth still reads 0 does not re-render');
     container.ph1Width = 590;
     container.ph1Content = null;
     await ph1Frame();
-    // MUTATION GUARD: PH1C-MUTANT-ONE-SHOT-TWICE turns RED if the one-shot
-    // re-renders more than once for its firing, or stays armed after it fires
-    // (any later notification could then re-render again).
-    assert(view.renders === 2 && isCompact(container) && oneShot.notifications === 4 && oneShot.disconnected >= 1
-      && liveObservers().length === 0 && oneShot.thrown.length === 0,
-    'PH1C-MUTANT-ONE-SHOT-TWICE (PH1C-ONE-SHOT-COLD-LOAD): when the container lays out at 590 the next notification re-resolves 590 and re-renders compact exactly once, the one-shot disarms as it fires, and the measured re-render installs none');
-    await settled('PH1C-ONE-SHOT-COLD-LOAD: cold load at 0, the pane lays out at 590', view, ['wide', 'compact'], container);
-    assert.strictEqual(oneShot.notifications, 4, 'PH1C-ONE-SHOT-COLD-LOAD: the disarmed one-shot is not notified again');
-    const fresh = mountContainer(590);
-    const freshView = countingView();
-    await freshView.render({ container: fresh });
+    assert(view.renders === 1 && JSON.stringify(pendingDelays()) === JSON.stringify([120]),
+      'PH9C-ONE-SHOT-EQUIVALENTS: the notification at 590 arms the 120ms debounce and renders nothing yet');
+    await ph1Clock.advance(119);
+    assert(view.renders === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS: 119ms after the notification at 590 nothing has rendered');
+    await ph1Clock.advance(1);
     await ph1Drain();
-    assert(liveObservers().length === 0 && isCompact(fresh),
-      'PH1C-ONE-SHOT-COLD-LOAD: a new render at 590 is measured and installs none');
-    await settled('PH1C-ONE-SHOT-COLD-LOAD: a new render at 590', freshView, ['compact'], fresh);
+    assert(view.renders === 2 && isCompact(container) && resize.disconnected === 1 && liveResize().length === 1
+      && liveResize()[0] !== resize && liveResize()[0].target === container && resize.thrown.length === 0,
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): 120ms after the notification at 590 the watch disconnects and re-renders compact exactly once, and the re-render watches with a new observer');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): cold load at 0, the pane lays out at 590', view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
   // is-mobile cold load: the 390 compact map, then one re-render to wide
   // when the pane measures 800.
@@ -4767,52 +5991,55 @@ async function main() {
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    const armed = liveResize();
+    const [resize] = liveResize();
     assert(isCompact(container) && JSON.stringify(domShape(container.children[0])) === at390
-      && armed.length === 1 && armed[0].target === container.children[0] && liveMutation().length === 1,
-    'PH1C-ONE-SHOT-COLD-LOAD: an is-mobile cold load (clientWidth 0) renders the 390 compact map and installs exactly one observer');
-    const oneShot = armed[0];
+      && liveResize().length === 1 && resize.target === container && liveMutation().length === 1,
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): an is-mobile cold load (clientWidth 0) renders the 390 compact map and watches with exactly one observer');
     await ph1Frame();
-    assert(view.renders === 1 && oneShot.live,
-      'PH1C-ONE-SHOT-COLD-LOAD: on is-mobile the observe() notification re-resolves 0 and does nothing');
+    await ph1Clock.advance(250);
+    assert(view.renders === 1 && resize.live && pendingTimers() === 0,
+      'PH9C-ONE-SHOT-EQUIVALENTS: on is-mobile the unmeasured notification and its re-check keep the compact map');
     container.ph1Width = 800;
     await ph1Frame();
-    assert(view.renders === 2 && !isCompact(container) && oneShot.disconnected >= 1 && liveObservers().length === 0,
-      'PH1C-ONE-SHOT-COLD-LOAD: when the is-mobile container measures 800 the one-shot re-renders once, to wide, and disarms');
-    await settled('PH1C-ONE-SHOT-COLD-LOAD: is-mobile cold load at 390 compact, the pane measures 800',
+    await ph9Debounce();
+    assert(view.renders === 2 && !isCompact(container) && resize.disconnected === 1 && liveResize().length === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS: when the is-mobile container measures 800 the watch re-renders once, to wide');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): is-mobile cold load at 390 compact, the pane measures 800',
       view, ['compact', 'wide'], container);
     ph1MobileClass = false;
+    ph9Discard(container);
   }
-  // Removing the root disarms the one-shot without rendering, even when the
-  // pane has meanwhile laid out at a measurable 590.
-  for (const [label, laidOut] of [['before its first notification', false], ['after a laid-out content box', true]]) {
+  // Removing the root disconnects the watch (and clears its re-check)
+  // without rendering, even when the pane has meanwhile laid out at 590.
+  for (const [label, laidOut] of [['before its first notification', false], ['after a laid-out 240px box', true]]) {
     const container = mountContainer(0, laidOut ? 240 : null);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    const oneShot = liveResize()[0];
+    const [resize] = liveResize();
     if (laidOut) {
       await ph1Frame();
-      assert(oneShot && oneShot.notifications === 1 && oneShot.live && view.renders === 1,
-        'PH1C-ONE-SHOT-COLD-LOAD: a 240px content box over an unmeasured pane leaves the one-shot observing');
+      assert(resize && resize.notifications === 1 && resize.live && view.renders === 1 && pendingTimers() === 1,
+        'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): a 240px box over an unmeasured pane keeps observing with one re-check armed');
     }
     container.children[0].remove();
     container.ph1Width = 590;
     await ph1Frame();
-    assert(oneShot && oneShot.disconnected >= 1 && view.renders === 1 && container.children.length === 0
-      && liveObservers().length === 0 && oneShot.thrown.length === 0,
-    `PH1C-ONE-SHOT-COLD-LOAD: removing the root ${label} disarms the one-shot without rendering`);
-    await settled(`PH1C-ONE-SHOT-COLD-LOAD: root removed ${label}`, view, ['wide']);
+    assert(resize && resize.disconnected === 1 && view.renders === 1 && container.children.length === 0
+      && liveObservers().length === 0 && pendingTimers() === 0 && resize.thrown.length === 0,
+    `PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): removing the root ${label} disconnects the watch without rendering`);
+    await settled(`PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): root removed ${label}`, view, ['wide']);
+    ph9Discard(container);
   }
   // A new mount container replaces the old one at cold load: the old
-  // container leaves the document with its root still inside, so its
-  // one-shot stays armed on that detached subtree (one notification, the one
-  // observe() owes, and no render; the harness drops it with ph1Collect);
-  // the new container's one-shot re-renders once when its pane lays out.
+  // container leaves the document with its root inside, so its watch stays on
+  // that detached subtree (one notification, the one observe() owes, and no
+  // render; the harness collects it); the new container's watch re-renders
+  // once when its pane lays out.
   // MUTATION GUARD: PH1C-MUTANT-PER-INSTANCE-KEY turns RED here too: keyed per
-  // instance, the replacement's render disarms the old container's one-shot.
+  // instance, the replacement's render disconnects the old container's watch.
   // MUTATION GUARD: PH1C-MUTANT-ISCONNECTED-REMOVAL turns RED here too: a
-  // detached container is not a removed root, so its one-shot stays armed.
+  // detached container is not a removed root, so its watch stays.
   {
     const old = mountContainer(0);
     const view = countingView();
@@ -4823,20 +6050,24 @@ async function main() {
     await view.render({ container: replacement });
     await ph1Drain();
     assert(oldPair.length === 2 && liveResize().length === 2 && liveMutation().length === 2,
-      'PH1C-MUTANT-PER-INSTANCE-KEY (PH1C-ONE-SHOT-COLD-LOAD): each container owns its own one-shot');
+      'PH1C-MUTANT-PER-INSTANCE-KEY (PH9C-ONE-SHOT-EQUIVALENTS): each container owns its own watch');
+    await ph1Frame();
     replacement.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     await ph1Quiet();
     assert(view.renders === 3 && isCompact(replacement) && old.children.length === 1 && !isCompact(old)
       && oldPair.every((observer) => observer.live && observer.thrown.length === 0) && oldPair[0].notifications === 1
-      && liveObservers().length === 2 && pendingTimers() === 0,
-    'PH1C-MUTANT-ISCONNECTED-REMOVAL (PH1C-ONE-SHOT-COLD-LOAD): when a new mount container replaces the old one at cold load the new one-shot re-renders exactly once; the old one stays armed on its detached container, not notified again and not rendering');
+      && liveObservers().length === 4 && pendingTimers() === 0,
+    'PH1C-MUTANT-ISCONNECTED-REMOVAL (PH9C-ONE-SHOT-EQUIVALENTS): when a new mount container replaces the old one at cold load the new watch re-renders exactly once; the old watch stays on its detached container, notified once and not rendering');
     ph1Collect(old);
-    await settled('PH1C-ONE-SHOT-COLD-LOAD: a new mount container replaces the old one at cold load',
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): a new mount container replaces the old one at cold load',
       view, ['wide', 'wide', 'compact'], replacement);
+    ph9Discard(replacement);
   }
-  // Without a ResizeObserver API an unmeasured render still succeeds; without
-  // a MutationObserver API the one-shot still arms and re-renders once.
+  // Without a ResizeObserver API an unmeasured render still succeeds and
+  // watches nothing; without a MutationObserver API the watch still observes
+  // and re-renders once.
   {
     global.ResizeObserver = undefined;
     ph1MobileClass = true;
@@ -4847,7 +6078,8 @@ async function main() {
     ph1MobileClass = false;
     global.ResizeObserver = BrowserLikeResizeObserver;
     assert(isCompact(container) && view.renders === 1 && liveObservers().length === 0,
-      'PH1C-ONE-SHOT-COLD-LOAD: without a ResizeObserver API an unmeasured is-mobile render still draws compact and arms nothing');
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): without a ResizeObserver API an unmeasured is-mobile render still draws compact and watches nothing');
+    ph9Discard(container);
   }
   {
     global.MutationObserver = undefined;
@@ -4855,20 +6087,25 @@ async function main() {
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    global.MutationObserver = BrowserLikeMutationObserver;
     assert(liveResize().length === 1 && liveMutation().length === 0,
-      'PH1C-ONE-SHOT-COLD-LOAD: without a MutationObserver API the one-shot still arms its resize observer');
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): without a MutationObserver API the watch still observes');
+    await ph1Frame();
     container.ph1Width = 590;
     await ph1Frame();
-    await settled('PH1C-ONE-SHOT-COLD-LOAD: no MutationObserver API, the pane lays out at 590', view, ['wide', 'compact'], container);
+    await ph9Debounce();
+    global.MutationObserver = BrowserLikeMutationObserver;
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): no MutationObserver API, the pane lays out at 590', view, ['wide', 'compact'], container,
+      { childLists: 0 });
+    ph9Discard(container);
   }
 
-  // ---- PH1C-ONE-SHOT-NO-LEAK ----
-  // Re-runs into the same container leave at most one armed one-shot, and
-  // removing the root disarms it.
-  // MUTATION GUARD: PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY turns RED if the
-  // one-shot disarms only when a resize notification reaches it (no disarm at
-  // render start, no childList watch).
+  // ---- PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK) ----
+  // Re-runs into the same container leave exactly one watch, and removing
+  // the root disconnects it through the childList record.
+  // MUTATION GUARD: PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY turns RED at
+  // "PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY (PH9C-ONE-SHOT-EQUIVALENTS): a
+  // root removed after the watch's first notification ..." if the watch sees
+  // a removal only at its own notification or timer (no childList watch).
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -4881,13 +6118,15 @@ async function main() {
     }
     assert(most === 1 && liveResize().length === 1 && liveMutation().length === 1 && view.renders === 51
       && view.initiated === 51 && container.children.length === 1,
-    'PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY (PH1C-ONE-SHOT-NO-LEAK): 50 Dataview re-runs at clientWidth 0 leave at most one armed one-shot (one resize and one childList observer) after every render');
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): 50 Dataview re-runs at clientWidth 0 leave exactly one watch (one resize and one childList observer) after every render');
     container.ph1Width = 590;
     await ph1Frame();
-    assert(view.renders === 52 && view.renders - view.initiated === 1 && isCompact(container) && liveObservers().length === 0,
-      'PH1C-ONE-SHOT-NO-LEAK: when the pane lays out at 590 exactly one extra render draws compact and zero observers of either kind stay live');
-    await settled('PH1C-ONE-SHOT-NO-LEAK: 50 Dataview re-runs at clientWidth 0, then the pane lays out at 590',
+    await ph9Debounce();
+    assert(view.renders === 52 && view.renders - view.initiated === 1 && isCompact(container) && liveResize().length === 1 && liveMutation().length === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): when the pane lays out at 590 exactly one extra render draws compact and exactly one watch stays live');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): 50 Dataview re-runs at clientWidth 0, then the pane lays out at 590',
       view, [...Array(51).fill('wide'), 'compact'], container);
+    ph9Discard(container);
   }
   {
     const container = mountContainer(0);
@@ -4897,14 +6136,15 @@ async function main() {
     const [resize] = liveResize();
     const [watch] = liveMutation();
     assert(resize && watch && resize.notifications === 1 && view.renders === 1,
-      'PH1C-ONE-SHOT-NO-LEAK: the zero-box root has had its first notification');
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): the watch on the zero-width container has had its first notification');
     container.children[0].remove();
     container.ph1Width = 590;
     await ph1Frame();
     assert(liveObservers().length === 0 && resize.notifications === 1 && watch.deliveries === 1 && view.renders === 1
-      && container.children.length === 0,
-    'PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY (PH1C-ONE-SHOT-NO-LEAK): a zero-box root removed after its first notification disarms both observers on the next frame through the childList signal, with no resize notification and no render');
-    await settled('PH1C-ONE-SHOT-NO-LEAK: a zero-box root removed after its first notification', view, ['wide']);
+      && container.children.length === 0 && pendingTimers() === 0,
+    'PH1C-MUTANT-DISARM-ON-NOTIFICATION-ONLY (PH9C-ONE-SHOT-EQUIVALENTS): a root removed after the watch\'s first notification disconnects both observers and clears the re-check on the next frame through the childList record, before any resize notification, with no render');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): a root removed after the watch\'s first notification', view, ['wide']);
+    ph9Discard(container);
   }
   for (const [label, dataviewFirst] of [['the Dataview re-run lands first', true], ['the layout notification lands first', false]]) {
     const container = mountContainer(0);
@@ -4924,15 +6164,18 @@ async function main() {
     }
     await ph1Drain();
     await ph1Frame();
+    await ph1Clock.advance(300);
+    await ph1Drain();
     assert(container.children.length === 1 && isCompact(container) && view.initiated === 2
-      && view.renders - view.initiated <= 1 && liveObservers().length === 0,
-    `PH1C-ONE-SHOT-NO-LEAK: a Dataview re-run and the layout notification in the same frame (${label}) leave one root, compact, at most one extra render, and nothing armed`);
-    await settled(`PH1C-ONE-SHOT-NO-LEAK: Dataview re-run and layout in one frame, ${label}`,
-      view, dataviewFirst ? ['wide', 'compact'] : ['wide', 'compact', 'compact'], container);
+      && view.renders === 2 && liveResize().length === 1 && pendingTimers() === 0,
+    `PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): a Dataview re-run and the layout notification in the same frame (${label}) leave one root, compact, no extra render, and one watch`);
+    await settled(`PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): Dataview re-run and layout in one frame, ${label}`,
+      view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
-  // MUTATION GUARD: PH1C-MUTANT-PER-INSTANCE-KEY turns RED if the one-shot is
+  // MUTATION GUARD: PH1C-MUTANT-PER-INSTANCE-KEY turns RED if the watch is
   // owned per GraphView instance instead of per container: a second
-  // container's render would disarm the first container's one-shot.
+  // container's render would disconnect the first container's watch.
   {
     const view = countingView();
     const first = mountContainer(0);
@@ -4940,46 +6183,51 @@ async function main() {
     await view.render({ container: first });
     await view.render({ container: second });
     await ph1Frame();
-    const owners = liveResize().map((observer) => observer.target.parent);
+    const owners = liveResize().map((observer) => observer.target);
     assert(liveResize().length === 2 && liveMutation().length === 2 && owners.includes(first) && owners.includes(second),
-    'PH1C-MUTANT-PER-INSTANCE-KEY (PH1C-ONE-SHOT-NO-LEAK): one shared instance rendering two cold-load containers keeps one armed one-shot per container');
+      'PH1C-MUTANT-PER-INSTANCE-KEY (PH9C-ONE-SHOT-EQUIVALENTS): one shared instance rendering two cold-load containers keeps one watch per container');
     first.ph1Width = 590;
     await ph1Frame();
-    assert(isCompact(first) && !isCompact(second) && view.renders === 3 && liveResize().length === 1,
-      'PH1C-MUTANT-PER-INSTANCE-KEY (PH1C-ONE-SHOT-NO-LEAK): the first container re-renders once and the second stays armed');
+    await ph9Debounce();
+    assert(isCompact(first) && !isCompact(second) && view.renders === 3 && liveResize().length === 2,
+      'PH1C-MUTANT-PER-INSTANCE-KEY (PH9C-ONE-SHOT-EQUIVALENTS): the first container re-renders once and the second keeps its watch');
     second.ph1Width = 500;
     await ph1Frame();
-    await settled('PH1C-ONE-SHOT-NO-LEAK: one instance, two cold-load containers', view, ['wide', 'wide', 'compact', 'compact']);
-    assert(isCompact(second), 'PH1C-ONE-SHOT-NO-LEAK: the second container re-renders once when it lays out');
+    await ph9Debounce();
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): one instance, two cold-load containers', view, ['wide', 'wide', 'compact', 'compact'], null,
+      { watched: [first, second] });
+    assert(isCompact(second), 'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): the second container re-renders once when it lays out');
+    ph9Discard(first, second);
   }
 
-  // ---- PH1C-ONE-SHOT-USES-ITS-MEASUREMENT ----
-  // The re-render draws the measurement the one-shot resolved without reading
-  // the width again, so a width read that alternately throws and succeeds
-  // yields one extra render.
-  // MUTATION GUARD: PH1C-MUTANT-RERENDER-REREADS turns RED if the one-shot's
+  // ---- PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-USES-ITS-MEASUREMENT) ----
+  // The watch's re-render draws the measurement its debounce resolved
+  // without reading the width again.
+  // MUTATION GUARD: PH1C-MUTANT-RERENDER-REREADS turns RED if the watch's
   // re-render resolves the width again instead of using its measurement.
   {
     const at500 = await referenceRoot(500);
     const container = mountContainer(500, 500);
-    container.ph1ThrowOn = (read) => read % 2 === 1;
+    container.ph1ThrowOn = (read) => read === 1;
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
     assert(container.ph1Reads === 1 && !isCompact(container) && liveResize().length === 1,
-      'PH1C-ONE-SHOT-USES-ITS-MEASUREMENT: the render read throws, resolves unmeasured, draws wide, and arms the one-shot');
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-USES-ITS-MEASUREMENT): the render read throws, resolves unmeasured, draws wide, and watches');
     await ph1Frame();
+    await ph1Clock.advance(120);
+    await ph1Drain();
     assert(view.renders === 2 && isCompact(container) && JSON.stringify(domShape(container.children[0])) === at500
-      && container.ph1Reads === 2 && liveObservers().length === 0,
-    'PH1C-MUTANT-RERENDER-REREADS (PH1C-ONE-SHOT-USES-ITS-MEASUREMENT): with a width read that alternately throws and succeeds, the one-shot resolves 500 and its one extra render draws the 500 compact map from that measurement without reading again');
-    await settled('PH1C-ONE-SHOT-USES-ITS-MEASUREMENT: alternating throwing width read', view, ['wide', 'compact'], container);
-    assert.strictEqual(container.ph1Reads, 2, 'PH1C-ONE-SHOT-USES-ITS-MEASUREMENT: nothing reads the width after the one-shot fired');
+      && container.ph1Reads === 3,
+    'PH1C-MUTANT-RERENDER-REREADS (PH9C-ONE-SHOT-EQUIVALENTS): the notification and the debounce each read 500, and the one extra render draws the 500 compact map from the debounce measurement without reading again');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-USES-ITS-MEASUREMENT): a width read that throws on the render', view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
 
-  // ---- PH1C-ONE-SHOT-LATE-ATTACH ----
-  // A container that is not attached yet keeps its one-shot armed, and a
-  // later attach that lays out re-renders once.
-  // MUTATION GUARD: PH1C-MUTANT-ISCONNECTED-REMOVAL turns RED if the one-shot
+  // ---- PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH) ----
+  // A container that is not attached yet keeps its watch, and a later attach
+  // that lays out converges.
+  // MUTATION GUARD: PH1C-MUTANT-ISCONNECTED-REMOVAL turns RED if the watch
   // treats root.isConnected === false as removal.
   {
     const container = mountContainer(0);
@@ -4989,18 +6237,43 @@ async function main() {
     await ph1Frame();
     const [resize] = liveResize();
     assert(resize && resize.notifications === 1 && resize.live && liveMutation().length === 1 && view.renders === 1,
-      'PH1C-MUTANT-ISCONNECTED-REMOVAL (PH1C-ONE-SHOT-LATE-ATTACH): a container still detached at render keeps its one-shot armed through the first frame');
+      'PH1C-MUTANT-ISCONNECTED-REMOVAL (PH9C-ONE-SHOT-EQUIVALENTS): a container still detached at render keeps its watch through the first frame');
     container.offDocument = false;
     await ph1Frame();
     container.ph1Width = 590;
     await ph1Frame();
-    assert(view.renders === 2 && isCompact(container) && liveObservers().length === 0,
-      'PH1C-ONE-SHOT-LATE-ATTACH: attached after the first frame and laid out at 590, the one-shot re-renders exactly once, compact');
-    await settled('PH1C-ONE-SHOT-LATE-ATTACH: detached at render, attached, laid out at 590', view, ['wide', 'compact'], container);
+    await ph9Debounce();
+    assert(view.renders === 2 && isCompact(container) && liveResize().length === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH): attached after the first frame and laid out at 590, the watch re-renders exactly once, compact');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH): detached at render, attached, laid out at 590', view, ['wide', 'compact'], container);
+    ph9Discard(container);
+  }
+  // A container rendered before it is placed in its note pane watches
+  // itself; placed in a 590 pane, it converges to compact, and the
+  // re-render watches the pane.
+  {
+    const container = mountContainer(0);
+    const view = countingView();
+    await view.render({ container });
+    await ph1Frame();
+    const pane = element('div', { cls: 'markdown-preview-view' });
+    pane.ph9Pane = true;
+    pane.ph9Width = 590;
+    pane.ph9InnerNow = () => pane.ph9Width;
+    Object.defineProperty(pane, 'offsetWidth', { get() { return pane.ph9Width; } });
+    container.parent = pane;
+    pane.children.push(container);
+    container.ph1Width = 590;
+    await ph1Frame();
+    await ph9Debounce();
+    assert(view.renders === 2 && isCompact(container) && liveResize().length === 1 && liveResize()[0].target === pane,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH): a container rendered before it is placed in a 590 pane re-renders compact once and then watches the pane');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH): rendered outside its pane, then placed in a 590 pane', view, ['wide', 'compact'], container);
+    ph9Discard(pane);
   }
   // A container torn down with its root inside while still 0 wide: the root
-  // is still its child, so nothing disarms and nothing fires; the harness
-  // models the detached subtree's collection with ph1Collect.
+  // is still its child, so nothing disconnects and nothing renders; the
+  // harness models the detached subtree's collection with ph1Collect.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5010,85 +6283,92 @@ async function main() {
     container.remove();
     await ph1Quiet();
     assert(view.renders === 1 && pendingTimers() === 0 && pair.length === 2 && pair.every((observer) => observer.live)
-      && pair[0].notifications === 1 && pair[1].deliveries === 0
-      && pair.every((observer) => observer.target === container || observer.target.parent === container),
-    'PH1C-ONE-SHOT-LATE-ATTACH: a container torn down with its root inside while still 0 renders nothing and schedules nothing; its armed pair watches only nodes inside the detached subtree');
+      && pair[0].notifications === 1 && pair[1].deliveries === 0 && pair.every((observer) => observer.target === container),
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH): a container torn down with its root inside while still 0 renders nothing and leaves nothing pending; its watch observes only the detached container');
     ph1Collect(container);
-    await settled('PH1C-ONE-SHOT-LATE-ATTACH: torn down while still 0, then collected', view, ['wide']);
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-LATE-ATTACH): torn down while still 0, then collected', view, ['wide']);
   }
 
-  // ---- PH1C-UNMEASURED-RECOVERS ----
-  // PH1B-THROWING-GETTER-DROPS-CROSSING: a width read that throws is
-  // unmeasured: it falls through to the is-mobile class, then wide, arms the
-  // one-shot, and the next notification whose re-resolve succeeds re-renders
-  // once.
-  for (const [label, mobile, first] of [['without is-mobile', false, 'wide'], ['on an is-mobile body', true, 'compact']]) {
+  // ---- PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS) ----
+  // PH1B-THROWING-GETTER-DROPS-CROSSING: a width read that throws on the
+  // render is unmeasured: it falls through to the is-mobile class, then wide,
+  // and the watch's next readable measurement decides. Without is-mobile the
+  // measured 500 differs from the drawn wide map and re-renders compact
+  // once; on an is-mobile body the unmeasured 390 compact map re-renders
+  // once at 500.
+  for (const [label, mobile, trace] of [['without is-mobile', false, ['wide', 'compact']], ['on an is-mobile body', true, ['compact', 'compact']]]) {
     ph1MobileClass = mobile;
-    const at500 = await referenceRoot(500);
+    const expected = await referenceRoot(500);
     const container = mountContainer(500, 500);
     container.ph1Throws = 1;
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    const armed = liveResize();
-    assert(container.ph1Throws === 0 && view.renders === 1 && isCompact(container) === (first === 'compact')
-      && armed.length === 1 && armed[0].target === container.children[0],
-    `PH1B-THROWING-GETTER-DROPS-CROSSING (PH1C-UNMEASURED-RECOVERS): a clientWidth getter that throws on the render ${label} resolves unmeasured (${first}) and installs the one-shot`);
+    const [resize] = liveResize();
+    assert(container.ph1Throws === 0 && view.renders === 1 && isCompact(container) === mobile
+      && liveResize().length === 1 && resize.target === container,
+    `PH1B-THROWING-GETTER-DROPS-CROSSING (PH9C-ONE-SHOT-EQUIVALENTS): a clientWidth getter that throws on the render ${label} resolves unmeasured (${trace[0]}) and watches`);
     await ph1Frame();
-    assert(view.renders === 2 && isCompact(container) && armed[0].disconnected >= 1 && liveObservers().length === 0
-      && armed[0].thrown.length === 0 && JSON.stringify(domShape(container.children[0])) === at500,
-    `PH1C-UNMEASURED-RECOVERS: ${label}, the next notification re-resolves 500 and re-renders the 500 compact map exactly once`);
-    await settled(`PH1C-UNMEASURED-RECOVERS: a getter that throws on the render ${label}`, view, [first, 'compact'], container);
+    await ph9Debounce();
+    assert(view.renders === trace.length && isCompact(container) && resize.thrown.length === 0
+      && JSON.stringify(domShape(container.children[0])) === expected,
+    `PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): ${label}, the next notification re-resolves 500 and ends on the re-rendered 500 compact map`);
+    await settled(`PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): a getter that throws on the render ${label}`, view, trace, container);
     ph1MobileClass = false;
+    ph9Discard(container);
   }
   {
     const container = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    const oneShot = liveResize()[0];
+    const [resize] = liveResize();
     await ph1Frame();
     container.ph1Width = 500;
     container.ph1Throws = 1;
     await ph1Frame();
-    assert(container.ph1Throws === 0 && oneShot.notifications === 2 && oneShot.thrown.length === 0 && oneShot.live
-      && view.renders === 1,
-    'PH1B-THROWING-GETTER-DROPS-CROSSING (PH1C-UNMEASURED-RECOVERS): a clientWidth getter that throws inside the one-shot notification keeps observing and does not throw out of the observer callback');
-    container.ph1Content = 499.5;
-    await ph1Frame();
-    assert(view.renders === 2 && isCompact(container) && oneShot.disconnected >= 1 && liveObservers().length === 0,
-      'PH1C-UNMEASURED-RECOVERS: the next notification whose re-resolve succeeds at 500 re-renders compact exactly once');
-    await settled('PH1C-UNMEASURED-RECOVERS: a getter that throws inside the notification', view, ['wide', 'compact'], container);
+    assert(container.ph1Throws === 0 && resize.notifications === 2 && resize.thrown.length === 0 && resize.live
+      && view.renders === 1 && JSON.stringify(pendingDelays()) === JSON.stringify([250]),
+    'PH1B-THROWING-GETTER-DROPS-CROSSING (PH9C-ONE-SHOT-EQUIVALENTS): a clientWidth getter that throws inside the notification keeps the drawn map, arms one re-check, and does not throw out of the observer callback');
+    await ph1Clock.advance(250);
+    await ph1Drain();
+    assert(view.renders === 2 && isCompact(container) && resize.disconnected === 1 && liveResize().length === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): the re-check reads 500 and re-renders compact exactly once');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): a getter that throws inside the notification', view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
   {
     const container = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    const oneShot = liveResize()[0];
+    const [resize] = liveResize();
     await ph1Frame();
+    await ph1Clock.advance(250);
     view._resolveWidth = () => { throw new Error('resolver fault'); };
     container.ph1Width = 500;
     await ph1Frame();
     delete view._resolveWidth;
-    assert(oneShot.notifications === 2 && oneShot.thrown.length === 0 && oneShot.live && view.renders === 1,
-      'PH1C-UNMEASURED-RECOVERS: a resolver fault inside the notification is swallowed and the one-shot keeps observing');
+    assert(resize.notifications === 2 && resize.thrown.length === 0 && resize.live && view.renders === 1 && pendingTimers() === 0,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): a resolver fault inside the notification is swallowed and the watch keeps observing');
     container.ph1Content = 499.5;
     await ph1Frame();
-    assert(view.renders === 2 && isCompact(container) && oneShot.disconnected >= 1 && liveObservers().length === 0,
-      'PH1C-UNMEASURED-RECOVERS: after a swallowed fault the next measured notification re-renders compact exactly once');
-    await settled('PH1C-UNMEASURED-RECOVERS: a fault inside the notification', view, ['wide', 'compact'], container);
+    await ph9Debounce();
+    assert(view.renders === 2 && isCompact(container) && resize.disconnected === 1 && liveResize().length === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): after a swallowed fault the next measured notification re-renders compact exactly once');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-UNMEASURED-RECOVERS): a fault inside the notification', view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
 
-  // ---- PH1D-ONE-SHOT-BRANCHES ----
+  // ---- PH9C-ONE-SHOT-EQUIVALENTS: the PH1D one-shot branches ----
   // PH1C-SIBLING-CHANGE-KEEPS-ARMED: a sibling added to, then removed from,
-  // the container while armed delivers two childList records with the root
-  // still a child, so the one-shot stays armed, and layout at 590 still
-  // re-renders compact exactly once.
+  // the container delivers two childList records with the root still a
+  // child, so the watch keeps observing, and layout at 590 still re-renders
+  // compact exactly once.
   // MUTATION GUARD: PH1D-MUTANT-DISARM-ON-ANY-CHILDLIST turns RED at
-  // "PH1D-ONE-SHOT-BRANCHES (PH1C-SIBLING-CHANGE-KEEPS-ARMED): a sibling added
-  // ..." if the childList callback disarms on any record instead of only when
-  // the root was removed.
+  // "PH9C-ONE-SHOT-EQUIVALENTS (PH1C-SIBLING-CHANGE-KEEPS-ARMED): a sibling
+  // added ..." if the childList callback disconnects on any record instead of
+  // only when the root was removed.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5102,81 +6382,89 @@ async function main() {
     await ph1Frame();
     assert(resize && watch && watch.deliveries === 2 && watch.thrown.length === 0 && resize.live && watch.live
       && resize.notifications === 1 && view.renders === 1 && container.children.length === 1,
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-SIBLING-CHANGE-KEEPS-ARMED): a sibling added to and then removed from the container while armed delivers two childList records and leaves the one-shot armed');
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-SIBLING-CHANGE-KEEPS-ARMED): a sibling added to and then removed from the container delivers two childList records and the watch keeps observing');
     container.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 2 && view.initiated === 1 && isCompact(container) && resize.notifications === 2
-      && liveObservers().length === 0,
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-SIBLING-CHANGE-KEEPS-ARMED): layout at 590 after the sibling changes still re-renders compact exactly once');
-    await settled('PH1D-ONE-SHOT-BRANCHES (PH1C-SIBLING-CHANGE-KEEPS-ARMED): sibling added and removed while armed, then laid out at 590',
+      && liveResize().length === 1,
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-SIBLING-CHANGE-KEEPS-ARMED): layout at 590 after the sibling changes still re-renders compact exactly once');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-SIBLING-CHANGE-KEEPS-ARMED): sibling added and removed, then laid out at 590',
       view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
-  // PH1C-RESIZE-CALLBACK-REMOVAL: without a MutationObserver API, a root laid
-  // out to a 240px content box over a still-unmeasured pane is removed as the
-  // pane lays out at 590; on the removal notification (240 -> 0) the
-  // one-shot disarms and renders nothing into the container its root left.
+  // PH1C-RESIZE-CALLBACK-REMOVAL: without a MutationObserver API, the root is
+  // removed as the pane lays out at 590; the notification that layout brings
+  // finds the root gone, disconnects, and renders nothing into the container
+  // its root left.
   // MUTATION GUARD: PH1D-MUTANT-RESIZE-IGNORES-REMOVAL turns RED at
-  // "PH1D-ONE-SHOT-BRANCHES (PH1C-RESIZE-CALLBACK-REMOVAL): with no
-  // MutationObserver API, removing the laid-out root ..." if the resize
-  // callback skips its removal check (it would re-resolve 590 and draw a
-  // compact root the harness never asked for).
+  // "PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RESIZE-CALLBACK-REMOVAL): with no
+  // MutationObserver API, removing the root ..." if the watch's steps skip
+  // the removal check (it would re-resolve 590 and draw a compact root the
+  // harness never asked for).
   {
     global.MutationObserver = undefined;
-    const container = mountContainer(0, 240);
+    const container = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    global.MutationObserver = BrowserLikeMutationObserver;
     const [resize] = liveResize();
-    assert(resize && resize.target === container.children[0] && liveResize().length === 1 && liveMutation().length === 0
+    assert(resize && resize.target === container && liveResize().length === 1 && liveMutation().length === 0
       && view.renders === 1 && !isCompact(container),
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-RESIZE-CALLBACK-REMOVAL): with no MutationObserver API an unmeasured render arms the resize observer alone');
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RESIZE-CALLBACK-REMOVAL): with no MutationObserver API an unmeasured render watches with the resize observer alone');
     await ph1Frame();
-    assert(resize.notifications === 1 && resize.live && view.renders === 1,
-      'PH1D-ONE-SHOT-BRANCHES (PH1C-RESIZE-CALLBACK-REMOVAL): the 240px content-box notification over an unmeasured pane keeps it armed');
+    await ph1Clock.advance(250);
     container.children[0].remove();
     container.ph1Width = 590;
     await ph1Frame();
-    assert(resize.notifications === 2 && resize.disconnected >= 1 && resize.thrown.length === 0 && view.renders === 1
+    await ph1Clock.advance(1000);
+    await ph1Drain();
+    global.MutationObserver = BrowserLikeMutationObserver;
+    assert(resize.notifications === 2 && resize.disconnected === 1 && resize.thrown.length === 0 && view.renders === 1
       && container.children.length === 0 && liveObservers().length === 0,
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-RESIZE-CALLBACK-REMOVAL): with no MutationObserver API, removing the laid-out root notifies the resize callback, which disarms and renders nothing');
-    await settled('PH1D-ONE-SHOT-BRANCHES (PH1C-RESIZE-CALLBACK-REMOVAL): no MutationObserver API, a laid-out root removed as the pane lays out at 590',
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RESIZE-CALLBACK-REMOVAL): with no MutationObserver API, removing the root as the pane lays out at 590 notifies the watch, which disconnects and renders nothing');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RESIZE-CALLBACK-REMOVAL): no MutationObserver API, the root removed as the pane lays out at 590',
       view, ['wide']);
+    ph9Discard(container);
   }
-  // PH1D-RESIZE-REMOVAL-UNMEASURED (O25): without a MutationObserver API, a
-  // root laid out to a 240px content box is removed while the pane still
-  // measures 0; on the removal notification (240 -> 0) the one-shot
-  // disconnects and renders nothing.
+  // PH1D-RESIZE-REMOVAL-UNMEASURED (O25): without a MutationObserver API, the
+  // root is removed while the pane still measures 0; the pending re-check,
+  // and separately a notification, find it gone and disconnect, and nothing
+  // renders.
   // MUTATION GUARD: PH1D-MUTANT-REMOVAL-AFTER-MEASURED-RETURN (O25) turns RED
   // at "PH1D-RESIZE-REMOVAL-UNMEASURED (O25): with no MutationObserver API,
-  // a laid-out root removed while the pane still measures 0 ..." if the
-  // removal check moves after the fresh.source !== "measured" return.
-  {
+  // a root removed while the pane still measures 0 ..." if the removal check
+  // moves after the unmeasured return.
+  for (const [label, by] of [['its pending re-check', 'recheck'], ['a notification', 'notify']]) {
     global.MutationObserver = undefined;
     const container = mountContainer(0, 240);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
-    global.MutationObserver = BrowserLikeMutationObserver;
     const [resize] = liveResize();
     await ph1Frame();
-    assert(resize && resize.notifications === 1 && resize.live && liveResize().length === 1 && liveMutation().length === 0
-      && view.renders === 1,
-    'PH1D-RESIZE-REMOVAL-UNMEASURED (O25): with no MutationObserver API a 240px content box over a 0 pane keeps the one-shot armed');
+    if (by === 'notify') await ph1Clock.advance(250);
     container.children[0].remove();
-    await ph1Frame();
-    assert(resize.notifications === 2 && resize.disconnected >= 1 && resize.thrown.length === 0 && view.renders === 1
-      && container.children.length === 0 && liveObservers().length === 0,
-    'PH1D-RESIZE-REMOVAL-UNMEASURED (O25): with no MutationObserver API, a laid-out root removed while the pane still measures 0 is disarmed by its removal notification and nothing renders');
-    await settled('PH1D-RESIZE-REMOVAL-UNMEASURED (O25): no MutationObserver API, a laid-out root removed while the pane measures 0',
+    if (by === 'notify') {
+      container.ph1Content = 239;
+      await ph1Frame();
+    } else {
+      await ph1Clock.advance(250);
+    }
+    global.MutationObserver = BrowserLikeMutationObserver;
+    assert(resize && resize.disconnected === 1 && resize.thrown.length === 0 && view.renders === 1
+      && container.children.length === 0 && liveObservers().length === 0 && pendingTimers() === 0,
+    `PH1D-RESIZE-REMOVAL-UNMEASURED (O25): with no MutationObserver API, a root removed while the pane still measures 0 is found gone by ${label}, which disconnects, and nothing renders`);
+    await settled(`PH1D-RESIZE-REMOVAL-UNMEASURED (O25): no MutationObserver API, a root removed while the pane measures 0, seen by ${label}`,
       view, ['wide']);
+    ph9Discard(container);
   }
-  // PH1D-OBSERVE-FAILURE (O28): when resize.observe() throws at cold load,
-  // any childList watch already started is disconnected, no observer is
-  // live, and a later layout or root removal renders nothing.
+  // PH1D-OBSERVE-FAILURE (O28): when resize.observe() throws, the childList
+  // watch already started is disconnected, no observer is live, and a later
+  // layout or root removal renders nothing.
   // MUTATION GUARD: PH1D-MUTANT-OBSERVE-FAILURE-KEEPS-ARMED (O28) turns RED
   // at "PH1D-OBSERVE-FAILURE (O28): a resize observe() that throws ..." if the
-  // installer's catch stops disarming what it armed.
+  // installer's catch stops disconnecting what it started.
   {
     class RefusingResizeObserver extends BrowserLikeResizeObserver {
       observe() { throw new Error('observe refused'); }
@@ -5189,9 +6477,9 @@ async function main() {
     global.ResizeObserver = BrowserLikeResizeObserver;
     const refused = ph1Observers.filter((observer) => observer instanceof RefusingResizeObserver);
     const watches = ph1Observers.filter((observer) => observer instanceof BrowserLikeMutationObserver && observer.target === container);
-    assert(refused.length === 1 && refused[0].target === null && watches.every((watch) => watch.disconnected >= 1)
+    assert(refused.length === 1 && refused[0].target === null && watches.length === 1 && watches.every((watch) => watch.disconnected >= 1)
       && liveObservers().length === 0 && view.renders === 1 && !isCompact(container),
-    'PH1D-OBSERVE-FAILURE (O28): a resize observe() that throws after arming leaves nothing armed: any childList watch it started is disconnected and no observer is live');
+    'PH1D-OBSERVE-FAILURE (O28): a resize observe() that throws leaves nothing watching: the childList watch it started is disconnected and no observer is live');
     container.ph1Width = 590;
     await ph1Frame();
     container.children[0].remove();
@@ -5199,61 +6487,77 @@ async function main() {
     assert(view.renders === 1 && watches.every((watch) => watch.deliveries === 0) && liveObservers().length === 0,
       'PH1D-OBSERVE-FAILURE (O28): after the failed observe() neither a layout at 590 nor removing the root renders or delivers anything');
     await settled('PH1D-OBSERVE-FAILURE (O28): resize observe() throws at cold load', view, ['wide']);
+    ph9Discard(container);
   }
-  // PH1C-RENDER-START-DISARM: without a MutationObserver API, a cold-load
-  // one-shot whose zero-box root has had its first notification (0) is
-  // replaced by a measured Dataview re-run of the same container, which arms
-  // nothing. That container must have no live observer the moment the
-  // re-render finishes, and through ten quiet seconds.
+  // PH1C-RENDER-START-DISARM: without a MutationObserver API, a watch whose
+  // 120ms debounce is pending (its container, which has no querySelector and
+  // so keeps its old root, laid out at 590) is replaced by a Dataview re-run
+  // of the same container whose lifecycle read is held past the debounce. The re-run disconnects the watch as it starts, so the
+  // debounce never fires, and the re-run draws compact once. The same
+  // instance also watches a second container.
   // MUTATION GUARD: PH1D-MUTANT-NO-RENDER-START-DISARM turns RED at
-  // "PH1D-ONE-SHOT-BRANCHES (PH1C-RENDER-START-DISARM): with no
-  // MutationObserver API a measured re-render ..." if _renderAtWidth stops
-  // disarming its container's one-shot before anything else.
-  // The same instance also arms a second container before the re-render.
+  // "PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RENDER-START-DISARM): with no
+  // MutationObserver API a Dataview re-run ..." if _renderAtWidth stops
+  // disconnecting its container's watch before anything else.
   // MUTATION GUARD: PH1D-MUTANT-OWNERSHIP-PER-INSTALL turns RED at the same
   // label if each install starts a fresh ownership map (the second
-  // container's install forgets the first's one-shot).
+  // container's install forgets the first's watch).
   // MUTATION GUARD: PH1D-MUTANT-OWNERSHIP-NOT-RECORDED turns RED at the same
-  // label if the installer never records the armed one-shot for its
-  // container.
+  // label if the installer never records the watch for its container.
   {
     global.MutationObserver = undefined;
     const container = mountContainer(0);
+    container.querySelector = undefined;
     const other = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await view.render({ container: other });
     await ph1Frame();
-    const stale = liveResize().find((observer) => observer.target.parent === container);
-    const otherOneShot = liveResize().find((observer) => observer.target.parent === other);
-    assert(stale && otherOneShot && stale.notifications === 1 && stale.live && liveResize().length === 2 && liveMutation().length === 0
+    await ph1Clock.advance(250);
+    const stale = liveResize().find((observer) => observer.target === container);
+    const otherWatch = liveResize().find((observer) => observer.target === other);
+    assert(stale && otherWatch && stale.notifications === 1 && stale.live && liveResize().length === 2 && liveMutation().length === 0
       && view.renders === 2,
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-RENDER-START-DISARM): with no MutationObserver API two cold-load containers of one instance each arm a resize observer alone, and a zero-box first notification keeps each armed');
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RENDER-START-DISARM): with no MutationObserver API two cold-load containers of one instance each watch with a resize observer alone');
     container.ph1Width = 590;
-    await view.render({ container });
+    await ph1Frame();
+    let release = null;
+    const held = new Promise((resolve) => { release = resolve; });
+    view._lifecycleApi = function heldLifecycleApi(...args) {
+      const api = GraphView.prototype._lifecycleApi.apply(this, args);
+      return held.then(() => api);
+    };
+    const rerun = view.render({ container });
+    await ph1Clock.advance(200);
+    await settle();
+    delete view._lifecycleApi;
+    release();
+    await rerun;
     await ph1Drain();
     global.MutationObserver = BrowserLikeMutationObserver;
-    assert(stale.disconnected >= 1 && stale.notifications === 1 && liveResize().length === 1 && liveResize()[0] === otherOneShot
-      && liveMutation().length === 0 && view.renders === 3 && view.initiated === 3 && container.children.length === 1 && isCompact(container),
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-RENDER-START-DISARM): with no MutationObserver API a measured re-render of the same container disarms the armed one-shot as it starts and leaves zero live observers of its own (the other container stays armed)');
+    assert(stale.disconnected === 1 && stale.notifications === 2 && liveResize().length === 2 && liveResize().includes(otherWatch)
+      && liveMutation().length === 0 && view.renders === 3 && view.initiated === 3 && container.children.length === 2
+      && !byClass(container.children[0], 'graph-view-compact').length && byClass(container.children[1], 'graph-view-compact').length === 1,
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RENDER-START-DISARM): with no MutationObserver API a Dataview re-run into a container that keeps its old root disconnects the container\'s watch as it starts, so the pending debounce never fires, and draws compact once (the other container keeps its watch)');
     other.ph1Width = 500;
     await ph1Frame();
-    assert(isCompact(other) && view.renders === 4 && liveObservers().length === 0,
-      'PH1D-ONE-SHOT-BRANCHES (PH1C-RENDER-START-DISARM): the other container still re-renders once when it lays out');
-    await settled('PH1D-ONE-SHOT-BRANCHES (PH1C-RENDER-START-DISARM): no MutationObserver API, a measured 590 re-render replaces an armed cold-load root while another container is armed',
-      view, ['wide', 'wide', 'compact', 'compact'], container);
+    await ph9Debounce();
+    assert(isCompact(other) && view.renders === 4,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RENDER-START-DISARM): the other container still re-renders once when it lays out');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-RENDER-START-DISARM): no MutationObserver API, a held Dataview re-run replaces a watch with a pending debounce while another container is watched',
+      view, ['wide', 'wide', 'compact', 'compact'], null, { watched: [container, other], childLists: 1 });
+    ph9Discard(container, other);
   }
   // PH1C-ARM-ONLY-WHILE-ATTACHED: two overlapping cold-load renders of one
   // container, the older finishing last (its lifecycle read is held until
-  // the newer render has finished and armed). The newer render removed the
+  // the newer render has finished and watches). The newer render removed the
   // older root, so when the older render finishes its root is no longer a
-  // child of the container: it arms nothing and leaves the newer one-shot
-  // armed, which re-renders compact once when the pane lays out at 590.
+  // child of the container: it installs nothing and leaves the newer watch,
+  // which re-renders compact once when the pane lays out at 590.
   // MUTATION GUARD: PH1D-MUTANT-ARM-AFTER-REMOVAL turns RED at
-  // "PH1D-ONE-SHOT-BRANCHES (PH1C-ARM-ONLY-WHILE-ATTACHED): the older render,
-  // finishing last ..." if the installer arms a root that has already left
-  // its container (it would disarm the newer one-shot and watch a detached
-  // root, and the map would stay wide at 590).
+  // "PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ARM-ONLY-WHILE-ATTACHED): the older
+  // render, finishing last ..." if the installer watches for a root that has
+  // already left its container (it would disconnect the newer watch).
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5271,28 +6575,31 @@ async function main() {
     const newerRoot = container.children[0];
     await newer;
     assert(lifecycleReads === 2 && olderRoot && newerRoot && olderRoot !== newerRoot && olderRoot.parentNode === null
-      && container.children.length === 1 && liveResize().length === 1 && liveResize()[0].target === newerRoot
+      && container.children.length === 1 && liveResize().length === 1 && liveResize()[0].target === container
       && liveMutation().length === 1 && liveMutation()[0].target === container && view.trace.length === 1,
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-ARM-ONLY-WHILE-ATTACHED): the newer overlapping cold-load render finishes first and arms its own root');
-    const newerOneShot = liveResize()[0];
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ARM-ONLY-WHILE-ATTACHED): the newer overlapping cold-load render finishes first and watches');
+    const newerWatch = liveResize()[0];
     releaseOlder();
     await older;
     await ph1Drain();
-    assert(view.trace.length === 2 && liveResize().length === 1 && liveResize()[0] === newerOneShot && newerOneShot.live
+    assert(view.trace.length === 2 && liveResize().length === 1 && liveResize()[0] === newerWatch && newerWatch.live
       && liveMutation().length === 1 && liveMutation()[0].target === container && container.children[0] === newerRoot,
-    'PH1D-ONE-SHOT-BRANCHES (PH1C-ARM-ONLY-WHILE-ATTACHED): the older render, finishing last with its root already removed, arms nothing and leaves the newer one-shot armed');
+    'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ARM-ONLY-WHILE-ATTACHED): the older render, finishing last with its root already removed, installs nothing and leaves the newer watch');
+    await ph1Frame();
     container.ph1Width = 590;
     await ph1Frame();
-    assert(view.renders === 3 && view.initiated === 2 && isCompact(container) && liveObservers().length === 0,
-      'PH1D-ONE-SHOT-BRANCHES (PH1C-ARM-ONLY-WHILE-ATTACHED): two overlapping cold-load renders where the older finishes last end compact at 590');
-    await settled('PH1D-ONE-SHOT-BRANCHES (PH1C-ARM-ONLY-WHILE-ATTACHED): two overlapping cold-load renders, the older finishing last, then laid out at 590',
+    await ph9Debounce();
+    assert(view.renders === 3 && view.initiated === 2 && isCompact(container) && liveResize().length === 1,
+      'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ARM-ONLY-WHILE-ATTACHED): two overlapping cold-load renders where the older finishes last end compact at 590');
+    await settled('PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ARM-ONLY-WHILE-ATTACHED): two overlapping cold-load renders, the older finishing last, then laid out at 590',
       view, ['wide', 'wide', 'compact'], container);
+    ph9Discard(container);
   }
   // ---- PH1D-ONE-SHOT-HANDOFF-BOUNDARY ----
   // A cold load of chained slices GA-H1 ... GA-H<R> at clientWidth 0 draws
-  // wide and arms the one-shot. When the pane lays out at a floor boundary,
-  // the one re-render draws exactly the measured width (literals from the
-  // card formula, as in PH1D-HANDOFF-BOUNDARY):
+  // wide and watches. When the pane lays out at a floor boundary, the one
+  // re-render draws exactly the measured width (literals from the card
+  // formula, as in PH1D-HANDOFF-BOUNDARY):
   //   394, 8 ranks: 40px pills with short ids, canvas 394, padding 0
   //   393, 8 ranks: 40px pills with short ids, canvas 394, padding 14
   //   404, 5 ranks: 72px pills with full ids, canvas 404, padding 0
@@ -5322,33 +6629,34 @@ async function main() {
       const view = countingView();
       await view.render({ container });
       await ph1Drain();
-      const [oneShot] = liveResize();
+      const [resize] = liveResize();
       await ph1Frame();
-      assert(oneShot && oneShot.live && oneShot.notifications === 1 && liveResize().length === 1
+      assert(resize && resize.live && resize.notifications === 1 && liveResize().length === 1
         && view.renders === 1 && !isCompact(container),
-      `PH1D-ONE-SHOT-HANDOFF-BOUNDARY: a cold load of ${R} chained slices at clientWidth 0 draws wide and stays armed through the observe() notification`);
+      `PH1D-ONE-SHOT-HANDOFF-BOUNDARY: a cold load of ${R} chained slices at clientWidth 0 draws wide and keeps watching through the observe() notification`);
       container.ph1Width = W;
       await ph1Frame();
+      await ph9Debounce();
       assert.deepStrictEqual({ renders: view.renders, drawing: ph1dCompactDrawing(container.children[0]) },
         { renders: 2, drawing: ph1dExpectedDrawing(colW, lefts, ids, canvasWidth, padding) },
         `PH1D-ONE-SHOT-HANDOFF-BOUNDARY: the pane laid out at ${W} re-renders ${R} chained slices once, as ${colW}px pills with ${ids} ids on a ${canvasWidth}px canvas with a ${padding}px scroller padding-bottom`);
       await settled(`PH1D-ONE-SHOT-HANDOFF-BOUNDARY: ${R} chained slices, cold load, then laid out at ${W}`,
         view, ['wide', 'compact'], container);
+      ph9Discard(container);
     }
     global.app = savedAppHandoff;
     global.customJS = savedCustomJSHandoff;
   }
-  // ---- PH1D-FRACTIONAL-WIDTH (one-shot) ----
-  // A cold load of chained slices at clientWidth 0 draws wide and arms the
-  // one-shot; the pane then measures a fractional width, and the one
-  // re-render draws exactly that width (literals as in the
-  // PH1D-FRACTIONAL-WIDTH rows above):
+  // ---- PH1D-FRACTIONAL-WIDTH (watch) ----
+  // A cold load of chained slices at clientWidth 0 draws wide and watches;
+  // the pane then measures a fractional width, and the one re-render draws
+  // exactly that width (literals as in the PH1D-FRACTIONAL-WIDTH rows above):
   //   403.5, 5 ranks: 71px pills with short ids, canvas 399, padding 0
   //   393.5, 8 ranks: 40px pills with short ids, canvas 394, padding 14
   //   0.5, 5 ranks: 40px pills with short ids, canvas 244, padding 14
   // MUTATION GUARD: PH1D-MUTANT-ONE-SHOT-HANDS-ROUNDED turns RED at
   // "PH1D-FRACTIONAL-WIDTH: after a cold load, the pane measuring 403.5 ..."
-  // if the one-shot hands its re-render Math.round(fresh.width).
+  // if the watch hands its re-render Math.round(fresh.width).
   // MUTATION GUARD: PH1D-MUTANT-ONE-SHOT-HANDS-CEIL turns RED at the same label
   // if it hands Math.ceil(fresh.width).
   // MUTATION GUARD: PH1D-MUTANT-HANDED-WIDTH-ROUNDED turns RED at the same
@@ -5357,7 +6665,7 @@ async function main() {
   // if the re-render draws Math.ceil(decided.width).
   // MUTATION GUARD: PH1D-MUTANT-ONE-SHOT-HANDS-FLOOR turns RED at
   // "PH1D-FRACTIONAL-WIDTH: after a cold load, the pane measuring 0.5 ..." if
-  // the one-shot hands its re-render Math.floor(fresh.width).
+  // the watch hands its re-render Math.floor(fresh.width).
   {
     const savedAppFractional = global.app;
     const savedCustomJSFractional = global.customJS;
@@ -5374,52 +6682,61 @@ async function main() {
       await ph1Frame();
       container.ph1Width = W;
       await ph1Frame();
+      await ph9Debounce();
       assert.deepStrictEqual({ renders: view.renders, drawing: ph1dCompactDrawing(container.children[0]) },
         { renders: 2, drawing: ph1dExpectedDrawing(colW, lefts, 'short', canvasWidth, padding) },
         `PH1D-FRACTIONAL-WIDTH: after a cold load, the pane measuring ${W} re-renders ${R} chained slices once, as ${colW}px pills with short ids at left ${lefts.join(' ')} on a ${canvasWidth}px canvas with a ${padding}px scroller padding-bottom`);
       await settled(`PH1D-FRACTIONAL-WIDTH: ${R} chained slices, cold load, then measured at ${W}`,
         view, ['wide', 'compact'], container);
+      ph9Discard(container);
     }
     global.app = savedAppFractional;
     global.customJS = savedCustomJSFractional;
   }
   // ---- PH1D-ONE-SHOT-SAME-PRESENTATION ----
-  // The first measured notification re-renders once even when the
-  // measurement draws the same presentation as the cold-load guess: a
-  // default-wide cold load whose pane then measures 1024, and an is-mobile
-  // 390 compact cold load whose pane then measures 390. The re-render
-  // replaces the cold-load root with a new root whose DOM equals it.
+  // A default-wide cold load whose pane then measures 1024 keeps its root.
+  // An is-mobile 390 compact cold load re-renders once when its pane
+  // measures: at 390 into a new root of the same DOM, and at 500 into the
+  // 500 compact map.
   // MUTATION GUARD: PH1D-MUTANT-SKIP-WIDE-TO-WIDE turns RED at
   // "PH1D-ONE-SHOT-SAME-PRESENTATION: a default-wide cold load ..." if the
-  // one-shot skips its re-render when both the guess and the measurement are
-  // wide.
-  // MUTATION GUARD: PH1D-MUTANT-SKIP-UNCHANGED-WIDTH turns RED at the same
-  // label if the one-shot skips its re-render when the measured width equals
-  // the guessed width.
+  // watch re-renders when the measurement resolves the drawn presentation.
+  // MUTATION GUARD: PH1D-MUTANT-SKIP-UNCHANGED-WIDTH turns RED at
+  // "PH1D-ONE-SHOT-SAME-PRESENTATION: an is-mobile 390 compact cold load
+  // whose pane then measures 390 ..." if a compact map drawn from the
+  // unmeasured guess is kept when the measurement equals the guessed width.
   for (const [label, mobile, W, trace] of [
-    ['a default-wide cold load whose pane then measures 1024', false, 1024, ['wide', 'wide']],
+    ['a default-wide cold load whose pane then measures 1024', false, 1024, ['wide']],
     ['an is-mobile 390 compact cold load whose pane then measures 390', true, 390, ['compact', 'compact']],
+    ['an is-mobile 390 compact cold load whose pane then measures 500', true, 500, ['compact', 'compact']],
   ]) {
     ph1MobileClass = mobile;
+    const expected = await referenceRoot(W);
     const container = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
     const coldRoot = container.children[0];
-    const coldShape = JSON.stringify(domShape(coldRoot));
     await ph1Frame();
     container.ph1Width = W;
     await ph1Frame();
+    await ph9Debounce();
     ph1MobileClass = false;
-    assert(view.renders === 2 && container.children.length === 1 && container.children[0] !== coldRoot && coldRoot.removed
-      && JSON.stringify(domShape(container.children[0])) === coldShape && liveObservers().length === 0,
-    `PH1D-ONE-SHOT-SAME-PRESENTATION: ${label} re-renders once, replacing the cold-load root with a new root of the same DOM, and leaves nothing armed`);
+    const kept = trace.length === 1;
+    assert(view.renders === trace.length && container.children.length === 1 && (container.children[0] === coldRoot) === kept
+      && !coldRoot.removed === kept && JSON.stringify(domShape(container.children[0])) === expected
+      && liveResize().length === 1 && pendingTimers() === 0,
+    kept
+      ? `PH1D-ONE-SHOT-SAME-PRESENTATION: ${label} re-renders nothing and keeps its root and its watch`
+      : `PH1D-ONE-SHOT-SAME-PRESENTATION: ${label} re-renders once, into a new root with the DOM of a ${W} render, and watches`);
     await settled(`PH1D-ONE-SHOT-SAME-PRESENTATION: ${label}`, view, trace, container);
+    ph9Discard(container);
   }
   // ---- PH1D-MUTATION-API-NOT-A-FUNCTION ----
   // A MutationObserver global that is a plain object, not a function: a cold
-  // load at clientWidth 0 arms one resize observer on its root and no
-  // childList watch, and the pane laying out at 590 re-renders compact once.
+  // load at clientWidth 0 watches with one resize observer on its container
+  // and no childList watch, and the pane laying out at 590 re-renders
+  // compact once.
   // MUTATION GUARD: PH1D-MUTANT-MUTATION-API-TRUTHY turns RED at
   // "PH1D-MUTATION-API-NOT-A-FUNCTION: with a MutationObserver global that is
   // a plain object, a cold load ..." if any truthy MutationObserver global is
@@ -5431,33 +6748,35 @@ async function main() {
     await view.render({ container });
     await ph1Drain();
     const armed = liveResize();
-    const armedOnRoot = armed.length === 1 && armed[0].target === container.children[0] && liveMutation().length === 0;
+    const watchingAlone = armed.length === 1 && armed[0].target === container && liveMutation().length === 0;
     await ph1Frame();
     container.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     global.MutationObserver = BrowserLikeMutationObserver;
-    assert(armedOnRoot, 'PH1D-MUTATION-API-NOT-A-FUNCTION: with a MutationObserver global that is a plain object, a cold load at clientWidth 0 arms one resize observer on its root and no childList watch');
-    assert(view.renders === 2 && isCompact(container) && liveObservers().length === 0,
-      'PH1D-MUTATION-API-NOT-A-FUNCTION: with that global, the pane laying out at 590 re-renders compact once and leaves nothing armed');
+    assert(watchingAlone, 'PH1D-MUTATION-API-NOT-A-FUNCTION: with a MutationObserver global that is a plain object, a cold load at clientWidth 0 watches with one resize observer on its container and no childList watch');
+    assert(view.renders === 2 && isCompact(container) && liveResize().length === 1 && liveMutation().length === 0,
+      'PH1D-MUTATION-API-NOT-A-FUNCTION: with that global, the pane laying out at 590 re-renders compact once');
     await settled('PH1D-MUTATION-API-NOT-A-FUNCTION: a plain-object MutationObserver global, cold load, then laid out at 590',
-      view, ['wide', 'compact'], container);
+      view, ['wide', 'compact'], container, { childLists: 0 });
+    ph9Discard(container);
   }
   // ---- PH1D-CONTAINER-REPLACED ----
-  // A cold load into container A (clientWidth 0) draws wide and arms on A's
-  // root. dv.container is then replaced by container B, which measures 590,
-  // and A's root gets a 700px content box while A's clientWidth still reads
-  // 0. The notification on A's root re-resolves through dv, measures 590,
-  // and re-renders once, compact, into B; A keeps its wide root, and no
-  // observer is live afterwards.
+  // A cold load into container A (clientWidth 0) draws wide and watches A.
+  // dv.container is then replaced by container B, which measures 590, and A
+  // gets a 700px box while A's clientWidth still reads 0. The notification
+  // on A re-resolves through dv, measures 590, and after the debounce
+  // re-renders once, compact, into B; A keeps its wide root, A's watch is
+  // disconnected, and B's re-render watches B.
   // MUTATION GUARD: PH1D-MUTANT-FIRE-WITHOUT-DISARM turns RED at
   // "PH1D-CONTAINER-REPLACED: after dv.container is replaced ..." if the
-  // one-shot re-renders without disarming itself first.
+  // watch re-renders without disconnecting itself first.
   // MUTATION GUARD: PH1D-MUTANT-FIRE-DISCONNECTS-RESIZE-ONLY turns RED at the
-  // same label if, as it fires, the one-shot disconnects its resize observer
-  // and not its childList watch.
+  // same label if, as it re-renders, the watch disconnects its resize
+  // observer and not its childList watch.
   // MUTATION GUARD: PH1D-MUTANT-REMOVAL-AGAINST-CURRENT-CONTAINER turns RED at
   // the same label if removal compares the root's parent with the current
-  // dv.container instead of the container it was armed on.
+  // dv.container instead of the container it was installed on.
   {
     const first = mountContainer(0);
     const second = mountContainer(590);
@@ -5466,44 +6785,49 @@ async function main() {
     await view.render(dv);
     await ph1Drain();
     const coldRoot = first.children[0];
-    assert(view.renders === 1 && liveResize().length === 1 && liveResize()[0].target === coldRoot
-      && liveMutation().length === 1 && liveMutation()[0].target === first,
-    'PH1D-CONTAINER-REPLACED: a cold load into container A arms one resize observer on its root and one childList watch on A');
+    const [resizeA] = liveResize();
+    const [watchA] = liveMutation();
+    assert(view.renders === 1 && liveResize().length === 1 && resizeA.target === first
+      && liveMutation().length === 1 && watchA.target === first,
+    'PH1D-CONTAINER-REPLACED: a cold load into container A watches A with one resize observer and one childList watch');
     await ph1Frame();
+    await ph1Clock.advance(250);
     dv.container = second;
     first.ph1Content = 700;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 2 && first.children.length === 1 && first.children[0] === coldRoot && !isCompact(first)
-      && second.children.length === 1 && isCompact(second) && liveObservers().length === 0,
-    'PH1D-CONTAINER-REPLACED: after dv.container is replaced by container B measuring 590, the notification on A\'s root re-renders once, compact, into B, A keeps its wide root, and no observer is live');
-    await settled('PH1D-CONTAINER-REPLACED: cold load into A, dv.container replaced by B at 590, then A\'s root resized',
+      && second.children.length === 1 && isCompact(second) && !resizeA.live && !watchA.live
+      && liveResize().length === 1 && liveResize()[0].target === second && liveMutation().length === 1 && liveMutation()[0].target === second,
+    'PH1D-CONTAINER-REPLACED: after dv.container is replaced by container B measuring 590, the notification on A re-renders once, compact, into B, A keeps its wide root, A\'s watch is disconnected, and B is watched');
+    await settled('PH1D-CONTAINER-REPLACED: cold load into A, dv.container replaced by B at 590, then A resized',
       view, ['wide', 'compact'], second);
+    ph9Discard(first, second);
   }
   // ---- PH1D-ONE-SHOT-AFTER-RENDER-ERROR ----
-  // An unmeasured cold load whose render records a render_error still arms
-  // one one-shot, and the pane measuring 500 re-renders compact once. Each
-  // fault throws on its first call only:
-  //   _applyCrossEpicStubs, without is-mobile: the default-wide render records it;
+  // An unmeasured cold load whose render records a render_error still
+  // watches. Each fault throws on its first call only:
+  //   _applyCrossEpicStubs, without is-mobile: the default-wide render records
+  //     it, and the pane measuring 500 re-renders compact once;
   //   _compactGeometry, on an is-mobile body: the 390 compact attempt fails
-  //     and the wide fallback records it;
+  //     and the wide fallback records it; the pane measuring 500 re-renders
+  //     compact once, and the pane measuring 800 re-renders wide once;
   //   _renderGraph, without is-mobile: the default-wide render records it and
-  //     draws no graph.
-  // MUTATION GUARD: PH1D-MUTANT-NO-ARM-AFTER-RENDER-ERROR turns RED at
-  // "PH1D-ONE-SHOT-AFTER-RENDER-ERROR: an unmeasured cold load with a
-  // cross-epic stub fault ..." if a render that recorded a render_error arms
-  // nothing.
-  // MUTATION GUARD: PH1D-MUTANT-ARM-ONLY-WHEN-PRESENTED-OR-WIDE turns RED at
-  // "PH1D-ONE-SHOT-AFTER-RENDER-ERROR: an unmeasured cold load with a compact
-  // geometry fault ..." if a narrow render arms only when its compact map was
-  // presented.
+  //     draws no graph, and the pane measuring 500 re-renders compact once.
+  // MUTATION GUARD: PH1D-MUTANT-NO-ARM-AFTER-RENDER-ERROR turns RED first at
+  // "PH9-LIFECYCLE: a 500 pane whose compact map always fails watches the
+  // pane ..." if a render that recorded a render_error watches nothing.
+  // MUTATION GUARD: PH1D-MUTANT-ARM-ONLY-WHEN-PRESENTED-OR-WIDE turns RED
+  // first at the same label if a narrow render watches only when its compact
+  // map was presented.
   // MUTATION GUARD: PH1D-MUTANT-ARM-ONLY-AFTER-DRAWN-GRAPH turns RED at
   // "PH1D-ONE-SHOT-AFTER-RENDER-ERROR: an unmeasured cold load with a wide
   // graph fault ..." if the install runs only after a compact or wide graph
   // drew without throwing.
-  for (const [label, method, fault, mobile] of [
-    ['a cross-epic stub fault without is-mobile', '_applyCrossEpicStubs', 'cross-epic stub fault', false],
-    ['a compact geometry fault on an is-mobile body', '_compactGeometry', 'compact geometry fault', true],
-    ['a wide graph fault without is-mobile', '_renderGraph', 'wide graph fault', false],
+  for (const [label, method, fault, mobile, W, trace] of [
+    ['a cross-epic stub fault without is-mobile', '_applyCrossEpicStubs', 'cross-epic stub fault', false, 500, ['wide', 'compact']],
+    ['a compact geometry fault on an is-mobile body', '_compactGeometry', 'compact geometry fault', true, 800, ['wide', 'compact', 'wide']],
+    ['a wide graph fault without is-mobile', '_renderGraph', 'wide graph fault', false, 500, ['wide', 'compact']],
   ]) {
     ph1MobileClass = mobile;
     const container = mountContainer(0);
@@ -5519,29 +6843,40 @@ async function main() {
     ph1MobileClass = false;
     const root = container.children[0];
     const errorRows = byClass(root, 'warning-render-error');
-    const [oneShot] = liveResize();
+    const [resize] = liveResize();
     assert(calls === 1 && view.renders === 1 && !isCompact(container)
       && errorRows.length === 1 && errorRows[0].textContent === `GraphView: ${fault}`
-      && liveResize().length === 1 && oneShot.target === root && liveMutation().length === 1 && liveMutation()[0].target === container,
-    `PH1D-ONE-SHOT-AFTER-RENDER-ERROR: an unmeasured cold load with ${label} records one render_error row and arms one one-shot on its root`);
+      && liveResize().length === 1 && resize.target === container && liveMutation().length === 1 && liveMutation()[0].target === container,
+    `PH1D-ONE-SHOT-AFTER-RENDER-ERROR: an unmeasured cold load with ${label} records one render_error row and watches its container`);
     await ph1Frame();
-    container.ph1Width = 500;
+    await ph1Clock.advance(250);
+    if (mobile) {
+      container.ph1Width = 500;
+      await ph1Frame();
+      await ph9Debounce();
+      assert(view.renders === 2 && isCompact(container) && liveResize().length === 1 && pendingTimers() === 0,
+        `PH1D-ONE-SHOT-AFTER-RENDER-ERROR: after ${label}, the pane measuring 500 re-renders compact once`);
+    }
+    container.ph1Width = W;
     await ph1Frame();
-    assert(view.renders === 2 && isCompact(container) && byClass(container.children[0], 'warning-render-error').length === 0
-      && liveObservers().length === 0,
-    `PH1D-ONE-SHOT-AFTER-RENDER-ERROR: after ${label}, the pane measuring 500 re-renders compact exactly once with no render_error row`);
-    await settled(`PH1D-ONE-SHOT-AFTER-RENDER-ERROR: ${label}`, view, ['wide', 'compact'], container);
+    await ph9Debounce();
+    const last = trace[trace.length - 1];
+    assert(view.renders === trace.length && isCompact(container) === (last === 'compact') && byClass(container.children[0], 'warning-render-error').length === 0
+      && liveResize().length === 1,
+    `PH1D-ONE-SHOT-AFTER-RENDER-ERROR: after ${label}, the pane measuring ${W} re-renders ${last} exactly once with no render_error row`);
+    await settled(`PH1D-ONE-SHOT-AFTER-RENDER-ERROR: ${label}`, view, trace, container);
+    ph9Discard(container);
   }
   // ---- PH1D-ONE-SHOT-SINGLE-OWNER ----
   // A container without querySelector keeps every root drawn into it. Two
   // overlapping cold-load renders of it, the older finishing last (its
-  // lifecycle read is held until the newer render has finished and armed):
-  // both roots stay children, the older render's install replaces the newer
-  // one-shot, and exactly one one-shot is armed, on the older root. The pane
-  // laying out at 590 re-renders compact once, into a third root.
+  // lifecycle read is held until the newer render has finished and
+  // watches): both roots stay children, the older render's install replaces
+  // the newer watch, and exactly one watch is live. The pane laying out at
+  // 590 re-renders compact once, into a third root.
   // MUTATION GUARD: PH1D-MUTANT-NO-INSTALL-DISARM turns RED at
   // "PH1D-ONE-SHOT-SINGLE-OWNER: two overlapping cold-load renders ..." if an
-  // install arms without first disarming its container's one-shot.
+  // install watches without first disconnecting its container's watch.
   // MUTATION GUARD: PH1D-MUTANT-INSTALL-AFTER-CHROME turns RED at the same
   // label if the install runs right after the section chrome is drawn.
   // MUTATION GUARD: PH1D-MUTANT-INSTALL-BEFORE-AWAITS turns RED at the same
@@ -5564,24 +6899,28 @@ async function main() {
     const newer = view.render({ container });
     const newerRoot = container.children[1];
     await newer;
+    const newerWatch = liveResize()[0];
     releaseOlder();
     await older;
     await ph1Drain();
     assert(lifecycleReads === 2 && container.children.length === 2 && container.children[0] === olderRoot
-      && container.children[1] === newerRoot && liveResize().length === 1 && liveResize()[0].target === olderRoot
+      && container.children[1] === newerRoot && newerWatch && !newerWatch.live && liveResize().length === 1 && liveResize()[0].target === container
       && liveMutation().length === 1 && liveMutation()[0].target === container,
-    'PH1D-ONE-SHOT-SINGLE-OWNER: two overlapping cold-load renders of a container without querySelector, the older finishing last, keep both roots and leave exactly one one-shot armed, on the older root');
+    'PH1D-ONE-SHOT-SINGLE-OWNER: two overlapping cold-load renders of a container without querySelector, the older finishing last, keep both roots and leave exactly one watch, the older render\'s');
+    await ph1Frame();
     container.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 3 && container.children.length === 3
-      && byClass(container.children[2], 'graph-view-compact').length === 1 && liveObservers().length === 0,
-    'PH1D-ONE-SHOT-SINGLE-OWNER: the pane laying out at 590 re-renders compact once, into a third root, and leaves nothing armed');
+      && byClass(container.children[2], 'graph-view-compact').length === 1 && liveResize().length === 1,
+    'PH1D-ONE-SHOT-SINGLE-OWNER: the pane laying out at 590 re-renders compact once, into a third root, and one watch stays live');
     await settled('PH1D-ONE-SHOT-SINGLE-OWNER: overlapping cold loads into a container without querySelector, then laid out at 590',
-      view, ['wide', 'wide', 'compact']);
+      view, ['wide', 'wide', 'compact'], null, { watched: [container] });
+    ph9Discard(container);
   }
   // ---- PH1D-ONE-SHOT-ROOT-MOVED ----
   // A root moved out of its container into another element has left that
-  // container: the next frame's childList record disarms the one-shot, and
+  // container: the next frame's childList record disconnects the watch, and
   // the pane laying out at 590 afterwards renders nothing.
   // MUTATION GUARD: PH1D-MUTANT-REMOVED-MEANS-NO-PARENT turns RED at
   // "PH1D-ONE-SHOT-ROOT-MOVED: a root moved from its container ..." if
@@ -5592,33 +6931,35 @@ async function main() {
     const view = countingView();
     await view.render({ container });
     await ph1Frame();
-    const [oneShot] = liveResize();
+    const [resize] = liveResize();
     const elsewhere = element();
     elsewhere.insertBefore(container.children[0], null);
     await ph1Frame();
-    assert(oneShot && oneShot.disconnected >= 1 && liveObservers().length === 0
+    assert(resize && resize.disconnected === 1 && liveObservers().length === 0 && pendingTimers() === 0
       && container.children.length === 0 && elsewhere.children.length === 1,
-    'PH1D-ONE-SHOT-ROOT-MOVED: a root moved from its container into another element disarms the one-shot on the next frame');
+    'PH1D-ONE-SHOT-ROOT-MOVED: a root moved from its container into another element disconnects the watch on the next frame');
     container.ph1Width = 590;
     elsewhere.ph1Width = 700;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 1 && container.children.length === 0,
       'PH1D-ONE-SHOT-ROOT-MOVED: the pane laying out at 590 after the move renders nothing');
     await settled('PH1D-ONE-SHOT-ROOT-MOVED: a root moved into another element', view, ['wide']);
+    ph9Discard(container, elsewhere);
   }
   // ---- PH1D-EARLY-RETURN-DISARM ----
-  // A render into a container whose cold-load one-shot is armed disarms it
-  // even when that render returns early: RenderSafe finds no page, the
-  // scope is unknown, or the scope is project. The early render arms
-  // nothing, and the pane laying out at 590 renders nothing more.
+  // A render into a watched container disconnects its watch even when that
+  // render returns early: RenderSafe finds no page, the scope is unknown, or
+  // the scope is project. The early render watches nothing, and the pane
+  // laying out at 590 renders nothing more.
   // MUTATION GUARD: PH1D-MUTANT-DISARM-AFTER-PAGE-CHECK turns RED at
   // "PH1D-EARLY-RETURN-DISARM: a render that finds no page ..." if the
-  // render-start disarm moves after the page check.
+  // render-start disconnect moves after the page check.
   // MUTATION GUARD: PH1D-MUTANT-DISARM-AFTER-SCOPE-CHECK turns RED at the
-  // same label if the render-start disarm moves after the scope checks.
+  // same label if the render-start disconnect moves after the scope checks.
   // MUTATION GUARD: PH1D-MUTANT-INSTALL-IN-PROJECT-SCOPE turns RED at
   // "PH1D-EARLY-RETURN-DISARM: a project-scope render ..." if a project-scope
-  // render arms a one-shot.
+  // render watches.
   for (const [label, overrides, pageless] of [
     ['a render that finds no page', undefined, true],
     ['a render with an unknown scope', { scope: 'elsewhere' }, false],
@@ -5628,30 +6969,32 @@ async function main() {
     const view = countingView();
     await view.render({ container });
     await ph1Frame();
-    const [oneShot] = liveResize();
+    const [resize] = liveResize();
     const customJSBefore = global.customJS;
     if (pageless) global.customJS = { ...customJSBefore, RenderSafe: { page: () => null } };
     await view.render({ container }, overrides);
     await ph1Drain();
     global.customJS = customJSBefore;
-    assert(oneShot && oneShot.disconnected >= 1 && liveObservers().length === 0 && view.renders === 2
+    assert(resize && resize.disconnected === 1 && liveObservers().length === 0 && pendingTimers() === 0 && view.renders === 2
       && container.children.length === 1,
-    `PH1D-EARLY-RETURN-DISARM: ${label} into a container with an armed cold-load one-shot disarms it and arms nothing`);
+    `PH1D-EARLY-RETURN-DISARM: ${label} into a watched container disconnects its watch and watches nothing`);
     container.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     assert.strictEqual(view.renders, 2,
       `PH1D-EARLY-RETURN-DISARM: after ${label}, the pane laying out at 590 renders nothing`);
     await settled(`PH1D-EARLY-RETURN-DISARM: ${label}`, view, ['wide', 'wide']);
+    ph9Discard(container);
   }
   // ---- PH1D-ONE-SHOT-MEASURED-ONLY ----
-  // Only a measured resolution fires the one-shot. An args object whose
+  // Only a measured resolution re-renders. An args object whose
   // containerWidth read throws at render and reads 500 afterwards leaves the
-  // render unmeasured; the notifications after it re-resolve the 500
-  // override, which is not a measurement, so nothing re-renders, even after
-  // the pane lays out at 590. Removing the root then disarms it.
+  // render unmeasured; the notifications and re-checks after it re-resolve
+  // the 500 override, which is not a measurement, so nothing re-renders,
+  // even after the pane lays out at 590. Removing the root then disconnects.
   // MUTATION GUARD: PH1D-MUTANT-FIRE-ON-OVERRIDE turns RED at
   // "PH1D-ONE-SHOT-MEASURED-ONLY: two notifications ..." if an override
-  // resolution also fires the one-shot.
+  // resolution also re-renders.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5665,26 +7008,30 @@ async function main() {
     };
     await view.render({ container }, args);
     await ph1Drain();
-    const [oneShot] = liveResize();
+    const [resize] = liveResize();
     await ph1Frame();
+    await ph1Clock.advance(250);
     container.ph1Width = 590;
     await ph1Frame();
-    assert(oneShot && oneShot.live && oneShot.notifications === 2 && argReads === 3 && view.renders === 1
-      && !isCompact(container),
-    'PH1D-ONE-SHOT-MEASURED-ONLY: two notifications that re-resolve a 500 override, before and after the pane lays out at 590, re-render nothing and keep the one-shot armed');
+    await ph1Clock.advance(250);
+    await ph1Drain();
+    assert(resize && resize.live && resize.notifications === 2 && argReads === 5 && view.renders === 1
+      && !isCompact(container) && pendingTimers() === 0,
+    'PH1D-ONE-SHOT-MEASURED-ONLY: two notifications and their re-checks that re-resolve a 500 override, before and after the pane lays out at 590, re-render nothing and keep watching');
     container.children[0].remove();
     await ph1Frame();
     await settled('PH1D-ONE-SHOT-MEASURED-ONLY: an override that becomes readable after an unmeasured render, then the root removed',
       view, ['wide']);
+    ph9Discard(container);
   }
   // ---- PH1D-ONE-SHOT-KEEPS-ARGS ----
-  // The one-shot re-renders with the args of the render that armed it. A
+  // The watch re-renders with the args of the render that installed it. A
   // view whose own scope is project, rendered with args { scope: 'epic' } at
-  // clientWidth 0, draws the wide epic map and arms; the pane laying out at
-  // 590 re-renders the epic map once, compact.
+  // clientWidth 0, draws the wide epic map and watches; the pane laying out
+  // at 590 re-renders the epic map once, compact.
   // MUTATION GUARD: PH1D-MUTANT-RERENDER-DROPS-ARGS turns RED at
-  // "PH1D-ONE-SHOT-KEEPS-ARGS: the pane laying out at 590 ..." if the one-shot
-  // re-renders without the args it was armed with.
+  // "PH1D-ONE-SHOT-KEEPS-ARGS: the pane laying out at 590 ..." if the watch
+  // re-renders without the args it was installed with.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5693,33 +7040,34 @@ async function main() {
     await ph1Drain();
     assert(view.renders === 1 && hasGraph(container.children[0]) && !isCompact(container)
       && liveResize().length === 1 && liveMutation().length === 1,
-    'PH1D-ONE-SHOT-KEEPS-ARGS: a project-scope view rendered with args { scope: \'epic\' } at clientWidth 0 draws the wide epic map and arms one one-shot');
+    'PH1D-ONE-SHOT-KEEPS-ARGS: a project-scope view rendered with args { scope: \'epic\' } at clientWidth 0 draws the wide epic map and watches');
     await ph1Frame();
     container.ph1Width = 590;
     await ph1Frame();
-    assert(view.renders === 2 && isCompact(container) && liveObservers().length === 0,
+    await ph9Debounce();
+    assert(view.renders === 2 && isCompact(container) && liveResize().length === 1,
       'PH1D-ONE-SHOT-KEEPS-ARGS: the pane laying out at 590 re-renders the epic map once, compact');
     await settled('PH1D-ONE-SHOT-KEEPS-ARGS: args { scope: \'epic\' } on a project-scope view, cold load, then laid out at 590',
       view, ['wide', 'compact'], container);
+    ph9Discard(container);
   }
   // ---- PH1D-ONE-DISARM ----
-  // Two one-shots whose observers each count exactly one disconnect() call.
-  // First, a cold load at clientWidth 0 that fires when the pane lays out at
-  // 590, then a measured Dataview re-run of the same container: the fired
-  // one-shot's resize observer and childList watch each count one
-  // disconnect(). Second, with no MutationObserver API, a root laid out to a
-  // 240px content box and then removed is disarmed by its removal
-  // notification; a measured re-run of the container at 590 after that
-  // leaves the resize observer's count at one.
+  // Each watch disconnects exactly once. First, a cold load whose watch
+  // re-renders when the pane lays out at 590, then a measured Dataview
+  // re-run of the same container: the first watch's resize observer and
+  // childList watch each count one disconnect(), and so do the second's.
+  // Second, with no MutationObserver API, a removed root found gone by the
+  // re-check, followed by a measured re-run of the container at 590, leaves
+  // the resize observer's count at one.
   // MUTATION GUARD: PH1D-MUTANT-OWNER-NEVER-DELETED (O22) turns RED at
-  // "PH1D-ONE-DISARM: a one-shot that fired when the pane laid out at 590
-  // ..." if disarming leaves the container's ownership entry in place.
+  // "PH1D-ONE-DISARM: a watch that re-rendered when the pane laid out at 590
+  // ..." if disconnecting leaves the container's ownership entry in place.
   // MUTATION GUARD: PH1D-MUTANT-DISARM-AFTER-RERENDER (O32) turns RED at the
-  // same label if the one-shot starts its re-render before disarming itself.
+  // same label if the watch starts its re-render before disconnecting itself.
   // MUTATION GUARD: PH1D-MUTANT-REMOVAL-DISCONNECTS-RESIZE-ONLY (O57) turns RED
-  // at "PH1D-ONE-DISARM: with no MutationObserver API, a laid-out root
-  // removed ..." if the resize callback's removal branch disconnects the
-  // resize observer instead of disarming.
+  // at "PH1D-ONE-DISARM: with no MutationObserver API, a removed root ..." if
+  // the removal branch disconnects the resize observer instead of the whole
+  // watch.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5729,42 +7077,48 @@ async function main() {
     const [watch] = liveMutation();
     container.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
+    const [secondResize] = liveResize();
+    const [secondWatch] = liveMutation();
     await view.render({ container });
     await ph1Drain();
-    assert(resize && watch && resize.disconnected === 1 && watch.disconnected === 1 && view.renders === 3 && view.initiated === 2
-      && isCompact(container) && liveObservers().length === 0,
-    'PH1D-ONE-DISARM: a one-shot that fired when the pane laid out at 590, followed by a measured re-run of its container, counts exactly one disconnect() on its resize observer and one on its childList watch');
+    assert(resize && watch && secondResize && secondWatch && secondResize !== resize
+      && resize.disconnected === 1 && watch.disconnected === 1 && secondResize.disconnected === 1 && secondWatch.disconnected === 1
+      && view.renders === 3 && view.initiated === 2 && isCompact(container) && liveResize().length === 1,
+    'PH1D-ONE-DISARM: a watch that re-rendered when the pane laid out at 590, followed by a measured re-run of its container, counts exactly one disconnect() on each observer of both watches');
     await settled('PH1D-ONE-DISARM: cold load, laid out at 590, then a measured re-run', view, ['wide', 'compact', 'compact'], container);
+    ph9Discard(container);
   }
   {
     global.MutationObserver = undefined;
-    const container = mountContainer(0, 240);
+    const container = mountContainer(0);
     const view = countingView();
     await view.render({ container });
     await ph1Drain();
     const [resize] = liveResize();
     await ph1Frame();
     container.children[0].remove();
-    await ph1Frame();
+    await ph1Clock.advance(250);
     container.ph1Width = 590;
     await view.render({ container });
     await ph1Drain();
     global.MutationObserver = BrowserLikeMutationObserver;
-    assert(resize && resize.notifications === 2 && resize.disconnected === 1 && view.renders === 2 && isCompact(container)
-      && liveObservers().length === 0,
-    'PH1D-ONE-DISARM: with no MutationObserver API, a laid-out root removed and disarmed by its removal notification, followed by a measured re-run of its container at 590, counts exactly one disconnect() on the resize observer');
-    await settled('PH1D-ONE-DISARM: no MutationObserver API, a laid-out root removed, then a measured re-run at 590',
-      view, ['wide', 'compact'], container);
+    assert(resize && resize.notifications === 1 && resize.disconnected === 1 && view.renders === 2 && isCompact(container)
+      && liveResize().length === 1 && liveResize()[0] !== resize,
+    'PH1D-ONE-DISARM: with no MutationObserver API, a removed root found gone by the re-check, followed by a measured re-run of its container at 590, counts exactly one disconnect() on the resize observer');
+    await settled('PH1D-ONE-DISARM: no MutationObserver API, a removed root, then a measured re-run at 590',
+      view, ['wide', 'compact'], container, { childLists: 0 });
+    ph9Discard(container);
   }
   // ---- PH1D-ROOT-MOVED-DURING-RENDER ----
   // A cold-load render at clientWidth 0 whose lifecycle read is held; while
   // it is held the root is moved into another element. When the render
   // finishes its root's parent is that element, not the container, so it
-  // arms nothing, and the pane laying out at 590 renders nothing.
+  // watches nothing, and the pane laying out at 590 renders nothing.
   // MUTATION GUARD: PH1D-MUTANT-ARM-WHEN-ROOT-HAS-A-PARENT (C02) turns RED at
   // "PH1D-ROOT-MOVED-DURING-RENDER: a cold-load root moved into another
-  // element while its render awaits ..." if the installer arms whenever the
-  // root has any parent.
+  // element while its render awaits ..." if the installer watches whenever
+  // the root has any parent.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5783,59 +7137,76 @@ async function main() {
     await ph1Drain();
     assert(root && root.parentNode === elsewhere && hasGraph(root) && container.children.length === 0
       && liveObservers().length === 0 && view.renders === 1,
-    'PH1D-ROOT-MOVED-DURING-RENDER: a cold-load root moved into another element while its render awaits draws its graph there and arms nothing when the render finishes');
+    'PH1D-ROOT-MOVED-DURING-RENDER: a cold-load root moved into another element while its render awaits draws its graph there and watches nothing when the render finishes');
     container.ph1Width = 590;
     elsewhere.ph1Width = 700;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 1 && container.children.length === 0,
       'PH1D-ROOT-MOVED-DURING-RENDER: the pane laying out at 590 after that renders nothing');
     await settled('PH1D-ROOT-MOVED-DURING-RENDER: a root moved into another element while its render awaits', view, ['wide']);
+    ph9Discard(container, elsewhere);
   }
   // ---- PH1D-DECIDED-RENDER-DISARMS ----
-  // One view and one dv. A cold load into container A arms one-shot A on
-  // A's root. dv.container is replaced by container B, which has no
-  // querySelector (so it keeps every root drawn into it), and a cold load
-  // into B arms one-shot B. When B lays out at 590 and A's root gets a 700px
-  // content box, one-shot A fires first and re-renders through dv into B;
-  // that re-render disarms one-shot B as it starts, so B's old root, still
-  // in B and now measuring 590, re-renders nothing more.
+  // One view whose renders take 200ms of the stubbed clock, and one dv. A
+  // cold load into container A watches A. dv.container is replaced by
+  // container B, which has no querySelector (so it keeps every root drawn
+  // into it), and a cold load into B watches B. When B lays out at 590 and A
+  // gets a 700px box in the same frame, both watches arm their debounce, A's
+  // first. A's debounce starts a re-render through dv into B, handed its
+  // measurement, and that re-render disconnects B's watch as it starts, so
+  // B's debounce, due in the same instant, never fires.
   // MUTATION GUARD: PH1D-MUTANT-DECIDED-RENDER-SKIPS-DISARM (C01) turns RED at
-  // "PH1D-DECIDED-RENDER-DISARMS: one-shot A re-renders once, compact, into
-  // B, ..." if a render handed a measurement skips the render-start disarm.
+  // "PH1D-DECIDED-RENDER-DISARMS: A's watch re-renders once, compact, into
+  // B, ..." if a render handed a measurement skips the render-start
+  // disconnect.
   {
     const first = mountContainer(0);
     const second = mountContainer(0);
     second.querySelector = undefined;
     const dv = { container: first };
-    const view = countingView();
-    await view.render(dv);
-    await ph1Drain();
+    const view = countingView({ delay: 200 });
+    const intoFirst = view.render(dv);
+    await ph1Clock.advance(200);
+    await intoFirst;
     await ph1Frame();
     dv.container = second;
-    await view.render(dv);
-    await ph1Drain();
+    const intoSecond = view.render(dv);
+    await ph1Clock.advance(200);
+    await intoSecond;
     await ph1Frame();
-    const [oneShotA, oneShotB] = liveResize();
-    assert(oneShotA && oneShotB && liveResize().length === 2 && oneShotA.target === first.children[0]
-      && oneShotB.target === second.children[0] && liveMutation().length === 2 && view.renders === 2,
-    'PH1D-DECIDED-RENDER-DISARMS: cold loads into A and then, through the same dv, into B leave one one-shot armed on each root');
+    await ph1Clock.advance(250);
+    const [watchA, watchB] = liveResize();
+    assert(watchA && watchB && liveResize().length === 2 && watchA.target === first
+      && watchB.target === second && liveMutation().length === 2 && view.renders === 2 && pendingTimers() === 0,
+    'PH1D-DECIDED-RENDER-DISARMS: cold loads into A and then, through the same dv, into B leave one watch on each');
     second.ph1Width = 590;
     first.ph1Content = 700;
     await ph1Frame();
-    assert(view.renders === 3 && view.initiated === 2 && oneShotB.disconnected === 1 && oneShotB.notifications === 1
-      && second.children.length === 2 && byClass(second.children[1], 'graph-view-compact').length === 1 && liveObservers().length === 0,
-    'PH1D-DECIDED-RENDER-DISARMS: one-shot A re-renders once, compact, into B, and that re-render disarms one-shot B before B\'s old root is notified, so nothing else renders');
+    assert(JSON.stringify(pendingDelays()) === JSON.stringify([120, 120]),
+      'PH1D-DECIDED-RENDER-DISARMS: in that frame both watches arm their debounce');
+    await ph1Clock.advance(120);
+    await ph1Clock.advance(200);
+    await settle();
+    await ph1Frame();
+    await ph1Clock.advance(1000);
+    await settle();
+    assert(view.renders === 3 && view.initiated === 2 && watchB.disconnected === 1 && watchB.notifications === 2
+      && second.children.length === 2 && byClass(second.children[1], 'graph-view-compact').length === 1
+      && liveResize().length === 1 && liveResize()[0].target === second,
+    'PH1D-DECIDED-RENDER-DISARMS: A\'s watch re-renders once, compact, into B, and that re-render disconnects B\'s watch as it starts, so nothing else renders');
     await settled('PH1D-DECIDED-RENDER-DISARMS: cold loads into A and B through one dv, then A resized while B lays out at 590',
-      view, ['wide', 'wide', 'compact']);
+      view, ['wide', 'wide', 'compact'], null, { watched: [second] });
+    ph9Discard(first, second);
   }
   // ---- PH1D-PARTIAL-RENDER-ARMS-NOTHING ----
   // An unmeasured render that throws out of its warnings strip ends in the
-  // render-safe catch: its graph is drawn, it arms nothing, and the pane
+  // render-safe catch: its graph is drawn, it watches nothing, and the pane
   // laying out at 590 renders nothing.
   // MUTATION GUARD: PH1D-MUTANT-INSTALL-BEFORE-WARNINGS (O59) turns RED at
   // "PH1D-PARTIAL-RENDER-ARMS-NOTHING: an unmeasured render whose warnings
-  // strip throws ..." if the one-shot is installed before the warnings strip
-  // is drawn.
+  // strip throws ..." if the watch is installed before the warnings strip is
+  // drawn.
   {
     const container = mountContainer(0);
     const view = countingView();
@@ -5848,62 +7219,64 @@ async function main() {
     await view.render({ container });
     await ph1Drain();
     assert(faults === 1 && view.renders === 1 && hasGraph(container.children[0]) && liveObservers().length === 0,
-      'PH1D-PARTIAL-RENDER-ARMS-NOTHING: an unmeasured render whose warnings strip throws draws its graph and arms nothing');
+      'PH1D-PARTIAL-RENDER-ARMS-NOTHING: an unmeasured render whose warnings strip throws draws its graph and watches nothing');
     container.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 1 && !isCompact(container),
       'PH1D-PARTIAL-RENDER-ARMS-NOTHING: the pane laying out at 590 after that renders nothing');
     await settled('PH1D-PARTIAL-RENDER-ARMS-NOTHING: an unmeasured render whose warnings strip throws', view, ['wide']);
+    ph9Discard(container);
   }
   // ---- PH1D-INTERACT-WHILE-ARMED ----
-  // A cold load at clientWidth 0 arms the one-shot; after its first frame the
-  // harness interacts with the drawn graph, and then the pane lays out:
+  // A cold load at clientWidth 0 watches; after its first frame the harness
+  // interacts with the drawn graph, and then the pane lays out:
   //   without the is-mobile class (wide at 1024), with one of: a tap on the
   //     first chip (its card stays open); a tap on the first chip and then
   //     Close; a tap on the first chip and then Open slice; a canvas tap;
   //     Stuck on and then off; Dim done on. The pane then lays out at 590;
   //   with the is-mobile class (compact at 390), a tap on the first pill (its
   //     card stays open). The pane then measures 800.
-  // In each case the view's _disarmColdLoad, _renderAtWidth, and
-  // _installColdLoadObserver are wrapped: each _disarmColdLoad call is
-  // counted as inside or outside a synchronous run of the other two. The
-  // interaction makes no _disarmColdLoad call outside them, and the frame
-  // after the layout re-renders the map exactly once, to the measured
-  // presentation, leaving one root in the container and nothing armed
+  // In each case the view's _disconnectWidthWatch, _renderAtWidth, and
+  // _watchPaneWidth are wrapped: each _disconnectWidthWatch call is counted
+  // as inside or outside a synchronous run of the other two. The
+  // interaction makes no _disconnectWidthWatch call outside them, and the
+  // debounce after the layout re-renders the map exactly once, to the
+  // measured presentation, leaving one root in the container and one watch
   // (settled() then checks ten quiet seconds).
   // MUTATION GUARD: PH1D-MUTANT-SELECT-DISARMS (T02) turns RED at
   // "PH1D-INTERACT-WHILE-ARMED: a wide cold load, then a tap on the first
-  // chip ..." if selecting a node disarms the container's one-shot.
+  // chip ..." if selecting a node disconnects the container's watch.
   // MUTATION GUARD: PH1D-MUTANT-ONE-SHOT-SKIPS-OPEN-CARD (T01) turns RED at
   // "PH1D-INTERACT-WHILE-ARMED: a wide cold load, then a tap on the first
-  // chip, and then the pane laid out at 590 ..." if the one-shot does not
+  // chip, and then the pane laid out at 590 ..." if the watch does not
   // re-render while a card is open.
   // MUTATION GUARD: PH1D-MUTANT-ONE-SHOT-SKIPS-DIMMED (T03) turns RED at the
-  // same label if the one-shot does not re-render while a node is dimmed or
-  // a filter is on.
+  // same label if the watch does not re-render while a node is dimmed or a
+  // filter is on.
   // MUTATION GUARD: PH1D-MUTANT-RERENDER-KEEPS-ROOT-WITH-CARD (T06) turns RED
-  // at the same label if the one-shot's re-render keeps the previous root
-  // when it holds a card.
+  // at the same label if the watch's re-render keeps the previous root when
+  // it holds a card.
   // MUTATION GUARD: PH1D-MUTANT-OPEN-CARD-DISARMS-WITHOUT-RERENDER (T07) turns RED
-  // at the same label if the one-shot disarms without re-rendering while a
+  // at the same label if the watch disconnects without re-rendering while a
   // card is open.
   // MUTATION GUARD: PH1D-MUTANT-DIMMED-DISARMS-WITHOUT-RERENDER (T08) turns RED
-  // at the same label if the one-shot disarms without re-rendering while a
+  // at the same label if the watch disconnects without re-rendering while a
   // node is dimmed or a filter is on.
   // MUTATION GUARD: PH1D-MUTANT-CLEAR-DISARMS (T04) turns RED at
   // "PH1D-INTERACT-WHILE-ARMED: a wide cold load, then a tap on the first
-  // chip and then Close ..." if clearing the selection disarms the
-  // container's one-shot.
+  // chip and then Close ..." if clearing the selection disconnects the
+  // container's watch.
   // MUTATION GUARD: PH1D-MUTANT-OPEN-SLICE-DISARMS (T11) turns RED at
   // "PH1D-INTERACT-WHILE-ARMED: a wide cold load, then a tap on the first
-  // chip and then Open slice ..." if Open slice disarms the container's
-  // one-shot.
+  // chip and then Open slice ..." if Open slice disconnects the container's
+  // watch.
   // MUTATION GUARD: PH1D-MUTANT-FILTER-TOGGLE-DISARMS (T05) turns RED at
   // "PH1D-INTERACT-WHILE-ARMED: a wide cold load, then Stuck on and then off
-  // ..." if a filter toggle disarms the container's one-shot.
+  // ..." if a filter toggle disconnects the container's watch.
   // MUTATION GUARD: PH1D-MUTANT-PILL-TAP-DISARMS (T09) turns RED at
   // "PH1D-INTERACT-WHILE-ARMED: an is-mobile compact cold load, then a tap on
-  // the first pill ..." if a pill tap disarms the container's one-shot.
+  // the first pill ..." if a pill tap disconnects the container's watch.
   for (const [label, mobile, width, act, trace] of [
     ['a wide cold load, then a tap on the first chip', false, 590,
       (root) => { bubblingClick(byClass(root, 'graph-view-chip')[0]); }, ['wide', 'compact']],
@@ -5925,47 +7298,49 @@ async function main() {
     const view = countingView();
     const sites = { inside: 0, outside: 0 };
     let depth = 0;
-    for (const name of ['_renderAtWidth', '_installColdLoadObserver']) {
+    for (const name of ['_renderAtWidth', '_watchPaneWidth']) {
       const original = view[name].bind(view);
       view[name] = (...args) => {
         depth += 1;
         try { return original(...args); } finally { depth -= 1; }
       };
     }
-    const disarm = view._disarmColdLoad.bind(view);
-    view._disarmColdLoad = (...args) => {
+    const disconnect = view._disconnectWidthWatch.bind(view);
+    view._disconnectWidthWatch = (...args) => {
       sites[depth > 0 ? 'inside' : 'outside'] += 1;
-      return disarm(...args);
+      return disconnect(...args);
     };
     await view.render({ container });
     await ph1Drain();
     await ph1Frame();
     ph1MobileClass = false;
-    const armed = liveResize().length;
+    const watching = liveResize().length;
     const insideBefore = sites.inside;
     act(container.children[0]);
-    assert(armed === 1 && insideBefore > 0 && sites.outside === 0 && liveResize().length === 1,
-      `PH1D-INTERACT-WHILE-ARMED: ${label}: the interaction leaves the one-shot armed and makes no _disarmColdLoad call outside _renderAtWidth and _installColdLoadObserver`);
+    assert(watching === 1 && insideBefore > 0 && sites.outside === 0 && liveResize().length === 1,
+      `PH1D-INTERACT-WHILE-ARMED: ${label}: the interaction leaves the watch live and makes no _disconnectWidthWatch call outside _renderAtWidth and _watchPaneWidth`);
     container.ph1Width = width;
     await ph1Frame();
+    await ph9Debounce();
     assert(view.renders === 2 && view.initiated === 1 && container.children.length === 1
-      && isCompact(container) === (trace[1] === 'compact') && liveObservers().length === 0 && sites.outside === 0,
-    `PH1D-INTERACT-WHILE-ARMED: ${label}, and then the pane laid out at ${width}: one re-render draws the ${trace[1]} map, the container holds one root, and nothing is armed`);
+      && isCompact(container) === (trace[1] === 'compact') && liveResize().length === 1 && sites.outside === 0,
+    `PH1D-INTERACT-WHILE-ARMED: ${label}, and then the pane laid out at ${width}: one re-render draws the ${trace[1]} map, the container holds one root, and one watch is live`);
     await settled(`PH1D-INTERACT-WHILE-ARMED: ${label}, then laid out at ${width}`, view, trace, container);
+    ph9Discard(container);
   }
   // ---- PH1D-COMPACT-WIDE-PARITY (width sources) ----
   // ph1dParity.run() (the replay, the parity assertions, and the model
   // anchors) runs on the render() fixture three more times. Each run's wide
   // drawing is render() at a containerWidth override of 1024; its compact
   // drawing is render() with no override, reached through:
-  //   a measured clientWidth of 390;
+  //   a measured clientWidth of 390, which watches its container;
   //   an unmeasured clientWidth of 0 with the is-mobile body class, which
-  //     arms a one-shot on the compact root; after the replay the pane lays
-  //     out at 800, and the one-shot re-renders the map exactly once, wide,
-  //     leaving one root and nothing armed;
-  //   a cold-load one-shot re-render: a render at clientWidth 0 without the
-  //     is-mobile class draws wide and arms the one-shot, and when the pane
-  //     lays out at 390 the one-shot re-renders the map once, compact.
+  //     watches its container; after the replay the pane lays out at 800,
+  //     and the watch re-renders the map exactly once, wide, leaving one
+  //     root and one watch;
+  //   a watch re-render: a render at clientWidth 0 without the is-mobile
+  //     class draws wide and watches, and when the pane lays out at 390 the
+  //     debounce re-renders the map once, compact.
   // MUTATION GUARD: PH1D-MUTANT-MEASURED-PILLS-OPEN (A4) turns RED at
   // "PH1D-COMPACT-WIDE-PARITY: render() of six slices and two cross-epic
   // stubs, compact from a measured clientWidth of 390, step 1 (tap PA-1
@@ -5986,54 +7361,57 @@ async function main() {
   // note instead of selecting.
   // MUTATION GUARD: PH1D-MUTANT-HANDOFF-PILLS-OPEN (A1) turns RED at
   // "PH1D-COMPACT-WIDE-PARITY: render() of six slices and two cross-epic
-  // stubs, compact from a cold-load one-shot re-render at 390, step 1 (tap
-  // PA-1 Base): ..." if compact pills drawn by the one-shot's re-render open
-  // their note instead of selecting.
+  // stubs, compact from a watch re-render at 390, step 1 (tap PA-1 Base):
+  // ..." if compact pills drawn by the watch's re-render open their note
+  // instead of selecting.
   // MUTATION GUARD: PH1D-MUTANT-HANDOFF-UNREGISTERED (A2) turns RED at the same
-  // label if a compact map drawn by the one-shot's re-render registers no
-  // pill.
+  // label if a compact map drawn by the watch's re-render registers no pill.
   // MUTATION GUARD: PH1D-MUTANT-HANDOFF-NO-OUTCOMES (A3) turns RED at the same
-  // label if a compact map drawn by the one-shot's re-render loads no
-  // Outcomes.
+  // label if a compact map drawn by the watch's re-render loads no Outcomes.
   // MUTATION GUARD: PH1D-MUTANT-HANDOFF-SOURCE-LOST (A7) turns RED at
   // "PH1D-COMPACT-WIDE-PARITY: render() of six slices and two cross-epic
-  // stubs, compact from a cold-load one-shot re-render at 390, step 2 (tap
-  // PA-1 Base): ..." if the one-shot's re-render hands the compact map an
-  // empty source path.
+  // stubs, compact from a watch re-render at 390, step 2 (tap PA-1 Base):
+  // ..." if the watch's re-render hands the compact map an empty source
+  // path.
   {
     const savedApp = global.app;
     const savedCustomJS = global.customJS;
     let armed = null;
+    let mounted = null;
     const drawers = [
       ['a measured clientWidth of 390', async () => {
         const container = mountContainer(390);
+        mounted = container;
         await new GraphView({ lifecycleApi, insights: new GraphInsights() }).render({ container });
-        assert(isCompact(container) && liveObservers().length === 0,
-          'PH1D-COMPACT-WIDE-PARITY: render() with no override at a measured clientWidth of 390 draws the compact map and arms nothing');
+        assert(isCompact(container) && liveResize().length === 1 && liveResize()[0].target === container,
+          'PH1D-COMPACT-WIDE-PARITY: render() with no override at a measured clientWidth of 390 draws the compact map and watches its container');
         return container.children[0];
       }],
       ['an unmeasured clientWidth of 0 with the is-mobile body class', async () => {
         ph1MobileClass = true;
         const container = mountContainer(0);
+        mounted = container;
         const view = countingView();
         await view.render({ container });
         await ph1Drain();
         ph1MobileClass = false;
         armed = { container, view };
-        assert(isCompact(container) && liveResize().length === 1 && liveResize()[0].target === container.children[0],
-          'PH1D-COMPACT-WIDE-PARITY: render() with no override at an unmeasured clientWidth of 0 on an is-mobile body draws the compact map and arms one one-shot on its root');
+        assert(isCompact(container) && liveResize().length === 1 && liveResize()[0].target === container,
+          'PH1D-COMPACT-WIDE-PARITY: render() with no override at an unmeasured clientWidth of 0 on an is-mobile body draws the compact map and watches its container');
         return container.children[0];
       }],
-      ['a cold-load one-shot re-render at 390', async () => {
+      ['a watch re-render at 390', async () => {
         const container = mountContainer(0);
+        mounted = container;
         const view = countingView();
         await view.render({ container });
         await ph1Drain();
         await ph1Frame();
         container.ph1Width = 390;
         await ph1Frame();
-        assert(view.renders === 2 && view.initiated === 1 && isCompact(container) && liveObservers().length === 0,
-          'PH1D-COMPACT-WIDE-PARITY: a render with no override at clientWidth 0 without the is-mobile class, and then the pane laying out at 390, re-render the map once, compact, and leave nothing armed');
+        await ph9Debounce();
+        assert(view.renders === 2 && view.initiated === 1 && isCompact(container) && liveResize().length === 1,
+          'PH1D-COMPACT-WIDE-PARITY: a render with no override at clientWidth 0 without the is-mobile class, and then the pane laying out at 390, re-render the map once, compact, and keep one watch');
         return container.children[0];
       }],
     ];
@@ -6044,14 +7422,15 @@ async function main() {
       if (armed) {
         armed.container.ph1Width = 800;
         await ph1Frame();
-        await ph1Frame();
+        await ph9Debounce();
         assert(armed.view.renders === 2 && armed.view.initiated === 1 && armed.container.children.length === 1
           && !isCompact(armed.container) && hasGraph(armed.container.children[0]),
         'PH1D-COMPACT-WIDE-PARITY: after the replay on the is-mobile compact drawing, the pane laying out at 800 re-renders the map exactly once, wide, and the container holds one root');
         armed = null;
       }
-      assert.deepStrictEqual([liveObservers().length, fixture.env.mutations], [0, []],
-        `PH1D-COMPACT-WIDE-PARITY: after the replay on the compact drawing from ${source}, no observer is live and no vault mutator ran`);
+      assert.deepStrictEqual([liveResize().map((observer) => observer.target === mounted), fixture.env.mutations], [[true], []],
+        `PH1D-COMPACT-WIDE-PARITY: after the replay on the compact drawing from ${source}, exactly one watch is live, on its container, and no vault mutator ran`);
+      ph9Discard(mounted);
     }
     global.app = savedApp;
     global.customJS = savedCustomJS;
@@ -6059,10 +7438,10 @@ async function main() {
   // ---- PH1D-NO-RESIZE-LISTENERS ----
   // With window, visualViewport, and app.workspace.on stubs that record each
   // call: render() at a measured clientWidth of 900, at a containerWidth
-  // override of 390, and at an unmeasured clientWidth of 0 whose one-shot
-  // fires when the pane lays out at 590, followed by ten quiet seconds, make
-  // no call to window.addEventListener, visualViewport.addEventListener, or
-  // app.workspace.on.
+  // override of 390, and at an unmeasured clientWidth of 0 whose watch
+  // re-renders when the pane lays out at 590, followed by ten quiet seconds,
+  // make no call to window.addEventListener, visualViewport.addEventListener,
+  // or app.workspace.on.
   // MUTATION GUARD: PH1D-MUTANT-WINDOW-RESIZE-LISTENER (H1) turns RED at
   // "PH1D-NO-RESIZE-LISTENERS: render() at a measured 900 ..." if a measured
   // render registers a window resize listener.
@@ -6082,16 +7461,19 @@ async function main() {
     global.visualViewport = { addEventListener: recorder('visualViewport.addEventListener') };
     workspace.on = recorder('app.workspace.on');
     const view = countingView();
-    await view.render({ container: mountContainer(900) });
-    await view.render({ container: mountContainer(0) }, { containerWidth: 390 });
+    const measured = mountContainer(900);
+    await view.render({ container: measured });
+    const pinned = mountContainer(0);
+    await view.render({ container: pinned }, { containerWidth: 390 });
     const cold = mountContainer(0);
     await view.render({ container: cold });
     await ph1Drain();
     await ph1Frame();
     cold.ph1Width = 590;
     await ph1Frame();
+    await ph9Debounce();
     await settled('PH1D-NO-RESIZE-LISTENERS: a measured 900 render, a 390 override render, and a cold load laid out at 590',
-      view, ['wide', 'compact', 'wide', 'compact'], cold);
+      view, ['wide', 'compact', 'wide', 'compact'], cold, { watched: [measured, cold] });
     if (savedWindow) Object.defineProperty(global, 'window', savedWindow);
     else delete global.window;
     if (savedViewport) Object.defineProperty(global, 'visualViewport', savedViewport);
@@ -6099,15 +7481,18 @@ async function main() {
     if (savedOn) Object.defineProperty(workspace, 'on', savedOn);
     else delete workspace.on;
     assert.deepStrictEqual(calls, [],
-      'PH1D-NO-RESIZE-LISTENERS: render() at a measured 900, at a 390 override, and at an unmeasured 0 whose one-shot fires at 590, then ten quiet seconds, make no call to window.addEventListener, visualViewport.addEventListener, or app.workspace.on');
+      'PH1D-NO-RESIZE-LISTENERS: render() at a measured 900, at a 390 override, and at an unmeasured 0 whose watch re-renders at 590, then ten quiet seconds, make no call to window.addEventListener, visualViewport.addEventListener, or app.workspace.on');
+    ph9Discard(measured, pinned, cold);
   }
-  assert.deepStrictEqual(ph1StubViolations, [],
-    'PH1D-STUB-VIOLATIONS: no observer-stub misuse is recorded at the end of the one-shot fixtures');
+  assert.deepStrictEqual([ph1StubViolations, liveObservers().length, pendingTimers()], [[], 0, 0],
+    'PH1D-STUB-VIOLATIONS: no observer-stub misuse is recorded at the end of the pane-width fixtures, no observer is live, and no timer is pending');
   global.ResizeObserver = savedResizeObserver;
   global.MutationObserver = savedMutationObserver;
   global.setTimeout = savedSetTimeout;
   global.clearTimeout = savedClearTimeout;
-  for (const receipt of ph1Receipts) console.log(`PH1C-ONE-SHOT ${receipt}`);
+  if (savedGetComputedStyle) Object.defineProperty(global, 'getComputedStyle', savedGetComputedStyle);
+  else delete global.getComputedStyle;
+  for (const receipt of ph1Receipts) console.log(`PH9C-WATCH ${receipt}`);
   if (savedDocumentDescriptor) Object.defineProperty(global, 'document', savedDocumentDescriptor);
   else delete global.document;
 
@@ -6376,44 +7761,75 @@ async function main() {
   // PH-1 source scans.
   const methodSource = (signature) => widgetSource.match(new RegExp(`\\n  ${signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{[\\s\\S]*?\\n  \\}\\n`))?.[0] || '';
   const resolverSource = methodSource('_resolveWidth(dv, overrides)');
-  const disarmSource = methodSource('_disarmColdLoad(container)');
-  const oneShotSource = methodSource('_installColdLoadObserver(dv, overrides, root, resolved)');
+  const scrollerSource = methodSource('_noteScroller(container)');
+  const disconnectSource = methodSource('_disconnectWidthWatch(container)');
+  const watchSource = methodSource('_watchPaneWidth(dv, overrides, root, resolved)');
   const renderEntrySource = methodSource('async render(dv, overrides)');
   const renderSource = methodSource('async _renderAtWidth(dv, overrides, decided)');
-  assert(resolverSource && disarmSource && oneShotSource && renderEntrySource && renderSource,
-    'PH1-SOURCE-SCAN: _resolveWidth, _disarmColdLoad, the one-shot installer, render, and _renderAtWidth are named methods');
-  assert(resolverSource.includes('clientWidth') && !widgetSource.replace(resolverSource, '').includes('clientWidth'),
-    'PH1-SOURCE-SCAN: clientWidth appears only inside _resolveWidth');
-  assert(oneShotSource.includes('globalThis.ResizeObserver') && !widgetSource.replace(oneShotSource, '').includes('ResizeObserver')
-    && oneShotSource.includes('globalThis.MutationObserver') && !widgetSource.replace(oneShotSource, '').includes('MutationObserver'),
-  'PH1-SOURCE-SCAN: ResizeObserver and MutationObserver appear only inside the one-shot installer');
+  assert(resolverSource && scrollerSource && disconnectSource && watchSource && renderEntrySource && renderSource,
+    'PH1-SOURCE-SCAN: _resolveWidth, _noteScroller, _disconnectWidthWatch, the watch installer, render, and _renderAtWidth are named methods');
+  // PH9B-RESOLVER-SENTINEL (PH9-RESOLVER-SENTINEL-OFFSETWIDTH): the measured
+  // width is the scroller's content width read from its computed style (its
+  // client width less padding under a stable gutter, otherwise its offset
+  // width less borders and padding), with the container's clientWidth as the
+  // fallback, read inside one try.
+  assert(resolverSource.includes('const scroller = this._noteScroller(container);')
+    && resolverSource.includes('? globalThis.getComputedStyle(scroller)')
+    && resolverSource.includes('measured = Number(container?.clientWidth);')
+    && resolverSource.includes('const padding = px("paddingLeft") + px("paddingRight");')
+    && resolverSource.includes('measured = String(style.scrollbarGutter || "").includes("stable")\n            ? Number(scroller.clientWidth) - padding\n            : Number(scroller.offsetWidth) - px("borderLeftWidth") - px("borderRightWidth") - padding;')
+    && scrollerSource.includes('container.closest(".markdown-preview-view, .cm-scroller")')
+    && !widgetSource.replace(resolverSource, '').includes('clientWidth') && !widgetSource.replace(resolverSource, '').includes('offsetWidth')
+    && !widgetSource.replace(resolverSource, '').includes('getComputedStyle')
+    && (widgetSource.match(/\.closest\(/g) || []).length === 1 && scrollerSource.includes('.closest('),
+  'PH9B-RESOLVER-SENTINEL (PH9-RESOLVER-SENTINEL-OFFSETWIDTH): _resolveWidth measures the content width of dv.container.closest(".markdown-preview-view, .cm-scroller") from its computed style and falls back to dv.container.clientWidth; offsetWidth, clientWidth, and getComputedStyle appear only inside _resolveWidth and .closest( calls appear only inside _noteScroller');
+  // PH9D-BOUNDED-WIDTH-CLAIMS: none of the width-comparison phrasings
+  // refuted at bbecfb85 appears in the helper or this harness, including
+  // across wrapped comment lines.
+  {
+    const refuted = /at\s+most\s+the\s+scrollbar|exceeds?\s+the\s+(?:mount\s+)?container|border\s+box\s+exceeds|within\s+the\s+scrollbar|over\s+by\s+no\s+more\s+than/i;
+    const unwrap = (text) => text.replace(/\n\s*(?:\/\/|\*)?\s*/g, ' ');
+    for (const [name, text] of [['graph-view.js', widgetSource], ['run-graph-view.js', fs.readFileSync(__filename, 'utf8')]]) {
+      assert(!refuted.test(unwrap(text)),
+        `PH9D-BOUNDED-WIDTH-CLAIMS: ${name} carries none of the width-comparison phrasings refuted at bbecfb85`);
+    }
+  }
+  assert(watchSource.includes('globalThis.ResizeObserver') && !widgetSource.replace(watchSource, '').includes('ResizeObserver')
+    && watchSource.includes('globalThis.MutationObserver') && !widgetSource.replace(watchSource, '').includes('MutationObserver'),
+  'PH1-SOURCE-SCAN: ResizeObserver and MutationObserver appear only inside the watch installer');
   assert(!/matchMedia|\bdv\.current\b|isConnected/.test(widgetSource),
     'PH1-SOURCE-SCAN: no matchMedia, no dv.current, and no isConnected anywhere in graph-view.js');
-  assert(disarmSource.includes('this._coldLoads?.get(container)?.disarm();')
-    && oneShotSource.includes('const unmeasured = resolved?.source === "default" || resolved?.source === "mobile-class";')
-    && oneShotSource.includes('const removed = () => root.parentNode !== container;')
-    && oneShotSource.includes('if (removed()) return null;')
-    && oneShotSource.includes('owners.set(container, armed);')
-    && oneShotSource.includes('if (owners.get(container) === armed) owners.delete(container);')
-    && oneShotSource.includes('childList.observe(container, { childList: true });')
-    && oneShotSource.includes('const fresh = this._resolveWidth(dv, overrides);\n          if (fresh.source !== "measured") return;\n          armed.disarm();\n          this._renderAtWidth(dv, overrides, fresh);')
-    && (oneShotSource.match(/\.disconnect\(\)/g) || []).length === 2
-    && (oneShotSource.match(/this\._renderAtWidth\(/g) || []).length === 1
-    && (oneShotSource.match(/new Resize\(/g) || []).length === 1
-    && (oneShotSource.match(/new Mutation\(/g) || []).length === 1
-    && !/contentRect|entries|this\.render\(/.test(oneShotSource)
-    && (oneShotSource.match(/this\._[A-Za-z]+\s*=[^=]/g) || []).join() === 'this._coldLoads = '
-    && (widgetSource.match(/this\._coldLoads\s*=[^=]/g) || []).length === 1,
-  'PH1C-ONE-SHOT-NO-LEAK: the one-shot is owned per container through one _coldLoads map, removal is root.parentNode !== container seen by a childList watch, one disarm routine disconnects both observers, and the re-render is handed the measurement it resolved');
+  assert(disconnectSource.includes('this._widthWatches?.get(container)?.disconnect();')
+    && watchSource.includes('resolved.source === "override"')
+    && watchSource.includes('const removed = () => root.parentNode !== container;')
+    && watchSource.includes('if (removed()) return null;')
+    && watchSource.indexOf('if (removed()) return null;') < watchSource.indexOf('this._disconnectWidthWatch(container);')
+    && watchSource.includes('const target = this._noteScroller(container) || container;')
+    && watchSource.includes('owners.set(container, watch);')
+    && watchSource.includes('if (owners.get(container) === watch) owners.delete(container);')
+    && watchSource.includes('childList.observe(container, { childList: true });')
+    && watchSource.includes('resize.observe(target);')
+    && watchSource.includes('const fresh = this._resolveWidth(dv, overrides);')
+    && watchSource.includes('watch.disconnect();\n          this._renderAtWidth(dv, overrides, fresh);')
+    && (watchSource.match(/\.disconnect\(\)/g) || []).length === 7
+    && watchSource.includes('watch?.disconnect();\n      return null;')
+    && (watchSource.match(/this\._renderAtWidth\(/g) || []).length === 1
+    && (watchSource.match(/new Resize\(/g) || []).length === 1
+    && (watchSource.match(/new Mutation\(/g) || []).length === 1
+    && !/contentRect|entries|this\.render\(/.test(watchSource)
+    && (watchSource.match(/this\._[A-Za-z]+\s*=[^=]/g) || []).join() === 'this._widthWatches = ,this._paneWatches = '
+    && (widgetSource.match(/this\._widthWatches\s*=[^=]/g) || []).length === 1,
+  'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-NO-LEAK): the watch is owned per container through one _widthWatches map, observes the note scroll container or the mount container, never reads the notification box, removal is root.parentNode !== container seen by a childList watch, and the re-render is handed the measurement the watch resolved');
   assert(renderEntrySource.includes('return this._renderAtWidth(dv, overrides, null);')
-    && renderSource.indexOf('this._disarmColdLoad(dv && typeof dv === "object" ? dv.container : null);') >= 0
-    && renderSource.indexOf('this._disarmColdLoad(') < renderSource.indexOf('const RS = globalThis.customJS?.RenderSafe;')
+    && renderSource.indexOf('this._disconnectWidthWatch(dv && typeof dv === "object" ? dv.container : null);') >= 0
+    && renderSource.indexOf('this._disconnectWidthWatch(') < renderSource.indexOf('const RS = globalThis.customJS?.RenderSafe;')
     && renderSource.includes('const resolved = decided && decided.source === "measured" ? decided : this._resolveWidth(dv, overrides);')
     && renderSource.indexOf('const resolved = ') < renderSource.indexOf('previous?.remove?.();')
     && (renderSource.match(/this\._resolveWidth\(/g) || []).length === 1
-    && (renderSource.match(/this\._installColdLoadObserver\(dv, overrides, root, resolved\);/g) || []).length === 1
-    && (widgetSource.match(/this\._installColdLoadObserver\(/g) || []).length === 1,
-  'PH1C-ONE-SHOT-COLD-LOAD: every render disarms its container before reading RenderSafe, resolves the width at most once (not when handed a measurement) before removing the previous root, and is the only caller of the one-shot installer');
+    && (renderSource.match(/this\._watchPaneWidth\(dv, overrides, root, resolved\);/g) || []).length === 1
+    && (widgetSource.match(/this\._watchPaneWidth\(/g) || []).length === 1
+    && !/_disarmColdLoad|_installColdLoadObserver|_coldLoads/.test(widgetSource),
+  'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): every render disconnects its container\'s watch before reading RenderSafe, resolves the width at most once (not when handed a measurement) before removing the previous root, and is the only caller of the watch installer; the PH-1c one-shot is gone');
   assert(!/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(widgetSource),
     'PH1-SOURCE-SCAN: no hex, rgb, or hsl colour literal anywhere in graph-view.js');
   assert.deepStrictEqual([...new Set(widgetSource.match(/var\(--[a-z0-9-]+\)/g))].sort(), PH1_ALLOWED_TOKENS,

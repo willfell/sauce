@@ -40,24 +40,38 @@
  * strip row each under the graph; empty warnings render nothing.
  *
  * Phone-first (PH-1): every render resolves a container width once —
- * explicit containerWidth mount arg, then the measured mount container, then
- * the Obsidian is-mobile body class when the measurement is zero or
- * unreadable, then wide — and at epic scope, under 600px, draws a second
- * presentation of the SAME frozen layout result: a compact map of one 26px
- * pill per slice or cross-epic stub in per-rank columns sized by a pure
- * formula, with the same edge layer, filter toolbar, legend, and selection
- * controller. Both presentations open the same inline detail card under the
- * map / canvas.
- * There is no continuous width watcher: a render whose width was measured or
- * pinned watches nothing afterwards, and only a cold-load render whose width
- * was unmeasured arms a one-shot, owned per mount container, that, on each
- * resize notification of its root, re-resolves the same measurement and, at
- * the first notification where it is measured, re-renders exactly once with
- * it; it disarms when its root leaves the container or the container renders
- * again. Adapting to later pane resizes is PH-9c's work (live pane-resize
- * adaptation). At rest the wide presentation's DOM is byte-identical to the
- * pre-PH-1 renderer's; the detail card a chip tap opens (at both scopes) now
- * labels its open button "Open slice" instead of "Open card" and adds a
+ * explicit containerWidth mount arg, then the measured note scroll container,
+ * then the Obsidian is-mobile body class when the measurement is not a
+ * finite positive number, then wide — and at epic scope, under 600px, draws
+ * a compact map of the SAME frozen layout result: one 26px pill per slice or
+ * cross-epic stub in per-rank columns sized by a pure formula, with the same
+ * edge layer, filter toolbar, legend, and selection controller. Both maps
+ * open the same inline detail card under the map / canvas. A presentation is
+ * the wide map, or the compact map at the width it was measured at (or drawn
+ * from an unmeasured guess).
+ * Live pane resize (PH-9c): the measured width is the content width of the
+ * note's scroll container (the closest .markdown-preview-view or
+ * .cm-scroller at or around the mount container), or the mount container's
+ * client width when there is no scroll container or no computed style to
+ * read (see _resolveWidth). An epic-scope render that was not pinned by a
+ * containerWidth arg, and that finishes with its root still in the mount
+ * container, watches that scroll container (or the mount container when none
+ * is found) with one resize observer, where the resize-observer API exists
+ * and observe() succeeds, as a trigger only: each notification, unless the
+ * watch is gone, re-resolves the same measurement; one that resolves a
+ * different measured presentation (re)starts a 120ms debounce, which, unless
+ * the watch is gone, re-resolves again and re-renders if and only if the
+ * measured presentation still differs; a measured one that resolves the
+ * drawn presentation cancels anything pending. The last measurement wins. An unmeasured resolution keeps the drawn presentation
+ * and arms one re-check 250ms later; a re-check that is still unmeasured
+ * waits for the next notification. The watch disconnects when the container
+ * renders again, and at its next notification, debounce or re-check after
+ * its root has left the mount container or the container has left the
+ * scroll container it watches (where the mutation-observer API exists, root
+ * removal is also seen at the watch's next childList record; see
+ * _watchPaneWidth). At rest the wide presentation's DOM is byte-identical to
+ * the pre-PH-1 renderer's; the detail card a chip tap opens (at both scopes)
+ * now labels its open button "Open slice" instead of "Open card" and adds a
  * "Close" button.
  *
  * Fail-soft everywhere: gather/layout/render failures degrade to warning rows
@@ -1413,20 +1427,34 @@ class GraphView {
     } catch (_e) { return false; }
   }
 
+  // The note's scroll container at or around a mount container: the closest
+  // reading-view or editor scroller, or null when there is none (or the
+  // container has no closest method).
+  _noteScroller(container) {
+    const found = typeof container?.closest === "function"
+      ? container.closest(".markdown-preview-view, .cm-scroller")
+      : null;
+    return found && typeof found === "object" ? found : null;
+  }
+
   // Resolved ONCE per render, in this order: an explicit containerWidth in
-  // the mounting block's args (or a harness override); then the mount
-  // container's measured client width (the root is a full-width block child
-  // of dv.container, so this approximates the root's width: the client width
-  // is integer-rounded and includes the container's padding); then the
-  // Obsidian is-mobile body class when the measurement is zero or
-  // unreadable (a read that throws is unmeasured, never an error); then
-  // wide. Never throws; input it cannot use falls through to the is-mobile
-  // class and otherwise to wide. Only a finite positive NUMBER is an
-  // override (no coercion: true, "390", or [390] fall through to
-  // measurement). The phone default (390) and the desktop default (1024) are
-  // the design's reference widths. `source` names the step that decided:
-  // "override" and "measured" are decided widths, "mobile-class" and
-  // "default" are unmeasured guesses.
+  // the mounting block's args (or a harness override); then the measured
+  // width: the content width of the note's scroll container, or the mount
+  // container's client width when there is no scroll container around it
+  // (or no computed style to read). The content width is the scroll
+  // container's client width less its left and right padding when its
+  // computed scrollbar-gutter includes "stable", and otherwise its offset
+  // width less its left and right borders and padding (a shown scrollbar is
+  // not subtracted); then the Obsidian is-mobile body class when the
+  // measurement is not a finite positive number (a read that throws is
+  // unmeasured, never an error); then wide. Never throws; input it cannot use falls
+  // through to the is-mobile class and otherwise to wide. The 600px narrow
+  // cutoff applies to the measured width itself. Only a finite positive
+  // NUMBER is an override (no coercion: true, "390", or [390] fall through
+  // to measurement). The phone default (390) and the desktop default
+  // (1024) are the design's reference widths. `source` names the step that
+  // decided: "override" and "measured" are decided widths, "mobile-class"
+  // and "default" are unmeasured guesses.
   _resolveWidth(dv, overrides) {
     const wide = { width: 1024, narrow: false, source: "default" };
     try {
@@ -1437,7 +1465,22 @@ class GraphView {
         return { width: explicit, narrow: this._isNarrow(explicit), source: "override" };
       }
       let measured = NaN;
-      try { measured = Number(dv?.container?.clientWidth); } catch (_e) { measured = NaN; }
+      try {
+        const container = dv?.container;
+        const scroller = this._noteScroller(container);
+        const style = scroller && typeof globalThis.getComputedStyle === "function"
+          ? globalThis.getComputedStyle(scroller)
+          : null;
+        if (!style) {
+          measured = Number(container?.clientWidth);
+        } else {
+          const px = (name) => Number.parseFloat(style[name]);
+          const padding = px("paddingLeft") + px("paddingRight");
+          measured = String(style.scrollbarGutter || "").includes("stable")
+            ? Number(scroller.clientWidth) - padding
+            : Number(scroller.offsetWidth) - px("borderLeftWidth") - px("borderRightWidth") - padding;
+        }
+      } catch (_e) { measured = NaN; }
       if (Number.isFinite(measured) && measured > 0) {
         return { width: measured, narrow: this._isNarrow(measured), source: "measured" };
       }
@@ -1446,88 +1489,109 @@ class GraphView {
     } catch (_e) { return wide; }
   }
 
-  // Cold-load one-shot (PH-1c). A render whose width was decided (override
-  // or measured) arms nothing, so nothing the widget draws afterwards — a
-  // pane scrollbar that comes and goes with the graph — can ever re-render
-  // it. Only an unmeasured render (the pane had not laid out, or its width
-  // was unreadable: source "default" or "mobile-class") arms a one-shot.
-  //
-  // Ownership: at most one armed one-shot per mount container, held in a
-  // WeakMap keyed by dv.container. Every render disarms its container's
-  // one-shot first, whoever removed the previous root, so any number of
-  // Dataview re-runs leaves at most one armed.
-  _disarmColdLoad(container) {
+  // Disconnects the pane-width watch owned by a mount container, if any.
+  _disconnectWidthWatch(container) {
     try {
-      if (container && typeof container === "object") this._coldLoads?.get(container)?.disarm();
-    } catch (_e) { /* nothing armed */ }
+      if (container && typeof container === "object") this._widthWatches?.get(container)?.disconnect();
+    } catch (_e) { /* nothing to disconnect */ }
   }
 
-  // An armed one-shot is two observers where the mutation-observer API
-  // exists (a resize observer on the root, a childList observer on the
-  // container; only the resize one without it) and one disarm routine that
-  // disconnects both and drops the ownership entry; every exit calls it.
-  // Removal is a signal, not a resize: the childList watch disarms the
-  // one-shot when a record is delivered and its root is no longer a child of
-  // that container, even when the root had a zero box and so never changes
-  // size.
-  // "Removed" is exactly root.parentNode !== container: a container that is
-  // not yet attached, or whose whole view was torn down with the root still
-  // inside, keeps the one-shot armed, so a later attach that lays out
-  // re-renders once. That pair needs no timer, and the ownership entry is
-  // weak (a WeakMap keyed by the container), so nothing the widget holds
-  // keeps a torn-down container alive.
-  // A resize notification is a trigger only: it re-resolves the SAME
-  // measurement render() uses and never reads the notification's box. While
-  // that is still unmeasured it stays armed; the first time it resolves as
-  // measured it disarms and re-renders exactly once WITH that resolution
-  // (no second read), and that render, being measured, arms nothing. Any
-  // fault is swallowed and it stays armed. Adapting to later pane resizes is
-  // PH-9c's work (live pane-resize adaptation), over a measurement the widget
-  // cannot influence.
-  _installColdLoadObserver(dv, overrides, root, resolved) {
-    let armed = null;
+  // Live pane resize (PH-9c). An epic-scope render whose width was not an
+  // override, and that finishes with its root still a child of the mount
+  // container, leaves one watch per mount container where the
+  // resize-observer API exists and observe() succeeds: a resize observer on the note's scroll
+  // container (the mount container when there is none) and, where the
+  // mutation-observer API exists, a childList watch on the mount container.
+  // A notification is a trigger only; it never reads the observer's box.
+  // Each step that finds the watch not gone re-resolves the same
+  // measurement render() uses and compares the resolved presentation with
+  // the one the render resolved: wide and compact differ, and two compact
+  // resolutions differ unless both are measured at the same width:
+  //   a notification: unmeasured arms the 250ms re-check; measured and
+  //     different (re)starts the 120ms debounce; measured and the same
+  //     cancels whatever was pending;
+  //   the debounce: unmeasured arms the re-check; measured and different
+  //     disconnects and re-renders once, handing over that resolution;
+  //   the re-check: measured and different re-renders the same way;
+  //     unmeasured waits for the next notification.
+  // One timer at most is pending per watch. The watch is gone, and
+  // disconnects on its next step, once its root is no longer a child of the
+  // mount container or the mount container is no longer inside the scroll
+  // container it watches; a new watch on the same scroll container also
+  // disconnects any watch there that is gone. A render of the container
+  // disconnects its watch before anything else. Any fault is swallowed.
+  _watchPaneWidth(dv, overrides, root, resolved) {
+    let watch = null;
     try {
       const container = dv?.container;
-      const unmeasured = resolved?.source === "default" || resolved?.source === "mobile-class";
       const Resize = globalThis.ResizeObserver;
-      if (!root || !container || typeof container !== "object" || !unmeasured || typeof Resize !== "function") return null;
+      if (!root || !container || typeof container !== "object" || !resolved
+        || resolved.source === "override" || typeof Resize !== "function") return null;
       const removed = () => root.parentNode !== container;
       if (removed()) return null;
-      this._disarmColdLoad(container);
-      if (!this._coldLoads) this._coldLoads = new WeakMap();
-      const owners = this._coldLoads;
+      const target = this._noteScroller(container) || container;
+      this._disconnectWidthWatch(container);
+      if (!this._widthWatches) this._widthWatches = new WeakMap();
+      if (!this._paneWatches) this._paneWatches = new WeakMap();
+      const owners = this._widthWatches;
+      const peers = this._paneWatches.get(target) || new Set();
+      this._paneWatches.set(target, peers);
+      const drawnNarrow = resolved.narrow === true;
+      const drawnWidth = resolved.source === "measured" ? resolved.width : NaN;
       let resize = null;
       let childList = null;
-      armed = {
-        disarm: () => {
+      let timer = null;
+      const stopTimer = () => {
+        if (timer === null) return;
+        const pending = timer;
+        timer = null;
+        globalThis.clearTimeout(pending);
+      };
+      watch = {
+        gone: () => removed() || (target !== container && this._noteScroller(container) !== target),
+        disconnect: () => {
+          try { stopTimer(); } catch (_e) { /* already cleared */ }
           try { resize?.disconnect(); } catch (_e) { /* already disconnected */ }
           try { childList?.disconnect(); } catch (_e) { /* already disconnected */ }
-          if (owners.get(container) === armed) owners.delete(container);
+          peers.delete(watch);
+          if (owners.get(container) === watch) owners.delete(container);
         },
       };
-      owners.set(container, armed);
-      resize = new Resize(() => {
+      const step = (kind) => {
         try {
-          if (removed()) { armed.disarm(); return; }
+          if (watch.gone()) { watch.disconnect(); return; }
           const fresh = this._resolveWidth(dv, overrides);
-          if (fresh.source !== "measured") return;
-          armed.disarm();
+          if (fresh.source !== "measured") {
+            if (kind !== "recheck") arm(250, "recheck");
+            return;
+          }
+          if (fresh.narrow === drawnNarrow && (!fresh.narrow || fresh.width === drawnWidth)) { stopTimer(); return; }
+          if (kind === "notify") { arm(120, "debounce"); return; }
+          watch.disconnect();
           this._renderAtWidth(dv, overrides, fresh);
-        } catch (_e) { /* swallowed: the one-shot stays armed */ }
-      });
+        } catch (_e) { /* swallowed: the watch keeps observing */ }
+      };
+      const arm = (ms, kind) => {
+        stopTimer();
+        timer = globalThis.setTimeout(() => { timer = null; step(kind); }, ms);
+      };
+      for (const peer of [...peers]) if (peer.gone()) peer.disconnect();
+      owners.set(container, watch);
+      peers.add(watch);
+      resize = new Resize(() => step("notify"));
       const Mutation = globalThis.MutationObserver;
       if (typeof Mutation === "function") {
         childList = new Mutation(() => {
           try {
-            if (removed()) armed.disarm();
-          } catch (_e) { /* swallowed: the one-shot stays armed */ }
+            if (removed()) watch.disconnect();
+          } catch (_e) { /* swallowed: the watch keeps observing */ }
         });
         childList.observe(container, { childList: true });
       }
-      resize.observe(root);
-      return armed;
+      resize.observe(target);
+      return watch;
     } catch (_e) {
-      armed?.disarm();
+      watch?.disconnect();
       return null;
     }
   }
@@ -1537,17 +1601,17 @@ class GraphView {
   }
 
   // The body of render(). `decided` is null for every render a caller starts;
-  // only the cold-load one-shot passes the measured resolution it just took,
+  // only the pane-width watch passes the measured resolution it just took,
   // so its re-render draws exactly that presentation without reading the
   // width a second time.
   async _renderAtWidth(dv, overrides, decided) {
     try {
-      this._disarmColdLoad(dv && typeof dv === "object" ? dv.container : null);
+      this._disconnectWidthWatch(dv && typeof dv === "object" ? dv.container : null);
       const RS = globalThis.customJS?.RenderSafe;
       const current = RS?.page ? RS.page(dv) : null;
       if (!current?.file?.path || !dv?.container?.createEl) return;
       // The width is resolved once, while the previous graph (if any) is still
-      // drawn, unless the cold-load one-shot handed over the measurement it
+      // drawn, unless the pane-width watch handed over the measurement it
       // resolved in that same layout state.
       const resolved = decided && decided.source === "measured" ? decided : this._resolveWidth(dv, overrides);
       const previous = dv.container.querySelector?.(":scope > .graph-view-root");
@@ -1617,7 +1681,7 @@ class GraphView {
         ...(Array.isArray(result.warnings) ? result.warnings : []),
         ...extraWarnings,
       ]);
-      this._installColdLoadObserver(dv, overrides, root, resolved);
+      this._watchPaneWidth(dv, overrides, root, resolved);
     } catch (_e) { /* render-safe: a partial cold-load page is a no-op */ }
   }
 }
