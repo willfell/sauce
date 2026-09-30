@@ -37,7 +37,7 @@ function boundProjectSlug(repoPath) {
   const resolver = require(path.join(__dirname, 'loop-config.js'));
   const res = resolver.resolveBinding(repoPath, { brewPrefix: () => '' });
   if (!res || !res.ok) {
-    throw new Error(`${repoPath} is not loop-bound (.loop/config.json missing or invalid) — run /loop:init first`);
+    throw new Error(`${repoPath} is not loop-bound (.loop/config.json missing or invalid) — run /sauce:init first`);
   }
   return path.basename(path.dirname(res.config.board_path_abs));
 }

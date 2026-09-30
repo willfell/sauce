@@ -110,6 +110,6 @@ Run in the egnyte-mcp repo (`~/Documents/GitHub/egnyte-mcp`). Do NOT migrate ero
 
 - `config_missing` → run `/sauce:init`. Any other refusal code from `loop-config.js` names its exact fix.
 - Coordinator missing → `brew install willfell/sauce/sauce` (or set `coordinator: {resolve: "path", path: ...}`).
-- `Cannot find module '../../../scripts/autoloop/loop-config.js'` → the plugin is loaded from the Claude plugin cache, which holds only the plugin subtree, so `${CLAUDE_PLUGIN_ROOT}/scripts/loop-config.js` cannot resolve its relative require to `scripts/autoloop/loop-config.js`. Workaround until fixed: call the brew copy at `/opt/homebrew/opt/sauce/libexec/scripts/autoloop/loop-config.js`.
+- `resolver_unavailable` refusal from `loop-config.js` → the plugin shim looks for the resolver beside the plugin (a sauce clone or the brew libexec), then at `$SAUCE_LIBEXEC`, then under `brew --prefix sauce`. The Claude plugin cache holds only the plugin subtree, so from the cache it relies on the brew install: `brew install willfell/sauce/sauce`, or set `SAUCE_LIBEXEC` to a sauce checkout. Before this fallback the same situation crashed with `Cannot find module '../../../scripts/autoloop/loop-config.js'`.
 - Codex router drift → `node <plugin_root>/scripts/gen-codex-routers.js --repo . --json` (CI gate: `--check`).
 - Harnesses: `npm run test:loop-config`, `test:loop-binding`, `test:autoloop-leases` (all in `release:preflight`).
