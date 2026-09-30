@@ -8,10 +8,12 @@
  * coordinator/batch-runner). Every plugin skill starts here; a repo without a
  * valid binding is refused loudly, never guessed.
  *
- * Self-contained on purpose: after marketplace install this file lives in the
- * plugin cache and cannot require() anything from the sauce repo. The receipt
- * envelope mirrors scripts/autoloop/cli-kit.js (action/ok/no_op + refusal
- * codes) without importing it.
+ * Self-contained on purpose: it requires only Node built-ins, so the plugin
+ * shim (plugins/sauce/scripts/loop-config.js) can load it from the sauce tree
+ * beside the plugin, from $SAUCE_LIBEXEC, or from `brew --prefix sauce`
+ * when the plugin runs from the Claude plugin cache. The receipt envelope
+ * mirrors scripts/autoloop/cli-kit.js (action/ok/no_op + refusal codes)
+ * without importing it.
  *
  * CLI:
  *   loop-config.js resolve --json [--repo <root>] [--home <home>]
@@ -65,7 +67,7 @@ function parseRepoSlug(remoteUrl) {
 function readRawConfig(repoRoot) {
   const configPath = path.join(repoRoot, CONFIG_RELPATH);
   if (!fs.existsSync(configPath)) {
-    return { refusals: [refusal('config_missing', `no ${CONFIG_RELPATH} at ${repoRoot} — run /loop:init to bind this repo`)] };
+    return { refusals: [refusal('config_missing', `no ${CONFIG_RELPATH} at ${repoRoot} — run /sauce:init to bind this repo`)] };
   }
   let raw;
   try {

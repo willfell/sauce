@@ -131,5 +131,75 @@ const EXPECTED_SKILLS = ['block-review', 'execute', 'init', 'intake', 'loop', 'p
     'propose body must note the sketch renders as a live GraphView graph');
 }
 
+// LP-CACHE: the Claude plugin cache holds only the plugin subtree, so the
+// shim's in-tree require has nothing above it. Every skill's first step runs
+// this shim; it must still reach a resolver, and fail with a receipt, not a
+// stack trace, when none exists.
+{
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-plugin-cache-'));
+  const cachePlugin = path.join(tmp, 'cache', 'sauce', 'sauce', '0123456789ab');
+  fs.cpSync(PLUGIN, cachePlugin, { recursive: true });
+  const shim = path.join(cachePlugin, 'scripts', 'loop-config.js');
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-plugin-cache-repo-'));
+  fs.mkdirSync(path.join(repo, '.loop'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.loop', 'config.json'), JSON.stringify({
+    schema_version: '1.0.0',
+    project: { slug: 'demo', name: 'Demo' },
+    vault: { root: '~/vaults/demo-vault' },
+    board: {
+      project_root: 'spice/projects/demo',
+      board_path: 'spice/projects/demo/demo-board.md',
+      cards_root: 'spice/projects/demo/tasks',
+    },
+    coordinator: { resolve: 'path', path: '~/tools/coordinator.js' },
+  }, null, 2));
+
+  const noBrew = path.join(tmp, 'no-such-brew');
+  const run = (extraEnv) => {
+    const env = { ...process.env, SAUCE_BREW: noBrew, ...extraEnv };
+    if (!extraEnv || !('SAUCE_LIBEXEC' in extraEnv)) delete env.SAUCE_LIBEXEC;
+    const r = spawnSync(process.execPath, [shim, 'resolve', '--json', '--repo', repo, '--home', '/home/fixture'], {
+      cwd: tmp, env, encoding: 'utf8',
+    });
+    let receipt = null;
+    try { receipt = JSON.parse(r.stdout); } catch (_) { receipt = null; }
+    return { status: r.status, receipt, stderr: r.stderr };
+  };
+
+  const none = run({});
+  ok('LP-CACHE no resolver: exits 1 with a JSON receipt, not a stack trace',
+    none.status === 1 && none.receipt && none.receipt.ok === false && !/Cannot find module/.test(none.stderr),
+    `status=${none.status} stderr=${none.stderr.slice(0, 160)}`);
+  ok('LP-CACHE no resolver: refusal code resolver_unavailable',
+    !!(none.receipt && none.receipt.refusals && none.receipt.refusals[0].code === 'resolver_unavailable'));
+
+  const viaEnv = run({ SAUCE_LIBEXEC: REPO });
+  ok('LP-CACHE SAUCE_LIBEXEC override resolves the binding from the cache copy',
+    viaEnv.status === 0 && viaEnv.receipt && viaEnv.receipt.ok === true
+      && viaEnv.receipt.config.board_path_abs === '/home/fixture/vaults/demo-vault/spice/projects/demo/demo-board.md',
+    `status=${viaEnv.status} stderr=${viaEnv.stderr.slice(0, 160)}`);
+
+  const prefix = path.join(tmp, 'brew-prefix');
+  fs.mkdirSync(prefix);
+  fs.symlinkSync(REPO, path.join(prefix, 'libexec'));
+  const fakeBrew = path.join(tmp, 'fake-brew');
+  fs.writeFileSync(fakeBrew, `#!/bin/sh\n[ "$1" = "--prefix" ] && [ "$2" = "sauce" ] && echo "${prefix}" && exit 0\nexit 1\n`);
+  fs.chmodSync(fakeBrew, 0o755);
+  const viaBrew = run({ SAUCE_BREW: fakeBrew });
+  ok('LP-CACHE brew --prefix sauce fallback resolves the binding from the cache copy',
+    viaBrew.status === 0 && viaBrew.receipt && viaBrew.receipt.ok === true,
+    `status=${viaBrew.status} stderr=${viaBrew.stderr.slice(0, 160)}`);
+
+  const inTree = require(path.join(PLUGIN, 'scripts', 'loop-config.js'));
+  ok('LP-CACHE in-tree shim still forwards the resolver exports',
+    typeof inTree.resolveBinding === 'function' && typeof inTree.main === 'function');
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error('FAILURES:', failures.join(', ')); process.exit(1); }
