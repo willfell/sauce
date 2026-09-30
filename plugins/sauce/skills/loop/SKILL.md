@@ -5,7 +5,7 @@ description: One bounded autonomous turn of the delivery loop against the bound 
 
 # sauce:loop
 
-Drive whatever board this repo is bound to. Let deterministic scripts own operational state; spend model context only on implementation, repair, and review. This is the run-loose engine as a skill: same laws, config-driven paths.
+Drive whatever board this repo is bound to. Let deterministic scripts own operational state; spend model context only on implementation, repair, and review. This is the delivery loop as a skill: same laws, config-driven paths.
 
 The universal start prompt is IDENTICAL for every bound repo:
 
@@ -45,16 +45,16 @@ Deploy posture is the binding's, never the prompt's: `policy.deploy_vaults: []` 
 
 ## Execute (the slice path)
 
-Claim → isolated worktree → implement within `touch_zones` (regression test that fails without the change; conventional `fix:`/`feat:` commit; never touch versions/tags/release PRs/tap) → `node <gate> verify-adequacy --base origin/main --json` → three read-only reviews in separate contexts (correctness, regression-risk, test-adequacy), each recorded via `record-review --lease-token <token>` with exact heads, sequential, stop-at-first-refutation → `verify-gates --lease-token <token>` → push + PR + `record-pr --lease-token <token>` → `advance --lease-token <token> --lease-seconds 600 --jsonl` through CI/merge/release/deploy/reconcile per the binding's `execution_mode` and deploy list. On `complete`, reconcile and continue to the next eligible slice.
+Claim → isolated worktree → implement within `touch_zones` (regression test that fails without the change; conventional `fix:`/`feat:` commit; never touch versions/tags/release PRs/tap) → `node <gate> verify-adequacy --base origin/main --cwd <worktree> --json` → three read-only reviews in separate contexts (correctness, regression-risk, test-adequacy), each recorded via `record-review --lease-token <token>` with exact heads, sequential, stop-at-first-refutation → `verify-gates --lease-token <token>` → push + PR + `record-pr --lease-token <token>` → `advance --lease-token <token> --lease-seconds 600` through CI/merge/release/deploy/reconcile per the binding's `execution_mode` and deploy list. On `complete`, reconcile and continue to the next eligible slice.
 
 Refutation → ONE same-card repair, full quorum rerun. Second refutation → **before minting, probe the lineage**: `node <coordinator> supersession-depth --card "<card>" --json`; if `at_limit`, this slice has been superseded to the ceiling without converging — do NOT supersede again, escalate to the Director to decompose it or make an explicit scope call. Otherwise supersede at mint via `/sauce:intake` (carried findings + binding fixtures) and execute the returned discard through the coordinator. A discard that returns `awaiting_user_decision` with `supersession_depth_exceeded` is a hard stop, not a retry — surface it and move on. Coordinator return values (`parked`, `fix-ci`, `verify-gates`, `refresh-feature`, `waiting`, `deploy`, `complete`, `completion-projection-failed`, `blocked-external`, `needs-inspection`) are handled exactly as the coordinator prescribes — its receipt, not intuition, is authoritative.
 
 ## Engine mode (opt-in)
 
-The same slice path exists as a shipped Sauce graph, `platform/engine/graphs/delivery-slice.md` beside the installed coordinator (`<coordinator>/../../../platform/engine/graphs/delivery-slice.md`). Every coordinator call in it is a `shell` node, the lenses are `agent` nodes, the one-repair-then-supersede rule is edges with `max: 1`, and `advance`'s receipt actions are named edges. When the user says "run it through the engine", run:
+The same slice path exists as a shipped Sauce graph, `platform/engine/graphs/delivery-slice.md` beside the installed coordinator (`$(dirname <coordinator>)/../../platform/engine/graphs/delivery-slice.md`). Every coordinator call in it is a `shell` node, the lenses are `agent` nodes, the one-repair-then-supersede rule is edges with `max: 1`, and `advance`'s receipt actions are named edges. When the user says "run it through the engine", run:
 
 ```text
-sauce run "<plugin_root>/../platform/engine/graphs/delivery-slice.md" --var coordinator="<coordinator>" --var gate="<gate>" --follow --json
+sauce run "$(dirname "<coordinator>")/../../platform/engine/graphs/delivery-slice.md" --var coordinator="<coordinator>" --var gate="<gate>" --follow --json
 ```
 
 from the bound repo, with `config.env` exported. Relay the receipt exactly as the prose path would: `done` is a completed slice, a run parked on `supersede` is the second refutation waiting for the Director, and any named end (`no-work`, `at-capacity`, `all-work-leased`, `blocked`) is reported and the turn stops. The ledger lives in the bound vault at `ranch/engine/runs/`.

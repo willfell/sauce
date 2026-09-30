@@ -118,8 +118,8 @@ includes it in `status.projection_problems`, and returns
 Repair one card or all tracked cards with:
 
 ```bash
-node scripts/autoloop/codex-coordinator.js reconcile --card "<card>" --json
-node scripts/autoloop/codex-coordinator.js reconcile --json
+node <coordinator> reconcile --card "<card>" --json
+node <coordinator> reconcile --json
 ```
 
 The command projects `implementing` → `In Progress`/`in_progress`, `parked` →
