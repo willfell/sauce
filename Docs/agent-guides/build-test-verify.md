@@ -13,9 +13,9 @@ npm run release:preflight
 
 Runs `scripts/check-version-sync.js` first (gates workshop_version vs `platform/manifest.json` vs `package.json`), then every harness in `platform/test/run-*.js`. Whole-suite GREEN is the bar — any harness failure on a fresh checkout means something regressed.
 
-Current count: **32 load-bearing harnesses** (whole-suite GREEN preserved v0.21.0 → current). See [cycle-status.md](cycle-status.md) for the exact catalogue and per-cycle sub-assert deltas.
+The harness set is manifest-driven: **183 steps** in `platform/test/preflight-manifest.json` (whole-suite GREEN preserved v0.21.0 → current). See [cycle-status.md](cycle-status.md) for the exact catalogue and per-cycle sub-assert deltas.
 
-**Per-cycle behavioral harness pattern.** Where `run-helper-cases.js` asserts source-text contracts via regex (cheap, fast, source-stable), per-cycle behavioral harnesses LOAD each helper into a sandboxed scope, INSTANTIATE it, and exercise its methods against minimal Dataview / DOM / Obsidian app stubs. Use this when the cycle ships a new shared primitive (e.g. `SectionLabel` v0.109.0) or non-trivial render dispatch (e.g. `Breadcrumb` type branches v0.109.0) where a regression would manifest as wrong DOM rather than wrong source text. Reference impl: [`platform/test/run-v0109-projects-overhaul.js`](../../platform/test/run-v0109-projects-overhaul.js) covers SectionLabel render, Breadcrumb type branches + path fallback, ProjectMeetingsPanel._enrichMeeting parse correctness, ProjectDocsIndex section sort algorithm, applyDocNoteBreadcrumbMarkerCleanup edge cases, and Template, Project.md structural integrity. Wired into `release:preflight` after `run-smart-connections-bridge`; runs on every PR + push to `main` via `ci.yml` and on every annotated tag via `release.yml`.
+**Per-cycle behavioral harness pattern.** Where `run-helper-cases.js` asserts source-text contracts via regex (cheap, fast, source-stable), per-cycle behavioral harnesses LOAD each helper into a sandboxed scope, INSTANTIATE it, and exercise its methods against minimal Dataview / DOM / Obsidian app stubs. Use this when the cycle ships a new shared primitive (e.g. `SectionLabel` v0.109.0) or non-trivial render dispatch (e.g. `Breadcrumb` type branches v0.109.0) where a regression would manifest as wrong DOM rather than wrong source text. Reference impl: [`platform/test/run-v0109-projects-overhaul.js`](../../platform/test/run-v0109-projects-overhaul.js) covers SectionLabel render, Breadcrumb type branches + path fallback, ProjectMeetingsPanel._enrichMeeting parse correctness, ProjectDocsIndex section sort algorithm, applyDocNoteBreadcrumbMarkerCleanup edge cases, and Template, Project.md structural integrity. Wired into `release:preflight` after `run-smart-connections-bridge`; runs on every PR + push to `main` via `ci.yml` and inside the release pipeline via `release.yml`.
 
 Individual run:
 
@@ -30,11 +30,11 @@ node platform/test/run-renderer.js
 
 ## Self-install (workshop dogfood)
 
-The workshop is its own first consumer. Self-install runs against the workshop directory, using its own `Docs/Meta/platform-config.json` / `platform-subscription.json`. **Before promoting any mechanism / blueprint version to consumers, the workshop's own self-install must succeed.** If workshop self-test fails, do NOT push the update.
+The workshop is its own first consumer. Self-install runs against the workshop directory, using its own `ranch/platform-config.json` / `platform-subscription.json`. **Before promoting any mechanism / blueprint version to consumers, the workshop's own self-install must succeed.** If workshop self-test fails, do NOT push the update.
 
 ```bash
 node platform/install.js --vault . --auto-approve   # self-install at workshop root
-sauce install                 # equivalent via CLI (after brew install)
+sauce update                  # equivalent via CLI (after brew install)
 ```
 
 The platform non-negotiable: workshop dogfoods every release **and every push** (~4 seconds, ~82 history entries; catches manifest entry order, materialization paths, and path-resolution drift that preflight misses).
@@ -69,9 +69,9 @@ gate loudly.
 ## CLI
 
 ```bash
-sauce install        # install (or re-install) all subscribed mechanisms + blueprints
+sauce update         # re-run the installer for all subscribed mechanisms + blueprints
 sauce audit          # read-only audit (claude_surface alignment, entity-create wiring, drift detection)
-sauce upgrade        # interactive upgrade of a single blueprint/mechanism
+sauce update --bump-pins   # move the vault's pins to the brew-installed catalogue, then re-run the installer
 sauce bootstrap      # one-shot vault scaffold for a fresh consumer
 sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (READ-ONLY against source per landmine #20)
 ```
@@ -132,7 +132,7 @@ Direct-push to `origin/main` remains possible (admin override) but the preferred
 
 1. Branch off `origin/main`: `git switch -c cycle/v0.X.Y-<topic>` (or use a worktree under `.worktrees/`).
 2. Cycle stages commit normally; push to the branch instead of main: `git push -u origin cycle/v0.X.Y-<topic>`.
-3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on both self-hosted pools (`preflight (linux)` + `preflight (macos)`). The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
+3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on both self-hosted pools (`preflight (linux)` + `preflight (macos)`). The harness `platform/test/run-seed-migrations.js` runs as part of that chain.
 4. CI red → merge blocked (once branch protection is on; see below).
 5. Merge to main via the PR.
 6. On merge to `main`, the **release pipeline takes over automatically** — it bumps every version record, opens + auto-merges the release PR, tags `v<X.Y.Z>`, and ships to brew (§ Release workflow). You do **not** bump / tag by hand. The seed vault is **not** auto-rebaselined — that's a manual, reviewed action (§ Seed-vault rebaseline).
@@ -253,7 +253,7 @@ A **queued job that never starts** is the symptom to know: it looks identical wh
 
 ## Cycle-close artifacts
 
-Every cycle close MUST produce (canonical list from `Docs/prompts/SESSION-START.md`):
+This list applies to large hand-run cycles only; routine work ships through the delivery loop and the automatic release pipeline (§ Release workflow) and does not produce these artifacts. A large hand-run cycle close produces (canonical list from `Docs/prompts/SESSION-START.md`):
 
 1. `Docs/plans/<YYYY-MM-DD>-v<X.Y.Z>-<topic>-result.md` — what shipped, surfaces hit, NEW lessons, carry-forward items, commits.
 2. `Docs/plans/<YYYY-MM-DD>-v<X.Y.Z>-<topic>-plan.md` — implementation plan (created during cycle).
@@ -262,7 +262,7 @@ Every cycle close MUST produce (canonical list from `Docs/prompts/SESSION-START.
 5. **`Docs/agent-guides/cycle-status.md`** — update workshop_version + mechanism + blueprint + harness pointers.
 6. `Docs/install.md` — Upgrading-from-vX.Y.Z section.
 7. `Docs/landmines.md` — history block updates (#12 + others as relevant).
-8. `Docs/prompts/<YYYY-MM-DD>-post-v<X.Y.Z>-next-cycle-handoff.md` — NEXT cycle's onboarding doc (always written; never optional).
+8. `Docs/prompts/<YYYY-MM-DD>-post-v<X.Y.Z>-next-cycle-handoff.md` — NEXT cycle's onboarding doc (historical convention; last written 2026-08-05).
 9. ~~Annotated git tag~~ — **automated.** `tag-and-ship` creates `v<X.Y.Z>` when the auto-merged release PR lands; never tag by hand (§ Release workflow).
 
 **Important:** items 4 and 5 replace what used to be a single CLAUDE.md `## Status (live)` edit. CLAUDE.md itself does NOT need touching for status updates anymore — its markered surfaces are regenerated by `platform-claude` automatically, and outside-marker prose is hand-authored and stable across cycles.

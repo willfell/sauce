@@ -35,7 +35,7 @@ nodes:
       without the fix. Commit with a conventional message.
   - id: verify
     type: judge
-    run: npm run test:sticky-notes
+    run: node platform/test/run-sticky-notes.js
   - id: review
     type: agent
     worker: codex

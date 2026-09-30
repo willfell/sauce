@@ -4,12 +4,12 @@
     "name": "Will Fellhoelter",
     "url": "https://github.com/willfell"
   },
-  "description": "Sauce platform marketplace — the sauce plugin centralizes the meta-loop (board-governed epic/slice delivery) skill surface for every repo and agent runtime.",
+  "description": "Plugins for Sauce, the Obsidian vault platform. The sauce plugin adds the board-governed delivery loop for any repo.",
   "plugins": [
     {
       "name": "sauce",
       "source": "./plugins/sauce",
-      "description": "Board-governed delivery loop: bind a repo to a vault/board (.loop/config.json), then plan, mint, execute, and review epics/slices through the sanctioned coordinator + card-intake rails."
+      "description": "Delivery loop for Sauce, the Obsidian vault platform: bind a repo to a vault/board (.loop/config.json), then plan, mint, execute, and review epics/slices through the sanctioned coordinator + card-intake rails."
     }
   ]
 }

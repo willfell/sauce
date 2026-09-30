@@ -18,7 +18,6 @@ since: v0.28.0
 ```bash
 # 1. Ensure the target vault is sauce-managed (has ranch/platform-config.json)
 cd /path/to/<target>-sauce-vault
-source pantry/Scripts/activate.sh   # OR equivalent activation
 
 # 2. Dry-run (default) — no writes; reviews migration plan
 sauce migrate --from /path/to/source-vault

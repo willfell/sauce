@@ -43,7 +43,7 @@ Rule: every view ships as a folder containing `view.js` (e.g.
 `ranch/views/my-view/view.js`), referenced as `dv.view("ranch/views/my-view", {...})`.
 Why: Dataview's view API is folder-addressed; a bare `.js` file path won't resolve.
 
-## Platform installer (landmines #6–#30)
+## Platform installer (landmines #6–#35; #31 sits under Operational gotchas)
 
 ### 6. Templater scripts can't reach Obsidian's YAML helpers
 Trigger: needing to parse/stringify frontmatter from a Templater script.
@@ -111,6 +111,7 @@ Rule: the stub's content is frozen; canonical source is
 from canonical, don't hand-patch.
 Why: the stub is the very first thing a fresh `curl | bash` install runs,
 before any version-negotiation exists to correct it.
+(Legacy: `curl | bash` was retired at v0.36.0; brew is the install path.)
 
 ### 14. `gitState()` is best-effort — must never throw
 Trigger: touching the helper that reports git status/history for install
@@ -185,6 +186,8 @@ edit upstream so it survives future updates.
 Why: `pantry/` content is meant to be fully replaceable on every update;
 hand edits there are invisible to the update mechanism and will silently
 vanish.
+(Legacy: the in-vault `pantry/` layout was retired at v0.36.0; brew is the
+install path.)
 
 ### 19. Platform-managed directory names must be lowercase
 Trigger: naming any new directory materialized under `pantry/`, `ranch/`, or

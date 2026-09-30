@@ -18,7 +18,6 @@ since: v0.29.0
 ```bash
 # 1. From inside a sauce-managed vault (the cwd must contain ranch/platform-installed.json)
 cd /path/to/<vault>
-source pantry/Scripts/activate.sh   # OR equivalent activation
 
 # 2. Run audit; default writes markdown report to stdout
 sauce audit
@@ -46,6 +45,15 @@ echo "exit=$?"
 | `--output-file <path>` | (stdout) | Write the markdown report to a file. Prints a one-line summary to stdout (`audit: <V> violations, <U> untracked dirs — written to <path>`). Parent directory must exist. |
 | `--no-untracked-check` | off | Skip the top-level untracked-directory scan. Use when you've accepted the residue of a partial migration and only want frontmatter/tag/naming gaps. |
 | `--quiet` | off | Suppress all output. Exit code only. Intended for CI / scripting / re-audit at session close. |
+| `--strict` | off | Accepted and reserved for future opt-in stricter rules. It does not change results today. |
+| `--claude-surface` | off | Run the Claude-surface drift pass instead of the default rule-fragment pass. Walks `ranch/claude-surface-registry.json` and reports `dead_path`, `orphan`, `stale_but_valid`, and `consumer_edit_at_risk`. |
+| `--workshop <path>` | (none) | Platform root to compare against. With `--claude-surface` it enables the body-diff checks. |
+| `--entity-create` | off | Run the entity-create drift pass: `manual_implementation_at_risk` (HIGH), `dead_path` (MEDIUM), `escape_hatch_used` (INFO). |
+| `--frontmatter-alignment` | off | Run the frontmatter canonical-vocab pass: `legacy_key_used` and `non_iso_timestamp` (HIGH), `unquoted_wikilink` and `missing_canonical_key` (MEDIUM), `discriminator_tag_present` and `temporal_tag_present` (INFO). |
+| `--engine` | off | Run the engine install check: `engine_dir_missing` and `engine_surface_missing` (HIGH), `engine_surface_stale`, `engine_version_drift`, and `engine_ledger_unparsable` (MEDIUM), `engine_worktree_orphan` (LOW). |
+| `--help`, `-h` | off | Print usage and exit. |
+
+The four pass flags (`--claude-surface`, `--entity-create`, `--frontmatter-alignment`, `--engine`) each replace the default rule-fragment pass. The rest of this guide describes the default pass.
 
 ---
 
@@ -137,25 +145,34 @@ The only sanctioned write is `--output-file <path>` when the user explicitly pas
 
 ---
 
-## What v0.29.0 covers / doesn't cover
+## What the rule-fragment pass covers / doesn't cover
 
-### Covered (5 blueprints with rule_fragments)
+### Covered (15 of 16 blueprints declare `rule_fragments[]`)
 
-| Blueprint | Surface | Cycle |
-|---|---|---|
-| trips | entity (`Trip Atlas.md`) + hub (`Trips.md`) | v0.29.0 |
-| project | entity (`Project.md`) | v0.29.0 |
-| people | per-person notes (excludes hub) | v0.29.0 |
-| meetings | per-meeting note + per-period hub (frontmatter_branch) | v0.29.0 |
-| daily | daily-note shape + filename pattern | v0.29.0 |
+The first five (trips, project, people, meetings, daily) shipped in v0.29.0. The rest followed.
 
-### Not covered yet (v0.29.1 PATCH carries)
+| Blueprint | Surface |
+|---|---|
+| boards | card notes under `spice/boards/cards/` |
+| cowork | hubs, context files, prompts, scheduled-jobs config, and the briefing / review / memory notes |
+| daily | daily-note shape + filename pattern |
+| finance | budgets, paychecks, invoices, time logs, debts, savings, months, the defaults notes, and `Finance Plan.md` |
+| journal | journal entries + per-day hubs |
+| meetings | per-meeting note + per-period hub (frontmatter_branch) |
+| people | per-person notes (excludes hub) |
+| products | per-product notes (excludes hub) |
+| project | project note, docs hub, doc notes, section hubs, and project to-do (frontmatter_branch) |
+| reader | hub (`Reader.md`) + articles |
+| sticky-notes | sticky notes + per-day hubs |
+| teams | per-team notes (excludes hub) |
+| to-do | daily to-do notes + `Recurring Tasks.md` |
+| trips | trip and trip-section notes (frontmatter_branch) + hub (`Trips.md`) |
+| wiki | hub (`Wiki.md`) + sections and pages |
 
-- **`journal` blueprint** — no `rule_fragments[]` declared yet. Authoring deferred until journal-migrator lands and shape stabilizes.
-- **`to-do` blueprint** — no `rule_fragments[]` declared yet.
-- **`boards` blueprint** — no `rule_fragments[]` declared yet (boards are path-translated only in v0.28.0; rule-fragment authoring waits on full Sauce-shape board ecosystem).
-- **`finance` blueprint** — no `rule_fragments[]` declared yet (no real source content in any consumer vault).
-- **Sub-section + task-note rule fragments** for trips (Flights/Stay/Activities/etc.) and project (`<slug>/board/<task>.md`) — entity + hub coverage shipped this cycle; sub-section coverage deferred.
+### Not covered yet
+
+- **`home` blueprint.** No `rule_fragments[]` declared. It is the only blueprint without one.
+- **Task-note rule fragments** for project. The project fragments cover notes at the project root and under `docs/`, not task notes.
 - **Per-vault audit allowlist** (`ranch/audit-allowlist.json`) — v0.29.0 hard-flags every non-sanctioned top-level dir. Per-vault opt-out deferred to v0.29.1 if signal-to-noise across cleanup sessions warrants.
 
 ### Out of scope (this cycle's design)

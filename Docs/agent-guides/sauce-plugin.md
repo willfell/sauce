@@ -78,7 +78,7 @@ Two derived/repair facts:
 | `/sauce:propose` | `$sauce-propose` | design dialogue → epic proposal doc |
 | `/sauce:plan` | `$sauce-plan` | plan AS board schema; prompts id prefix + priority; mints via intake |
 | `/sauce:execute` | `$sauce-execute` | drive the minted epic in-session, sub-agent per slice, full quorum |
-| `/sauce:loop` | `$sauce-loop` | one bounded autonomous loop turn (the run-loose engine) |
+| `/sauce:loop` | `$sauce-loop` | one bounded autonomous loop turn |
 | `/sauce:intake` | `$sauce-intake` | raw requirement → board-ready work (incl. supersede-at-mint) |
 | `/sauce:block-review` | `$sauce-block-review` | detect + heal dangling depends_on rot; auto-fix provable, escalate never-minted |
 
@@ -99,7 +99,7 @@ Run in a fresh Claude session in the sauce workshop repo:
 
 ## Test script B — ero-egnyte (bind-and-observe ONLY, round one)
 
-Run in the egnyte-mcp repo (`~/projects/repos/egnyte-mcp`). Do NOT migrate ero's boards or touch its `ero_loop` — round one only proves the binding reads the ero board.
+Run in the egnyte-mcp repo (`~/Documents/GitHub/egnyte-mcp`). Do NOT migrate ero's boards or touch its `ero_loop` — round one only proves the binding reads the ero board.
 
 1. `/sauce:init` — vault root `~/obsidian/ero-sauce`, slug `ero-egnyte-mcp`, board `spice/projects/ero-egnyte-mcp/ero-egnyte-mcp-board.md`, cards `spice/projects/ero-egnyte-mcp/tasks`, prefix (e.g. `EM`), **`observe_only: true`**, deploy subscriptions empty (ero completes on merge), coordinator `brew`, routers yes.
 2. `/sauce:status` — expect a digest of the ero board with an empty/near-empty ledger (ero's Python loop owns its state; the coordinator has no claims here). That's the correct round-one answer.
@@ -110,5 +110,6 @@ Run in the egnyte-mcp repo (`~/projects/repos/egnyte-mcp`). Do NOT migrate ero's
 
 - `config_missing` → run `/sauce:init`. Any other refusal code from `loop-config.js` names its exact fix.
 - Coordinator missing → `brew install willfell/sauce/sauce` (or set `coordinator: {resolve: "path", path: ...}`).
+- `Cannot find module '../../../scripts/autoloop/loop-config.js'` → the plugin is loaded from the Claude plugin cache, which holds only the plugin subtree, so `${CLAUDE_PLUGIN_ROOT}/scripts/loop-config.js` cannot resolve its relative require to `scripts/autoloop/loop-config.js`. Workaround until fixed: call the brew copy at `/opt/homebrew/opt/sauce/libexec/scripts/autoloop/loop-config.js`.
 - Codex router drift → `node <plugin_root>/scripts/gen-codex-routers.js --repo . --json` (CI gate: `--check`).
 - Harnesses: `npm run test:loop-config`, `test:loop-binding`, `test:autoloop-leases` (all in `release:preflight`).

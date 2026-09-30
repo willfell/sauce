@@ -9,17 +9,16 @@ Two distinct postures co-exist post-v0.21.0:
 ```
 ~/Documents/GitHub/sauce/               canonical platform source-of-truth (git-tracked) + self-installs as workshop dogfood
 ~/obsidian/
-  barebones/                          primary regression target (Sauce-shape from scratch)
   accuris-sauce/                      Sauce-shape consumer (post-v0.28.0 migrated)
   ero-sauce/                          Sauce-shape consumer (post-v0.28.0 migrated)
   headspace-sauce/                    Sauce-shape consumer (post-v0.28.0 migrated)
-~/notes/                              legacy source vaults (READ-ONLY per landmine #20)
+~/notes/                              legacy source vaults on the predecessor machine (not present on this machine; READ-ONLY per landmine #20)
   accuris/                            sauce migrate input only
   ero-sync/ero/                       sauce migrate input only
   headspace/                          sauce migrate input only
 ```
 
-The bootstrap layer (`platform/bootstrap.js` since v0.21.0) clones the workshop into the consumer vault on first run, decoupling consumer location from workshop location. Consumers point at the cloned-in workshop via `workshop_relative_path` in their `platform-config.json`.
+Since v0.36.0 the platform is installed once per machine under the Homebrew prefix (`/opt/homebrew/opt/sauce/libexec`), and `sauce bootstrap --vault <path>` installs a vault from there. Nothing is cloned into the consumer vault, so consumer location is independent of workshop location. Consumers point at the brew-installed platform via `workshop_relative_path` in their `platform-config.json`. From v0.21.0 through v0.35.x the bootstrap layer (`platform/bootstrap.js`) cloned the workshop into the vault as `pantry/` instead. `sauce migrate-layout` converts a vault from that layout.
 
 **Posture B — sibling-of-workshop (legacy, predecessor machine):**
 
@@ -45,18 +44,22 @@ A mechanism lives at `platform/mechanisms/<name>/` with:
 - A `manifest.json` declaring its version, the files it ships, where they go in the consumer (with `{{template_variables}}`), and any approval-gated post-install steps.
 
 ### Blueprint
-A bundle defining a *note type*. Examples (planned, none shipped yet):
-- `project` — atlas + structure + card notes under `Boards/planning/<slug>/`. Maps to "side-quest" in headspace via variant aliasing.
-- `daily` — daily notes with the right tags, frontmatter, and nav blocks.
-- `invoice` — ERO-only.
+A bundle defining a *note type*. 16 ship today: `boards`, `cowork`, `daily`, `finance`, `home`, `journal`, `meetings`, `people`, `products`, `project`, `reader`, `sticky-notes`, `teams`, `to-do`, `trips`, `wiki`. Examples:
+- `project`: atlas + map + Kanban board + task notes under `spice/projects/<slug>/`.
+- `daily`: daily notes with the right tags, frontmatter, and nav blocks.
+- `meetings`: a per-day meetings hub plus individual meeting notes with attendees.
+
+Every blueprint works by hand in Obsidian. 11 of the 16 also declare an agent surface (`claude_surface[]`: a slash command, skills, and a `CLAUDE.md` router row). `boards`, `finance`, `people`, `to-do`, and `trips` do not yet.
 
 A blueprint lives at `platform/blueprints/<name>/` with:
-- `rule.json` — what makes a note of this type "correct".
-- `templates/` — the Templater templates that produce notes of this type.
-- `helpers/` — CustomJS classes specific to this blueprint.
-- `commands/` — slash commands related to this blueprint.
-- `variants.json` — declares aliases (e.g., headspace renames `project` → `side-quest`).
-- `manifest.json` — version + install steps.
+- `manifest.json`: version, install steps, and `rule_fragments[]` (what makes a note of this type "correct").
+- `templates/`: the Templater templates that produce notes of this type.
+- `helpers/`: CustomJS classes specific to this blueprint.
+- `content/`: hub notes and other files materialized into the module directory.
+- `commands/` and `skills/`: slash commands and skill bodies for agents (blueprints with a `claude_surface[]`).
+- `seed/`: per-blueprint seed contributions (`sauce seed`).
+
+Not every blueprint has every folder.
 
 ### Module directory under `spice/` namespace (blueprint-only invariant)
 
@@ -64,7 +67,7 @@ Every **blueprint** owns ONE directory at `spice/<module_directory>/` in the con
 
 The `spice/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers keep any other top-level structure they want (e.g., `Timestamps/`, `Resources/`) — `spice/` is the contract boundary.
 
-Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/spice/<module_directory>/`. Examples: `spice/boards/` for the boards blueprint (v0.2.0), `spice/to-do/` / `spice/projects/` / `spice/trips/` / `spice/finance/` for future blueprints.
+Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/spice/<module_directory>/`. Examples: `spice/boards/` for the boards blueprint, `spice/to-do/`, `spice/projects/` (the project blueprint), `spice/trips/`, `spice/finance/`.
 
 **Why:**
 - Install / update / uninstall a blueprint = touch one directory at `spice/<module>/`. Predictable.
@@ -96,7 +99,7 @@ The installer reads the subscription, compares against the workshop's `platform/
 ## Workshop layout
 
 ```
-workshop/poc-vault/
+sauce/
 ├── CLAUDE.md                                  Workshop identity + agent navigation.
 ├── Docs/
 │   ├── Index.md                               Documentation entry point.
@@ -107,11 +110,13 @@ workshop/poc-vault/
 │   ├── platform-config.json                   Workshop's self-install path map.
 │   ├── platform-subscription.json             Workshop's self-subscription.
 │   ├── platform-installed.json                Auto-managed: what's currently installed.
-│   ├── Templater/                             Materialized user scripts (incl. platformInstall.js).
-│   ├── Views/                                 Materialized Dataview view files.
-│   ├── Scripts/                               CustomJS classes (none in workshop).
-│   ├── Templates/                             Templater templates.
-│   └── rules/                                 Rule registry (_global.json + per-blueprint rules).
+│   ├── templater/                             Materialized user scripts (incl. platformInstall.js).
+│   ├── views/                                 Materialized Dataview view files.
+│   ├── scripts/                               Materialized CustomJS classes, one folder per mechanism or blueprint.
+│   ├── templates/                             Templater templates.
+│   ├── rules/                                 Rule registry (_global.json + per-blueprint rules).
+│   ├── engine/                                Engine runtime state (run ledgers land under runs/).
+│   └── *-registry.json                        Installer-written registries (nav buttons, breadcrumbs, entity-create, claude-surface).
 └── platform/
     ├── manifest.json                          Version catalogue.
     ├── install.js                             The installer (canonical source).
@@ -132,7 +137,7 @@ If a consumer's existing paths differ from canonical (e.g., accuris currently ha
 
 ## Installer flow
 
-The installer is invoked via the consumer's `_install-platform.md` Templater template. The consumer's `ranch/templater/platformInstall.js` is a ~12-line content-static thin stub (post-v0.1.2 S2) that reads `ranch/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
+The primary path is the CLI: `sauce update` (or `sauce reinstall --vault <path>`) runs the canonical installer from the brew-installed platform against the vault. The Templater-driven path is retired as an install flow (see [use.md](use.md), "Legacy install"), but bootstrap still vendors its stub, and only the workshop keeps the `_install-platform.md` Templater template that calls it. The stub, `ranch/templater/platformInstall.js`, is a 20-line content-static file (post-v0.1.2 S2) that reads `ranch/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
 
 Steps the canonical installer performs:
 
@@ -191,11 +196,11 @@ Trade-off: JSON is less human-readable than YAML but every reader needs zero dep
 
 Drift detection (in `audit-walker.js`):
 - For each subscribed mechanism, compare `installed[i].version` to `subscription[i].version`. Mismatch = drift.
-- For each subscribed mechanism, also compare against `manifest.mechanisms[i].version`. If subscription is behind manifest, the consumer can update by bumping the subscription and re-running `platformInstall`.
+- For each subscribed mechanism, also compare against `manifest.mechanisms[i].version`. If subscription is behind manifest, the consumer can update with `sauce update --bump-pins`, which bumps the subscription pins and re-runs the installer.
 
 ### Distribution model (post-v0.1.2)
 
-Each consumer's `ranch/templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
+Each consumer's `ranch/templater/platformInstall.js` is a 20-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo. Since v0.36.0 consumers get it through Homebrew: `brew upgrade sauce`, then `sauce update` in each vault (or `sauce reinstall --all`). Before that it was updated via `git pull` in the workshop, then a re-run of the install in each consumer.
 
 The stub itself never changes after v0.1.2 S2 deployment. Edits to canonical `install.js` propagate to all consumers automatically on the next install run, with no per-consumer file changes.
 
@@ -233,6 +238,8 @@ Load-bearing operational lessons not yet codified elsewhere. Most surfaced acros
 Sauce vault platform ships an interactive Node-based bootstrap orchestrator at `platform/bootstrap.js`. A fresh consumer goes from `git clone` to fully-loaded with one shell command.
 
 ### Quick start
+
+Since v0.36.0 the entry point is `sauce bootstrap --vault <path>` after `brew install willfell/sauce/sauce` (see [use.md](use.md)). The commands below run the same orchestrator straight from a workshop checkout.
 
 ```bash
 # One-time workshop setup
@@ -355,15 +362,17 @@ v0.22.0 introduces a `sauce` CLI as the consumer-facing operations surface for v
 The CLI entry point is `platform/cli/sauce-cli.js`. The dispatcher resolves which vault the user is operating on by:
 
 1. **Walking cwd ancestors** looking for `ranch/platform-config.json`. The first ancestor containing that file is treated as the vault root. This lets `sauce status` work from any subdirectory inside an activated vault.
-2. **`$SAUCE_VAULT` env-var fallback.** If the cwd-walk finds no config (e.g., the user is outside the vault tree), the dispatcher reads `process.env.SAUCE_VAULT`. The activation script (`pantry/Scripts/activate.sh`) exports this on every `source` so the fallback is always populated for an activated shell.
+2. **`$SAUCE_VAULT` env-var fallback.** If the cwd-walk finds no config (e.g., the user is outside the vault tree), the dispatcher reads `process.env.SAUCE_VAULT`. The activation script (`pantry/Scripts/activate.sh`, legacy pre-v0.36 layout) exports this on every `source` so the fallback is always populated for an activated shell. With a brew install, set `SAUCE_VAULT` yourself when you need the fallback.
 3. **Failure-loud on neither.** If the cwd-walk fails AND `SAUCE_VAULT` is unset, the dispatcher prints "Not inside a sauce-managed vault. cd into one or set SAUCE_VAULT" and exits 1. Mirrors the failure-loud posture from landmine #17 and `applyTemplaterHotkeys` precedent.
 
-### The four-verb surface
+### Core verbs
+
+The CLI started with four verbs (`bootstrap`, `update`, `status`, `wizard`). The table covers those plus `run`. The dispatcher (`platform/cli/sauce-cli.js`) registers 18 in total: `bootstrap`, `update`, `status`, `wizard`, `migrate`, `migrate-layout`, `migrate-frontmatter`, `cleanup-project-type`, `reconcile-cowork`, `audit`, `vault`, `reinstall`, `doctor`, `link`, `unlink`, `seed`, `run`, `help`. See [use.md](use.md) for how the day-to-day verbs are used.
 
 | Verb | File | Behavior |
 |---|---|---|
 | `bootstrap` | `platform/cli/cmd-bootstrap.js` | Re-runs the first-run bootstrap from a clean state. Rare in day-2 use; kept for re-bootstrap-after-uninstall scenarios. Special case in the dispatcher: `bootstrap` is the only verb that runs BEFORE the config exists, so the dispatcher's normal cwd-walk → load-config posture is bypassed via `bootstrapCtxFromArgs(argv)` which builds a minimal `{vault, version}` ctx from `--vault` argv alone. |
-| `update` | `platform/cli/cmd-update.js` | `git fetch + git reset --hard origin/main` inside `pantry/`. Working-tree dirty check; `--force` overrides. If `package.json` SHA changed, re-runs `npm install --omit=dev`. Re-invokes the installer phase. The only verb with substantial new logic. |
+| `update` | `platform/cli/cmd-update.js` | Re-runs the installer phase against the vault from the brew-installed platform. With `--bump-pins` it first rewrites the vault's `ranch/platform-subscription.json` pins to match the installed catalogue (`--dry-run` prints the diff only). It no longer touches git in the vault: the `git fetch + git reset --hard origin/main` path inside `pantry/` was removed in v0.75.1. |
 | `status` | `platform/cli/cmd-status.js` | Read-only state report: workshop git head + dirty state + commits-behind-origin count, subscribed mechanism / blueprint counts, drift summary. No writes. Uses the v0.1.2 `gitState()` helper (landmine #14 — best-effort, never throws). |
 | `wizard` | `platform/cli/cmd-wizard.js` | Falls through to the existing `runReRunWizard()` from `bootstrap-lib/wizard.js`. No new visual code. |
 | `run` | `platform/cli/cmd-run.js` | Runs a graph note through the Sauce engine (`platform/engine/`): one tick by default, `--follow` until a terminal or `human` node, plus `--dry-run` / `--status` / `--list` / `--sweep` / `--install-launchd`. Context-free in the dispatcher like `doctor` — the vault is resolved from the note's own ancestors first, then the cwd walk, then `$SAUCE_VAULT`. Exit 0 done/parked/listed, 1 failed, 2 refusal. |
@@ -371,6 +380,8 @@ The CLI entry point is `platform/cli/sauce-cli.js`. The dispatcher resolves whic
 Each verb file is 50-150 LOC; per v0.21.1 lesson (a) the per-verb structure (vs single 1000-LOC switch) keeps insertion points 200+ LOC apart so future cycles can dispatch parallel subagents safely.
 
 ### Activation script + chmod posture
+
+> Legacy layout (pre-v0.36.0). The `<vault>/pantry/Scripts/` paths below describe the retired in-vault clone. `phaseWriteActivation` still runs at bootstrap, but it now writes under the platform root it is given (the brew prefix on a brew install), and brew already puts `sauce` on PATH, so sourcing `activate.sh` is not needed.
 
 At install time, `phaseWriteActivation` (NEW in v0.22.0) writes two artifacts:
 

@@ -48,7 +48,7 @@ When a superseding sibling X2 is minted, the predecessor X is discarded at mint 
 
 ## Coordinator operations
 
-The mutating operations below require `--json` (refused before any read or write) and run under the selector lock.
+The mutating operations below require `--json` (refused before any read or write) and run under the selector lock (except `reconcile-metadata --parked-rebind`, which takes its own `parked-metadata-rebind` lock).
 
 **`discard --card <name> --reason <why> [--superseded-by <successor>] [--carried-fixture <f>]... --json`** — the per-card path described above. Receipt: tombstone fields plus `board_line_removed`, `note_deleted`, `worktree_removed`, branch receipt (`deleted` or `retained_unsafe_to_delete` with reason), and an epic-projection receipt when the card sat on an epic board.
 
@@ -92,19 +92,19 @@ Path derivation is single-sourced the same way: `delivery.topology.physicalProje
 
 The coordinator is the sole writer of `spice/projects/sauce/Loop Station.md`. On a meaningful lifecycle transition it patches the note's frontmatter with the schema-registered `sauce.loop-station.v1` payload: a mobile headline and exact action, the active card, Director-visible escalations with plain-language reasons, genuine concurrency/deploy waits, the peek-only retroactive digest, recent releases, tombstone residue, and unbounded totals. Every projected list is capped at 20 and carries its own overflow count.
 
-The station body belongs to the render layer. If the note is absent, the first projection scaffolds one stock `OperatorStation` customjs-guard block; after that, projection changes frontmatter only and preserves the body byte-for-byte. Replaying an unchanged transition preserves the complete note byte-for-byte and performs no write. An existing body-only note fails closed rather than being rewritten.
+The station body belongs to the render layer. If the note is absent, the first projection scaffolds two stock customjs-guard blocks — `OperatorStation` and a project-scope `GraphView`; after that, projection changes frontmatter only and preserves the body byte-for-byte. Replaying an unchanged transition preserves the complete note byte-for-byte and performs no write. An existing body-only note fails closed rather than being rewritten.
 
 Projection is transition-driven, never read-driven: claim, park, resume, discard/reap, advancing phases (including deploy), receipt-bound deployed recovery, and cutover flips refresh it. Status, review, gate, dry-run, poll, refusal, retry, and no-op replay paths do not. The shared station write remains under the selector boundary, including the short projection step after a per-card advance or recovery, so concurrent card transitions cannot write the single note simultaneously.
 
-The `since` section reads `.delivery-digest-last-seen` with peek semantics. Station projection never advances that marker; only a successful real `delivery:status` read does. A transition receipt includes `loop_station`, including a visible failure receipt if the additive station projection fails after authoritative lifecycle state has committed.
+The `since` section reads `.delivery-digest-last-seen` with peek semantics. Station projection never advances that marker; only a successful real `/sauce:status` read does. A transition receipt includes `loop_station`, including a visible failure receipt if the additive station projection fails after authoritative lifecycle state has committed.
 
 ## The retroactive digest
 
-Nothing waits on a human; instead `delivery:status` reports what happened **since you last looked**: discards (with reasons/successors), cutover flips, and `SELF-RATIFIED <date>` FID amendment headings. `scripts/autoloop/delivery-status-digest.js` keeps its own marker file `.delivery-digest-last-seen` beside the coordinator state file; a normal read updates the marker after a successful render, `--peek` renders without updating it. Over-inclusion is the deliberate safe side (timestamp-less discards and same-day amendments always show). Known gap: ceilings-hit and decompositions are specced digest feeds but `status --json` does not expose them yet. `delivery:review` walks the digest and surfaces perimeter items; its triage classifier (`delivery-review-triage.js`) has no superseded-corpse bucket anymore — parked classifies only as genuine concurrency/deploy waits or Director-visible escalations.
+Nothing waits on a human; instead `/sauce:status` (`scripts/autoloop/delivery-status-digest.js`) reports what happened **since you last looked**: discards (with reasons/successors), cutover flips, and `SELF-RATIFIED <date>` FID amendment headings. `scripts/autoloop/delivery-status-digest.js` keeps its own marker file `.delivery-digest-last-seen` beside the coordinator state file; a normal read updates the marker after a successful render, `--peek` renders without updating it. Over-inclusion is the deliberate safe side (timestamp-less discards and same-day amendments always show). Known gap: ceilings-hit and decompositions are specced digest feeds but `status --json` does not expose them yet. `/sauce:review` walks the digest and surfaces perimeter items; its triage classifier (`delivery-review-triage.js`) has no superseded-corpse bucket anymore — parked classifies only as genuine concurrency/deploy waits or Director-visible escalations.
 
 ## Read these next
 
 - Governance clauses, constitution, perimeter rule → the design spec (§3) named at the top.
 - Cleanup pass ordering (reconcile → reap → restructure → cutover → reconcile) → spec §4.
-- Intake mechanics for supersede/epic-native routing → `.agents/skills/card-intake/SKILL.md`.
+- Intake mechanics for supersede/epic-native routing → `plugins/sauce/skills/intake/SKILL.md`.
 - Release/deploy chain the slices ride → [build-test-verify.md](build-test-verify.md).

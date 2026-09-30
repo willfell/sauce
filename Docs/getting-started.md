@@ -1,6 +1,6 @@
 # Getting started
 
-Zero to a working sauce vault with Claude-driven automation, end-to-end. Assumes macOS, a working install of [Obsidian](https://obsidian.md), and that you've used [Claude Code](https://claude.com/claude-code) at least once. About 20 minutes start to finish.
+Zero to a working Sauce vault that you can use by hand and with Claude Code. Assumes macOS, a working install of [Obsidian](https://obsidian.md), and that you've used [Claude Code](https://claude.com/claude-code) at least once. About 20 minutes start to finish.
 
 If something in the walkthrough doesn't match what you see, the deeper references are:
 
@@ -15,10 +15,10 @@ You need [Homebrew](https://brew.sh) first. Then:
 ```bash
 brew tap willfell/sauce
 brew install willfell/sauce/sauce
-sauce --version
+sauce help | head -1
 ```
 
-`sauce` is the CLI you'll use to bootstrap and update vaults. Re-running `brew upgrade willfell/sauce/sauce` pulls newer platform releases as they ship.
+The last command prints the installed platform version. `sauce` is the CLI you'll use to bootstrap and update vaults. Re-running `brew upgrade willfell/sauce/sauce` pulls newer platform releases as they ship.
 
 ## 2. Create or pick an Obsidian vault
 
@@ -53,13 +53,40 @@ Open Obsidian and *Open folder as vault* → pick `<vault>`. Obsidian will load 
 
 A few things to check:
 
-- Open `spice/cowork/Cowork.md` — you'll see a **Cowork readiness** panel at the top showing engagement / prompts / MCP routing / last runs / expected jobs. Right now everything will say "not configured" — that's expected, you fix it in the next step.
-- Open `spice/daily/Daily Hub.md` — a card-listed view of your daily notes (empty until you create one).
+- If you subscribed to the `cowork` blueprint, open `spice/cowork/Cowork.md` — you'll see a **Cowork readiness** panel at the top showing engagement / prompts / MCP routing / last runs / expected jobs. Right now everything will say "not configured" — that's expected, you fix it in step 6.
+- Open `spice/cowork/Daily Hub.md` (also shipped by the `cowork` blueprint) — a card-listed view of your daily notes (empty until you create one).
 - In the file menu, hit `Cmd+R` once to make sure all CustomJS helpers are loaded fresh.
 
 If the readiness panel doesn't render (instead you see the raw `dataviewjs` block), enable the Dataview + CustomJS + Templater plugins under *Settings → Community plugins* and Cmd+R.
 
-## 5. Bootstrap your cowork engagement
+## 5. Use it both ways
+
+There are two doors into the same vault. Try each one before you set up any automation. This step assumes you subscribed to `home`, `daily`, and `meetings` in the wizard.
+
+By hand, in Obsidian:
+
+1. Open `spice/home/Home.md`, or press the **Home** button in the nav strip at the top of any note.
+2. Press the **Daily** nav button. It creates today's daily note from the template under `spice/daily/`.
+3. Press the **Meetings** nav button to open the Meetings hub, then press **New Meeting** and give the meeting a title. The note lands under `spice/meetings/notes/`.
+
+By agent, in a terminal:
+
+```bash
+cd <vault>
+claude
+```
+
+Then in the Claude Code prompt:
+
+```
+/daily
+```
+
+Claude finds the same daily note you just created by hand. Nothing is copied or synced. Both doors read and write the same Markdown files.
+
+## 6. Bootstrap your cowork engagement (optional)
+
+Steps 6 to 8 are optional. Cowork adds scheduled briefings on top of the vault. It needs the `cowork` blueprint, an external scheduler, and MCP access to the vault. Everything in steps 1 to 5 works without it, so skip to step 9 if you do not want it.
 
 This is a one-time interactive setup that records who you are and what kind of work-context you're in (`personal` / `w2-fte` / `consulting`). It writes a `vault-config.md` that the rest of cowork reads from.
 
@@ -86,7 +113,7 @@ The skill drives a 25-step interview, one question at a time:
 
 When it finishes, refresh `Cowork.md` in Obsidian. The readiness panel's first row flips to `Engagement: ✓ <id>`.
 
-## 6. Onboard scheduled jobs (the v0.65.0 entry point)
+## 7. Onboard scheduled jobs (optional; the v0.65.0 entry point)
 
 The previous step set up the **vault**. This step sets up the **schedule** — when Claude actually fires `cowork:morning-briefing` at 7:05 AM each weekday and writes the morning briefing into your vault.
 
@@ -113,7 +140,7 @@ When all 5 orchestrators are walked, the skill registers the cron jobs in Claude
 
 This is **re-runnable**. On day 90 when you want to change a cadence or rewrite a prompt, run the same skill — it diffs against the live job list and walks you through changes.
 
-## 7. Verify
+## 8. Verify the cowork setup (optional)
 
 Back in Obsidian, reopen `Cowork.md`. The readiness panel should now show:
 
@@ -131,17 +158,17 @@ spice/cowork/daily/2026/05-May/2026-05-20/morning-briefing.md
 
 ActivityFeed surfaces it in `Daily Hub`, `Weekly Hub`, `Monthly Hub`, and `Today.md`. The dashboard panel in your daily note picks it up under a "Today's Activity" group. The readiness panel's `Last runs` row flips to the timestamp.
 
-## 8. Keep it updated
+## 9. Keep it updated
 
 Whenever a new sauce release ships:
 
 ```bash
 brew upgrade willfell/sauce/sauce
 cd <vault>
-sauce update
+sauce update --bump-pins
 ```
 
-`sauce update` pulls the workshop's `origin/main`, re-runs the installer, and reports what changed in `ranch/bootstrap-last-install.log`. Your `spice/` content is never touched — only the platform-managed plumbing under `ranch/`, the plugin configs in `.obsidian/`, and the slash commands / skills in `.claude/`.
+`sauce update --bump-pins` moves the vault's pins to the new catalogue, re-runs the installer from the brew-installed platform, and reports what changed in `ranch/bootstrap-last-install.log`. Plain `sauce update` re-runs the installer at the vault's current pins. Your `spice/` content is never touched — only the platform-managed plumbing under `ranch/`, the plugin configs in `.obsidian/`, and the slash commands / skills in `.claude/`.
 
 ### Picking up a stale vault on a new device
 
@@ -177,4 +204,4 @@ If `sauce wizard` isn't available or you'd rather hand-edit, open `ranch/platfor
 | Scheduled job fires but no atomic note appears | The orchestrator's `check-vault-routing` step bailed | Check `spice/cowork/.routing-cache.json` for the failure reason; usually a missing MCP backend |
 | Atomic note has `warning: empty_prompt` frontmatter | The prompt body at `spice/cowork/prompts/<orch>.md` is empty | Edit the prompt file; next run uses the new body |
 
-For anything else, [`Docs/landmines.md`](landmines.md) catalogues 22 known footguns and how to recover from each.
+For anything else, [`Docs/landmines.md`](landmines.md) catalogues known footguns and how to recover from each.

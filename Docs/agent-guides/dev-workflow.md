@@ -33,11 +33,9 @@ The workshop is its OWN first consumer (workshop dogfood). Look at `ranch/platfo
 
 ## Local-clone vs brew install
 
-The workshop ships to Homebrew via the `willfell/homebrew-sauce` tap. Consumer vaults can resolve their `workshop_relative_path` to EITHER `/opt/homebrew/opt/sauce/libexec` (brew) OR a local clone (`/Users/willfell/Documents/GitHub/sauce`). The two consumer vaults on this machine point at the local clone for daily-cycle dev workflow.
+The workshop ships to Homebrew via the `willfell/homebrew-sauce` tap. Consumer vaults can resolve their `workshop_relative_path` to EITHER `/opt/homebrew/opt/sauce/libexec` (brew) OR a local clone (`/Users/willfell/Documents/GitHub/sauce`). The three consumer vaults on this machine resolve to the brew path.
 
-**Currently** the brew tap formula is stale at v0.84.0 (we're at workshop 0.111.3+); 27 versions behind. Local-clone is the only realistic deploy path until the tap is bumped. See [`Docs/landmines.md`](../landmines.md) for the asking-before-acting policy around brew operations.
-
-**Quick check** — look at a consumer vault's `Docs/Meta/platform-config.json`:
+**Quick check** — look at a consumer vault's `ranch/platform-config.json`:
 ```json
 {
   "workshop_relative_path": "/Users/willfell/Documents/GitHub/sauce"  // local-clone
@@ -60,9 +58,9 @@ cd /Users/willfell/obsidian/<vault-name>
 sauce update --bump-pins   # rewrites ranch/platform-subscription.json pins AND re-runs the installer
 ```
 
-The `sauce update --bump-pins` command preserves explicit version pins (anything not at `latest`) but advances `latest` pins to the workshop's current version, then runs the installer itself. After it finishes, run `sauce status` from inside the consumer vault to confirm drift is gone.
+The `sauce update --bump-pins` command rewrites every subscribed blueprint and mechanism pin to the version in the installed workshop's `platform/manifest.json` (`--keep-comparators` keeps a pin's comparator prefix such as `^`), then runs the installer itself. Components the vault does not subscribe to are reported and skipped. After it finishes, run `sauce status` from inside the consumer vault to confirm drift is gone.
 
-**There is no `sauce install` verb.** The CLI's full verb list is `bootstrap|update|status|wizard|migrate|audit|seed|help` (`sauce help`) — `sauce install` and `sauce reinstall --all` do not exist and never have. To run the installer directly against a vault without going through `update` (the usual dogfood / heal-verification path, and what you want when the workshop is a local clone rather than the brew copy):
+**There is no `sauce install` verb.** The CLI's full verb list is `bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|cleanup-project-type|reconcile-cowork|audit|vault|reinstall|doctor|link|unlink|seed|run|help` (the `VERBS` table in `platform/cli/sauce-cli.js`; `sauce help` currently lists only nine of them). `sauce reinstall --all` re-runs the installer across every registered vault. To run the installer directly against a vault without going through `update` (the usual dogfood / heal-verification path, and what you want when the workshop is a local clone rather than the brew copy):
 
 ```bash
 node /opt/homebrew/opt/sauce/libexec/platform/install.js --vault <vault-path> --auto-approve
@@ -150,19 +148,19 @@ Exit codes:
 
 ## CI vs local preflight
 
-`npm run release:preflight` runs the full harness chain locally (~30s):
-- `scripts/check-version-sync.js` — gates workshop_version vs manifest vs package.json.
+`npm run release:preflight` runs the full harness set locally (`scripts/run-preflight.js`; minutes, not seconds). It is manifest-driven — the 183 steps in `platform/test/preflight-manifest.json` run as a serial lane first, then a parallel queue:
+- `scripts/check-version-sync.js` — gates workshop_version vs manifest vs package.json (serial lane).
 - `scripts/check-files-forbidden-paths.js` — Safeguard 3 path guard.
-- All `npm run test:*` harnesses + every `platform/test/run-*.js` harness in sequence.
+- Every other manifest step (the `platform/test/run-*.js` harnesses and lint scripts) through the bounded parallel queue.
 - Wired the same way in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
 
-CI fires on every push to `main` + every PR + every annotated tag. Local preflight is the bar before push; CI is the safety net.
+CI fires on every push to `main` + every PR targeting `main` (plus manual `workflow_dispatch`); it does not trigger on tags. Local preflight is the bar before push; CI is the safety net.
 
 ## When in doubt, in this order
 
 1. Run `npm run status` to see live state.
 2. Read the most recent `Docs/plans/*-result.md` (workshop-status lists it).
-3. Read the next-session handoff prompt (`Docs/prompts/*-next-session-handoff.md`) if present.
+3. For board-bound work, read live state with `/sauce:status`. (Dated `Docs/prompts/*-next-cycle-handoff.md` prompts are history — the last was written 2026-08-05.)
 4. Check `Docs/agent-guides/cycle-status.md` § Current for the live pointer (run `npm run regen-cycle-status -- --check` first to detect drift).
 5. Pick a lane from the open brainstorm (`Docs/plans/*-enhancements-brainstorm.md`) OR start a new brief.
 
