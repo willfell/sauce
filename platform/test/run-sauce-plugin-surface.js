@@ -157,6 +157,7 @@ const EXPECTED_SKILLS = ['block-review', 'execute', 'init', 'intake', 'loop', 'p
     coordinator: { resolve: 'path', path: '~/tools/coordinator.js' },
   }, null, 2));
 
+  try {
   const noBrew = path.join(tmp, 'no-such-brew');
   const run = (extraEnv) => {
     const env = { ...process.env, SAUCE_BREW: noBrew, ...extraEnv };
@@ -197,8 +198,30 @@ const EXPECTED_SKILLS = ['block-review', 'execute', 'init', 'intake', 'loop', 'p
   ok('LP-CACHE in-tree shim still forwards the resolver exports',
     typeof inTree.resolveBinding === 'function' && typeof inTree.main === 'function');
 
-  fs.rmSync(tmp, { recursive: true, force: true });
-  fs.rmSync(repo, { recursive: true, force: true });
+  const marker = path.join(tmp, 'brew-was-called');
+  const spyBrew = path.join(tmp, 'spy-brew');
+  fs.writeFileSync(spyBrew, `#!/bin/sh\necho called > "${marker}"\nexit 1\n`);
+  fs.chmodSync(spyBrew, 0o755);
+  const inTreeRun = spawnSync(process.execPath, [path.join(PLUGIN, 'scripts', 'loop-config.js'), 'resolve', '--json', '--repo', repo, '--home', '/home/fixture'], {
+    cwd: tmp, env: { ...process.env, SAUCE_BREW: spyBrew }, encoding: 'utf8',
+  });
+  ok('LP-CACHE in-tree shim resolves without spawning brew',
+    inTreeRun.status === 0 && !fs.existsSync(marker),
+    `status=${inTreeRun.status} brewCalled=${fs.existsSync(marker)}`);
+
+  const missing = run({});
+  ok('LP-CACHE no resolver: required exports still return the refusal',
+    missing.status === 1 && (() => {
+      const probe = spawnSync(process.execPath, ['-e',
+        `const m = require(${JSON.stringify(shim)}); const r = m.resolveBinding('.'); process.stdout.write(JSON.stringify(r));`],
+        { cwd: tmp, env: { ...process.env, SAUCE_BREW: noBrew, SAUCE_LIBEXEC: '' }, encoding: 'utf8' });
+      try { const r = JSON.parse(probe.stdout); return r.ok === false && r.refusals[0].code === 'resolver_unavailable'; }
+      catch (_) { return false; }
+    })());
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

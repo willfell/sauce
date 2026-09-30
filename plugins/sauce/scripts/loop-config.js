@@ -33,23 +33,33 @@ const { execFileSync } = require('child_process');
 
 const RESOLVER_REL = path.join('scripts', 'autoloop', 'loop-config.js');
 
-function resolverCandidates(env = process.env) {
-  const candidates = [path.resolve(__dirname, '..', '..', '..', RESOLVER_REL)];
-  if (env.SAUCE_LIBEXEC) candidates.push(path.join(env.SAUCE_LIBEXEC, RESOLVER_REL));
+function brewCandidate(env) {
   try {
     const prefix = execFileSync(env.SAUCE_BREW || 'brew', ['--prefix', 'sauce'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000,
     }).trim();
-    if (prefix) candidates.push(path.join(prefix, 'libexec', RESOLVER_REL));
+    return prefix ? path.join(prefix, 'libexec', RESOLVER_REL) : null;
   } catch (_) {
-    // brew absent or sauce not installed: the candidates above are all there is.
+    return null;
   }
-  return candidates;
 }
 
+// Candidates are checked in order and brew is asked only when the first two
+// miss, so a clone or the brew libexec never pays for a brew spawn.
 function locateResolver(env = process.env) {
-  const tried = resolverCandidates(env);
-  return { path: tried.find((p) => fs.existsSync(p)) || null, tried };
+  const tried = [];
+  const lazy = [
+    () => path.resolve(__dirname, '..', '..', '..', RESOLVER_REL),
+    () => (env.SAUCE_LIBEXEC ? path.join(env.SAUCE_LIBEXEC, RESOLVER_REL) : null),
+    () => brewCandidate(env),
+  ];
+  for (const next of lazy) {
+    const candidate = next();
+    if (!candidate) continue;
+    tried.push(candidate);
+    if (fs.existsSync(candidate)) return { path: candidate, tried };
+  }
+  return { path: null, tried };
 }
 
 const located = locateResolver();
@@ -64,7 +74,13 @@ if (located.path) {
     message: 'the sauce binding resolver was not found beside this plugin, at $SAUCE_LIBEXEC, or under `brew --prefix sauce` — install sauce with `brew install willfell/sauce/sauce`, or set SAUCE_LIBEXEC to a sauce checkout or libexec',
     tried: located.tried,
   };
-  module.exports = { resolverUnavailable: refusal, locateResolver };
+  const unavailable = () => ({ ok: false, refusals: [refusal] });
+  module.exports = {
+    resolveBinding: unavailable,
+    checkBinding: unavailable,
+    resolverUnavailable: refusal,
+    locateResolver,
+  };
   if (require.main === module) {
     const verb = process.argv[2] || 'resolve';
     process.stdout.write(JSON.stringify({ action: `loop-config-${verb}`, ok: false, no_op: false, refusals: [refusal] }, null, 2) + '\n');
