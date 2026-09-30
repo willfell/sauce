@@ -45,6 +45,15 @@
       "group": "chrome"
     },
     {
+      "id": "board-health",
+      "cmd": [
+        "node",
+        "platform/test/run-board-health.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
       "id": "finance-style-adoption",
       "cmd": [
         "node",
