@@ -39,9 +39,31 @@
  * carries the card's Outcome sentence. Layout warnings render as one compact
  * strip row each under the graph; empty warnings render nothing.
  *
+ * Phone-first (PH-1): every render resolves a container width once —
+ * explicit containerWidth mount arg, then the measured mount container, then
+ * the Obsidian is-mobile body class when the measurement is zero or
+ * unreadable, then wide — and at epic scope, under 600px, draws a second
+ * presentation of the SAME frozen layout result: a compact map of one 26px
+ * pill per slice or cross-epic stub in per-rank columns sized by a pure
+ * formula, with the same edge layer, filter toolbar, legend, and selection
+ * controller. Both presentations open the same inline detail card under the
+ * map / canvas.
+ * There is no continuous width watcher: a render whose width was measured or
+ * pinned watches nothing afterwards, and only a cold-load render whose width
+ * was unmeasured arms a one-shot, owned per mount container, that, on each
+ * resize notification of its root, re-resolves the same measurement and, at
+ * the first notification where it is measured, re-renders exactly once with
+ * it; it disarms when its root leaves the container or the container renders
+ * again. Adapting to later pane resizes is PH-9c's work (live pane-resize
+ * adaptation). At rest the wide presentation's DOM is byte-identical to the
+ * pre-PH-1 renderer's; the detail card a chip tap opens (at both scopes) now
+ * labels its open button "Open slice" instead of "Open card" and adds a
+ * "Close" button.
+ *
  * Fail-soft everywhere: gather/layout/render failures degrade to warning rows
  * or unknown-style chips — the widget never throws, never blanks the note,
- * never writes to the vault, and never calls the coordinator.
+ * never writes to the vault, and never calls the coordinator. A compact-map
+ * failure falls back to the wide path plus one warning row.
  */
 class GraphView {
   constructor(options = {}) {
@@ -436,7 +458,7 @@ class GraphView {
     return block;
   }
 
-  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes) {
+  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes, onClose) {
     const panel = root.createEl("div");
     panel.className = "graph-view-detail-panel";
     panel.style.cssText = "display:grid;gap:12px;margin-top:16px;padding:12px 14px;border:1px solid var(--background-modifier-border);"
@@ -467,13 +489,22 @@ class GraphView {
         + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
         + `background:color-mix(in srgb, ${presentation.color} 10%, var(--background-primary));`;
     }
-    const open = controls.createEl("button", { text: "Open card" });
+    const open = controls.createEl("button", { text: "Open slice" });
     open.className = "graph-view-detail-open";
     open.style.cssText = "min-height:32px;padding:5px 10px;cursor:pointer;";
     open.addEventListener?.("click", (event) => {
       event?.stopPropagation?.();
       this._open(node.path || node.card, source);
     });
+    if (typeof onClose === "function") {
+      const close = controls.createEl("button", { text: "Close" });
+      close.className = "graph-view-detail-close";
+      close.style.cssText = "min-height:32px;padding:5px 10px;cursor:pointer;";
+      close.addEventListener?.("click", (event) => {
+        event?.stopPropagation?.();
+        onClose();
+      });
+    }
     if (node.isStub) return panel;
 
     if (node.waitReason) {
@@ -512,6 +543,17 @@ class GraphView {
     count.className = "graph-view-detail-gates-count";
     for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent");
     return panel;
+  }
+
+  // Inline detail card (PH-1): the one labeled-rows builder above, mounted as
+  // an inline element right after the host's legend — under the compact map
+  // on narrow widths, under the canvas on wide — on both presentations. Never
+  // a body-fixed sheet: that fights the reading-view scroller and the
+  // ghost-click guard, and the popover primitive is for menus only.
+  _renderDetailInline(host, node, context) {
+    const ctx = context && typeof context === "object" ? context : {};
+    return this._renderDetailPanel(host, ctx.scroller, node, ctx.nodes, ctx.edges, ctx.analysis,
+      ctx.api, ctx.source, ctx.outcomes, ctx.onClose);
   }
 
   // Stuck filtering consumes GraphInsights closures only. For every root/stuck
@@ -617,7 +659,9 @@ class GraphView {
         setDimmed(record, !chain.has(card));
       }
       renderEdges(chain);
-      panel = this._renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes);
+      panel = this._renderDetailInline(root, node, {
+        scroller, nodes, edges, analysis, api, source, outcomes, onClose: clear,
+      });
     };
     const focus = (cluster, path, event) => {
       event?.stopPropagation?.();
@@ -884,9 +928,10 @@ class GraphView {
   }
 
   // Ghost external stub (GV-R1): a muted, dashed, selectable chip standing in
-  // for a cross-epic prerequisite. Its detail panel degrades to Open card only.
-  // It is not a slice, so it never routes through status presentation and never
-  // emits an unreadable-slice warning.
+  // for a cross-epic prerequisite. Its detail panel degrades to its heading
+  // plus the Open slice and Close buttons. It is not a slice, so it never
+  // routes through status presentation and never emits an unreadable-slice
+  // warning.
   _renderStub(canvas, node, at, geometry, source, onSelect) {
     const chipW = at && at.w != null ? at.w : geometry.chipW;
     const chip = canvas.createEl("div");
@@ -977,6 +1022,171 @@ class GraphView {
         + "background:color-mix(in srgb, var(--text-error) 10%, var(--background-primary));";
     }
     return chip;
+  }
+
+  // ---- PH-1 phone-first: compact map (epic scope, narrow widths) ----
+  // Deterministic geometry (its one outside read is the shared _titleParts id
+  // parser) over the frozen GraphLayout result. One column per rank:
+  // colW = clamp(floor((W - 2*pad - (R-1)*gap) / R), 40, 140); pill height
+  // 26, row gap 8, pad 2, gap 10. Ids drop their shared alphabetic prefix
+  // (through the dash, GA-ML8 -> ML8) only when colW < 72 AND every id shares
+  // that prefix. When even 40px pills cannot fit (R*40 + (R-1)*gap + 2*pad >
+  // W) the canvas keeps its natural width and the map scrolls sideways — the
+  // documented, warning-free fallback. No DOM measurement happens here: the
+  // width arrives as an argument (render()'s resolved width in production, a
+  // literal in the harness).
+  _compactGeometry(nodes, ranks, width) {
+    const W = Number(width);
+    if (!Number.isFinite(W) || W <= 0) throw new Error(`compact geometry needs a positive width, got ${String(width)}`);
+    const list = Array.isArray(nodes) ? nodes : [];
+    const order = Array.isArray(ranks) && ranks.length
+      ? ranks.slice()
+      : [...new Set(list.map((node) => node?.rank || 0))].sort((left, right) => left - right);
+    const R = Math.max(1, order.length);
+    const pad = 2;
+    const gap = 10;
+    const pillH = 26;
+    const rowGap = 8;
+    const minCol = 40;
+    const maxCol = 140;
+    const shortIdBelow = 72;
+    const colW = Math.min(maxCol, Math.max(minCol, Math.floor((W - 2 * pad - (R - 1) * gap) / R)));
+    const scrolls = R * minCol + (R - 1) * gap + 2 * pad > W;
+    const natural = R * colW + (R - 1) * gap + 2 * pad;
+    const colX = new Map(order.map((rank, index) => [rank, pad + index * (colW + gap)]));
+    const rowCount = list.reduce((max, node) => Math.max(max, (Number(node?.row) || 0) + 1), 0);
+    const canvasHeight = 2 * pad + rowCount * pillH + Math.max(0, rowCount - 1) * rowGap;
+    const positions = new Map(list.map((node) => [node.card, {
+      x: colX.get(node?.rank || 0),
+      y: pad + (Number(node?.row) || 0) * (pillH + rowGap),
+      w: colW,
+      h: pillH,
+    }]));
+    const labels = this._compactLabels(list, colW < shortIdBelow);
+    return {
+      width: W, ranks: R, pad, gap, pillH, rowGap, minCol, maxCol, shortIdBelow,
+      colW, scrolls, natural, canvasWidth: natural, canvasHeight,
+      shortIds: labels.shortened, labels: labels.byCard, colX, positions,
+      chipW: colW, chipH: pillH, scrollbarAllowance: scrolls ? 14 : 0,
+    };
+  }
+
+  // Short-id rule: strip the alphabetic prefix through the dash only when the
+  // columns are narrow AND every id carries the same prefix; a set whose
+  // prefixes differ (or a node without a parseable id) keeps full ids.
+  _compactLabels(nodes, narrowColumns) {
+    const entries = (nodes || []).map((node) => ({ card: node?.card, id: this._titleParts(node?.card).id }));
+    let prefix = null;
+    let shared = entries.length > 0;
+    for (const entry of entries) {
+      const match = entry.id ? entry.id.match(/^([A-Z]+)-(.+)$/) : null;
+      if (!match || (prefix !== null && match[1] !== prefix)) { shared = false; break; }
+      prefix = match[1];
+    }
+    const shortened = narrowColumns === true && shared;
+    const byCard = new Map(entries.map((entry) => [entry.card,
+      shortened ? entry.id.slice(prefix.length + 1) : (entry.id || String(entry.card == null ? "" : entry.card))]));
+    return { shortened, byCard };
+  }
+
+  async _renderCompactGraph(root, result, api, source, warnings, width) {
+    const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
+    if (!nodes.length) return null;
+    const ranks = [...new Set(nodes.map((node) => node.rank || 0))].sort((left, right) => left - right);
+    const geometry = this._compactGeometry(nodes, ranks, width);
+    return this._renderCompactMap(root, result, api, source, warnings, geometry);
+  }
+
+  // The compact map is a second presentation of the same layout: the stuck
+  // summary, the existing filter toolbar, the existing SVG edge layer over
+  // positioned pills, and the existing legend, all inside one host so the
+  // inline detail card mounts under the map. Selection registers pills as
+  // chips, so Stuck / Dim done, chain highlight, two-tap open, and the
+  // canvas-tap deselect are the wide path's behaviors verbatim.
+  async _renderCompactMap(root, result, api, source, warnings, geometry) {
+    const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
+    const edges = Array.isArray(result?.edges) ? result.edges : [];
+    const analysis = this._analyzeGraph(nodes, edges);
+    const host = root.createEl("div");
+    host.className = "graph-view-compact";
+    host.style.cssText = "display:grid;gap:0;min-width:0;max-width:100%;";
+    this._renderStuckSummary(host, analysis);
+    const outcomes = await this._loadOutcomes(nodes);
+    const scroller = host.createEl("div");
+    scroller.className = "graph-view-scroll graph-view-compact-scroll";
+    scroller.style.cssText = `overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:${geometry.scrollbarAllowance}px;box-sizing:content-box;`;
+    const canvas = scroller.createEl("div");
+    canvas.className = "graph-view-canvas graph-view-compact-canvas";
+    canvas.style.cssText = `position:relative;width:${geometry.canvasWidth}px;height:${geometry.canvasHeight}px;`;
+    const edgeLayer = canvas.createEl("div");
+    edgeLayer.className = "graph-view-edges";
+    edgeLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+    const renderEdges = (chain) => {
+      edgeLayer.innerHTML = this._edgeSvg(geometry.canvasWidth, geometry.canvasHeight, edges, geometry.positions, geometry, chain);
+    };
+    renderEdges(null);
+    const interaction = this._selectionController({
+      root: host, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges,
+    });
+    interaction.renderToolbar();
+    for (const node of nodes) {
+      const pill = this._renderPill(canvas, node, geometry, api, source, warnings, interaction?.select);
+      interaction?.register(node, pill);
+    }
+    this._renderLegend(host, nodes, api);
+    return host;
+  }
+
+  // One id pill per slice or cross-epic stub (an id-less node shows its full
+  // card name): the shared status class, colour, and glyph come from
+  // _statusPresentation (no local table); stubs are dashed and muted; stuck
+  // (blocked / parked) pills carry a 2px error hairline on the left; parked
+  // slice pills carry the graph-view-needs-you class (no stylesheet styles it
+  // yet). A slice pill's tooltip is its full card name, a stub's its epic · id
+  // label; the detail card carries the Outcome.
+  _renderPill(canvas, node, geometry, api, source, warnings, onSelect) {
+    const at = geometry.positions.get(node.card)
+      || { x: geometry.pad, y: geometry.pad, w: geometry.colW, h: geometry.pillH };
+    const label = geometry.labels.get(node.card) ?? String(node.card == null ? "" : node.card);
+    const pill = canvas.createEl("div");
+    const base = `position:absolute;left:${at.x}px;top:${at.y}px;width:${at.w}px;height:${at.h}px;`
+      + "display:inline-flex;align-items:center;gap:4px;padding:0 6px;border-radius:999px;box-sizing:border-box;"
+      + "cursor:pointer;min-width:0;font-family:var(--font-monospace);font-size:11px;font-weight:600;";
+    if (node.isStub) {
+      pill.className = "graph-view-chip graph-view-pill graph-view-stub";
+      pill.style.cssText = base + "color:var(--text-muted);opacity:0.75;"
+        + "border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);"
+        + "background:color-mix(in srgb, var(--text-muted) 6%, var(--background-primary));";
+      pill.setAttribute?.("title", String(node.stubLabel || node.card || ""));
+    } else {
+      const presentation = this._statusPresentation(node.status, api);
+      if (!presentation.normalized) {
+        warnings.push({
+          code: "unreadable_slice",
+          card: node.card,
+          detail: String(node.status == null ? "(missing)" : node.status),
+        });
+      }
+      const stuck = ["blocked", "parked"].includes(presentation.normalized);
+      const needsYou = presentation.normalized === "parked";
+      pill.className = `graph-view-chip graph-view-pill ${presentation.className}${needsYou ? " graph-view-needs-you" : ""}`;
+      pill.style.cssText = base + `color:${presentation.color};`
+        + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
+        + (stuck ? "border-left:2px solid var(--text-error);" : "")
+        + `background:color-mix(in srgb, ${presentation.color} 10%, var(--background-primary));`;
+      pill.setAttribute?.("title", String(node.card || ""));
+      const glyph = pill.createEl("span", { text: presentation.glyph });
+      glyph.className = `graph-view-status-glyph ${presentation.className}`;
+      glyph.setAttribute?.("aria-hidden", "true");
+      glyph.style.cssText = `flex:none;font-weight:700;color:${presentation.color};`;
+    }
+    const id = pill.createEl("span", { text: label });
+    id.className = "graph-view-pill-id";
+    id.style.cssText = "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    pill.addEventListener?.("click", (event) => (onSelect
+      ? onSelect(node, event)
+      : this._open(node.path || node.card, source)));
+    return pill;
   }
 
   _activeCard(current) {
@@ -1182,11 +1392,164 @@ class GraphView {
     }
   }
 
-  async render(dv, overrides) {
+  // ---- PH-1 phone-first: width resolution (resolved on every render, used only at epic scope) ----
+  // Under 600px is narrow: any finite value below 600 after Number() (0
+  // included) is narrow here. _resolveWidth only calls this with a positive
+  // override or measurement; a zero or unreadable measurement never reaches
+  // it and resolves to the is-mobile class or wide, which keeps a desktop
+  // cold-load pane (measures 0) from flickering into the compact
+  // presentation.
+  _isNarrow(width) {
+    const value = Number(width);
+    return Number.isFinite(value) && value < 600;
+  }
+
+  _isMobileBody() {
     try {
+      const body = globalThis.document?.body;
+      if (!body) return false;
+      if (typeof body.classList?.contains === "function") return body.classList.contains("is-mobile") === true;
+      return /(?:^|\s)is-mobile(?:\s|$)/.test(String(body.className || ""));
+    } catch (_e) { return false; }
+  }
+
+  // Resolved ONCE per render, in this order: an explicit containerWidth in
+  // the mounting block's args (or a harness override); then the mount
+  // container's measured client width (the root is a full-width block child
+  // of dv.container, so this approximates the root's width: the client width
+  // is integer-rounded and includes the container's padding); then the
+  // Obsidian is-mobile body class when the measurement is zero or
+  // unreadable (a read that throws is unmeasured, never an error); then
+  // wide. Never throws; input it cannot use falls through to the is-mobile
+  // class and otherwise to wide. Only a finite positive NUMBER is an
+  // override (no coercion: true, "390", or [390] fall through to
+  // measurement). The phone default (390) and the desktop default (1024) are
+  // the design's reference widths. `source` names the step that decided:
+  // "override" and "measured" are decided widths, "mobile-class" and
+  // "default" are unmeasured guesses.
+  _resolveWidth(dv, overrides) {
+    const wide = { width: 1024, narrow: false, source: "default" };
+    try {
+      let raw;
+      try { raw = overrides && typeof overrides === "object" ? overrides.containerWidth : undefined; } catch (_e) { raw = undefined; }
+      const explicit = typeof raw === "number" ? raw : NaN;
+      if (Number.isFinite(explicit) && explicit > 0) {
+        return { width: explicit, narrow: this._isNarrow(explicit), source: "override" };
+      }
+      let measured = NaN;
+      try { measured = Number(dv?.container?.clientWidth); } catch (_e) { measured = NaN; }
+      if (Number.isFinite(measured) && measured > 0) {
+        return { width: measured, narrow: this._isNarrow(measured), source: "measured" };
+      }
+      if (this._isMobileBody()) return { width: 390, narrow: true, source: "mobile-class" };
+      return wide;
+    } catch (_e) { return wide; }
+  }
+
+  // Cold-load one-shot (PH-1c). A render whose width was decided (override
+  // or measured) arms nothing, so nothing the widget draws afterwards — a
+  // pane scrollbar that comes and goes with the graph — can ever re-render
+  // it. Only an unmeasured render (the pane had not laid out, or its width
+  // was unreadable: source "default" or "mobile-class") arms a one-shot.
+  //
+  // Ownership: at most one armed one-shot per mount container, held in a
+  // WeakMap keyed by dv.container. Every render disarms its container's
+  // one-shot first, whoever removed the previous root, so any number of
+  // Dataview re-runs leaves at most one armed.
+  _disarmColdLoad(container) {
+    try {
+      if (container && typeof container === "object") this._coldLoads?.get(container)?.disarm();
+    } catch (_e) { /* nothing armed */ }
+  }
+
+  // An armed one-shot is two observers where the mutation-observer API
+  // exists (a resize observer on the root, a childList observer on the
+  // container; only the resize one without it) and one disarm routine that
+  // disconnects both and drops the ownership entry; every exit calls it.
+  // Removal is a signal, not a resize: the childList watch disarms the
+  // one-shot when a record is delivered and its root is no longer a child of
+  // that container, even when the root had a zero box and so never changes
+  // size.
+  // "Removed" is exactly root.parentNode !== container: a container that is
+  // not yet attached, or whose whole view was torn down with the root still
+  // inside, keeps the one-shot armed, so a later attach that lays out
+  // re-renders once. That pair needs no timer, and the ownership entry is
+  // weak (a WeakMap keyed by the container), so nothing the widget holds
+  // keeps a torn-down container alive.
+  // A resize notification is a trigger only: it re-resolves the SAME
+  // measurement render() uses and never reads the notification's box. While
+  // that is still unmeasured it stays armed; the first time it resolves as
+  // measured it disarms and re-renders exactly once WITH that resolution
+  // (no second read), and that render, being measured, arms nothing. Any
+  // fault is swallowed and it stays armed. Adapting to later pane resizes is
+  // PH-9c's work (live pane-resize adaptation), over a measurement the widget
+  // cannot influence.
+  _installColdLoadObserver(dv, overrides, root, resolved) {
+    let armed = null;
+    try {
+      const container = dv?.container;
+      const unmeasured = resolved?.source === "default" || resolved?.source === "mobile-class";
+      const Resize = globalThis.ResizeObserver;
+      if (!root || !container || typeof container !== "object" || !unmeasured || typeof Resize !== "function") return null;
+      const removed = () => root.parentNode !== container;
+      if (removed()) return null;
+      this._disarmColdLoad(container);
+      if (!this._coldLoads) this._coldLoads = new WeakMap();
+      const owners = this._coldLoads;
+      let resize = null;
+      let childList = null;
+      armed = {
+        disarm: () => {
+          try { resize?.disconnect(); } catch (_e) { /* already disconnected */ }
+          try { childList?.disconnect(); } catch (_e) { /* already disconnected */ }
+          if (owners.get(container) === armed) owners.delete(container);
+        },
+      };
+      owners.set(container, armed);
+      resize = new Resize(() => {
+        try {
+          if (removed()) { armed.disarm(); return; }
+          const fresh = this._resolveWidth(dv, overrides);
+          if (fresh.source !== "measured") return;
+          armed.disarm();
+          this._renderAtWidth(dv, overrides, fresh);
+        } catch (_e) { /* swallowed: the one-shot stays armed */ }
+      });
+      const Mutation = globalThis.MutationObserver;
+      if (typeof Mutation === "function") {
+        childList = new Mutation(() => {
+          try {
+            if (removed()) armed.disarm();
+          } catch (_e) { /* swallowed: the one-shot stays armed */ }
+        });
+        childList.observe(container, { childList: true });
+      }
+      resize.observe(root);
+      return armed;
+    } catch (_e) {
+      armed?.disarm();
+      return null;
+    }
+  }
+
+  async render(dv, overrides) {
+    return this._renderAtWidth(dv, overrides, null);
+  }
+
+  // The body of render(). `decided` is null for every render a caller starts;
+  // only the cold-load one-shot passes the measured resolution it just took,
+  // so its re-render draws exactly that presentation without reading the
+  // width a second time.
+  async _renderAtWidth(dv, overrides, decided) {
+    try {
+      this._disarmColdLoad(dv && typeof dv === "object" ? dv.container : null);
       const RS = globalThis.customJS?.RenderSafe;
       const current = RS?.page ? RS.page(dv) : null;
       if (!current?.file?.path || !dv?.container?.createEl) return;
+      // The width is resolved once, while the previous graph (if any) is still
+      // drawn, unless the cold-load one-shot handed over the measurement it
+      // resolved in that same layout state.
+      const resolved = decided && decided.source === "measured" ? decided : this._resolveWidth(dv, overrides);
       const previous = dv.container.querySelector?.(":scope > .graph-view-root");
       previous?.remove?.();
       const root = dv.container.createEl("div");
@@ -1226,15 +1589,35 @@ class GraphView {
       } catch (error) {
         extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
       }
-      try {
-        await this._renderGraph(root, result, api, current.file.path, extraWarnings);
-      } catch (error) {
-        extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
+      // The compact map is a second presentation of the same frozen layout
+      // result; any compact failure degrades to one warning row plus the wide
+      // path — never a blank note.
+      let presented = false;
+      if (resolved.narrow) {
+        const warningsBefore = extraWarnings.length;
+        try {
+          await this._renderCompactGraph(root, result, api, current.file.path, extraWarnings, resolved.width);
+          presented = true;
+        } catch (error) {
+          for (const child of Array.from(root.children || [])) {
+            if (String(child?.className || "").split(/\s+/).includes("graph-view-compact")) child.remove?.();
+          }
+          extraWarnings.length = warningsBefore;
+          extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
+        }
+      }
+      if (!presented) {
+        try {
+          await this._renderGraph(root, result, api, current.file.path, extraWarnings);
+        } catch (error) {
+          extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
+        }
       }
       this._renderWarnings(root, [
         ...(Array.isArray(result.warnings) ? result.warnings : []),
         ...extraWarnings,
       ]);
+      this._installColdLoadObserver(dv, overrides, root, resolved);
     } catch (_e) { /* render-safe: a partial cold-load page is a no-op */ }
   }
 }
