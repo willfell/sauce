@@ -24,7 +24,7 @@ Stop and ask the user before any of these. The router's "What not to do" section
 
 ## Distribution stub
 
-- **Modifying the body of `Docs/Meta/Templater/platformInstall.js` in any consumer.** The thin stub is content-static per landmine #13 (md5 `a39257da1dd49ae4481e5cd0a42bdac4`). A lockstep change across all consumers + distribution-model bump would be required.
+- **Modifying the body of `ranch/templater/platformInstall.js` in any consumer.** The thin stub is content-static per landmine #13 (md5 `ea23aa812503bfca66359d3b2b239ba8`). A lockstep change across all consumers + distribution-model bump would be required.
 - **Editing `platform/installer-stub.js`** in the workshop. Changes the canonical stub body; cascades to every consumer in the next deployment.
 
 ## Platform internals
@@ -51,11 +51,11 @@ The sanctioned set is:
 
 **Top-level dirs:**
 - `spice/<module>/` — blueprint content (landmine #11; renamed from `beacon/<module>/` in v0.25.0)
-- `pantry/` — workshop clone for inside-vault layout (renamed from `Beacon/` in v0.23.0 for macOS APFS case-collision)
+- `pantry/` — legacy workshop clone for the inside-vault layout, retired v0.36.0 (renamed from `Beacon/` in v0.23.0 for macOS APFS case-collision)
 - `ranch/` — runtime plumbing (renamed from `Docs/Meta/` in v0.24.0)
 - `.claude/skills/<blueprint>/` — native Claude Code skill bodies (materialized by `materializeSkills` since v0.30.0)
 
-The `pantry/` + `ranch/` + `spice/` + `.claude/skills/` namespace tetrad is the canonical layout post-v0.30.0.
+The `pantry/` + `ranch/` + `spice/` + `.claude/skills/` namespace tetrad is the canonical layout post-v0.30.0 (`pantry/` is legacy since v0.36.0, when the workshop moved to the brew-installed layout).
 
 **Top-level files (added 2026-05-18 for public-readiness):**
 - `README.md` · `LICENSE` · `SECURITY.md` · `CONTRIBUTING.md`

@@ -20,6 +20,18 @@ These guides are not auto-injected into every conversation. They earn their cont
 | [asking-before-acting.md](asking-before-acting.md) | Before any destructive/shared/cross-vault action. The full ask-before list with landmine context. |
 | [project-blueprint-ui.md](project-blueprint-ui.md) | Editing any project-blueprint helper or template. Shared rendering primitives (Breadcrumb, SectionLabel, DocSearch, EntityCreate) + section ordering + spacing rules locked in v0.109.0. |
 | [migration-regression-net.md](migration-regression-net.md) | Adding an install-time migration, editing `platform/test/seed-vault/`, authoring an `HC-V0XYZ-SEED-*` family, running `npm run seed:rebaseline`, or debugging `run-seed-migrations.js` on CI. |
+| [note-chrome.md](note-chrome.md) | Vault-wide chrome standard (breadcrumb/nav grammar, dividers, migration posture). **New features (all blueprints) follow this grammar.** |
+| [dev-workflow.md](dev-workflow.md) | Day-to-day workflow: `npm run status` first; local-clone vs brew; per-vault sync; the four scripts (workshop-status, regen-cycle-status, scaffold-behavioral-harness, dev-sync). |
+| [delivery-board.md](delivery-board.md) | Epic-centric delivery board topology, `discarded` tombstone governance, supersede-at-mint, reap/restructure/cutover, retroactive digest. Read before touching the board, coordinator lifecycle, or intake supersession. |
+| [sauce-plugin.md](sauce-plugin.md) | The sauce plugin (`plugins/sauce/`, published via sauce's own marketplace): install/reload for Claude + Codex, `.loop/config.json` binding contract, skill surface, Codex router generation. Sauce's own runtime copy of the binding resolver lives at `scripts/autoloop/loop-config.js`. Read before touching the plugin, the binding resolver, or the sauce skill surface. |
+| [engine.md](engine.md) | The Sauce engine: runtime layout under `platform/engine/`, the invariants (append-only ledger, no index, result.json by rename, never writes boards), the four harnesses. Read before touching `platform/engine/`, `platform/cli/cmd-run.js`, or the delivery-slice graph. |
+| [finance-blueprint.md](finance-blueprint.md) | Canonical finance reference (entities, `FinanceMath` engine, Finance Plan, widgets, install heals). Read before any finance work. |
+| [wiki-blueprint.md](wiki-blueprint.md) | Canonical wiki reference (folder-is-truth, render helpers, chrome, move dialog, install heal). Read before any wiki work. |
+| [trips-blueprint.md](trips-blueprint.md) | Canonical trips reference (folder-is-truth, collision-free naming, launcher nav, conformance heal). Read before any trips work. |
+| [reader-blueprint.md](reader-blueprint.md) | Canonical reader reference (flat reading queue, status-in-frontmatter, Web Clipper capture flow, scaffold heal). Read before any reader work. |
+| [schemas.md](schemas.md) | Schema registry (`platform/schemas-index.json`) + `npm run lint-schemas`. Read before designing any feature that touches frontmatter, sidecars, contracts, or learned state. |
+| [cowork-customization-contract.md](cowork-customization-contract.md) | Which cowork consumer-vault files are STOCK vs USER-owned. Read before adding a new user-owned cowork file. |
+| [cowork-orchestrator-template.md](cowork-orchestrator-template.md) | Structural contract every cowork atomic-note orchestrator must conform to. Read before authoring or refactoring an orchestrator. |
 
 ## What does not belong here
 

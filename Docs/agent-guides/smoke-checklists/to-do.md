@@ -5,7 +5,7 @@ load_when: Cycle close that touches to-do's template / dialog / widget surface.
 
 # to-do smoke checklist
 
-Run on a deployed consumer vault after `brew upgrade sauce && sauce update --bump-pins && sauce install`.
+Run on a deployed consumer vault after `brew upgrade sauce && sauce update --bump-pins`.
 
 ## Templates
 - [ ] Open today's `ToDo-<date>.md` → renders without console errors
@@ -37,7 +37,7 @@ Run on a deployed consumer vault after `brew upgrade sauce && sauce update --bum
 
 ## Sentinel heal migration (one-time, post-install)
 - [ ] Before install: `grep -l 'recurring-materialized-2026' spice/to-do/2026/06-June/` finds files with date-only sentinels
-- [ ] After `sauce install`: same grep shows date-only sentinels rewritten to `: ` (empty set) form
+- [ ] After `sauce update --bump-pins`: same grep shows date-only sentinels rewritten to `: ` (empty set) form
 - [ ] On next Obsidian render, the set populates with current hashes
 
 ## Console

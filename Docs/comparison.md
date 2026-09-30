@@ -1,6 +1,6 @@
 # How Sauce compares
 
-Sauce is an Obsidian vault platform with a small orchestration engine at its core. A graph note (`type: sauce-graph` plus one fenced `sauce` block) declares typed nodes and edges. The engine ticks the graph, runs workers in git worktrees, and writes results back into the note. This page sets that next to three other ways people run coding agents.
+Sauce is an Obsidian vault platform with a small orchestration engine at its core. A graph note (`type: sauce-graph` plus one fenced `sauce` block) declares typed nodes and edges. The engine ticks the graph, runs workers in git worktrees, and writes results back into the note. This page sets that next to three other ways people run coding agents. It compares only the engine. For what Sauce is as a whole, see the [README](../README.md).
 
 ## Gas Town
 

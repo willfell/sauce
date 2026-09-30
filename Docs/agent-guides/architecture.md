@@ -9,9 +9,9 @@ load_when: Touching mechanisms, blueprints, the installer, the distribution mode
 
 ## What is Sauce
 
-Sauce is a **workshop vault** that ships a platform installed into **consumer vaults** (currently `barebones`, `accuris-sauce`, `ero-sauce`, `headspace-sauce`). The workshop is also its own first consumer — it self-installs as a regression target ("dogfood"). No personal content lives in the workshop.
+Sauce is a **workshop vault** that ships a platform installed into **consumer vaults** (currently `accuris-sauce`, `ero-sauce`, `headspace-sauce`). The workshop is also its own first consumer — it self-installs as a regression target ("dogfood"). No personal content lives in the workshop.
 
-Distribution: Homebrew tap `willfell/homebrew-sauce` + an `sh` CLI installed via `brew install sauce`. The `sauce` CLI exposes `install`, `audit` (incl. `audit --engine`), `migrate`, `upgrade`, `bootstrap`, and `run` against a target vault directory. See `Docs/use.md` § Onboarding for the full lifecycle.
+Distribution: Homebrew tap `willfell/homebrew-sauce` + an `sh` CLI installed via `brew install sauce`. The `sauce` CLI exposes `bootstrap`, `update` (incl. `update --bump-pins`), `status`, `wizard`, `migrate` (plus `migrate-layout`, `migrate-frontmatter`), `cleanup-project-type`, `reconcile-cowork`, `audit` (incl. `audit --engine`), `vault`, `reinstall`, `doctor`, `link` / `unlink`, `seed`, `run`, and `help` against a target vault directory. See `Docs/use.md` § Onboarding for the full lifecycle.
 
 ## Two building blocks
 
@@ -28,7 +28,7 @@ Both kinds are catalogued in `platform/manifest.json`'s `workshop_version` + `me
 
 ## Installer
 
-`platform/install.js` is the single installer. Each consumer's `Docs/Meta/Templater/platformInstall.js` is a **content-static thin stub** (~12 LOC; canonical at `platform/installer-stub.js`; md5 fixed by landmine #13) that `require()`s the workshop's canonical `install.js` at runtime. Updates reach consumers via `git pull` of the workshop + a fresh install run; the stub never changes.
+`platform/install.js` is the single installer. Each consumer's `ranch/templater/platformInstall.js` is a **content-static thin stub** (20 lines; canonical at `platform/installer-stub.js`; md5 fixed by landmine #13) that `require()`s the workshop's canonical `install.js` at runtime. Updates reach consumers via `brew upgrade sauce` + `sauce update` (a fresh install run); the stub never changes.
 
 Installer behavior:
 - Reads each consumer's `platform-config.json` (path map; sets `{{templates_path}}`, `{{scripts_path}}`, `{{module_directory}}`, etc.).
@@ -52,7 +52,7 @@ The live example — **`sauce-plugin`** — registers customJS renderer classes 
 | Top-level dir | Owner | Lifecycle |
 | --- | --- | --- |
 | `spice/<module>/` | Blueprints | Installed + runtime content. The module-directory invariant lives here. |
-| `pantry/` | Workshop clone (inside-vault layout) | Git-managed snapshot, never hand-edit (landmine #18). |
+| `pantry/` | Workshop clone (legacy inside-vault layout; retired v0.36.0 — the workshop now ships via brew) | Git-managed snapshot, never hand-edit (landmine #18). |
 | `ranch/` | Runtime plumbing | Config, scripts, templates, views. Materialized by the installer. |
 | `.claude/skills/<bp>/` | Native Claude Code skills | Materialized by `materializeSkills` per blueprint. |
 

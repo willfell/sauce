@@ -1,6 +1,6 @@
 # Contributing to Sauce
 
-Sauce is solo-developed by Will Fellhoelter using a cycle-versioned workflow: every change ships as a `vX.Y.Z` cycle with companion `design.md` → `plan.md` → `result.md` docs under `Docs/plans/`.
+Sauce is solo-developed by Will Fellhoelter using an automated release workflow: releases are cut automatically as `vX.Y.Z` from conventional commits on `main`; large cycles also write companion `design.md` → `plan.md` → `result.md` docs under `Docs/plans/`.
 
 ## Before opening a PR
 
@@ -24,7 +24,7 @@ npm install
 npm run release:preflight
 ```
 
-The preflight chain runs the full harness suite; expect ~30s on a recent machine.
+The preflight chain runs the full harness suite; expect a few minutes on a recent machine.
 
 ## Security issues
 

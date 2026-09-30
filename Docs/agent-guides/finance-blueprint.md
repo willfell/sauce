@@ -7,7 +7,7 @@ load_when: Designing or debugging anything in platform/blueprints/finance/, touc
 
 The finance blueprint (`platform/blueprints/finance/`, installs under `spice/finance/`) is a personal-finance system: budgeting, semi-monthly paychecks, debt payoff (avalanche), savings glide, monthly reconciliation, and consulting invoices. It is the most complex blueprint in the workshop (~35 CustomJS classes + a shared engine + ~25 install heals). This guide is the map; the code is the source of truth (the manifest `description` prose is version-lagged — trust the code).
 
-**Version at last doc pass:** finance `0.16.0`. `depends_on`: `nav-buttons >=2.5.2`, `cards >=0.2.3`, `customjs-guard >=1.0.0`, `accent-button >=0.1.0`, `convenience >=0.1.0`, `entity-create >=0.7.0`.
+**Manifest version:** finance `0.23.2` (the body of this guide was last fully reviewed at `0.16.0`). `depends_on`: `nav-buttons >=2.5.2`, `cards >=0.2.3`, `customjs-guard >=1.0.0`, `accent-button >=0.1.0`, `convenience >=0.1.0`, `entity-create >=0.7.0`, `chrome-bar >=0.3.0`, `modal >=0.2.0`, `styling >=0.3.0`.
 
 ## The mental model (read this first)
 

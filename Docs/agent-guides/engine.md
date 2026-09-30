@@ -59,7 +59,7 @@ The stub coordinator for the last one is `platform/test/fixtures/engine/stub-coo
 
 ## Mechanism + always-on heal
 
-`platform/mechanisms/engine/` (slug `engine`, v0.1.0, `skills_dir: .claude/skills/engine`) materializes only the vault-facing surface:
+`platform/mechanisms/engine/` (slug `engine`, `skills_dir: .claude/skills/engine`) materializes only the vault-facing surface:
 
 - `.claude/commands/sauce.md` — the `/sauce` launcher
 - `.claude/skills/engine/run/SKILL.md`

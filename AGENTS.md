@@ -4,7 +4,7 @@ The workshop for the **Sauce** platform: ships mechanisms (cross-cutting code) a
 
 ## Vault identity check (pre-write)
 
-Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-level: `AGENTS.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, not the workshop — STOP.
+Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-level: `AGENTS.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `plugins/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, not the workshop — STOP.
 
 ## Further reading
 
@@ -17,6 +17,8 @@ Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-
 - [`Docs/agent-guides/project-blueprint-ui.md`](Docs/agent-guides/project-blueprint-ui.md) — shared rendering primitives (Breadcrumb, SectionLabel, DocSearch) + section-ordering + spacing conventions for the project blueprint.
 - [`Docs/agent-guides/note-chrome.md`](Docs/agent-guides/note-chrome.md) — vault-wide chrome standard: breadcrumb/nav grammar, the helper-owned divider grammar (`SectionLabel.divider` + leading-hairline ownership, never literal `---`), core-nav + `More ▾` overflow, full-width action rows, no-`## H2`/SectionLabel rule + outline/anchor tradeoff, breadcrumb-declaration schema, open-mode + button rules, migration posture. **New features (all blueprints) follow this grammar.**
 - [`Docs/agent-guides/dev-workflow.md`](Docs/agent-guides/dev-workflow.md) — day-to-day workflow: `npm run status` first; local-clone vs brew; per-vault sync; the four scripts (workshop-status, regen-cycle-status, scaffold-behavioral-harness, dev-sync).
+- [`Docs/agent-guides/delivery-board.md`](Docs/agent-guides/delivery-board.md) — epic-centric delivery board topology, `discarded` tombstone governance, supersede-at-mint, reap/restructure/cutover, retroactive digest. Read before touching the board, coordinator lifecycle, or intake supersession.
+- [`Docs/agent-guides/sauce-plugin.md`](Docs/agent-guides/sauce-plugin.md) — the sauce plugin (`plugins/sauce/`, published via sauce's own marketplace): install/reload for Claude + Codex, `.loop/config.json` binding contract, skill surface, Codex router generation. Sauce's own runtime copy of the binding resolver lives at `scripts/autoloop/loop-config.js`. Read before touching the plugin, the binding resolver, or the sauce skill surface.
 - [`Docs/agent-guides/engine.md`](Docs/agent-guides/engine.md) — the Sauce engine: runtime layout under `platform/engine/`, the invariants (append-only ledger, no index, result.json by rename, never writes boards), the four harnesses. Read before touching `platform/engine/`, `platform/cli/cmd-run.js`, or the delivery-slice graph.
 - [`Docs/agent-guides/finance-blueprint.md`](Docs/agent-guides/finance-blueprint.md) — canonical finance reference: entities + data model, the `FinanceMath` engine, the Finance Plan (lever protocol), every widget, the month workflow, install heals, and the envelope-isolation invariant. Read before any finance work.
 - [`Docs/agent-guides/wiki-blueprint.md`](Docs/agent-guides/wiki-blueprint.md) — canonical wiki reference: note types + folder-is-truth, the render helpers (WikiTree / WikiHubActions / WikiLeafActions / WikiMove), chrome (breadcrumb `path_walk` + nav buttons + helper-owned dividers), `doc-search`, the Move tree dialog, entity-create folder routing, and the `_healWikiChromeBody` install heal. Read before any wiki work.
@@ -27,17 +29,19 @@ Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-
 - [`Docs/agent-guides/vault-paths.md`](Docs/agent-guides/vault-paths.md) — workshop / consumer / legacy source vault paths on this machine.
 - [`Docs/agent-guides/cycle-status.md`](Docs/agent-guides/cycle-status.md) — live workshop version, mechanism + blueprint catalogue, harness count, in-flight queue.
 - [`Docs/agent-guides/asking-before-acting.md`](Docs/agent-guides/asking-before-acting.md) — full ask-before list with landmine context.
-- [`Docs/landmines.md`](Docs/landmines.md) — 22 canonical traps with rationale. Always non-negotiable.
+- [`Docs/agent-guides/cowork-customization-contract.md`](Docs/agent-guides/cowork-customization-contract.md) — which cowork consumer-vault files are STOCK vs USER-owned. Read before adding a new user-owned cowork file.
+- [`Docs/agent-guides/cowork-orchestrator-template.md`](Docs/agent-guides/cowork-orchestrator-template.md) — structural contract every cowork atomic-note orchestrator must conform to. Read before authoring or refactoring an orchestrator.
+- [`Docs/landmines.md`](Docs/landmines.md) — canonical traps with rationale. Always non-negotiable.
 - [`Docs/cycle-history.md`](Docs/cycle-history.md) — archived per-cycle status snapshots in chronological close order.
 - [`Docs/prompts/SESSION-START.md`](Docs/prompts/SESSION-START.md) — canonical session-start recipe (read on every fresh session).
 
 ## When using slash commands
 
-<!-- @Codex-surface:resolvers BEGIN -->
+<!-- @claude-surface:resolvers BEGIN -->
 | Topic | Path | Slash command |
 | --- | --- | --- |
-| Audit | .Codex/commands/audit.md | /audit |
-| Bootstrap | .Codex/commands/bootstrap.md | /bootstrap |
+| Audit | .claude/commands/audit.md | /audit |
+| Bootstrap | .claude/commands/bootstrap.md | /bootstrap |
 | Cowork | spice/cowork | /cowork |
 | Cowork About | spice/cowork/About Cowork.md | /cowork about |
 | Cowork Atomic Notes (cron output) | spice/cowork/daily/ | (cron-only — NOT spice/daily/) |
@@ -51,38 +55,39 @@ Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-
 | Cowork Weekly Hub | spice/cowork/Weekly Hub.md | /weekly hub |
 | Daily | spice/daily | /daily |
 | Home | spice/home | /home |
-| Install | .Codex/commands/install.md | /install |
+| Install | .claude/commands/install.md | /install |
 | Meetings | spice/meetings | /meetings |
 | Projects | spice/projects | /project |
 | Reader | spice/reader | /reader |
+| Sauce | .claude/commands/sauce.md | /sauce |
 | Sticky Notes | spice/sticky-notes | /sticky-notes |
-| Upgrade | .Codex/commands/upgrade.md | /upgrade |
+| Upgrade | .claude/commands/upgrade.md | /upgrade |
 | Wiki | spice/wiki | /wiki |
-<!-- @Codex-surface:resolvers END -->
+<!-- @claude-surface:resolvers END -->
 
 ## Directory map (managed by `claude_surface[]`)
 
-<!-- @Codex-surface:directory-map BEGIN -->
+<!-- @claude-surface:directory-map BEGIN -->
 | Path | Blueprint | Purpose |
 | --- | --- | --- |
 | spice/ | (platform) | Module-directory namespace for blueprints |
 | spice/resources/ | (platform) | Vault default attachment + new-note targets |
 | ranch/ | (platform) | Runtime plumbing (config, scripts, templates, views) |
-| .Codex/commands/ | (platform) | Slash commands managed via claude_surface[] |
-| .Codex/skills/ | (platform) | Native Codex skill bodies |
-<!-- @Codex-surface:directory-map END -->
+| .claude/commands/ | (platform) | Slash commands managed via claude_surface[] |
+| .claude/skills/ | (platform) | Native Claude Code skill bodies |
+<!-- @claude-surface:directory-map END -->
 
 ## Skills index (managed by `claude_surface[]`)
 
-<!-- @Codex-surface:skills-index BEGIN -->
+<!-- @claude-surface:skills-index BEGIN -->
 | Command | SKILL.md | Blueprint/Mechanism |
 | --- | --- | --- |
-<!-- @Codex-surface:skills-index END -->
+<!-- @claude-surface:skills-index END -->
 
 ## What not to do
 
 - Don't bloat this file. It is a router, not a manual — see [`Docs/agent-guides/`](Docs/agent-guides/) for content.
 - Don't duplicate content from `Docs/` into the agent-guides, or from agent-guides into this router.
-- Don't edit content between `Codex-surface` marker pairs. The `platform-Codex` mechanism rewrites those regions on every install.
+- Don't edit content between `claude-surface` marker pairs. The `platform-claude` mechanism rewrites those regions in `CLAUDE.md` on every install; this file's copies mirror them.
 - Don't manually version, tag, sweep version pins, or merge the release PR — the release pipeline is **fully automatic**. Write conventional commits and merge feature work to `main`; the bumper computes per-component + umbrella semver, opens the release PR (which **auto-merges** once CI passes), tags, and ships to brew. Hand-editing `workshop_version` / `package.json` / per-component + seed-vault manifests / `ranch` pins, creating tags, widening `HC-V0*-VERSION-*` regexes/literals, or merging the release PR yourself is the pipeline's job, not yours — see [`Docs/agent-guides/build-test-verify.md`](Docs/agent-guides/build-test-verify.md) § Release workflow.
 - Don't take destructive, cross-vault, or shared-state actions without confirming — see [`Docs/agent-guides/asking-before-acting.md`](Docs/agent-guides/asking-before-acting.md).

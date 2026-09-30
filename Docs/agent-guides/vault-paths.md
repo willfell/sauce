@@ -5,7 +5,7 @@ load_when: Touching any vault path — workshop, consumer, legacy source, or pre
 
 # Vault paths
 
-> The paths below are **current-machine** (post-2026-05-07). On other machines, substitute the equivalent workshop dev-repo path. Auto-memory entry `project_machine_layout.md` carries the same data for cross-session continuity.
+> The paths below are **current-machine** (post-2026-05-07). On other machines, substitute the equivalent workshop dev-repo path. Auto-memory entry `machine-layout-willfell.md` carries the same data for cross-session continuity.
 
 ## Workshop dev repo (THIS directory)
 
@@ -15,7 +15,7 @@ load_when: Touching any vault path — workshop, consumer, legacy source, or pre
 
 Canonical platform source-of-truth. Also self-installs as the workshop dogfood vault. All `cd` / harness invocations in docs assume this path.
 
-GitHub remote: `git@github-personal:willfell/sauce.git` (HTTPS: `https://github.com/willfell/sauce`) — personal account `willfellhoelter@gmail.com`.
+GitHub remote: `git@github.com:willfell/sauce.git` (HTTPS: `https://github.com/willfell/sauce`) — personal account `willfellhoelter@gmail.com`.
 
 ## Consumer vaults
 
@@ -23,66 +23,50 @@ Post-v0.28.0 migrated Sauce-shape vaults:
 
 | Vault | Path | Role |
 | --- | --- | --- |
-| `barebones` | `/Users/willfell/obsidian/barebones` | Primary regression target |
 | `accuris-sauce` | `/Users/willfell/obsidian/accuris-sauce` | Day-to-day consumer |
 | `ero-sauce` | `/Users/willfell/obsidian/ero-sauce` | Day-to-day consumer |
 | `headspace-sauce` | `/Users/willfell/obsidian/headspace-sauce` | Day-to-day consumer + smoke-path target |
 
-## Consumer workshop resolution: local-clone (canonical on this machine)
+## Consumer workshop resolution: brew (canonical on this machine)
 
-Each consumer vault's `ranch/platform-config.json` declares `workshop_relative_path`. On THIS dev machine, consumers point at the **local clone** of the workshop, NOT the brew bottle:
+Each consumer vault's `ranch/platform-config.json` declares `workshop_relative_path`. On THIS dev machine, all three consumers point at the **brew-installed** workshop, NOT a local clone:
 
 ```json
-{ "workshop_relative_path": "/Users/willfell/Documents/GitHub/sauce" }
+{ "workshop_relative_path": "/opt/homebrew/opt/sauce/libexec" }
 ```
 
-**Why local clone (not brew bottle):**
+All three are registered in `~/.sauce/vaults.json`. Consumers only see a change once it has been released and `brew upgrade sauce` has served it locally.
 
-- We ship multiple cycles per day during active development; every commit on workshop `main` is instantly available to consumers without a brew round-trip (bottle bump → PR → merge → `brew upgrade`).
-- Live debugging works: edit a helper in `platform/blueprints/<x>/helpers/` → re-run `sauce install` → the new code materializes immediately.
-- Branch-switching the workshop instantly switches what consumers see — useful for testing branches before merging.
-
-**Tradeoff:** consumers see whatever HEAD of the local workshop is at install time. Uncommitted edits propagate. Other-branch work propagates. Discipline required.
+**Dev override:** `sauce link <checkout>` symlinks `~/.sauce/active-pantry` at a workshop checkout so every `sauce` subcommand dispatches through it; `sauce unlink` reverts to the brew-installed copy (see [`Docs/use.md`](../use.md) § Dev mode). While linked, consumers see whatever HEAD of that checkout is at install time — uncommitted edits and other-branch work propagate — so unlink when done. To materialize a helper edit without linking, run the checkout's installer directly: `node platform/install.js --vault <vault-path> --auto-approve`.
 
 ### Long-term maintenance protocol
 
-Run this sequence whenever you've just landed a workshop cycle and want consumers fully aligned. Order matters.
+Run this sequence after a release has shipped and you want consumers aligned. Order matters.
 
 ```bash
-# 1. Workshop side — confirm clean + on origin/main
-cd /Users/willfell/Documents/GitHub/sauce
-git status                              # expect: clean working tree
-git log --oneline origin/main..HEAD     # expect: empty (no unpushed commits)
-git log --oneline HEAD..origin/main     # expect: empty (no unpulled commits)
-node platform/test/run-helper-cases.js  # expect: PASS
+# 1. Serve the newly released version locally
+brew upgrade sauce
 
-# 2. Per consumer vault — bump subscription pins to match workshop
+# 2. Per consumer vault — bump subscription pins to the brew-installed catalogue (re-runs the installer)
 cd /Users/willfell/obsidian/headspace-sauce
 sauce update --bump-pins
-sauce status                            # expect: drift: none + git head matches workshop HEAD
+sauce status                            # expect: Drift: none
 
 cd /Users/willfell/obsidian/accuris-sauce
+sauce update --bump-pins
+sauce status
+
+cd /Users/willfell/obsidian/ero-sauce
 sauce update --bump-pins
 sauce status
 
 # 3. Cmd+R in Obsidian on each vault — loads new CustomJS classes
 ```
 
-**Expected state after a successful cycle:**
+**Expected state after a successful upgrade:**
 
-- `sauce status` on each consumer reports the same `git head <sha>` as the workshop HEAD.
 - `Drift: none` on each consumer.
 - Workshop `git status` is clean (no uncommitted runtime artifacts).
-
-**When to flip to brew bottle instead:**
-
-Switch consumer `workshop_relative_path` to `/opt/homebrew/opt/sauce/libexec` when:
-
-- You're leaving the machine for an extended period (no active development).
-- You want fully reproducible state across machines (CI/cross-machine sync).
-- The brew bottle is on a tagged release you trust, and you want frozen behavior.
-
-To switch: edit each consumer's `ranch/platform-config.json` `workshop_relative_path` → `/opt/homebrew/opt/sauce/libexec`. The next `sauce update --bump-pins` will install from the bottle instead.
 
 ### Don't ship runtime artifacts
 
@@ -95,19 +79,16 @@ Never push origin/main with stale runtime artifacts mixed into a feature commit.
 
 ## Legacy source vaults (READ-ONLY)
 
-Per landmine #20, these are READ-ONLY: they are **only ever inputs** to `sauce migrate --from <path>`. Never written to.
-
-```
-/Users/willfell/notes/accuris
-/Users/willfell/notes/ero-sync/ero
-/Users/willfell/notes/headspace
-```
+Per landmine #20, legacy source vaults are READ-ONLY: they are **only ever inputs** to `sauce migrate --from <path>`. Never written to. None are present on this machine (`/Users/willfell/notes/` does not exist here); the paths are listed under the predecessor-machine heading below.
 
 ## Predecessor-machine paths (historical reference)
 
 These paths appear in dated handoff / plan / result / prompt docs under `Docs/plans/` + `Docs/prompts/`. **Do NOT edit those for path-update churn** — they are historical artifacts.
 
 ```
+/Users/willfell/notes/accuris                                    (legacy source vault — not present on this machine)
+/Users/willfell/notes/ero-sync/ero                               (legacy source vault — not present on this machine)
+/Users/willfell/notes/headspace                                  (legacy source vault — not present on this machine)
 /Users/willfell/Documents/obsidian/sync/workshop/beacon          (old workshop, pre-rebrand)
 /Users/willfell/Documents/obsidian/sync/workshop/barebones-beacon-poc
 /Users/willfell/Documents/obsidian/sync/workshop/accuris-beacon-poc
@@ -117,8 +98,8 @@ These paths appear in dated handoff / plan / result / prompt docs under `Docs/pl
 
 Before any write to a vault, run `ls <vault-path>` to confirm shape:
 
-- **Workshop** expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you are NOT in the workshop. STOP.
-- **Consumer** expected top-level: `spice/`, `pantry/`, `ranch/`, `.claude/`, `.obsidian/`, plus the consumer's own personal content. No `platform/` or `commands/`.
+- **Workshop** expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `plugins/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you are NOT in the workshop. STOP.
+- **Consumer** expected top-level: `spice/`, `ranch/`, `.claude/`, `.obsidian/`, plus the consumer's own personal content. No `platform/` or `commands/` (and no in-vault `pantry/` — that layout was retired in v0.36.0).
 
 The router's "Vault identity check" section enforces this as a pre-write gate.
 

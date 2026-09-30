@@ -189,7 +189,7 @@ Touching content inside a marker block without going through the mechanism = you
 
 ## When to read deeper
 
-- All 22 landmines with rationale + history blocks → `Docs/landmines.md`.
+- All landmines with rationale + history blocks → `Docs/landmines.md`.
 - Architecture and installer mechanics → [architecture.md](architecture.md) + `Docs/how.md`.
 - Past cycle decisions and platform values → `Docs/cycle-history.md`.
 
