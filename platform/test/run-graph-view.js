@@ -6374,7 +6374,7 @@ async function main() {
   assert.deepStrictEqual(emptyEnv.mutations, [], 'PH1D-EMPTY-NARROW: the 390 and 1024 renders of an epic with no slices write nothing');
 
   // PH-1 source scans.
-  const methodSource = (signature) => widgetSource.match(new RegExp(`\\n  ${signature.replace(/[()]/g, '\\$&')} \\{[\\s\\S]*?\\n  \\}\\n`))?.[0] || '';
+  const methodSource = (signature) => widgetSource.match(new RegExp(`\\n  ${signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{[\\s\\S]*?\\n  \\}\\n`))?.[0] || '';
   const resolverSource = methodSource('_resolveWidth(dv, overrides)');
   const disarmSource = methodSource('_disarmColdLoad(container)');
   const oneShotSource = methodSource('_installColdLoadObserver(dv, overrides, root, resolved)');
