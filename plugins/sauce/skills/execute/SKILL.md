@@ -25,7 +25,7 @@ For each eligible slice of the target epic, in coordinator order (its eligibilit
 
 1. **Claim**: `node <coordinator> claim --json` (dry-run first if the Director wants a preview; receipt returns `lease_token` — keep it for every verb on this card). Work ONLY in the returned worktree and branch.
 2. **Implement (sub-agent)**: dispatch ONE implementation sub-agent into the worktree with the slice card as its brief. It enforces `touch_zones`, `model_profile`, dependencies, deployment map; verifies every cited loader/helper before changing code; adds a regression test that fails without the source change; commits with a release-triggering `fix:`/`feat:` title. Never edits versions, tags, release PRs, or the tap.
-3. **Gate B**: `node <gate> verify-adequacy --base origin/main --json` in the worktree.
+3. **Gate B**: `node <gate> verify-adequacy --base origin/main --cwd <worktree> --json` (the installed `gate.js` diffs whatever `--cwd` names and defaults to its own install tree, so omitting `--cwd` is a vacuous pass).
 4. **Quorum (three read-only sub-agents, sequential)**: correctness, then regression-risk, then test-adequacy — each a SEPARATE context reviewing `git diff origin/main...HEAD`, each verdict recorded immediately:
 
    ```bash
