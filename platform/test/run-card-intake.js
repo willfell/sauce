@@ -1007,8 +1007,516 @@ function canonicalBoardBindings() {
   });
 }
 
+// SYNC-2
+// A stub of the Local REST API plugin. With stallOnPut, the first PUT of that
+// vault path blocks the stub's thread for stallMs before it is handled.
+function sync2IntakeStubMain() {
+  const fs = require('fs');
+  const path = require('path');
+  const http = require('http');
+  const crypto = require('crypto');
+  const { parentPort, workerData: o } = require('worker_threads');
+  const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+  const absOf = (rel) => path.join(o.vault, ...rel.split('/'));
+  const isFileOnDisk = (rel) => { try { return Boolean(rel) && fs.statSync(absOf(rel)).isFile(); } catch (_) { return false; } };
+  const index = new Map();
+  const scan = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(o.vault, ...dir.split('/').filter(Boolean)), { withFileTypes: true }); } catch (_) { entries = []; }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) scan(rel);
+      else if (!entry.name.endsWith('.tmp')) index.set(rel, sha(fs.readFileSync(absOf(rel))));
+    }
+  };
+  scan('');
+  const requests = [];
+  let stalled = false;
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const entry = {
+        at: Date.now(), method: req.method, url: req.url, host: req.headers.host, remote: req.socket.remoteAddress,
+        contentType: req.headers['content-type'] || null, body: Buffer.concat(chunks), rel: null, kind: null, status: null,
+      };
+      requests.push(entry);
+      const echo = o.hostile ? ` ${req.headers.authorization || ''}` : '';
+      const json = { 'Content-Type': 'application/json' };
+      const answer = (status, headers, body) => { entry.status = status; res.writeHead(status, headers); res.end(body); };
+      if (req.url === '/') {
+        entry.kind = 'root';
+        answer(200, json, JSON.stringify({ status: 'OK', authenticated: req.headers.authorization === `Bearer ${o.apiKey}`, ...(o.hostile ? { echo } : {}) }));
+        return;
+      }
+      if (req.headers.authorization !== `Bearer ${o.apiKey}` || !req.url.startsWith('/vault/')) {
+        answer(401, json, JSON.stringify({ errorCode: 40101, message: `Authorization required.${echo}` }));
+        return;
+      }
+      const raw = decodeURIComponent(req.url.slice('/vault/'.length));
+      entry.rel = raw.endsWith('/') ? raw.slice(0, -1) : raw;
+      if (req.method === 'PUT') {
+        entry.kind = 'put';
+        if (o.stallOnPut === entry.rel && !stalled) {
+          stalled = true;
+          parentPort.postMessage({ type: 'stalling', at: Date.now() });
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, o.stallMs);
+          parentPort.postMessage({ type: 'resumed', at: Date.now() });
+        }
+        if (o.putStatus) { answer(o.putStatus, json, JSON.stringify({ errorCode: o.putStatus * 100, message: `stub refused the write${echo}` })); return; }
+        fs.mkdirSync(path.dirname(absOf(entry.rel)), { recursive: true });
+        fs.writeFileSync(absOf(entry.rel), entry.body);
+        index.set(entry.rel, sha(entry.body));
+        answer(204, {}, '');
+        return;
+      }
+      if (isFileOnDisk(entry.rel)) { entry.kind = 'note'; return; }
+      entry.kind = 'list';
+      const prefix = entry.rel ? `${entry.rel}/` : '';
+      const files = [...new Set([...index.keys()].filter((rel) => rel.startsWith(prefix))
+        .map((rel) => { const sub = rel.slice(prefix.length); return sub.includes('/') ? sub.slice(0, sub.indexOf('/') + 1) : sub; }))].sort();
+      if (!files.length) { answer(404, json, JSON.stringify({ errorCode: 40400, message: `File not found${echo}` })); return; }
+      answer(200, json, JSON.stringify({ files, ...(o.hostile ? { echo } : {}) }));
+    });
+  });
+  parentPort.on('message', (message) => {
+    if (message && message.type === 'log') parentPort.postMessage({ type: 'log', id: message.id, requests, index: Object.fromEntries(index) });
+  });
+  server.listen(0, '127.0.0.1', () => parentPort.postMessage({ type: 'ready', port: server.address().port }));
+}
+
+async function sync2IntakeStub(vault, apiKey, extra = {}) {
+  const { Worker } = require('worker_threads');
+  const worker = new Worker(`(${sync2IntakeStubMain.toString()})();`, { eval: true, workerData: { vault, apiKey, ...extra } });
+  const events = [];
+  worker.on('message', (message) => { if (message && (message.type === 'stalling' || message.type === 'resumed')) events.push(message); });
+  const ready = await new Promise((resolve, reject) => {
+    const onMessage = (message) => { if (message && message.type === 'ready') { worker.off('message', onMessage); resolve(message); } };
+    worker.on('message', onMessage);
+    worker.once('error', reject);
+  });
+  let logSeq = 0;
+  let closedLog = null;
+  const fetchLog = () => new Promise((resolve) => {
+    const id = ++logSeq;
+    const onMessage = (message) => {
+      if (!message || message.type !== 'log' || message.id !== id) return;
+      worker.off('message', onMessage);
+      resolve({ requests: message.requests.map((request) => ({ ...request, body: Buffer.from(request.body) })), index: message.index });
+    };
+    worker.on('message', onMessage);
+    worker.postMessage({ type: 'log', id });
+  });
+  return {
+    port: ready.port,
+    events,
+    log: () => (closedLog ? Promise.resolve(closedLog) : fetchLog()),
+    close: async () => {
+      if (closedLog) return;
+      closedLog = await fetchLog();
+      await worker.terminate();
+    },
+  };
+}
+
+// Loaded with --require into an intake CLI child. SYNC2_PROBE_LOG records
+// sockets, workers and vault file writes; SYNC2_MAIN_SHIM replaces vault-index
+// with a module whose functions do nothing.
+function sync2IntakePreloadMain() {
+  const fs = require('fs');
+  const path = require('path');
+  const append = fs.appendFileSync.bind(fs);
+  const log = process.env.SYNC2_PROBE_LOG;
+  const record = (entry) => { if (log) append(log, `${JSON.stringify(entry)}\n`); };
+  if (process.env.SYNC2_MAIN_SHIM) {
+    const target = process.env.SYNC2_MAIN_SHIM;
+    const shim = {
+      beforeNoteWrite() {},
+      beforeNoteRewrite() {},
+      noteWritten() {},
+      lockGate() { return null; },
+      async awaitWriteTurn() {},
+      async withVaultIndex(_vaultRoot, fn) { return fn(null); },
+      async verifyJournal() { return null; },
+      attachObsidianIndex(receipt) { return receipt; },
+      vaultRootForBoard(boardPath) { return path.resolve(path.dirname(boardPath), '../../..'); },
+    };
+    require.cache[target] = { id: target, filename: target, loaded: true, exports: shim, children: [], paths: [] };
+  }
+  if (log) {
+    const net = require('net');
+    const threads = require('worker_threads');
+    const connect = net.Socket.prototype.connect;
+    net.Socket.prototype.connect = function sync2Connect(...args) { record({ op: 'connect' }); return connect.apply(this, args); };
+    const RealWorker = threads.Worker;
+    threads.Worker = class extends RealWorker { constructor(...args) { record({ op: 'worker' }); super(...args); } };
+    const vault = `${process.env.SYNC2_VAULT}${path.sep}`;
+    const wrap = (name, describe) => {
+      const real = fs[name];
+      fs[name] = function sync2Wrapped(...args) {
+        const result = real.apply(this, args);
+        const entry = describe(args);
+        if (entry) record(entry);
+        return result;
+      };
+    };
+    wrap('writeFileSync', ([file]) => (String(file).startsWith(vault) ? { op: 'write', file: String(file) } : null));
+    wrap('renameSync', ([from, to]) => (String(to).startsWith(vault) ? { op: 'rename', from: String(from), to: String(to) } : null));
+    wrap('unlinkSync', ([file]) => (String(file).startsWith(vault) ? { op: 'unlink', file: String(file) } : null));
+    wrap('mkdirSync', ([dir]) => (String(dir).startsWith(vault) ? { op: 'mkdir', dir: String(dir) } : null));
+  }
+}
+
+async function sync2Intake() {
+  console.log('\n--- SYNC-2: intake notes sent to Obsidian after they are written ---');
+  const { spawn } = require('child_process');
+  const intake = require('../../.agents/skills/card-intake/scripts/card-intake');
+  const vaultIndex = require('../../scripts/autoloop/vault-index');
+  const indexPath = path.join(ROOT, 'scripts/autoloop/vault-index.js');
+  const intakePath = path.join(ROOT, '.agents/skills/card-intake/scripts/card-intake.js');
+  const apiKey = crypto.randomBytes(24).toString('hex');
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'card-intake-sync2-'));
+  const stubs = [];
+  const nullStatus = () => ({ action: 'status', cutover: null });
+  const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const snapshot = (vault) => {
+    const out = new Map();
+    const stack = [vault];
+    while (stack.length) {
+      const dir = stack.pop();
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === '.obsidian') continue;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) stack.push(full);
+        else out.set(path.relative(vault, full).split(path.sep).join('/'), fs.readFileSync(full, 'utf8'));
+      }
+    }
+    return out;
+  };
+  const changedBetween = (before, after) => [...after].filter(([rel, raw]) => before.get(rel) !== raw).map(([rel]) => rel).sort();
+  const hidden = (rel) => rel.split('/').some((segment) => segment.startsWith('.'));
+  const indexable = (rels) => rels.filter((rel) => !hidden(rel));
+  const turn = (vault) => path.join(vault, vaultIndex.PENDING_DIR, 'turn');
+  const until = async (predicate, ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline && !predicate()) await new Promise((resolve) => { setTimeout(resolve, 10); });
+    return predicate();
+  };
+  const closedPort = () => new Promise((resolve) => {
+    const probe = require('http').createServer();
+    probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+  });
+  const epicTitle = 'Visibility Epic';
+  const sliceTitles = Array.from({ length: 8 }, (_, i) => `VW-${i + 1} Visible slice ${i + 1}`);
+  let fixtureSeq = 0;
+  const fixture = async (mode = 'reachable', stubExtra = {}) => {
+    const base = path.join(root, `fixture-${++fixtureSeq}`);
+    const vault = path.join(base, 'vault');
+    const slug = 'demo-project';
+    const projectRoot = path.join(vault, 'spice', 'projects', slug);
+    fs.mkdirSync(path.join(projectRoot, 'tasks'), { recursive: true });
+    const boardPath = path.join(projectRoot, `${slug}-board.md`);
+    fs.writeFileSync(boardPath, board());
+    fs.writeFileSync(path.join(projectRoot, 'Roadmap.md'), '# Roadmap\n');
+    fs.writeFileSync(path.join(projectRoot, 'Loop System with Codex.md'), '# Loop System with Codex\n');
+    fs.mkdirSync(path.join(projectRoot, 'platform'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'platform', 'example.js'), Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n'));
+    let stub = null;
+    if (mode === 'reachable') {
+      stub = await sync2IntakeStub(vault, apiKey, stubExtra);
+      stubs.push(stub);
+      const config = path.join(vault, vaultIndex.REST_CONFIG_RELATIVE);
+      fs.mkdirSync(path.dirname(config), { recursive: true });
+      fs.writeFileSync(config, JSON.stringify({
+        port: await closedPort(), insecurePort: stub.port, enableInsecureServer: true, enableSecureServer: true, apiKey,
+      }, null, 2));
+    }
+    const spec = {
+      mode: 'roadmap', classification: 'roadmap_theme', completion_mode: 'release', epic_native: true,
+      outcome: 'Mint a canonical epic whose every note desktop Obsidian indexes.',
+      project_root: projectRoot, link_roots: [projectRoot], evidence_roots: [projectRoot],
+      board_path: boardPath, cards_root: path.join(projectRoot, 'tasks'),
+      created_at: '2026-09-28T06:40:00-06:00',
+      evidence: [{ path: 'platform/example.js', line: 12, note: 'verified behavior', source_identity: 'fixture repo', captured_at: '2026-09-28T06:40:00-06:00', revision: 'fixture-revision', claim: 'The bounded example behavior is verified.' }],
+      protected_cards: [],
+      roadmap_path: path.join(projectRoot, 'docs', 'roadmap', 'Visibility.md'),
+      roadmap_key: 'visibility', roadmap_section: '## Visibility plan\n\n1. Slice',
+      cards: [
+        { title: epicTitle, role: 'parent', lane: 'In Planning', status: 'planning', depends_on: [] },
+        ...sliceTitles.map((title, i) => execution(title, {
+          parent_title: epicTitle, slice: `VW-${i + 1}`, ...(i ? { depends_on: [`[[${sliceTitles[i - 1]}]]`] } : {}),
+        })),
+      ],
+    };
+    return { base, vault, boardPath, stub, spec };
+  };
+  const deps = { readCoordinatorStatus: nullStatus };
+  const fakePrefix = path.join(root, 'fake-brew-prefix');
+  const fakeCoordinator = path.join(fakePrefix, 'libexec', 'scripts', 'autoloop', 'codex-coordinator.js');
+  fs.mkdirSync(path.dirname(fakeCoordinator), { recursive: true });
+  fs.writeFileSync(fakeCoordinator, "process.stdout.write(JSON.stringify({ action: 'status', cutover: null }));\n");
+  const fakeBin = path.join(root, 'bin');
+  fs.mkdirSync(fakeBin, { recursive: true });
+  fs.writeFileSync(path.join(fakeBin, 'brew'), `#!/bin/sh\necho ${JSON.stringify(fakePrefix)}\n`);
+  fs.chmodSync(path.join(fakeBin, 'brew'), 0o755);
+  const preload = path.join(root, 'preload.js');
+  fs.writeFileSync(preload, `(${sync2IntakePreloadMain.toString()})();\n`);
+  let probeSeq = 0;
+  const cli = (fx, extra, options = {}) => new Promise((resolve) => {
+    const specFile = path.join(fx.base, 'spec.json');
+    fs.writeFileSync(specFile, JSON.stringify(fx.spec));
+    const probeLog = options.probe ? path.join(fx.base, `probe-${++probeSeq}.log`) : null;
+    const env = {
+      ...process.env, HOME: root, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, SYNC2_VAULT: fx.vault,
+      ...(probeLog ? { SYNC2_PROBE_LOG: probeLog } : {}),
+      ...(options.mainShim ? { SYNC2_MAIN_SHIM: indexPath } : {}),
+    };
+    const child = spawn(process.execPath, ['--require', preload, intakePath, '--spec', specFile, ...extra, '--json'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = []; const err = [];
+    const timer = setTimeout(() => child.kill('SIGKILL'), 60000);
+    child.stdout.on('data', (chunk) => out.push(chunk));
+    child.stderr.on('data', (chunk) => err.push(chunk));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const stdout = Buffer.concat(out).toString('utf8');
+      let receipt = {};
+      try { receipt = JSON.parse(stdout); } catch (_) { receipt = {}; }
+      const probe = probeLog && fs.existsSync(probeLog)
+        ? fs.readFileSync(probeLog, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+      resolve({ code, stdout, stderr: Buffer.concat(err).toString('utf8'), receipt, pid: child.pid, probe });
+    });
+  });
+  const outputs = [];
+  try {
+    const intakeSource = fs.readFileSync(intakePath, 'utf8');
+    const writerStart = intakeSource.indexOf('function atomicWrite(');
+    const writerBody = writerStart < 0 ? '' : intakeSource.slice(writerStart, intakeSource.indexOf('\n}\n', writerStart));
+    ok(/^function atomicWrite\(file, content\) \{\s*vaultIndex\.beforeNoteWrite\(\);\s*fs\.mkdirSync\(path\.dirname\(file\), \{ recursive: true \}\);\s*const tmp = `\$\{file\}\.card-intake-\$\{process\.pid\}\.tmp`;\s*fs\.writeFileSync\(tmp, content, 'utf8'\);\s*fs\.renameSync\(tmp, file\);\s*vaultIndex\.noteWritten\(file, content\);$/.test(writerBody),
+      'SYNC2-NO-REST-IDENTICAL card-intake atomicWrite keeps its .card-intake-<pid>.tmp rename, between the turn check and the record');
+    ok(!/require\('(?:http|https|net|tls|worker_threads)'\)|'PUT'|withLock/.test(intakeSource),
+      'SYNC2-NO-POST-VERB-WRITE card-intake opens no connection and takes no coordinator lock of its own');
+
+    const dryFx = await fixture();
+    const dryBefore = snapshot(dryFx.vault);
+    const dry = await intake.runAndIndex(dryFx.spec, false, deps);
+    ok(dry.ok === true && dry.applied === false, `SYNC2-NO-REST-IDENTICAL dry run succeeds — ${JSON.stringify(dry.errors || [])}`);
+    ok(!Object.prototype.hasOwnProperty.call(dry, 'obsidian_index'), 'SYNC2-NO-REST-IDENTICAL a dry run carries no obsidian_index');
+    eq([(await dryFx.stub.log()).requests.length, changedBetween(dryBefore, snapshot(dryFx.vault))], [0, []],
+      'SYNC2-NO-REST-IDENTICAL a dry run makes no request and writes nothing');
+
+    // SYNC2-INDEXED-WHEN-HEALTHY
+    const fx = await fixture();
+    const before = snapshot(fx.vault);
+    const applied = await intake.runAndIndex(fx.spec, true, deps);
+    const all = changedBetween(before, snapshot(fx.vault));
+    const notes = indexable(all);
+    const burst = notes.filter((rel) => !before.has(rel) && rel.startsWith(`spice/projects/demo-project/tasks/${epicTitle}/`));
+    const { requests, index: indexed } = await fx.stub.log();
+    const puts = requests.filter((request) => request.kind === 'put');
+    ok(applied.ok === true && applied.no_op === false, `SYNC2-INDEXED-WHEN-HEALTHY --apply mints the epic — ${JSON.stringify(applied.errors || [])}`);
+    eq(burst.length, 11, `SYNC2-INDEXED-WHEN-HEALTHY the mint is eleven new notes: atlas, epic board, context pack, eight cards (${burst.join(', ')})`);
+    eq(notes.filter((rel) => indexed[rel] !== sha(path.join(fx.vault, ...rel.split('/')))), [],
+      'SYNC2-INDEXED-WHEN-HEALTHY SYNC1-TOUCH-NOT-RELIABLE every note of the mint is in the stub\'s index with its bytes when runAndIndex returns');
+    eq(puts.map((request) => request.rel).sort(), notes, 'SYNC2-INDEXED-WHEN-HEALTHY SYNC1-WRITE-THROUGH-REPAIRS every changed note is sent once, the dot-prefixed placeholders never');
+    ok(puts.every((request) => request.contentType === 'text/markdown' && request.body.equals(fs.readFileSync(path.join(fx.vault, ...request.rel.split('/'))))),
+      'SYNC2-INDEXED-WHEN-HEALTHY each PUT carries the bytes intake wrote, as text/markdown');
+    const index = applied.obsidian_index;
+    eq(index && [index.available, index.seen.slice().sort(), index.written_through.slice().sort(), index.unseen, index.conflicts,
+      index.skipped.map((item) => item.path).sort(), index.not_written_through.map((item) => [item.path, item.reason]).sort()],
+    [true, notes, notes, [], [], all.filter(hidden), all.filter(hidden).map((rel) => [rel, 'dot-prefixed'])],
+    'SYNC2-INDEXED-WHEN-HEALTHY obsidian_index: every note written through and seen, placeholders skipped');
+    const firstList = requests.findIndex((request) => request.kind === 'list');
+    eq([requests.filter((request) => request.kind === 'note').length, requests.slice(firstList).filter((request) => request.kind !== 'list').length], [0, 0],
+      'SYNC2-READ-ONLY-VERIFY SYNC1B-UNINDEXED-GET-HANGS the check lists folders only, after every PUT: no note GET, no PUT');
+    eq(fs.existsSync(turn(fx.vault)), false, 'SYNC2-TURN the mint releases the write turn');
+
+    // SYNC2-TURN an applying mint waits for another holder's write turn
+    // before it reads the board or writes anything. The holder, another
+    // process, appends to the board and then releases the turn.
+    const waitFx = await fixture();
+    const { spawn: spawnHolder } = require('child_process');
+    const holder = spawnHolder(process.execPath, ['-e', `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const lease = ${JSON.stringify(turn(waitFx.vault))};
+const board = ${JSON.stringify(waitFx.boardPath)};
+fs.mkdirSync(lease, { recursive: true });
+fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
+process.stdout.write('held\\n');
+setTimeout(() => {
+  fs.appendFileSync(board, '- [x] [[Written by the turn holder]]\\n');
+  const at = Date.now();
+  fs.rmSync(lease, { recursive: true, force: true });
+  process.stdout.write('released ' + at + '\\n');
+}, 800);
+`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    let holderOut = '';
+    holder.stdout.on('data', (chunk) => { holderOut += chunk; });
+    const holderClosed = new Promise((resolve) => holder.on('close', resolve));
+    await until(() => holderOut.includes('held'), 10000);
+    const waitBefore = snapshot(waitFx.vault);
+    let settledAt = 0;
+    const waiting = intake.runAndIndex(waitFx.spec, true, deps).then((result) => { settledAt = Date.now(); return result; });
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    const heldBack = changedBetween(waitBefore, snapshot(waitFx.vault)).filter((rel) => !rel.startsWith(`${vaultIndex.PENDING_DIR}/`));
+    const waited = await waiting;
+    await holderClosed;
+    const releasedAt = Number((holderOut.match(/released (\d+)/) || [])[1]);
+    eq([heldBack, releasedAt > 0 && settledAt >= releasedAt, waited.ok], [[], true, true],
+      'SYNC2-TURN an applying mint writes nothing while another process holds the write turn, then completes');
+    ok(fs.readFileSync(waitFx.boardPath, 'utf8').includes('[[Written by the turn holder]]'),
+      'SYNC2-TURN an applying mint reads the board only after it holds the write turn, so the holder\'s board write survives');
+
+    // SYNC2B-INTAKE-STATUS-FIRST an applying mint reads the coordinator status,
+    // which takes the selector lock, before it waits for the write turn, so it
+    // never holds the turn while it needs a coordinator lock.
+    {
+      const statusFx = await fixture();
+      const { spawn: spawnStatusHolder } = require('child_process');
+      const statusHolder = spawnStatusHolder(process.execPath, ['-e', `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const lease = ${JSON.stringify(turn(statusFx.vault))};
+fs.mkdirSync(lease, { recursive: true });
+fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
+process.stdout.write('held\\n');
+setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + '\\n'); }, 800);
+`], { stdio: ['ignore', 'pipe', 'inherit'] });
+      let statusHolderOut = '';
+      statusHolder.stdout.on('data', (chunk) => { statusHolderOut += chunk; });
+      const statusHolderClosed = new Promise((resolve) => statusHolder.on('close', resolve));
+      await until(() => statusHolderOut.includes('held'), 10000);
+      let statusReadAt = 0;
+      const statusRun = await intake.runAndIndex(statusFx.spec, true, { readCoordinatorStatus: () => { statusReadAt = Date.now(); return nullStatus(); } });
+      await statusHolderClosed;
+      const statusReleasedAt = Number((statusHolderOut.match(/released (\d+)/) || [])[1]);
+      eq([statusRun.ok, statusReadAt > 0 && statusReleasedAt > statusReadAt], [true, true],
+        'SYNC2B-INTAKE-STATUS-FIRST an applying mint reads the coordinator status while another process holds the turn, then waits for the turn');
+    }
+
+    // SYNC2-TURN-INTAKE-RACE (D2): a coordinator verb enters its selector lock,
+    // then an applying mint runs in another process. While the mint's PUT of
+    // the parent board is stalled, the verb, still inside its lock, is refused
+    // the turn and writes nothing; the verb run again later takes the turn
+    // before its lock, waits holding no lock, and read-modify-writes the board.
+    {
+      const coordinator = require('../../scripts/autoloop/codex-coordinator');
+      const raceFx = await fixture('reachable', { stallOnPut: 'spice/projects/demo-project/demo-project-board.md', stallMs: 2500 });
+      const ctx = { stateDir: path.join(raceFx.base, 'state') };
+      const railWrite = (file, text) => {
+        vaultIndex.beforeNoteWrite();
+        const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+        fs.writeFileSync(tmp, text);
+        fs.renameSync(tmp, file);
+        vaultIndex.noteWritten(file, text);
+      };
+      const rewriteBoard = () => {
+        vaultIndex.beforeNoteRewrite();
+        railWrite(raceFx.boardPath, `${fs.readFileSync(raceFx.boardPath, 'utf8')}- [x] [[Coordinator verb write]]\n`);
+      };
+      let verbInside = false;
+      let boardWhenRefused = null;
+      let refusedAt = 0;
+      const verb = vaultIndex.withVaultIndex(raceFx.vault, () => coordinator.withLock(ctx, 'selector', async () => {
+        verbInside = true;
+        await until(() => raceFx.stub.events.some((event) => event.type === 'stalling'), 5000);
+        await new Promise((resolve) => { setTimeout(resolve, 200); });
+        try { rewriteBoard(); return { ok: true }; } catch (error) {
+          refusedAt = Date.now();
+          boardWhenRefused = fs.readFileSync(raceFx.boardPath, 'utf8');
+          return { ok: false, code: error.code, message: error.message };
+        }
+      }));
+      await until(() => verbInside, 5000);
+      const mint = cli(raceFx, ['--apply']);
+      const firstAttempt = await verb;
+      let verbWroteAt = 0;
+      const retry = vaultIndex.withVaultIndex(raceFx.vault, async () => {
+        await vaultIndex.awaitWriteTurn();
+        return coordinator.withLock(ctx, 'selector', async () => { rewriteBoard(); verbWroteAt = Date.now(); return { ok: true }; });
+      });
+      const [verbReceipt, mintRun] = await Promise.all([retry, mint]);
+      outputs.push(mintRun);
+      const mintReceipt = mintRun.receipt;
+      await until(() => raceFx.stub.events.some((event) => event.type === 'resumed'), 10000);
+      await new Promise((resolve) => { setTimeout(resolve, 500); });
+      const finalBoard = fs.readFileSync(raceFx.boardPath, 'utf8');
+      const resumedAt = (raceFx.stub.events.find((event) => event.type === 'resumed') || {}).at;
+      ok(raceFx.stub.events.some((event) => event.type === 'stalling'), 'SYNC2-TURN-INTAKE-RACE precondition: the stub stalled on a PUT of the parent board');
+      ok(firstAttempt.ok === false && firstAttempt.code === 'LOCKED' && refusedAt < resumedAt && !boardWhenRefused.includes('[[Coordinator verb write]]'),
+        `SYNC2B-NO-WAIT-IN-LOCK D2: the verb inside its lock is refused the mint's turn during the stall and writes nothing (${firstAttempt.code})`);
+      eq([finalBoard.includes('[[Coordinator verb write]]'), finalBoard.includes(`[[${epicTitle}]]`), mintRun.code],
+        [true, true, 0], 'SYNC2-TURN-INTAKE-RACE D2: the parent board keeps both the verb\'s write and the mint after the stall');
+      ok(resumedAt > 0 && verbWroteAt >= resumedAt,
+        `SYNC2-TURN-INTAKE-RACE D2: the verb writes the board only after the stalled PUT of it is handled (${verbWroteAt - resumedAt}ms after)`);
+      const mintConflicts = (mintReceipt.obsidian_index && mintReceipt.obsidian_index.conflicts) || [];
+      eq([verbReceipt.obsidian_index.conflicts, mintConflicts.filter((rel) => rel !== 'spice/projects/demo-project/demo-project-board.md')], [[], []],
+        'SYNC2-TURN-INTAKE-RACE the later writer reports no conflict, and the mint at most the board the verb rewrote after it');
+    }
+
+    // SYNC2-NO-REST-IDENTICAL: the apply without REST config against the same
+    // apply with vault-index replaced by a no-op module (the shim run in the
+    // labels).
+    const identical = {};
+    for (const mode of ['main', 'no-config']) {
+      const each = await fixture('none');
+      const beforeCli = snapshot(each.vault);
+      const run = await cli(each, ['--apply'], { probe: true, mainShim: mode === 'main' });
+      outputs.push(run);
+      identical[mode] = { fx: each, run, changed: changedBetween(beforeCli, snapshot(each.vault)), after: snapshot(each.vault) };
+    }
+    const normalize = (text, entry) => String(text).split(entry.fx.base).join('<base>').replace(new RegExp(`\\b${entry.run.pid}\\b`, 'g'), '<pid>');
+    const receiptOf = (entry) => {
+      const { obsidian_index: _index, plan_fingerprint: _fingerprint, ...rest } = JSON.parse(normalize(entry.run.stdout, entry) || '{}');
+      return rest;
+    };
+    const opsOf = (entry) => entry.run.probe.map((op) => normalize(JSON.stringify(op), entry));
+    eq(identical['no-config'].run.code, identical.main.run.code, `SYNC2-NO-REST-IDENTICAL the CLI --apply exit code matches the shim run (${identical.main.run.code})`);
+    eq(receiptOf(identical['no-config']), receiptOf(identical.main), 'SYNC2-NO-REST-IDENTICAL the CLI receipt matches the shim run apart from obsidian_index and the path-derived plan_fingerprint');
+    eq(identical['no-config'].changed.map((rel) => [rel, identical['no-config'].after.get(rel)]), identical.main.changed.map((rel) => [rel, identical.main.after.get(rel)]),
+      'SYNC2-NO-REST-IDENTICAL the notes the apply changed, and their bytes, match the shim run');
+    eq(opsOf(identical['no-config']), opsOf(identical.main), 'SYNC2-NO-REST-IDENTICAL the same probed operations as the shim run, in order: vault writes, tmp names, renames, sockets and workers');
+    ok(identical.main.run.probe.some((op) => op.op === 'rename'), 'SYNC2-NO-REST-IDENTICAL precondition: the compared apply renames notes');
+    eq(identical['no-config'].run.receipt.obsidian_index && [identical['no-config'].run.receipt.obsidian_index.available, identical['no-config'].run.receipt.obsidian_index.reason],
+      [false, 'no-rest-config'], 'SYNC2-NO-REST-IDENTICAL obsidian_index reports that the vault has no REST config');
+
+    // SYNC2-INDEXED-WHEN-HEALTHY through the CLI
+    const cliFx = await fixture();
+    const cliBefore = snapshot(cliFx.vault);
+    const cliApply = await cli(cliFx, ['--apply']);
+    outputs.push(cliApply);
+    const cliNotes = indexable(changedBetween(cliBefore, snapshot(cliFx.vault)));
+    const cliLog = await cliFx.stub.log();
+    eq(cliApply.code, 0, `SYNC2-INDEXED-WHEN-HEALTHY the CLI --apply exits 0 — ${cliApply.stderr.slice(0, 300)}`);
+    eq(cliNotes.filter((rel) => cliLog.index[rel] !== sha(path.join(cliFx.vault, ...rel.split('/')))), [],
+      'SYNC2-INDEXED-WHEN-HEALTHY every note the CLI --apply wrote is in the stub\'s index with its bytes when the CLI exits');
+
+    // SYNC2-SAFETY-CARRIED
+    const wrongFx = await fixture('reachable', { apiKey: crypto.randomBytes(24).toString('hex') });
+    const wrong = await intake.runAndIndex(wrongFx.spec, true, deps);
+    eq([wrong.ok, (await wrongFx.stub.log()).requests.map((request) => request.kind), wrong.obsidian_index && wrong.obsidian_index.reason],
+      [true, ['root'], 'rest-unauthorized'], 'SYNC2-SAFETY-CARRIED a server that rejects the vault key receives only the probe');
+    const refusedFx = await fixture('reachable', { putStatus: 500, hostile: true });
+    const refused = await intake.runAndIndex(refusedFx.spec, true, deps);
+    const refusedNotes = refused.obsidian_index.not_written_through.filter((item) => item.reason === 'put-http-500');
+    ok(refused.ok === true && refusedNotes.length === notes.length
+      && refusedNotes.every((item) => fs.existsSync(path.join(refusedFx.vault, ...item.path.split('/')))),
+    'SYNC2-SAFETY-CARRIED a refused PUT is reported put-http-500 for as many notes as the healthy mint sent, and each reported note is on disk');
+    ok(![applied, refused, wrong].some((receipt) => JSON.stringify(receipt).includes(apiKey))
+      && !outputs.some((run) => run.stdout.includes(apiKey) || run.stderr.includes(apiKey)),
+    'SYNC2-SAFETY-CARRIED the apiKey appears in none of the applied, refused (from a server that echoes it) and wrong-key receipts, nor on the stdout or stderr of the collected CLI runs');
+    const everyRequest = [];
+    for (const stub of stubs) everyRequest.push(...(await stub.log()).requests.map((request) => ({ ...request, port: stub.port })));
+    ok(everyRequest.length > 0 && everyRequest.every((request) => /^(::ffff:)?127\.0\.0\.1$/.test(request.remote) && request.host === `127.0.0.1:${request.port}`),
+      'SYNC2-SAFETY-CARRIED intake requests go only to 127.0.0.1');
+  } finally {
+    for (const stub of stubs) await stub.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   actualLegacyWriterPin(); installedCoordinatorResolution(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); canonicalBoardBindings(); supersedeGovernance(); await exactHeadMaterialization();
+  await sync2Intake();
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
