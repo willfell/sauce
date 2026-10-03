@@ -27,14 +27,18 @@ const path = require('path');
 // run unless finishHarness() ran with at least ASSERTION_FLOOR assertions
 // counted and printed the pass line. Raise ASSERTION_FLOOR when assertions
 // are added. Pattern: platform/test/run-autoloop-leases.js.
-// MUTATION GUARD: PH1D-MUTANT-NARROW-NEVER-SETTLES turns RED here if a narrow
-// render never settles (_renderCompactMap awaiting a promise nothing
-// resolves): without this guard node exits 0 with no pass line; with it the
-// exit code is 1 and stderr names the "PH1D-HARNESS-FLOOR
+// MUTATION GUARD convention, for the PH-2 and PH2B guards: a guard turns its
+// named assertion RED when earlier assertions are neutralised, and in a
+// fail-fast run it may first fail at an earlier assertion.
+// MUTATION GUARD: PH1D-MUTANT-NARROW-NEVER-SETTLES turns RED at the exit
+// guard below if a narrow render never settles (_renderCompactMap awaiting
+// a promise nothing resolves): without that guard node exits 0 with no pass
+// line; with it the exit code is 1 and stderr names the "PH1D-HARNESS-FLOOR
 // (PH1C-HARNESS-NOT-VACUOUS)" abort.
-// MUTATION GUARD: PH1D-MUTANT-COLD-LOAD-NEVER-SETTLES turns RED here the same
-// way if the pane-width watch's re-render (the render handed a measurement)
-// never settles, so the pane-width fixtures' drain waits forever.
+// MUTATION GUARD: PH1D-MUTANT-COLD-LOAD-NEVER-SETTLES turns RED at the exit
+// guard below the same way if the pane-width watch's re-render (the render
+// handed a measurement) never settles, so the pane-width fixtures' drain
+// waits forever.
 let assertionCount = 0;
 const counted = (check) => (...args) => {
   assertionCount += 1;
@@ -44,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 3730;
+const ASSERTION_FLOOR = 3953;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -243,32 +247,39 @@ function file(filePath, mtime = 0) {
 function digestOf(node) {
   return crypto.createHash('sha256').update(JSON.stringify(domShape(node))).digest('hex');
 }
-// PH1C-WIDE-BYTE-IDENTICAL pins (PH1-WIDE-DIGEST-PINS). Each entry is the
-// sha256 of domShape() at rest for a pre-existing epic-scope fixture's whole
-// root and for its canvas scroller subtree, as the pre-PH-1 renderer
-// (graph-view.js at fff7ad69) draws them. Run against that renderer, this
-// file passes the main, clean, and stub-lifecycle pins and first fails at
-// BL2-GLYPH-SOURCE's exact presentation.glyph site count (4 !== 5), before
-// the cross-epic and MX pins.
+// PH1C-WIDE-BYTE-IDENTICAL pins (PH1-WIDE-DIGEST-PINS). Each entry holds
+// sha256 digests of domShape() at rest for a pre-existing epic-scope
+// fixture: scroller, its canvas scroller subtree as the pre-PH-1 renderer
+// (graph-view.js at fff7ad69) draws it; preFrontierRoot, its whole root as
+// that renderer draws it; and root, its whole root with the PH-2 frontier
+// list.
+// PH2B-WHOLE-ROOT-REPIN (PH2-WHOLE-ROOT-REPIN): the whole-root pins are
+// re-pinned for the frontier list as the only difference: assertWideDigest
+// removes that root child and compares the rest with preFrontierRoot.
 const PH1_WIDE_DIGESTS = {
   main: {
-    root: '48bdadf60733de6867a92ae2922311c43481c4664dc5a674d133e135afa21776',
+    root: '3e8a03d0c83199eca3970b064b9e947d31ed474baec3ce92fef6736020fd1b7c',
+    preFrontierRoot: '48bdadf60733de6867a92ae2922311c43481c4664dc5a674d133e135afa21776',
     scroller: '5e4d7cfcbd16b2a3ecb5ff747aa7bfa77b1598e9557c17ded9753ca1a4f68df0',
   },
   clean: {
-    root: 'bb15204729eb48779151562d99d23ca60bcdfae2e4c2a0b185cb0e8f4f758400',
+    root: '0ddcf625ed628ac0befd5fcd03b75429355bc0f7098e1fe7ad1f18afdd75b5bf',
+    preFrontierRoot: 'bb15204729eb48779151562d99d23ca60bcdfae2e4c2a0b185cb0e8f4f758400',
     scroller: 'afd575ede4abca0d0e40860c7712dbf36af2c5e41db4a88ac68e10861233e102',
   },
   stubLifecycle: {
-    root: 'a730b21c4640eec736d849bb1760fea59900745cc38f39c25816696ebebc76d0',
+    root: '3df49b4de904743aeb4f90a836e2221f645382e08466814c2804d15d44ec1bfa',
+    preFrontierRoot: 'a730b21c4640eec736d849bb1760fea59900745cc38f39c25816696ebebc76d0',
     scroller: '320a964a6f047540197aaf1afedf42213adfc06c81e680617ed75b586e12b8b6',
   },
   crossEpic: {
-    root: '480d6b985de32eecd904e26d1d7d6c192832f6d7b416fec714eb30cf3a5d2f33',
+    root: 'bcd79b504136e63fed85e736588bab537f0165e27267fb10d019dc40873bc784',
+    preFrontierRoot: '480d6b985de32eecd904e26d1d7d6c192832f6d7b416fec714eb30cf3a5d2f33',
     scroller: '1388a531760a13ec7f33bd4d63a75448fa10cbdb9a9597e5eb1e9e51e3270f84',
   },
   mx: {
-    root: '7e4d53c843c43950af4fa76aa74465bb51557232eb856f9fa32db3713f60a0e6',
+    root: 'c10cd890f4ddb48f288e15f8b6cdf14fd0a0a60d1cfecb96beec3f9a96b1b3c1',
+    preFrontierRoot: '7e4d53c843c43950af4fa76aa74465bb51557232eb856f9fa32db3713f60a0e6',
     scroller: '41973fd13663ad3a4606a59ca53655259741a6de50646196f457baebdaad165a',
   },
 };
@@ -279,8 +290,42 @@ function assertWideDigest(label, root, expected) {
     `PH1C-WIDE-BYTE-IDENTICAL: ${label} renders no compact host`);
   assert.strictEqual(digestOf(scroller), expected.scroller,
     `PH1C-WIDE-BYTE-IDENTICAL: ${label} canvas + chip subtree digest equals the pre-slice renderer's`);
+  const lists = root.children.filter((child) => child.className === 'graph-view-frontier');
+  const legend = root.children.findIndex((child) => child.className === 'graph-view-legend');
+  assert(lists.length === 1 && legend >= 0 && root.children.indexOf(lists[0]) === legend + 1,
+    `PH2B-WHOLE-ROOT-REPIN: ${label} root holds one frontier list, directly after the legend`);
+  assert.strictEqual(digestOf({ ...root, children: root.children.filter((child) => child !== lists[0]) }), expected.preFrontierRoot,
+    `PH2B-WHOLE-ROOT-REPIN (PH2-WHOLE-ROOT-REPIN): ${label} whole root without its frontier list equals the pre-PH-2 renderer's`);
   assert.strictEqual(digestOf(root), expected.root,
-    `PH1C-WIDE-BYTE-IDENTICAL (PH1-WIDE-DIGEST-PINS): ${label} whole-root digest equals the pre-slice renderer's`);
+    `PH1C-WIDE-BYTE-IDENTICAL (PH1-WIDE-DIGEST-PINS): ${label} whole-root digest equals its pin`);
+}
+// PH-2 frontier list readers: a row as [id, status (with the needs-you glyph
+// when drawn), marker, wait line], and a root's one list as its groups
+// (class, label, rows), its Everything shipped line, and its done strip.
+function ph2RowOf(row) {
+  const pill = byClass(row, 'graph-view-frontier-pill')[0];
+  const glyphs = byClass(row, 'graph-view-needs-you-glyph').map((glyph) => `${glyph.textContent} `).join('');
+  const markers = [...byClass(row, 'graph-view-frontier-next'), ...byClass(row, 'graph-view-frontier-ready')]
+    .map((marker) => marker.textContent);
+  return [
+    byClass(row, 'graph-view-frontier-id')[0]?.textContent ?? null,
+    `${glyphs}${byClass(pill, 'graph-view-frontier-status')[0]?.textContent ?? ''}`,
+    markers.join() || null,
+    byClass(row, 'graph-view-frontier-wait')[0]?.textContent ?? null,
+  ];
+}
+function ph2Read(root) {
+  const lists = byClass(root, 'graph-view-frontier');
+  if (lists.length !== 1) return { lists: lists.length };
+  return {
+    groups: byClass(lists[0], 'graph-view-frontier-group').map((group) => [
+      group.className,
+      byClass(group, 'graph-view-frontier-label')[0]?.textContent ?? null,
+      ...byClass(group, 'graph-view-frontier-row').map(ph2RowOf),
+    ]),
+    shipped: byClass(lists[0], 'graph-view-frontier-shipped').map((node) => node.textContent),
+    strip: byClass(lists[0], 'graph-view-frontier-done-strip').map((node) => node.textContent),
+  };
 }
 // PH-1 compact geometry helpers: compactColW, compactNatural, compactHit,
 // compactPos, and compactEdgeD compute expected compact column widths, canvas
@@ -675,11 +720,27 @@ async function main() {
   const root = container.children.find((child) => child.className === 'graph-view-root');
   assert(root, 'render mounts one graph-view-root');
   // PH1C-WIDE-BYTE-IDENTICAL (main fixture): the default path and an explicit
-  // W=1024 override both match the pinned pre-PH-1 digests.
+  // W=1024 override both match the pinned digests.
   assertWideDigest('main (default width)', root, PH1_WIDE_DIGESTS.main);
   const wideMainContainer = element();
   await new GraphView().render({ container: wideMainContainer }, { containerWidth: 1024 });
   assertWideDigest('main @1024', wideMainContainer.children[0], PH1_WIDE_DIGESTS.main);
+  // PH2B-WHOLE-ROOT-REPIN: the frontier list inside the main pins. This
+  // render has no GraphInsights, so its groups are the fail-soft ones.
+  for (const [label, drawn] of [['default width', root], ['@1024', wideMainContainer.children[0]]]) {
+    assert.deepStrictEqual(ph2Read(drawn), {
+      groups: [
+        ['graph-view-frontier-group frontier-needs-you', 'Needs you 2',
+          ['GV-C', '⚑ waiting', null, 'Waiting for Director sign-off'], ['GV-G', '⚑ waiting', null, longReason]],
+        ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GV-B', 'in progress', null, null]],
+        ['graph-view-frontier-group frontier-planned', 'Planned 3',
+          ['GV-E', 'planning', null, null], ['GV-F', 'unrecognized: garbled', null, null], ['GV-D', 'blocked', null, 'needs GV-B']],
+        ['graph-view-frontier-group frontier-done', 'Done 1', ['GV-A', 'done', null, null]],
+      ],
+      shipped: [],
+      strip: [],
+    }, `PH2B-WHOLE-ROOT-REPIN: main (${label}) draws the fail-soft groups Needs you, In progress, Planned, and Done`);
+  }
   assert.strictEqual(root.children[0]?.className, 'shared-section-divider',
     'VP-2 epic scope owns the shared SectionLabel divider as its first child');
   assert.strictEqual(root.children[1]?.className, 'shared-section-label',
@@ -986,6 +1047,14 @@ async function main() {
   const wideCleanContainer = element();
   await new GraphView().render({ container: wideCleanContainer }, { containerWidth: 1024 });
   assertWideDigest('clean @1024', wideCleanContainer.children[0], PH1_WIDE_DIGESTS.clean);
+  assert.deepStrictEqual([cleanRoot, wideCleanContainer.children[0]].map(ph2Read), [0, 1].map(() => ({
+    groups: [
+      ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GV-B', 'in progress', null, null]],
+      ['graph-view-frontier-group frontier-done', null],
+    ],
+    shipped: [],
+    strip: ['1 done · show'],
+  })), 'PH2B-WHOLE-ROOT-REPIN: clean draws In progress 1 and the folded 1 done strip at both widths');
   assert.strictEqual(byClass(cleanRoot, 'graph-view-chip').length, 2, 'case 7: clean board renders its chips');
   const cleanLegend = byClass(cleanRoot, 'graph-view-legend')[0];
   assert.strictEqual(byClass(cleanLegend, 'graph-view-legend-entry').length, 2,
@@ -1014,6 +1083,17 @@ async function main() {
   const wideStubContainer = element();
   await new GraphView({ lifecycleApi: weirdLifecycleApi }).render({ container: wideStubContainer }, { containerWidth: 1024 });
   assertWideDigest('stub lifecycle @1024', wideStubContainer.children[0], PH1_WIDE_DIGESTS.stubLifecycle);
+  assert.deepStrictEqual([stubContainer.children[0], wideStubContainer.children[0]].map(ph2Read), [0, 1].map(() => ({
+    groups: [
+      ['graph-view-frontier-group frontier-planned', 'Planned 6',
+        ['GV-E', 'unrecognized: planning', null, null], ['GV-F', 'unrecognized: garbled', null, null],
+        ['GV-C', 'unrecognized: parked', null, 'Waiting for Director sign-off'], ['GV-B', 'unrecognized: in_progress', null, null],
+        ['GV-G', 'unrecognized: parked', null, longReason], ['GV-D', 'unrecognized: blocked', null, 'needs GV-B']],
+      ['graph-view-frontier-group frontier-done', 'Done 1', ['GV-A', 'done', null, null]],
+    ],
+    shipped: [],
+    strip: [],
+  })), 'PH2B-WHOLE-ROOT-REPIN: stub lifecycle groups by the injected lifecycle answer at both widths: one done slice, and every other slice Planned');
   const stubChip = byClass(stubContainer.children[0], 'graph-view-chip')
     .find((chip) => flatten(chip).some((node) => node.textContent === 'Base'));
   assert(stubChip.className.includes('status-done')
@@ -1455,6 +1535,14 @@ async function main() {
   const wideBContainer = element();
   await new GraphView().render({ container: wideBContainer }, { containerWidth: 1024 });
   assertWideDigest('cross-epic stub @1024', wideBContainer.children[0], PH1_WIDE_DIGESTS.crossEpic);
+  assert.deepStrictEqual([bRoot, wideBContainer.children[0]].map(ph2Read), [0, 1].map(() => ({
+    groups: [
+      ['graph-view-frontier-group frontier-next', 'Next up 1', ['HB-2', 'planning', 'next', null]],
+      ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['HB-1', 'in progress', null, null]],
+    ],
+    shipped: [],
+    strip: [],
+  })), 'PH2B-WHOLE-ROOT-REPIN: cross-epic stub draws Next up and In progress at both widths, and no row for the stub');
 
   // B1: exactly one ghost stub node renders for the cross-epic dependency,
   // labeled with the owning epic name and the target card id.
@@ -1597,6 +1685,16 @@ async function main() {
   const wideMxContainer = element();
   await new GraphView({ lifecycleApi, insights: new GraphInsights() }).render({ container: wideMxContainer }, { containerWidth: 1024 });
   assertWideDigest('MX @1024', wideMxContainer.children[0], PH1_WIDE_DIGESTS.mx);
+  assert.deepStrictEqual([mxRoot, wideMxContainer.children[0]].map(ph2Read), [0, 1].map(() => ({
+    groups: [
+      ['graph-view-frontier-group frontier-needs-you', 'Needs you 1', ['MX-D', '⚑ waiting', null, mxParkReason]],
+      ['graph-view-frontier-group frontier-next', 'Next up 1', ['MX-A', 'planning', 'next', null]],
+      ['graph-view-frontier-group frontier-blocked', 'Blocked 1', ['MX-C', 'blocked', null, 'needs MX-A']],
+      ['graph-view-frontier-group frontier-ready', 'Ready 1', ['MX-B', 'planning', 'ready', null]],
+    ],
+    shipped: [],
+    strip: [],
+  })), 'PH2B-WHOLE-ROOT-REPIN: MX draws Needs you, Next up (MX-A), Blocked, and Ready at both widths');
   // The MX env mounts without SectionLabel, so the wide root holds no empty
   // element at all: every node has children, text, or edge markup.
   assert.deepStrictEqual(flatten(mxRoot).filter((node) => !node.children.length && !node.textContent && !node.innerHTML).map((node) => node.className),
@@ -2016,7 +2114,7 @@ async function main() {
   }
   byClass(mxWideCard, 'graph-view-detail-close')[0].listeners.click({ stopPropagation() {} });
   assert.strictEqual(digestOf(mxWideRoot), PH1_WIDE_DIGESTS.mx.root,
-    'PH1C-WIDE-BYTE-IDENTICAL: closing the wide card returns the root to the pinned pre-slice shape');
+    'PH1C-WIDE-BYTE-IDENTICAL: closing the wide card returns the root to its pinned at-rest shape');
 
   // MX-writes: the presentation render (including Outcome reads) mutates nothing.
   assert.deepStrictEqual(mxMutations, [],
@@ -3894,7 +3992,7 @@ async function main() {
     // "PH12-CONTROLS-44: render() of six slices and two cross-epic stubs,
     // step 13 (tap PB-1 Far One) ..." if a stub's compact card keeps 32px
     // buttons.
-    const linkClasses = ['graph-view-detail-prerequisite', 'graph-view-detail-dependent'];
+    const linkClasses = ['graph-view-detail-prerequisite', 'graph-view-detail-dependent', 'graph-view-detail-root-cause-link'];
     const heightsOf = (root) => flatten(root).filter((node) => node.tag === 'button')
       .map((button) => [button.className, cssEffective(button.style.cssText)['min-height'] ?? null]);
     const cardDigestOf = (panel) => {
@@ -7910,6 +8008,53 @@ async function main() {
       'PH1D-NO-RESIZE-LISTENERS: render() at a measured 900, at a 390 override, and at an unmeasured 0 whose watch re-renders at 590, then ten quiet seconds, make no call to window.addEventListener, visualViewport.addEventListener, or app.workspace.on');
     ph9Discard(measured, pinned, cold);
   }
+  // ---- PH-2: frontier taps while a pane-width debounce is pending ----
+  // MUTATION GUARD: PH2-MUTANT-JUMP-CLEARS turns RED at "PH-2: a Root cause
+  // jump 60ms into a pending debounce ..." if the jump link clears the
+  // selection instead of selecting the root blocker.
+  {
+    const savedApp = global.app;
+    const savedCustomJS = global.customJS;
+    ph1dUseEnv(epicEnv({
+      dir: 'spice/projects/phone/tasks/Pending Frontier', name: 'Pending Frontier',
+      slices: [
+        { card: 'GA-PE1 One', status: 'completed' },
+        { card: 'GA-PE2 Two', status: 'completed' },
+        { card: 'GA-PE3 Three', status: 'parked', resume_condition: 'Resume after review.' },
+        { card: 'GA-PE4 Four', status: 'blocked', depends_on: ['[[GA-PE3 Three]]'] },
+      ],
+    }));
+    for (const [what, act] of [
+      ['a frontier row tap', (root) => bubblingClick(byClass(root, 'graph-view-frontier-row')[0])],
+      ['a done strip tap', (root) => bubblingClick(byClass(root, 'graph-view-frontier-done-strip')[0])],
+      ['a Root cause jump', (root) => {
+        bubblingClick(byClass(root, 'graph-view-frontier-row').find((row) => byClass(row, 'graph-view-frontier-id')[0]?.textContent === 'GA-PE4'));
+        bubblingClick(byClass(root, 'graph-view-detail-root-cause-link')[0]);
+      }],
+    ]) {
+      const { pane, container } = mountPane(700);
+      const view = countingView();
+      await view.render({ container });
+      await ph1Frame();
+      pane.ph9Width = 590;
+      await ph1Frame();
+      await ph1Clock.advance(60);
+      const before = container.children[0];
+      act(before);
+      const tapped = byClass(before, 'graph-view-detail-panel').length + byClass(before, 'graph-view-frontier-done-rows').length;
+      const afterTap = pendingDelays();
+      const rendersAfterTap = view.renders;
+      await ph1Clock.advance(60);
+      await ph1Drain();
+      assert(tapped === 1 && JSON.stringify(afterTap) === JSON.stringify([120]) && rendersAfterTap === 1 && view.renders === 2
+        && isCompact(container) && byClass(container.children[0], 'graph-view-frontier').length === 1,
+      `PH-2: ${what} 60ms into a pending debounce leaves one card or the done rows open, re-renders nothing, and leaves the 120ms debounce pending, whose compact re-render draws the frontier list`);
+      await settled(`PH-2: ${what} 60ms into a pending debounce`, view, ['wide', 'compact'], container);
+      ph9Discard(pane);
+    }
+    global.app = savedApp;
+    global.customJS = savedCustomJS;
+  }
   assert.deepStrictEqual([ph1StubViolations, liveObservers().length, pendingTimers()], [[], 0, 0],
     'PH1D-STUB-VIOLATIONS: no observer-stub misuse is recorded at the end of the pane-width fixtures, no observer is live, and no timer is pending');
   global.ResizeObserver = savedResizeObserver;
@@ -8024,13 +8169,13 @@ async function main() {
   const rootChildClasses = (node) => (node?.children || []).map((child) => child.className);
   const wideChromeClasses = [
     'shared-section-divider', 'shared-section-label', 'graph-view-stuck-summary', 'graph-view-filter-toolbar',
-    'graph-view-scroll', 'graph-view-legend', 'graph-view-warnings',
+    'graph-view-scroll', 'graph-view-legend', 'graph-view-frontier', 'graph-view-warnings',
   ];
   const staleRowText = "GV-E Stale: depends on a card that doesn't exist: 'GV-1 GraphLayout pure layout core'";
   const garbledRowText = "GV-F Malformed: slice state unreadable: 'garbled'";
   assert(JSON.stringify(rootChildClasses(chromeWideRoot)) === JSON.stringify(wideChromeClasses)
-    && JSON.stringify(chromeWideRoot.children[6].children.map((row) => row.textContent)) === JSON.stringify([staleRowText, garbledRowText]),
-  'PH1D-FAILSOFT-CHROME: a wide render of the main fixture at 1024 has the root children divider, label, stuck summary, toolbar, scroller, legend, and warning strip, and the strip rows are the GV-E dangling row then the GV-F unreadable row');
+    && JSON.stringify(chromeWideRoot.children[7].children.map((row) => row.textContent)) === JSON.stringify([staleRowText, garbledRowText]),
+  'PH1D-FAILSOFT-CHROME: a wide render of the main fixture at 1024 has the root children divider, label, stuck summary, toolbar, scroller, legend, frontier list, and warning strip, and the strip rows are the GV-E dangling row then the GV-F unreadable row');
   // MUTATION GUARD: PH1D-MUTANT-FAILSOFT-REMOVES-EVERY-CHILD turns RED at
   // "PH1D-FAILSOFT-CHROME: after a compact geometry fault at 390 the root
   // children are ..." if the fail-soft cleanup removes every root child
@@ -8040,15 +8185,15 @@ async function main() {
     ['edge fault', partialRoot, 'compact edge fault'],
   ]) {
     assert.deepStrictEqual(rootChildClasses(failedRoot), wideChromeClasses,
-      `PH1D-FAILSOFT-CHROME: after a compact ${label} at 390 the root children are divider, label, stuck summary, toolbar, scroller, legend, and warning strip, in the wide render's order`);
-    assert(failedRoot.children.slice(0, 6).every((child, index) => JSON.stringify(domShape(child)) === JSON.stringify(domShape(chromeWideRoot.children[index]))),
-      `PH1D-FAILSOFT-CHROME: after a compact ${label} at 390 the divider, label, stuck summary, toolbar, scroller, and legend have the same DOM as the wide render's`);
-    const failedStrip = failedRoot.children[6];
+      `PH1D-FAILSOFT-CHROME: after a compact ${label} at 390 the root children are divider, label, stuck summary, toolbar, scroller, legend, frontier list, and warning strip, in the wide render's order`);
+    assert(failedRoot.children.slice(0, 7).every((child, index) => JSON.stringify(domShape(child)) === JSON.stringify(domShape(chromeWideRoot.children[index]))),
+      `PH1D-FAILSOFT-CHROME: after a compact ${label} at 390 the divider, label, stuck summary, toolbar, scroller, legend, and frontier list have the same DOM as the wide render's`);
+    const failedStrip = failedRoot.children[7];
     const failedErrorRows = failedStrip.children.filter((row) => row.className.split(/\s+/).includes('warning-render-error'));
     const stripWithoutErrors = { ...domShape(failedStrip), children: failedStrip.children.filter((row) => !failedErrorRows.includes(row)).map(domShape) };
     assert(JSON.stringify(failedStrip.children.map((row) => row.textContent)) === JSON.stringify([staleRowText, `GraphView: ${fault}`, garbledRowText])
       && failedErrorRows.length === 1 && failedErrorRows[0] === failedStrip.children[1]
-      && JSON.stringify(stripWithoutErrors) === JSON.stringify(domShape(chromeWideRoot.children[6])),
+      && JSON.stringify(stripWithoutErrors) === JSON.stringify(domShape(chromeWideRoot.children[7])),
     `PH1D-FAILSOFT-CHROME: after a compact ${label} at 390 the warning strip is the wide strip with one render_error row "GraphView: ${fault}" between the GV-E dangling row and the GV-F unreadable row`);
   }
 
@@ -8256,6 +8401,8 @@ async function main() {
     && (widgetSource.match(/this\._watchPaneWidth\(/g) || []).length === 1
     && !/_disarmColdLoad|_installColdLoadObserver|_coldLoads/.test(widgetSource),
   'PH9C-ONE-SHOT-EQUIVALENTS (PH1C-ONE-SHOT-COLD-LOAD): every render disconnects its container\'s watch before reading RenderSafe, resolves the width at most once (not when handed a measurement) before removing the previous root, and is the only caller of the watch installer; the PH-1c one-shot is gone');
+  // MUTATION GUARD: PH2-MUTANT-COLOUR-LITERAL turns RED here too if the
+  // ready word is drawn in a hex, rgb, or hsl colour literal.
   assert(!/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(widgetSource),
     'PH1-SOURCE-SCAN: no hex, rgb, or hsl colour literal anywhere in graph-view.js');
   assert.deepStrictEqual([...new Set(widgetSource.match(/var\(--[a-z0-9-]+\)/g))].sort(), PH1_ALLOWED_TOKENS,
@@ -8811,6 +8958,31 @@ async function main() {
     .some((node) => node.textContent && node.textContent.startsWith('E1-2')));
   assert(flatten(crossE12).includes(crossBadges[0]),
     'BL3-PROJECT-BADGE: the cross-epic blast-radius badge lives on E1-2 only');
+  // PH-2 draws no frontier list and no Root cause row at project scope: the
+  // same blocker render with GraphInsights, at rest, with E2-1 (one hop
+  // below the root blocker E1-2) selected, and cleared, matches the digests
+  // the pre-PH-2 renderer (origin/main at v0.298.0) draws.
+  {
+    projectFrontmatter.set(e12Path, { ...healthyE12, status: 'blocked' });
+    const projectContainer = element();
+    await new GraphView({ scope: 'project', insights: realInsights }).render({ container: projectContainer });
+    projectFrontmatter.set(e12Path, healthyE12);
+    const projectRoot = projectContainer.children[0];
+    const projectChipFor = (id) => byClass(projectRoot, 'graph-view-chip')
+      .find((chip) => flatten(chip).some((node) => String(node.textContent || '').startsWith(id)));
+    const atRest = digestOf(projectRoot);
+    bubblingClick(projectChipFor('E2-1'));
+    const selected = digestOf(projectRoot);
+    const labels = byClass(projectRoot, 'graph-view-detail-label').map((label) => label.textContent);
+    bubblingClick(byClass(projectRoot, 'graph-view-canvas')[0]);
+    assert.deepStrictEqual([atRest, selected, labels, digestOf(projectRoot), byClass(projectRoot, 'graph-view-frontier').length], [
+      '7d83b8437aeddbed7165228b38a0f188a07e9951e6c28cd763eddf2b4f3688b1',
+      '428f5b63c00e02d944891af0c00511d8028af2a3c77d26d0bfebbc1e7228eadc',
+      ['Unmet prerequisites', 'Outcome', 'Gates'],
+      '7d83b8437aeddbed7165228b38a0f188a07e9951e6c28cd763eddf2b4f3688b1',
+      0,
+    ], 'PH2-ROOT-CAUSE-BLOCK: at project scope the blocker render matches the pre-PH-2 digests at rest, with E2-1 selected (no Root cause row), and cleared, and draws no frontier list');
+  }
   assert(crossE12.style.cssText.includes(`left:${pExpected.get('E1-2').x}px;top:${pExpected.get('E1-2').y}px`),
     'BL3-PROJECT-GEOMETRY: the separate blocker render preserves E1-2 coordinates');
 
@@ -8936,7 +9108,7 @@ async function main() {
   ];
   assert(localChromeChannels.every((channel) => !channel.test(sectionChromeSource)),
     'VP-2d carried fixture: section chrome defines no local styling or class channel, including optional attribute APIs and createEl attr bags');
-  const panelSource = widgetSource.match(/_panelLink\(parent, node, api, source, className, linkHeight\) \{[\s\S]*?\n  \/\/ Stuck filtering/)?.[0] || '';
+  const panelSource = widgetSource.match(/_panelLink\(parent, node, api, source, className, linkHeight, onActivate\) \{[\s\S]*?\n  \/\/ Stuck filtering/)?.[0] || '';
   assert(panelSource.includes('this._statusPresentation(node.status, api)')
     && !/var\(--color-(?:red|orange|yellow|green|cyan|blue|purple|pink)\)/.test(panelSource),
   'VP4-SHARED-PRESENTATION: panel status glyphs, words, and colors have no local lifecycle palette');
@@ -9078,6 +9250,735 @@ async function main() {
   assert(stationHistory.some((entry) => entry.event === 'info' && entry.step === 'loop_station_graph_heal'
     && entry.action === 'graph_view_injected' && entry.target === 'spice/projects/demo/Loop Station.md'),
   'station heal records one injection history event');
+
+  // ---- PH-2 frontier list (epic scope, both presentations) ----
+  const ph2Saved = { app: global.app, customJS: global.customJS };
+  const ph2Env = (name, slices, laneOrder = []) => epicEnv({
+    dir: `spice/projects/phone/tasks/${name}`, name, slices, laneOrder,
+  });
+  const ph2Draw = async (env, width, { insights = true, view = null } = {}) => {
+    ph1dUseEnv(env);
+    if (!insights) delete global.customJS.GraphInsights;
+    const container = element();
+    await (view || new GraphView({ lifecycleApi })).render({ container }, { containerWidth: width });
+    return container.children[0];
+  };
+  const ph2RowFor = (root, id) => byClass(root, 'graph-view-frontier-row')
+    .find((row) => byClass(row, 'graph-view-frontier-id')[0]?.textContent === id);
+  const ph2MapNodeFor = (root, id) => byClass(root, 'graph-view-chip').find((chip) => (
+    byClass(chip, 'graph-view-pill-id')[0]?.textContent === id
+    || byClass(chip, 'graph-view-chip-id')[0]?.textContent === id));
+  const ph2Labels = (root) => byClass(root, 'graph-view-frontier-label').map((label) => label.textContent);
+  // The Mobile Load Performance shape: seven slices done, GA-ML8 parked,
+  // GA-ML9 blocked behind it, and GA-ML10 blocked behind GA-ML9.
+  const ph2MlCard = (n) => `GA-ML${n} ${['', 'Bundle audit', 'Image budget', 'Font subset', 'Route split', 'Cache headers',
+    'Prefetch hints', 'Worker warmup', 'Device lab rerun', 'Lazy route chunks', 'Cold start budget'][n]}`;
+  const ph2MlEnv = () => ph2Env('Mobile Load Performance', [
+    ...[1, 2, 3, 4, 5, 6, 7].map((n) => ({ card: ph2MlCard(n), status: 'completed' })),
+    { card: ph2MlCard(8), status: 'parked', depends_on: [`[[${ph2MlCard(7)}]]`], resume_condition: 'Resume when the device lab is back online.' },
+    { card: ph2MlCard(9), status: 'blocked', depends_on: [`[[${ph2MlCard(8)}]]`] },
+    { card: ph2MlCard(10), status: 'blocked', depends_on: [`[[${ph2MlCard(9)}]]`] },
+  ], [ph2MlCard(8), ph2MlCard(9), ph2MlCard(10)]);
+  // The Dataview shape: three slices done, one in progress, one queued
+  // behind it.
+  const ph2DvEnv = () => ph2Env('Dataview Indexing', [
+    { card: 'GA-DV1 Field index', status: 'completed' },
+    { card: 'GA-DV2 Inline fields', status: 'completed' },
+    { card: 'GA-DV3 Task index', status: 'completed', depends_on: ['[[GA-DV2 Inline fields]]'] },
+    { card: 'GA-DV4 Query cache', status: 'in_progress', depends_on: ['[[GA-DV3 Task index]]'] },
+    { card: 'GA-DV5 Cache eviction', status: 'planning', depends_on: ['[[GA-DV4 Query cache]]'] },
+  ], ['GA-DV4 Query cache', 'GA-DV5 Cache eviction']);
+  // The Perf shape: every slice done.
+  const ph2PerfEnv = () => ph2Env('Perf Budget', [
+    { card: 'GA-PF1 Baseline trace', status: 'completed' },
+    { card: 'GA-PF2 Paint budget', status: 'completed', depends_on: ['[[GA-PF1 Baseline trace]]'] },
+    { card: 'GA-PF3 Script budget', status: 'completed', depends_on: ['[[GA-PF1 Baseline trace]]'] },
+    { card: 'GA-PF4 Budget gate', status: 'completed', depends_on: ['[[GA-PF2 Paint budget]]', '[[GA-PF3 Script budget]]'] },
+  ]);
+  // Every GraphInsights group, then Done, at once. laneOrder names GA-AG6
+  // before GA-AG7, and GA-AG7 is drawn first.
+  const ph2AgEnv = () => ph2Env('Frontier Groups', [
+    { card: 'GA-AG1 Schema', status: 'completed' },
+    { card: 'GA-AG2 Review gate', status: 'parked', resume_condition: 'Resume after the design review.' },
+    { card: 'GA-AG3 Migration', status: 'blocked', depends_on: ['[[GA-AG2 Review gate]]'] },
+    { card: 'GA-AG4 Importer', status: 'in_progress', depends_on: ['[[GA-AG1 Schema]]'] },
+    { card: 'GA-AG5 Backfill', status: 'planning', depends_on: ['[[GA-AG4 Importer]]'] },
+    { card: 'GA-AG6 Exporter', status: 'planning', depends_on: ['[[GA-AG1 Schema]]'] },
+    { card: 'GA-AG7 Docs', status: 'planning' },
+  ], ['GA-AG6 Exporter', 'GA-AG7 Docs']);
+  const ph2Envs = [];
+  const ph2Track = (env) => { ph2Envs.push(env); return env; };
+
+  // ---- PH2-GROUPS-EXACT (FL3-TRIAGE-COUNTS) ----
+  // MUTATION GUARD: PH2-MUTANT-GROUPS-REORDERED turns RED at
+  // "PH2-GROUPS-EXACT: Frontier Groups ..." if Blocked is drawn before In
+  // progress.
+  // MUTATION GUARD: PH2-MUTANT-EMPTY-GROUP-DRAWN turns RED at
+  // "PH2-GROUPS-EXACT: Mobile Load Performance ..." if a group with no rows
+  // is drawn.
+  // MUTATION GUARD: PH2-MUTANT-BLOCKED-BY-LAST-CAUSE turns RED at
+  // "PH2-GROUPS-EXACT: multiple root causes ..." if a Blocked row names its
+  // last root cause.
+  for (const width of [390, 1024]) {
+    const ml = await ph2Draw(ph2Track(ph2MlEnv()), width);
+    assert.deepStrictEqual(ph2Read(ml), {
+      groups: [
+        ['graph-view-frontier-group frontier-needs-you', 'Needs you 1',
+          ['GA-ML8', '⚑ waiting', null, 'Resume when the device lab is back online.']],
+        ['graph-view-frontier-group frontier-blocked', 'Blocked 2',
+          ['GA-ML9', 'blocked', null, 'blocked by GA-ML8 · 1 hop up'],
+          ['GA-ML10', 'blocked', null, 'blocked by GA-ML8 · 2 hops up']],
+        ['graph-view-frontier-group frontier-done', null],
+      ],
+      shipped: [],
+      strip: ['7 done · show'],
+    }, `PH2-GROUPS-EXACT: Mobile Load Performance at ${width}: Needs you 1, Blocked 2, and the folded 7 done strip, and no other group`);
+    assert.deepStrictEqual(['GA-ML9', 'GA-ML10'].map((id) => {
+      const row = ph2RowFor(ml, id);
+      return `${byClass(row, 'graph-view-frontier-id')[0].textContent} ${byClass(row, 'graph-view-frontier-wait')[0].textContent}`;
+    }), ['GA-ML9 blocked by GA-ML8 · 1 hop up', 'GA-ML10 blocked by GA-ML8 · 2 hops up'],
+    `PH2-GROUPS-EXACT: Mobile Load Performance at ${width}: the Blocked rows read GA-ML9 blocked by GA-ML8 · 1 hop up and GA-ML10 blocked by GA-ML8 · 2 hops up`);
+    const dv = await ph2Draw(ph2Track(ph2DvEnv()), width);
+    assert.deepStrictEqual(ph2Read(dv), {
+      groups: [
+        ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GA-DV4', 'in progress', null, null]],
+        ['graph-view-frontier-group frontier-queued', 'Queued 1', ['GA-DV5', 'planning', null, 'after GA-DV4']],
+        ['graph-view-frontier-group frontier-done', null],
+      ],
+      shipped: [],
+      strip: ['3 done · show'],
+    }, `PH2-GROUPS-EXACT: Dataview at ${width}: In progress 1 and Queued 1 (after GA-DV4), no Next up, and the folded 3 done strip`);
+    const perf = await ph2Draw(ph2Track(ph2PerfEnv()), width);
+    assert.deepStrictEqual(ph2Read(perf), {
+      groups: [['graph-view-frontier-group frontier-done', null]],
+      shipped: ['Everything shipped'],
+      strip: ['4 done · show'],
+    }, `PH2-GROUPS-EXACT: Perf at ${width}: no group but Done, the folded 4 done strip, and the line Everything shipped`);
+    const ag = await ph2Draw(ph2Track(ph2AgEnv()), width);
+    assert.deepStrictEqual(ph2Read(ag), {
+      groups: [
+        ['graph-view-frontier-group frontier-needs-you', 'Needs you 1',
+          ['GA-AG2', '⚑ waiting', null, 'Resume after the design review.']],
+        ['graph-view-frontier-group frontier-next', 'Next up 1', ['GA-AG6', 'planning', 'next', null]],
+        ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GA-AG4', 'in progress', null, null]],
+        ['graph-view-frontier-group frontier-blocked', 'Blocked 1', ['GA-AG3', 'blocked', null, 'blocked by GA-AG2 · 1 hop up']],
+        ['graph-view-frontier-group frontier-ready', 'Ready 1', ['GA-AG7', 'planning', 'ready', null]],
+        ['graph-view-frontier-group frontier-queued', 'Queued 1', ['GA-AG5', 'planning', null, 'after GA-AG4']],
+        ['graph-view-frontier-group frontier-done', 'Done 1', ['GA-AG1', 'done', null, null]],
+      ],
+      shipped: [],
+      strip: [],
+    }, `PH2-GROUPS-EXACT: Frontier Groups at ${width}: Needs you, Next up, In progress, Blocked, Ready, Queued, then Done listed under its label`);
+    assert.deepStrictEqual(byClass(ag, 'graph-view-chip').map((chip) => (byClass(chip, 'graph-view-pill-id')[0] || byClass(chip, 'graph-view-chip-id')[0]).textContent),
+      ['GA-AG7', 'GA-AG1', 'GA-AG2', 'GA-AG6', 'GA-AG3', 'GA-AG4', 'GA-AG5'],
+      `PH2-GROUPS-EXACT: Frontier Groups at ${width}: the map draws GA-AG7 first and GA-AG6 after it`);
+    const ids = byClass(ag, 'graph-view-frontier-row').map((row) => byClass(row, 'graph-view-frontier-title')[0].textContent);
+    assert.deepStrictEqual(ids, ['Review gate', 'Exporter', 'Importer', 'Migration', 'Docs', 'Backfill', 'Schema'],
+      `PH2-GROUPS-EXACT: Frontier Groups at ${width}: each row's title text is its slice title`);
+  }
+  // Multiple root causes: GA-MR3 is blocked behind the parked GA-MR1 and the
+  // blocked GA-MR2, each a root blocker; its row names the first one
+  // GraphInsights lists.
+  {
+    const env = ph2Track(ph2Env('Many Roots', [
+      { card: 'GA-MR1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-MR2 Legal', status: 'blocked' },
+      { card: 'GA-MR3 Launch', status: 'blocked', depends_on: ['[[GA-MR2 Legal]]', '[[GA-MR1 Vendor]]'] },
+    ]));
+    const root = await ph2Draw(env, 1024);
+    assert.deepStrictEqual(ph2Read(root).groups, [
+      ['graph-view-frontier-group frontier-needs-you', 'Needs you 1', ['GA-MR1', '⚑ waiting', null, 'Resume after the vendor call.']],
+      ['graph-view-frontier-group frontier-blocked', 'Blocked 2',
+        ['GA-MR2', 'blocked', null, null],
+        ['GA-MR3', 'blocked', null, 'blocked by GA-MR1 · 1 hop up']],
+    ], 'PH2-GROUPS-EXACT: multiple root causes: a blocked root blocker with nothing to wait on has no wait line, and GA-MR3 names its first root cause, GA-MR1');
+  }
+  // FL3-TRIAGE-COUNTS: the Needs you and Blocked labels show GraphInsights'
+  // summary counts, not the number of rows drawn under them.
+  // MUTATION GUARD: PH2-MUTANT-NEEDS-YOU-COUNTS-ROWS turns RED at
+  // "PH2-GROUPS-EXACT (FL3-TRIAGE-COUNTS): ..." if the Needs you label
+  // counts its rows.
+  // MUTATION GUARD: PH2-MUTANT-BLOCKED-COUNTS-ROWS turns RED at the same
+  // label if the Blocked label counts its rows.
+  // MUTATION GUARD: PH2-MUTANT-SUMMARY-SWAPPED turns RED at the same label
+  // if the two summary fields are read the other way round.
+  {
+    const triage = {
+      analyzeGraph(nodes, edges) {
+        const analysis = new GraphInsights().analyzeGraph(nodes, edges);
+        return { ...analysis, summary: { ...analysis.summary, needsYouCount: 7, blockedCount: 9 } };
+      },
+    };
+    for (const width of [390, 1024]) {
+      const root = await ph2Draw(ph2Track(ph2MlEnv()), width, { view: new GraphView({ lifecycleApi, insights: triage }) });
+      assert.deepStrictEqual(ph2Labels(root), ['Needs you 7', 'Blocked 9'],
+        `PH2-GROUPS-EXACT (FL3-TRIAGE-COUNTS): at ${width} the Needs you and Blocked labels read GraphInsights' needsYouCount 7 and blockedCount 9 over one parked and two blocked rows`);
+    }
+    const real = new GraphInsights().analyzeGraph(
+      [{ card: 'A', status: 'parked' }, { card: 'B', status: 'blocked' }, { card: 'C', status: 'blocked' }], []);
+    assert.deepStrictEqual([real.summary.needsYouCount, real.summary.blockedCount], [1, 2],
+      'PH2-GROUPS-EXACT (FL3-TRIAGE-COUNTS): GraphInsights counts one parked and two blocked records');
+    for (const [label, bad] of [['not a number', 'many'], ['missing', undefined], ['a numeric string', '7'], ['not finite', Infinity]]) {
+      const odd = { analyzeGraph(nodes, edges) {
+        const analysis = new GraphInsights().analyzeGraph(nodes, edges);
+        return { ...analysis, summary: { ...analysis.summary, needsYouCount: bad, blockedCount: bad } };
+      } };
+      const root = await ph2Draw(ph2Track(ph2MlEnv()), 1024, { view: new GraphView({ lifecycleApi, insights: odd }) });
+      assert.deepStrictEqual(ph2Labels(root), ['Needs you 1', 'Blocked 2'],
+        `PH2-GROUPS-EXACT (FL3-TRIAGE-COUNTS): a summary count that is ${label} falls back to the rows drawn`);
+    }
+    const listSource = methodSource('_renderFrontierList(root, nodes, analysis, laneOrder, options)');
+    assert(listSource.includes('summaryCount("needsYouCount")') && listSource.includes('summaryCount("blockedCount")')
+      && !/\.(?:stuckCount|readyCount|gatedTotal|rootBlockers)\b|"(?:stuckCount|readyCount|gatedTotal|rootBlockers)"/.test(listSource)
+      && !/upstream|downstream|\bqueue\b|\bvisited\b/.test(listSource),
+    'PH2-GROUPS-EXACT (FL3-TRIAGE-COUNTS): _renderFrontierList reads needsYouCount and blockedCount from the summary, reads no other summary count, and walks no upstream or downstream closure');
+  }
+
+  // ---- PH2-NEXT-UP-RULE (FL2-NEXT-UP-BADGE, FL2-READY-MARKER, FL2-NO-MARKER-ON-NON-READY) ----
+  // Direct calls over hand-built nodes, with GraphInsights' analysis unless
+  // a case hands in its own.
+  // MUTATION GUARD: PH2-MUTANT-NEXT-BY-DRAW-ORDER turns RED at
+  // "PH2-NEXT-UP-RULE: laneOrder [Y, X] ..." if Next up is the first ready
+  // slice in draw order while laneOrder is non-empty.
+  // MUTATION GUARD: PH2-MUTANT-NEXT-FIRST-LANE-ENTRY turns RED at
+  // "PH2-NEXT-UP-RULE: laneOrder [C, B] ..." if Next up is the first laneOrder
+  // entry whether or not it is ready.
+  // MUTATION GUARD: PH2-MUTANT-NO-DRAW-ORDER-FALLBACK turns RED at
+  // "PH2-NEXT-UP-RULE: laneOrder [GA-Z9] ..." if a laneOrder naming no ready
+  // slice leaves Next up empty.
+  // MUTATION GUARD: PH2-MUTANT-BADGE-EVERY-READY turns RED at
+  // "PH2-NEXT-UP-RULE: empty laneOrder ..." if every ready row carries the
+  // next badge.
+  // MUTATION GUARD: PH2-MUTANT-MARK-NON-READY turns RED at
+  // "PH2-NEXT-UP-RULE (FL2-NO-MARKER-ON-NON-READY): ..." if a Queued row
+  // carries the ready word.
+  // MUTATION GUARD: PH2-MUTANT-READY-INCLUDES-IN-PROGRESS turns RED at
+  // "PH2-NEXT-UP-RULE: an in-progress slice ..." if a ready in-progress slice
+  // can be Next up.
+  // MUTATION GUARD: PH2-MUTANT-READY-IGNORES-INSIGHTS turns RED at
+  // "PH2-NEXT-UP-RULE: laneOrder [C, B] ..." if every planning slice counts
+  // as ready.
+  const ph2Node = (card, status, extra = {}) => ({ card, status, path: `spice/x/${card}.md`, rank: 0, row: 0, ...extra });
+  const ph2Depends = (from, to) => ({ from, to, kind: 'depends' });
+  const ph2List = (nodes, edges, laneOrder, options = {}) => {
+    const { analysis, select = null, view = null } = options;
+    const scope = Object.prototype.hasOwnProperty.call(options, 'scope') ? options.scope : 'epic';
+    const root = element();
+    const drawn = (view || new GraphView({ dashboard, lifecycleApi }))._renderFrontierList(root, nodes,
+      analysis === undefined ? new GraphInsights().analyzeGraph(nodes, edges) : analysis, laneOrder,
+      { scope, api: lifecycleApi, source: 'spice/x/Epic.md', select, edges });
+    return { root, drawn };
+  };
+  {
+    const I = ph2Node('GA-I Running', 'in_progress');
+    const C = ph2Node('GA-C Waits on I', 'planning');
+    const B = ph2Node('GA-B Free', 'planning');
+    const { root } = ph2List([I, C, B], [ph2Depends(I.card, C.card)], [C.card, B.card]);
+    assert.deepStrictEqual(ph2Read(root).groups.map((group) => group.slice(1)), [
+      ['Next up 1', ['GA-B', 'planning', 'next', null]],
+      ['In progress 1', ['GA-I', 'in progress', null, null]],
+      ['Queued 1', ['GA-C', 'planning', null, 'after GA-I']],
+    ], 'PH2-NEXT-UP-RULE: laneOrder [C, B] with B the one ready planning slice: B is the one Next up row and C queues after GA-I');
+    const X = ph2Node('GA-X First', 'planning');
+    const Y = ph2Node('GA-Y Second', 'planning');
+    for (const [label, laneOrder, expected] of [
+      ['empty laneOrder', [], [['Next up 1', ['GA-X', 'planning', 'next', null]], ['Ready 1', ['GA-Y', 'planning', 'ready', null]]]],
+      ['laneOrder [Y, X]', [Y.card, X.card], [['Next up 1', ['GA-Y', 'planning', 'next', null]], ['Ready 1', ['GA-X', 'planning', 'ready', null]]]],
+      ['laneOrder [GA-Z9]', ['GA-Z9 Elsewhere'], [['Next up 1', ['GA-X', 'planning', 'next', null]], ['Ready 1', ['GA-Y', 'planning', 'ready', null]]]],
+      ['laneOrder that is not an array', 'GA-Y Second', [['Next up 1', ['GA-X', 'planning', 'next', null]], ['Ready 1', ['GA-Y', 'planning', 'ready', null]]]],
+      ['laneOrder [X, Y, X]', [X.card, Y.card, X.card], [['Next up 1', ['GA-X', 'planning', 'next', null]], ['Ready 1', ['GA-Y', 'planning', 'ready', null]]]],
+      ['laneOrder [GA-Z9, Y, X]', ['GA-Z9 Elsewhere', Y.card, X.card], [['Next up 1', ['GA-Y', 'planning', 'next', null]], ['Ready 1', ['GA-X', 'planning', 'ready', null]]]],
+    ]) {
+      const { root: drawnRoot } = ph2List([X, Y], [], laneOrder);
+      assert.deepStrictEqual(ph2Read(drawnRoot).groups.map((group) => group.slice(1)), expected,
+        `PH2-NEXT-UP-RULE: ${label}: the expected slice is the one Next up row (FL2-NEXT-UP-BADGE) and the other ready slice lists under Ready with the ready word (FL2-READY-MARKER)`);
+    }
+    const Z = ph2Node('GA-Z Third', 'planning');
+    const { root: threeReady } = ph2List([X, Y, Z], [], [Z.card]);
+    assert.deepStrictEqual(ph2Read(threeReady).groups.map((group) => group.slice(1)), [
+      ['Next up 1', ['GA-Z', 'planning', 'next', null]],
+      ['Ready 2', ['GA-X', 'planning', 'ready', null], ['GA-Y', 'planning', 'ready', null]],
+    ], 'PH2-NEXT-UP-RULE: three ready slices with laneOrder [Z]: Z is Next up and X then Y list under Ready in draw order');
+    const P = ph2Node('GA-P Done', 'completed');
+    const R = ph2Node('GA-R Running', 'in_progress');
+    const { root: inProgressReady } = ph2List([P, R], [ph2Depends(P.card, R.card)], [R.card]);
+    assert.deepStrictEqual(ph2Read(inProgressReady).groups.map((group) => group.slice(1)), [
+      ['In progress 1', ['GA-R', 'in progress', null, null]],
+      [null],
+    ], 'PH2-NEXT-UP-RULE: an in-progress slice that GraphInsights marks ready lists under In progress with no marker, and no Next up or Ready group is drawn');
+    assert.strictEqual(new GraphInsights().analyzeGraph([P, R], [ph2Depends(P.card, R.card)]).perNode[R.card].isReady, true,
+      'PH2-NEXT-UP-RULE: GraphInsights marks that in-progress slice ready');
+    const { root: noneReady } = ph2List([I, C], [ph2Depends(I.card, C.card)], [C.card]);
+    assert(ph2Labels(noneReady).every((label) => !/^(?:Next up|Ready) /.test(label))
+      && byClass(noneReady, 'graph-view-frontier-next').length === 0 && byClass(noneReady, 'graph-view-frontier-ready').length === 0,
+    'PH2-NEXT-UP-RULE: zero ready slices draw neither Next up nor Ready and no marker');
+  }
+  // MUTATION GUARD: PH2-MUTANT-READY-TRUTHY turns RED at "PH2-NEXT-UP-RULE:
+  // per-node analysis with isReady "true" ..." if a truthy isReady other
+  // than true counts as ready.
+  {
+    const nodes = [ph2Node('GA-X First', 'planning'), ph2Node('GA-Y Second', 'planning')];
+    for (const [label, isReady] of [['without isReady', undefined], ['with isReady "true"', 'true'], ['with isReady 1', 1]]) {
+      const real = new GraphInsights().analyzeGraph(nodes, []);
+      const perNode = Object.fromEntries(Object.entries(real.perNode).map(([card, entry]) => [card, { ...entry, isReady }]));
+      const { root } = ph2List(nodes, [], [], { analysis: { ...real, perNode } });
+      assert.deepStrictEqual(ph2Read(root).groups.map((group) => group.slice(1)), [
+        ['Queued 2', ['GA-X', 'planning', null, null], ['GA-Y', 'planning', null, null]],
+      ], `PH2-NEXT-UP-RULE: per-node analysis ${label} marks no slice ready, so both queue and neither Next up nor Ready is drawn`);
+    }
+  }
+  // FL2-NO-MARKER-ON-NON-READY: a stub, a parked, a blocked, an
+  // in-progress, a completed, a null-status, and an unrecognized slice,
+  // beside one ready slice and one after the stub.
+  {
+    const done = ph2Node('GA-N1 Done', 'completed');
+    const nodes = [
+      ph2Node('GA-N0 Other epic', null, { isStub: true, stubLabel: 'Other · GA-N0' }),
+      done,
+      ph2Node('GA-N2 Parked', 'parked'),
+      ph2Node('GA-N3 Blocked', 'blocked'),
+      ph2Node('GA-N4 Running', 'in_progress'),
+      ph2Node('GA-N5 No status', null),
+      ph2Node('GA-N6 Odd', 'garbled'),
+      ph2Node('GA-N7 Ready', 'planning'),
+      ph2Node('GA-N8 After stub', 'planning'),
+    ];
+    const edges = [ph2Depends('GA-N0 Other epic', 'GA-N8 After stub')];
+    const { root } = ph2List(nodes, edges, []);
+    const read = ph2Read(root);
+    assert.deepStrictEqual(read.groups.map((group) => group.slice(1)), [
+      ['Needs you 1', ['GA-N2', '⚑ waiting', null, null]],
+      ['Next up 1', ['GA-N7', 'planning', 'next', null]],
+      ['In progress 1', ['GA-N4', 'in progress', null, null]],
+      ['Blocked 1', ['GA-N3', 'blocked', null, null]],
+      ['Queued 3', ['GA-N5', 'unrecognized: (missing)', null, null], ['GA-N6', 'unrecognized: garbled', null, null],
+        ['GA-N8', 'planning', null, 'after GA-N0']],
+      ['Done 1', ['GA-N1', 'done', null, null]],
+    ], 'PH2-NEXT-UP-RULE (FL2-NO-MARKER-ON-NON-READY): stub, parked, blocked, in-progress, completed, null-status, and unrecognized slices carry no marker, a stub gets no row, and a slice after a stub queues after it');
+    assert.strictEqual(byClass(root, 'graph-view-frontier-row').length, 8,
+      'PH2-NEXT-UP-RULE (FL2-NO-MARKER-ON-NON-READY): one row per slice and none for the stub');
+    const after = [
+      ph2Node('GA-W1 Done', 'completed'), ph2Node('GA-W2 Running', 'in_progress'), ph2Node('GA-W3 Sibling', 'planning'),
+      ph2Node('GA-W5 Spec', 'blocked'), ph2Node('GA-W4 Waits', 'planning'), ph2Node('Untitled follow-up', 'planning'),
+    ];
+    const { root: afterRoot } = ph2List(after, [
+      ph2Depends('GA-W1 Done', 'GA-W4 Waits'), ph2Depends('GA-W2 Running', 'GA-W4 Waits'),
+      { from: 'GA-W3 Sibling', to: 'GA-W4 Waits', kind: 'order' }, ph2Depends('GA-W5 Spec', 'GA-W4 Waits'),
+      ph2Depends('GA-W4 Waits', 'Untitled follow-up'),
+    ], []);
+    assert.deepStrictEqual(ph2Read(afterRoot).groups.filter((group) => group[1]?.startsWith('Queued')).map((group) => group.slice(1)), [
+      ['Queued 2', ['GA-W4', 'planning', null, 'after GA-W2, GA-W5'], [null, 'planning', null, 'after GA-W4']],
+    ], 'PH2-NEXT-UP-RULE (FL2-NO-MARKER-ON-NON-READY): a queued row names its unfinished depends prerequisites, comma-separated, and not a done one or an order sibling, and a card with no id draws no id chip');
+    const untitled = byClass(afterRoot, 'graph-view-frontier-row').at(-2);
+    assert(byClass(untitled, 'graph-view-frontier-id').length === 0
+      && byClass(untitled, 'graph-view-frontier-title')[0]?.textContent === 'Untitled follow-up',
+    'PH2-NEXT-UP-RULE: a card with no id draws no id chip and shows its whole name as the title');
+    const next = byClass(root, 'graph-view-frontier-next');
+    assert(next.length === 1 && next[0].style.cssText === 'padding:1px 7px;border-radius:999px;font-weight:700;color:var(--interactive-accent);'
+      + 'border:1px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent);',
+    'PH2-NEXT-UP-RULE (FL2-NEXT-UP-BADGE): the one next badge is drawn in var(--interactive-accent) only');
+    // MUTATION GUARD: PH2-MUTANT-COLOUR-LITERAL turns RED at
+    // "PH2-NEXT-UP-RULE (FL2-READY-MARKER): ..." if the ready word is drawn
+    // in a local colour literal.
+    const { root: readyRoot } = ph2List([ph2Node('GA-Q1 One', 'planning'), ph2Node('GA-Q2 Two', 'planning')], [], []);
+    const readyWords = byClass(readyRoot, 'graph-view-frontier-ready');
+    assert(readyWords.length === 1 && readyWords[0].textContent === 'ready'
+      && readyWords[0].style.cssText === 'font-weight:700;color:var(--interactive-accent);',
+    'PH2-NEXT-UP-RULE (FL2-READY-MARKER): the ready word is drawn in var(--interactive-accent) only');
+  }
+
+  // ---- PH2-DONE-FOLD-THRESHOLD ----
+  // MUTATION GUARD: PH2-MUTANT-FOLD-BELOW-HALF turns RED at
+  // "PH2-DONE-FOLD-THRESHOLD: 5 of 12 done ..." if done folds below half.
+  // MUTATION GUARD: PH2-MUTANT-FOLD-ABOVE-HALF-ONLY turns RED at
+  // "PH2-DONE-FOLD-THRESHOLD: 6 of 12 done ..." if exactly half lists.
+  // MUTATION GUARD: PH2-MUTANT-STUBS-COUNT-TOWARD-RATIO turns RED at
+  // "PH2-DONE-FOLD-THRESHOLD: 5 of 10 done with two stubs ..." if stubs count
+  // toward the ratio.
+  // MUTATION GUARD: PH2-MUTANT-FOLD-AT-49 turns RED at
+  // "PH2-DONE-FOLD-THRESHOLD: 49 of 100 done ..." if done folds from 0.49.
+  const ph2Ratio = (doneCount, liveCount, stubs = 0) => {
+    const nodes = [
+      ...Array.from({ length: stubs }, (_, index) => ph2Node(`GA-S${index + 1} Stub`, null, { isStub: true })),
+      ...Array.from({ length: liveCount }, (_, index) => ph2Node(`GA-D${index + 1} Slice`, index < doneCount ? 'completed' : 'in_progress')),
+    ];
+    return ph2List(nodes, [], []).root;
+  };
+  for (const [doneCount, liveCount, stubs, folds] of [
+    [6, 12, 0, true], [5, 12, 0, false], [12, 12, 0, true], [5, 11, 0, false], [6, 11, 0, true],
+    [4, 9, 0, false], [5, 9, 0, true], [1, 1, 0, true], [1, 2, 0, true], [1, 3, 0, false],
+    [49, 100, 0, false], [50, 100, 0, true], [5, 10, 2, true], [4, 10, 2, false], [0, 3, 0, null],
+  ]) {
+    const root = ph2Ratio(doneCount, liveCount, stubs);
+    const read = ph2Read(root);
+    const doneGroup = read.groups.find((group) => group[0].includes('frontier-done')) || null;
+    const expected = folds === null ? null : folds
+      ? { strip: [`${doneCount} done · show`], group: ['graph-view-frontier-group frontier-done', null] }
+      : { strip: [], group: ['graph-view-frontier-group frontier-done', `Done ${doneCount}`,
+        ...Array.from({ length: doneCount }, (_, index) => [`GA-D${index + 1}`, 'done', null, null])] };
+    assert.deepStrictEqual({ strip: read.strip, group: doneGroup }, expected || { strip: [], group: null },
+      `PH2-DONE-FOLD-THRESHOLD: ${doneCount} of ${liveCount} done${stubs ? ` with ${stubs === 2 ? 'two' : stubs} stubs` : ''} ${folds === null ? 'draws no Done group' : folds ? `folds into the strip "${doneCount} done · show"` : `lists ${doneCount} done rows under a Done label`}`);
+  }
+  // Tapping the strip expands the done rows; tapping it again restores the
+  // folded DOM exactly.
+  // MUTATION GUARD: PH2-MUTANT-STRIP-EXPANDS-ONCE turns RED at
+  // "PH2-DONE-FOLD-THRESHOLD: a second strip tap ..." if the strip cannot
+  // fold again.
+  // MUTATION GUARD: PH2-MUTANT-STRIP-TAP-BUBBLES turns RED at
+  // "PH2-DONE-FOLD-THRESHOLD: a strip tap ..." if the strip tap bubbles.
+  for (const width of [390, 1024]) {
+    const env = ph2Track(ph2PerfEnv());
+    const root = await ph2Draw(env, width);
+    const atRest = JSON.stringify(domShape(root));
+    const strip = byClass(root, 'graph-view-frontier-done-strip')[0];
+    const tap = bubblingClick(strip);
+    const expandedRows = byClass(root, 'graph-view-frontier-done-rows')[0];
+    assert(tap.stopped && strip.textContent === '4 done · hide' && strip.attrs['aria-expanded'] === 'true'
+      && expandedRows?.parent === strip.parent && strip.parent.children.indexOf(expandedRows) === strip.parent.children.indexOf(strip) + 1
+      && JSON.stringify(byClass(root, 'graph-view-frontier-done-rows').map((rows) => rows.children.map(ph2RowOf))) === JSON.stringify([[
+        ['GA-PF1', 'done', null, null], ['GA-PF2', 'done', null, null], ['GA-PF3', 'done', null, null], ['GA-PF4', 'done', null, null],
+      ]]),
+    `PH2-DONE-FOLD-THRESHOLD: a strip tap at ${width} stops there, expands the four done rows in draw order as the strip's next sibling, and the strip reads 4 done · hide`);
+    bubblingClick(strip);
+    assert.strictEqual(JSON.stringify(domShape(root)), atRest,
+      `PH2-DONE-FOLD-THRESHOLD: a second strip tap at ${width} folds the rows again and restores the folded DOM exactly`);
+    bubblingClick(strip);
+    assert.strictEqual(byClass(root, 'graph-view-frontier-done-rows')[0]?.children.length, 4,
+      `PH2-DONE-FOLD-THRESHOLD: a third strip tap at ${width} expands the four rows again`);
+  }
+
+  // ---- PH2-ROW-TAP-SELECTS ----
+  // A row tap and a tap on the slice's map pill (390) or chip (1024) leave
+  // the same DOM; a second tap on the row opens the note.
+  // MUTATION GUARD: PH2-MUTANT-ROW-OPENS turns RED at "PH2-ROW-TAP-SELECTS:
+  // at 390 a GA-ML9 row tap ..." if a row tap opens the note instead of
+  // selecting.
+  // MUTATION GUARD: PH2-MUTANT-ROW-SELECTS-WITHOUT-INSIGHTS turns RED at
+  // "PH2-INSIGHTS-ABSENT-FAIL-SOFT: at 390 a row tap ..." if a row tap
+  // without GraphInsights does nothing.
+  for (const width of [390, 1024]) {
+    const env = ph2Track(ph2MlEnv());
+    const byRow = await ph2Draw(env, width);
+    const byMap = await ph2Draw(env, width);
+    const atRest = JSON.stringify(domShape(byRow));
+    const rowTap = bubblingClick(ph2RowFor(byRow, 'GA-ML9'));
+    bubblingClick(ph2MapNodeFor(byMap, 'GA-ML9'));
+    const panel = byClass(byRow, 'graph-view-detail-panel');
+    assert(rowTap.stopped && env.opened.length === 0 && panel.length === 1
+      && byClass(panel[0], 'graph-view-detail-id')[0]?.textContent === 'GA-ML9'
+      && JSON.stringify(domShape(byRow)) === JSON.stringify(domShape(byMap)),
+    `PH2-ROW-TAP-SELECTS: at ${width} a GA-ML9 row tap stops there, opens nothing, and leaves the same DOM (chain highlight and card) as a tap on its ${width === 390 ? 'pill' : 'chip'}`);
+    bubblingClick(ph2RowFor(byRow, 'GA-ML9'));
+    assert.deepStrictEqual(env.opened, [[`${env.boardDir}/${ph2MlCard(9)}`, env.epicPath, false]],
+      `PH2-ROW-TAP-SELECTS: at ${width} a second GA-ML9 row tap opens its note`);
+    bubblingClick(ph2RowFor(byRow, 'GA-ML10'));
+    bubblingClick(ph2MapNodeFor(byRow, 'GA-ML10'));
+    assert.deepStrictEqual(env.opened.at(-1), [`${env.boardDir}/${ph2MlCard(10)}`, env.epicPath, false],
+      `PH2-ROW-TAP-SELECTS: at ${width} a GA-ML10 row tap then a tap on its ${width === 390 ? 'pill' : 'chip'} opens its note`);
+    bubblingClick(byClass(byRow, 'graph-view-canvas')[0]);
+    assert.strictEqual(JSON.stringify(domShape(byRow)), atRest,
+      `PH2-ROW-TAP-SELECTS: at ${width} a canvas tap after row taps restores the at-rest DOM`);
+  }
+
+  // ---- PH2-ROOT-CAUSE-BLOCK (FL3-ROOT-CAUSE-BLOCK) ----
+  // MUTATION GUARD: PH2-MUTANT-ROOT-CAUSE-OPENS turns RED at
+  // "PH2-ROOT-CAUSE-BLOCK: at 390 the GA-ML8 jump link ..." if the jump link
+  // opens the root blocker's note instead of selecting it.
+  // MUTATION GUARD: PH2-MUTANT-ROOT-CAUSE-ON-ROOT turns RED at
+  // "PH2-ROOT-CAUSE-BLOCK: at 390 selecting GA-ML8 ..." if a root blocker
+  // lists itself.
+  // MUTATION GUARD: PH2-MUTANT-ROOT-CAUSE-AT-PROJECT turns RED at
+  // "PH2-ROOT-CAUSE-BLOCK: at project scope ..." if project-scope cards get
+  // the block.
+  // MUTATION GUARD: PH2-MUTANT-ROOT-CAUSE-LINK-NO-HEIGHT turns RED at
+  // "PH2-ROOT-CAUSE-BLOCK: at 390 selecting GA-ML10 ..." if the compact jump
+  // link drops its 44px min-height.
+  const parkedGlyph = EpicDashboard.STATUS_GLYPHS.parked;
+  for (const width of [390, 1024]) {
+    const env = ph2Track(ph2MlEnv());
+    const root = await ph2Draw(env, width);
+    const causeOf = (panelNode) => byClass(panelNode, 'graph-view-detail-root-cause-line').map((line) => [
+      byClass(line, 'graph-view-detail-link-id')[0]?.textContent,
+      byClass(line, 'graph-view-detail-link-status')[0]?.textContent,
+      line.children.map((child) => child.className).join() === 'graph-view-detail-root-cause-link,graph-view-detail-root-cause-hops'
+        ? line.children[1].textContent : 'out of order',
+    ]);
+    bubblingClick(ph2RowFor(root, 'GA-ML10'));
+    const panel = byClass(root, 'graph-view-detail-panel')[0];
+    const link = byClass(panel, 'graph-view-detail-root-cause-link')[0];
+    assert(JSON.stringify(byClass(panel, 'graph-view-detail-label').map((label) => label.textContent))
+        === JSON.stringify(['Waiting on', 'Root cause', 'Unmet prerequisites', 'Gates'])
+      && JSON.stringify(causeOf(panel)) === JSON.stringify([['GA-ML8', ` · ${parkedGlyph} waiting`, '2 hops up']])
+      && link?.tag === 'button' && cssEffective(link.style.cssText)['min-height'] === (width === 390 ? '44px' : undefined),
+    `PH2-ROOT-CAUSE-BLOCK: at ${width} selecting GA-ML10 draws a Root cause row after Waiting on naming GA-ML8 with its ${parkedGlyph} glyph, its waiting word, and 2 hops up, as a link button${width === 390 ? ' with min-height 44px' : ' with no min-height'}`);
+    const block = byClass(panel, 'graph-view-detail-root-cause')[0];
+    assert(block?.className === 'graph-view-detail-fact graph-view-detail-root-cause'
+      && byClass(block, 'graph-view-detail-label')[0]?.style.cssText
+        === 'font-size:0.7em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);',
+    `PH2-ROOT-CAUSE-BLOCK (FL3-ROOT-CAUSE-BLOCK): at ${width} the Root cause row uses the VP-4 labeled-row grammar`);
+    const opensBefore = env.opened.length;
+    const jump = bubblingClick(link);
+    const jumped = byClass(root, 'graph-view-detail-panel');
+    assert(jump.stopped && env.opened.length === opensBefore && jumped.length === 1
+      && byClass(jumped[0], 'graph-view-detail-id')[0]?.textContent === 'GA-ML8'
+      && byClass(jumped[0], 'graph-view-detail-root-cause').length === 0,
+    `PH2-ROOT-CAUSE-BLOCK: at ${width} the GA-ML8 jump link selects GA-ML8 without opening a note, and selecting GA-ML8 draws no Root cause row`);
+    const viaPill = await ph2Draw(env, width);
+    bubblingClick(ph2MapNodeFor(viaPill, 'GA-ML8'));
+    assert.strictEqual(JSON.stringify(domShape(root)), JSON.stringify(domShape(viaPill)),
+      `PH2-ROOT-CAUSE-BLOCK: at ${width} the jump leaves the same DOM as a tap on GA-ML8's ${width === 390 ? 'pill' : 'chip'}`);
+    bubblingClick(ph2RowFor(root, 'GA-ML9'));
+    assert.deepStrictEqual(causeOf(byClass(root, 'graph-view-detail-panel')[0]), [['GA-ML8', ` · ${parkedGlyph} waiting`, '1 hop up']],
+      `PH2-ROOT-CAUSE-BLOCK: at ${width} selecting GA-ML9 names GA-ML8 at 1 hop up`);
+    bubblingClick(ph2RowFor(root, 'GA-ML8'));
+    assert.strictEqual(byClass(root, 'graph-view-detail-root-cause').length, 0,
+      `PH2-ROOT-CAUSE-BLOCK: at ${width} selecting GA-ML8 itself draws no Root cause row`);
+    const many = await ph2Draw(ph2Track(ph2Env('Many Roots', [
+      { card: 'GA-MR1 Vendor', status: 'parked' },
+      { card: 'GA-MR2 Legal', status: 'blocked' },
+      { card: 'GA-MR3 Launch', status: 'planning', depends_on: ['[[GA-MR2 Legal]]', '[[GA-MR1 Vendor]]'] },
+      { card: 'GA-MR4 Rollout', status: 'planning', depends_on: ['[[GA-MR3 Launch]]'] },
+    ])), width);
+    bubblingClick(ph2RowFor(many, 'GA-MR4'));
+    assert.deepStrictEqual(causeOf(byClass(many, 'graph-view-detail-panel')[0]), [
+      ['GA-MR1', ` · ${parkedGlyph} waiting`, '2 hops up'],
+      ['GA-MR2', ` · ${EpicDashboard.STATUS_GLYPHS.blocked} blocked`, '2 hops up'],
+    ], `PH2-ROOT-CAUSE-BLOCK: at ${width} a queued slice two hops below two root blockers lists both, GA-MR1 then GA-MR2, each 2 hops up`);
+  }
+  {
+    const pick = (analysis) => ({ analyzeGraph(nodes, edges) {
+      const real = new GraphInsights().analyzeGraph(nodes, edges);
+      return { ...real, perNode: analysis(real.perNode) };
+    } });
+    for (const [label, perNode] of [
+      ['a root cause naming no drawn node', (nodes) => ({ ...nodes, [ph2MlCard(10)]: { ...nodes[ph2MlCard(10)], rootCauses: [{ card: 'GA-ZZ Gone', hops: 1 }] } })],
+      ['rootCauses that is not an array', (nodes) => ({ ...nodes, [ph2MlCard(10)]: { ...nodes[ph2MlCard(10)], rootCauses: 'GA-ML8' } })],
+      ['rootCauses that is an array-like object', (nodes) => ({ ...nodes, [ph2MlCard(10)]: { ...nodes[ph2MlCard(10)], rootCauses: { 0: { card: ph2MlCard(8), hops: 2 }, length: 1 } } })],
+    ]) {
+      const env = ph2Track(ph2MlEnv());
+      const root = await ph2Draw(env, 1024, { view: new GraphView({ lifecycleApi, insights: pick(perNode) }) });
+      bubblingClick(ph2RowFor(root, 'GA-ML10'));
+      assert(byClass(root, 'graph-view-detail-panel').length === 1 && byClass(root, 'graph-view-detail-root-cause').length === 0
+        && byClass(ph2RowFor(root, 'GA-ML10'), 'graph-view-frontier-wait')[0]?.textContent === 'needs GA-ML9',
+      `PH2-ROOT-CAUSE-BLOCK: ${label} draws no Root cause row, and the Blocked row falls back to its wait line`);
+    }
+    // MUTATION GUARD: PH2-MUTANT-HOPS-CONVERTED turns RED at
+    // "PH2-ROOT-CAUSE-BLOCK: at 390, a root cause whose hop count is not a
+    // finite number ..." if the row and the card convert the hop count with
+    // Number() before the finite check.
+    for (const width of [390, 1024]) {
+      for (const [shown, hops] of [["'two'", 'two'], ['null', null], ['""', ''], ['"2"', '2'], ['true', true], ['[]', []], ['NaN', NaN]]) {
+        const odd = pick((nodes) => ({ ...nodes, [ph2MlCard(10)]: { ...nodes[ph2MlCard(10)], rootCauses: [{ card: ph2MlCard(8), hops }] } }));
+        const root = await ph2Draw(ph2Track(ph2MlEnv()), width, { view: new GraphView({ lifecycleApi, insights: odd }) });
+        bubblingClick(ph2RowFor(root, 'GA-ML10'));
+        assert(byClass(root, 'graph-view-detail-panel').length === 1 && byClass(root, 'graph-view-detail-root-cause').length === 0
+          && byClass(ph2RowFor(root, 'GA-ML10'), 'graph-view-frontier-wait')[0]?.textContent === 'needs GA-ML9',
+        `PH2-ROOT-CAUSE-BLOCK: at ${width}, a root cause whose hop count is not a finite number ('two', null, "", "2", true, [], NaN) draws no Root cause row, and the Blocked row falls back to its wait line; here the hop count is ${shown}`);
+      }
+    }
+  }
+
+  // Where the Blocked row or the Root cause row shows a hop count, it is
+  // shown unrounded (1.5 reads 1.5 hops up).
+  {
+    const fractional = { analyzeGraph(nodes, edges) {
+      const real = new GraphInsights().analyzeGraph(nodes, edges);
+      const perNode = { ...real.perNode, [ph2MlCard(10)]: { ...real.perNode[ph2MlCard(10)], rootCauses: [{ card: ph2MlCard(8), hops: 1.5 }] } };
+      return { ...real, perNode };
+    } };
+    const root = await ph2Draw(ph2Track(ph2MlEnv()), 390, { view: new GraphView({ lifecycleApi, insights: fractional }) });
+    bubblingClick(ph2RowFor(root, 'GA-ML10'));
+    assert(byClass(ph2RowFor(root, 'GA-ML10'), 'graph-view-frontier-wait')[0]?.textContent === 'blocked by GA-ML8 · 1.5 hops up'
+      && byClass(root, 'graph-view-detail-root-cause-hops')[0]?.textContent === '1.5 hops up',
+    'PH2-ROOT-CAUSE-BLOCK: a hop count of 1.5 from GraphInsights reads 1.5 hops up in the Blocked row and the Root cause row');
+  }
+
+  // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
+  // MUTATION GUARD: PH2-MUTANT-NEEDS-YOU-ON-BLOCKED turns RED at
+  // "PH2-NEEDS-YOU-GLYPH-PARKED-ONLY: at 390 ..." if a blocked row's pill
+  // carries the needs-you glyph.
+  // MUTATION GUARD: PH2-MUTANT-NEEDS-YOU-OUTSIDE-PILL turns RED at the same
+  // label if the glyph is drawn outside the status pill.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2AgEnv()), width);
+    bubblingClick(ph2RowFor(root, 'GA-AG2'));
+    const glyphs = byClass(root, 'graph-view-needs-you-glyph');
+    const parkedRow = ph2RowFor(root, 'GA-AG2');
+    const pill = byClass(parkedRow, 'graph-view-frontier-pill')[0];
+    assert(glyphs.length === 1 && glyphs[0].parent === pill && glyphs[0].textContent === '⚑'
+      && pill.children.indexOf(glyphs[0]) === 0 && pill.children[1]?.className === 'graph-view-frontier-status'
+      && pill.children[1].textContent === 'waiting' && pill.children.length === 2
+      && parkedRow.className === 'graph-view-frontier-row graph-view-needs-you'
+      && byClass(root, 'graph-view-frontier-row').filter((row) => row.className.includes('graph-view-needs-you')).length === 1,
+    `PH2-NEEDS-YOU-GLYPH-PARKED-ONLY: at ${width} the needs-you glyph is drawn once in the whole root, inside the parked row's pill before its waiting word, while that slice's card is open`);
+    assert(EpicDashboard.STATUS_DISPLAY.parked === 'waiting'
+      && byClass(root, 'graph-view-legend-label').every((label) => !/ready|next|needs you/i.test(label.textContent)),
+    `PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER): at ${width} STATUS_DISPLAY.parked stays waiting and the legend names no ready, next, or needs-you entry`);
+    for (const row of byClass(root, 'graph-view-frontier-row')) {
+      const pillOf = byClass(row, 'graph-view-frontier-pill')[0];
+      const word = byClass(pillOf, 'graph-view-frontier-status')[0];
+      assert(pillOf.parent?.className === 'graph-view-frontier-meta' && word?.parent === pillOf
+        && pillOf.children.at(-1) === word,
+      `PH2-NEEDS-YOU-GLYPH-PARKED-ONLY: at ${width} every row's status word is its pill's last child`);
+    }
+  }
+  assert(!/STATUS_GLYPHS|"⚑"\s*:/.test(widgetSource) && (widgetSource.match(/⚑/g) || []).length === 1
+    && !Object.values(EpicDashboard.STATUS_GLYPHS).includes('⚑'),
+  'PH2-NEEDS-YOU-GLYPH-PARKED-ONLY: graph-view.js draws the needs-you glyph at one site, and it is none of the shared status glyphs');
+
+  // ---- PH2-INSIGHTS-ABSENT-FAIL-SOFT ----
+  // MUTATION GUARD: PH2-MUTANT-FAIL-SOFT-KEEPS-BLOCKED turns RED at
+  // "PH2-INSIGHTS-ABSENT-FAIL-SOFT: at 390 with GraphInsights missing ..." if
+  // the fail-soft groups keep a Blocked group.
+  for (const width of [390, 1024]) {
+    for (const [label, options] of [
+      ['missing', { insights: false }],
+      ['throwing', { view: new GraphView({ lifecycleApi, insights: { analyzeGraph() { throw new Error('insights fault'); } } }) }],
+      ['malformed', { view: new GraphView({ lifecycleApi, insights: { analyzeGraph: () => ({ perNode: null }) } }) }],
+    ]) {
+      const env = ph2Track(ph2AgEnv());
+      const root = await ph2Draw(env, width, options);
+      assert.deepStrictEqual(ph2Read(root), {
+        groups: [
+          ['graph-view-frontier-group frontier-needs-you', 'Needs you 1', ['GA-AG2', '⚑ waiting', null, 'Resume after the design review.']],
+          ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GA-AG4', 'in progress', null, null]],
+          ['graph-view-frontier-group frontier-planned', 'Planned 4',
+            ['GA-AG7', 'planning', null, null], ['GA-AG6', 'planning', null, null],
+            ['GA-AG3', 'blocked', null, 'needs GA-AG2'], ['GA-AG5', 'planning', null, null]],
+          ['graph-view-frontier-group frontier-done', 'Done 1', ['GA-AG1', 'done', null, null]],
+        ],
+        shipped: [],
+        strip: [],
+      }, `PH2-INSIGHTS-ABSENT-FAIL-SOFT: at ${width} with GraphInsights ${label} the groups are Needs you, In progress, Planned, and Done, with no Next up, Blocked, or Ready label and no marker`);
+      bubblingClick(ph2RowFor(root, 'GA-AG7'));
+      assert(byClass(root, 'graph-view-detail-panel').length === 0
+        && JSON.stringify(env.opened) === JSON.stringify([[`${env.boardDir}/GA-AG7 Docs`, env.epicPath, false]]),
+      `PH2-INSIGHTS-ABSENT-FAIL-SOFT: at ${width} a row tap with GraphInsights ${label} opens the note, as a tap on its ${width === 390 ? 'pill' : 'chip'} does`);
+      bubblingClick(ph2MapNodeFor(root, 'GA-AG7'));
+      assert.strictEqual(env.opened.length, 2,
+        `PH2-INSIGHTS-ABSENT-FAIL-SOFT: at ${width} with GraphInsights ${label} the ${width === 390 ? 'pill' : 'chip'} tap opens the note too`);
+    }
+  }
+
+  // ---- PH2B-TAP-TARGETS (PH2-ROWS-44) ----
+  // MUTATION GUARD: PH2B-MUTANT-ROWS-32 turns RED at "PH2B-TAP-TARGETS
+  // (PH2-ROWS-44): at 390, ..." if a row's min-height is 32px.
+  // MUTATION GUARD: PH2B-MUTANT-STRIP-32 turns RED at the same label if the
+  // strip's min-height is 32px.
+  // MUTATION GUARD: PH2B-MUTANT-ROW-CONTENT-BOX turns RED at the same label
+  // if a row's box-sizing is content-box.
+  for (const make of [ph2MlEnv, ph2AgEnv, ph2PerfEnv]) {
+    const root = await ph2Draw(ph2Track(make()), 390);
+    for (const strip of byClass(root, 'graph-view-frontier-done-strip')) bubblingClick(strip);
+    const targets = [...byClass(root, 'graph-view-frontier-row'), ...byClass(root, 'graph-view-frontier-done-strip')];
+    assert(targets.length > 0 && targets.every((target) => {
+      const css = cssEffective(target.style.cssText);
+      return css['min-height'] === '44px' && css['box-sizing'] === 'border-box' && !('height' in css) && !('max-height' in css);
+    }) && byClass(root, 'graph-view-frontier-done-rows').every((rows) => rows.children.length > 0),
+    `PH2B-TAP-TARGETS (PH2-ROWS-44): at 390, ${targets.length} frontier rows and done strips, expanded rows included, each have min-height 44px with border-box sizing and no height or max-height`);
+  }
+
+  // ---- PH2-ZERO-WRITES ----
+  // The list sits after the legend on both presentations: in the root right
+  // after the compact host, whose last child is the legend, at 390, and
+  // right after the legend at 1024.
+  // MUTATION GUARD: PH2-MUTANT-LIST-BEFORE-MAP turns RED at
+  // "PH2-ZERO-WRITES: at 390 ..." if the list is drawn before the map.
+  for (const make of [ph2MlEnv, ph2AgEnv, ph2DvEnv, ph2PerfEnv]) {
+    const compact = await ph2Draw(ph2Track(make()), 390);
+    const host = byClass(compact, 'graph-view-compact')[0];
+    const list = byClass(compact, 'graph-view-frontier')[0];
+    assert(host && list && list.parent === compact && compact.children.indexOf(list) === compact.children.indexOf(host) + 1
+      && host.children.at(-1)?.className === 'graph-view-legend',
+    `PH2-ZERO-WRITES: at 390 the ${make === ph2MlEnv ? 'Mobile Load Performance' : make === ph2AgEnv ? 'Frontier Groups' : make === ph2DvEnv ? 'Dataview' : 'Perf'} list follows the compact host, whose last child is the legend`);
+    const wide = await ph2Draw(ph2Track(make()), 1024);
+    const wideList = byClass(wide, 'graph-view-frontier')[0];
+    assert(wideList && wide.children.indexOf(wideList) === wide.children.findIndex((child) => child.className === 'graph-view-legend') + 1,
+      'PH2-ZERO-WRITES: at 1024 the list directly follows the legend');
+  }
+  assert.deepStrictEqual(ph2Envs.flatMap((env) => env.mutations), [],
+    `PH2-ZERO-WRITES: the ${ph2Envs.length} tracked PH-2 fixture vaults record no vault, adapter, frontmatter, or metadata mutator call across their renders and row, pill, chip, strip, and jump-link taps`);
+
+  // ---- PH-2 render plumbing ----
+  // MUTATION GUARD: PH2-MUTANT-LIST-THROW-ESCAPES turns RED at "PH-2: a
+  // frontier list that throws ..." if the fault escapes render().
+  // MUTATION GUARD: PH2-MUTANT-LIST-ANY-SCOPE turns RED at "PH-2:
+  // _renderFrontierList at scope project ..." if the scope guard is dropped.
+  // MUTATION GUARD: PH2-MUTANT-NO-LANE-ORDER-HANDOFF turns RED at
+  // "PH-2: render() hands the board's lane order ..." if render() passes an
+  // empty laneOrder.
+  {
+    class FaultyFrontier extends GraphView {
+      _renderFrontierList() { throw new Error('frontier fault'); }
+    }
+    for (const width of [390, 1024]) {
+      const root = await ph2Draw(ph2Track(ph2MlEnv()), width, { view: new FaultyFrontier({ lifecycleApi }) });
+      assert(byClass(root, 'graph-view-canvas').length === 1 && byClass(root, 'graph-view-frontier').length === 0
+        && JSON.stringify(byClass(root, 'warning-render-error').map((row) => row.textContent)) === JSON.stringify(['GraphView: frontier fault']),
+      `PH-2: a frontier list that throws at ${width} leaves the map drawn and adds one render_error row naming the fault`);
+    }
+    for (const scope of ['project', undefined, 'Epic']) {
+      const { root, drawn } = ph2List([ph2Node('GA-X First', 'planning')], [], [], { scope });
+      assert(drawn === null && root.children.length === 0,
+        `PH-2: _renderFrontierList at scope ${String(scope)} draws nothing and returns null`);
+    }
+    const { root: truthyStub, drawn: truthyDrawn } = ph2List([ph2Node('GA-S1 Stub', null, { isStub: 1 }), ph2Node('GA-X First', 'planning')], [], [], { analysis: null });
+    assert(truthyDrawn && byClass(truthyStub, 'graph-view-frontier-row').length === 1
+      && byClass(truthyStub, 'graph-view-frontier-id')[0]?.textContent === 'GA-X',
+    'PH-2: a node whose isStub is truthy but not true gets no row, as the legend skips it');
+    const { root: noOptions } = (() => {
+      const root = element();
+      return { root, drawn: new GraphView({ dashboard, lifecycleApi })._renderFrontierList(root, [ph2Node('GA-X First', 'planning')], null, [], null) };
+    })();
+    assert.strictEqual(noOptions.children.length, 0, 'PH-2: _renderFrontierList with no options draws nothing');
+    const { root: stubsOnly, drawn: stubsDrawn } = ph2List([ph2Node('GA-S1 Stub', null, { isStub: true })], [], []);
+    assert(stubsDrawn === null && stubsOnly.children.length === 0,
+      'PH-2: _renderFrontierList over cross-epic stubs only draws nothing and returns null');
+    // GA-LH2 is first in the In Planning lane and drawn after GA-LH1.
+    const handoff = ph2Track(ph2Env('Lane Handoff', [
+      { card: 'GA-LH0 Base', status: 'completed' },
+      { card: 'GA-LH1 Alpha', status: 'planning' },
+      { card: 'GA-LH2 Beta', status: 'planning', depends_on: ['[[GA-LH0 Base]]'] },
+    ], ['GA-LH2 Beta', 'GA-LH1 Alpha']));
+    for (const width of [390, 1024]) {
+      const root = await ph2Draw(handoff, width);
+      assert.deepStrictEqual(byClass(root, 'graph-view-chip').map((chip) => (byClass(chip, 'graph-view-pill-id')[0] || byClass(chip, 'graph-view-chip-id')[0]).textContent),
+        ['GA-LH1', 'GA-LH0', 'GA-LH2'], `PH-2: render() at ${width} draws GA-LH1 before GA-LH2`);
+      assert.deepStrictEqual(ph2Read(root).groups.map((group) => group.slice(1)), [
+        ['Next up 1', ['GA-LH2', 'planning', 'next', null]],
+        ['Ready 1', ['GA-LH1', 'planning', 'ready', null]],
+        ['Done 1', ['GA-LH0', 'done', null, null]],
+      ], `PH-2: render() hands the board's lane order to the list at ${width}, so GA-LH2, first in In Planning and drawn after GA-LH1, is Next up`);
+    }
+  }
+  // Two widgets drawn by one GraphView instance keep separate list state.
+  // MUTATION GUARD: PH2-MUTANT-STRIP-STATE-ON-INSTANCE turns RED at
+  // "PH-2: two Perf roots drawn by one instance ..." if the strip's expanded
+  // state lives on the instance.
+  for (const width of [390, 1024]) {
+    const view = new GraphView({ lifecycleApi });
+    const first = await ph2Draw(ph2Track(ph2PerfEnv()), width, { view });
+    const second = await ph2Draw(ph2Track(ph2PerfEnv()), width, { view });
+    const secondAtRest = JSON.stringify(domShape(second));
+    bubblingClick(byClass(first, 'graph-view-frontier-done-strip')[0]);
+    const secondUntouched = JSON.stringify(domShape(second)) === secondAtRest;
+    bubblingClick(byClass(second, 'graph-view-frontier-done-strip')[0]);
+    bubblingClick(byClass(first, 'graph-view-frontier-done-strip')[0]);
+    assert(secondUntouched && byClass(first, 'graph-view-frontier-done-rows').length === 0
+      && byClass(second, 'graph-view-frontier-done-rows')[0]?.children.length === 4
+      && byClass(second, 'graph-view-frontier-done-strip')[0].textContent === '4 done · hide',
+    `PH-2: two Perf roots drawn by one instance at ${width}: expanding the first leaves the second folded, and folding the first leaves the second expanded`);
+    const ml = await ph2Draw(ph2Track(ph2MlEnv()), width, { view });
+    const ag = await ph2Draw(ph2Track(ph2AgEnv()), width, { view });
+    bubblingClick(ph2RowFor(ml, 'GA-ML9'));
+    bubblingClick(ph2RowFor(ag, 'GA-AG6'));
+    assert(byClass(ml, 'graph-view-detail-id')[0]?.textContent === 'GA-ML9' && byClass(ag, 'graph-view-detail-id')[0]?.textContent === 'GA-AG6'
+      && byClass(ag, 'graph-view-frontier-next').length === 1 && ph2RowFor(ag, 'GA-AG6').children.length === 2
+      && byClass(ml, 'graph-view-frontier-next').length === 0,
+    `PH-2: Mobile Load Performance and Frontier Groups roots drawn by one instance at ${width} each select their own row, and only Frontier Groups draws a next badge`);
+  }
+  global.app = ph2Saved.app;
+  global.customJS = ph2Saved.customJS;
 
   console.log(`BL6-RECEIPTS ${JSON.stringify(bl6ReceiptSnapshot())}`);
   finishHarness();

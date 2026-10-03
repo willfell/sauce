@@ -448,6 +448,54 @@ check(/const PH1_WIDE_DIGESTS = \{[\s\S]*?\n\};/.test(behavior)
   && (behavior.match(/[0-9a-f]{64}/g) || []).length >= 10,
 'PH1-SENTINEL-WIDE-PINS: PH1_WIDE_DIGESTS is an object literal and the harness carries at least ten 64-hex literals');
 
+// PH-2 sentinels: the frontier list's authority boundary and its one
+// caller, the epic-only Root cause jump, the listed PH-2 markers and
+// carried-finding tokens in the behavior harness, the listed PH-2 mutants'
+// MUTATION GUARD comments, and the pre-PH-2 whole-root digests kept beside
+// the re-pinned ones.
+const frontierList = section(widget, '  _renderFrontierList(root, nodes, analysis, laneOrder, options) {', '\n  _frontierLabel(parent, text) {');
+const wideGraph = section(widget, '  async _renderGraph(root, result, api, source, extraWarnings) {', '\n  // Deterministic chip-content width');
+check(frontierList.length > 0
+  && frontierList.includes('summaryCount("needsYouCount")') && frontierList.includes('summaryCount("blockedCount")')
+  && frontierList.includes('insight(node)?.isReady === true')
+  && frontierList.includes('const causes = insight(node)?.rootCauses;')
+  && !/\.upstream\b|\.downstream\b|\bqueue\b|\bvisited\b|analyzeGraph|stuckCount|readyCount|gatedTotal|rootBlockers/.test(frontierList),
+'PH2-SENTINEL-FRONTIER-AUTHORITY: _renderFrontierList calls insight(node) for isReady and rootCauses and summaryCount for needsYouCount and blockedCount, and names no closure, no other summary field, and no analyzeGraph call');
+check((widget.match(/this\._renderFrontierList\(/g) || []).length === 1
+  && renderBody.includes('this._renderFrontierList(root, drawn.nodes, drawn.analysis, laneOrder, {\n            scope: "epic",'),
+'PH2-SENTINEL-ONE-CALLER: graph-view.js contains this._renderFrontierList( once, and _renderAtWidth contains this._renderFrontierList(root, drawn.nodes, drawn.analysis, laneOrder, { followed by scope: "epic",');
+check(controller.includes('    rootCause = false,\n') && controller.includes('onJump: rootCause ? select : null,')
+  && (widget.match(/rootCause: true,/g) || []).length === 2
+  && wideGraph.includes('renderEdges, rootCause: true,') && compactMap.includes('rootCause: true,'),
+'PH2-SENTINEL-ROOT-CAUSE-EPIC-ONLY: _selectionController contains rootCause = false, and onJump: rootCause ? select : null, graph-view.js contains rootCause: true, twice, and _renderGraph and _renderCompactMap each contain it');
+for (const marker of [
+  'PH2-GROUPS-EXACT', 'PH2-NEXT-UP-RULE', 'PH2-DONE-FOLD-THRESHOLD', 'PH2-ROW-TAP-SELECTS', 'PH2-ROOT-CAUSE-BLOCK',
+  'PH2-NEEDS-YOU-GLYPH-PARKED-ONLY', 'PH2-INSIGHTS-ABSENT-FAIL-SOFT', 'PH2-ZERO-WRITES', 'PH2B-WHOLE-ROOT-REPIN', 'PH2B-TAP-TARGETS',
+]) check(new RegExp(`['\`]${escapeRegExp(marker)}[ :(]`).test(behavior), `PH2-SENTINEL-BEHAVIOR-MARKER: ${marker} follows a quote or backtick and precedes a space, colon, or parenthesis in the behavior harness`);
+for (const token of [
+  'FL2-READY-MARKER', 'FL2-NEXT-UP-BADGE', 'FL2-NO-MARKER-ON-NON-READY', 'FL3-TRIAGE-COUNTS', 'FL3-NEEDS-YOU-MARKER',
+  'FL3-ROOT-CAUSE-BLOCK', 'PH2-WHOLE-ROOT-REPIN', 'PH2-ROWS-44',
+]) check(new RegExp(`['\`][^'\`\\n]*${escapeRegExp(token)}`).test(behavior), `PH2-SENTINEL-CARRIED-FINDING: ${token} follows a quote or backtick on a line of the behavior harness`);
+for (const mutant of [
+  'PH2-MUTANT-FOLD-BELOW-HALF', 'PH2-MUTANT-FOLD-ABOVE-HALF-ONLY', 'PH2-MUTANT-STUBS-COUNT-TOWARD-RATIO', 'PH2-MUTANT-FOLD-AT-49',
+  'PH2-MUTANT-BADGE-EVERY-READY', 'PH2-MUTANT-MARK-NON-READY', 'PH2-MUTANT-NEXT-BY-DRAW-ORDER', 'PH2-MUTANT-NEXT-FIRST-LANE-ENTRY',
+  'PH2-MUTANT-NO-DRAW-ORDER-FALLBACK', 'PH2-MUTANT-READY-INCLUDES-IN-PROGRESS', 'PH2-MUTANT-READY-IGNORES-INSIGHTS',
+  'PH2-MUTANT-READY-TRUTHY', 'PH2-MUTANT-NEEDS-YOU-ON-BLOCKED', 'PH2-MUTANT-NEEDS-YOU-OUTSIDE-PILL',
+  'PH2-MUTANT-NEEDS-YOU-COUNTS-ROWS', 'PH2-MUTANT-BLOCKED-COUNTS-ROWS', 'PH2-MUTANT-SUMMARY-SWAPPED', 'PH2-MUTANT-GROUPS-REORDERED',
+  'PH2-MUTANT-EMPTY-GROUP-DRAWN', 'PH2-MUTANT-BLOCKED-BY-LAST-CAUSE', 'PH2-MUTANT-ROW-OPENS', 'PH2-MUTANT-ROW-SELECTS-WITHOUT-INSIGHTS',
+  'PH2-MUTANT-STRIP-EXPANDS-ONCE', 'PH2-MUTANT-STRIP-TAP-BUBBLES', 'PH2-MUTANT-STRIP-STATE-ON-INSTANCE', 'PH2-MUTANT-LIST-THROW-ESCAPES',
+  'PH2-MUTANT-LIST-ANY-SCOPE', 'PH2-MUTANT-NO-LANE-ORDER-HANDOFF', 'PH2-MUTANT-LIST-BEFORE-MAP', 'PH2-MUTANT-ROOT-CAUSE-OPENS',
+  'PH2-MUTANT-ROOT-CAUSE-ON-ROOT', 'PH2-MUTANT-ROOT-CAUSE-AT-PROJECT', 'PH2-MUTANT-ROOT-CAUSE-LINK-NO-HEIGHT', 'PH2-MUTANT-JUMP-CLEARS',
+  'PH2-MUTANT-FAIL-SOFT-KEEPS-BLOCKED', 'PH2-MUTANT-COLOUR-LITERAL', 'PH2B-MUTANT-ROWS-32', 'PH2B-MUTANT-STRIP-32',
+  'PH2B-MUTANT-ROW-CONTENT-BOX', 'PH2-MUTANT-HOPS-CONVERTED',
+]) {
+  check(behavior.includes(`// MUTATION GUARD: ${mutant} turns RED`),
+    `PH2-SENTINEL-MUTANT: ${mutant} is named in a MUTATION GUARD comment`);
+}
+check((behavior.match(/\n {4}preFrontierRoot: '[0-9a-f]{64}',\n/g) || []).length === 5
+  && behavior.includes("digestOf({ ...root, children: root.children.filter((child) => child !== lists[0]) }), expected.preFrontierRoot,"),
+'PH2-SENTINEL-WHOLE-ROOT-REPIN: the behavior harness carries five preFrontierRoot 64-hex literals, and the behavior harness contains a digestOf comparison of the root without lists[0] against expected.preFrontierRoot');
+
 check(pkg.scripts?.['test:graph-view-contract'] === 'node platform/test/run-graph-view-contract.js',
   'BL5B-SENTINEL-REGISTRY: focused contract script is registered');
 // The release:preflight registration surface moved from a package.json chain

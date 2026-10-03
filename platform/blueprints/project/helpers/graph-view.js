@@ -70,10 +70,13 @@
  * its root has left the mount container or the container has left the
  * scroll container it watches (where the mutation-observer API exists, root
  * removal is also seen at the watch's next childList record; see
- * _watchPaneWidth). At rest the wide presentation's DOM is byte-identical to
- * the pre-PH-1 renderer's; the detail card a chip tap opens (at both scopes)
- * now labels its open button "Open slice" instead of "Open card" and adds a
- * "Close" button.
+ * _watchPaneWidth). At rest the wide presentation's canvas scroller is
+ * byte-identical to the pre-PH-1 renderer's; the detail card a chip tap
+ * opens (at both scopes) now labels its open button "Open slice" instead of
+ * "Open card" and adds a "Close" button.
+ *
+ * Frontier list (PH-2): render() hands an epic-scope map's drawn nodes and
+ * analysis, on either presentation, to _renderFrontierList.
  *
  * Fail-soft everywhere: gather/layout/render failures degrade to warning rows
  * or unknown-style chips — the widget never throws, never blanks the note,
@@ -446,7 +449,7 @@ class GraphView {
     element.className = next.join(" ");
   }
 
-  _panelLink(parent, node, api, source, className, linkHeight) {
+  _panelLink(parent, node, api, source, className, linkHeight, onActivate) {
     const link = parent.createEl("button");
     link.className = className;
     link.style.cssText = "display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;"
@@ -459,9 +462,22 @@ class GraphView {
     link.createEl("span", { text: ` · ${presentation.glyph} ${presentation.label}` }).className = "graph-view-detail-link-status";
     link.addEventListener?.("click", (event) => {
       event?.stopPropagation?.();
-      this._open(node.path || node.card, source);
+      if (typeof onActivate === "function") onActivate(node, event);
+      else this._open(node.path || node.card, source);
     });
     return link;
+  }
+
+  // A node's direct depends prerequisites that are stubs or not completed.
+  _unmetPrerequisites(node, byCard, edges, api) {
+    return (Array.isArray(edges) ? edges : [])
+      .filter((edge) => edge?.kind === "depends" && edge.to === node.card)
+      .map((edge) => byCard.get(edge.from))
+      .filter((entry) => entry && (entry.isStub || this._statusPresentation(entry.status, api).normalized !== "completed"));
+  }
+
+  _hopsText(hops) {
+    return `${hops} hop${hops === 1 ? "" : "s"} up`;
   }
 
   _panelFact(panel, label, className) {
@@ -474,7 +490,7 @@ class GraphView {
     return block;
   }
 
-  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes, onClose, controlHeight, linkHeight) {
+  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes, onClose, controlHeight, linkHeight, onJump) {
     const panel = root.createEl("div");
     panel.className = "graph-view-detail-panel";
     panel.style.cssText = "display:grid;gap:12px;margin-top:16px;padding:12px 14px;border:1px solid var(--background-modifier-border);"
@@ -531,10 +547,27 @@ class GraphView {
     }
 
     const byCard = new Map((nodes || []).map((entry) => [entry.card, entry]));
-    const unmet = (edges || [])
-      .filter((edge) => edge.kind === "depends" && edge.to === node.card)
-      .map((edge) => byCard.get(edge.from))
-      .filter((entry) => entry && (entry.isStub || this._statusPresentation(entry.status, api).normalized !== "completed"));
+    // Root cause (PH-2), drawn when the controller passes onJump: the root
+    // blockers GraphInsights lists for this node that are drawn and whose
+    // hop count is a finite number, each with that count and a link that
+    // selects it.
+    const causes = typeof onJump === "function"
+      ? (Array.isArray(this._nodeInsight(analysis, node.card)?.rootCauses)
+        ? this._nodeInsight(analysis, node.card).rootCauses : [])
+        .map((cause) => ({ entry: byCard.get(cause?.card), hops: cause?.hops }))
+        .filter(({ entry, hops }) => entry && typeof hops === "number" && Number.isFinite(hops))
+      : [];
+    if (causes.length) {
+      const block = this._panelFact(panel, "Root cause", "graph-view-detail-root-cause");
+      for (const { entry, hops } of causes) {
+        const line = block.createEl("div");
+        line.className = "graph-view-detail-root-cause-line";
+        line.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;";
+        this._panelLink(line, entry, api, source, "graph-view-detail-root-cause-link", linkHeight, onJump);
+        line.createEl("span", { text: this._hopsText(hops) }).className = "graph-view-detail-root-cause-hops";
+      }
+    }
+    const unmet = this._unmetPrerequisites(node, byCard, edges, api);
     if (unmet.length) {
       const needs = this._panelFact(panel, "Unmet prerequisites", "graph-view-detail-needs");
       for (const entry of unmet) this._panelLink(needs, entry, api, source, "graph-view-detail-prerequisite", linkHeight);
@@ -569,7 +602,7 @@ class GraphView {
   _renderDetailInline(host, node, context) {
     const ctx = context && typeof context === "object" ? context : {};
     return this._renderDetailPanel(host, ctx.scroller, node, ctx.nodes, ctx.edges, ctx.analysis,
-      ctx.api, ctx.source, ctx.outcomes, ctx.onClose, ctx.controlHeight, ctx.linkHeight);
+      ctx.api, ctx.source, ctx.outcomes, ctx.onClose, ctx.controlHeight, ctx.linkHeight, ctx.onJump);
   }
 
   // Stuck filtering consumes GraphInsights closures only. For every root/stuck
@@ -601,6 +634,7 @@ class GraphView {
   _selectionController({
     root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, clusterByCard = null,
     controlHeight = 32, linkHeight = null,
+    rootCause = false,
   }) {
     const chips = new Map();
     const headers = new Map();
@@ -678,6 +712,7 @@ class GraphView {
       renderEdges(chain);
       panel = this._renderDetailInline(root, node, {
         scroller, nodes, edges, analysis, api, source, outcomes, onClose: clear, controlHeight, linkHeight,
+        onJump: rootCause ? select : null,
       });
     };
     const focus = (cluster, path, event) => {
@@ -793,7 +828,7 @@ class GraphView {
     const renderEdges = (chain) => { edgeLayer.innerHTML = this._edgeSvg(width, height, edges, positions, geometry, chain); };
     renderEdges(null);
     const interaction = this._selectionController({
-      root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges,
+      root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, rootCause: true,
     });
     interaction.renderToolbar();
     for (const node of nodes) {
@@ -804,6 +839,7 @@ class GraphView {
       interaction?.register(node, chip);
     }
     this._renderLegend(root, nodes, api);
+    return { nodes, edges, analysis, select: interaction.select };
   }
 
   // Deterministic chip-content width (headless-safe): word-wrap the complete
@@ -1041,6 +1077,201 @@ class GraphView {
     return chip;
   }
 
+  // ---- PH-2 frontier list (epic scope, both presentations) ----
+  // Groups the drawn slices (cross-epic stubs get no row) into Needs you,
+  // Next up, In progress, Blocked, Ready, and Queued, or, without
+  // GraphInsights, into Needs you, In progress, and Planned; done slices
+  // follow, listed or folded into a strip. Readiness and root causes with
+  // their hop counts are read from GraphInsights, as are the Needs you and
+  // Blocked label counts when its summary carries them as finite numbers.
+  // Next up is the first ready planning slice in laneOrder, else in draw
+  // order. A row's tap does what a tap on its slice in the map does.
+  _renderFrontierList(root, nodes, analysis, laneOrder, options) {
+    const { scope, api = null, source = "", select = null, edges = [] } = options && typeof options === "object" ? options : {};
+    if (scope !== "epic") return null;
+    const live = (Array.isArray(nodes) ? nodes : []).filter((node) => node && !node.isStub);
+    if (!live.length) return null;
+    const status = new Map(live.map((node) => [node, this._statusPresentation(node.status, api).normalized]));
+    const withStatus = (wanted) => live.filter((node) => status.get(node) === wanted);
+    const parked = withStatus("parked");
+    const inProgress = withStatus("in_progress");
+    const done = withStatus("completed");
+    const insight = (node) => this._nodeInsight(analysis, node.card);
+    const byCard = new Map((Array.isArray(nodes) ? nodes : []).map((node) => [node?.card, node]));
+    const summaryCount = (key) => {
+      const value = analysis?.summary?.[key];
+      return Number.isFinite(value) ? value : null;
+    };
+    let groups;
+    let next = null;
+    if (analysis) {
+      const blocked = withStatus("blocked");
+      const ready = withStatus("planning").filter((node) => insight(node)?.isReady === true);
+      const lanes = Array.isArray(laneOrder) ? laneOrder : [];
+      next = lanes.map((card) => ready.find((node) => node.card === card)).find(Boolean) || ready[0] || null;
+      const grouped = new Set([...parked, ...inProgress, ...done, ...blocked, ...ready]);
+      groups = [
+        ["needs-you", "Needs you", parked, summaryCount("needsYouCount")],
+        ["next", "Next up", next ? [next] : [], null],
+        ["in-progress", "In progress", inProgress, null],
+        ["blocked", "Blocked", blocked, summaryCount("blockedCount")],
+        ["ready", "Ready", ready.filter((node) => node !== next), null],
+        ["queued", "Queued", live.filter((node) => !grouped.has(node)), null],
+      ];
+    } else {
+      const grouped = new Set([...parked, ...inProgress, ...done]);
+      groups = [
+        ["needs-you", "Needs you", parked, null],
+        ["in-progress", "In progress", inProgress, null],
+        ["planned", "Planned", live.filter((node) => !grouped.has(node)), null],
+      ];
+    }
+    const waitFor = (key, node) => {
+      if (key === "blocked") {
+        const causes = insight(node)?.rootCauses;
+        const cause = Array.isArray(causes) ? causes[0] : null;
+        const blocker = cause ? byCard.get(cause.card) : null;
+        if (blocker && typeof cause.hops === "number" && Number.isFinite(cause.hops)) {
+          return `blocked by ${this._titleParts(blocker.card).id || blocker.card} · ${this._hopsText(cause.hops)}`;
+        }
+        return this._waitInfo(node);
+      }
+      if (key === "queued") {
+        const after = this._unmetPrerequisites(node, byCard, edges, api)
+          .map((entry) => this._titleParts(entry.card).id || entry.card);
+        return after.length ? `after ${after.join(", ")}` : null;
+      }
+      return this._waitInfo(node);
+    };
+    const list = root.createEl("div");
+    list.className = "graph-view-frontier";
+    list.setAttribute?.("aria-label", "Frontier list");
+    list.style.cssText = "display:grid;gap:12px;margin-top:16px;min-width:0;";
+    const context = { api, source, select };
+    let drawnGroups = 0;
+    for (const [key, label, rows, count] of groups) {
+      if (!rows.length) continue;
+      drawnGroups += 1;
+      const group = list.createEl("div");
+      group.className = `graph-view-frontier-group frontier-${key}`;
+      group.style.cssText = "display:grid;gap:0;min-width:0;";
+      this._frontierLabel(group, `${label} ${count === null ? rows.length : count}`);
+      for (const node of rows) {
+        const marker = node === next ? "next" : key === "ready" ? "ready" : null;
+        this._renderFrontierRow(group, node, { ...context, marker, wait: waitFor(key, node) });
+      }
+    }
+    if (!drawnGroups) {
+      const shipped = list.createEl("div", { text: "Everything shipped" });
+      shipped.className = "graph-view-frontier-shipped";
+      shipped.style.cssText = "font-weight:650;color:var(--text-muted);";
+    }
+    if (done.length) {
+      const section = list.createEl("div");
+      section.className = "graph-view-frontier-group frontier-done";
+      section.style.cssText = "display:grid;gap:0;min-width:0;";
+      if (done.length * 2 < live.length) {
+        this._frontierLabel(section, `Done ${done.length}`);
+        for (const node of done) this._renderFrontierRow(section, node, { ...context, marker: null, wait: null });
+      } else {
+        const folded = `${done.length} done · show`;
+        const strip = section.createEl("div", { text: folded });
+        strip.className = "graph-view-frontier-done-strip";
+        strip.setAttribute?.("role", "button");
+        strip.setAttribute?.("aria-expanded", "false");
+        strip.style.cssText = "display:flex;align-items:center;min-height:44px;box-sizing:border-box;padding:6px 8px;"
+          + "border:1px solid var(--background-modifier-border);border-radius:9px;color:var(--text-muted);cursor:pointer;";
+        let expanded = null;
+        strip.addEventListener?.("click", (event) => {
+          event?.stopPropagation?.();
+          if (expanded) {
+            expanded.remove?.();
+            expanded = null;
+            strip.textContent = folded;
+            strip.setAttribute?.("aria-expanded", "false");
+            return;
+          }
+          expanded = section.createEl("div");
+          expanded.className = "graph-view-frontier-done-rows";
+          expanded.style.cssText = "display:grid;gap:0;min-width:0;";
+          for (const node of done) this._renderFrontierRow(expanded, node, { ...context, marker: null, wait: null });
+          strip.textContent = `${done.length} done · hide`;
+          strip.setAttribute?.("aria-expanded", "true");
+        });
+      }
+    }
+    return list;
+  }
+
+  _frontierLabel(parent, text) {
+    const label = parent.createEl("div", { text });
+    label.className = "graph-view-frontier-label";
+    label.style.cssText = "font-size:0.7em;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);padding:0 0 4px;";
+    return label;
+  }
+
+  // One frontier row in EpicDashboard's row grammar: the id chip (when the
+  // card has an id) and title, then the shared status word in a pill (a
+  // parked slice's pill also carries the needs-you glyph), the next badge or
+  // ready word when marked, and the wait line when there is one.
+  _renderFrontierRow(parent, node, context) {
+    const { api, source, select, marker, wait } = context;
+    const presentation = this._statusPresentation(node.status, api);
+    const parts = this._titleParts(node.card);
+    const needsYou = presentation.normalized === "parked";
+    const row = parent.createEl("div");
+    row.className = `graph-view-frontier-row${needsYou ? " graph-view-needs-you" : ""}`;
+    row.setAttribute?.("role", "button");
+    row.style.cssText = "display:grid;gap:4px;align-content:center;min-height:44px;box-sizing:border-box;padding:6px 8px;"
+      + "border-bottom:1px solid var(--background-modifier-border);cursor:pointer;min-width:0;";
+    row.addEventListener?.("click", (event) => (select
+      ? select(node, event)
+      : this._open(node.path || node.card, source)));
+    const titleRow = row.createEl("div");
+    titleRow.className = "graph-view-frontier-title-row";
+    titleRow.style.cssText = "display:flex;align-items:baseline;gap:7px;min-width:0;";
+    if (parts.id) {
+      const id = titleRow.createEl("span", { text: parts.id });
+      id.className = "graph-view-frontier-id";
+      id.style.cssText = "flex:none;padding:1px 5px;border-radius:5px;background:var(--background-secondary);"
+        + "color:var(--text-muted);font-family:var(--font-monospace);font-size:0.72em;font-weight:600;";
+    }
+    const title = titleRow.createEl("span", { text: parts.title });
+    title.className = "graph-view-frontier-title";
+    title.style.cssText = "min-width:0;color:var(--link-color);font-weight:600;overflow-wrap:anywhere;";
+    const meta = row.createEl("div");
+    meta.className = "graph-view-frontier-meta";
+    meta.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;font-size:var(--font-ui-smaller);";
+    const pill = meta.createEl("span");
+    pill.className = `graph-view-frontier-pill ${presentation.className}`;
+    pill.style.cssText = "display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-weight:600;"
+      + `color:${presentation.color};`
+      + `background:color-mix(in srgb, ${presentation.color} 12%, transparent);`
+      + `border:1px solid color-mix(in srgb, ${presentation.color} 35%, transparent);`;
+    if (needsYou) {
+      const glyph = pill.createEl("span", { text: "⚑" });
+      glyph.className = "graph-view-needs-you-glyph";
+      glyph.setAttribute?.("title", "needs you");
+    }
+    pill.createEl("span", { text: presentation.label }).className = "graph-view-frontier-status";
+    if (marker === "next") {
+      const badge = meta.createEl("span", { text: "next" });
+      badge.className = "graph-view-frontier-next";
+      badge.style.cssText = "padding:1px 7px;border-radius:999px;font-weight:700;color:var(--interactive-accent);"
+        + "border:1px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent);";
+    } else if (marker === "ready") {
+      const word = meta.createEl("span", { text: "ready" });
+      word.className = "graph-view-frontier-ready";
+      word.style.cssText = "font-weight:700;color:var(--interactive-accent);";
+    }
+    if (wait) {
+      const line = meta.createEl("span", { text: wait });
+      line.className = "graph-view-frontier-wait";
+      line.style.cssText = "min-width:0;color:var(--text-muted);overflow-wrap:anywhere;";
+    }
+    return row;
+  }
+
   // ---- PH-1 phone-first: compact map (epic scope, narrow widths) ----
   // Deterministic geometry (its one outside read is the shared _titleParts id
   // parser) over the frozen GraphLayout result. One column per rank:
@@ -1151,6 +1382,7 @@ class GraphView {
     renderEdges(null);
     const interaction = this._selectionController({
       root: host, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, controlHeight: 44, linkHeight: 44,
+      rootCause: true,
     });
     interaction.renderToolbar();
     for (const node of nodes) {
@@ -1158,7 +1390,7 @@ class GraphView {
       interaction?.register(node, pill);
     }
     this._renderLegend(host, nodes, api);
-    return host;
+    return { nodes, edges, analysis, select: interaction.select };
   }
 
   // One id pill per slice or cross-epic stub (an id-less node shows its full
@@ -1656,11 +1888,12 @@ class GraphView {
       const extraWarnings = [];
       let result = { nodes: [], edges: [], warnings: [] };
       let api = null;
+      let laneOrder = [];
       try {
         const currentFolder = current.file.folder || "";
         api = await this._lifecycleApi();
         const slices = this._slicePages(current.file.path, currentFolder, api);
-        const laneOrder = await this._laneOrder(current.file.path, currentFolder);
+        laneOrder = await this._laneOrder(current.file.path, currentFolder);
         const layout = this._graphLayout();
         if (typeof layout?.layoutGraph !== "function") {
           extraWarnings.push({ code: "render_error", card: "GraphView", detail: "GraphLayout unavailable — reinstall project" });
@@ -1676,10 +1909,11 @@ class GraphView {
       // result; any compact failure degrades to one warning row plus the wide
       // path — never a blank note.
       let presented = false;
+      let drawn = null;
       if (resolved.narrow) {
         const warningsBefore = extraWarnings.length;
         try {
-          await this._renderCompactGraph(root, result, api, current.file.path, extraWarnings, resolved.width);
+          drawn = await this._renderCompactGraph(root, result, api, current.file.path, extraWarnings, resolved.width);
           presented = true;
         } catch (error) {
           for (const child of Array.from(root.children || [])) {
@@ -1691,7 +1925,16 @@ class GraphView {
       }
       if (!presented) {
         try {
-          await this._renderGraph(root, result, api, current.file.path, extraWarnings);
+          drawn = await this._renderGraph(root, result, api, current.file.path, extraWarnings);
+        } catch (error) {
+          extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
+        }
+      }
+      if (drawn) {
+        try {
+          this._renderFrontierList(root, drawn.nodes, drawn.analysis, laneOrder, {
+            scope: "epic", api, source: current.file.path, select: drawn.select, edges: drawn.edges,
+          });
         } catch (error) {
           extraWarnings.push({ code: "render_error", card: "GraphView", detail: error?.message || String(error) });
         }
