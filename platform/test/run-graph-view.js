@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 4064;
+const ASSERTION_FLOOR = 4070;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -10647,6 +10647,91 @@ async function main() {
       `PH2C-IDLESS-PAIR: at ${width} GA-IP3's card draws the Root cause lines [GA-IP2, 1 hop up] and [Vendor sign-off, 1 hop up], and a tap on the Vendor sign-off link stops there, opens nothing, and opens the Vendor sign-off card`);
   }
 
+  // Next Draw: the lane order is empty. The map draws GA-NX5 first; GA-NX1
+  // sorts first by name, sits at a higher rank (after the completed
+  // GA-NX6), and gates GA-NX9, so it is not the first ready slice drawn.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-ALPHA-FIRST turns RED at
+  // "PH2C-NEXT-DRAW: at 390 ..." if, with no lane match, Next up is the
+  // ready slice whose card name sorts first.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-HIGHEST-RANK turns RED at the same
+  // label if, with no lane match, Next up is the ready slice at the highest
+  // rank.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-MOST-GATES turns RED at the same label
+  // if, with no lane match, Next up is the ready slice that gates the most
+  // slices.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Next Draw', [
+      { card: 'GA-NX6 Base', status: 'completed' },
+      { card: 'GA-NX5 Zulu', status: 'planning' },
+      { card: 'GA-NX1 Alpha', status: 'planning', depends_on: ['[[GA-NX6 Base]]'] },
+      { card: 'GA-NX9 After', status: 'planning', depends_on: ['[[GA-NX1 Alpha]]'] },
+    ])), width);
+    assert.deepStrictEqual([
+      byClass(root, 'graph-view-chip').map((chip) => (byClass(chip, 'graph-view-pill-id')[0] || byClass(chip, 'graph-view-chip-id')[0])?.textContent ?? null),
+      ph2Read(root).groups.map((group) => group.slice(1)),
+    ], [['GA-NX5', 'GA-NX6', 'GA-NX1', 'GA-NX9'], [
+      ['Next up 1', ['GA-NX5', 'planning', 'next', null]],
+      ['Ready 1', ['GA-NX1', 'planning', 'ready', null]],
+      ['Queued 1', ['GA-NX9', 'planning', null, 'after GA-NX1']],
+      ['Done 1', ['GA-NX6', 'done', null, null]],
+    ]], `PH2C-NEXT-DRAW: at ${width} with an empty lane order the map draws GA-NX5, GA-NX6, GA-NX1, GA-NX9, and GA-NX5, the first ready slice drawn, is Next up while GA-NX1 lists under Ready`);
+  }
+  // Row Order: the map draws GA-RW1, GA-RW3, GA-RW6, GA-RW2, GA-RW4,
+  // GA-RW7, GA-RW5, GA-RW8. GA-RW1 and GA-RW5 are blocked root blockers and
+  // GA-RW2 is blocked behind GA-RW1; GA-RW6 and GA-RW8 are parked root
+  // blockers and GA-RW7 is parked behind GA-RW6.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-ROOTS-FIRST turns RED at
+  // "PH2C-ROW-ORDER: at 390 ..." if the Blocked rows list root blockers
+  // first.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-BY-HOPS turns RED at the same label
+  // if the Blocked rows are sorted by their first root cause's hop count.
+  // MUTATION GUARD: PH2C-MUTANT-NEEDS-YOU-ROOTS-FIRST turns RED at the same
+  // label if the Needs you rows list root blockers first.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Row Order', [
+      { card: 'GA-RW1 Legal', status: 'blocked' },
+      { card: 'GA-RW2 Contract', status: 'blocked', depends_on: ['[[GA-RW1 Legal]]'] },
+      { card: 'GA-RW3 Spec', status: 'planning' },
+      { card: 'GA-RW4 Draft', status: 'planning', depends_on: ['[[GA-RW3 Spec]]'] },
+      { card: 'GA-RW5 Audit', status: 'blocked', depends_on: ['[[GA-RW4 Draft]]'] },
+      { card: 'GA-RW6 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-RW7 Terms', status: 'parked', depends_on: ['[[GA-RW6 Vendor]]'], resume_condition: 'Resume after terms.' },
+      { card: 'GA-RW8 Budget', status: 'parked', depends_on: ['[[GA-RW4 Draft]]'], resume_condition: 'Resume after budget.' },
+    ])), width);
+    assert.deepStrictEqual([
+      byClass(root, 'graph-view-chip').map((chip) => (byClass(chip, 'graph-view-pill-id')[0] || byClass(chip, 'graph-view-chip-id')[0])?.textContent ?? null),
+      ph2Read(root).groups.map((group) => group.slice(1)),
+    ], [['GA-RW1', 'GA-RW3', 'GA-RW6', 'GA-RW2', 'GA-RW4', 'GA-RW7', 'GA-RW5', 'GA-RW8'], [
+      ['Needs you 3',
+        ['GA-RW6', '⚑ waiting', null, 'Resume after the vendor call.'],
+        ['GA-RW7', '⚑ waiting', null, 'Resume after terms.'],
+        ['GA-RW8', '⚑ waiting', null, 'Resume after budget.']],
+      ['Next up 1', ['GA-RW3', 'planning', 'next', null]],
+      ['Blocked 3',
+        ['GA-RW1', 'blocked', null, null],
+        ['GA-RW2', 'blocked', null, 'blocked by GA-RW1 · 1 hop up'],
+        ['GA-RW5', 'blocked', null, 'needs GA-RW4']],
+      ['Queued 1', ['GA-RW4', 'planning', null, 'after GA-RW3']],
+    ]], `PH2C-ROW-ORDER: at ${width} the list is exactly Needs you 3 (GA-RW6, GA-RW7, GA-RW8), Next up 1, Blocked 3 (GA-RW1, GA-RW2, GA-RW5), and Queued 1, each group's rows in the map's draw order`);
+  }
+  // Done Order: GA-DN1 is completed after the completed GA-DN2, so the map
+  // draws GA-DN2 first, and 2 of 3 done folds into the strip.
+  // MUTATION GUARD: PH2C-MUTANT-EXPANDED-DONE-SORTED turns RED at
+  // "PH2C-DONE-ORDER: at 390 ..." if the rows expanded from the strip are
+  // sorted by card name.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Done Order', [
+      { card: 'GA-DN2 Schema', status: 'completed' },
+      { card: 'GA-DN1 Import', status: 'completed', depends_on: ['[[GA-DN2 Schema]]'] },
+      { card: 'GA-DN3 Docs', status: 'in_progress', depends_on: ['[[GA-DN1 Import]]'] },
+    ])), width);
+    bubblingClick(byClass(root, 'graph-view-frontier-done-strip')[0]);
+    assert.deepStrictEqual([
+      byClass(root, 'graph-view-chip').map((chip) => (byClass(chip, 'graph-view-pill-id')[0] || byClass(chip, 'graph-view-chip-id')[0])?.textContent ?? null),
+      byClass(root, 'graph-view-frontier-done-rows').map((rows) => rows.children.map(ph2RowOf)),
+    ], [['GA-DN2', 'GA-DN1', 'GA-DN3'], [[['GA-DN2', 'done', null, null], ['GA-DN1', 'done', null, null]]]],
+    `PH2C-DONE-ORDER: at ${width} the map draws GA-DN2, GA-DN1, GA-DN3, and the strip expands to GA-DN2 then GA-DN1, in that draw order`);
+  }
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
   // MUTATION GUARD: PH2-MUTANT-NEEDS-YOU-ON-BLOCKED turns RED at
   // "PH2-NEEDS-YOU-GLYPH-PARKED-ONLY: at 390 ..." if a blocked row's pill

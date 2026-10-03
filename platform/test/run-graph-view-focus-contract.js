@@ -37,7 +37,7 @@ const pkg = JSON.parse(fs.readFileSync(PACKAGE, 'utf8'));
 // BL-6 recorder and the exactPredicates strings below are byte-unchanged in it.
 // Re-pinned for PH-2c: platform/test/run-graph-view.js changed; the
 // BL-6 recorder and the exactPredicates strings below are byte-unchanged in it.
-const EXPECTED_BEHAVIOR_SHA256 = '379dd8e8f82fb3afc999df8eee447de295c0e2a5dcf87afe143b16b2b3ab8e67';
+const EXPECTED_BEHAVIOR_SHA256 = '273d1de92f39567f2df0e503d9d695c1afea86303b6769271aef498e3968ec73';
 
 const exactPredicates = [
   ["epic no-op", "bl6Check('epic-noop', () => byClass(root, 'graph-view-cluster-header').length === 0, 'BL6-EPIC-SCOPE-NOOP: epic scope renders no cluster header or focus affordance');"],
