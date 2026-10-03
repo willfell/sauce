@@ -1177,6 +1177,28 @@ const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation
     refs: [],
     failures: [unreadable(2, CALL_CHAIN)],
   },
+  // MUTATION GUARD: accepting a line comment before ) (/^\s*(\/\/.*)?\s*\)/) turns RED
+  {
+    label: 'a guard call left open in its string except for a ) inside a line comment, and joined with += to a part that starts with a newline, fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } // )';
+s += '\n && { class: "NoSuchLineParen" });';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: reading a template literal part by its raw text in place of its cooked text turns RED
+  {
+    label: 'a guard object whose comment after the class key joins a template literal part written \\x2a/ class: "NoSuchRawPart", /\\x2a has 2 class keys and fails the gate',
+    source: "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", /* ' + `\\x2a/ class: \"NoSuchRawPart\", /\\x2a` + ' */ });';",
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard object has 2 class keys')],
+  },
+  // MUTATION GUARD: skipping method-shorthand properties when counting class keys turns RED
+  {
+    label: 'a guard object with class: "OperatorStation" and a method class() has 2 class keys and fails the gate',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", class() { return "NoSuchMethod"; } });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard object has 2 class keys')],
+  },
   // MUTATION GUARD: parsing the call as a module (sourceType: 'module') in place of allowAwaitOutsideFunction turns RED
   {
     label: 'a guard object whose class value is followed by <!-- , class: "NoSuchHtml" and a newline is read as OperatorStation',
