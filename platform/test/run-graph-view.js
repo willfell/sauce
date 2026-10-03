@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 4010;
+const ASSERTION_FLOOR = 4026;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -10193,6 +10193,189 @@ async function main() {
       shipped: [],
       strip: [],
     }, `PH2C-THREE-WAITS: Three Waits at ${width}: the list is exactly Next up 1 (GA-TW2), In progress 1 (GA-TW1), Blocked 1 (GA-TW3), and Queued 1, whose GA-TW4 row reads after GA-TW3, GA-TW1, GA-TW2`);
+  }
+
+  // Three Roots: GA-TR1 is parked, GA-TR2 and GA-TR3 are blocked, and
+  // GA-TR4 is blocked after all three, so GA-TR4 has three root blockers,
+  // each 1 hop up.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-FIRST-TWO turns RED at
+  // "PH2C-THREE-ROOTS: Three Roots at 390 ..." if the Root cause row keeps
+  // only its first two lines.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-DROP-LAST-WHEN-THREE turns RED at
+  // the same label if the Root cause row drops its last line when it has
+  // three or more.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-LABEL-PLURAL turns RED at the
+  // same label if a Root cause row with more than one line is labelled Root
+  // causes.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-LAST-CAUSE-WHEN-THREE turns RED at
+  // the same label if a Blocked row with three or more root causes names
+  // the last one.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Three Roots', [
+      { card: 'GA-TR1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-TR2 Legal', status: 'blocked' },
+      { card: 'GA-TR3 Budget', status: 'blocked' },
+      { card: 'GA-TR4 Launch', status: 'blocked', depends_on: ['[[GA-TR1 Vendor]]', '[[GA-TR2 Legal]]', '[[GA-TR3 Budget]]'] },
+    ])), width);
+    const listed = ph2Read(root);
+    bubblingClick(ph2RowFor(root, 'GA-TR4'));
+    assert.deepStrictEqual([
+      listed,
+      ph2cCauseLines(root),
+      byClass(root, 'graph-view-detail-root-cause').map((block) => byClass(block, 'graph-view-detail-label')[0]?.textContent ?? null),
+    ], [{
+      groups: [
+        ['graph-view-frontier-group frontier-needs-you', 'Needs you 1', ['GA-TR1', '⚑ waiting', null, 'Resume after the vendor call.']],
+        ['graph-view-frontier-group frontier-blocked', 'Blocked 3',
+          ['GA-TR2', 'blocked', null, null],
+          ['GA-TR3', 'blocked', null, null],
+          ['GA-TR4', 'blocked', null, 'blocked by GA-TR1 · 1 hop up']],
+      ],
+      shipped: [],
+      strip: [],
+    }, [['GA-TR1', '1 hop up'], ['GA-TR2', '1 hop up'], ['GA-TR3', '1 hop up']], ['Root cause']],
+    `PH2C-THREE-ROOTS: Three Roots at ${width}: the list is exactly Needs you 1 and Blocked 3, whose GA-TR4 row reads blocked by GA-TR1 · 1 hop up, and GA-TR4's card has one block labelled Root cause with three lines, [GA-TR1, 1 hop up], [GA-TR2, 1 hop up], and [GA-TR3, 1 hop up]`);
+  }
+  // Four Roots: GA-FR1 to GA-FR4 are blocked, and GA-FR5 is blocked after
+  // all four.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-FIRST-THREE turns RED at
+  // "PH2C-FOUR-ROOTS: Four Roots at 390 ..." if the Root cause row keeps
+  // only its first three lines.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Four Roots', [
+      { card: 'GA-FR1 Legal', status: 'blocked' },
+      { card: 'GA-FR2 Budget', status: 'blocked' },
+      { card: 'GA-FR3 Vendor', status: 'blocked' },
+      { card: 'GA-FR4 Audit', status: 'blocked' },
+      { card: 'GA-FR5 Launch', status: 'blocked', depends_on: ['[[GA-FR1 Legal]]', '[[GA-FR2 Budget]]', '[[GA-FR3 Vendor]]', '[[GA-FR4 Audit]]'] },
+    ])), width);
+    bubblingClick(ph2RowFor(root, 'GA-FR5'));
+    assert.deepStrictEqual(ph2cCauseLines(root), [['GA-FR1', '1 hop up'], ['GA-FR2', '1 hop up'], ['GA-FR3', '1 hop up'], ['GA-FR4', '1 hop up']],
+      `PH2C-FOUR-ROOTS: Four Roots at ${width}: GA-FR5's card draws four Root cause lines, GA-FR1 to GA-FR4, each 1 hop up`);
+  }
+  // Blocked First: GA-BF1 is blocked, GA-BF2 is parked, and GA-BF3 is
+  // blocked after both, so GraphInsights lists the blocked GA-BF1 before
+  // the parked GA-BF2.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-PREFERS-PARKED-ROOT turns RED at
+  // "PH2C-BLOCKED-FIRST: Blocked First at 390 ..." if a Blocked row names a
+  // parked root cause ahead of its first one.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-PARKED-FIRST turns RED at the same
+  // label if the Root cause row puts parked root blockers first.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Blocked First', [
+      { card: 'GA-BF1 Legal', status: 'blocked' },
+      { card: 'GA-BF2 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-BF3 Launch', status: 'blocked', depends_on: ['[[GA-BF1 Legal]]', '[[GA-BF2 Vendor]]'] },
+    ])), width);
+    const listed = ph2Read(root).groups.map((group) => group.slice(1));
+    bubblingClick(ph2RowFor(root, 'GA-BF3'));
+    assert.deepStrictEqual([listed, ph2cCauseLines(root)], [[
+      ['Needs you 1', ['GA-BF2', '⚑ waiting', null, 'Resume after the vendor call.']],
+      ['Blocked 2', ['GA-BF1', 'blocked', null, null], ['GA-BF3', 'blocked', null, 'blocked by GA-BF1 · 1 hop up']],
+    ], [['GA-BF1', '1 hop up'], ['GA-BF2', '1 hop up']]],
+    `PH2C-BLOCKED-FIRST: Blocked First at ${width}: GA-BF3's Blocked row reads blocked by GA-BF1 · 1 hop up, and its Root cause lines are [GA-BF1, 1 hop up] then [GA-BF2, 1 hop up]`);
+  }
+  // Rank Order: GA-RO9 is blocked with no prerequisite, GA-RO1 is blocked
+  // after the completed GA-RO0, and GA-RO5 is blocked after GA-RO9 and
+  // GA-RO1.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-ALPHA-FIRST turns RED at
+  // "PH2C-RANK-ORDER: Rank Order at 390 ..." if a Blocked row names the
+  // alphabetically first root cause.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-SORTED-BY-CARD turns RED at the
+  // same label if the Root cause row sorts its lines by card name.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Rank Order', [
+      { card: 'GA-RO0 Base', status: 'completed' },
+      { card: 'GA-RO9 Legal', status: 'blocked' },
+      { card: 'GA-RO1 Vendor', status: 'blocked', depends_on: ['[[GA-RO0 Base]]'] },
+      { card: 'GA-RO5 Launch', status: 'blocked', depends_on: ['[[GA-RO9 Legal]]', '[[GA-RO1 Vendor]]'] },
+    ])), width);
+    const listed = ph2Read(root).groups.map((group) => group.slice(1));
+    bubblingClick(ph2RowFor(root, 'GA-RO5'));
+    assert.deepStrictEqual([listed, ph2cCauseLines(root)], [[
+      ['Blocked 3', ['GA-RO9', 'blocked', null, null], ['GA-RO1', 'blocked', null, null], ['GA-RO5', 'blocked', null, 'blocked by GA-RO9 · 1 hop up']],
+      ['Done 1', ['GA-RO0', 'done', null, null]],
+    ], [['GA-RO9', '1 hop up'], ['GA-RO1', '1 hop up']]],
+    `PH2C-RANK-ORDER: Rank Order at ${width}: GA-RO5's Blocked row reads blocked by GA-RO9 · 1 hop up, and its Root cause lines are [GA-RO9, 1 hop up] then [GA-RO1, 1 hop up]`);
+  }
+  // Four Waits: GA-FW5 is planned after GA-FW1, GA-FW2, GA-FW3, and GA-FW4,
+  // none of them completed.
+  // MUTATION GUARD: PH2C-MUTANT-AFTER-FIRST-THREE turns RED at
+  // "PH2C-FOUR-WAITS: Four Waits at 390 ..." if a Queued row names at most
+  // three prerequisites.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Four Waits', [
+      { card: 'GA-FW1 Alpha', status: 'in_progress' },
+      { card: 'GA-FW2 Beta', status: 'blocked' },
+      { card: 'GA-FW3 Gamma', status: 'planning' },
+      { card: 'GA-FW4 Delta', status: 'in_progress' },
+      { card: 'GA-FW5 Join', status: 'planning', depends_on: ['[[GA-FW1 Alpha]]', '[[GA-FW2 Beta]]', '[[GA-FW3 Gamma]]', '[[GA-FW4 Delta]]'] },
+    ])), width);
+    const queued = ph2Read(root).groups.find((group) => group[0] === 'graph-view-frontier-group frontier-queued') || null;
+    assert.deepStrictEqual(queued?.slice(1) ?? null, ['Queued 1', ['GA-FW5', 'planning', null, 'after GA-FW1, GA-FW2, GA-FW3, GA-FW4']],
+      `PH2C-FOUR-WAITS: Four Waits at ${width}: the Queued group is GA-FW5 alone, reading after GA-FW1, GA-FW2, GA-FW3, GA-FW4`);
+  }
+  // Parked No Resume: GA-PN2 is parked after the in-progress GA-PN1 and has
+  // no resume condition, so its wait reason is "waiting on: GA-PN1 Build".
+  // MUTATION GUARD: PH2C-MUTANT-NEEDS-YOU-RAW-WAIT turns RED at
+  // "PH2C-PARKED-NO-RESUME: Parked No Resume at 390 ..." if a Needs you row
+  // shows its raw wait reason instead of the shared wait line.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Parked No Resume', [
+      { card: 'GA-PN1 Build', status: 'in_progress' },
+      { card: 'GA-PN2 Vendor', status: 'parked', depends_on: ['[[GA-PN1 Build]]'] },
+    ])), width);
+    assert.deepStrictEqual(ph2Read(root).groups.map((group) => group.slice(1)), [
+      ['Needs you 1', ['GA-PN2', '⚑ waiting', null, 'needs GA-PN1']],
+      ['In progress 1', ['GA-PN1', 'in progress', null, null]],
+    ], `PH2C-PARKED-NO-RESUME: Parked No Resume at ${width}: the list is exactly Needs you 1, whose GA-PN2 row reads needs GA-PN1, and In progress 1 (GA-PN1)`);
+  }
+  // Draw Order: the lane order draws GA-DO8, GA-DO3, GA-DO9, GA-DO7, GA-DO2,
+  // GA-DO6, GA-DO4, which puts the Needs you, Ready, and Queued rows out of
+  // card-name order.
+  // MUTATION GUARD: PH2C-MUTANT-NEEDS-YOU-ROWS-SORTED turns RED at
+  // "PH2C-DRAW-ORDER: Draw Order at 390 ..." if the Needs you rows are
+  // sorted by card name.
+  // MUTATION GUARD: PH2C-MUTANT-READY-ROWS-SORTED turns RED at the same
+  // label if the Ready rows are sorted by card name.
+  // MUTATION GUARD: PH2C-MUTANT-QUEUED-ROWS-SORTED turns RED at the same
+  // label if the Queued rows are sorted by card name.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Draw Order', [
+      { card: 'GA-DO3 Legal', status: 'parked', resume_condition: 'Resume after legal review.' },
+      { card: 'GA-DO8 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-DO2 Docs', status: 'planning' },
+      { card: 'GA-DO7 Export', status: 'planning' },
+      { card: 'GA-DO9 Import', status: 'planning' },
+      { card: 'GA-DO4 Rollout', status: 'planning', depends_on: ['[[GA-DO8 Vendor]]'] },
+      { card: 'GA-DO6 Review', status: 'planning', depends_on: ['[[GA-DO3 Legal]]'] },
+    ], ['GA-DO8 Vendor', 'GA-DO3 Legal', 'GA-DO9 Import', 'GA-DO7 Export', 'GA-DO2 Docs', 'GA-DO6 Review', 'GA-DO4 Rollout'])), width);
+    assert.deepStrictEqual([
+      byClass(root, 'graph-view-chip').map((chip) => (byClass(chip, 'graph-view-pill-id')[0] || byClass(chip, 'graph-view-chip-id')[0])?.textContent ?? null),
+      ph2Read(root).groups.map((group) => group.slice(1)),
+    ], [['GA-DO8', 'GA-DO3', 'GA-DO9', 'GA-DO7', 'GA-DO2', 'GA-DO6', 'GA-DO4'], [
+      ['Needs you 2', ['GA-DO8', '⚑ waiting', null, 'Resume after the vendor call.'], ['GA-DO3', '⚑ waiting', null, 'Resume after legal review.']],
+      ['Next up 1', ['GA-DO9', 'planning', 'next', null]],
+      ['Ready 2', ['GA-DO7', 'planning', 'ready', null], ['GA-DO2', 'planning', 'ready', null]],
+      ['Queued 2', ['GA-DO6', 'planning', null, 'after GA-DO3'], ['GA-DO4', 'planning', null, 'after GA-DO8']],
+    ]], `PH2C-DRAW-ORDER: Draw Order at ${width}: the map draws GA-DO8, GA-DO3, GA-DO9, GA-DO7, GA-DO2, GA-DO6, GA-DO4, and the Needs you (GA-DO8, GA-DO3), Ready (GA-DO7, GA-DO2), and Queued (GA-DO6, GA-DO4) rows follow that order`);
+  }
+  // A Gates link on a detail card opens its note rather than selecting its
+  // slice.
+  // MUTATION GUARD: PH2C-MUTANT-GATES-LINK-SELECTS turns RED at
+  // "PH2C-GATES-LINK-OPENS: at 390 ..." if a Gates link selects its slice
+  // instead of opening its note.
+  for (const width of [390, 1024]) {
+    const env = ph2Track(ph2MlEnv());
+    const root = await ph2Draw(env, width);
+    bubblingClick(ph2RowFor(root, 'GA-ML8'));
+    const gate = byClass(root, 'graph-view-detail-dependent')
+      .find((link) => byClass(link, 'graph-view-detail-link-id')[0]?.textContent === 'GA-ML9');
+    const tap = bubblingClick(gate);
+    assert(tap.stopped && JSON.stringify(env.opened) === JSON.stringify([[`${env.boardDir}/${ph2MlCard(9)}`, env.epicPath, false]])
+      && byClass(root, 'graph-view-detail-panel').length === 1
+      && byClass(root, 'graph-view-detail-id')[0]?.textContent === 'GA-ML8',
+    `PH2C-GATES-LINK-OPENS: at ${width} a tap on the GA-ML9 Gates link on GA-ML8's card stops there, opens GA-ML9's note, and leaves GA-ML8's card open`);
   }
 
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
