@@ -1963,6 +1963,220 @@ COORDINATOR_FIXTURES.push(
   },
 );
 
+COORDINATOR_FIXTURES.push(
+  // MUTATION GUARD: letting enclosingFunction stop at a class field or static block turns RED
+  {
+    label: "a helper whose guard string is a static class field initialiser reading widget is read through its call and fails naming NoSuchInStaticField",
+    source: String.raw`function block(widget) { return (class { static s = 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }).s; }
+const s = block('NoSuchInStaticField');`,
+    refs: ['NoSuchInStaticField'],
+    failures: [missing('NoSuchInStaticField', 2)],
+  },
+  // MUTATION GUARD: letting enclosingFunction stop at a class field or static block turns RED
+  {
+    label: "a helper whose guard string is built in a class static block reading widget is read through its call and fails naming NoSuchInStaticBlock",
+    source: String.raw`function block(widget) { let r; class K { static { r = 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } } return r; }
+const s = block('NoSuchInStaticBlock');`,
+    refs: ['NoSuchInStaticBlock'],
+    failures: [missing('NoSuchInStaticBlock', 2)],
+  },
+);
+
+// Position property: a seeded, deterministic generator builds strict CommonJS scripts from the
+// payload families below. Each expression slot in POSITION_EXPRESSIONS holds a payload
+// without nesting; each statement position in POSITION_STATEMENTS wraps a payload in the
+// declarator-init slot; and seeded samples nest slots and positions to depth 2 or 3. It
+// pushes one fixture per generated source. The expected refs and failures come from the
+// payload's family, not from the gate: a guard literal or helper call whose class Dataview
+// would pass to dv.view is read, and fails exactly when that class does not ship; an
+// appearance of the helper other than as a direct call fails; a rebinding of the class
+// parameter anywhere inside the helper fails. A generated source identical to an earlier one,
+// or that V8 does not compile as a strict script, is dropped, and the last fixture asserts
+// that every position kind appears in every family.
+// MUTATION GUARD: the visitor not descending into any one node type used below (ClassBody,
+// StaticBlock, PropertyDefinition, MethodDefinition, SwitchCase, LabeledStatement,
+// IfStatement, WhileStatement, DoWhileStatement, ForStatement, ForInStatement,
+// ForOfStatement, TryStatement, CatchClause, BlockStatement, ReturnStatement, ThrowStatement,
+// AssignmentPattern, SpreadElement, AwaitExpression, YieldExpression, ChainExpression,
+// SequenceExpression, ConditionalExpression, LogicalExpression, NewExpression,
+// CallExpression, TaggedTemplateExpression, TemplateLiteral, ArrayExpression,
+// ObjectExpression, Property, ArrowFunctionExpression, FunctionExpression, ClassExpression,
+// UnaryExpression, AssignmentExpression, BinaryExpression) turns position fixtures RED
+const POSITION_SEED = 20261003;
+const POSITION_SAMPLES = 40;
+const positionRandom = (seed) => () => {
+  seed = (seed * 1103515245 + 12345) % 2147483648;
+  return seed / 2147483648;
+};
+const POSITION_EXPRESSIONS = [
+  ['declarator init', (h) => `(() => { const v = ${h}; })`],
+  ['assignment right side', (h) => `(x = ${h})`],
+  ['compound assignment right side', (h) => `(x += ${h})`],
+  ['object property value', (h) => `({ k: ${h} })`],
+  ['object method return', (h) => `({ m() { return ${h}; } })`],
+  ['object getter return', (h) => `({ get g() { return ${h}; } })`],
+  ['object setter body', (h) => `({ set s(v) { x = ${h}; } })`],
+  ['class field', (h) => `(class { f = ${h}; })`],
+  ['static class field', (h) => `(class { static f = ${h}; })`],
+  ['class static block', (h) => `(class { static { x = ${h}; } })`],
+  ['class method return', (h) => `(class { m() { return ${h}; } })`],
+  ['class getter return', (h) => `(class { get g() { return ${h}; } })`],
+  ['computed class key', (h) => `(class { [${h}]() {} })`],
+  ['default parameter', (h) => `(function (p = ${h}) {})`],
+  ['destructuring default', (h) => `(({ q = ${h} }) => q)`],
+  ['function return', (h) => `(function () { return ${h}; })`],
+  ['function throw', (h) => `(function () { throw ${h}; })`],
+  ['arrow body', (h) => `(() => ${h})`],
+  ['ternary consequent', (h) => `(c ? ${h} : 0)`],
+  ['ternary alternate', (h) => `(c ? 0 : ${h})`],
+  ['ternary test', (h) => `(${h} ? 0 : 1)`],
+  ['logical || right side', (h) => `(c || ${h})`],
+  ['logical && right side', (h) => `(c && ${h})`],
+  ['logical ?? right side', (h) => `(c ?? ${h})`],
+  ['array element', (h) => `[0, ${h}]`],
+  ['array spread', (h) => `[...[${h}]]`],
+  ['call argument', (h) => `g(${h})`],
+  ['call spread argument', (h) => `g(...[${h}])`],
+  ['new argument', (h) => `new G(${h})`],
+  ['optional call argument', (h) => `g?.(${h})`],
+  ['optional member call argument', (h) => `o?.m?.(${h})`],
+  ['sequence after the first', (h) => `(0, ${h})`],
+  ['sequence first', (h) => `(${h}, 0)`],
+  ['yield argument', (h) => `(function* () { yield ${h}; })`],
+  ['await argument', (h) => `(async () => { await ${h}; })`],
+  ['template substitution', (h) => `\`a\${${h}}b\``],
+  ['tagged template substitution', (h) => `tag\`a\${${h}}b\``],
+  ['unary operand', (h) => `(void ${h})`],
+  ['binary right side after a static string', (h) => `('' + ${h})`],
+  ['member object', (h) => `(${h}).length`],
+];
+const POSITION_STATEMENTS = [
+  ['if consequent', (s, n) => `if (c) { ${s} }`],
+  ['if alternate', (s, n) => `if (c) {} else { ${s} }`],
+  ['else-if consequent', (s, n) => `if (c) {} else if (c) { ${s} }`],
+  ['switch case', (s, n) => `switch (c) { case 1: ${s} }`],
+  ['switch default', (s, n) => `switch (c) { default: ${s} }`],
+  ['for body', (s, n) => `for (let i${n} = 0; i${n} < 1; i${n}++) { ${s} }`],
+  ['for-in body', (s, n) => `for (const k${n} in o) { ${s} }`],
+  ['for-of body', (s, n) => `for (const k${n} of a) { ${s} }`],
+  ['while body', (s, n) => `while (c) { ${s} }`],
+  ['do-while body', (s, n) => `do { ${s} } while (c);`],
+  ['try block', (s, n) => `try { ${s} } catch (e${n}) {}`],
+  ['catch block', (s, n) => `try {} catch (e${n}) { ${s} }`],
+  ['finally block', (s, n) => `try {} finally { ${s} }`],
+  ['labeled block', (s, n) => `l${n}: { ${s} }`],
+  ['labeled loop', (s, n) => `m${n}: for (;;) { ${s} break m${n}; }`],
+  ['block', (s, n) => `{ ${s} }`],
+  ['function declaration body', (s, n) => `function f${n}() { ${s} }`],
+  ['arrow function block body', (s, n) => `(() => { ${s} })();`],
+  ['class method body', (s, n) => `class K${n} { m() { ${s} } }`],
+  ['class static block body', (s, n) => `class S${n} { static { ${s} } }`],
+  ['generator body', (s, n) => `function* y${n}() { ${s} }`],
+  ['async function body', (s, n) => `async function z${n}() { ${s} }`],
+];
+const POSITION_PRELUDE = "'use strict'; let c = 0, x, u, o = {}, a = []; const g = () => 0, G = function () {}, tag = () => 0;";
+const positionGuard = (cls) => `await dv.view("ranch/views/customjs-guard", { class: "${cls}" });`;
+const POSITION_HELPER = "function block(widget) { return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }";
+// A payload yields the second and third lines of a source from a position wrapper, which takes
+// an expression and returns the third line, and the expected refs and failures.
+const POSITION_FAMILIES = [
+  ['an unshipped guard literal', 'NoSuchPositionLiteral', (wrap, cls) => ['', wrap(`'${positionGuard(cls)}'`)]],
+  ['a shipped guard literal', 'OperatorStation', (wrap, cls) => ['', wrap(`'${positionGuard(cls)}'`)]],
+  ['an unshipped helper call', 'NoSuchPositionHelper', (wrap, cls) => [POSITION_HELPER, wrap(`block('${cls}')`)]],
+  ['a shipped helper call', 'OperatorStation', (wrap, cls) => [POSITION_HELPER, wrap(`block('${cls}')`)]],
+  ['a helper alias', null, (wrap, cls, alias) => [`${POSITION_HELPER} block('OperatorStation');`, wrap(alias)]],
+  ['a class parameter rebinding', null, (wrap, cls, alias, rebind) => [
+    `function block(widget) { ${wrap(rebind)} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }`, "block('OperatorStation');"]],
+];
+// The shorthand alias ({ block }) is two Identifier nodes in acorn, its key and its value, and each
+// fails as an appearance other than a call.
+const POSITION_ALIASES = ['block', '(u = block)', '(o.b = block)', '[block]', '(block || 0)', '[].map(block)', "block.call(null, 'NoSuchAlias')",
+  "block.apply(null, ['NoSuchAlias'])", "Reflect.apply(block, null, ['NoSuchAlias'])", '({ block })', '(() => block)'];
+const POSITION_REBINDS = ["(widget = 'NoSuchRebind')", "(widget += 'X')", '(widget++)', "([widget] = ['NoSuchRebind'])",
+  "({ w: widget } = { w: 'NoSuchRebind' })", "(() => { widget = 'NoSuchRebind'; })", "(() => { const widget = 'NoSuchRebind'; return widget; })",
+  "(() => { for (widget of ['NoSuchRebind']) {} })", "(() => { arguments[0] = 'NoSuchRebind'; })", "(() => { eval(\"widget = 'NoSuchRebind'\"); })"];
+// with is not generated: strict code, which the coordinator source is, rejects it as a SyntaxError.
+const positionDataviewClass = (cls) => {
+  const got = [];
+  const vm = require('vm');
+  new vm.Script(`(function (dv) { 'use strict'; return (async () => { ${positionGuard(cls)} })(); })`).runInNewContext({})({ view: (p, input) => got.push(input.class) });
+  return got[0];
+};
+const positionCompiles = (source) => {
+  try { new (require('vm').Script)(source); return null; } catch (e) { return `generated source does not compile as a strict script: ${e.message}`; }
+};
+const POSITION_FIXTURES = (() => {
+  const defs = collectClassNames(REF_SCAN_DIRS);
+  const random = positionRandom(POSITION_SEED);
+  const pick = (list) => list[Math.floor(random() * list.length)];
+  let serial = 0;
+  let skipped = 0;
+  let repeated = 0;
+  const sources = new Set();
+  const fixtures = [];
+  const seen = POSITION_FAMILIES.map(() => new Set());
+  const add = (familyIndex, path, expression, variant = serial) => {
+    const [family, cls, build] = POSITION_FAMILIES[familyIndex];
+    const alias = POSITION_ALIASES[variant % POSITION_ALIASES.length];
+    const rebind = POSITION_REBINDS[variant % POSITION_REBINDS.length];
+    const wrap = (payload) => {
+      let text = payload;
+      for (const [, ctx] of expression) text = ctx(text);
+      text = `void ${text};`;
+      path.forEach(([, ctx], level) => { text = ctx(text, `${serial}_${level}`); });
+      return text;
+    };
+    serial += 1;
+    const [second, third] = build(wrap, cls, alias, rebind);
+    const source = `${POSITION_PRELUDE}\n${second}\n${third}`;
+    if (sources.has(source)) { repeated += 1; return; }
+    sources.add(source);
+    if (positionCompiles(source)) { skipped += 1; return; }
+    for (const [kind] of [...expression, ...path]) seen[familyIndex].add(kind);
+    const where = [...expression.map(([k]) => k), ...path.map(([k]) => k)].join(' in ')
+      + (family === 'a helper alias' ? ` (${alias})` : family === 'a class parameter rebinding' ? ` (${rebind})` : '');
+    let refs = [];
+    let failures = [];
+    if (cls) {
+      const seenClass = positionDataviewClass(cls);
+      refs = [seenClass];
+      failures = defs.has(seenClass) ? [] : [missing(seenClass, 3)];
+    } else if (family === 'a helper alias') {
+      refs = ['OperatorStation'];
+      failures = alias === '({ block })' ? [unreadable(3, BLOCK_ARG), unreadable(3, BLOCK_ARG)] : [unreadable(3, BLOCK_ARG)];
+    } else {
+      failures = [unreadable(2, MAY_NOT_HOLD('block'))];
+      refs = [];
+    }
+    fixtures.push({ label: `position property: ${family} in ${where}`, source, refs, failures });
+  };
+  POSITION_FAMILIES.forEach(([, cls], i) => {
+    const variants = cls ? 1 : i === 4 ? POSITION_ALIASES.length : POSITION_REBINDS.length;
+    for (const e of POSITION_EXPRESSIONS) for (let v = 0; v < variants; v++) add(i, [], [e], v);
+    for (const s of POSITION_STATEMENTS) add(i, [s], [POSITION_EXPRESSIONS[0]]);
+    for (let n = 0; n < POSITION_SAMPLES; n++) {
+      const depth = 2 + Math.floor(random() * 2);
+      const exprCount = 1 + Math.floor(random() * (depth - 1));
+      const expression = Array.from({ length: exprCount }, () => pick(POSITION_EXPRESSIONS));
+      const path = Array.from({ length: depth - exprCount }, () => pick(POSITION_STATEMENTS));
+      add(i, path, expression);
+    }
+  });
+  const kinds = [...POSITION_EXPRESSIONS, ...POSITION_STATEMENTS].map(([k]) => k);
+  fixtures.push({
+    label: `position property: each of the ${kinds.length} position kinds appears in each of the ${POSITION_FAMILIES.length} families among the ${fixtures.length} generated sources that compile as strict scripts (${repeated} repeats of an earlier source and ${skipped} sources that do not compile are dropped)`,
+    precondition: () => {
+      const gaps = POSITION_FAMILIES.flatMap(([family], i) => kinds.filter((k) => !seen[i].has(k)).map((k) => `${family}: ${k}`));
+      return gaps.length ? `position kinds missing: ${gaps.join('; ')}` : null;
+    },
+    source: '',
+    refs: [],
+    failures: [],
+  });
+  return fixtures;
+})();
+COORDINATOR_FIXTURES.push(...POSITION_FIXTURES);
+
 const COORDINATOR_GATE_FIXTURES = [
   {
     label: 'a coordinator source with 3 refs, one per required class, fails only the floor',
