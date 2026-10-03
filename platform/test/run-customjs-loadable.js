@@ -179,6 +179,696 @@ function scanClassRefs() {
   return { refCount: refs.length, defCount: defs.size, unresolved };
 }
 
+// --- CJS-REF-COORDINATOR (gate 3): scans the string literals and template parts
+// of scripts/autoloop/codex-coordinator.js for customjs-guard. When the scan
+// completes, each occurrence yields at least one class reference or unreadable
+// failure, and a class reference fails the gate unless collectClassNames finds
+// its class name under platform/blueprints or platform/mechanisms. The gate
+// also fails when fewer than COORDINATOR_REF_FLOOR references are read or a
+// class in COORDINATOR_REQUIRED_CLASSES is not among them. Fixtures in
+// COORDINATOR_FIXTURES check reading rules against examples.
+const acorn = require('acorn');
+
+const COORDINATOR_SOURCE = 'scripts/autoloop/codex-coordinator.js';
+const COORDINATOR_REF_FLOOR = 6;
+const COORDINATOR_REQUIRED_CLASSES = ['BoardHealth', 'GraphView', 'OperatorStation'];
+const EXPR_PLACEHOLDER_RE = /__sauceClassExpr(\d+)__/;
+
+function stringValue(node) {
+  if (node && node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node && node.type === 'TemplateLiteral' && node.expressions.length === 0) return node.quasis[0].value.cooked;
+  return null;
+}
+
+function readGuardCall(text, at) {
+  const call = /\bdv\.view\(\s*["'`][^"'`]*$/.exec(text.slice(0, at));
+  if (!call) return { error: 'customjs-guard does not follow dv.view( at the start of a word, optional whitespace and a quote in this string or template part, with no other quote between that quote and customjs-guard' };
+  let parsed;
+  try { parsed = acorn.parseExpressionAt(text, call.index + call[0].search(/["'`]/), { ecmaVersion: 'latest' }); }
+  catch (_e) { return { error: "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value" }; }
+  const args = parsed.type === 'SequenceExpression' ? parsed.expressions : [parsed];
+  if (!/customjs-guard$/.test(stringValue(args[0]) || '')) return { error: "customjs-guard call's first argument, as parsed from the quote before customjs-guard, has no static string value ending in customjs-guard" };
+  const config = args[1];
+  if (!config || config.type !== 'ObjectExpression') return { error: 'customjs-guard call has no object literal as its second argument' };
+  if (config.properties.some((p) => p.type !== 'Property' || p.computed)) return { error: 'customjs-guard object has a spread or computed key' };
+  const keys = config.properties.filter((p) => (p.key.type === 'Identifier' ? p.key.name : p.key.value) === 'class');
+  if (keys.length !== 1) return { error: `customjs-guard object has ${keys.length} class keys` };
+  const value = stringValue(keys[0].value);
+  if (value === null) return { error: 'customjs-guard class value is not a string literal' };
+  return { value };
+}
+
+function coordinatorClassRefs(source) {
+  const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, locations: true });
+  const parent = new Map();
+  const nodes = [];
+  (function visit(node) {
+    nodes.push(node);
+    for (const value of Object.values(node)) {
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (child && typeof child.type === 'string') { parent.set(child, node); visit(child); }
+      }
+    }
+  })(ast);
+
+  const refs = [];
+  const problems = [];
+  const concatenated = (node) => {
+    for (let cur = node, up = parent.get(cur); up && up.type === 'BinaryExpression' && up.operator === '+'; cur = up, up = parent.get(up)) {
+      if (up.left === cur) return up.right;
+    }
+    return null;
+  };
+  const following = (node) => {
+    const pieces = [];
+    for (let next = concatenated(node); next; next = concatenated(next)) pieces.push(next);
+    return pieces;
+  };
+  const enclosingFunction = (node) => {
+    for (let up = parent.get(node); up; up = parent.get(up)) {
+      if (/Function/.test(up.type)) return up;
+    }
+    return null;
+  };
+  const isWithin = (node, ancestor) => {
+    for (let up = node; up; up = parent.get(up)) if (up === ancestor) return true;
+    return false;
+  };
+  const isName = (id) => {
+    const up = parent.get(id);
+    return (up.type === 'MemberExpression' && up.property === id && !up.computed)
+      || (['Property', 'MethodDefinition', 'PropertyDefinition'].includes(up.type) && up.key === id && !up.computed && !up.shorthand)
+      || (['LabeledStatement', 'BreakStatement', 'ContinueStatement'].includes(up.type) && up.label === id);
+  };
+  const binds = (id) => {
+    const up = parent.get(id);
+    switch (up.type) {
+      case 'AssignmentExpression': case 'AssignmentPattern': case 'ForInStatement': case 'ForOfStatement': return up.left === id;
+      case 'UpdateExpression': case 'ArrayPattern': case 'RestElement': return true;
+      case 'VariableDeclarator': case 'ClassDeclaration': case 'ClassExpression': return up.id === id;
+      case 'CatchClause': return up.param === id;
+      case 'Property': return up.value === id && parent.get(up).type === 'ObjectPattern';
+      case 'FunctionDeclaration': case 'FunctionExpression': case 'ArrowFunctionExpression': return up.id === id || up.params.includes(id);
+      default: return false;
+    }
+  };
+  const resolve = (expr, line) => {
+    const fn = expr.type === 'Identifier' ? enclosingFunction(expr) : null;
+    const index = fn && fn.type === 'FunctionDeclaration' ? fn.params.findIndex((p) => p.name === expr.name) : -1;
+    if (index < 0) { problems.push({ line, message: 'class value is not a string literal, a template literal without substitutions, or a plain identifier parameter of its nearest enclosing function, or that function is not a function declaration' }); return; }
+    const rebinds = (n) => n !== fn.params[index] && isWithin(n, fn) && (n.type === 'WithStatement'
+      || (n.type === 'Identifier' && (n.name === 'arguments' || n.name === 'eval' || (n.name === expr.name && binds(n)))));
+    if (nodes.some(rebinds)) { problems.push({ line, message: `${expr.name} is redeclared or assigned in ${fn.id.name}, or ${fn.id.name} names arguments, eval or with` }); return; }
+    let uses = 0;
+    for (const id of nodes) {
+      if (id.type !== 'Identifier' || id.name !== fn.id.name || id === fn.id || isName(id)) continue;
+      uses++;
+      const up = parent.get(id);
+      const called = up.type === 'CallExpression' && up.callee === id
+        && !up.arguments.slice(0, index).some((a) => a.type === 'SpreadElement');
+      const value = called ? stringValue(up.arguments[index]) : null;
+      if (value === null) problems.push({ line: id.loc.start.line, message: `${fn.id.name} appears other than as a call with a readable string literal class argument` });
+      else refs.push({ cls: value, line: id.loc.start.line });
+    }
+    if (uses === 0) problems.push({ line, message: `${fn.id.name} has no call to read the class from` });
+  };
+
+  const parts = [];
+  for (const node of nodes) {
+    if (node.type === 'Literal' && typeof node.value === 'string') {
+      parts.push({ text: node.value, line: node.loc.start.line, rest: () => following(node) });
+    } else if (node.type === 'TemplateLiteral') {
+      const up = parent.get(node);
+      const tagged = up && up.type === 'TaggedTemplateExpression' && up.quasi === node;
+      const raw = tagged && up.tag.type === 'MemberExpression' && !up.tag.computed
+        && up.tag.object.type === 'Identifier' && up.tag.object.name === 'String' && up.tag.property.name === 'raw';
+      const quasiText = (q) => (raw ? q.value.raw : q.value.cooked);
+      node.quasis.forEach((q, i) => parts.push({
+        text: quasiText(q),
+        line: q.loc.start.line,
+        opaque: tagged && !raw,
+        rest: () => node.expressions.slice(i).flatMap((e, j) => [e, { type: 'Literal', value: quasiText(node.quasis[i + j + 1]) }])
+          .concat(following(tagged ? up : node)),
+      }));
+    }
+  }
+  for (const part of parts) {
+    for (let at = part.text.indexOf('customjs-guard'); at !== -1; at = part.text.indexOf('customjs-guard', at + 1)) {
+      if (part.opaque) { problems.push({ line: part.line, message: 'customjs-guard string is in a template with a tag not written String.raw' }); continue; }
+      const exprs = [];
+      const text = part.text + part.rest().map((piece) => {
+        const value = stringValue(piece);
+        if (value !== null) return value;
+        exprs.push(piece);
+        return `__sauceClassExpr${exprs.length - 1}__`;
+      }).join('');
+      const collides = text.split('__sauceClassExpr').length - 1 > exprs.length;
+      const { value, error } = readGuardCall(text, at);
+      const placeholder = value === undefined ? null : EXPR_PLACEHOLDER_RE.exec(value);
+      if (error) problems.push({ line: part.line, message: error });
+      else if (!placeholder) refs.push({ cls: value, line: part.line });
+      else if (placeholder[0] !== value || collides) problems.push({ line: part.line, message: 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders' });
+      else resolve(exprs[Number(placeholder[1])], part.line);
+    }
+  }
+  return { refs, problems };
+}
+
+function coordinatorFailures(source, defs, file) {
+  const { refs, problems } = coordinatorClassRefs(source);
+  const names = new Set(refs.map((r) => r.cls));
+  const failures = [];
+  if (refs.length < COORDINATOR_REF_FLOOR) {
+    failures.push(`FAIL CJS-REF-COORDINATOR floor: extracted ${refs.length} customjs-guard class ref(s) from ${file}, expected at least ${COORDINATOR_REF_FLOOR}`);
+  }
+  for (const cls of COORDINATOR_REQUIRED_CLASSES) {
+    if (!names.has(cls)) failures.push(`FAIL CJS-REF-COORDINATOR required: no customjs-guard class ref "${cls}" extracted from ${file}`);
+  }
+  return { refs, failures: [...failures, ...refFailures(refs, problems, defs, file)] };
+}
+
+function refFailures(refs, problems, defs, file) {
+  return [
+    ...problems.map((p) => `FAIL CJS-REF-COORDINATOR unreadable: ${file}:${p.line} ${p.message}`),
+    ...refs.filter((r) => !defs.has(r.cls))
+      .map((r) => `FAIL CJS-REF-COORDINATOR: { class: "${r.cls}" } <- ${file}:${r.line} has no shipped class definition`),
+  ];
+}
+
+function checkCoordinatorFixture(fixture, defs) {
+  const unmet = fixture.precondition ? fixture.precondition() : null;
+  if (unmet) return `precondition not met: ${unmet}`;
+  const { refs, problems } = coordinatorClassRefs(fixture.source);
+  const got = JSON.stringify({ refs: refs.map((r) => r.cls), failures: refFailures(refs, problems, defs, 'fixture') });
+  const want = JSON.stringify({ refs: fixture.refs, failures: fixture.failures });
+  return got === want ? null : `expected ${want}, got ${got}`;
+}
+
+const missing = (cls, line) => `FAIL CJS-REF-COORDINATOR: { class: "${cls}" } <- fixture:${line} has no shipped class definition`;
+const unreadable = (line, message) => `FAIL CJS-REF-COORDINATOR unreadable: fixture:${line} ${message}`;
+const NOT_PARAM = 'class value is not a string literal, a template literal without substitutions, or a plain identifier parameter of its nearest enclosing function, or that function is not a function declaration';
+const BLOCK_ARG = 'block appears other than as a call with a readable string literal class argument';
+const MAY_NOT_HOLD = (fn) => `widget is redeclared or assigned in ${fn}, or ${fn} names arguments, eval or with`;
+
+const COORDINATOR_FIXTURES = [
+  {
+    label: 'a body naming a class that does not ship fails with that class named',
+    source: String.raw`const BODY = ['await dv.view("ranch/views/customjs-guard", { class: "NoSuchClassRR4" });'].join('\n');`,
+    refs: ['NoSuchClassRR4'],
+    failures: [missing('NoSuchClassRR4', 1)],
+  },
+  {
+    label: 'a body naming a shipped class passes',
+    source: String.raw`const BODY = ['await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });'].join('\n');`,
+    refs: ['OperatorStation'],
+    failures: [],
+  },
+  {
+    label: 'a class named only in a comment is not a ref',
+    source: String.raw`// await dv.view("ranch/views/customjs-guard", { class: "GhostInLineComment" });
+/* await dv.view("ranch/views/customjs-guard", { class: "GhostInBlockComment" }); */
+const x = 1;`,
+    refs: [],
+    failures: [],
+  },
+  {
+    label: 'a class named in a string without customjs-guard is not a ref',
+    source: String.raw`const a = 'GhostInProse is not loaded';
+const b = '{ class: "GhostInProse" }';`,
+    refs: [],
+    failures: [],
+  },
+  {
+    label: 'escapes are read as the written note text; templates tagged tag, String.other, Other.raw and String[raw] each fail the gate',
+    source: String.raw`const a = "await dv.view(\"ranch/views/customjs-guard\", { class: \"EscapedDouble\" });";
+const b = 'await dv.view(\'ranch/views/customjs-guard\', { class: \'EscapedSingle\' });';
+const c = 'await dv.view("ranch/views/customjs-guard", \
+{ class: "ContinuedLine" });';
+` + 'const d = String.raw`await dv.view("ranch/views/customjs-guard", { class: "TaggedRaw" }); \\unicode`;\n'
+      + 'const e = String.raw`await dv.view("ranch/views/customjs-guard", { class: "Raw\\"Quote" });`;\n'
+      + 'const f = tag`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });`;\n'
+      + 'const g = String.other`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });`;\n'
+      + 'const h = Other.raw`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });`;\n'
+      + 'const i = String[raw]`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });`;',
+    refs: ['EscapedDouble', 'EscapedSingle', 'ContinuedLine', 'TaggedRaw', 'Raw"Quote'],
+    failures: [
+      unreadable(7, 'customjs-guard string is in a template with a tag not written String.raw'),
+      unreadable(8, 'customjs-guard string is in a template with a tag not written String.raw'),
+      unreadable(9, 'customjs-guard string is in a template with a tag not written String.raw'),
+      unreadable(10, 'customjs-guard string is in a template with a tag not written String.raw'),
+      missing('EscapedDouble', 1), missing('EscapedSingle', 2), missing('ContinuedLine', 3), missing('TaggedRaw', 5), missing('Raw"Quote', 6),
+    ],
+  },
+  {
+    label: 'each of the three calls of a class-writing helper is checked',
+    source: String.raw`function block(title, widget) {
+  return '## ' + title + '\n\x60\x60\x60dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });\n\x60\x60\x60';
+}
+block('Heading', 'MissingViaHelperFirst');
+block('Heading', 'OperatorStation');
+block(
+  'Heading',
+  'MissingViaHelperLast',
+);`,
+    refs: ['MissingViaHelperFirst', 'OperatorStation', 'MissingViaHelperLast'],
+    failures: [missing('MissingViaHelperFirst', 4), missing('MissingViaHelperLast', 6)],
+  },
+  {
+    label: 'class values are read from customjs-guard calls that start in template literals: one from each of four helper calls and one from each of two templates outside a helper',
+    source: 'function block(widget) {\n  return `await dv.view(\\"ranch/views/customjs-guard\\", { class: \\"${widget}\\" });`;\n}\n'
+      + "block('MissingViaTemplate');\nblock(`OperatorStation`);\n"
+      + 'const multi = `\nawait dv.view("ranch/views/customjs-guard", { class: "MissingInMultilineTemplate" });`;\n'
+      + 'const inline = `await dv.view("ranch/views/customjs-guard", { class: "${\'InlinedLiteral\'}" });`;\n'
+      + 'function two(a, widget) { return `await dv.view("ranch/views/customjs-guard", { args: [${a}], class: "${widget}" });`; }\n'
+      + "two('x', 'MissingSecondExpr');\n"
+      + 'function rawBlock(widget) { return String.raw`await dv.view("ranch/views/customjs-guard", { class: "` + widget + \'" });\'; }\n'
+      + "rawBlock('MissingAfterRaw');",
+    refs: ['MissingViaTemplate', 'OperatorStation', 'MissingInMultilineTemplate', 'InlinedLiteral', 'MissingSecondExpr', 'MissingAfterRaw'],
+    failures: [
+      missing('MissingViaTemplate', 4), missing('MissingInMultilineTemplate', 6), missing('InlinedLiteral', 8),
+      missing('MissingSecondExpr', 10), missing('MissingAfterRaw', 12),
+    ],
+  },
+  {
+    label: 'class values that are not string literals or cannot be read: no ref is read, and the gate fails at lines 5-10, 12, 16, 20 and 26-30 of this source',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+const name = 'OperatorStation';
+block(name);
+wrap('OperatorStation', block);
+block(${'`${name}`'});
+block(5);
+const c = 'await dv.view("ranch/views/customjs-guard", { class: "' + name.trim() + '" });';
+const d = name + 'await dv.view("ranch/views/customjs-guard", { class: "' + name + '" });';
+const expr = function named(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+};
+expr('OperatorStation');
+function compare(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' == widget;
+}
+compare('OperatorStation');
+function outer(widget) {
+  return [1].map(() => 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });');
+}
+outer('OperatorStation');
+function pair(title, widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+pair(...['Heading'], 'OperatorStation');
+function lonely(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const mixed = 'await dv.view("ranch/views/customjs-guard", { class: "Pre' + name + '" });';
+const cmp = 'await dv.view("ranch/views/customjs-guard", { class: "' == 'OperatorStation" });';
+const unary = +'await dv.view("ranch/views/customjs-guard", { class: "' + 'OperatorStation" });';`,
+    refs: [],
+    failures: [
+      unreadable(5, BLOCK_ARG), unreadable(6, BLOCK_ARG), unreadable(7, BLOCK_ARG), unreadable(8, BLOCK_ARG),
+      unreadable(9, NOT_PARAM), unreadable(10, NOT_PARAM), unreadable(12, NOT_PARAM),
+      unreadable(16, "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value"), unreadable(20, NOT_PARAM),
+      unreadable(26, 'pair appears other than as a call with a readable string literal class argument'),
+      unreadable(27, 'lonely has no call to read the class from'),
+      unreadable(28, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders'),
+      unreadable(29, "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value"), unreadable(30, "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value"),
+    ],
+  },
+  {
+    label: 'a parameter redeclared or assigned in its function, or a function naming arguments, eval or with, fails the gate',
+    source: String.raw`function f1(widget) { widget = 'Ghost'; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f1('OperatorStation');
+function f2(widget) { widget++; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f2('OperatorStation');
+function f3(widget) { { let widget = 'Ghost'; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } } f3('OperatorStation');
+function f4(widget) { [widget = 'Ghost'] = []; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f4('OperatorStation');
+function f5(widget) { [widget] = ['Ghost']; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f5('OperatorStation');
+function f6(widget) { [...widget] = 'G'; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f6('OperatorStation');
+function f7(widget) { ({ widget } = { widget: 'Ghost' }); return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f7('OperatorStation');
+function f8(widget) { try {} catch (widget) {} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f8('OperatorStation');
+function f9(widget) { for (widget in {}) {} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f9('OperatorStation');
+function f10(widget) { for (widget of []) {} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f10('OperatorStation');
+function f11(widget) { function widget() {} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f11('OperatorStation');
+function f12(widget) { const g = (widget) => widget; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f12('OperatorStation');
+function f13(widget) { { class widget {} } return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f13('OperatorStation');
+function f14(widget) { const c = class widget {}; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f14('OperatorStation');
+function f15(widget) { const g = function widget() {}; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f15('OperatorStation');
+function f16(widget, widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f16('OperatorStation', 'Ghost');
+function f17(widget) { arguments[0] = 'Ghost'; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f17('OperatorStation');
+function f18(widget) { eval('widget = 1'); return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f18('OperatorStation');
+function f19(widget) { with ({ widget: 'Ghost' }) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } } f19('OperatorStation');`,
+    refs: [],
+    failures: [
+      unreadable(1, MAY_NOT_HOLD('f1')), unreadable(2, MAY_NOT_HOLD('f2')), unreadable(3, MAY_NOT_HOLD('f3')),
+      unreadable(4, MAY_NOT_HOLD('f4')), unreadable(5, MAY_NOT_HOLD('f5')), unreadable(6, MAY_NOT_HOLD('f6')),
+      unreadable(7, MAY_NOT_HOLD('f7')), unreadable(8, MAY_NOT_HOLD('f8')), unreadable(9, MAY_NOT_HOLD('f9')),
+      unreadable(10, MAY_NOT_HOLD('f10')), unreadable(11, MAY_NOT_HOLD('f11')), unreadable(12, MAY_NOT_HOLD('f12')),
+      unreadable(13, MAY_NOT_HOLD('f13')), unreadable(14, MAY_NOT_HOLD('f14')), unreadable(15, MAY_NOT_HOLD('f15')),
+      unreadable(16, MAY_NOT_HOLD('f16')), unreadable(17, MAY_NOT_HOLD('f17')), unreadable(18, MAY_NOT_HOLD('f18')),
+      unreadable(19, MAY_NOT_HOLD('f19')),
+    ],
+  },
+  {
+    label: 'reads of the parameter, and bindings in functions outside it, do not fail the gate',
+    source: String.raw`function block(widget) {
+  const copy = widget; let t; t = widget; [t = widget] = []; ({ widget: t } = { widget: 1 });
+  const o = { a: widget }; const f = () => widget; class C extends widget {}
+  for (const k in widget) {} for (const k of widget) {}
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');
+function other(widget) { widget = arguments[0]; with (widget) {} }`,
+    refs: ['OperatorStation'],
+    failures: [],
+  },
+  {
+    label: 'a customjs-guard string that is not a readable guard call fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { method: "render" });';
+const b = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", class: "GraphView" });';
+const c = 'await dv.view("ranch/views/customjs-guard", { ...base, class: "OperatorStation" });';
+const d = 'await dv.view("ranch/views/customjs-guard", { ["class"]: "OperatorStation" });';
+const e = 'await dv.view("ranch/views/customjs-guard", { class: name });';
+const f = ['await dv.view("ranch/views/customjs-guard", {', '  class: "OperatorStation" });'].join('\n');
+const g = 'see ranch/views/customjs-guard for details';
+const h = 'await dv.view("ranch/views/customjs-guard");';
+const i = 'await dv.view("ranch/views/customjs-guard-legacy", { class: "OperatorStation" });';
+const j = 'await dv.other("ranch/views/customjs-guard", { class: "OperatorStation" });';
+const k = 'await dv.view("ranch/views/customjs-guard", { class: "__sauceClassExpr0__" });';
+const l = 'await dv.view("ranch/views/customjs-guard", { class: "__sauce' + 'ClassExpr0__" });';
+function collideOne(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "__sauceClassExpr0__", x: "' + widget + '" });'; } collideOne('OperatorStation');
+function collideTwo(a, widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "__sauceClassExpr1__", x: "' + a + '", y: "' + widget + '" });'; } collideTwo('x', 'OperatorStation');`,
+    refs: [],
+    failures: [
+      unreadable(1, 'customjs-guard object has 0 class keys'),
+      unreadable(2, 'customjs-guard object has 2 class keys'),
+      unreadable(3, 'customjs-guard object has a spread or computed key'),
+      unreadable(4, 'customjs-guard object has a spread or computed key'),
+      unreadable(5, 'customjs-guard class value is not a string literal'),
+      unreadable(6, "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value"),
+      unreadable(7, 'customjs-guard does not follow dv.view( at the start of a word, optional whitespace and a quote in this string or template part, with no other quote between that quote and customjs-guard'),
+      unreadable(8, 'customjs-guard call has no object literal as its second argument'),
+      unreadable(9, "customjs-guard call's first argument, as parsed from the quote before customjs-guard, has no static string value ending in customjs-guard"),
+      unreadable(10, 'customjs-guard does not follow dv.view( at the start of a word, optional whitespace and a quote in this string or template part, with no other quote between that quote and customjs-guard'),
+      unreadable(11, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders'),
+      unreadable(12, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders'),
+      unreadable(13, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders'),
+      unreadable(14, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders'),
+    ],
+  },
+  {
+    label: 'Board, a prefix of BoardHealth, and oardHealt, a substring of BoardHealth, each fail with that name',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "Board" });';
+const b = 'await dv.view("ranch/views/customjs-guard", { class: "oardHealt" });';`,
+    refs: ['Board', 'oardHealt'],
+    failures: [missing('Board', 1), missing('oardHealt', 2)],
+  },
+  {
+    label: 'AccentButton passes; GoodClass, TypoWidget, FakeElement and CliRefusal each fail with that class named',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "AccentButton" });';
+const b = 'await dv.view("ranch/views/customjs-guard", { class: "GoodClass" });';
+const c = 'await dv.view("ranch/views/customjs-guard", { class: "TypoWidget" });';
+const d = 'await dv.view("ranch/views/customjs-guard", { class: "FakeElement" });';
+const e = 'await dv.view("ranch/views/customjs-guard", { class: "CliRefusal" });';`,
+    refs: ['AccentButton', 'GoodClass', 'TypoWidget', 'FakeElement', 'CliRefusal'],
+    failures: [missing('GoodClass', 2), missing('TypoWidget', 3), missing('FakeElement', 4), missing('CliRefusal', 5)],
+  },
+  {
+    label: 'class names are matched case-sensitively',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "operatorStation" });';`,
+    refs: ['operatorStation'],
+    failures: [missing('operatorStation', 1)],
+  },
+  {
+    label: 'each of the five customjs-guard calls in one returned string is read at the top-level class key of its own object',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "Board Health" }); await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", args: [{ class: "NotTheGuardClass" }] }); await dv.view("ranch/views/customjs-guard", { args: [{ class: "NotGuard" }], class: "RealGuard" }); await dv.view("ranch/views/customjs-guard", { $class: "Wrong", "class": "Right" }); await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('MissingLastInString');`,
+    refs: ['Board Health', 'OperatorStation', 'RealGuard', 'Right', 'MissingLastInString'],
+    failures: [missing('Board Health', 2), missing('RealGuard', 2), missing('Right', 2), missing('MissingLastInString', 4)],
+  },
+  {
+    label: 'a property, method, field or label named like the helper is not an appearance of it; a computed one or an object shorthand one is',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');
+const table = { block: 1 };
+table.block;
+table[block];
+const exported = { block };
+const keyed = { [block]: 1 };
+class K { block() {} static block = 1; }
+block: for (;;) { if (table) break block; else continue block; }`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(7, BLOCK_ARG), unreadable(8, BLOCK_ARG), unreadable(8, BLOCK_ARG), unreadable(9, BLOCK_ARG)],
+  },
+  {
+    label: 'RR4B-CLASS-SET-EXACT: PlanningNavButtons, defined under ranch/scripts and under neither platform/blueprints nor platform/mechanisms, fails with that class named',
+    precondition: () => {
+      const definedUnder = (dir) => collectClassNames([dir]).has('PlanningNavButtons');
+      if (!definedUnder('ranch/scripts')) return 'PlanningNavButtons is not defined under ranch/scripts';
+      const also = ['platform/blueprints', 'platform/mechanisms'].filter(definedUnder);
+      return also.length ? `PlanningNavButtons is defined under ${also.join(' and ')}` : null;
+    },
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "PlanningNavButtons" });';`,
+    refs: ['PlanningNavButtons'],
+    failures: [missing('PlanningNavButtons', 1)],
+  },
+  {
+    label: 'RR4B-HELPER-ARGUMENTS: a call of a class-writing helper that omits the class argument fails the gate',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block();`,
+    refs: [],
+    failures: [unreadable(4, BLOCK_ARG)],
+  },
+  {
+    label: "RR4B-HELPER-ARGUMENTS: for function block(widget, title), the call block('Missing', 'OperatorStation') fails naming Missing",
+    source: String.raw`function block(widget, title) {
+  return '## ' + title + '\nawait dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('Missing', 'OperatorStation');`,
+    refs: ['Missing'],
+    failures: [missing('Missing', 4)],
+  },
+  {
+    label: 'RR4B-TEMPLATE-AND-VALUE-SHAPES: a customjs-guard call after a ${} expression in a template is read, and fails naming its class that does not ship',
+    source: "const title = 'x';\n"
+      + 'const body = `## ${\n  title} await dv.view("ranch/views/customjs-guard", { class: "MissingAfterExpr" });`;',
+    refs: ['MissingAfterExpr'],
+    failures: [missing('MissingAfterExpr', 3)],
+  },
+  {
+    label: 'RR4B-TEMPLATE-AND-VALUE-SHAPES: the class values `Operator${x}Station` and "OperatorStation" + suffix each fail the gate',
+    source: "const a = 'await dv.view(\"ranch/views/customjs-guard\", { class: `Operator${x}Station` });';\n"
+      + "const b = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\" + suffix });';",
+    refs: [],
+    failures: [
+      unreadable(1, 'customjs-guard class value is not a string literal'),
+      unreadable(2, 'customjs-guard class value is not a string literal'),
+    ],
+  },
+  {
+    label: 'RR4B-TEMPLATE-AND-VALUE-SHAPES: a class key in a third dv.view argument is not read: with { class: "Missing" } second and { class: "OperatorStation" } third the call fails naming Missing, and with cfg second and { class: "OperatorStation" } third it fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "Missing" }, { class: "OperatorStation" });';
+const b = 'await dv.view("ranch/views/customjs-guard", cfg, { class: "OperatorStation" });';`,
+    refs: ['Missing'],
+    failures: [unreadable(2, 'customjs-guard call has no object literal as its second argument'), missing('Missing', 1)],
+  },
+  {
+    label: 'RR4B-TEMPLATE-AND-VALUE-SHAPES: a with statement nested below the top level of a class-writing helper fails the gate',
+    source: String.raw`function nested(widget) {
+  if (widget) {
+    with ({ widget: 'Ghost' }) {
+      return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+    }
+  }
+}
+nested('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(4, MAY_NOT_HOLD('nested'))],
+  },
+  {
+    label: 'the customjs-guard path Extras/Scripts/customjs-guard, outside ranch/views, is read: dv.view("Extras/Scripts/customjs-guard", { class: "Missing" }) fails naming Missing',
+    source: String.raw`const a = 'await dv.view("Extras/Scripts/customjs-guard", { class: "Missing" });';`,
+    refs: ['Missing'],
+    failures: [missing('Missing', 1)],
+  },
+  {
+    label: 'declaration fails with that name, though a .js file under platform/blueprints or platform/mechanisms has the word class, after other text on its line, followed by whitespace and the word declaration',
+    precondition: () => (['platform/blueprints', 'platform/mechanisms'].flatMap((d) => walk(d, []))
+      .some((f) => /^[^\n]*\S[^\n]*\bclass\s+declaration\b/m.test(fs.readFileSync(f, 'utf8')))
+      ? null : 'no line of a .js file under platform/blueprints or platform/mechanisms has other text before the whole words "class declaration"'),
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "declaration" });';`,
+    refs: ['declaration'],
+    failures: [missing('declaration', 1)],
+  },
+  {
+    label: 'a string that starts with customjs-guard is checked: \'await dv.view("ranch/views/\' + \'customjs-guard", { class: "NoSuchSplitPath" });\' fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/' + 'customjs-guard", { class: "NoSuchSplitPath" });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard does not follow dv.view( at the start of a word, optional whitespace and a quote in this string or template part, with no other quote between that quote and customjs-guard')],
+  },
+  {
+    label: "the helper as the object of a member expression is an appearance of it: block.call(null, 'NoSuchViaCall') fails the gate",
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');
+block.call(null, 'NoSuchViaCall');`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(5, BLOCK_ARG)],
+  },
+  {
+    label: 'the helper as the value of a property is an appearance of it: { make: block } fails the gate',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');
+const o = { make: block };
+o.make('NoSuchViaAlias');`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(5, BLOCK_ARG)],
+  },
+  {
+    label: 'a class-writing helper naming arguments fails the gate also when arguments is not the object of a member expression: const a = arguments',
+    source: String.raw`function f(widget) { const a = arguments; a[0] = 'Ghost'; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('f'))],
+  },
+  {
+    label: "a call of a class-writing helper written before the helper declaration is checked: block('NoSuchHoisted') fails naming NoSuchHoisted",
+    source: String.raw`block('NoSuchHoisted');
+function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');`,
+    refs: ['NoSuchHoisted', 'OperatorStation'],
+    failures: [missing('NoSuchHoisted', 1)],
+  },
+  {
+    label: "RR4B-FIXTURE-BRANCH-PINS: for function block(widget, title), the call block(cls, 'OperatorStation'), whose class argument is the identifier cls, fails the gate",
+    source: String.raw`function block(widget, title) {
+  return '## ' + title + '\nawait dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+const cls = 'NoSuchVariable';
+block(cls, 'OperatorStation');`,
+    refs: [],
+    failures: [unreadable(5, BLOCK_ARG)],
+  },
+  {
+    label: "a customjs-guard call that does not parse from its own string and that string's + operands fails the gate, though a class key naming OperatorStation follows customjs-guard in that string",
+    source: String.raw`const a = ['await dv.view("ranch/views/customjs-guard", { class: "OperatorStation",', '  class: "NoSuchSecondKey" });'].join('\n');`,
+    refs: [],
+    failures: [unreadable(1, "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value")],
+  },
+  {
+    label: 'a customjs-guard string in a template whose tag is the bare identifier raw, not String.raw, fails the gate',
+    source: 'const a = raw`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });`;',
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard string is in a template with a tag not written String.raw')],
+  },
+  {
+    label: 'the class key is matched case-sensitively: { Class: "OperatorStation" } has 0 class keys and fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { Class: "OperatorStation" });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard object has 0 class keys')],
+  },
+  {
+    label: 'RR4B-FIXTURE-BRANCH-PINS: Name fails with that name, though a .js file under platform/blueprints or platform/mechanisms has a line whose first word is className',
+    precondition: () => (['platform/blueprints', 'platform/mechanisms'].flatMap((d) => walk(d, []))
+      .some((f) => /^[ \t]*className\b/m.test(fs.readFileSync(f, 'utf8')))
+      ? null : 'no line of a .js file under platform/blueprints or platform/mechanisms has className as its first word'),
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "Name" });';`,
+    refs: ['Name'],
+    failures: [missing('Name', 1)],
+  },
+  {
+    label: "the helper passed as an argument to a call of itself is an appearance of it other than as a call: block('OperatorStation', block) fails the gate",
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation', block);`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(4, BLOCK_ARG)],
+  },
+  {
+    label: 'a class-writing helper naming eval fails the gate also when eval is not called: const e = eval',
+    source: String.raw`function f(widget) { const e = eval; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('f'))],
+  },
+  {
+    label: 'a customjs-guard call whose path argument is "ranch/views/customjs-guard" + x fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard" + x, { class: "OperatorStation" });';`,
+    refs: [],
+    failures: [unreadable(1, "customjs-guard call's first argument, as parsed from the quote before customjs-guard, has no static string value ending in customjs-guard")],
+  },
+  {
+    label: 'a class-writing helper with no call fails the gate also when a string before it is a ref to a shipped class',
+    source: String.raw`const z = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });';
+function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(3, 'block has no call to read the class from')],
+  },
+];
+
+const COORDINATOR_GATE_FIXTURES = [
+  {
+    label: 'a coordinator source with 3 refs, one per required class, fails only the floor',
+    source: () => String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "BoardHealth" });';
+const b = 'await dv.view("ranch/views/customjs-guard", { class: "GraphView" });';
+const c = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });';`,
+    check: (failures) => JSON.stringify(failures) === JSON.stringify([
+      'FAIL CJS-REF-COORDINATOR floor: extracted 3 customjs-guard class ref(s) from scripts/autoloop/codex-coordinator.js, expected at least 6',
+    ]),
+  },
+  {
+    label: 'a coordinator source with no refs fails the floor and names each required class',
+    source: () => '',
+    check: (failures) => JSON.stringify(failures) === JSON.stringify([
+      'FAIL CJS-REF-COORDINATOR floor: extracted 0 customjs-guard class ref(s) from scripts/autoloop/codex-coordinator.js, expected at least 6',
+      'FAIL CJS-REF-COORDINATOR required: no customjs-guard class ref "BoardHealth" extracted from scripts/autoloop/codex-coordinator.js',
+      'FAIL CJS-REF-COORDINATOR required: no customjs-guard class ref "GraphView" extracted from scripts/autoloop/codex-coordinator.js',
+      'FAIL CJS-REF-COORDINATOR required: no customjs-guard class ref "OperatorStation" extracted from scripts/autoloop/codex-coordinator.js',
+    ]),
+  },
+  {
+    label: 'the coordinator with BoardHealth renamed to a class that does not ship fails naming it',
+    source: (real) => real.split('{ class: "BoardHealth" }').join('{ class: "NoSuchBoardHealthRR4" }'),
+    check: (failures) => failures.length === 2
+      && failures[0] === 'FAIL CJS-REF-COORDINATOR required: no customjs-guard class ref "BoardHealth" extracted from scripts/autoloop/codex-coordinator.js'
+      && /^FAIL CJS-REF-COORDINATOR: \{ class: "NoSuchBoardHealthRR4" \} <- scripts\/autoloop\/codex-coordinator\.js:\d+ has no shipped class definition$/.test(failures[1]),
+  },
+];
+
+function runCoordinatorGate(defs) {
+  const failures = [];
+  for (const fixture of COORDINATOR_FIXTURES) {
+    let fail;
+    try { fail = checkCoordinatorFixture(fixture, defs); } catch (e) { fail = `threw ${e.constructor.name}: ${e.message}`; }
+    if (fail) failures.push(`FAIL CJS-REF-COORDINATOR fixture: ${fixture.label}: ${fail}`);
+    else console.log(`ok CJS-REF-COORDINATOR fixture: ${fixture.label}`);
+  }
+  const real = fs.readFileSync(path.join(REPO_ROOT, COORDINATOR_SOURCE), 'utf8');
+  for (const fixture of COORDINATOR_GATE_FIXTURES) {
+    let got;
+    try { got = coordinatorFailures(fixture.source(real), defs, COORDINATOR_SOURCE).failures; } catch (e) { got = [`threw ${e.constructor.name}: ${e.message}`]; }
+    if (fixture.check(got)) console.log(`ok CJS-REF-COORDINATOR fixture: ${fixture.label}`);
+    else failures.push(`FAIL CJS-REF-COORDINATOR fixture: ${fixture.label}: got ${JSON.stringify(got)}`);
+  }
+
+  const { refs, failures: gateFailures } = coordinatorFailures(real, defs, COORDINATOR_SOURCE);
+  failures.push(...gateFailures);
+  if (failures.length) {
+    console.error('');
+    for (const f of failures) console.error(f);
+    process.exit(1);
+  }
+  const names = [...new Set(refs.map((r) => r.cls))].sort().join(', ');
+  console.log(`ok CJS-REF-COORDINATOR: ${refs.length} customjs-guard class ref(s) in ${COORDINATOR_SOURCE} all resolve to a shipped class definition (${names}).`);
+}
+
 function runSelfTest() {
   const fx = path.join(REPO_ROOT, 'platform', 'test', 'fixtures', 'customjs-loadable');
   const cases = [
@@ -233,6 +923,9 @@ function main() {
     process.exit(1);
   }
   console.log(`ok CJS-REF: ${refCount} customjs-guard class ref(s) across ${REF_SCAN_DIRS.join(' + ')} all resolve to a shipped class definition (of ${defCount} known).`);
+
+  // Gate 3 (CJS-REF-COORDINATOR): coordinator-written refs resolve against the same class definitions.
+  runCoordinatorGate(collectClassNames(REF_SCAN_DIRS));
   process.exit(0);
 }
 
