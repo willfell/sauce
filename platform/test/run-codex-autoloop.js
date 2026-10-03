@@ -15150,6 +15150,80 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
   };
 
   try {
+    // SYNC2D-CI-HISTORY: the archived-main oracle intentionally fails when
+    // its object or origin/main is absent. Each full-preflight checkout must
+    // furnish history. This extractor accepts ci.yml's literal, space-
+    // indented job/step mappings only; unsupported layouts fail the pin.
+    {
+      const fullHistoryCheckout = (source, job) => {
+        const lines = source.split(/\r?\n/);
+        if (lines.some((line) => /^\s*\t/.test(line))) return false;
+        const indexes = (predicate, from = 0, to = lines.length) => lines
+          .map((line, index) => ({ line, index })).filter(({ line, index }) => index >= from && index < to && predicate(line))
+          .map(({ index }) => index);
+        const jobs = indexes((line) => line === 'jobs:');
+        if (jobs.length !== 1) return false;
+        const jobsEnd = indexes((line) => /^[^\s#]/.test(line), jobs[0] + 1)[0] || lines.length;
+        const starts = indexes((line) => line === `  ${job}:`, jobs[0] + 1, jobsEnd);
+        if (starts.length !== 1) return false;
+        const jobEnd = indexes((line) => /^  [^\s#]/.test(line), starts[0] + 1, jobsEnd)[0] || jobsEnd;
+        const steps = indexes((line) => /^    steps:\s*$/.test(line), starts[0] + 1, jobEnd);
+        if (steps.length !== 1) return false;
+        const stepsEnd = indexes((line) => /^    [^\s#]/.test(line), steps[0] + 1, jobEnd)[0] || jobEnd;
+        const stepStarts = indexes((line) => /^      - /.test(line), steps[0] + 1, stepsEnd);
+        const stepBodies = stepStarts.map((start, index) => lines.slice(start, stepStarts[index + 1] || stepsEnd));
+        const checkouts = stepBodies.filter((step) => step.some((line) => /^(?:        uses:|      - uses:) actions\/checkout@/.test(line)));
+        if (checkouts.length !== 1 || checkouts[0] !== stepBodies[0]) return false;
+        const checkout = checkouts[0];
+        const uses = checkout.filter((line) => /^(?:        uses:|      - uses:)/.test(line));
+        const withFields = checkout.filter((line) => /^        with:/.test(line));
+        const withAt = checkout.findIndex((line) => /^        with:/.test(line));
+        const withEnd = checkout.findIndex((line, index) => index > withAt && /^        [^\s#]/.test(line));
+        const inputs = checkout.slice(withAt + 1, withEnd < 0 ? checkout.length : withEnd);
+        const depth = inputs.filter((line) => /^          fetch-depth:/.test(line));
+        return uses.length === 1 && /^(?:        uses:|      - uses:) actions\/checkout@v4\s*$/.test(uses[0])
+          && withFields.length === 1 && /^        with:\s*$/.test(withFields[0])
+          && depth.length === 1 && /^          fetch-depth: 0\s*$/.test(depth[0])
+          && !checkout.some((line) => /^(?:        if:|      - if:)/.test(line));
+      };
+      const ci = fs.readFileSync(path.join(__dirname, '../../.github/workflows/ci.yml'), 'utf8');
+      eq(fullHistoryCheckout(ci, 'preflight'), true,
+        'SYNC2D-CI-HISTORY protected preflight checkout provides full history for the required archived-main fixture');
+      const override = '        with:\n          fetch-depth: 0\n';
+      const checkout = '        uses: actions/checkout@v4\n';
+      const mutated = (replacement) => ci.replace(override, replacement);
+      eq(fullHistoryCheckout(mutated(''), 'preflight'), false,
+        'SYNC2D-CI-HISTORY removing the protected preflight override is rejected even though pr-title-bump still has full history');
+      eq(fullHistoryCheckout(mutated('        with:\n          fetch-depth: 1\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY an explicitly shallow protected checkout is rejected');
+      eq(fullHistoryCheckout(mutated('        with:\n          # fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a comment cannot provide the history prerequisite');
+      eq(fullHistoryCheckout(mutated('        with:\n          fetch-depth: |\n            0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a literal scalar cannot impersonate the numeric fetch-depth input');
+      eq(fullHistoryCheckout(mutated('        with:\n            fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a fetch-depth line at the wrong mapping depth is rejected');
+      eq(fullHistoryCheckout(mutated('        with:\n          fetch-depth: 0\n          fetch-depth: 1\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY duplicate fetch-depth keys are rejected');
+      eq(fullHistoryCheckout(ci.replace(checkout, `${checkout}        if: false\n`), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a conditional checkout cannot guarantee the required history');
+      eq(fullHistoryCheckout(ci.replace(checkout, `${checkout}        uses: actions/checkout@v4\n`), 'preflight'), false,
+        'SYNC2D-CI-HISTORY duplicate uses keys are rejected');
+      eq(fullHistoryCheckout(mutated('        with:\n        env:\n          fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY fetch-depth under another step mapping cannot replace the checkout input');
+      eq(fullHistoryCheckout(ci.replace('    steps:\n', '    steps:\n      - name: Earlier harness\n        run: npm run release:preflight\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a checkout after the harness cannot provide its history prerequisite');
+      eq(fullHistoryCheckout(ci.replace('      - name: Checkout sauce repo\n', '      - if: false\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a condition as the first checkout field is also rejected');
+      eq(fullHistoryCheckout(ci.replace('    steps:\n', '    steps:\n      - uses: actions/checkout@v4\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY multiple checkouts in the protected job are rejected');
+      eq(fullHistoryCheckout(ci.replace('  preflight:\n', '  # preflight:\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a commented job name cannot select the protected preflight job');
+      eq(fullHistoryCheckout(ci.replace('  preflight:\n', '  preflight:\n  preflight:\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY duplicate protected job keys are rejected');
+      eq(fullHistoryCheckout(mutated('        run: |\n          with:\n            fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a checkout-looking line in a run block cannot furnish the prerequisite');
+    }
+
     // SYNC2-NO-POST-VERB-WRITE source scan
     {
       const indexCode = sync2Code(fs.readFileSync(sync2IndexPath, 'utf8'));
