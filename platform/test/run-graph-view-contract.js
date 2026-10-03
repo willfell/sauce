@@ -381,6 +381,47 @@ check(behavior.includes('const ph1StubViolations = [];')
   && !/\bassert\([^;]*'PH1-BROWSER-LIKE-OBSERVER-STUB: the widget watches its container childList only'\);/.test(behavior)
   && behavior.includes('assert.deepStrictEqual(ph1StubViolations, [], `PH1D-STUB-VIOLATIONS: ${label}:'),
 'PH1D-SENTINEL-STUB-VIOLATIONS: the childList-only stub check records into ph1StubViolations rather than asserting, and the settled() assertion checks that record is empty');
+// PH-12b sentinels: the compact geometry's 44px hit-box pitch and 26px
+// visual pill, the edge layer drawn over the visual pills, the hit box as the
+// tap target, the compact control height, the listed PH-12b markers in the
+// behavior harness, and the listed PH-12b mutants' MUTATION GUARD comments.
+const compactGeometry = section(widget, '  _compactGeometry(nodes, ranks, width) {', '\n  // Short-id rule');
+const renderPill = section(widget, '  _renderPill(canvas, node, geometry, api, source, warnings, onSelect) {', '\n  _activeCard(current) {');
+check(compactGeometry.includes('const hitH = 44;') && compactGeometry.includes('const pillH = 26;')
+  && compactGeometry.includes('const pillInset = (hitH - pillH) / 2;')
+  && compactGeometry.includes('y: pad + (Number(node?.row) || 0) * hitH,')
+  && compactGeometry.includes('const canvasHeight = 2 * pad + rowCount * hitH;')
+  && compactGeometry.includes('x: hit.x, y: hit.y + pillInset, w: colW, h: pillH,')
+  && !/rowGap/.test(compactGeometry),
+'PH12B-SENTINEL-HIT-ROWS: _compactGeometry places row r\'s 44px hit box at pad + r*44, its 26px visual pill 9px below the hit box\'s top, and sizes the canvas to rowCount*44 + 2*pad with no row gap');
+check(compactMap.includes('this._edgeSvg(geometry.canvasWidth, geometry.canvasHeight, edges, geometry.positions, geometry, chain)')
+  && !compactMap.includes('hitBoxes'),
+'PH12B-SENTINEL-EDGES-ON-PILLS: the compact edge layer draws over geometry.positions, the visual pills');
+check(renderPill.includes('const face = pill.createEl("div");')
+  && (renderPill.match(/addEventListener/g) || []).length === 1 && renderPill.includes('pill.addEventListener?.("click"'),
+'PH12B-SENTINEL-HIT-BOX-TAP: _renderPill draws the visual pill inside the hit box and attaches its one click listener to the hit box');
+check(compactMap.includes('renderEdges, controlHeight: 44, linkHeight: 44,')
+  && controller.includes('    controlHeight = 32, linkHeight = null,\n')
+  && (widget.match(/controlHeight\s*:/g) || []).length === 1
+  && (widget.match(/linkHeight\s*:/g) || []).length === 1,
+'PH12B-SENTINEL-CONTROL-HEIGHT: the compact map hands the selection controller controlHeight: 44 and linkHeight: 44, graph-view.js names controlHeight: and linkHeight: nowhere else, and the controller defaults controlHeight to 32 and linkHeight to null');
+for (const marker of [
+  'PH12B-HIT-ROWS-TILE-CANVAS', 'PH12B-PILL-HEIGHT-REPINNED', 'PH12-HIT-BOXES-DISJOINT', 'PH12-CONTROLS-44', 'PH12-WIDE-UNCHANGED',
+]) check(new RegExp(`['\`]${escapeRegExp(marker)}[ :]`).test(behavior), `PH12B-SENTINEL-BEHAVIOR-MARKER: ${marker} leads a string literal`);
+for (const mutant of [
+  'PH12B-MUTANT-PITCH-34', 'PH12B-MUTANT-HIT-IS-PILL', 'PH12B-MUTANT-TOP-ROW-ABOVE-CANVAS', 'PH12B-MUTANT-HIT-OVERLAPS-NEXT-ROW',
+  'PH12B-MUTANT-COLUMN-ROUNDED', 'PH12B-MUTANT-DRAWN-HIT-OVERLAPS', 'PH12B-MUTANT-EDGES-ON-HIT-BOXES', 'PH12B-MUTANT-TOGGLES-32',
+  'PH12B-MUTANT-CARD-BUTTONS-32', 'PH12B-MUTANT-STUB-CARD-BUTTONS-32', 'PH12B-MUTANT-FACE-SWALLOWS-TAP',
+  'PH12B-MUTANT-LISTENER-ON-FACE', 'PH12B-MUTANT-LISTENER-ON-BOTH', 'PH12B-MUTANT-CONTROL-HEIGHT-ON-INSTANCE',
+  'PH12B-MUTANT-PROJECT-TOGGLES-44', 'PH12B-MUTANT-PILLS-ON-OLD-PITCH', 'PH12B-MUTANT-CANVAS-PLUS-ONE',
+  'PH12B-MUTANT-LINKS-WITHOUT-LINK-HEIGHT', 'PH12B-MUTANT-WIDE-DEPENDENT-LINK-32', 'PH12B-MUTANT-LINK-HEIGHT-ON-INSTANCE',
+  'PH12B-MUTANT-RERENDER-LINKS-NULL', 'PH12B-MUTANT-PROJECT-LINKS-44', 'PH12B-MUTANT-PROJECT-CARD-44',
+  'PH12B-MUTANT-CANVAS-CAP-6', 'PH12B-MUTANT-RANK-NO-DEFAULT', 'PH12B-MUTANT-ROWCOUNT-FIRST-RANK',
+  'PH12B-MUTANT-DEPENDENT-LINKS-WITHOUT-LINK-HEIGHT',
+]) {
+  check(behavior.includes(`// MUTATION GUARD: ${mutant} turns RED`),
+    `PH12B-SENTINEL-MUTANT: ${mutant} is named in a MUTATION GUARD comment`);
+}
 const floorMatch = behavior.match(/\nconst ASSERTION_FLOOR = (\d+);\n/);
 check(Boolean(floorMatch) && Number(floorMatch[1]) > 0
   && behavior.includes("const nodeAssert = require('assert');")

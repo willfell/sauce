@@ -44,11 +44,12 @@
  * then the Obsidian is-mobile body class when the measurement is not a
  * finite positive number, then wide — and at epic scope, under 600px, draws
  * a compact map of the SAME frozen layout result: one 26px pill per slice or
- * cross-epic stub in per-rank columns sized by a pure formula, with the same
- * edge layer, filter toolbar, legend, and selection controller. Both maps
- * open the same inline detail card under the map / canvas. A presentation is
- * the wide map, or the compact map at the width it was measured at (or drawn
- * from an unmeasured guess).
+ * cross-epic stub, inside a 44px-tall tap target, in per-rank columns sized
+ * by a pure formula, with the same edge layer, filter toolbar, legend, and
+ * selection controller; its toolbar toggles and every button in its detail
+ * card have a 44px min-height. Both maps open the same inline detail card
+ * under the map / canvas. A presentation is the wide map, or the compact map at the
+ * width it was measured at (or drawn from an unmeasured guess).
  * Live pane resize (PH-9c): the measured width is the content width of the
  * note's scroll container (the closest .markdown-preview-view or
  * .cm-scroller at or around the mount container), or the mount container's
@@ -445,12 +446,13 @@ class GraphView {
     element.className = next.join(" ");
   }
 
-  _panelLink(parent, node, api, source, className) {
+  _panelLink(parent, node, api, source, className, linkHeight) {
     const link = parent.createEl("button");
     link.className = className;
     link.style.cssText = "display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;"
       + "padding:3px 8px;border:1px solid var(--background-modifier-border);border-radius:999px;"
-      + "background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;";
+      + "background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;"
+      + (linkHeight == null ? "" : `min-height:${linkHeight}px;`);
     const parts = this._titleParts(node.card);
     const presentation = this._statusPresentation(node.status, api);
     link.createEl("span", { text: parts.id || node.card }).className = "graph-view-detail-link-id";
@@ -472,7 +474,7 @@ class GraphView {
     return block;
   }
 
-  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes, onClose) {
+  _renderDetailPanel(root, scroller, node, nodes, edges, analysis, api, source, outcomes, onClose, controlHeight, linkHeight) {
     const panel = root.createEl("div");
     panel.className = "graph-view-detail-panel";
     panel.style.cssText = "display:grid;gap:12px;margin-top:16px;padding:12px 14px;border:1px solid var(--background-modifier-border);"
@@ -505,7 +507,7 @@ class GraphView {
     }
     const open = controls.createEl("button", { text: "Open slice" });
     open.className = "graph-view-detail-open";
-    open.style.cssText = "min-height:32px;padding:5px 10px;cursor:pointer;";
+    open.style.cssText = `min-height:${controlHeight}px;padding:5px 10px;cursor:pointer;`;
     open.addEventListener?.("click", (event) => {
       event?.stopPropagation?.();
       this._open(node.path || node.card, source);
@@ -513,7 +515,7 @@ class GraphView {
     if (typeof onClose === "function") {
       const close = controls.createEl("button", { text: "Close" });
       close.className = "graph-view-detail-close";
-      close.style.cssText = "min-height:32px;padding:5px 10px;cursor:pointer;";
+      close.style.cssText = `min-height:${controlHeight}px;padding:5px 10px;cursor:pointer;`;
       close.addEventListener?.("click", (event) => {
         event?.stopPropagation?.();
         onClose();
@@ -535,7 +537,7 @@ class GraphView {
       .filter((entry) => entry && (entry.isStub || this._statusPresentation(entry.status, api).normalized !== "completed"));
     if (unmet.length) {
       const needs = this._panelFact(panel, "Unmet prerequisites", "graph-view-detail-needs");
-      for (const entry of unmet) this._panelLink(needs, entry, api, source, "graph-view-detail-prerequisite");
+      for (const entry of unmet) this._panelLink(needs, entry, api, source, "graph-view-detail-prerequisite", linkHeight);
     }
 
     const outcome = outcomes?.get?.(node.card);
@@ -555,7 +557,7 @@ class GraphView {
     const gates = this._panelFact(panel, "Gates", "graph-view-detail-gates");
     const count = gates.createEl("div", { text: `${gatedCount} slice${gatedCount === 1 ? "" : "s"}` });
     count.className = "graph-view-detail-gates-count";
-    for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent");
+    for (const entry of gated) this._panelLink(gates, entry, api, source, "graph-view-detail-dependent", linkHeight);
     return panel;
   }
 
@@ -567,7 +569,7 @@ class GraphView {
   _renderDetailInline(host, node, context) {
     const ctx = context && typeof context === "object" ? context : {};
     return this._renderDetailPanel(host, ctx.scroller, node, ctx.nodes, ctx.edges, ctx.analysis,
-      ctx.api, ctx.source, ctx.outcomes, ctx.onClose);
+      ctx.api, ctx.source, ctx.outcomes, ctx.onClose, ctx.controlHeight, ctx.linkHeight);
   }
 
   // Stuck filtering consumes GraphInsights closures only. For every root/stuck
@@ -598,6 +600,7 @@ class GraphView {
   // direct partner at either end of every cross-epic edge at full strength.
   _selectionController({
     root, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, clusterByCard = null,
+    controlHeight = 32, linkHeight = null,
   }) {
     const chips = new Map();
     const headers = new Map();
@@ -674,7 +677,7 @@ class GraphView {
       }
       renderEdges(chain);
       panel = this._renderDetailInline(root, node, {
-        scroller, nodes, edges, analysis, api, source, outcomes, onClose: clear,
+        scroller, nodes, edges, analysis, api, source, outcomes, onClose: clear, controlHeight, linkHeight,
       });
     };
     const focus = (cluster, path, event) => {
@@ -710,7 +713,7 @@ class GraphView {
           button.className = `graph-view-filter-toggle ${className}`;
           button.setAttribute?.("type", "button");
           button.setAttribute?.("aria-pressed", "false");
-          button.style.cssText = "min-height:32px;padding:5px 12px;border-radius:999px;cursor:pointer;"
+          button.style.cssText = `min-height:${controlHeight}px;padding:5px 12px;border-radius:999px;cursor:pointer;`
             + "border:1px solid var(--background-modifier-border);background:var(--background-secondary);";
           button.addEventListener?.("click", (event) => {
             event?.stopPropagation?.();
@@ -1041,8 +1044,11 @@ class GraphView {
   // ---- PH-1 phone-first: compact map (epic scope, narrow widths) ----
   // Deterministic geometry (its one outside read is the shared _titleParts id
   // parser) over the frozen GraphLayout result. One column per rank:
-  // colW = clamp(floor((W - 2*pad - (R-1)*gap) / R), 40, 140); pill height
-  // 26, row gap 8, pad 2, gap 10. Ids drop their shared alphabetic prefix
+  // colW = clamp(floor((W - 2*pad - (R-1)*gap) / R), 40, 140); pad 2, gap 10.
+  // Row r's hit box (the tap target) spans pad + r*44 to pad + r*44 + 44 and
+  // its 26px visual pill, as wide as the hit box, starts 9px below the hit
+  // box's top; the canvas is rowCount*44 + 2*pad tall. positions maps each card to its visual pill,
+  // which the edges attach to. Ids drop their shared alphabetic prefix
   // (through the dash, GA-ML8 -> ML8) only when colW < 72 AND every id shares
   // that prefix. When even 40px pills cannot fit (R*40 + (R-1)*gap + 2*pad >
   // W) the canvas keeps its natural width and the map scrolls sideways — the
@@ -1059,8 +1065,9 @@ class GraphView {
     const R = Math.max(1, order.length);
     const pad = 2;
     const gap = 10;
+    const hitH = 44;
     const pillH = 26;
-    const rowGap = 8;
+    const pillInset = (hitH - pillH) / 2;
     const minCol = 40;
     const maxCol = 140;
     const shortIdBelow = 72;
@@ -1069,18 +1076,21 @@ class GraphView {
     const natural = R * colW + (R - 1) * gap + 2 * pad;
     const colX = new Map(order.map((rank, index) => [rank, pad + index * (colW + gap)]));
     const rowCount = list.reduce((max, node) => Math.max(max, (Number(node?.row) || 0) + 1), 0);
-    const canvasHeight = 2 * pad + rowCount * pillH + Math.max(0, rowCount - 1) * rowGap;
-    const positions = new Map(list.map((node) => [node.card, {
+    const canvasHeight = 2 * pad + rowCount * hitH;
+    const hitBoxes = new Map(list.map((node) => [node.card, {
       x: colX.get(node?.rank || 0),
-      y: pad + (Number(node?.row) || 0) * (pillH + rowGap),
+      y: pad + (Number(node?.row) || 0) * hitH,
       w: colW,
-      h: pillH,
+      h: hitH,
+    }]));
+    const positions = new Map([...hitBoxes].map(([card, hit]) => [card, {
+      x: hit.x, y: hit.y + pillInset, w: colW, h: pillH,
     }]));
     const labels = this._compactLabels(list, colW < shortIdBelow);
     return {
-      width: W, ranks: R, pad, gap, pillH, rowGap, minCol, maxCol, shortIdBelow,
+      width: W, ranks: R, pad, gap, hitH, pillH, pillInset, minCol, maxCol, shortIdBelow,
       colW, scrolls, natural, canvasWidth: natural, canvasHeight,
-      shortIds: labels.shortened, labels: labels.byCard, colX, positions,
+      shortIds: labels.shortened, labels: labels.byCard, colX, hitBoxes, positions,
       chipW: colW, chipH: pillH, scrollbarAllowance: scrolls ? 14 : 0,
     };
   }
@@ -1140,7 +1150,7 @@ class GraphView {
     };
     renderEdges(null);
     const interaction = this._selectionController({
-      root: host, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges,
+      root: host, scroller, canvas, nodes, edges, analysis, api, source, outcomes, renderEdges, controlHeight: 44, linkHeight: 44,
     });
     interaction.renderToolbar();
     for (const node of nodes) {
@@ -1157,18 +1167,26 @@ class GraphView {
   // (blocked / parked) pills carry a 2px error hairline on the left; parked
   // slice pills carry the graph-view-needs-you class (no stylesheet styles it
   // yet). A slice pill's tooltip is its full card name, a stub's its epic · id
-  // label; the detail card carries the Outcome.
+  // label; the detail card carries the Outcome. The returned element is the
+  // hit box: it carries the chip classes, the colour, the tooltip, and the
+  // tap listener, and the selection controller registers it. The visual pill
+  // inside it (graph-view-pill-face) carries the shape, border, and
+  // background and contains the glyph (slices only) and id spans.
   _renderPill(canvas, node, geometry, api, source, warnings, onSelect) {
-    const at = geometry.positions.get(node.card)
-      || { x: geometry.pad, y: geometry.pad, w: geometry.colW, h: geometry.pillH };
+    const hit = geometry.hitBoxes.get(node.card);
     const label = geometry.labels.get(node.card) ?? String(node.card == null ? "" : node.card);
     const pill = canvas.createEl("div");
-    const base = `position:absolute;left:${at.x}px;top:${at.y}px;width:${at.w}px;height:${at.h}px;`
+    const box = `position:absolute;left:${hit.x}px;top:${hit.y}px;width:${hit.w}px;height:${hit.h}px;`
+      + "box-sizing:border-box;cursor:pointer;";
+    const face = pill.createEl("div");
+    face.className = "graph-view-pill-face";
+    const shape = `position:absolute;left:0px;top:${geometry.pillInset}px;width:${hit.w}px;height:${geometry.pillH}px;`
       + "display:inline-flex;align-items:center;gap:4px;padding:0 6px;border-radius:999px;box-sizing:border-box;"
-      + "cursor:pointer;min-width:0;font-family:var(--font-monospace);font-size:11px;font-weight:600;";
+      + "min-width:0;font-family:var(--font-monospace);font-size:11px;font-weight:600;";
     if (node.isStub) {
       pill.className = "graph-view-chip graph-view-pill graph-view-stub";
-      pill.style.cssText = base + "color:var(--text-muted);opacity:0.75;"
+      pill.style.cssText = box + "color:var(--text-muted);opacity:0.75;";
+      face.style.cssText = shape
         + "border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);"
         + "background:color-mix(in srgb, var(--text-muted) 6%, var(--background-primary));";
       pill.setAttribute?.("title", String(node.stubLabel || node.card || ""));
@@ -1184,17 +1202,18 @@ class GraphView {
       const stuck = ["blocked", "parked"].includes(presentation.normalized);
       const needsYou = presentation.normalized === "parked";
       pill.className = `graph-view-chip graph-view-pill ${presentation.className}${needsYou ? " graph-view-needs-you" : ""}`;
-      pill.style.cssText = base + `color:${presentation.color};`
+      pill.style.cssText = box + `color:${presentation.color};`;
+      face.style.cssText = shape
         + `border:1px solid color-mix(in srgb, ${presentation.color} 40%, transparent);`
         + (stuck ? "border-left:2px solid var(--text-error);" : "")
         + `background:color-mix(in srgb, ${presentation.color} 10%, var(--background-primary));`;
       pill.setAttribute?.("title", String(node.card || ""));
-      const glyph = pill.createEl("span", { text: presentation.glyph });
+      const glyph = face.createEl("span", { text: presentation.glyph });
       glyph.className = `graph-view-status-glyph ${presentation.className}`;
       glyph.setAttribute?.("aria-hidden", "true");
       glyph.style.cssText = `flex:none;font-weight:700;color:${presentation.color};`;
     }
-    const id = pill.createEl("span", { text: label });
+    const id = face.createEl("span", { text: label });
     id.className = "graph-view-pill-id";
     id.style.cssText = "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
     pill.addEventListener?.("click", (event) => (onSelect

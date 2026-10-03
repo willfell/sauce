@@ -44,7 +44,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 3270;
+const ASSERTION_FLOOR = 3730;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -282,17 +282,32 @@ function assertWideDigest(label, root, expected) {
   assert.strictEqual(digestOf(root), expected.root,
     `PH1C-WIDE-BYTE-IDENTICAL (PH1-WIDE-DIGEST-PINS): ${label} whole-root digest equals the pre-slice renderer's`);
 }
-// PH-1 compact geometry helpers: compactColW, compactNatural, compactPos, and
-// compactEdgeD compute expected compact column widths, canvas widths, pill
-// positions, and edge paths.
-const PH1 = { pad: 2, gap: 10, pillH: 26, rowGap: 8, minCol: 40, maxCol: 140, shortIdBelow: 72 };
+// PH-1 compact geometry helpers: compactColW, compactNatural, compactHit,
+// compactPos, and compactEdgeD compute expected compact column widths, canvas
+// widths, hit boxes, visual pill positions, and edge paths. PH-12b: row r's
+// hit box spans pad + r*44 to pad + r*44 + 44 and its 26px visual pill starts
+// 9px below the hit box's top.
+const PH1 = { pad: 2, gap: 10, hitH: 44, pillH: 26, pillInset: 9, minCol: 40, maxCol: 140, shortIdBelow: 72 };
 function compactColW(R, W) {
   return Math.min(PH1.maxCol, Math.max(PH1.minCol, Math.floor((W - 2 * PH1.pad - (R - 1) * PH1.gap) / R)));
 }
 function compactNatural(R, colW) { return R * colW + (R - 1) * PH1.gap + 2 * PH1.pad; }
+// PH-12b: a compact hit box's visual pill, its only child, and an element's
+// effective left, top, width, and height.
+function pillFace(pill) {
+  const children = pill?.children || [];
+  return children.length === 1 && children[0].className === 'graph-view-pill-face' ? children[0] : null;
+}
+function pillBox(node) {
+  const css = cssEffective(node?.style?.cssText);
+  return `${css.left} ${css.top} ${css.width} ${css.height}`;
+}
+function compactHit(rankIndex, row, colW) {
+  return { x: PH1.pad + rankIndex * (colW + PH1.gap), y: PH1.pad + row * PH1.hitH, w: colW, h: PH1.hitH };
+}
 function compactPos(rankIndex, row, colW) {
   return {
-    x: PH1.pad + rankIndex * (colW + PH1.gap), y: PH1.pad + row * (PH1.pillH + PH1.rowGap),
+    x: PH1.pad + rankIndex * (colW + PH1.gap), y: PH1.pad + row * PH1.hitH + PH1.pillInset,
     w: colW, h: PH1.pillH,
   };
 }
@@ -1913,16 +1928,33 @@ async function main() {
     'PH1C-DETAIL-INLINE-OUTCOME: Open slice and Close actions are present');
   // ---- PH1D-DETAIL-BUTTONS ----
   // The card's Open slice and Close buttons are button elements carrying
-  // exactly min-height:32px;padding:5px 10px;cursor:pointer;.
+  // exactly min-height:44px;padding:5px 10px;cursor:pointer; on the compact
+  // card (re-pinned from 32px by PH-12b, PH12-CONTROLS-44).
   // MUTATION GUARD: PH1D-MUTANT-CLOSE-BUTTON-DECLARATION turns RED at
   // "PH1D-DETAIL-BUTTONS: the compact card's Close button ..." if the Close
   // button's min-height drops to 24px.
   // MUTATION GUARD: PH1D-MUTANT-OPEN-BUTTON-DECLARATION turns RED at
   // "PH1D-DETAIL-BUTTONS: the compact card's Open slice button ..." if the
   // Open slice button's min-height drops to 24px.
+  // MUTATION GUARD: PH12B-MUTANT-CARD-BUTTONS-32 turns RED at
+  // "PH1D-DETAIL-BUTTONS: the compact card's Open slice button ..." if the
+  // compact card's buttons keep the wide 32px min-height.
   for (const [name, button] of [['Open slice', mxOpenSlice], ['Close', mxClose]]) {
-    assert(button?.tag === 'button' && button.style.cssText === 'min-height:32px;padding:5px 10px;cursor:pointer;',
-      `PH1D-DETAIL-BUTTONS: the compact card's ${name} button carries exactly min-height:32px;padding:5px 10px;cursor:pointer;`);
+    assert(button?.tag === 'button' && button.style.cssText === 'min-height:44px;padding:5px 10px;cursor:pointer;',
+      `PH1D-DETAIL-BUTTONS: the compact card's ${name} button carries exactly min-height:44px;padding:5px 10px;cursor:pointer;`);
+  }
+  // ---- PH12-CONTROLS-44 ----
+  // The compact toolbar's Stuck and Dim done toggles carry exactly the wide
+  // toggles' declarations with min-height:44px in place of 32px.
+  // MUTATION GUARD: PH12B-MUTANT-TOGGLES-32 turns RED at "PH12-CONTROLS-44:
+  // the compact toolbar's Stuck toggle ..." if the compact toggles keep the
+  // wide 32px min-height.
+  for (const [name, className] of [['Stuck', 'graph-view-filter-stuck'], ['Dim done', 'graph-view-filter-done']]) {
+    const toggle = byClass(mxNarrowToolbar, className)[0];
+    assert(toggle?.tag === 'button' && toggle.textContent === name
+      && toggle.style.cssText === 'min-height:44px;padding:5px 12px;border-radius:999px;cursor:pointer;'
+        + 'border:1px solid var(--background-modifier-border);background:var(--background-secondary);',
+    `PH12-CONTROLS-44: the compact toolbar's ${name} toggle carries exactly min-height:44px;padding:5px 12px;border-radius:999px;cursor:pointer; and the wide toggle's border and background`);
   }
   assert(!mxPillFor('MX-A').className.includes('graph-view-dimmed')
     && !mxPillFor('MX-C').className.includes('graph-view-dimmed')
@@ -2185,21 +2217,189 @@ async function main() {
     'PH1-MUTANT-DROP-CLAMP: 8 ranks at 390 clamp up to the 40px floor (the raw floor gives 39)');
   assert(eight.natural === 394 && eight.scrolls === true && eight.canvasWidth === 394,
     'PH1C-NO-SIDEWAYS-SCROLL (PH1-EIGHT-RANKS-OVERFLOW): 8 ranks at 390 overflow — 40px pills, 394px canvas, scrolls: true');
+  // MUTATION GUARD: PH12B-MUTANT-HIT-IS-PILL turns RED at
+  // "PH12B-PILL-HEIGHT-REPINNED (PH1C-NO-SIDEWAYS-SCROLL): hit box 44, visual
+  // pill 26 inset 9 ..." if the hit box is the 26px visual pill.
+  // MUTATION GUARD: PH12B-MUTANT-TOP-ROW-ABOVE-CANVAS turns RED at
+  // "PH12B-PILL-HEIGHT-REPINNED (PH1C-NO-SIDEWAYS-SCROLL): rank 0 hit box
+  // sits at ..." if each hit box starts 9px above its row, so the top row's
+  // starts above the canvas.
+  // MUTATION GUARD: PH12B-MUTANT-HIT-OVERLAPS-NEXT-ROW turns RED at the same
+  // label if hit boxes are 54px tall on the 44px pitch.
+  // MUTATION GUARD: PH12B-MUTANT-CANVAS-PLUS-ONE turns RED at
+  // "PH12B-PILL-HEIGHT-REPINNED (PH1C-NO-SIDEWAYS-SCROLL): a single-row map
+  // ..." if the canvas is one pixel taller than rowCount*44 + 2*pad.
+  // MUTATION GUARD: PH12B-MUTANT-COLUMN-ROUNDED turns RED at
+  // "PH1C-NO-SIDEWAYS-SCROLL: 7-rank column width ..." if colW rounds the
+  // column quotient instead of flooring it.
   for (const R of [1, 4, 7]) {
     const geometry = ph1View._compactGeometry(ph1Nodes(R), ph1Ranks(R), 390);
     assert.strictEqual(geometry.colW, compactColW(R, 390),
       `PH1C-NO-SIDEWAYS-SCROLL: ${R}-rank column width is clamp(floor((390 - 4 - ${R - 1}*10) / ${R}), 40, 140) = ${compactColW(R, 390)}`);
     assert(geometry.canvasWidth <= 390 && geometry.scrolls === false && geometry.canvasWidth === compactNatural(R, geometry.colW),
       `PH1C-NO-SIDEWAYS-SCROLL: ${R} ranks at 390 fit without horizontal scroll (canvas ${geometry.canvasWidth}px)`);
-    assert.deepStrictEqual([geometry.pillH, geometry.rowGap, geometry.pad, geometry.gap], [26, 8, 2, 10],
-      'PH1C-NO-SIDEWAYS-SCROLL: pill height 26, row gap 8, pad 2, gap 10 are the emitted numbers');
+    // PH-12b re-pin: pill height 26 and row gap 8 became a 44px hit box with
+    // its 26px visual pill 9px below its top, and the one-row canvas 30
+    // became 48.
+    assert.deepStrictEqual([geometry.hitH, geometry.pillH, geometry.pillInset, geometry.pad, geometry.gap], [44, 26, 9, 2, 10],
+      'PH12B-PILL-HEIGHT-REPINNED (PH1C-NO-SIDEWAYS-SCROLL): hit box 44, visual pill 26 inset 9, pad 2, gap 10 are the emitted numbers');
     for (let index = 0; index < R; index += 1) {
+      assert.deepStrictEqual(geometry.hitBoxes.get(`GA-ML${index + 1} Step ${index + 1}`), compactHit(index, 0, geometry.colW),
+        `PH12B-PILL-HEIGHT-REPINNED (PH1C-NO-SIDEWAYS-SCROLL): rank ${index} hit box sits at pad + rank*(colW + gap), top 2, 44 tall`);
       assert.deepStrictEqual(geometry.positions.get(`GA-ML${index + 1} Step ${index + 1}`), compactPos(index, 0, geometry.colW),
         `PH1C-NO-SIDEWAYS-SCROLL: rank ${index} pill sits at pad + rank*(colW + gap)`);
     }
-    assert.strictEqual(geometry.canvasHeight, 2 * PH1.pad + PH1.pillH,
-      'PH1C-NO-SIDEWAYS-SCROLL: a single-row map is pad + pill + pad tall');
+    assert.strictEqual(geometry.canvasHeight, 48,
+      'PH12B-PILL-HEIGHT-REPINNED (PH1C-NO-SIDEWAYS-SCROLL): a single-row map is pad + 44 + pad = 48 tall');
   }
+  // ---- PH12B-HIT-ROWS-TILE-CANVAS (PH12-HIT-BOX-OUTSIDE-CANVAS) ----
+  // Expected values are literals from the PH-12b formula: row r's hit box
+  // spans 2 + 44r to 2 + 44r + 44 (tops 2, 46, 90, 134, 178, 222, 266, 310),
+  // its pill spans 11 + 44r to 37 + 44r, and n rows make a canvas 44n + 4
+  // tall (48, 92, 136, 180, 224, 268, 312, 356 for n = 1 ... 8). One rank at
+  // W=390 is a 140px column on a 144px canvas. A node with no rank lays out
+  // in the rank-0 column.
+  // MUTATION GUARD: PH12B-MUTANT-PITCH-34 turns RED at
+  // "PH12B-HIT-ROWS-TILE-CANVAS: the 2-row hit boxes ..." if hit-box rows sit
+  // on a 34px pitch.
+  // MUTATION GUARD: PH12B-MUTANT-PILLS-ON-OLD-PITCH turns RED at
+  // "PH12B-HIT-ROWS-TILE-CANVAS: 2 rows at W=390 ..." if the visual pills
+  // keep the 34px pitch inside 44px hit boxes.
+  // MUTATION GUARD: PH12B-MUTANT-CANVAS-CAP-6 turns RED at
+  // "PH12B-HIT-ROWS-TILE-CANVAS: the 7-row hit boxes ..." if the canvas
+  // counts at most six rows.
+  // MUTATION GUARD: PH12B-MUTANT-RANK-NO-DEFAULT turns RED at
+  // "PH12B-HIT-ROWS-TILE-CANVAS: a node with no rank ..." if a node's column
+  // is looked up by its raw rank.
+  {
+    const layOut = (nodes, ranks, width) => {
+      try { return ph1View._compactGeometry(nodes, ranks, width); } catch (error) { return { error: String(error?.message || error) }; }
+    };
+    const hitTops = [2, 46, 90, 134, 178, 222, 266, 310];
+    const canvasHeights = [48, 92, 136, 180, 224, 268, 312, 356];
+    for (let rows = 1; rows <= 8; rows += 1) {
+      const nodes = Array.from({ length: rows }, (_, row) => ({ card: `GA-HB${row + 1} Hit ${row + 1}`, rank: 0, row }));
+      const geometry = layOut(nodes, [0], 390);
+      const hits = nodes.map((node) => geometry.hitBoxes?.get(node.card) || null);
+      assert(hits.every((hit, row) => hit && hit.y >= 0 && hit.y + hit.h <= geometry.canvasHeight
+        && hit.x >= 0 && hit.x + hit.w <= geometry.canvasWidth
+        && (row === 0 ? hit.y === geometry.pad : hit.y === hits[row - 1].y + hits[row - 1].h))
+        && hits[rows - 1].y + hits[rows - 1].h + geometry.pad === geometry.canvasHeight,
+      `PH12B-HIT-ROWS-TILE-CANVAS: the ${rows}-row hit boxes, the top and bottom rows included, lie inside the canvas and stack from pad down to the canvas height minus pad with no gap`);
+      assert.deepStrictEqual({
+        hits,
+        pills: nodes.map((node) => geometry.positions?.get(node.card) || null),
+        canvas: [geometry.canvasWidth, geometry.canvasHeight],
+        numbers: [geometry.hitH, geometry.pillH, geometry.pillInset, geometry.pad, geometry.gap],
+      }, {
+        hits: hitTops.slice(0, rows).map((y) => ({ x: 2, y, w: 140, h: 44 })),
+        pills: hitTops.slice(0, rows).map((y) => ({ x: 2, y: y + 9, w: 140, h: 26 })),
+        canvas: [144, canvasHeights[rows - 1]],
+        numbers: [44, 26, 9, 2, 10],
+      }, `PH12B-HIT-ROWS-TILE-CANVAS: ${rows} row${rows === 1 ? '' : 's'} at W=390 lay out hit boxes at top ${hitTops.slice(0, rows).join(', ')}, 44 tall, with 26px pills 9px below their tops, on a 144 x ${canvasHeights[rows - 1]} canvas`);
+    }
+    const rankless = layOut([{ card: 'GA-NR1 No rank', row: 0 }], undefined, 390);
+    assert.deepStrictEqual([rankless.hitBoxes?.get('GA-NR1 No rank'), rankless.positions?.get('GA-NR1 No rank')],
+      [{ x: 2, y: 2, w: 140, h: 44 }, { x: 2, y: 11, w: 140, h: 26 }],
+      'PH12B-HIT-ROWS-TILE-CANVAS: a node with no rank lays out its hit box at left 2, top 2 and its pill at left 2, top 11 in the one 140px column');
+  }
+
+  // ---- PH12-HIT-BOXES-DISJOINT ----
+  // _renderCompactGraph over R = 1, 4, 7, 8, and 12 ranks at W=390, first
+  // with rank i holding 6 - (i mod 6) rows (six rows in rank 0), then with
+  // rank i holding 1 + (i mod 6) rows (one row in rank 0; labelled "rows
+  // rising by rank"). Columns are the card formula's literals (R: colW,
+  // canvas width): 1: 140, 144; 4: 89, 390; 7: 46, 386; 8: 40, 394; 12: 40,
+  // 594. The canvas is 44 * (most rows in a rank) + 4 tall: 268 for the
+  // first layout, and 48, 180, 268, 268, 268 for the second. Rank i's hit
+  // boxes sit at left 2 + i*(colW + 10), top 2 + 44r.
+  // Within a rank of two or more rows a depends edge runs from row 0 to row
+  // 1 and order edges from row 1 to row 2, row 2 to row 3, and so on, up to
+  // the rank's last row; a depends edge runs from the last row of rank i to
+  // row 0 of rank i + 1. A
+  // same-column edge runs from the upper pill's bottom (2 + 44r + 35) to the
+  // lower pill's top (2 + 44(r+1) + 9) at the column's centre; a cross-rank
+  // edge runs from the pill's right edge at its mid-height (2 + 44r + 22) to
+  // the next pill's left edge at its mid-height, bending by
+  // max(24, (x2 - x1) / 2).
+  // MUTATION GUARD: PH12B-MUTANT-DRAWN-HIT-OVERLAPS turns RED at
+  // "PH12-HIT-BOXES-DISJOINT: 1 rank: no two of the 6 hit boxes ..." if the
+  // drawn hit boxes are 54px tall.
+  // MUTATION GUARD: PH12B-MUTANT-EDGES-ON-HIT-BOXES turns RED at
+  // "PH12-HIT-BOXES-DISJOINT: 1 rank ..." if the edge layer attaches edges
+  // to the hit boxes instead of the visual pills.
+  // MUTATION GUARD: PH12B-MUTANT-ROWCOUNT-FIRST-RANK turns RED at
+  // "PH12-HIT-BOXES-DISJOINT: 4 ranks (rows rising by rank) at W=390 draw
+  // ..." if the row count reads only the first rank's nodes.
+  for (const [rising, R, colW, canvasWidth, canvasHeight] of [
+    [false, 1, 140, 144, 268], [false, 4, 89, 390, 268], [false, 7, 46, 386, 268], [false, 8, 40, 394, 268], [false, 12, 40, 594, 268],
+    [true, 1, 140, 144, 48], [true, 4, 89, 390, 180], [true, 7, 46, 386, 268], [true, 8, 40, 394, 268], [true, 12, 40, 594, 268],
+  ]) {
+    const rowsOf = (rank) => (rising ? 1 + (rank % 6) : 6 - (rank % 6));
+    const named = `${R} rank${R === 1 ? '' : 's'}${rising ? ' (rows rising by rank)' : ''}`;
+    const cardOf = (rank, row) => `GA-D${rank}R${row} Cell`;
+    const nodes = [];
+    const edges = [];
+    for (let rank = 0; rank < R; rank += 1) {
+      for (let row = 0; row < rowsOf(rank); row += 1) {
+        nodes.push({ card: cardOf(rank, row), path: `${board}/${cardOf(rank, row)}.md`, status: 'planning', rank, row });
+        if (row === 1) edges.push({ from: cardOf(rank, 0), to: cardOf(rank, 1), kind: 'depends' });
+        if (row >= 2) edges.push({ from: cardOf(rank, row - 1), to: cardOf(rank, row), kind: 'order' });
+      }
+      if (rank > 0) edges.push({ from: cardOf(rank - 1, rowsOf(rank - 1) - 1), to: cardOf(rank, 0), kind: 'depends' });
+    }
+    const root = element();
+    await ph1View._renderCompactGraph(root, { nodes, edges }, lifecycleApi, epicPath, [], 390);
+    const leftOf = (rank) => 2 + rank * (colW + 10);
+    const boxOf = (cssText) => {
+      const css = cssEffective(cssText);
+      return [parseFloat(css.left), parseFloat(css.top), parseFloat(css.width), parseFloat(css.height)];
+    };
+    const drawn = new Map(byClass(root, 'graph-view-pill').map((pill) => [pill.attrs.title, pill]));
+    const boxes = [...drawn.values()].map((pill) => boxOf(pill.style.cssText));
+    const overlapping = [];
+    boxes.forEach((a, i) => boxes.slice(i + 1).forEach((b) => {
+      if (Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]) > 0
+        && Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]) > 0) overlapping.push([a, b]);
+    }));
+    assert(boxes.length === nodes.length && overlapping.length === 0
+      && boxes.every(([x, y, w, h]) => x >= 0 && y >= 0 && x + w <= canvasWidth && y + h <= canvasHeight),
+    `PH12-HIT-BOXES-DISJOINT: ${named}: no two of the ${nodes.length} hit boxes intersect and each lies inside the ${canvasWidth} x ${canvasHeight} canvas`);
+    assert.deepStrictEqual({
+      hits: nodes.map((node) => (drawn.get(node.card) ? boxOf(drawn.get(node.card).style.cssText) : null)),
+      faces: nodes.map((node) => (pillFace(drawn.get(node.card)) ? boxOf(pillFace(drawn.get(node.card)).style.cssText) : null)),
+      canvas: byClass(root, 'graph-view-compact-canvas')[0]?.style.cssText,
+      count: drawn.size,
+    }, {
+      hits: nodes.map((node) => [leftOf(node.rank), 2 + 44 * node.row, colW, 44]),
+      faces: nodes.map(() => [0, 9, colW, 26]),
+      canvas: `position:relative;width:${canvasWidth}px;height:${canvasHeight}px;`,
+      count: nodes.length,
+    }, `PH12-HIT-BOXES-DISJOINT: ${named} at W=390 draw ${nodes.length} ${colW}px hit boxes 44 tall at top 2 + 44r, each holding a 26px pill 9px down, on a ${canvasWidth} x ${canvasHeight} canvas`);
+    const vertical = (rank, row) => {
+      const x = leftOf(rank) + colW / 2;
+      return `M ${x} ${2 + 44 * row + 35} L ${x} ${2 + 44 * (row + 1) + 9}`;
+    };
+    const across = (rank, row) => {
+      const x1 = leftOf(rank) + colW;
+      const y1 = 2 + 44 * row + 22;
+      const x2 = leftOf(rank + 1);
+      const bend = Math.max(24, (x2 - x1) / 2);
+      return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} 24, ${x2} 24`;
+    };
+    const expectedDepends = [];
+    const expectedOrder = [];
+    for (let rank = 0; rank < R; rank += 1) {
+      for (let row = 0; row + 1 < rowsOf(rank); row += 1) (row === 0 ? expectedDepends : expectedOrder).push(vertical(rank, row));
+      if (rank + 1 < R) expectedDepends.push(across(rank, rowsOf(rank) - 1));
+    }
+    assert.deepStrictEqual({
+      depends: svgPaths(root, 'edge-depends').map(dOf).sort(),
+      order: svgPaths(root, 'edge-order').map(dOf).sort(),
+    }, { depends: expectedDepends.sort(), order: expectedOrder.sort() },
+    `PH12-HIT-BOXES-DISJOINT: ${named}: every edge attaches to the visual pills (same-column edges from a pill's bottom to the next pill's top, cross-rank edges at pill mid-height), not to the hit boxes`);
+  }
+
   assert.throws(() => ph1View._compactGeometry(ph1Nodes(2), ph1Ranks(2), 'nope'),
     'PH1: compact geometry refuses a non-numeric width');
 
@@ -2275,8 +2475,9 @@ async function main() {
     await ph1View._renderCompactGraph(rendered, { nodes: ph1Nodes(5), edges: [] }, lifecycleApi, epicPath, [], W);
     assert.deepStrictEqual(byClass(rendered, 'graph-view-pill-id').map((node) => node.textContent), labels,
       `PH1D-GEOMETRY-BOUNDARIES (PH1C-SHORT-ID-BOUNDARY): the rendered W=${W} pills (colW ${colW}) carry ${shortened ? 'the short ids' : 'the full ids'}`);
-    assert(byClass(rendered, 'graph-view-pill').every((pill) => pill.style.cssText.includes(`width:${colW}px;height:${PH1.pillH}px;`)),
-      `PH1D-GEOMETRY-BOUNDARIES (PH1C-SHORT-ID-BOUNDARY): the rendered W=${W} pills are ${colW}px wide`);
+    assert(byClass(rendered, 'graph-view-pill').every((pill) => pill.style.cssText.includes(`width:${colW}px;height:44px;`)
+      && pillBox(pillFace(pill)) === `0px 9px ${colW}px 26px`),
+      `PH1D-GEOMETRY-BOUNDARIES (PH1C-SHORT-ID-BOUNDARY): the rendered W=${W} hit boxes are ${colW}px wide and 44px tall, each holding a ${colW}px by 26px pill 9px down (re-pinned by PH-12b)`);
   }
   // PH1C-SCROLL-BOUNDARY: eight 40px ranks need 8*40 + 7*10 + 2*2 = 394px.
   // At W=394 they fit exactly: no scroll and a zero scrollbar allowance. At
@@ -2334,9 +2535,11 @@ async function main() {
     const geometry = ph1View._compactGeometry(ph1Nodes(R), ph1Ranks(R), W);
     assert(geometry.colW === colW && geometry.canvasWidth === canvas && geometry.natural === canvas
       && geometry.scrolls === false && geometry.scrollbarAllowance === 0 && canvas <= W
+      && JSON.stringify(ph1Ranks(R).map((index) => geometry.hitBoxes.get(`GA-ML${index + 1} Step ${index + 1}`)))
+        === JSON.stringify(lefts.map((x) => ({ x, y: 2, w: colW, h: 44 })))
       && JSON.stringify(ph1Ranks(R).map((index) => geometry.positions.get(`GA-ML${index + 1} Step ${index + 1}`)))
-        === JSON.stringify(lefts.map((x) => ({ x, y: 2, w: colW, h: 26 }))),
-    `PH1D-COLUMN-FORMULA (G21, G50): ${R} ranks at W=${W} give colW ${colW}, lefts ${lefts.join(' ')}, and a ${canvas}px canvas that fits without scrolling`);
+        === JSON.stringify(lefts.map((x) => ({ x, y: 11, w: colW, h: 26 }))),
+    `PH1D-COLUMN-FORMULA (G21, G50): ${R} ranks at W=${W} give colW ${colW}, lefts ${lefts.join(' ')}, and a ${canvas}px canvas that fits without scrolling (hit boxes at top 2, 44 tall, pills at top 11, 26 tall, re-pinned by PH-12b)`);
   }
   // One column per distinct rank in rank order, even when the ranks are not
   // contiguous (ranks 0 and 3 draw as the first and second columns), and a
@@ -2351,8 +2554,8 @@ async function main() {
     { card: 'GA-ML1 Step 1', rank: 0, row: 0 }, { card: 'GA-ML4 Step 4', rank: 3, row: 0 },
   ], [0, 3], 390);
   assert(gapped.colW === 140 && gapped.canvasWidth === 294
-    && JSON.stringify(gapped.positions.get('GA-ML1 Step 1')) === JSON.stringify({ x: 2, y: 2, w: 140, h: 26 })
-    && JSON.stringify(gapped.positions.get('GA-ML4 Step 4')) === JSON.stringify({ x: 152, y: 2, w: 140, h: 26 }),
+    && JSON.stringify(gapped.positions.get('GA-ML1 Step 1')) === JSON.stringify({ x: 2, y: 11, w: 140, h: 26 })
+    && JSON.stringify(gapped.positions.get('GA-ML4 Step 4')) === JSON.stringify({ x: 152, y: 11, w: 140, h: 26 }),
   'PH1D-COLUMN-FORMULA: ranks 0 and 3 at W=390 draw as two 140px columns at left 2 and 152 on a 294px canvas');
   for (const width of [0, -5]) {
     assert.throws(() => ph1View._compactGeometry(ph1Nodes(2), ph1Ranks(2), width), /positive width/,
@@ -2388,8 +2591,8 @@ async function main() {
       { card: 'GA-ML1 Step 1', rank: 0, row: 0 }, { card: 'GA-ML3 Step 3', rank: 2, row: 0 },
     ], [0, 1, 2], 390);
     assert(listed.ranks === 3 && listed.colW === 122 && listed.canvasWidth === 390
-      && JSON.stringify(listed.positions.get('GA-ML1 Step 1')) === JSON.stringify({ x: 2, y: 2, w: 122, h: 26 })
-      && JSON.stringify(listed.positions.get('GA-ML3 Step 3')) === JSON.stringify({ x: 266, y: 2, w: 122, h: 26 }),
+      && JSON.stringify(listed.positions.get('GA-ML1 Step 1')) === JSON.stringify({ x: 2, y: 11, w: 122, h: 26 })
+      && JSON.stringify(listed.positions.get('GA-ML3 Step 3')) === JSON.stringify({ x: 266, y: 11, w: 122, h: 26 }),
     'PH1D-GEOMETRY-RANKS: nodes at ranks 0 and 2 over the ranks [0, 1, 2] at W=390 draw three 122px columns, the rank-2 node at left 266 on a 390px canvas');
     const derived = ph1View._compactGeometry([
       { card: 'GA-ML3 Step 3', rank: 2, row: 0 }, { card: 'GA-ML1 Step 1', rank: 0, row: 0 },
@@ -2445,8 +2648,9 @@ async function main() {
   assert.strictEqual(chainPills.length, 12, 'PH1C-FALLBACK-DOCUMENTED: 12 ranks render 12 pills');
   const chainColW = compactColW(12, 390);
   assert.strictEqual(chainColW, 40, 'PH1C-FALLBACK-DOCUMENTED: the replica formula floors 12 ranks at 40px');
-  assert(chainPills.every((pill) => pill.style.cssText.includes(`width:${chainColW}px;height:${PH1.pillH}px;`)),
-    'PH1C-FALLBACK-DOCUMENTED: 12 ranks at 390 render 40px pills');
+  assert(chainPills.every((pill) => pill.style.cssText.includes(`width:${chainColW}px;height:44px;`)
+    && pillBox(pillFace(pill)) === `0px 9px ${chainColW}px 26px`),
+  'PH1C-FALLBACK-DOCUMENTED: 12 ranks at 390 render 40px by 44px hit boxes around 40px by 26px pills (re-pinned by PH-12b)');
   const chainNatural = compactNatural(12, chainColW);
   const chainCanvas = byClass(chainRoot, 'graph-view-compact-canvas')[0];
   assert(chainNatural === 594 && chainCanvas.style.cssText.includes(`width:${chainNatural}px;`),
@@ -2457,7 +2661,7 @@ async function main() {
   // pinned here on the scrolling map, where the canvas is 594 and W is 390.
   // MUTATION GUARD: PH1D-MUTANT-SVG-SIZED-TO-W turns RED here if the compact
   // edge SVG is sized to W instead of to the canvas.
-  const chainCanvasHeight = 2 * PH1.pad + PH1.pillH;
+  const chainCanvasHeight = 48;
   assert(byClass(chainRoot, 'graph-view-edges')[0]?.innerHTML
     .startsWith(`<svg width="${chainNatural}" height="${chainCanvasHeight}" viewBox="0 0 ${chainNatural} ${chainCanvasHeight}"`),
   'PH1D-PILL-PRESENTATION (PH1C-SVG-SIZED-TO-CANVAS): on the 12-rank scrolling map the edge SVG is exactly the 594px canvas width, not W=390');
@@ -2486,7 +2690,7 @@ async function main() {
     'PH1C-FALLBACK-DOCUMENTED: the fallback renders zero warning rows');
   const chainPillFor = (label) => chainPills.find((pill) => byClass(pill, 'graph-view-pill-id')[0]?.textContent === label);
   for (let index = 0; index < 12; index += 1) {
-    const pos = compactPos(index, 0, chainColW);
+    const pos = compactHit(index, 0, chainColW);
     assert(chainPillFor(`ML${index + 1}`)?.style.cssText.includes(`left:${pos.x}px;top:${pos.y}px;`),
       `PH1C-FALLBACK-DOCUMENTED: ML${index + 1} sits in rank ${index} at left:${pos.x}px`);
   }
@@ -2509,9 +2713,10 @@ async function main() {
   //   measured 500, 4 ranks: colW 116, lefts 2 128 254 380, canvas 498
   //   measured 590, 5 ranks: colW 109, lefts 2 121 240 359 478, canvas 589
   //   override 430, 3 ranks: colW 135, lefts 2 147 292, canvas 429
-  // One row, so the canvas is 2 + 26 + 2 = 30 tall and each depends edge runs
-  // at mid-height (15) from a pill's right edge to the next pill's left edge,
-  // bending by max(24, gap/2) = 24: M x1 15 C x1+24 15, x2-24 15, x2 15.
+  // One row, so the canvas is 2 + 44 + 2 = 48 tall (re-pinned by PH-12b from
+  // 2 + 26 + 2 = 30) and each depends edge runs at the visual pill's
+  // mid-height (2 + 9 + 13 = 24) from a pill's right edge to the next pill's
+  // left edge, bending by max(24, gap/2) = 24: M x1 24 C x1+24 24, x2-24 24, x2 24.
   // MUTATION GUARD: PH1D-MUTANT-COMPACT-WIDTH-390 (F10) turns RED at
   // "PH1D-RESOLVED-WIDTH-BOUND (F10, F12): measured 500, 4 ranks ..." if
   // render() draws every compact map at a constant 390.
@@ -2549,16 +2754,16 @@ async function main() {
       .find((pill) => byClass(pill, 'graph-view-pill-id')[0]?.textContent === id);
     const widthCanvas = byClass(widthRoot, 'graph-view-compact-canvas')[0];
     assert(byClass(widthRoot, 'graph-view-pill').length === R
-      && lefts.every((x, index) => widthPillFor(`GA-W${index + 1}`)?.style.cssText.includes(`left:${x}px;top:2px;width:${colW}px;height:26px;`))
-      && widthCanvas?.style.cssText.includes(`width:${canvasWidth}px;height:30px;`),
-    `PH1D-RESOLVED-WIDTH-BOUND (F10, F12): ${label} draws ${colW}px pills at left ${lefts.join(' ')} on a ${canvasWidth}px canvas`);
+      && lefts.every((x, index) => widthPillFor(`GA-W${index + 1}`)?.style.cssText.includes(`left:${x}px;top:2px;width:${colW}px;height:44px;`))
+      && widthCanvas?.style.cssText.includes(`width:${canvasWidth}px;height:48px;`),
+    `PH1D-RESOLVED-WIDTH-BOUND (F10, F12): ${label} draws ${colW}px pills at left ${lefts.join(' ')} on a ${canvasWidth}px canvas (44px hit boxes on a 48px canvas, re-pinned by PH-12b)`);
     const expectedEdges = lefts.slice(1).map((x2, index) => {
       const x1 = lefts[index] + colW;
-      return `M ${x1} 15 C ${x1 + 24} 15, ${x2 - 24} 15, ${x2} 15`;
+      return `M ${x1} 24 C ${x1 + 24} 24, ${x2 - 24} 24, ${x2} 24`;
     });
-    assert(byClass(widthRoot, 'graph-view-edges')[0]?.innerHTML.startsWith(`<svg width="${canvasWidth}" height="30" viewBox="0 0 ${canvasWidth} 30"`)
+    assert(byClass(widthRoot, 'graph-view-edges')[0]?.innerHTML.startsWith(`<svg width="${canvasWidth}" height="48" viewBox="0 0 ${canvasWidth} 48"`)
       && JSON.stringify(svgPaths(widthRoot, 'edge-depends').map(dOf).sort()) === JSON.stringify(expectedEdges.sort()),
-    `PH1D-RESOLVED-WIDTH-BOUND (F10, F12): ${label} sizes the edge SVG to ${canvasWidth}x30 and runs every depends edge between those pills`);
+    `PH1D-RESOLVED-WIDTH-BOUND (F10, F12): ${label} sizes the edge SVG to ${canvasWidth}x48 and runs every depends edge between those pills`);
     assert(byClass(widthRoot, 'graph-view-warning').length === 0 && widthEnv.mutations.length === 0,
       `PH1D-RESOLVED-WIDTH-BOUND (F10, F12): ${label} renders no warning row and writes nothing`);
   }
@@ -2579,7 +2784,8 @@ async function main() {
   //   override 394 over a measured 900 pane, 8 ranks: as measured 394
   //   override 393 over a measured 900 pane, 8 ranks: as measured 393
   //   override 0.5 over a measured 900 pane, 5 ranks: colW 40, lefts 2 52 102 152 202, short ids, canvas 244, padding 14
-  // Every pill is top 2, height 26, and the canvas is 30 tall. A measured
+  // Every pill's hit box is top 2, height 44, with its pill 9px down and
+  // 26px tall, and the canvas is 48 tall. A measured
   // 600 pane draws the five wide chips and no compact map.
   // MUTATION GUARD: PH1D-MUTANT-HANDOFF-MINUS-ONE turns RED at
   // "PH1D-HANDOFF-BOUNDARY: measured 404, 5 ranks ..." if render() hands the
@@ -2615,20 +2821,23 @@ async function main() {
       DeliveryCoordinator: coordinatorSentinel,
     };
   };
-  // The drawn compact map as literals: each pill's id text, left, top,
-  // width, and height (in left order), the canvas cssText, and the compact
-  // scroller's padding-bottom.
+  // The drawn compact map as literals: each pill hit box's id text, left,
+  // top, width, and height (in left order), the distinct left, top, width,
+  // and height of the visual pills inside them (PH-12b), the canvas cssText,
+  // and the compact scroller's padding-bottom.
   const ph1dCompactDrawing = (root) => ({
     pills: byClass(root, 'graph-view-pill').map((pill) => {
       const css = cssEffective(pill.style.cssText);
       return [byClass(pill, 'graph-view-pill-id')[0]?.textContent, css.left, css.top, css.width, css.height];
     }).sort((left, right) => parseFloat(left[1]) - parseFloat(right[1])),
+    faces: [...new Set(byClass(root, 'graph-view-pill').map((pill) => pillBox(pillFace(pill))))].sort(),
     canvas: byClass(root, 'graph-view-compact-canvas')[0]?.style.cssText,
     padding: cssEffective(byClass(root, 'graph-view-compact-scroll')[0]?.style.cssText)['padding-bottom'],
   });
   const ph1dExpectedDrawing = (colW, lefts, ids, canvasWidth, padding) => ({
-    pills: lefts.map((x, index) => [ids === 'short' ? `H${index + 1}` : `GA-H${index + 1}`, `${x}px`, '2px', `${colW}px`, '26px']),
-    canvas: `position:relative;width:${canvasWidth}px;height:30px;`,
+    pills: lefts.map((x, index) => [ids === 'short' ? `H${index + 1}` : `GA-H${index + 1}`, `${x}px`, '2px', `${colW}px`, '44px']),
+    faces: [`0px 9px ${colW}px 26px`],
+    canvas: `position:relative;width:${canvasWidth}px;height:48px;`,
     padding: `${padding}px`,
   });
   const ph1dLefts5At72 = [2, 84, 166, 248, 330];
@@ -2729,9 +2938,9 @@ async function main() {
   // 13 chained slices GA-H1 ... GA-H13 drawn by render() at an override of
   // 390: colW = clamp(floor((390 - 4 - 120) / 13), 40, 140) = 40, short ids
   // at left 2 + 50r for r = 0 ... 12, a 13*40 + 12*10 + 4 = 644px canvas and
-  // edge SVG, 30px tall, and a 14px scroller padding-bottom (644 > 390).
-  // Each depends edge runs at y 15 from a pill's right edge to the next
-  // pill's left edge.
+  // edge SVG, 48px tall (30 before PH-12b), and a 14px scroller
+  // padding-bottom (644 > 390). Each depends edge runs at y 24 from a pill's
+  // right edge to the next pill's left edge.
   // MUTATION GUARD: PH1D-MUTANT-RANK-CAP-12 turns RED at "PH1D-MANY-RANKS: 13
   // chained slices at an override of 390 ..." if _compactGeometry counts at
   // most 12 ranks.
@@ -2743,10 +2952,10 @@ async function main() {
     const root = container.children[0];
     assert.deepStrictEqual(ph1dCompactDrawing(root), ph1dExpectedDrawing(40, lefts13, 'short', 644, 14),
       'PH1D-MANY-RANKS: 13 chained slices at an override of 390 draw 40px pills with short ids at left 2, 52, ... 602 on a 644px canvas and a 14px scroller padding-bottom');
-    const expectedEdges = lefts13.slice(1).map((x2, index) => `M ${lefts13[index] + 40} 15 C ${lefts13[index] + 64} 15, ${x2 - 24} 15, ${x2} 15`);
-    assert(byClass(root, 'graph-view-edges')[0]?.innerHTML.startsWith('<svg width="644" height="30" viewBox="0 0 644 30"')
+    const expectedEdges = lefts13.slice(1).map((x2, index) => `M ${lefts13[index] + 40} 24 C ${lefts13[index] + 64} 24, ${x2 - 24} 24, ${x2} 24`);
+    assert(byClass(root, 'graph-view-edges')[0]?.innerHTML.startsWith('<svg width="644" height="48" viewBox="0 0 644 48"')
       && JSON.stringify(svgPaths(root, 'edge-depends').map(dOf).sort()) === JSON.stringify(expectedEdges.sort()),
-    'PH1D-MANY-RANKS: the 13-rank edge SVG is 644 x 30 and runs each of the 12 depends edges between adjacent pills');
+    'PH1D-MANY-RANKS: the 13-rank edge SVG is 644 x 48 and runs each of the 12 depends edges between adjacent pills');
   }
   // _compactGeometry over 1 to 16 ranks and 24 ranks, at widths from 0.5 to
   // 10000, against compactColW and compactNatural (the card formula above):
@@ -2778,24 +2987,27 @@ async function main() {
   }
 
   // ---- PH1D-MULTI-ROW ----
-  // Row geometry from the card formula (pad 2, pill height 26, row gap 8):
-  // row r sits at top 2 + 34r (2, 36, 70, 104, 138) and n rows make a
-  // canvas 4 + 26n + 8(n-1) tall (30, 64, 98, 132, 166 for n = 1 ... 5).
+  // Row geometry from the card formula as re-pinned by PH-12b (pad 2, hit
+  // box 44 with its 26px pill 9px below its top; before PH-12b, pill 26 and row gap
+  // 8): row r's hit box sits at top 2 + 44r (2, 46, 90, 134, 178), its pill
+  // at top 11 + 44r (11, 55, 99, 143, 187), and n rows make a canvas
+  // 4 + 44n tall (48, 92, 136, 180, 224 for n = 1 ... 5).
   // render() at an override of 390 over GA-R1 ... GA-R6 in lane order, where
   // GA-R5 depends on GA-R3 and GA-R6 on GA-R4: rank 0 holds GA-R1 ... GA-R4
   // in rows 0 ... 3 and rank 1 holds GA-R5 and GA-R6 in rows 0 and 1, as
   // 140px pills (colW = min(140, floor((390 - 14) / 2))) at left 2 and 152,
-  // on a 294 x 132 canvas. The depends edges run from the rank-0 pill's
+  // on a 294 x 180 canvas. The depends edges run from the rank-0 pill's
   // right edge (142) at its mid-height to the rank-1 pill's left edge (152)
-  // at its mid-height, bending by 24: row 2 (y 83) to row 0 (y 15) and
-  // row 3 (y 117) to row 1 (y 49). The order edges between lane neighbours
+  // at its mid-height, bending by 24: row 2 (y 112) to row 0 (y 24) and
+  // row 3 (y 156) to row 1 (y 68). The order edges between lane neighbours
   // in one rank drop from a pill's bottom-centre to the next pill's top:
-  // x 72 from 28 to 36, 62 to 70, and 96 to 104, and x 222 from 28 to 36.
-  // MUTATION GUARD: PH1D-MUTANT-ROW-GAP-ONCE turns RED at "PH1D-MULTI-ROW: a
-  // rank with 4 rows ..." if a pill's top adds the row gap once instead of
-  // once per row above it.
-  // MUTATION GUARD: PH1D-MUTANT-HEIGHT-ROW-GAP-ONCE turns RED at the same label
-  // if the canvas height adds the row gap once instead of once per gap.
+  // x 72 from 37 to 55, 81 to 99, and 125 to 143, and x 222 from 37 to 55.
+  // MUTATION GUARD: PH1D-MUTANT-ROW-GAP-ONCE turns RED at
+  // "PH12B-HIT-ROWS-TILE-CANVAS: the 3-row hit boxes ..." if a hit box's top
+  // adds the 44px pitch once instead of once per row above it.
+  // MUTATION GUARD: PH1D-MUTANT-HEIGHT-ROW-GAP-ONCE turns RED at
+  // "PH12B-HIT-ROWS-TILE-CANVAS: the 2-row hit boxes ..." if the canvas
+  // height adds the 44px pitch once instead of once per row.
   // MUTATION GUARD: PH1D-MUTANT-ROW-COUNT-DISTINCT turns RED at
   // "PH1D-MULTI-ROW: _compactGeometry with pills in rows 0 and 3 only ..." if
   // the row count is the number of distinct rows instead of the highest row
@@ -2818,41 +3030,44 @@ async function main() {
     const drawing = ph1dCompactDrawing(root);
     assert.deepStrictEqual({ pills: drawing.pills, canvas: drawing.canvas }, {
       pills: [
-        ['GA-R1', '2px', '2px', '140px', '26px'], ['GA-R2', '2px', '36px', '140px', '26px'],
-        ['GA-R3', '2px', '70px', '140px', '26px'], ['GA-R4', '2px', '104px', '140px', '26px'],
-        ['GA-R5', '152px', '2px', '140px', '26px'], ['GA-R6', '152px', '36px', '140px', '26px'],
+        ['GA-R1', '2px', '2px', '140px', '44px'], ['GA-R2', '2px', '46px', '140px', '44px'],
+        ['GA-R3', '2px', '90px', '140px', '44px'], ['GA-R4', '2px', '134px', '140px', '44px'],
+        ['GA-R5', '152px', '2px', '140px', '44px'], ['GA-R6', '152px', '46px', '140px', '44px'],
       ],
-      canvas: 'position:relative;width:294px;height:132px;',
-    }, 'PH1D-MULTI-ROW: a rank with 4 rows at an override of 390 draws its pills at top 2, 36, 70, and 104, the next rank at top 2 and 36, on a 294 x 132 canvas');
-    assert(byClass(root, 'graph-view-edges')[0]?.innerHTML.startsWith('<svg width="294" height="132" viewBox="0 0 294 132"')
+      canvas: 'position:relative;width:294px;height:180px;',
+    }, 'PH1D-MULTI-ROW: a rank with 4 rows at an override of 390 draws its hit boxes at top 2, 46, 90, and 134, the next rank at top 2 and 46, on a 294 x 180 canvas');
+    assert(byClass(root, 'graph-view-edges')[0]?.innerHTML.startsWith('<svg width="294" height="180" viewBox="0 0 294 180"')
       && JSON.stringify(svgPaths(root, 'edge-depends').map(dOf).sort()) === JSON.stringify([
-        'M 142 83 C 166 83, 128 15, 152 15', 'M 142 117 C 166 117, 128 49, 152 49',
+        'M 142 112 C 166 112, 128 24, 152 24', 'M 142 156 C 166 156, 128 68, 152 68',
       ].sort())
       && JSON.stringify(svgPaths(root, 'edge-order').map(dOf).sort()) === JSON.stringify([
-        'M 72 28 L 72 36', 'M 72 62 L 72 70', 'M 72 96 L 72 104', 'M 222 28 L 222 36',
+        'M 72 37 L 72 55', 'M 72 81 L 72 99', 'M 72 125 L 72 143', 'M 222 37 L 222 55',
       ].sort()),
-    'PH1D-MULTI-ROW: the 294 x 132 edge SVG runs the depends edges from rows 2 and 3 at y 83 and 117 to rows 0 and 1 at y 15 and 49, and the order edges between rows 0-1, 1-2, and 2-3');
+    'PH1D-MULTI-ROW: the 294 x 180 edge SVG runs the depends edges from rows 2 and 3 at y 112 and 156 to rows 0 and 1 at y 24 and 68, and the order edges between rows 0-1, 1-2, and 2-3');
     const oneRank = (rows) => Array.from(rows, (row) => ({ card: `GA-ML${row + 1} Step ${row + 1}`, rank: 0, row }));
     const stacked = [1, 2, 3, 4, 5].map((count) => {
       const geometry = ph1dLayOut(oneRank(Array.from({ length: count }, (_, row) => row)), [0], 390);
-      return [count, geometry.positions ? [...geometry.positions.values()].map((at) => at.y) : null, geometry.canvasHeight];
+      return [count, geometry.hitBoxes ? [...geometry.hitBoxes.values()].map((at) => at.y) : null,
+        geometry.positions ? [...geometry.positions.values()].map((at) => at.y) : null, geometry.canvasHeight];
     });
     assert.deepStrictEqual(stacked, [
-      [1, [2], 30], [2, [2, 36], 64], [3, [2, 36, 70], 98], [4, [2, 36, 70, 104], 132], [5, [2, 36, 70, 104, 138], 166],
-    ], 'PH1D-MULTI-ROW: _compactGeometry stacks 1 to 5 rows at top 2, 36, 70, 104, and 138 on canvases 30, 64, 98, 132, and 166 tall');
+      [1, [2], [11], 48], [2, [2, 46], [11, 55], 92], [3, [2, 46, 90], [11, 55, 99], 136],
+      [4, [2, 46, 90, 134], [11, 55, 99, 143], 180], [5, [2, 46, 90, 134, 178], [11, 55, 99, 143, 187], 224],
+    ], 'PH1D-MULTI-ROW: _compactGeometry stacks 1 to 5 rows of hit boxes at top 2, 46, 90, 134, and 178 with pills at top 11, 55, 99, 143, and 187 on canvases 48, 92, 136, 180, and 224 tall');
     const sparse = ph1dLayOut(oneRank([0, 3]), [0], 390);
-    assert(JSON.stringify(sparse.positions ? [...sparse.positions.values()].map((at) => at.y) : null) === JSON.stringify([2, 104])
-      && sparse.canvasHeight === 132,
-    'PH1D-MULTI-ROW: _compactGeometry with pills in rows 0 and 3 only draws them at top 2 and 104 on a canvas 132 tall');
+    assert(JSON.stringify(sparse.hitBoxes ? [...sparse.hitBoxes.values()].map((at) => at.y) : null) === JSON.stringify([2, 134])
+      && JSON.stringify(sparse.positions ? [...sparse.positions.values()].map((at) => at.y) : null) === JSON.stringify([11, 143])
+      && sparse.canvasHeight === 180,
+    'PH1D-MULTI-ROW: _compactGeometry with pills in rows 0 and 3 only draws their hit boxes at top 2 and 134 and their pills at top 11 and 143 on a canvas 180 tall');
   }
 
   // ---- PH1D-STUB-ROWS ----
   // GA-T1 depends on GB-1 and GB-2, two slices on another epic's board, so
   // render() draws two cross-epic stubs in the column after GA-T1, in rows 0
-  // and 1. At an override of 390 (two ranks, colW 140): GA-T1 at left 2,
-  // top 2; GB-1 and GB-2 at left 152, top 2 and 36; a 294 x 64 canvas. Each
-  // stub edge runs from the stub's right edge (292) at its mid-height (15,
-  // 49) back to GA-T1's left edge (2) at 15, bending by 24.
+  // and 1. At an override of 390 (two ranks, colW 140): GA-T1's hit box at
+  // left 2, top 2; GB-1's and GB-2's at left 152, top 2 and 46; a 294 x 92
+  // canvas. Each stub edge runs from the stub's right edge (292) at its
+  // mid-height (24, 68) back to GA-T1's left edge (2) at 24, bending by 24.
   // MUTATION GUARD: PH1D-MUTANT-ROW-COUNT-WITHOUT-STUBS turns RED at
   // "PH1D-STUB-ROWS: two cross-epic stubs ..." if the row count skips stubs.
   // MUTATION GUARD: PH1D-MUTANT-STUBS-IN-ROW-0 turns RED at the same label if
@@ -2880,16 +3095,16 @@ async function main() {
     const drawing = ph1dCompactDrawing(root);
     assert.deepStrictEqual({ pills: drawing.pills, canvas: drawing.canvas, stubs: byClass(root, 'graph-view-stub').length }, {
       pills: [
-        ['GA-T1', '2px', '2px', '140px', '26px'], ['GB-1', '152px', '2px', '140px', '26px'], ['GB-2', '152px', '36px', '140px', '26px'],
+        ['GA-T1', '2px', '2px', '140px', '44px'], ['GB-1', '152px', '2px', '140px', '44px'], ['GB-2', '152px', '46px', '140px', '44px'],
       ],
-      canvas: 'position:relative;width:294px;height:64px;',
+      canvas: 'position:relative;width:294px;height:92px;',
       stubs: 2,
-    }, 'PH1D-STUB-ROWS: two cross-epic stubs at an override of 390 draw at left 152, top 2 and 36, beside GA-T1 at left 2, on a 294 x 64 canvas');
-    assert(byClass(root, 'graph-view-edges')[0]?.innerHTML.startsWith('<svg width="294" height="64" viewBox="0 0 294 64"')
+    }, 'PH1D-STUB-ROWS: two cross-epic stubs at an override of 390 draw at left 152, top 2 and 46, beside GA-T1 at left 2, on a 294 x 92 canvas');
+    assert(byClass(root, 'graph-view-edges')[0]?.innerHTML.startsWith('<svg width="294" height="92" viewBox="0 0 294 92"')
       && JSON.stringify(svgPaths(root, 'edge-depends').map(dOf).sort()) === JSON.stringify([
-        'M 292 15 C 316 15, -22 15, 2 15', 'M 292 49 C 316 49, -22 15, 2 15',
+        'M 292 24 C 316 24, -22 24, 2 24', 'M 292 68 C 316 68, -22 24, 2 24',
       ].sort()),
-    'PH1D-STUB-ROWS: the 294 x 64 edge SVG runs each stub edge from the stub\'s right edge at y 15 and 49 to GA-T1\'s left edge at y 15');
+    'PH1D-STUB-ROWS: the 294 x 92 edge SVG runs each stub edge from the stub\'s right edge at y 24 and 68 to GA-T1\'s left edge at y 24');
   }
 
   // ---- PH1D-EDGE-BEND ----
@@ -2914,9 +3129,9 @@ async function main() {
     await new GraphView().render({ container }, { containerWidth: 390 });
     const root = container.children[0];
     assert(JSON.stringify(ph1dCompactDrawing(root).pills) === JSON.stringify([
-      ['GA-S1', '2px', '2px', '122px', '26px'], ['GA-S2', '134px', '2px', '122px', '26px'], ['GA-S3', '266px', '2px', '122px', '26px'],
+      ['GA-S1', '2px', '2px', '122px', '44px'], ['GA-S2', '134px', '2px', '122px', '44px'], ['GA-S3', '266px', '2px', '122px', '44px'],
     ]) && JSON.stringify(svgPaths(root, 'edge-depends').map(dOf).sort()) === JSON.stringify([
-      'M 124 15 C 148 15, 110 15, 134 15', 'M 256 15 C 280 15, 242 15, 266 15', 'M 124 15 C 195 15, 195 15, 266 15',
+      'M 124 24 C 148 24, 110 24, 134 24', 'M 256 24 C 280 24, 242 24, 266 24', 'M 124 24 C 195 24, 195 24, 266 24',
     ].sort()),
     'PH1D-EDGE-BEND: at an override of 390 the adjacent-rank edges bend by 24 and the GA-S1 -> GA-S3 edge, spanning 142px, bends by 71');
   }
@@ -3053,14 +3268,14 @@ async function main() {
   const bl5ColW = compactColW(3, 390);
   assert.strictEqual(bl5ColW, 122, 'PH1-COMPACT-GEOMETRY: three 390px ranks give 122px columns');
   for (const [id, rank, row] of [['BL5-A', 0, 0], ['BL5-B', 1, 0], ['BL5-C', 2, 0], ['BL5-D', 0, 1], ['BL5-E', 1, 1], ['BL5-F', 2, 1]]) {
-    const pos = compactPos(rank, row, bl5ColW);
+    const pos = compactHit(rank, row, bl5ColW);
     assert(bl5CompactPillFor(id).style.cssText.includes(`left:${pos.x}px;top:${pos.y}px;width:${pos.w}px;height:${pos.h}px;`),
-      `PH1-COMPACT-GEOMETRY: ${id} pill sits at left:${pos.x}px;top:${pos.y}px;width:${pos.w}px;height:${pos.h}px`);
+      `PH1-COMPACT-GEOMETRY: ${id} hit box sits at left:${pos.x}px;top:${pos.y}px;width:${pos.w}px;height:${pos.h}px (re-pinned by PH-12b)`);
   }
   const bl5CompactCanvas = byClass(bl5Compact, 'graph-view-compact-canvas')[0];
-  const bl5CompactHeight = 2 * PH1.pad + 2 * PH1.pillH + PH1.rowGap;
+  const bl5CompactHeight = 92;
   assert(bl5CompactCanvas.style.cssText.includes(`width:${compactNatural(3, bl5ColW)}px;height:${bl5CompactHeight}px;`),
-    'PH1-COMPACT-GEOMETRY: the canvas is the natural width and pad + rows*pill + rowGap tall');
+    'PH1-COMPACT-GEOMETRY: the canvas is the natural width and pad + rows*44 + pad = 92 tall (re-pinned by PH-12b)');
   assert(byClass(bl5Compact, 'graph-view-edges')[0].innerHTML.startsWith(`<svg width="${compactNatural(3, bl5ColW)}" height="${bl5CompactHeight}"`),
     'PH1-COMPACT-EDGES: the SVG layer is sized to the compact canvas');
   const bl5CompactDepends = svgPaths(bl5Compact, 'edge-depends');
@@ -3171,19 +3386,22 @@ async function main() {
       `PH1-COMPACT-PRESENTATION: ${id} pill carries the shared status class ${expected.className}`);
     assert(pill.style.cssText.includes(`color:${expected.color};`),
       `PH1-COMPACT-PRESENTATION: ${id} pill carries the shared colour ${expected.color}`);
+    // The border, background, and glyph live on the visual pill inside the
+    // hit box (PH-12b).
+    const face = pillFace(pill);
     // MUTATION GUARD: PH1D-MUTANT-UNTINTED-BORDER turns RED here if the pill
     // border stops mixing the shared presentation colour (another colour, or
     // another strength than 40%).
-    assert(pill.style.cssText.includes(`border:1px solid color-mix(in srgb, ${expected.color} 40%, transparent);`),
+    assert(face?.style.cssText.includes(`border:1px solid color-mix(in srgb, ${expected.color} 40%, transparent);`),
       `PH1D-PILL-PRESENTATION (PH1C-PILL-TINTS): ${id} pill's border is the shared colour ${expected.color} tinted 40%`);
     // MUTATION GUARD: PH1D-MUTANT-UNTINTED-BACKGROUND turns RED here if the
     // pill background stops mixing the shared presentation colour (another
     // colour, or another strength than 10%).
-    assert(pill.style.cssText.includes(`background:color-mix(in srgb, ${expected.color} 10%, var(--background-primary));`),
+    assert(face?.style.cssText.includes(`background:color-mix(in srgb, ${expected.color} 10%, var(--background-primary));`),
       `PH1D-PILL-PRESENTATION (PH1C-PILL-TINTS): ${id} pill's background is the shared colour ${expected.color} tinted 10% over the primary background`);
     const glyph = byClass(pill, 'graph-view-status-glyph')[0];
     assert(glyph && glyph.textContent === expected.glyph && glyph.attrs['aria-hidden'] === 'true'
-      && pill.children.indexOf(glyph) < pill.children.indexOf(byClass(pill, 'graph-view-pill-id')[0]),
+      && face.children.indexOf(glyph) === 0 && face.children.indexOf(byClass(pill, 'graph-view-pill-id')[0]) === 1,
     `PH1-COMPACT-PRESENTATION: ${id} pill carries the shared glyph ${expected.glyph} before its id`);
     // MUTATION GUARD: PH1D-MUTANT-GLYPH-UNCOLOURED (P12) turns RED here if
     // the glyph span stops carrying the shared status colour (or its shared
@@ -3193,11 +3411,13 @@ async function main() {
     `PH1D-GLYPH-COLOUR (P12): ${id} pill's glyph carries the shared colour ${expected.color} and the shared status class`);
   }
   for (const id of ['PR-B', 'PR-C']) {
-    assert(presPillFor(id).style.cssText.includes('border-left:2px solid var(--text-error);'),
+    assert(pillFace(presPillFor(id))?.style.cssText.includes('border-left:2px solid var(--text-error);'),
       `PH1-COMPACT-STUCK-HAIRLINE: stuck ${id} carries the 2px error hairline on the left`);
   }
   for (const id of ['PR-A', 'PR-D', 'PR-E']) {
-    assert(!presPillFor(id).style.cssText.includes('border-left:'),
+    assert(pillFace(presPillFor(id))?.style.cssText.includes('border:1px solid')
+      && !pillFace(presPillFor(id)).style.cssText.includes('border-left:')
+      && !cssDeclarations(presPillFor(id).style.cssText).some(([property]) => property.startsWith('border')),
       `PH1-COMPACT-STUCK-HAIRLINE: ${id} carries no hairline`);
   }
   // PH1D-HAIRLINE-CASCADE (P23): effectiveBorders applies each pill's
@@ -3210,7 +3430,7 @@ async function main() {
     const expected = dashboard._statusPresentation(status, lifecycleApi);
     const tint = `1px solid color-mix(in srgb, ${expected.color} 40%, transparent)`;
     const stuck = status === 'blocked' || status === 'parked';
-    assert.deepStrictEqual(effectiveBorders(presPillFor(id).style.cssText),
+    assert.deepStrictEqual(effectiveBorders(pillFace(presPillFor(id))?.style.cssText),
       { top: tint, right: tint, bottom: tint, left: stuck ? '2px solid var(--text-error)' : tint },
       `PH1D-HAIRLINE-CASCADE (P23): ${id}'s effective left border is ${stuck ? 'the 2px error hairline' : 'the 1px shared tint'} and its other sides the 1px shared tint`);
   }
@@ -3237,11 +3457,12 @@ async function main() {
   assert(parkedPresentation.normalized === 'parked' && parkedSlicePill && parkedStubPill
     && parkedSlicePill.className.split(/\s+/).includes('graph-view-needs-you')
     && !parkedStubPill.className.split(/\s+/).includes('graph-view-needs-you')
-    && !parkedStubPill.style.cssText.includes('border-left:'),
+    && pillFace(parkedStubPill)?.style.cssText.includes('border:1px dashed')
+    && !pillFace(parkedStubPill).style.cssText.includes('border-left:'),
   'PH1D-PILL-PRESENTATION (PH1C-NEEDS-YOU-NOT-ON-STUB): a parked stub carries no needs-you class and no stuck hairline, while the parked slice beside it carries the needs-you class');
   const presStub = presPillFor('GA-X1');
   assert(presStub && presStub.className.split(/\s+/).includes('graph-view-stub')
-    && presStub.style.cssText.includes('border:1px dashed')
+    && pillFace(presStub)?.style.cssText.includes('border:1px dashed')
     && byClass(presStub, 'graph-view-status-glyph').length === 0
     && presStub.attrs.title === 'Other · GA-X1',
   'PH1-COMPACT-STUB: stub pills are dashed, glyph-less, and keep the owning-epic label as their tooltip');
@@ -3276,10 +3497,12 @@ async function main() {
   // ---- PH1D-COMPACT-DECLARATIONS ----
   // The compact map's structure and inline declarations, pinned as literals
   // for this 4-rank map at 390 (colW = floor((390 - 4 - 30) / 4) = 89, lefts
-  // 2 101 200 299, rows at top 2 and 36, canvas 390 x 64): the host, the
+  // 2 101 200 299, hit-box rows at top 2 and 46, canvas 390 x 92; before
+  // PH-12b, pill rows at top 2 and 36 on a 390 x 64 canvas): the host, the
   // scroller, the canvas, the edge layer, a plain, two stuck, and a stub
-  // pill with their id spans, and the plain pill's glyph span. Colours come
-  // from the shared presentation.
+  // pill (its hit box and the visual pill inside it) with their id spans,
+  // and the plain pill's glyph span. Colours come from the shared
+  // presentation.
   // MUTATION GUARD: PH1D-MUTANT-PILL-DECLARATION turns RED here if any pill
   // declaration changes (position:absolute, box-sizing:border-box,
   // inline-flex, padding, the stub's opacity) or a pill loses a shared
@@ -3294,10 +3517,12 @@ async function main() {
   {
     const planning = dashboard._statusPresentation('planning', lifecycleApi);
     const blocked = dashboard._statusPresentation('blocked', lifecycleApi);
-    const pillBase = (left, top) => `position:absolute;left:${left}px;top:${top}px;width:89px;height:26px;`
+    const hitBase = (left, top) => `position:absolute;left:${left}px;top:${top}px;width:89px;height:44px;`
+      + 'box-sizing:border-box;cursor:pointer;';
+    const faceBase = 'position:absolute;left:0px;top:9px;width:89px;height:26px;'
       + 'display:inline-flex;align-items:center;gap:4px;padding:0 6px;border-radius:999px;box-sizing:border-box;'
-      + 'cursor:pointer;min-width:0;font-family:var(--font-monospace);font-size:11px;font-weight:600;';
-    const tinted = (color, stuck) => `color:${color};border:1px solid color-mix(in srgb, ${color} 40%, transparent);`
+      + 'min-width:0;font-family:var(--font-monospace);font-size:11px;font-weight:600;';
+    const tinted = (color, stuck) => `border:1px solid color-mix(in srgb, ${color} 40%, transparent);`
       + (stuck ? 'border-left:2px solid var(--text-error);' : '')
       + `background:color-mix(in srgb, ${color} 10%, var(--background-primary));`;
     const presCanvas = byClass(presRoot, 'graph-view-compact-canvas')[0];
@@ -3307,31 +3532,180 @@ async function main() {
       && presScroller.parent === presHost && presScroller.className === 'graph-view-scroll graph-view-compact-scroll'
       && presScroller.style.cssText === 'overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:0px;box-sizing:content-box;'
       && presCanvas.parent === presScroller && presCanvas.className === 'graph-view-canvas graph-view-compact-canvas'
-      && presCanvas.style.cssText === 'position:relative;width:390px;height:64px;'
+      && presCanvas.style.cssText === 'position:relative;width:390px;height:92px;'
       && presEdgeLayer.parent === presCanvas && presCanvas.children[0] === presEdgeLayer
       && presEdgeLayer.style.cssText === 'position:absolute;inset:0;pointer-events:none;',
     'PH1D-COMPACT-DECLARATIONS: the host, scroller, canvas, and edge layer carry exactly their pinned classes and declarations, the edge layer first inside the canvas');
     assert(presPills.every((pill) => pill.parent === presCanvas),
       'PH1D-COMPACT-DECLARATIONS: every pill is drawn inside the canvas, never on the host');
-    for (const [id, className, cssText] of [
-      ['PR-A', `graph-view-chip graph-view-pill ${planning.className}`, pillBase(2, 2) + tinted(planning.color, false)],
-      ['PR-B', `graph-view-chip graph-view-pill ${blocked.className}`, pillBase(2, 36) + tinted(blocked.color, true)],
-      ['PR-C', `graph-view-chip graph-view-pill ${parkedPresentation.className} graph-view-needs-you`, pillBase(101, 2) + tinted(parkedPresentation.color, true)],
-      ['GA-X1', 'graph-view-chip graph-view-pill graph-view-stub', pillBase(299, 2) + 'color:var(--text-muted);opacity:0.75;'
-        + 'border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);'
+    for (const [id, className, cssText, faceCss] of [
+      ['PR-A', `graph-view-chip graph-view-pill ${planning.className}`, hitBase(2, 2) + `color:${planning.color};`,
+        faceBase + tinted(planning.color, false)],
+      ['PR-B', `graph-view-chip graph-view-pill ${blocked.className}`, hitBase(2, 46) + `color:${blocked.color};`,
+        faceBase + tinted(blocked.color, true)],
+      ['PR-C', `graph-view-chip graph-view-pill ${parkedPresentation.className} graph-view-needs-you`,
+        hitBase(101, 2) + `color:${parkedPresentation.color};`, faceBase + tinted(parkedPresentation.color, true)],
+      ['GA-X1', 'graph-view-chip graph-view-pill graph-view-stub', hitBase(299, 2) + 'color:var(--text-muted);opacity:0.75;',
+        faceBase + 'border:1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent);'
         + 'background:color-mix(in srgb, var(--text-muted) 6%, var(--background-primary));'],
     ]) {
       const pill = presPillFor(id);
-      assert(pill && pill.className === className && pill.style.cssText === cssText,
-        `PH1D-COMPACT-DECLARATIONS: ${id} pill carries exactly its pinned classes and declarations`);
+      const face = pillFace(pill);
+      assert(pill && pill.className === className && pill.style.cssText === cssText
+        && face && face.style.cssText === faceCss,
+        `PH1D-COMPACT-DECLARATIONS: ${id} pill carries exactly its pinned classes and declarations on its hit box and on the visual pill inside it`);
       const idSpan = byClass(pill, 'graph-view-pill-id')[0];
-      assert(idSpan && idSpan.className === 'graph-view-pill-id' && pill.children.at(-1) === idSpan
+      assert(idSpan && idSpan.className === 'graph-view-pill-id' && face.children.at(-1) === idSpan
         && idSpan.style.cssText === 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
-      `PH1D-COMPACT-DECLARATIONS: ${id} pill's id span is its last child and ellipsizes inside the pill`);
+      `PH1D-COMPACT-DECLARATIONS: ${id} pill's id span is the visual pill's last child and ellipsizes inside the pill`);
     }
     const planningGlyph = byClass(presPillFor('PR-A'), 'graph-view-status-glyph')[0];
     assert(planningGlyph && planningGlyph.style.cssText === `flex:none;font-weight:700;color:${planning.color};`,
       'PH1D-COMPACT-DECLARATIONS: the glyph span carries exactly its pinned declarations');
+  }
+
+  // ---- PH12-CONTROLS-44 (taps) ----
+  // A tap on a pill's hit box, on its visual pill, or on its id span selects
+  // that pill identically: the same DOM afterwards, no note opened; a second
+  // tap on any of them opens the slice once. Without GraphInsights a tap on
+  // any of them opens the slice once.
+  // MUTATION GUARD: PH12B-MUTANT-FACE-SWALLOWS-TAP turns RED at
+  // "PH12-CONTROLS-44: a tap on GA-D1R0's hit box, visual pill, or id span
+  // ..." if the visual pill stops a tap from reaching the hit box.
+  // MUTATION GUARD: PH12B-MUTANT-LISTENER-ON-FACE turns RED at
+  // "PH1C-DETAIL-INLINE-OUTCOME: the first pill tap selects without
+  // navigation ..." if the tap listener sits on the visual pill instead of
+  // the hit box.
+  // MUTATION GUARD: PH12B-MUTANT-LISTENER-ON-BOTH turns RED at
+  // "PH12-CONTROLS-44: without GraphInsights, a tap on the visual pill ..."
+  // if the visual pill also carries the tap listener.
+  // One GraphView instance then draws a compact map and a wide canvas, in
+  // both orders, and a pill or chip tap on each opens GA-D1R0's card, whose
+  // buttons are Open slice, Close, and the prerequisite link to GA-D0R0:
+  // each has a 44px min-height on the compact map; on the wide canvas Open
+  // slice and Close have 32px and the link none.
+  // MUTATION GUARD: PH12B-MUTANT-CONTROL-HEIGHT-ON-INSTANCE turns RED at
+  // "PH12-CONTROLS-44: one instance drawing compact then wide ..." if the
+  // card reads its button height from the instance the latest render set.
+  // MUTATION GUARD: PH12B-MUTANT-LINK-HEIGHT-ON-INSTANCE turns RED at the
+  // same label if the card reads its link height from the instance the
+  // latest render set.
+  // MUTATION GUARD: PH12B-MUTANT-LINKS-WITHOUT-LINK-HEIGHT turns RED at the
+  // same label if the card's link buttons are drawn without the link height.
+  {
+    const nodes = [0, 1, 2, 3].map((rank) => ({
+      card: `GA-D${rank}R0 Cell`, path: `${board}/GA-D${rank}R0 Cell.md`, status: 'planning', rank, row: 0,
+    }));
+    const edges = [{ from: 'GA-D0R0 Cell', to: 'GA-D1R0 Cell', kind: 'depends' }];
+    const tapped = {};
+    for (const target of ['hit box', 'visual pill', 'id span']) {
+      const view = new GraphView({ dashboard, lifecycleApi, insights: realInsights });
+      const opened = [];
+      view._open = (notePath, source) => { opened.push([notePath, source]); };
+      const root = element();
+      await view._renderCompactGraph(root, { nodes, edges }, lifecycleApi, epicPath, [], 390);
+      const pill = byClass(root, 'graph-view-pill').find((entry) => entry.attrs.title === 'GA-D1R0 Cell');
+      const tapTarget = { 'hit box': pill, 'visual pill': pillFace(pill), 'id span': byClass(pill, 'graph-view-pill-id')[0] }[target];
+      const first = bubblingClick(tapTarget);
+      tapped[target] = {
+        stopped: first.stopped,
+        opened: opened.length,
+        cards: byClass(root, 'graph-view-detail-panel').map((panel) => byClass(panel, 'graph-view-detail-id')[0]?.textContent),
+        shape: JSON.stringify(domShape(root)),
+      };
+      bubblingClick(tapTarget);
+      tapped[target].second = opened.slice();
+    }
+    const selected = (shape) => ({
+      stopped: true, opened: 0, cards: ['GA-D1R0'], shape, second: [[`${board}/GA-D1R0 Cell.md`, epicPath]],
+    });
+    assert.deepStrictEqual(tapped, {
+      'hit box': selected(tapped['hit box'].shape),
+      'visual pill': selected(tapped['hit box'].shape),
+      'id span': selected(tapped['hit box'].shape),
+    }, 'PH12-CONTROLS-44: a tap on GA-D1R0\'s hit box, visual pill, or id span selects it and opens its card without navigating, each leaving the same DOM, and a second tap opens the slice once');
+    for (const target of ['visual pill', 'id span', 'hit box']) {
+      const view = new GraphView({ dashboard, lifecycleApi, insights: {} });
+      const opened = [];
+      view._open = (notePath, source) => { opened.push([notePath, source]); };
+      const root = element();
+      await view._renderCompactGraph(root, { nodes, edges }, lifecycleApi, epicPath, [], 390);
+      const pill = byClass(root, 'graph-view-pill').find((entry) => entry.attrs.title === 'GA-D1R0 Cell');
+      bubblingClick({ 'hit box': pill, 'visual pill': pillFace(pill), 'id span': byClass(pill, 'graph-view-pill-id')[0] }[target]);
+      assert.deepStrictEqual({ opened, cards: byClass(root, 'graph-view-detail-panel').length },
+        { opened: [[`${board}/GA-D1R0 Cell.md`, epicPath]], cards: 0 },
+        `PH12-CONTROLS-44: without GraphInsights, a tap on the ${target} of GA-D1R0 opens the slice once and renders no card`);
+    }
+    for (const order of [['compact', 'wide'], ['wide', 'compact']]) {
+      const view = new GraphView({ dashboard, lifecycleApi, insights: realInsights });
+      view._open = () => {};
+      const roots = {};
+      for (const kind of order) {
+        roots[kind] = element();
+        if (kind === 'compact') await view._renderCompactGraph(roots[kind], { nodes, edges }, lifecycleApi, epicPath, [], 390);
+        else await view._renderGraph(roots[kind], { nodes, edges }, lifecycleApi, epicPath, []);
+      }
+      const heights = {};
+      for (const kind of order.slice().reverse()) {
+        const chip = byClass(roots[kind], 'graph-view-chip').find((entry) => textOf(entry).includes('GA-D1R0'));
+        bubblingClick(chip);
+        const panel = byClass(roots[kind], 'graph-view-detail-panel')[0];
+        heights[kind] = panel ? flatten(panel).filter((node) => node.tag === 'button')
+          .map((button) => [button.className, cssEffective(button.style.cssText)['min-height'] ?? null])
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)) : null;
+      }
+      assert.deepStrictEqual(heights, {
+        compact: [['graph-view-detail-close', '44px'], ['graph-view-detail-open', '44px'], ['graph-view-detail-prerequisite', '44px']],
+        wide: [['graph-view-detail-close', '32px'], ['graph-view-detail-open', '32px'], ['graph-view-detail-prerequisite', null]],
+      }, `PH12-CONTROLS-44: one instance drawing ${order[0]} then ${order[1]} opens GA-D1R0 cards whose buttons (Open slice, Close, and the prerequisite link) all have a 44px min-height on the compact map, and on the wide canvas Open slice and Close 32px and the link none`);
+    }
+    // GA-L2 depends on GA-L1, and GA-L3 on GA-L2, so GA-L2's card carries a
+    // prerequisite link button and a dependent link button. Every button
+    // element in its compact card has a 44px min-height. In its wide card each
+    // link button carries exactly the pre-PH-12b link declarations, and Open
+    // slice and Close carry their 32px declarations.
+    // MUTATION GUARD: PH12B-MUTANT-DEPENDENT-LINKS-WITHOUT-LINK-HEIGHT turns RED
+    // at "PH12-CONTROLS-44: every button element in GA-L2's compact card ..."
+    // if the card's dependent link buttons are drawn without the link height.
+    // MUTATION GUARD: PH12B-MUTANT-WIDE-DEPENDENT-LINK-32 turns RED at
+    // "PH12-WIDE-UNCHANGED: GA-L2's wide card ..." if a wide dependent link
+    // button takes a 32px min-height.
+    {
+      const chain = [1, 2, 3].map((index) => ({
+        card: `GA-L${index} Link ${index}`, path: `${board}/GA-L${index} Link ${index}.md`, status: 'planning', rank: index - 1, row: 0,
+      }));
+      const chainEdges = [
+        { from: 'GA-L1 Link 1', to: 'GA-L2 Link 2', kind: 'depends' },
+        { from: 'GA-L2 Link 2', to: 'GA-L3 Link 3', kind: 'depends' },
+      ];
+      const cardButtons = {};
+      for (const kind of ['compact', 'wide']) {
+        const view = new GraphView({ dashboard, lifecycleApi, insights: realInsights });
+        view._open = () => {};
+        const root = element();
+        if (kind === 'compact') await view._renderCompactGraph(root, { nodes: chain, edges: chainEdges }, lifecycleApi, epicPath, [], 390);
+        else await view._renderGraph(root, { nodes: chain, edges: chainEdges }, lifecycleApi, epicPath, []);
+        bubblingClick(byClass(root, 'graph-view-chip').find((chip) => textOf(chip).includes('GA-L2')));
+        const panel = byClass(root, 'graph-view-detail-panel')[0];
+        cardButtons[kind] = panel ? flatten(panel).filter((node) => node.tag === 'button')
+          .map((button) => [button.className, button.style.cssText]) : null;
+      }
+      const linkCss = 'display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;'
+        + 'padding:3px 8px;border:1px solid var(--background-modifier-border);border-radius:999px;'
+        + 'background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;';
+      assert(cardButtons.compact
+        && JSON.stringify(cardButtons.compact.map(([name]) => name).sort()) === JSON.stringify([
+          'graph-view-detail-close', 'graph-view-detail-dependent', 'graph-view-detail-open', 'graph-view-detail-prerequisite',
+        ])
+        && cardButtons.compact.every(([, cssText]) => cssEffective(cssText)['min-height'] === '44px'),
+      'PH12-CONTROLS-44: every button element in GA-L2\'s compact card (Open slice, Close, and its prerequisite and dependent link buttons) has a 44px min-height');
+      assert.deepStrictEqual(cardButtons.wide && Object.fromEntries(cardButtons.wide), {
+        'graph-view-detail-open': 'min-height:32px;padding:5px 10px;cursor:pointer;',
+        'graph-view-detail-close': 'min-height:32px;padding:5px 10px;cursor:pointer;',
+        'graph-view-detail-prerequisite': linkCss,
+        'graph-view-detail-dependent': linkCss,
+      }, 'PH12-WIDE-UNCHANGED: GA-L2\'s wide card draws its prerequisite and dependent link buttons with exactly the pre-PH-12b declarations, and Open slice and Close with their 32px declarations');
+    }
   }
 
   // ---- PH1D-COMPACT-WIDE-PARITY ----
@@ -3499,13 +3873,41 @@ async function main() {
         return [node.card, matches.length === 1 ? matches[0] : null];
       }));
     };
-    const boxOf = (chip) => {
+    // PH-12b: a compact pill's drawn box is its visual pill's box offset by
+    // the hit box's left and top, and its border and background are read
+    // from the visual pill.
+    const boxOf = (kind, chip) => {
       const css = cssEffective(chip.style.cssText);
-      return { left: parseFloat(css.left), top: parseFloat(css.top), width: parseFloat(css.width), height: parseFloat(css.height) };
+      const box = { left: parseFloat(css.left), top: parseFloat(css.top), width: parseFloat(css.width), height: parseFloat(css.height) };
+      if (kind !== 'compact') return box;
+      const face = cssEffective(pillFace(chip)?.style.cssText);
+      return {
+        left: box.left + parseFloat(face.left), top: box.top + parseFloat(face.top),
+        width: parseFloat(face.width), height: parseFloat(face.height),
+      };
+    };
+    const paintOf = (kind, chip) => cssEffective((kind === 'compact' ? pillFace(chip) : chip)?.style.cssText);
+    // PH-12b: heightsOf() lists the class and min-height of every button
+    // element in a drawing. read() leaves button min-heights out: its card
+    // digest removes every min-height declaration from button elements.
+    // MUTATION GUARD: PH12B-MUTANT-STUB-CARD-BUTTONS-32 turns RED at
+    // "PH12-CONTROLS-44: render() of six slices and two cross-epic stubs,
+    // step 13 (tap PB-1 Far One) ..." if a stub's compact card keeps 32px
+    // buttons.
+    const linkClasses = ['graph-view-detail-prerequisite', 'graph-view-detail-dependent'];
+    const heightsOf = (root) => flatten(root).filter((node) => node.tag === 'button')
+      .map((button) => [button.className, cssEffective(button.style.cssText)['min-height'] ?? null]);
+    const cardDigestOf = (panel) => {
+      const scrub = (shape) => ({
+        ...shape,
+        cssText: shape.tag === 'button' ? shape.cssText.replace(/min-height:[^;]*;/g, '') : shape.cssText,
+        children: shape.children.map(scrub),
+      });
+      return crypto.createHash('sha256').update(JSON.stringify(scrub(domShape(panel)))).digest('hex');
     };
     const read = (kind, root, nodes, opened, warnings) => {
       const elements = elementsOf(kind, root, nodes);
-      const boxes = new Map([...elements].filter(([, chip]) => chip).map(([card, chip]) => [card, boxOf(chip)]));
+      const boxes = new Map([...elements].filter(([, chip]) => chip).map(([card, chip]) => [card, boxOf(kind, chip)]));
       const lefts = [...new Set([...boxes.values()].map((box) => box.left))].sort((left, right) => left - right);
       const tops = [...new Set([...boxes.values()].map((box) => box.top))].sort((left, right) => left - right);
       const panels = byClass(root, 'graph-view-detail-panel');
@@ -3549,6 +3951,7 @@ async function main() {
           if (!chip) return [node.card, 'not exactly one element'];
           const box = boxes.get(node.card);
           const css = cssEffective(chip.style.cssText);
+          const paint = paintOf(kind, chip);
           const glyphs = byClass(chip, 'graph-view-status-glyph');
           return [node.card, {
             dimmed: classesOf(chip).includes('graph-view-dimmed'),
@@ -3558,8 +3961,8 @@ async function main() {
             status: {
               classes: classesOf(chip).filter((name) => name.startsWith('status-')),
               color: css.color ?? null,
-              border: css.border ?? null,
-              background: css.background ?? null,
+              border: paint.border ?? null,
+              background: paint.background ?? null,
               opacity: css.opacity ?? null,
               glyph: glyphs.map((glyph) => glyph.textContent),
               glyphClass: glyphs.map((glyph) => glyph.className),
@@ -3579,7 +3982,7 @@ async function main() {
           gates: textsOf(panel, 'graph-view-detail-gates-count'),
           dependents: links('graph-view-detail-dependent'),
           buttons: [...textsOf(panel, 'graph-view-detail-open'), ...textsOf(panel, 'graph-view-detail-close')],
-          digest: digestOf(panel),
+          digest: cardDigestOf(panel),
         } : null,
         stuck: pressed('graph-view-filter-stuck'),
         dimDone: pressed('graph-view-filter-done'),
@@ -3764,6 +4167,11 @@ async function main() {
           pair[kind] = read(kind, root, fixture.nodes, opened.slice(before), warnings);
         }
         const at = `PH1D-COMPACT-WIDE-PARITY: ${fixture.label}, step ${index} (${step.join(' ')})`;
+        const heights = { compact: heightsOf(drawn.compact.root), wide: heightsOf(drawn.wide.root) };
+        assert.deepStrictEqual(heights, {
+          compact: heights.compact.map(([name]) => [name, '44px']),
+          wide: heights.wide.map(([name]) => [name, linkClasses.includes(name) ? null : '32px']),
+        }, `PH12-CONTROLS-44: ${fixture.label}, step ${index} (${step.join(' ')}): every button element in the compact drawing, the card's link buttons included, has a 44px min-height; in the wide drawing every link button has no min-height and every other button a 32px one`);
         assert.deepStrictEqual(pair.compact, pair.wide,
           `${at}: the compact reading equals the wide reading (the whole object read() returns)`);
         const opened = advance(fixture, model, step);
@@ -4008,10 +4416,11 @@ async function main() {
       }, {
         drawing: {
           pills: [
-            ['S1', '2px', '2px', '69px', '26px'], ['S2', '81px', '2px', '69px', '26px'], ['S3', '160px', '2px', '69px', '26px'],
-            ['S4', '239px', '2px', '69px', '26px'], ['Z9', '318px', '2px', '69px', '26px'],
+            ['S1', '2px', '2px', '69px', '44px'], ['S2', '81px', '2px', '69px', '44px'], ['S3', '160px', '2px', '69px', '44px'],
+            ['S4', '239px', '2px', '69px', '44px'], ['Z9', '318px', '2px', '69px', '44px'],
           ],
-          canvas: 'position:relative;width:389px;height:30px;',
+          faces: ['0px 9px 69px 26px'],
+          canvas: 'position:relative;width:389px;height:48px;',
           padding: '0px',
         },
         stub: ['Z9', 'Far Epic · GA-Z9'],
@@ -4067,8 +4476,9 @@ async function main() {
         return ph1dCompactDrawing(container.children[0]);
       };
       const fiveAt390 = (labels) => ({
-        pills: labels.map((label, index) => [label, `${2 + index * 79}px`, '2px', '69px', '26px']),
-        canvas: 'position:relative;width:389px;height:30px;',
+        pills: labels.map((label, index) => [label, `${2 + index * 79}px`, '2px', '69px', '44px']),
+        faces: ['0px 9px 69px 26px'],
+        canvas: 'position:relative;width:389px;height:48px;',
         padding: '0px',
       });
       assert.deepStrictEqual(await drawnAt('Short Foreign Stub', ['GA-S1', 'GA-S2', 'GA-S3', 'GA-S4'], 'FL-Z9 Far Away', 390),
@@ -4082,10 +4492,11 @@ async function main() {
         'PH1D-SHORT-ID-MIXED: at an override of 390, GA-S1 GA-S2 GB-S3 GA-S4 and the GA-Z9 cross-epic stub draw 69px pills labelled GA-S1 GA-S2 GB-S3 GA-S4 GA-Z9 on a 389px canvas');
       assert.deepStrictEqual(await drawnAt('Short Four Ranks', ['GA-S1', 'GA-S2', 'GA-S3'], 'GA-Z9 Far Away', 300), {
         pills: [
-          ['S1', '2px', '2px', '66px', '26px'], ['S2', '78px', '2px', '66px', '26px'],
-          ['S3', '154px', '2px', '66px', '26px'], ['Z9', '230px', '2px', '66px', '26px'],
+          ['S1', '2px', '2px', '66px', '44px'], ['S2', '78px', '2px', '66px', '44px'],
+          ['S3', '154px', '2px', '66px', '44px'], ['Z9', '230px', '2px', '66px', '44px'],
         ],
-        canvas: 'position:relative;width:298px;height:30px;',
+        faces: ['0px 9px 66px 26px'],
+        canvas: 'position:relative;width:298px;height:48px;',
         padding: '0px',
       }, 'PH1D-SHORT-ID-MIXED: at an override of 300, GA-S1..GA-S3 and the GA-Z9 cross-epic stub draw 66px pills labelled S1 S2 S3 Z9 on a 298px canvas');
     }
@@ -4263,7 +4674,7 @@ async function main() {
       && drawn.warnings.length === 0 && reference.warnings.length === 0,
     `PH1D-NONCANONICAL-STATUS: the pill for status ${JSON.stringify(raw)} has the domShape of the pill for '${canonical}', which is how delivery.normalizeStatus reads that status, and neither pill pushes a warning`);
     assert(drawn.pill && drawn.pill.className.split(/\s+/).includes('graph-view-needs-you') === needsYou
-      && effectiveBorders(drawn.pill.style.cssText)?.left === '2px solid var(--text-error)',
+      && effectiveBorders(pillFace(drawn.pill)?.style.cssText)?.left === '2px solid var(--text-error)',
     `PH1D-NONCANONICAL-STATUS: the ${JSON.stringify(raw)} pill ${needsYou ? 'carries' : 'does not carry'} the needs-you class, and its effective left border is the 2px error hairline`);
   }
 
@@ -5227,6 +5638,21 @@ async function main() {
         { before: ph1dExpectedDrawing(109, [2, 121, 240, 359, 478], 'full', 589, 0), after: ph1dExpectedDrawing(71, [2, 83, 164, 245, 326], 'short', 399, 0), renders: 2, containerWidth: 400 },
         'PH9D-CONTENT-WIDTH: a desktop reading view (32px margins, 12px stable gutter) with 5 chained slices narrowed from 666 (content 590) to 476 (content 400) re-renders once: 109px pills on a 589px canvas, then 71px pills with short ids on a 399px canvas');
       await settled('PH9D-CONTENT-WIDTH: a desktop reading view narrowed from 666 to 476', view, ['compact', 'compact'], container);
+      // PH12-CONTROLS-44 after the width-change re-render: GA-H2's card on the
+      // re-rendered compact map carries Open slice, Close, a prerequisite link
+      // button (GA-H1), and three dependent link buttons (GA-H3 to GA-H5),
+      // each with a 44px min-height.
+      // MUTATION GUARD: PH12B-MUTANT-RERENDER-LINKS-NULL turns RED at
+      // "PH12-CONTROLS-44: after the 666 to 476 re-render ..." if a re-render
+      // of the compact map draws its card links without the link height.
+      bubblingClick(byClass(container.children[0], 'graph-view-pill').find((pill) => pill.attrs.title === 'GA-H2 Handoff 2'));
+      const rerenderedCard = byClass(container.children[0], 'graph-view-detail-panel')[0];
+      assert.deepStrictEqual(rerenderedCard ? flatten(rerenderedCard).filter((node) => node.tag === 'button')
+        .map((button) => [button.className, cssEffective(button.style.cssText)['min-height'] ?? null])
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)) : null, [
+        ['graph-view-detail-close', '44px'], ['graph-view-detail-dependent', '44px'], ['graph-view-detail-dependent', '44px'],
+        ['graph-view-detail-dependent', '44px'], ['graph-view-detail-open', '44px'], ['graph-view-detail-prerequisite', '44px'],
+      ], 'PH12-CONTROLS-44: after the 666 to 476 re-render, every button in GA-H2\'s compact card (Open slice, Close, one prerequisite and three dependent link buttons) has a 44px min-height');
       ph9Discard(pane);
     }
     {
@@ -8174,6 +8600,46 @@ async function main() {
   assert.strictEqual(projectToolbar.length, 1, 'BL5-TOOLBAR-PROJECT: project scope renders one filter toolbar');
   assert(pRoot.children.indexOf(projectToolbar[0]) < projectScrollIndex,
     'BL5-TOOLBAR-PROJECT: the project toolbar sits above and outside the shared canvas');
+  // MUTATION GUARD: PH12B-MUTANT-PROJECT-TOGGLES-44 turns RED at
+  // "PH12-WIDE-UNCHANGED: the project toolbar's Stuck toggle ..." if the
+  // project scope's toolbar takes the compact 44px min-height.
+  for (const [name, className] of [['Stuck', 'graph-view-filter-stuck'], ['Dim done', 'graph-view-filter-done']]) {
+    const toggle = byClass(projectToolbar[0], className)[0];
+    assert(toggle?.tag === 'button' && toggle.textContent === name
+      && toggle.style.cssText === 'min-height:32px;padding:5px 12px;border-radius:999px;cursor:pointer;'
+        + 'border:1px solid var(--background-modifier-border);background:var(--background-secondary);',
+    `PH12-WIDE-UNCHANGED: the project toolbar's ${name} toggle keeps exactly min-height:32px;padding:5px 12px;border-radius:999px;cursor:pointer; and its border and background`);
+  }
+  // PH12-WIDE-UNCHANGED: a fresh project-scope render, each chip tapped in
+  // turn. Every Open slice and Close button in each card carries exactly
+  // min-height:32px;padding:5px 10px;cursor:pointer;, and every link button
+  // exactly the pre-PH-12b link declarations.
+  // MUTATION GUARD: PH12B-MUTANT-PROJECT-LINKS-44 turns RED at
+  // "PH12-WIDE-UNCHANGED: every button in the project-scope cards ..." if
+  // the project scope's card links take a 44px min-height.
+  // MUTATION GUARD: PH12B-MUTANT-PROJECT-CARD-44 turns RED at the same label
+  // if the project scope's Open slice and Close take a 44px min-height.
+  {
+    const container = element();
+    await new GraphView({ scope: 'project' }).render({ container });
+    const root = container.children.find((child) => child.className === 'graph-view-root');
+    const seen = [];
+    for (const chip of byClass(root, 'graph-view-chip')) {
+      bubblingClick(chip);
+      const panel = byClass(root, 'graph-view-detail-panel')[0];
+      if (panel) seen.push(...flatten(panel).filter((node) => node.tag === 'button').map((button) => [button.className, button.style.cssText]));
+    }
+    const linkCss = 'display:inline-flex;align-items:center;gap:5px;justify-self:start;width:max-content;max-width:100%;'
+      + 'padding:3px 8px;border:1px solid var(--background-modifier-border);border-radius:999px;'
+      + 'background:var(--background-primary);color:var(--link-color);cursor:pointer;text-align:left;overflow-wrap:anywhere;';
+    const expectedCss = (name) => (['graph-view-detail-open', 'graph-view-detail-close'].includes(name)
+      ? 'min-height:32px;padding:5px 10px;cursor:pointer;' : linkCss);
+    assert(seen.some(([name]) => name === 'graph-view-detail-prerequisite') && seen.some(([name]) => name === 'graph-view-detail-dependent')
+      && seen.some(([name]) => name === 'graph-view-detail-open') && seen.some(([name]) => name === 'graph-view-detail-close'),
+    'PH12-WIDE-UNCHANGED: the project-scope cards draw Open slice, Close, and prerequisite and dependent link buttons');
+    assert.deepStrictEqual(seen, seen.map(([name]) => [name, expectedCss(name)]),
+      'PH12-WIDE-UNCHANGED: every button in the project-scope cards carries its exact pre-PH-12b declarations: Open slice and Close min-height:32px;padding:5px 10px;cursor:pointer;, and each link button the link declarations with no min-height');
+  }
   const projectFilterAtRest = JSON.parse(JSON.stringify(domShape(pRoot)));
   const projectDoneToggle = byClass(projectToolbar[0], 'graph-view-filter-done')[0];
   bubblingClick(headers[1]);
@@ -8470,7 +8936,7 @@ async function main() {
   ];
   assert(localChromeChannels.every((channel) => !channel.test(sectionChromeSource)),
     'VP-2d carried fixture: section chrome defines no local styling or class channel, including optional attribute APIs and createEl attr bags');
-  const panelSource = widgetSource.match(/_panelLink\(parent, node, api, source, className\) \{[\s\S]*?\n  \/\/ Stuck filtering/)?.[0] || '';
+  const panelSource = widgetSource.match(/_panelLink\(parent, node, api, source, className, linkHeight\) \{[\s\S]*?\n  \/\/ Stuck filtering/)?.[0] || '';
   assert(panelSource.includes('this._statusPresentation(node.status, api)')
     && !/var\(--color-(?:red|orange|yellow|green|cyan|blue|purple|pink)\)/.test(panelSource),
   'VP4-SHARED-PRESENTATION: panel status glyphs, words, and colors have no local lifecycle palette');
