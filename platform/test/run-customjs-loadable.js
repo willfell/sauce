@@ -2167,19 +2167,20 @@ const POSITION_REBINDS = ["(widget = 'NoSuchRebind')", "(widget += 'X')", '(widg
 const positionCompiles = (source) => {
   try { new (require('vm').Script)(source); return null; } catch (e) { return `generated source does not compile as a strict script: ${e.message}`; }
 };
+const positionExpected = (family, defs) => {
+  if (family.alias || family.rebinding) return null;
+  const read = family.read ? positionDataview(positionProduced(family.second || '', family.expr)) : family.refs || [];
+  return {
+    refs: read,
+    failures: [...(family.fail || []).map(([line, message]) => unreadable(line, message())),
+      ...(family.read ? read.filter((cls) => !defs.has(cls)).map((cls) => missing(cls, 3)) : [])],
+  };
+};
 const POSITION_FIXTURES = (() => {
   const defs = collectClassNames(REF_SCAN_DIRS);
   const random = positionRandom(POSITION_SEED);
   const pick = (list) => list[Math.floor(random() * list.length)];
-  const expectations = POSITION_FAMILIES.map((family) => {
-    if (family.alias || family.rebinding) return null;
-    const read = family.read ? positionDataview(positionProduced(family.second || '', family.expr)) : family.refs || [];
-    return {
-      refs: read,
-      failures: [...(family.fail || []).map(([line, message]) => unreadable(line, message())),
-        ...(family.read ? read.filter((cls) => !defs.has(cls)).map((cls) => missing(cls, 3)) : [])],
-    };
-  });
+  const expectations = POSITION_FAMILIES.map((family) => positionExpected(family, defs));
   let serial = 0;
   let skipped = 0;
   let repeated = 0;
@@ -2244,6 +2245,303 @@ const POSITION_FIXTURES = (() => {
   return fixtures;
 })();
 COORDINATOR_FIXTURES.push(...POSITION_FIXTURES);
+
+// Derived position property: instead of hand-picked positions, every (node type, field) pair is
+// taken from acorn's own parse of DERIVED_CORPUS, a script valid in strict mode that holds every
+// node type acorn 8.18 builds for a strict script under the gate's parse options. For each pair and
+// each payload family above, the generator replaces one instance of that field in the corpus with
+// the family's payload, as (P), as P (a string literal payload only), or as the statement void
+// (P);, and keeps the first replacement that V8 compiles as a strict script and that acorn parses
+// with the payload as exactly that field of the same parent node. The expected refs and failures
+// are the family's, as for the position property. A pair with no such replacement for a family is
+// excluded for it, and DERIVED_EXCLUSIONS gives, for each excluded field, the reason a payload
+// cannot sit there. Each pair whose field holds an expression (the probe (z0) sits there) and that
+// holds the first family's payload also has a fixture whose field holds a node of each expression
+// type in the corpus that has a shape (see below), with the payload inside, and DERIVED_UNSHAPED
+// gives the reason for each expression type without one. The last fixture asserts all of this, and
+// that every node type named in acorn's source appears in the corpus or in DERIVED_ABSENT_TYPES.
+// MUTATION GUARD: the visitor skipping any one (node type, field) pair that holds a fixture, or
+// skipping one of those pairs whose field holds an expression only when the field holds a node of
+// one shape's type, turns derived position fixtures RED
+const DERIVED_CORPUS = [
+  'let z0 = 0, z1 = [0], z2 = { k: 0, [z0]: 0, m() { return 0; }, get g() { return 0; }, set s(v) { z0 = v; }, ...z1 };',
+  'const z3 = function* z3n(z4 = 0, ...z5) { yield 0; yield* z1; };',
+  'const z6 = async (z7) => { await z7; };',
+  'const z8 = (z9) => z9;',
+  'function z10({ z11 = 0, ...z12 }, [z13 = 0, ...z14]) { if (z0) z0; else if (z0) {} else { z0; } return z0; }',
+  'class Z15 extends Object { static z16 = 0; z17 = 0; #z18 = 0; [z0] = 0; static { z0 = 0; } constructor() { super(0); void new.target; } z19() { return this.#z18 % (#z18 in this); } get z20() { return 0; } set z20(v) {} static [z0]() {} }',
+  'const z21 = class Z21n extends Object {};',
+  'z0 = (z0 % 0) * (z0 - 0) || (z0 && 0); z0 = z0 ?? 0; z0 += 0; z0++; --z0; z0 = -z0; z0 = !z0; z0 = typeof z0;',
+  "z0 = '' + '';",
+  'z0 = z0 ? 0 : 1; z0 = (0, z0); z0 = [0, ...z1]; z0 = z2.k; z0 = z2[z0]; z0 = z2?.k; z0 = z8?.(0); z0 = z8(0); z0 = new Z15(0);',
+  'z0 = `a${z0}b`; z0 = z8`a${z0}b`; ({ k: z0 } = z2); [z0] = z1; void import(z0); void import(z0, z0);',
+  'switch (z0) { case 0: z0; break; default: z0; }',
+  'for (let z22 = 0; z22 < 1; z22++) { continue; } for (z0 = 0; z0 < 1; z0++) z0; for (const z23 in z2) z0; for (const z24 of z1) z0; for (z0 of z1) z0;',
+  'while (z0) z0; do z0; while (z0);',
+  'try { z0; } catch (z25) { z0; } finally { z0; } try { z0; } catch { z0; }',
+  'z26: { break z26; } z27: for (;;) { continue z27; }',
+  'function z28() { throw z0; }',
+  '; debugger;',
+].join(' ');
+// Names in acorn's source that the type pattern below matches but that acorn never builds for a
+// strict script under the gate's parse options, so they are not in the corpus.
+const DERIVED_ABSENT_TYPES = {
+  ImportDeclaration: 'module syntax; the coordinator source and a Dataview block are scripts',
+  ImportSpecifier: 'module syntax',
+  ImportDefaultSpecifier: 'module syntax',
+  ImportNamespaceSpecifier: 'module syntax',
+  ImportAttribute: 'module syntax',
+  ExportAllDeclaration: 'module syntax',
+  ExportDefaultDeclaration: 'module syntax',
+  ExportNamedDeclaration: 'module syntax',
+  ExportSpecifier: 'module syntax',
+  ParenthesizedExpression: 'built only with the preserveParens option, which the gate does not set',
+  WithStatement: 'strict code rejects with',
+  Block: 'the kind acorn passes to onComment for a block comment, not a node type',
+};
+// For each field the generator finds excluded for some family, the reason a payload cannot sit
+// there.
+const DERIVED_EXCLUSIONS = {
+  'ArrayPattern.elements': 'holds patterns, of which only the bare helper name is a payload',
+  'ArrowFunctionExpression.params': 'holds patterns',
+  'AssignmentExpression.left': 'holds an assignment target, of which only the bare helper name is a payload',
+  'AssignmentPattern.left': 'holds a pattern',
+  'BreakStatement.label': 'holds a label name',
+  'CatchClause.body': 'holds a block',
+  'CatchClause.param': 'holds a binding pattern',
+  'ChainExpression.expression': 'holds only an optional chain, which a payload in its place replaces',
+  'ClassBody.body': 'holds class members',
+  'ClassDeclaration.body': 'holds a class body',
+  'ClassDeclaration.id': 'holds a binding name',
+  'ClassExpression.body': 'holds a class body',
+  'ClassExpression.id': 'holds a binding name',
+  'ContinueStatement.label': 'holds a label name',
+  'ForInStatement.left': 'holds a declaration or assignment target, of which only the bare helper name is a payload',
+  'ForOfStatement.left': 'holds a declaration or assignment target, of which only the bare helper name is a payload',
+  'FunctionDeclaration.body': 'holds a block',
+  'FunctionDeclaration.id': 'holds a binding name',
+  'FunctionDeclaration.params': 'holds patterns',
+  'FunctionExpression.body': 'holds a block',
+  'FunctionExpression.id': 'holds a binding name',
+  'FunctionExpression.params': 'holds patterns',
+  'LabeledStatement.label': 'holds a label name',
+  'MetaProperty.meta': 'holds the word new',
+  'MetaProperty.property': 'holds the word target',
+  'MethodDefinition.value': 'holds the method function',
+  'ObjectExpression.properties': 'holds properties',
+  'ObjectPattern.properties': 'holds pattern properties',
+  'Program.body': 'for the rebinding family the corpus sits inside the helper, where its top-level statements are BlockStatement.body',
+  'RestElement.argument': 'holds a pattern',
+  'SwitchStatement.cases': 'holds switch cases',
+  'TaggedTemplateExpression.quasi': 'holds a template, which a template payload in its place would make tagged',
+  'TemplateLiteral.quasis': 'holds template text',
+  'TryStatement.block': 'holds a block',
+  'TryStatement.finalizer': 'holds a block',
+  'TryStatement.handler': 'holds a catch clause',
+  'UpdateExpression.argument': 'holds an assignment target, of which only the bare helper name is a payload',
+  'VariableDeclaration.declarations': 'holds declarators',
+  'VariableDeclarator.id': 'holds a binding pattern',
+};
+// Expression node types in the corpus that no shape below has, with the reason.
+const DERIVED_UNSHAPED = {
+  AwaitExpression: 'parses only inside an async function',
+  YieldExpression: 'parses only inside a generator function',
+  UpdateExpression: 'its argument holds an assignment target',
+  ThisExpression: 'has no field',
+  Identifier: 'has no field that holds a node',
+  Literal: 'has no field that holds a node',
+  MetaProperty: 'its fields hold the words new and target',
+};
+const DERIVED_FIXTURES = (() => {
+  const parseOptions = { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, locations: true };
+  const children = (node) => {
+    const out = [];
+    for (const key in node) {
+      if (key === 'loc') continue;
+      const value = node[key];
+      if (Array.isArray(value)) value.forEach((child, index) => { if (child && typeof child.type === 'string') out.push([key, index, child]); });
+      else if (value && typeof value.type === 'string') out.push([key, -1, value]);
+    }
+    return out;
+  };
+  const instances = new Map();
+  const typesSeen = new Set();
+  (function walk(node, ancestors) {
+    typesSeen.add(node.type);
+    for (const [key, index, child] of children(node)) {
+      const pair = `${node.type}.${key}`;
+      if (!instances.has(pair)) instances.set(pair, []);
+      instances.get(pair).push({ type: node.type, start: node.start, end: node.end, key, index, childStart: child.start, childEnd: child.end, ancestors: [node, ...ancestors] });
+      walk(child, [node, ...ancestors]);
+    }
+  })(acorn.parse(DERIVED_CORPUS, parseOptions), []);
+  const acornSource = fs.readFileSync(require.resolve('acorn'), 'utf8');
+  const acornTypes = new Set([...acornSource.matchAll(/"((?:[A-Z][A-Za-z]*)?(?:Expression|Statement|Declaration|Declarator|Pattern|Element|Literal|Clause|Case|Block|Body|Definition|Identifier|Property|Specifier|Attribute|Program|Super))"/g)].map((m) => m[1]));
+  const defs = collectClassNames(REF_SCAN_DIRS);
+  const families = POSITION_FAMILIES.map((family) => ({ family, expected: positionExpected(family, defs) }));
+  const unparen = (text) => { let t = text.trim(); while (t.startsWith('(') && t.endsWith(')')) t = t.slice(1, -1).trim(); return t; };
+  // A wrapper places a payload P as (P), as P (only for a string literal payload), or as void (P);.
+  const WRAPPERS = [['paren', (p) => `(${p})`], ['bare', (p) => p], ['statement', (p) => `void (${p});`]];
+  // Whether the payload, wrapped, sits exactly in the field of the same parent: the parent is found by
+  // type and shifted range, and the field holds a node of the payload's own type spanning the
+  // payload's text (for a statement, an expression statement of void and that node).
+  const lands = (source, corpusStart, at, wrapped, payload) => {
+    let ast;
+    try { ast = acorn.parse(source, parseOptions); } catch (e) { return e.message.replace(/ \(\d+:\d+\)$/, ''); }
+    const delta = wrapped.length - (at.childEnd - at.childStart);
+    let holder = null;
+    const start = corpusStart + at.start;
+    const end = corpusStart + at.end + delta;
+    (function find(node) {
+      if (holder || node.start > start || node.end < end) return;
+      if (node.type === at.type && node.start === start && node.end === end) { holder = node; return; }
+      for (const [, , child] of children(node)) find(child);
+    })(ast);
+    // The corpus's Program is the whole source's Program, whose body also holds the earlier lines.
+    if (at.type === 'Program') holder = ast;
+    let held = holder && (at.type === 'Program'
+      ? ast.body.find((n) => n.start >= corpusStart + at.childStart && n.end <= corpusStart + at.childStart + wrapped.length)
+      : at.index < 0 ? holder[at.key] : holder[at.key][at.index]);
+    if (held && wrapped.startsWith('void ')) held = held.type === 'ExpressionStatement' && held.expression.type === 'UnaryExpression' ? held.expression.argument : null;
+    const want = acorn.parseExpressionAt(payload, 0, { ecmaVersion: 'latest' });
+    return held && held.type === want.type && unparen(source.slice(held.start, held.end)) === unparen(payload)
+      ? null : 'the payload does not sit in this field';
+  };
+  // Which wrappers fit each instance, probed with the identifier z0 and the string literal 's'.
+  const fits = new Map();
+  for (const [pair, list] of instances) {
+    fits.set(pair, list.map((at) => Object.fromEntries(WRAPPERS.map(([name, wrap]) => {
+      const probe = name === 'bare' ? "'s'" : 'z0';
+      const corpus = DERIVED_CORPUS.slice(0, at.childStart) + wrap(probe) + DERIVED_CORPUS.slice(at.childEnd);
+      return [name, lands(corpus, 0, at, wrap(probe), probe)];
+    }))));
+  }
+  const fixtures = [];
+  const covered = new Set();
+  const excluded = new Map();
+  const pairs = [...instances.keys()].sort();
+  pairs.forEach((pair, pairIndex) => {
+    const list = instances.get(pair);
+    families.forEach(({ family, expected }, familyIndex) => {
+      let firstError = null;
+      const variants = family.alias ? POSITION_ALIASES.length : family.rebinding ? POSITION_REBINDS.length : 1;
+      for (let v = 0; v < variants && !covered.has(`${pair}|${familyIndex}`); v++) {
+        const alias = POSITION_ALIASES[(pairIndex + v) % POSITION_ALIASES.length];
+        const rebind = POSITION_REBINDS[(pairIndex + v) % POSITION_REBINDS.length];
+        const payload = family.alias ? alias : family.rebinding ? rebind : family.expr;
+        const literal = /^['"]/.test(payload) && acorn.parseExpressionAt(payload, 0, { ecmaVersion: 'latest' }).type === 'Literal';
+        for (let k = 0; k < list.length && !covered.has(`${pair}|${familyIndex}`); k++) {
+          const index = (familyIndex + k) % list.length;
+          const at = list[index];
+          for (const [name, wrap] of WRAPPERS) {
+            if (name === 'bare' && !literal) continue;
+            if (fits.get(pair)[index][name]) { firstError = firstError || fits.get(pair)[index][name]; continue; }
+            const wrapped = wrap(payload);
+            const corpus = DERIVED_CORPUS.slice(0, at.childStart) + wrapped + DERIVED_CORPUS.slice(at.childEnd);
+            const lead = family.rebinding ? 'function block(widget) { ' : '';
+            const second = family.rebinding
+              ? `${lead}${corpus} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }` : family.second || '';
+            const third = family.rebinding ? "block('OperatorStation');" : corpus;
+            const source = `${POSITION_PRELUDE}\n${second}\n${third}`;
+            const corpusStart = POSITION_PRELUDE.length + 1 + (family.rebinding ? lead.length : second.length + 1);
+            const problem = lands(source, corpusStart, at, wrapped, payload) || positionCompiles(source);
+            if (problem) { firstError = firstError || problem; continue; }
+            let { refs, failures } = expected || {};
+            if (family.alias) {
+              refs = ['OperatorStation'];
+              failures = alias === '({ block })' ? [unreadable(3, BLOCK_ARG), unreadable(3, BLOCK_ARG)] : [unreadable(3, BLOCK_ARG)];
+            } else if (family.rebinding) {
+              refs = [];
+              failures = [unreadable(2, MAY_NOT_HOLD('block'))];
+            }
+            fixtures.push({ label: `derived position property: ${family.name} as ${pair}${family.alias ? ` (${alias})` : family.rebinding ? ` (${rebind})` : ''}`, source, refs, failures });
+            covered.add(`${pair}|${familyIndex}`);
+            break;
+          }
+        }
+      }
+      if (!covered.has(`${pair}|${familyIndex}`)) excluded.set(`${pair}|${familyIndex}`, firstError);
+    });
+  });
+  // Child types: a shape is the text of the nearest node above a field that parses alone as an
+  // expression of its own type, from the corpus, with the field replaced by (P); there is one
+  // shape per node type. Each shape, holding the first family's payload, is then placed as (S)
+  // in each pair whose field holds an expression, so the field holds a node of every such type.
+  const first = families[0];
+  const shapes = new Map();
+  for (const pair of pairs) {
+    instances.get(pair).forEach((at, index) => {
+      if (fits.get(pair)[index].paren) return;
+      for (const above of at.ancestors) {
+        const text = `${DERIVED_CORPUS.slice(above.start, at.childStart)}(${first.family.expr})${DERIVED_CORPUS.slice(at.childEnd, above.end)}`;
+        let node = null;
+        try { node = acorn.parseExpressionAt(text, 0, { ecmaVersion: 'latest' }); } catch (_e) { continue; }
+        if (node.type === above.type && node.end === text.length) {
+          if (!shapes.has(above.type)) shapes.set(above.type, text);
+          return;
+        }
+      }
+    });
+  }
+  const expressionFields = pairs.filter((pair) => covered.has(`${pair}|0`) && fits.get(pair).some((fit) => !fit.paren));
+  const shaped = new Set();
+  for (const pair of expressionFields) {
+    const list = instances.get(pair);
+    for (const [type, shape] of shapes) {
+      for (let k = 0; k < list.length && !shaped.has(`${pair}|${type}`); k++) {
+        const at = list[k];
+        if (fits.get(pair)[k].paren) continue;
+        const wrapped = `(${shape})`;
+        const corpus = DERIVED_CORPUS.slice(0, at.childStart) + wrapped + DERIVED_CORPUS.slice(at.childEnd);
+        const source = `${POSITION_PRELUDE}\n\n${corpus}`;
+        if (lands(source, POSITION_PRELUDE.length + 2, at, wrapped, shape) || positionCompiles(source)) continue;
+        fixtures.push({ label: `derived position property: ${first.family.name} in a ${type} as ${pair}`, source, ...first.expected });
+        shaped.add(`${pair}|${type}`);
+      }
+    }
+  }
+  fixtures.push({
+    label: `derived position property: each of the ${pairs.length} (node type, field) pairs in the corpus has a fixture for each of the ${families.length} families or is excluded with a listed reason, each of the ${expressionFields.length} pairs whose field holds an expression and that have a fixture for the first family has one whose field holds each of the ${shapes.size} shapes, each expression type in the corpus has a shape or a listed reason, and each node type acorn names is in the corpus or listed as absent`,
+    precondition: () => {
+      const unlisted = [...excluded].filter(([key]) => !DERIVED_EXCLUSIONS[key.split('|')[0]])
+        .map(([key, error]) => `${key.split('|')[0]} is excluded for ${families[key.split('|')[1]].family.name} without a listed reason (${error})`);
+      const unusedReasons = Object.keys(DERIVED_EXCLUSIONS).filter((pair) => !instances.has(pair) || families.every((_f, i) => covered.has(`${pair}|${i}`)));
+      const missingTypes = [...acornTypes].filter((type) => !typesSeen.has(type) && !DERIVED_ABSENT_TYPES[type]);
+      const shapeless = [...typesSeen].filter((type) => /Expression$|Literal$|^Identifier$|^MetaProperty$/.test(type))
+        .filter((type) => shapes.has(type) === Boolean(DERIVED_UNSHAPED[type]))
+        .map((type) => (shapes.has(type) ? `${type} has a shape but is listed as unshaped` : `${type} has no shape and no listed reason`));
+      const unshaped = expressionFields.flatMap((pair) => [...shapes.keys()].filter((type) => !shaped.has(`${pair}|${type}`)).map((type) => `${pair} has no fixture holding a ${type}`));
+      const problems = [
+        ...unlisted,
+        ...unusedReasons.map((pair) => `${pair} has a listed exclusion but is not in the corpus or has a fixture for every family`),
+        ...missingTypes.map((type) => `${type} is named in acorn but neither in the corpus nor listed as absent`),
+        ...shapeless,
+        ...unshaped,
+      ];
+      return problems.length ? problems.join('; ') : null;
+    },
+    source: '',
+    refs: [],
+    failures: [],
+  });
+  return fixtures;
+})();
+COORDINATOR_FIXTURES.push(...DERIVED_FIXTURES);
+
+COORDINATOR_FIXTURES.push(
+  // MUTATION GUARD: letting collectClassNames also add the class a definition extends turns RED
+  {
+    label: 'Plugin, which a class in a .js file under platform/blueprints or platform/mechanisms extends and none of those files defines, fails with that name',
+    precondition: () => {
+      const files = REF_SCAN_DIRS.flatMap((d) => walk(d, [])).map((f) => fs.readFileSync(f, 'utf8'));
+      if (!files.some((t) => /(?:^|\n)\s*class\s+[A-Za-z0-9_]+\s+extends\s+Plugin\b/.test(t))) return 'no .js file under platform/blueprints or platform/mechanisms has a class that extends Plugin';
+      return collectClassNames(REF_SCAN_DIRS).has('Plugin') ? 'a .js file under platform/blueprints or platform/mechanisms defines Plugin' : null;
+    },
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "Plugin" });';`,
+    refs: ['Plugin'],
+    failures: [missing('Plugin', 1)],
+  },
+);
 
 const COORDINATOR_GATE_FIXTURES = [
   {
