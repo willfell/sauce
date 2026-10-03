@@ -5,6 +5,63 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+// SYNC2D-HARNESS-ISOLATION. Every node child started with an argument array
+// gets a HOME inside the temp root unless its env already names one there, so
+// a child that resolves this repo's .loop/config.json binding, or the
+// coordinator's ~/obsidian fallbacks, finds its vaults under harnessHome and
+// never in a real vault. Each of those vaults gets a REST config naming a
+// closed port, so a child that takes a write turn there leaves
+// .sauce-obsidian-writes behind, and harnessIsolationProblems() lists it.
+const harnessTemp = fs.realpathSync(os.tmpdir());
+const harnessHome = fs.mkdtempSync(path.join(harnessTemp, 'harness-home-'));
+const harnessVaults = (() => {
+  const binding = JSON.parse(fs.readFileSync(path.join(__dirname, '../../.loop/config.json'), 'utf8'));
+  const roots = [
+    binding.vault && binding.vault.root,
+    ...((binding.policy && binding.policy.deploy_vaults) || []).map((vault) => vault.path),
+    '~/obsidian/headspace-sauce', '~/obsidian/accuris-sauce', '~/obsidian/ero-sauce',
+  ];
+  return [...new Set(roots.filter((root) => typeof root === 'string' && root.startsWith('~/'))
+    .map((root) => path.join(harnessHome, root.slice(2))))];
+})();
+for (const vault of harnessVaults) {
+  const config = path.join(vault, '.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json');
+  fs.mkdirSync(path.dirname(config), { recursive: true });
+  fs.writeFileSync(config, JSON.stringify({ apiKey: 'harness-tripwire', insecurePort: 1, enableInsecureServer: true, enableSecureServer: false }));
+}
+(() => {
+  const childProcess = require('child_process');
+  const insideTemp = (dir) => typeof dir === 'string' && path.resolve(dir).startsWith(`${harnessTemp}${path.sep}`);
+  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync']) {
+    const real = childProcess[name];
+    childProcess[name] = function harnessPinnedHome(command, args, options, ...rest) {
+      if ((command !== process.execPath && command !== 'node') || !Array.isArray(args)) return real.call(this, command, args, options, ...rest);
+      if (typeof options === 'function') { rest.unshift(options); options = undefined; }
+      const env = (options && options.env) || process.env;
+      if (insideTemp(env.HOME)) return real.call(this, command, args, options, ...rest);
+      return real.call(this, command, args, { ...(options || {}), env: { ...env, HOME: harnessHome } }, ...rest);
+    };
+  }
+})();
+// Paths, relative to harnessHome, of anything in those vaults besides their
+// REST configs.
+function harnessIsolationProblems() {
+  const expected = new Set();
+  for (const vault of harnessVaults) {
+    let entry = path.join(vault, '.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json');
+    while (entry.startsWith(`${vault}${path.sep}`)) { expected.add(entry); entry = path.dirname(entry); }
+  }
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (!expected.has(full)) found.push(path.relative(harnessHome, full));
+      if (entry.isDirectory()) walk(full);
+    }
+  };
+  for (const vault of harnessVaults) walk(vault);
+  return found.sort();
+}
 const {
   run: runCardIntake, validateDeliveryContract, canonicalEpicSurface, readInstalledCoordinatorStatus,
 } = require('../../.agents/skills/card-intake/scripts/card-intake');
@@ -1332,8 +1389,9 @@ async function sync2Intake() {
     eq(fs.existsSync(turn(fx.vault)), false, 'SYNC2-TURN the mint releases the write turn');
 
     // SYNC2-TURN an applying mint waits for another holder's write turn
-    // before it reads the board or writes anything. The holder, another
-    // process, appends to the board and then releases the turn.
+    // before it reads the board it writes from, or writes anything. The
+    // holder, another process, appends to the board and then releases the
+    // turn.
     const waitFx = await fixture();
     const { spawn: spawnHolder } = require('child_process');
     const holder = spawnHolder(process.execPath, ['-e', `
@@ -1365,7 +1423,7 @@ setTimeout(() => {
     eq([heldBack, releasedAt > 0 && settledAt >= releasedAt, waited.ok], [[], true, true],
       'SYNC2-TURN an applying mint writes nothing while another process holds the write turn, then completes');
     ok(fs.readFileSync(waitFx.boardPath, 'utf8').includes('[[Written by the turn holder]]'),
-      'SYNC2-TURN an applying mint reads the board only after it holds the write turn, so the holder\'s board write survives');
+      'SYNC2-TURN an applying mint reads the board it writes from only after it holds the write turn, so the holder\'s board write survives');
 
     // SYNC2B-INTAKE-STATUS-FIRST an applying mint reads the coordinator status,
     // which takes the selector lock, before it waits for the write turn, so it
@@ -1479,6 +1537,51 @@ setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, fo
     eq(identical['no-config'].run.receipt.obsidian_index && [identical['no-config'].run.receipt.obsidian_index.available, identical['no-config'].run.receipt.obsidian_index.reason],
       [false, 'no-rest-config'], 'SYNC2-NO-REST-IDENTICAL obsidian_index reports that the vault has no REST config');
 
+    // SYNC2D-USAGE-BEFORE-TURN: an --apply whose spec validateSpec refuses,
+    // run behind a live turn holder in a vault with a REST config, prints the
+    // refusal of the same run without REST config and takes no turn. The
+    // holder releases the turn by its release file, written after the run
+    // returned, or by its 20s timer, so a run that waited for the turn forces
+    // a release by the timer.
+    {
+      const refusedSpec = (fx) => ({ ...fx.spec, mode: 'not-a-mode' });
+      const plainFx = await fixture('none');
+      plainFx.spec = refusedSpec(plainFx);
+      const reference = await cli(plainFx, ['--apply']);
+      const heldFx = await fixture('reachable');
+      heldFx.spec = refusedSpec(heldFx);
+      const releaseFile = path.join(heldFx.base, 'release-intake-holder');
+      const { spawn: spawnRefusalHolder } = require('child_process');
+      const refusalHolder = spawnRefusalHolder(process.execPath, ['-e', `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const lease = ${JSON.stringify(turn(heldFx.vault))};
+const releaseFile = ${JSON.stringify(releaseFile)};
+fs.mkdirSync(lease, { recursive: true });
+fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
+process.stdout.write('held\\n');
+const timer = setTimeout(() => release('timer'), 20000);
+const poll = setInterval(() => { if (fs.existsSync(releaseFile)) release('file'); }, 20);
+function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + why + '\\n'); }
+`], { stdio: ['ignore', 'pipe', 'inherit'] });
+      let refusalHolderOut = '';
+      refusalHolder.stdout.on('data', (chunk) => { refusalHolderOut += chunk; });
+      const refusalHolderClosed = new Promise((resolve) => refusalHolder.on('close', resolve));
+      await until(() => refusalHolderOut.includes('held'), 10000);
+      const refused = await cli(heldFx, ['--apply']);
+      outputs.push(refused);
+      let owner = null;
+      try { owner = JSON.parse(fs.readFileSync(path.join(turn(heldFx.vault), 'owner.json'), 'utf8')); } catch (_) { owner = null; }
+      fs.writeFileSync(releaseFile, '');
+      await refusalHolderClosed;
+      const outputOf = (run, fx) => [run.code, run.stdout.split(fx.base).join('<base>'), run.stderr.split(fx.base).join('<base>')];
+      eq(outputOf(refused, heldFx), outputOf(reference, plainFx),
+        'SYNC2D-USAGE-BEFORE-TURN intake --apply with a spec validateSpec refuses: the exit code, stdout and stderr match the run without REST config');
+      ok(refused.code !== 0 && refused.receipt.ok === false && (refused.receipt.errors || []).includes('mode must be single|roadmap'),
+        'SYNC2D-USAGE-BEFORE-TURN intake --apply with a spec validateSpec refuses: it is refused with validateSpec\'s error');
+      eq([(refusalHolderOut.match(/released (file|timer)/) || [])[1] || null, owner && owner.token], ['file', 'holder'],
+        'SYNC2D-USAGE-BEFORE-TURN intake --apply with a spec validateSpec refuses: the refusal returns before the holder releases the turn, and takes no turn');
+    }
+
     // SYNC2D-INVALID-KEY: an apiKey that cannot be sent as a header value
     // makes the REST config malformed, so the CLI --apply mints as without
     // REST config and the stub receives nothing.
@@ -1539,6 +1642,9 @@ setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, fo
 async function main() {
   actualLegacyWriterPin(); installedCoordinatorResolution(); sharedDeliveryFixtures(); localizedBug(); roadmapTheme(); singleParentChildren(); docsOnly(); missingEvidenceAndRefusals(); cutoverEpicIntake(); epicNativeForcedIntake(); canonicalBoardBindings(); supersedeGovernance(); await exactHeadMaterialization();
   await sync2Intake();
+  eq(harnessIsolationProblems(), [],
+    'SYNC2D-HARNESS-ISOLATION no node child took a write turn or created anything in the vaults the repo binding and the coordinator fallbacks name under the harness HOME');
+  fs.rmSync(harnessHome, { recursive: true, force: true });
   console.log(`\nrun-card-intake: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
