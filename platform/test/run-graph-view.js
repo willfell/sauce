@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 3957;
+const ASSERTION_FLOOR = 3984;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -9840,6 +9840,237 @@ async function main() {
     assert(byClass(ph2RowFor(root, 'GA-ML10'), 'graph-view-frontier-wait')[0]?.textContent === 'blocked by GA-ML8 · 1.5 hops up'
       && byClass(root, 'graph-view-detail-root-cause-hops')[0]?.textContent === '1.5 hops up',
     'PH2-ROOT-CAUSE-BLOCK: a hop count of 1.5 from GraphInsights reads 1.5 hops up in the Blocked row and the Root cause row');
+  }
+
+  // ---- PH2C-ROOT-CAUSE-EACH-HOPS, PH2C-EVERY-ROOT, PH2C-BLOCKED-ROOT-WORDING ----
+  // Fixtures drawn through render() at 390 and 1024 with the real
+  // GraphLayout and, unless a fixture removes it, the real GraphInsights. A
+  // card's Root cause lines read as [id, hop count] pairs, or null when no
+  // detail card is open.
+  const ph2cCauseLines = (root) => {
+    const panel = byClass(root, 'graph-view-detail-panel')[0];
+    return panel ? byClass(panel, 'graph-view-detail-root-cause-line').map((line) => [
+      byClass(line, 'graph-view-detail-link-id')[0]?.textContent ?? null,
+      byClass(line, 'graph-view-detail-root-cause-hops')[0]?.textContent ?? null,
+    ]) : null;
+  };
+  // Uneven Roots: GA-UR1 is parked, GA-UR2 is blocked, GA-UR3 is planned
+  // after GA-UR2, and GA-UR4 is blocked after GA-UR1 and GA-UR3, so GA-UR4
+  // has two root blockers, GA-UR1 at 1 hop and GA-UR2 at 2 hops.
+  // MUTATION GUARD: PH2C-MUTANT-CARD-LINES-FIRST-HOPS turns RED at
+  // "PH2C-ROOT-CAUSE-EACH-HOPS: Uneven Roots at 390 ..." if every Root cause
+  // line shows the hop count of the first one.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-NEAREST-ONLY turns RED at
+  // "PH2C-EVERY-ROOT: Uneven Roots at 390 ..." if the Root cause row keeps
+  // only the root blockers with the fewest hops.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Uneven Roots', [
+      { card: 'GA-UR1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-UR2 Legal', status: 'blocked' },
+      { card: 'GA-UR3 Spec', status: 'planning', depends_on: ['[[GA-UR2 Legal]]'] },
+      { card: 'GA-UR4 Launch', status: 'blocked', depends_on: ['[[GA-UR1 Vendor]]', '[[GA-UR3 Spec]]'] },
+    ])), width);
+    assert.deepStrictEqual(ph2Read(root), {
+      groups: [
+        ['graph-view-frontier-group frontier-needs-you', 'Needs you 1', ['GA-UR1', '⚑ waiting', null, 'Resume after the vendor call.']],
+        ['graph-view-frontier-group frontier-blocked', 'Blocked 2',
+          ['GA-UR2', 'blocked', null, null],
+          ['GA-UR4', 'blocked', null, 'blocked by GA-UR1 · 1 hop up']],
+        ['graph-view-frontier-group frontier-queued', 'Queued 1', ['GA-UR3', 'planning', null, 'after GA-UR2']],
+      ],
+      shipped: [],
+      strip: [],
+    }, `PH2C-UNEVEN-ROOTS-LIST: Uneven Roots at ${width}: the list is Needs you 1 (GA-UR1), Blocked 2 (GA-UR2 with no wait line, then GA-UR4 blocked by GA-UR1 · 1 hop up), and Queued 1 (GA-UR3 after GA-UR2), with no other group, no Everything shipped line, and no done strip`);
+    bubblingClick(ph2RowFor(root, 'GA-UR4'));
+    const lines = ph2cCauseLines(root);
+    assert.deepStrictEqual(lines, [['GA-UR1', '1 hop up'], ['GA-UR2', '2 hops up']],
+      `PH2C-ROOT-CAUSE-EACH-HOPS: Uneven Roots at ${width}: selecting GA-UR4 draws the Root cause lines [GA-UR1, 1 hop up] and [GA-UR2, 2 hops up], in that order`);
+    assert.deepStrictEqual((lines || []).map(([id]) => id), ['GA-UR1', 'GA-UR2'],
+      `PH2C-EVERY-ROOT: Uneven Roots at ${width}: the Root cause lines on GA-UR4's card name exactly GA-UR1 and GA-UR2`);
+  }
+  // Blocked Chain: GA-BB1, GA-BB2, and GA-BB3 are all blocked, GA-BB2 after
+  // GA-BB1 and GA-BB3 after GA-BB2, so the root blocker behind GA-BB2 and
+  // GA-BB3 is blocked, not parked.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-BY-PARKED-ROOT-ONLY turns RED at
+  // "PH2C-BLOCKED-ROOT-WORDING: Blocked Chain at 390: the list ..." if a
+  // Blocked row reads blocked by only when its root blocker is parked.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Blocked Chain', [
+      { card: 'GA-BB1 Legal', status: 'blocked' },
+      { card: 'GA-BB2 Contract', status: 'blocked', depends_on: ['[[GA-BB1 Legal]]'] },
+      { card: 'GA-BB3 Launch', status: 'blocked', depends_on: ['[[GA-BB2 Contract]]'] },
+    ])), width);
+    assert.deepStrictEqual(ph2Read(root), {
+      groups: [
+        ['graph-view-frontier-group frontier-blocked', 'Blocked 3',
+          ['GA-BB1', 'blocked', null, null],
+          ['GA-BB2', 'blocked', null, 'blocked by GA-BB1 · 1 hop up'],
+          ['GA-BB3', 'blocked', null, 'blocked by GA-BB1 · 2 hops up']],
+      ],
+      shipped: [],
+      strip: [],
+    }, `PH2C-BLOCKED-ROOT-WORDING: Blocked Chain at ${width}: the list is exactly Blocked 3, with GA-BB1 (no wait line), GA-BB2 blocked by GA-BB1 · 1 hop up, and GA-BB3 blocked by GA-BB1 · 2 hops up`);
+    bubblingClick(ph2RowFor(root, 'GA-BB3'));
+    assert.deepStrictEqual(ph2cCauseLines(root), [['GA-BB1', '2 hops up']],
+      `PH2C-BLOCKED-ROOT-WORDING: Blocked Chain at ${width}: selecting GA-BB3 draws one Root cause line, [GA-BB1, 2 hops up]`);
+  }
+  // Far First: GA-FF1 is parked, GA-FF2 is planned after GA-FF1, GA-FF3 is
+  // blocked, and GA-FF4 is blocked after GA-FF2 and GA-FF3. GraphInsights
+  // lists GA-FF4's root causes as GA-FF1 at 2 hops, then GA-FF3 at 1 hop, so
+  // its first root cause is not its nearest.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-BY-NEAREST-CAUSE turns RED at
+  // "PH2C-BLOCKED-FIRST-CAUSE: Far First at 390 ..." if a Blocked row names
+  // its nearest root cause instead of its first.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Far First', [
+      { card: 'GA-FF1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-FF2 Spec', status: 'planning', depends_on: ['[[GA-FF1 Vendor]]'] },
+      { card: 'GA-FF3 Legal', status: 'blocked' },
+      { card: 'GA-FF4 Launch', status: 'blocked', depends_on: ['[[GA-FF2 Spec]]', '[[GA-FF3 Legal]]'] },
+    ])), width);
+    bubblingClick(ph2RowFor(root, 'GA-FF4'));
+    assert.deepStrictEqual([
+      ph2cCauseLines(root),
+      byClass(ph2RowFor(root, 'GA-FF4'), 'graph-view-frontier-wait')[0]?.textContent ?? null,
+    ], [[['GA-FF1', '2 hops up'], ['GA-FF3', '1 hop up']], 'blocked by GA-FF1 · 2 hops up'],
+    `PH2C-BLOCKED-FIRST-CAUSE: Far First at ${width}: GA-FF4's Root cause lines are [GA-FF1, 2 hops up] then [GA-FF3, 1 hop up], and its Blocked row reads blocked by GA-FF1 · 2 hops up`);
+  }
+  // Rootless Blocked: GA-RB2 is blocked after the in-progress GA-RB1, so it
+  // has no root cause, and GA-RB4 is planned after GA-RB3, which is
+  // completed, and GA-RB1.
+  // MUTATION GUARD: PH2C-MUTANT-ROOTLESS-BLOCKED-AFTER turns RED at
+  // "PH2C-ROOTLESS-BLOCKED: Rootless Blocked at 390 ..." if a Blocked row
+  // with no root cause reads its unmet prerequisites as after <deps>
+  // instead of its wait line.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Rootless Blocked', [
+      { card: 'GA-RB1 Build', status: 'in_progress' },
+      { card: 'GA-RB2 Ship', status: 'blocked', depends_on: ['[[GA-RB1 Build]]'] },
+      { card: 'GA-RB3 Base', status: 'completed' },
+      { card: 'GA-RB4 Docs', status: 'planning', depends_on: ['[[GA-RB3 Base]]', '[[GA-RB1 Build]]'] },
+    ])), width);
+    const listed = ph2Read(root).groups.map((group) => group.slice(1));
+    bubblingClick(ph2RowFor(root, 'GA-RB2'));
+    assert.deepStrictEqual([listed, ph2cCauseLines(root)], [[
+      ['In progress 1', ['GA-RB1', 'in progress', null, null]],
+      ['Blocked 1', ['GA-RB2', 'blocked', null, 'needs GA-RB1']],
+      ['Queued 1', ['GA-RB4', 'planning', null, 'after GA-RB1']],
+      ['Done 1', ['GA-RB3', 'done', null, null]],
+    ], []], `PH2C-ROOTLESS-BLOCKED: Rootless Blocked at ${width}: the Blocked row of GA-RB2, blocked behind the in-progress GA-RB1, reads its wait line needs GA-RB1, and its card has no Root cause line; GA-RB4's Queued row reads after GA-RB1, without the completed GA-RB3`);
+  }
+  // Odd Status: GA-OS1 is parked and GA-OS2, whose status review is not a
+  // lifecycle status, depends on it.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-BLOCKED-OR-PLANNING-ONLY turns RED
+  // at "PH2C-ODD-STATUS: Odd Status at 390 ..." if only a blocked or
+  // planning slice's card gets a Root cause row.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Odd Status', [
+      { card: 'GA-OS1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-OS2 Review', status: 'review', depends_on: ['[[GA-OS1 Vendor]]'] },
+    ])), width);
+    const queued = ph2Read(root).groups.find((group) => group[0] === 'graph-view-frontier-group frontier-queued') || null;
+    bubblingClick(ph2RowFor(root, 'GA-OS2'));
+    assert.deepStrictEqual([queued?.slice(1) ?? null, ph2cCauseLines(root)], [
+      ['Queued 1', ['GA-OS2', 'unrecognized: review', null, 'after GA-OS1']],
+      [['GA-OS1', '1 hop up']],
+    ], `PH2C-ODD-STATUS: Odd Status at ${width}: GA-OS2 lists under Queued after GA-OS1 with its unrecognized: review word, and its card draws the Root cause line [GA-OS1, 1 hop up]`);
+  }
+  // Quoted Status: the statuses are written with literal quote characters.
+  // The lifecycle API reads them as parked and blocked, so each slice gets a
+  // row under Needs you or Blocked, and GraphInsights does not, so its
+  // needsYouCount and blockedCount are 0; each label shows that finite 0.
+  // MUTATION GUARD: PH2C-MUTANT-SUMMARY-ZERO-COUNTS-ROWS turns RED at
+  // "PH2C-SUMMARY-ZERO: Quoted Status at 390 ..." if a summary count of 0
+  // falls back to the rows drawn.
+  for (const width of [390, 1024]) {
+    const slices = [
+      { card: 'GA-QS1 Vendor', status: '"parked"' },
+      { card: 'GA-QS2 Legal', status: "'blocked'" },
+    ];
+    const root = await ph2Draw(ph2Track(ph2Env('Quoted Status', slices)), width);
+    assert.deepStrictEqual(ph2Read(root).groups.map((group) => [group[1], group.slice(2).map((row) => row[0])]), [
+      ['Needs you 0', ['GA-QS1']],
+      ['Blocked 0', ['GA-QS2']],
+    ], `PH2C-SUMMARY-ZERO: Quoted Status at ${width}: GA-QS1 is the one row under Needs you 0 and GA-QS2 the one row under Blocked 0`);
+  }
+  {
+    const summary = new GraphInsights().analyzeGraph(
+      [{ card: 'GA-QS1 Vendor', status: '"parked"' }, { card: 'GA-QS2 Legal', status: "'blocked'" }], []).summary;
+    assert.deepStrictEqual([summary.needsYouCount, summary.blockedCount, ['"parked"', "'blocked'"].map((value) => delivery.normalizeStatus(value))],
+      [0, 0, ['parked', 'blocked']],
+      'PH2C-SUMMARY-ZERO: GraphInsights counts the quoted statuses as 0 parked and 0 blocked, and delivery normalizeStatus, which the fixture lifecycle API calls, reads them as parked and blocked');
+  }
+
+  // Done Between: GA-DB1 is parked, GA-DB2 is completed after it, and GA-DB3
+  // is planned after GA-DB2, so GA-DB3's one direct prerequisite is done and
+  // its root cause, GA-DB1, is two hops up.
+  // MUTATION GUARD: PH2C-MUTANT-ROOT-CAUSE-NEEDS-UNMET turns RED at
+  // "PH2C-DONE-BETWEEN: Done Between at 390 ..." if the Root cause row is
+  // drawn only for a slice with an unmet direct prerequisite.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Done Between', [
+      { card: 'GA-DB1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-DB2 Schema', status: 'completed', depends_on: ['[[GA-DB1 Vendor]]'] },
+      { card: 'GA-DB3 Import', status: 'planning', depends_on: ['[[GA-DB2 Schema]]'] },
+    ])), width);
+    const queued = ph2Read(root).groups.find((group) => group[0] === 'graph-view-frontier-group frontier-queued') || null;
+    bubblingClick(ph2RowFor(root, 'GA-DB3'));
+    assert.deepStrictEqual([queued?.slice(1) ?? null, ph2cCauseLines(root)], [
+      ['Queued 1', ['GA-DB3', 'planning', null, null]],
+      [['GA-DB1', '2 hops up']],
+    ], `PH2C-DONE-BETWEEN: Done Between at ${width}: GA-DB3, whose one prerequisite GA-DB2 is done, lists under Queued with no wait line, and its card draws the Root cause line [GA-DB1, 2 hops up]`);
+  }
+  // A done row's tap does what a tap on its slice in the map does, whether
+  // the row is listed under Done or expanded from the strip.
+  // MUTATION GUARD: PH2C-MUTANT-DONE-ROWS-OPEN turns RED at
+  // "PH2C-DONE-ROW-TAP-SELECTS: at 390 a GA-AG1 row tap ..." if a row listed
+  // under Done opens its note instead of selecting.
+  // MUTATION GUARD: PH2C-MUTANT-EXPANDED-ROWS-OPEN turns RED at
+  // "PH2C-DONE-ROW-TAP-SELECTS: at 390 an expanded GA-PF2 row tap ..." if a
+  // row expanded from the strip opens its note instead of selecting.
+  for (const width of [390, 1024]) {
+    const listedEnv = ph2Track(ph2AgEnv());
+    const listedByRow = await ph2Draw(listedEnv, width);
+    const listedByMap = await ph2Draw(listedEnv, width);
+    const listedTap = bubblingClick(ph2RowFor(listedByRow, 'GA-AG1'));
+    bubblingClick(ph2MapNodeFor(listedByMap, 'GA-AG1'));
+    const listedPanel = byClass(listedByRow, 'graph-view-detail-panel');
+    assert(ph2RowFor(listedByRow, 'GA-AG1')?.parent?.className === 'graph-view-frontier-group frontier-done'
+      && listedTap.stopped && listedEnv.opened.length === 0 && listedPanel.length === 1
+      && byClass(listedPanel[0], 'graph-view-detail-id')[0]?.textContent === 'GA-AG1'
+      && JSON.stringify(domShape(listedByRow)) === JSON.stringify(domShape(listedByMap)),
+    `PH2C-DONE-ROW-TAP-SELECTS: at ${width} a GA-AG1 row tap under Done stops there, opens nothing, and leaves the same DOM as a tap on its ${width === 390 ? 'pill' : 'chip'}`);
+    const foldedEnv = ph2Track(ph2PerfEnv());
+    const foldedByRow = await ph2Draw(foldedEnv, width);
+    const foldedByMap = await ph2Draw(foldedEnv, width);
+    for (const root of [foldedByRow, foldedByMap]) bubblingClick(byClass(root, 'graph-view-frontier-done-strip')[0]);
+    const foldedRow = ph2RowFor(foldedByRow, 'GA-PF2');
+    const foldedTap = bubblingClick(foldedRow);
+    bubblingClick(ph2MapNodeFor(foldedByMap, 'GA-PF2'));
+    const foldedPanel = byClass(foldedByRow, 'graph-view-detail-panel');
+    assert(foldedRow?.parent?.className === 'graph-view-frontier-done-rows'
+      && foldedTap.stopped && foldedEnv.opened.length === 0 && foldedPanel.length === 1
+      && byClass(foldedPanel[0], 'graph-view-detail-id')[0]?.textContent === 'GA-PF2'
+      && JSON.stringify(domShape(foldedByRow)) === JSON.stringify(domShape(foldedByMap)),
+    `PH2C-DONE-ROW-TAP-SELECTS: at ${width} an expanded GA-PF2 row tap stops there, opens nothing, and leaves the same DOM as a tap on its ${width === 390 ? 'pill' : 'chip'} with the strip expanded`);
+  }
+  // Without GraphInsights a row tap opens the note, and a tap on an expanded
+  // done row leaves the strip expanded.
+  // MUTATION GUARD: PH2C-MUTANT-STRIP-LISTENS-ON-SECTION turns RED at
+  // "PH2C-FAIL-SOFT-EXPANDED-ROW: at 390 ..." if the strip's tap handler is
+  // on the Done section, so an expanded row's tap folds the rows again.
+  for (const width of [390, 1024]) {
+    const env = ph2Track(ph2PerfEnv());
+    const root = await ph2Draw(env, width, { insights: false });
+    const strip = byClass(root, 'graph-view-frontier-done-strip')[0];
+    bubblingClick(strip);
+    bubblingClick(ph2RowFor(root, 'GA-PF2'));
+    assert.deepStrictEqual([
+      env.opened,
+      byClass(root, 'graph-view-frontier-done-rows').map((rows) => rows.children.length),
+      strip?.textContent ?? null,
+    ], [[[`${env.boardDir}/GA-PF2 Paint budget`, env.epicPath, false]], [4], '4 done · hide'],
+    `PH2C-FAIL-SOFT-EXPANDED-ROW: at ${width} with GraphInsights missing, a tap on the expanded GA-PF2 row opens its note, and the four done rows stay expanded under 4 done · hide`);
   }
 
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
