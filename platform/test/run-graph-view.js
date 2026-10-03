@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 4090;
+const ASSERTION_FLOOR = 4093;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -10750,7 +10750,8 @@ async function main() {
   // A fixed-seed generator (mulberry32) builds slice sets with random
   // statuses and depends_on edges; GraphLayout gives them their ranks and
   // rows. Each epic is drawn through render() at 390 and 1024 with the real
-  // GraphLayout and GraphInsights. In PH2C-NEXT-UP-PROPERTY,
+  // GraphLayout and, except in the fail-soft run of PH2C-FRONTIER-PROPERTY,
+  // the real GraphInsights. In PH2C-NEXT-UP-PROPERTY,
   // PH2C-FOLD-PROPERTY and PH2C-HOPS-PROPERTY the expected frontier is
   // computed from the generated slices and the map's drawn order, read from
   // the titles of its chips or pills; their generated statuses are planning,
@@ -10764,9 +10765,11 @@ async function main() {
   // covers a whole batch. PH2C-NEXT-UP-PROPERTY makes one per width for each
   // of its two batches (4), PH2C-FOLD-PROPERTY one per width (2),
   // PH2C-HOPS-PROPERTY two per width, Blocked rows and card lines (4), and
-  // PH2C-FRONTIER-PROPERTY one per width (2). PH2C-NEXT-UP-PROPERTY also
-  // makes one coverage assertion, and PH2C-FOLD-PROPERTY,
-  // PH2C-HOPS-PROPERTY and PH2C-FRONTIER-PROPERTY make two each.
+  // PH2C-FRONTIER-PROPERTY one per width for each of its two runs, with and
+  // without GraphInsights (4). PH2C-NEXT-UP-PROPERTY also makes one coverage
+  // assertion, PH2C-FOLD-PROPERTY and PH2C-HOPS-PROPERTY two each, and
+  // PH2C-FRONTIER-PROPERTY three; its precondition is checked at the top of
+  // this harness.
   const ph2cRandom = (seed) => () => {
     seed = (seed + 0x6D2B79F5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -11120,20 +11123,29 @@ async function main() {
   //   and ZZ-<n>, and id-less names of two words and a number;
   // - depends_on (GraphLayout._identity): [[card]], [[card|alias]], card,
   //   and card.md; in some epics a repeated link, a self-dependency, the
-  //   dangling Ghost card 99, or the cross-epic GA-OX1 Upstream or Shared
-  //   ledger (no id);
-  // - lane order (GraphView._laneOrder): the In Planning and In Progress
-  //   lanes, entries [[card]], [[card|alias]] and [[card.md]], some repeated
-  //   and some naming no card of the epic, 0 to all of the epic's cards.
-  // Most epics have 1 to 26 slices. Every tenth is a fan-in of 10 to 13
-  // root blockers into one blocked slice (11 to 40 slices); every tenth
+  //   dangling Ghost card 99, the cross-epic GA-OX1 Upstream or Shared
+  //   ledger (no id), or a slice after 6 to 14 earlier slices (all of them
+  //   when there are fewer);
+  // - lane order (GraphView._laneOrder, read by parseLanes): the In Planning
+  //   and In Progress lanes on "- [ ]" or "- [x]" lines, entries [[card]],
+  //   [[card|alias]], [[card.md]], [[card.MD]], and the card name
+  //   lower-cased (which names no slice), some repeated and some naming no
+  //   card of the epic, 0 to all of the epic's cards; in some boards also
+  //   the lines "### In Planning", "## in planning", "# In Progress" or
+  //   "## Completed" at any place.
+  // Most epics have 1 to 26 slices. Every tenth is a fan-in of 10 to 17
+  // root blockers into one blocked slice (11 to 52 slices); every tenth
   // from the fourth has 22 to 26 slices, each completed with probability
-  // about 0.7; every tenth from the sixth is a blocked chain of 11 to 15
-  // slices; and every tenth from the eighth names 4 to 15 slices that are
-  // not ready in its lane order before a ready slice at rank 1, while
-  // another ready slice at rank 0 is not in the lane order. A card not in
-  // the epic can be inserted anywhere in a lane order, so that ready slice
-  // is lane entry 5 to 17.
+  // about 0.7; every tenth from the sixth is a blocked chain of 11 to 20
+  // slices and a planning slice after all of them; every tenth from the
+  // eighth names 4 to 15 slices that are not ready in its lane order before
+  // a ready slice at rank 1, while another ready slice at rank 0 is not in
+  // the lane order; and every tenth from the tenth has 4 to 18 slices, half
+  // of them (rounded down) completed and at least one parked, so that twice
+  // its done count is its live count or one less. A card not in the epic can be
+  // inserted anywhere in a lane order, so the deep-lane ready slice is lane
+  // entry 5 to 17. The whole run is then repeated without GraphInsights and
+  // compared with the fail-soft reference.
   // MUTATION GUARD: PH2C-MUTANT-READY-CASE-SENSITIVE turns RED at
   // "PH2C-FRONTIER-PROPERTY: at 390, 300 seeded epics ..." if a slice is
   // ready only when its raw status is planning or in-planning exactly.
@@ -11213,6 +11225,28 @@ async function main() {
     };
     const link = (card) => ph2cPick(rand, [`[[${card}]]`, `[[${card}|${word()}]]`, card, `${card}.md`]);
     const stubCards = ['GA-OX1 Upstream', 'Shared ledger'];
+    // The lane order GraphView._laneOrder reads from a board body: a line
+    // matching /^##\s+(.*?)\s*$/ is a heading, and only "In Planning" and
+    // "In Progress" (exact case) start a lane; any other such heading ends
+    // it, and a line that is not one (such as "### In Planning" or
+    // "# In Progress") changes nothing. In a lane, each [[card]] or
+    // [[card|alias]] link on any line counts, with a trailing .md in any
+    // case removed and only its first occurrence kept.
+    const parseLanes = (lines) => {
+      const names = [];
+      let active = false;
+      for (const line of lines) {
+        const heading = line.match(/^##\s+(.*?)\s*$/);
+        if (heading) { active = ['In Planning', 'In Progress'].includes(heading[1]); continue; }
+        if (!active) continue;
+        for (const match of line.matchAll(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g)) {
+          const name = match[1].replace(/\.md$/i, '').trim();
+          if (name && !names.includes(name)) names.push(name);
+        }
+      }
+      return names;
+    };
+    const laneVariants = ['### In Planning', '## in planning', '# In Progress', '## Completed'];
     const epics = Array.from({ length: 300 }, (_, index) => {
       const slices = [];
       let laneFixed = null;
@@ -11223,7 +11257,7 @@ async function main() {
         return card;
       };
       if (index % 10 === 0) {
-        const roots = Array.from({ length: 10 + Math.floor(rand() * 4) }, () => add(pickStatus(rand() < 0.6 ? 'blocked' : 'parked', true), []));
+        const roots = Array.from({ length: 10 + Math.floor(rand() * 8) }, () => add(pickStatus(rand() < 0.6 ? 'blocked' : 'parked', true), []));
         const ends = roots.map((rootCard) => {
           let prev = rootCard;
           for (let step = Math.floor(rand() * 3); step > 0; step -= 1) prev = add(pickStatus(rand() < 0.5 ? 'planning' : 'completed', true), [link(prev)]);
@@ -11238,14 +11272,28 @@ async function main() {
         laneFixed = [...ph2cShuffle(rand, fillers), late];
       } else if (index % 10 === 5) {
         let prev = add(pickStatus('blocked', true), []);
-        for (let step = 10 + Math.floor(rand() * 5); step > 0; step -= 1) prev = add(pickStatus('blocked'), [link(prev)]);
+        for (let step = 10 + Math.floor(rand() * 10); step > 0; step -= 1) prev = add(pickStatus('blocked'), [link(prev)]);
+        add(pickStatus('planning', true), ph2cShuffle(rand, slices.map((slice) => slice.card)).map(link));
+      } else if (index % 10 === 9) {
+        const n = 4 + Math.floor(rand() * 15);
+        const doneCount = Math.floor(n / 2);
+        const statuses = ph2cShuffle(rand, [
+          ...Array.from({ length: doneCount }, () => pickStatus('completed')),
+          pickStatus('parked'),
+          ...Array.from({ length: n - doneCount - 1 }, () => pickStatus(ph2cPick(rand, ['planning', 'in_progress', 'blocked', 'parked']))),
+        ]);
+        for (const status of statuses) {
+          const links = slices.map((slice) => slice.card).filter(() => rand() < 0.15).map(link);
+          if (rand() < 0.15) links.push(`[[${ph2cPick(rand, stubCards)}]]`);
+          add(status, links);
+        }
       } else {
         const doneHeavy = index % 10 === 3;
         const n = doneHeavy ? 22 + Math.floor(rand() * 5) : 1 + Math.floor(rand() * 26);
         for (let k = 0; k < n; k += 1) {
           const earlier = slices.map((slice) => slice.card);
           let deps = earlier.filter(() => rand() < 0.12);
-          if (rand() < 0.12) deps = ph2cShuffle(rand, earlier).slice(0, 6 + Math.floor(rand() * 5));
+          if (rand() < 0.12) deps = ph2cShuffle(rand, earlier).slice(0, 6 + Math.floor(rand() * 9));
           if (earlier.length && rand() < 0.4) deps.push(earlier[earlier.length - 1]);
           const links = deps.map(link);
           if (rand() < 0.05 && links.length) links.push(links[0]);
@@ -11260,12 +11308,18 @@ async function main() {
       if (rand() < 0.3) laneCards.splice(Math.floor(rand() * (laneCards.length + 1)), 0, 'Not in epic 1');
       if (laneCards.length && rand() < 0.2) laneCards.push(laneCards[0]);
       const split = Math.floor(rand() * (laneCards.length + 1));
-      const entry = (card) => ph2cPick(rand, [`[[${card}]]`, `[[${card}|${word()}]]`, `[[${card}.md]]`]);
+      const entry = (card) => (laneFixed ? `[[${card}]]` : ph2cPick(rand, [
+        `[[${card}]]`, `[[${card}|${word()}]]`, `[[${card}.md]]`, `[[${card}.MD]]`, `[[${card.toLowerCase()}]]`,
+      ]));
+      const task = (card) => `${rand() < 0.25 ? '- [x] ' : '- [ ] '}${entry(card)}`;
+      const board = ['## In Planning', '', ...laneCards.slice(0, split).map(task), '', '## In Progress', '', ...laneCards.slice(split).map(task), ''];
+      if (!laneFixed) {
+        for (const variant of laneVariants) if (rand() < 0.2) board.splice(Math.floor(rand() * (board.length + 1)), 0, variant);
+      }
       return {
         slices,
-        planningLane: laneCards.slice(0, split).map(entry),
-        progressLane: laneCards.slice(split).map(entry),
-        lanes: [...new Set(laneCards)],
+        board,
+        lanes: parseLanes(board),
         stubStatus: ph2cPick(rand, ['completed', 'in_progress', 'planning']),
       };
     });
@@ -11279,7 +11333,7 @@ async function main() {
         slices.push({ card: cardName(slices.length + 1), raw: entry.raw, tag: entry.tag, depends_on: slices.length ? [link(slices[slices.length - 1].card)] : [] });
       }
       slices.push({ card: cardName(slices.length + 1), raw: 'planning', tag: 'spelling epic/planning', depends_on: [] });
-      epics.push({ slices, planningLane: [], progressLane: [], lanes: [], stubStatus: 'completed' });
+      epics.push({ slices, board: ['## In Planning', '', '## In Progress', ''], lanes: [], stubStatus: 'completed' });
     }
     const otherDir = 'spice/projects/phone/tasks/Other Ops/board';
     const envFor = (index, epic) => {
@@ -11299,9 +11353,7 @@ async function main() {
       const boardPath = `${env.boardDir}/Frontier Property ${index}-board.md`;
       const ownRead = env.app.vault.cachedRead;
       env.app.vault.cachedRead = async (entry) => (entry.path === boardPath ? [
-        '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic', '---', '',
-        '## In Planning', '', ...epic.planningLane.map((line) => `- [ ] ${line}`), '',
-        '## In Progress', '', ...epic.progressLane.map((line) => `- [ ] ${line}`), '',
+        '---', 'kanban-plugin: board', 'type: kanban', 'board_role: epic', '---', '', ...epic.board,
       ].join('\n') : ownRead(entry));
       return env;
     };
@@ -11320,8 +11372,15 @@ async function main() {
       const text = String(raw == null ? '' : raw).trim().toLowerCase().replace(/^['"]|['"]$/g, '');
       return text === 'archived' || text === 'discarded' || delivery.normalizeStatus(raw) === 'discarded';
     };
-    // The reference frontier for one epic.
-    const reference = (epic) => {
+    // The reference frontier for one epic, with GraphInsights or, when
+    // failSoft, without it. Fail-soft rules, from the card: "with
+    // GraphInsights null the list renders plain status groups Needs you /
+    // In progress / Planned / Done, no Next up, Blocked, or Ready label
+    // exists, no Root cause row is drawn, and nothing throws"; Done is
+    // "folded into an 'N done · show' strip at done / live >= 0.5 or listed
+    // under a Done label", and "stub nodes never count toward the ratio".
+    // With no summary counts, each label counts its rows.
+    const reference = (epic, failSoft = false) => {
       const gathered = epic.slices.filter((slice) => !excluded(slice.raw)).map((slice) => ({
         type: 'slice', ...(slice.raw === null ? {} : { status: slice.raw }), depends_on: slice.depends_on,
         card: slice.card, name: slice.card, file: { path: `x/${slice.card}.md`, name: slice.card },
@@ -11337,11 +11396,11 @@ async function main() {
       const live = layout.nodes;
       if (!live.length) return { read: { lists: 0 }, expanded: [], target: null, lines: null, stubs: 0 };
       const nodes = [...live, ...stubs];
-      const analysis = new GraphInsights().analyzeGraph(nodes, edges);
+      const analysis = failSoft ? null : new GraphInsights().analyzeGraph(nodes, edges);
       const byCard = new Map(nodes.map((node) => [node.card, node]));
       const presentation = (node) => dashboard._statusPresentation(node.status, lifecycleApi);
       const status = (node) => presentation(node).normalized;
-      const insight = (node) => analysis.perNode[node.card];
+      const insight = (node) => analysis?.perNode[node.card];
       const withStatus = (wanted) => live.filter((node) => status(node) === wanted);
       const parked = withStatus('parked');
       const inProgress = withStatus('in_progress');
@@ -11350,7 +11409,7 @@ async function main() {
       const ready = withStatus('planning').filter((node) => insight(node)?.isReady === true);
       const next = epic.lanes.map((card) => ready.find((node) => node.card === card)).find(Boolean) || ready[0] || null;
       const grouped = new Set([...parked, ...inProgress, ...blocked, ...done, ...ready]);
-      const count = (key) => (Number.isFinite(analysis.summary[key]) ? analysis.summary[key] : null);
+      const count = (key) => (Number.isFinite(analysis?.summary[key]) ? analysis.summary[key] : null);
       const causesOf = (node) => (insight(node)?.rootCauses || []).filter((cause) => byCard.has(cause.card) && Number.isFinite(cause.hops));
       const unmet = (node) => edges.filter((edge) => edge.kind === 'depends' && edge.to === node.card).map((edge) => byCard.get(edge.from))
         .filter((entry) => entry && (entry.isStub || status(entry) !== 'completed'));
@@ -11366,7 +11425,12 @@ async function main() {
         return waitInfo(node.waitReason);
       };
       const row = (node, marker, waitText) => [dashboard._titleParts(node.card).id, `${status(node) === 'parked' ? '⚑ ' : ''}${presentation(node).label}`, marker, waitText];
-      const groups = [
+      const groups = failSoft ? [
+        ['needs-you', 'Needs you', parked, null],
+        ['in-progress', 'In progress', inProgress, null],
+        ['planned', 'Planned', live.filter((node) => ![...parked, ...inProgress, ...done].includes(node)), null],
+      ].filter(([, , rows]) => rows.length).map(([key, label, rows]) => [`graph-view-frontier-group frontier-${key}`, `${label} ${rows.length}`,
+        ...rows.map((node) => row(node, null, waitInfo(node.waitReason)))]) : [
         ['needs-you', 'Needs you', parked, count('needsYouCount')],
         ['next', 'Next up', next ? [next] : [], null],
         ['in-progress', 'In progress', inProgress, null],
@@ -11379,8 +11443,18 @@ async function main() {
       const folds = done.length && done.length * 2 >= live.length;
       if (done.length) groups.push(folds ? ['graph-view-frontier-group frontier-done', null] : ['graph-view-frontier-group frontier-done', `Done ${done.length}`, ...doneRows]);
       const shipped = groups.filter((group) => group[0] !== 'graph-view-frontier-group frontier-done').length ? [] : ['Everything shipped'];
-      const candidates = [...blocked, ...withStatus('planning')].filter((node) => causesOf(node).length);
-      const target = candidates.reduce((best, node) => (!best || causesOf(node).length >= causesOf(best).length ? node : best), null);
+      const candidates = failSoft ? [] : [...blocked, ...withStatus('planning')].filter((node) => causesOf(node).length);
+      // The card read: the candidate with the most root causes, then the
+      // deepest root cause, then the later in candidate order (blocked slices
+      // in draw order, then planning slices in draw order), so a planning
+      // slice wins over a blocked one and, between slices of the same status,
+      // the last drawn wins.
+      const depthOf = (node) => Math.max(...causesOf(node).map((cause) => cause.hops));
+      const target = candidates.reduce((best, node) => {
+        if (!best || causesOf(node).length > causesOf(best).length) return node;
+        if (causesOf(node).length < causesOf(best).length) return best;
+        return depthOf(node) >= depthOf(best) ? node : best;
+      }, null);
       return {
         read: { groups, shipped, strip: folds ? [`${done.length} done · show`] : [] },
         expanded: folds ? [doneRows] : [],
@@ -11396,10 +11470,15 @@ async function main() {
           roots: target ? causesOf(target).length : 0,
           deepest: Math.max(0, ...blocked.map((node) => causesOf(node)[0]?.hops || 0)),
           foldedDone: folds ? done.length : 0,
+          done: done.length, parked: parked.length,
+          idlessPlanned: failSoft ? live.filter((node) => ![...parked, ...inProgress, ...done].includes(node) && !dashboard._titleParts(node.card).id).length : 0,
         },
       };
     };
-    const tally = { normalized: new Map(), tags: new Map(), idless: 0, idlessNext: 0, lane8: 0, lane12: 0, group11: 0, after6: 0, roots10: 0, hops10: 0, folded11: 0, stubbed: 0, noList: 0 };
+    const tally = {
+      normalized: new Map(), tags: new Map(), idless: 0, idlessNext: 0, lane8: 0, lane12: 0, group11: 0, after6: 0, after11: 0,
+      roots10: 0, roots15: 0, hops10: 0, hops16: 0, folded11: 0, stubbed: 0, noList: 0, laneVariants: new Map(),
+    };
     for (const width of [390, 1024]) {
       const actual = [];
       const expected = [];
@@ -11424,6 +11503,12 @@ async function main() {
             tally.tags.set(slice.tag, (tally.tags.get(slice.tag) || 0) + 1);
           }
           if (index >= seeded) continue;
+          const boardText = epic.board.join('\n');
+          for (const [name, present] of [
+            ...laneVariants.map((variant) => [variant, epic.board.includes(variant)]),
+            ['checked task', /^- \[x\] /m.test(boardText)], ['.MD link', /\.MD\]\]/.test(boardText)],
+            ['lower-cased card', epic.slices.some((slice) => slice.card !== slice.card.toLowerCase() && boardText.includes(`[[${slice.card.toLowerCase()}]]`))],
+          ]) if (present) tally.laneVariants.set(name, (tally.laneVariants.get(name) || 0) + 1);
           if (!want.stats) { tally.noList += 1; continue; }
           tally.idless += want.stats.idless;
           if (want.stats.idlessNext) tally.idlessNext += 1;
@@ -11431,22 +11516,78 @@ async function main() {
           if (want.stats.lanePosition >= 12) tally.lane12 += 1;
           if (want.stats.biggestGroup >= 11) tally.group11 += 1;
           if (want.stats.widestAfter >= 6) tally.after6 += 1;
+          if (want.stats.widestAfter >= 11) tally.after11 += 1;
           if (want.stats.roots >= 10) tally.roots10 += 1;
+          if (want.stats.roots >= 15) tally.roots15 += 1;
           if (want.stats.deepest >= 10) tally.hops10 += 1;
+          if (want.stats.deepest >= 16) tally.hops16 += 1;
           if (want.stats.foldedDone >= 11) tally.folded11 += 1;
           if (want.stubs) tally.stubbed += 1;
         }
       }
       assert.deepStrictEqual(actual, expected,
-        `PH2C-FRONTIER-PROPERTY: at ${width}, 300 seeded epics and ${epics.length - seeded} spelling epics: each epic's stubs, frontier list, expanded done rows, and the Root cause lines of its blocked or planning slice with the most root causes equal the reference frontier`);
+        `PH2C-FRONTIER-PROPERTY: at ${width}, 300 seeded epics and ${epics.length - seeded} spelling epics: each epic's stubs, frontier list, expanded done rows, and the Root cause lines of its blocked or planning slice with the most root causes (then the deepest root cause, then a planning slice over a blocked one, then the last drawn of that status) equal the reference frontier`);
     }
     const tagsMissing = everySpelling.map((entry) => entry.tag).filter((tag) => !tally.tags.get(tag));
     assert(['planning', 'in_progress', 'blocked', 'parked', 'completed', 'discarded', 'unrecognized'].every((bucket) => (tally.normalized.get(bucket) || 0) >= 40)
       && tagsMissing.length === 0,
     `PH2C-FRONTIER-PROPERTY status coverage: the 300 seeded epics give at least 40 slices to each of planning, in_progress, blocked, parked, completed, discarded and unrecognized (${JSON.stringify([...tally.normalized])}), and the seeded and spelling epics use each of the ${everySpelling.length} status spellings derived from delivery-schema.json status_aliases and the raw forms (missing: ${JSON.stringify(tagsMissing)})`);
     assert(tally.idless >= 200 && tally.idlessNext >= 10 && tally.lane8 >= 10 && tally.lane12 >= 5 && tally.group11 >= 10
-      && tally.after6 >= 10 && tally.roots10 >= 20 && tally.hops10 >= 20 && tally.folded11 >= 5 && tally.stubbed >= 20,
-    `PH2C-FRONTIER-PROPERTY shape coverage (ids, lane order, group sizes, after lists, root counts, hops, folds, stubs): the 300 seeded epics include at least 200 drawn slices with no id (${tally.idless}), 10 epics whose Next up has no id (${tally.idlessNext}), 10 whose Next up is lane entry 9 or later and not the first ready slice drawn (${tally.lane8}), 5 such at lane entry 13 or later (${tally.lane12}), 10 with a group of 11 or more rows (${tally.group11}), 10 with a Queued row after 6 or more slices (${tally.after6}), 20 whose Root cause card has 10 or more lines (${tally.roots10}), 20 with a Blocked row 10 or more hops below its first root cause (${tally.hops10}), 5 folding 11 or more done slices (${tally.folded11}), and 20 with a cross-epic stub (${tally.stubbed})`);
+      && tally.after6 >= 10 && tally.after11 >= 5 && tally.roots10 >= 20 && tally.roots15 >= 5 && tally.hops10 >= 20 && tally.hops16 >= 5
+      && tally.folded11 >= 5 && tally.stubbed >= 20
+      && [...laneVariants, 'checked task', '.MD link', 'lower-cased card'].every((name) => (tally.laneVariants.get(name) || 0) >= 10),
+    `PH2C-FRONTIER-PROPERTY shape coverage (ids, lane order, lane board variants, group sizes, after lists, root counts, hops, folds, stubs): the 300 seeded epics include at least 200 drawn slices with no id (${tally.idless}), 10 epics whose Next up has no id (${tally.idlessNext}), 10 whose Next up is lane entry 9 or later and not the first ready slice drawn (${tally.lane8}), 5 such at lane entry 13 or later (${tally.lane12}), 10 boards with each lane board variant (${JSON.stringify([...tally.laneVariants])}), 10 with a group of 11 or more rows (${tally.group11}), 10 with a Queued row after 6 or more slices (${tally.after6}), 5 after 11 or more (${tally.after11}), 20 whose Root cause card has 10 or more lines (${tally.roots10}), 5 with 15 or more (${tally.roots15}), 20 with a Blocked row 10 or more hops below its first root cause (${tally.hops10}), 5 with 16 or more (${tally.hops16}), 5 folding 11 or more done slices (${tally.folded11}), and 20 with a cross-epic stub (${tally.stubbed})`);
+    // The fail-soft run: the same epics drawn with GraphInsights removed,
+    // compared with reference(epic, true).
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-FOLD-FIVE-OF-TWELVE turns RED at
+    // "PH2C-FRONTIER-PROPERTY fail-soft: at 390, 300 seeded epics ..." if,
+    // without GraphInsights, done folds from two fifths of live.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-FOLD-AT-THIRD turns RED at the
+    // same label if, without GraphInsights, done folds from a third of live.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-STUBS-COUNT turns RED at the same
+    // label if, without GraphInsights, stubs count toward the fold ratio.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-LIVE-EXCLUDES-PARKED turns RED at
+    // the same label if, without GraphInsights, parked slices are left out
+    // of live.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-NEEDS-YOU-COUNTS-STUBS turns RED
+    // at the same label if, without GraphInsights, the Needs you label adds
+    // the stubs to its rows.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-LABELS-COUNT-STUBS turns RED at
+    // the same label if, without GraphInsights, each label adds the stubs to
+    // its rows.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-PLANNED-EXCLUDES-IDLESS turns RED
+    // at the same label if, without GraphInsights, slices with no id are
+    // left out of Planned.
+    const failSoft = { belowHalf: 0, atHalf: 0, atHalfStub: 0, parkedFlip: 0, needsYouStub: 0, idlessPlanned: 0, stubbed: 0 };
+    for (const width of [390, 1024]) {
+      const actual = [];
+      const expected = [];
+      for (const [index, epic] of epics.entries()) {
+        const root = await ph2Draw(envFor(index, epic), width, { insights: false });
+        const want = reference(epic, true);
+        const read = ph2Read(root);
+        const strip = byClass(root, 'graph-view-frontier-done-strip')[0];
+        if (strip) bubblingClick(strip);
+        actual.push([index, byClass(root, 'graph-view-stub').length, read,
+          byClass(root, 'graph-view-frontier-done-rows').map((rows) => rows.children.map(ph2RowOf))]);
+        expected.push([index, want.stubs, want.read, want.expanded]);
+        if (width === 390 && index < seeded && want.stats) {
+          const { live, done, parked } = want.stats;
+          if (done && done * 2 === live - 1) failSoft.belowHalf += 1;
+          if (done && done * 2 === live) failSoft.atHalf += 1;
+          if (done && done * 2 === live && want.stubs) failSoft.atHalfStub += 1;
+          if (parked && done * 2 < live && done * 2 >= live - parked) failSoft.parkedFlip += 1;
+          if (parked && want.stubs) failSoft.needsYouStub += 1;
+          failSoft.idlessPlanned += want.stats.idlessPlanned;
+          if (want.stubs) failSoft.stubbed += 1;
+        }
+      }
+      assert.deepStrictEqual(actual, expected,
+        `PH2C-FRONTIER-PROPERTY fail-soft: at ${width}, 300 seeded epics and ${epics.length - seeded} spelling epics drawn without GraphInsights: each epic's stubs, frontier list, and expanded done rows equal the fail-soft reference`);
+    }
+    assert(failSoft.belowHalf >= 20 && failSoft.atHalf >= 20 && failSoft.atHalfStub >= 5 && failSoft.parkedFlip >= 10
+      && failSoft.needsYouStub >= 20 && failSoft.idlessPlanned >= 100 && failSoft.stubbed >= 20,
+    `PH2C-FRONTIER-PROPERTY fail-soft coverage (fold edges, stubs, id-less slices, parked slices): the 300 seeded epics include at least 20 with twice the done count one less than live (${failSoft.belowHalf}), 20 with it equal to live (${failSoft.atHalf}), 5 of those with a stub (${failSoft.atHalfStub}), 10 whose done would fold if their parked slices left live (${failSoft.parkedFlip}), 20 with both a parked slice and a stub (${failSoft.needsYouStub}), 100 id-less slices under Planned (${failSoft.idlessPlanned}), and 20 with a stub (${failSoft.stubbed})`);
   }
 
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
