@@ -1318,6 +1318,172 @@ const PART_KIND_FIXTURES = PART_KINDS.flatMap(([kind, line]) => ['object', 'call
 
 COORDINATOR_FIXTURES.push(...PART_KIND_FIXTURES);
 
+const TWO_CLASS_KEYS = 'customjs-guard object has 2 class keys';
+const SPREAD_OR_COMPUTED = 'customjs-guard object has a spread or computed key';
+const NO_PARSE = "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value";
+const PROPERTY_KINDS = [
+  // MUTATION GUARD: skipping get properties when counting class keys turns this row RED
+  ['a getter named class', String.raw`{ class: "OperatorStation", get class() { return "NoSuchGetter"; } }`, TWO_CLASS_KEYS],
+  // MUTATION GUARD: skipping set properties when counting class keys turns this row RED
+  ['a setter named class', String.raw`{ class: "OperatorStation", set class(v) {} }`, TWO_CLASS_KEYS],
+  // MUTATION GUARD: skipping method properties when counting class keys turns this row and the next two RED
+  ['a method named class', String.raw`{ class: "OperatorStation", class() { return "NoSuchMethodKind"; } }`, TWO_CLASS_KEYS],
+  // MUTATION GUARD: skipping async methods when counting class keys turns this row RED
+  ['an async method named class', String.raw`{ class: "OperatorStation", async class() { return "NoSuchAsync"; } }`, TWO_CLASS_KEYS],
+  // MUTATION GUARD: skipping generator methods when counting class keys turns this row RED
+  ['a generator method named class', String.raw`{ class: "OperatorStation", *class() { yield "NoSuchGenerator"; } }`, TWO_CLASS_KEYS],
+  // MUTATION GUARD: allowing computed keys turns this row RED
+  ['a computed key ["class"]', String.raw`{ class: "OperatorStation", ["class"]: "NoSuchComputed" }`, SPREAD_OR_COMPUTED],
+  // MUTATION GUARD: counting only Identifier keys turns this row RED
+  ['a string key "class"', String.raw`{ class: "OperatorStation", "class": "NoSuchStringKey" }`, TWO_CLASS_KEYS],
+  // MUTATION GUARD: matching class keys by their source text turns this row and the next RED
+  ['an identifier key written cl\\u0061ss', String.raw`{ class: "OperatorStation", cl\\u0061ss: "NoSuchEscapedKey" }`, TWO_CLASS_KEYS],
+  ['a string key written "cl\\x61ss"', String.raw`{ class: "OperatorStation", "cl\\x61ss": "NoSuchEscapedString" }`, TWO_CLASS_KEYS],
+  ['a numeric key 1', String.raw`{ class: "OperatorStation", 1: "NoSuchNumericKey" }`, null],
+  ['a shorthand property class', String.raw`{ class: "OperatorStation", class }`, NO_PARSE],
+  // MUTATION GUARD: allowing spread elements turns this row and the next RED
+  ['a spread element before it', String.raw`{ ...{ class: "NoSuchSpreadBefore" }, class: "OperatorStation" }`, SPREAD_OR_COMPUTED],
+  ['a spread element after it', String.raw`{ class: "OperatorStation", ...{ class: "NoSuchSpreadAfter" } }`, SPREAD_OR_COMPUTED],
+];
+COORDINATOR_FIXTURES.push(...PROPERTY_KINDS.map(([kind, object, message]) => ({
+  label: `property-kind matrix: a guard object with class: "OperatorStation" and ${kind} ${message ? 'fails the gate' : 'is read as OperatorStation'}`,
+  source: `const s = 'await dv.view("ranch/views/customjs-guard", ${object});';`,
+  refs: message ? [] : ['OperatorStation'],
+  failures: message ? [unreadable(1, message)] : [],
+})));
+
+COORDINATOR_FIXTURES.push(
+  // MUTATION GUARD: reading a missing class argument from the first argument turns RED
+  {
+    label: "helper-argument matrix: for function block(title, widget), block('OperatorStation') omits the class argument and fails the gate",
+    source: String.raw`function block(title, widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, BLOCK_ARG)],
+  },
+  {
+    label: 'helper-argument matrix: block(undefined) fails the gate',
+    source: String.raw`function block(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block(undefined);`,
+    refs: [],
+    failures: [unreadable(2, BLOCK_ARG)],
+  },
+  {
+    label: "helper-argument matrix: block('OperatorStation', 'NoSuchExtra') is read as OperatorStation",
+    source: String.raw`function block(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block('OperatorStation', 'NoSuchExtra');`,
+    refs: ['OperatorStation'],
+    failures: [],
+  },
+  {
+    label: "helper-argument matrix: block(...['NoSuchSpreadArg']) fails the gate",
+    source: String.raw`function block(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block(...['NoSuchSpreadArg']);`,
+    refs: [],
+    failures: [unreadable(2, BLOCK_ARG)],
+  },
+  {
+    label: "helper-argument matrix: a class parameter with a default value fails the gate",
+    source: String.raw`function block(widget = 'OperatorStation') { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block('NoSuchDefault');`,
+    refs: [],
+    failures: [unreadable(1, NOT_PARAM)],
+  },
+  {
+    label: 'helper-argument matrix: a class value read from arguments[0] fails the gate',
+    source: String.raw`function block(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + arguments[0] + '" });'; }
+const s = block('NoSuchArgumentsIndex');`,
+    refs: [],
+    failures: [unreadable(1, NOT_PARAM)],
+  },
+  {
+    label: 'helper-argument matrix: a rest parameter as the class value fails the gate',
+    source: String.raw`function block(...widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block('NoSuchRest');`,
+    refs: [],
+    failures: [unreadable(1, NOT_PARAM)],
+  },
+  // MUTATION GUARD: counting the class parameter's position among plain identifier parameters only turns RED
+  {
+    label: "helper-argument matrix: for function block({ length }, widget), block('x', 'NoSuchPattern') fails naming NoSuchPattern",
+    source: String.raw`function block({ length }, widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block('x', 'NoSuchPattern');`,
+    refs: ['NoSuchPattern'],
+    failures: [missing('NoSuchPattern', 2)],
+  },
+  // MUTATION GUARD: skipping appearances of the helper inside the helper itself turns RED
+  {
+    label: "helper-argument matrix: a call of the helper inside the helper, block('NoSuchRecursive'), is checked and fails naming NoSuchRecursive",
+    source: String.raw`function block(widget, n) { if (n) return block('NoSuchRecursive'); return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const s = block('OperatorStation', 1);`,
+    refs: ['NoSuchRecursive', 'OperatorStation'],
+    failures: [missing('NoSuchRecursive', 1)],
+  },
+  // MUTATION GUARD: skipping appearances of the helper under typeof turns RED
+  {
+    label: 'helper-argument matrix: typeof block is an appearance of the helper other than as a call and fails the gate',
+    source: String.raw`function block(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }
+const k = typeof block;
+const s = block('OperatorStation');`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(2, BLOCK_ARG)],
+  },
+  // MUTATION GUARD: skipping a guard call that lies inside the previous guard call of the same string turns RED
+  {
+    label: 'nested guard calls: a guard call inside the object of another is read and fails naming NoSuchNested',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", x: dv.view("ranch/views/customjs-guard", { class: "NoSuchNested" }) });';`,
+    refs: ['OperatorStation', 'NoSuchNested'],
+    failures: [missing('NoSuchNested', 1)],
+  },
+  // MUTATION GUARD: resuming the occurrence scan at the end of the call just read turns RED
+  {
+    label: 'nested guard calls: a guard call in the third argument of another is read and fails naming NoSuchNested3',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }, dv.view("ranch/views/customjs-guard", { class: "NoSuchNested3" }));';`,
+    refs: ['OperatorStation', 'NoSuchNested3'],
+    failures: [missing('NoSuchNested3', 1)],
+  },
+  // MUTATION GUARD: skipping templates nested in another template's substitution turns RED
+  {
+    label: 'nested guard calls: a guard call in a template nested in another template is read and fails naming NoSuchNestedTpl',
+    source: 'const s = `${`await dv.view("ranch/views/customjs-guard", { class: "NoSuchNestedTpl" });`}`;',
+    refs: ['NoSuchNestedTpl'],
+    failures: [missing('NoSuchNestedTpl', 1)],
+  },
+  // MUTATION GUARD: skipping string literals in a conditional expression branch turns RED
+  {
+    label: 'nested guard calls: a guard call in a branch of a conditional expression is read and fails naming NoSuchCond',
+    source: String.raw`const flag = true; const s = flag ? 'await dv.view("ranch/views/customjs-guard", { class: "NoSuchCond" });' : '';`,
+    refs: ['NoSuchCond'],
+    failures: [missing('NoSuchCond', 1)],
+  },
+  // MUTATION GUARD: exempting from CALL_CHAIN a part placed after an unterminated // on its line turns RED
+  {
+    label: 'a guard string ending in // and a space, joined with t, which starts with a newline, fails the gate',
+    source: String.raw`const t = '\nawait dv.view("ranch/views/customjs-' + 'guard", { class: "NoSuchLineComment" });';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }); // ' + t;`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: testing the mixed-value exemption with startsWith in place of equality turns RED
+  {
+    label: "a class value written widget + 'X' fails as a mixed value",
+    source: String.raw`function block(widget) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + 'X" });'; }
+const s = block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders')],
+  },
+  // MUTATION GUARD: letting collectClassNames read class lines behind // or * comment markers turns RED
+  {
+    label: 'builds fails with that name, though a .js file under platform/blueprints or platform/mechanisms has a line whose text before the words class builds is only spaces, tabs, / and *, with at least one *',
+    precondition: () => (['platform/blueprints', 'platform/mechanisms'].flatMap((d) => walk(d, []))
+      .some((f) => /^[ \t/*]*\*[ \t/*]*class\s+builds\b/m.test(fs.readFileSync(f, 'utf8')))
+      ? null : 'no line of a .js file under platform/blueprints or platform/mechanisms has only spaces, tabs, / and *, with at least one *, before the words class builds'),
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "builds" });';`,
+    refs: ['builds'],
+    failures: [missing('builds', 1)],
+  },
+);
+
 const COORDINATOR_GATE_FIXTURES = [
   {
     label: 'a coordinator source with 3 refs, one per required class, fails only the floor',
