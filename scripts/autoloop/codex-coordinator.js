@@ -5766,12 +5766,18 @@ function ghUnavailable(err) {
   return /not authenticated|gh auth login/i.test(text);
 }
 
-function adoptProvenance(args, deps, cwd) {
-  const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
+// The --merge-sha operand, refused unless it is a 40-hex sha.
+function adoptMergeSha(args) {
   const sha = String(args['merge-sha'] || '').trim().toLowerCase();
   if (!ADOPT_SHA_RE.test(sha)) {
     refuse('adopt-refused', 'adopt_sha_unreachable', `--merge-sha must be a 40-hex commit sha (got "${args['merge-sha']}")`);
   }
+  return sha;
+}
+
+function adoptProvenance(args, deps, cwd) {
+  const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
+  const sha = adoptMergeSha(args);
   try { runGit(['cat-file', '-e', `${sha}^{commit}`]); }
   catch (err) {
     refuse('adopt-refused', 'adopt_sha_unreachable', `merge sha ${sha} does not resolve in this repo: ${err.message}`);
@@ -5842,6 +5848,7 @@ async function commandAdopt(ctx, args, deps = {}) {
   }
   const reason = String(args.reason || '').trim();
   if (!reason) refuse('adopt-refused', 'adopt_reason_required', 'adopt requires a non-empty --reason');
+  adoptMergeSha(args);
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const boardPath = deps.boardPath || BOARD;
   const loadState = deps.readState || readState;
@@ -7146,7 +7153,9 @@ function readRestructureJournal(journalPath) {
   } catch (_) { return null; }
 }
 
-async function restructureCore(ctx, spec, d) {
+// The project directory, parent board and tasks directory a --spec names,
+// refused unless each exists and the board sits directly in the project.
+function restructureSpecTargets(spec) {
   const projectRoot = spec.project_root;
   if (!fs.existsSync(projectRoot) || !fs.statSync(projectRoot).isDirectory()) {
     throw new Error('restructure --spec project_root must be an existing project directory');
@@ -7158,6 +7167,11 @@ async function restructureCore(ctx, spec, d) {
   }
   const cardsRoot = path.join(projectRoot, 'tasks');
   if (!fs.existsSync(cardsRoot)) throw new Error('restructure requires <project_root>/tasks to exist');
+  return { projectRoot, boardPath, cardsRoot };
+}
+
+async function restructureCore(ctx, spec, d) {
+  const { projectRoot, boardPath, cardsRoot } = restructureSpecTargets(spec);
   const prefix = physicalProjectPrefix(cardsRoot).prefix;
   const parentRaw = fs.readFileSync(boardPath, 'utf8');
   const state = d.loadState(ctx);
@@ -7215,6 +7229,7 @@ async function commandRestructure(ctx, args, deps = {}) {
   if (typeof args.spec !== 'string' || !args.spec.trim()) throw new Error('restructure requires --spec <map.json>');
   const d = resolveRestructureDeps(ctx, deps);
   const spec = loadRestructureSpec(args.spec.trim());
+  restructureSpecTargets(spec);
   await vaultIndex.awaitWriteTurn();
   return d.transitionLock(ctx, 'selector', () => restructureCore(ctx, spec, d), { staleMs: RESTRUCTURE_STALE_MS });
 }
@@ -9149,6 +9164,12 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   if (args.apply === true && args['dry-run'] === true) throw new Error('reconcile-metadata accepts only one of --apply or --dry-run');
   if (args.apply === true && (typeof args.reason !== 'string' || !args.reason.trim())) {
     throw new Error('reconcile-metadata --apply requires non-empty --reason');
+  }
+  // A value that is not a lowercase 64-hex sha can never equal the card's
+  // sha256, which the apply below requires, so it is refused here, before
+  // the write turn, with that same message.
+  if (args.apply === true && !/^[0-9a-f]{64}$/.test(String(args['expected-card-sha256']))) {
+    throw new Error('reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run');
   }
   const loadState = deps.readState || readState;
   const persist = deps.writeState || writeState;

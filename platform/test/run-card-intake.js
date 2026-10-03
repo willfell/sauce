@@ -5,11 +5,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-// SYNC2D-HARNESS-ISOLATION. Every node child started with an argument array
-// gets a HOME inside the temp root unless its env already names one there, so
-// a child that resolves this repo's .loop/config.json binding, or the
-// coordinator's ~/obsidian fallbacks, finds its vaults under harnessHome and
-// never in a real vault. Each of those vaults gets a REST config naming a
+// SYNC2D-HARNESS-ISOLATION. Every child this process starts through
+// child_process gets a HOME inside the temp root unless its env already names
+// one there, when it is a node child (node, process.execPath or fork) or a
+// shell child (exec, execSync, or a shell option); other children, such as
+// git, keep the env they are given. So a child that resolves this repo's
+// .loop/config.json binding, or the coordinator's ~/obsidian fallbacks, finds
+// its vaults under harnessHome and never in a real vault. Each of those vaults gets a REST config naming a
 // closed port, so a child that takes a write turn there leaves
 // .sauce-obsidian-writes behind, and harnessIsolationProblems() lists it.
 const harnessTemp = fs.realpathSync(os.tmpdir());
@@ -32,14 +34,30 @@ for (const vault of harnessVaults) {
 (() => {
   const childProcess = require('child_process');
   const insideTemp = (dir) => typeof dir === 'string' && path.resolve(dir).startsWith(`${harnessTemp}${path.sep}`);
-  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync']) {
+  const pinned = (options) => {
+    const env = (options && options.env) || process.env;
+    return insideTemp(env.HOME) ? options : { ...(options || {}), env: { ...env, HOME: harnessHome } };
+  };
+  const isNode = (command) => command === process.execPath || command === 'node';
+  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork']) {
     const real = childProcess[name];
     childProcess[name] = function harnessPinnedHome(command, args, options, ...rest) {
-      if ((command !== process.execPath && command !== 'node') || !Array.isArray(args)) return real.call(this, command, args, options, ...rest);
+      if (!Array.isArray(args) && args !== undefined && typeof args !== 'function') {
+        rest.unshift(options);
+        options = args;
+        args = [];
+      }
       if (typeof options === 'function') { rest.unshift(options); options = undefined; }
-      const env = (options && options.env) || process.env;
-      if (insideTemp(env.HOME)) return real.call(this, command, args, options, ...rest);
-      return real.call(this, command, args, { ...(options || {}), env: { ...env, HOME: harnessHome } }, ...rest);
+      const pin = name === 'fork' || isNode(command) || Boolean(options && options.shell);
+      const effective = pin ? pinned(options) : options;
+      return real.call(this, command, args, ...(effective === undefined ? [] : [effective]), ...rest.filter((item) => item !== undefined));
+    };
+  }
+  for (const name of ['exec', 'execSync']) {
+    const real = childProcess[name];
+    childProcess[name] = function harnessPinnedHome(command, options, ...rest) {
+      if (typeof options === 'function') { rest.unshift(options); options = undefined; }
+      return real.call(this, command, pinned(options), ...rest);
     };
   }
 })();
