@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 3984;
+const ASSERTION_FLOOR = 4010;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -9729,6 +9729,64 @@ async function main() {
       `PH2-ROW-TAP-SELECTS: at ${width} a canvas tap after row taps restores the at-rest DOM`);
   }
 
+  // A row tap in each group does what a tap on its slice in the map does.
+  // With GraphInsights, the Frontier Groups rows GA-AG2 (Needs you), GA-AG6
+  // (Next up), GA-AG4 (In progress), GA-AG3 (Blocked), GA-AG7 (Ready), and
+  // GA-AG5 (Queued) each select their slice; without it, the Planned rows
+  // GA-AG7, GA-AG6, GA-AG3, and GA-AG5 each open their note.
+  // MUTATION GUARD: PH2C-MUTANT-NEEDS-YOU-ROWS-OPEN turns RED at
+  // "PH2C-GROUP-ROW-TAP-SELECTS: at 390 the Needs you row GA-AG2 ..." if the
+  // Needs you rows open their note instead of selecting.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-ROWS-OPEN turns RED at
+  // "PH2C-GROUP-ROW-TAP-SELECTS: at 390 the Next up row GA-AG6 ..." if the
+  // Next up row opens its note instead of selecting.
+  // MUTATION GUARD: PH2C-MUTANT-IN-PROGRESS-ROWS-OPEN turns RED at
+  // "PH2C-GROUP-ROW-TAP-SELECTS: at 390 the In progress row GA-AG4 ..." if
+  // the In progress rows open their note instead of selecting.
+  // MUTATION GUARD: PH2C-MUTANT-BLOCKED-ROWS-OPEN turns RED at
+  // "PH2C-GROUP-ROW-TAP-SELECTS: at 390 the Blocked row GA-AG3 ..." if the
+  // Blocked rows open their note instead of selecting.
+  // MUTATION GUARD: PH2C-MUTANT-READY-ROWS-OPEN turns RED at
+  // "PH2C-GROUP-ROW-TAP-SELECTS: at 390 the Ready row GA-AG7 ..." if the
+  // Ready rows open their note instead of selecting.
+  // MUTATION GUARD: PH2C-MUTANT-QUEUED-ROWS-OPEN turns RED at
+  // "PH2C-GROUP-ROW-TAP-SELECTS: at 390 the Queued row GA-AG5 ..." if the
+  // Queued rows open their note instead of selecting.
+  for (const width of [390, 1024]) {
+    const mapNode = width === 390 ? 'pill' : 'chip';
+    for (const [key, label, id] of [
+      ['needs-you', 'Needs you', 'GA-AG2'], ['next', 'Next up', 'GA-AG6'], ['in-progress', 'In progress', 'GA-AG4'],
+      ['blocked', 'Blocked', 'GA-AG3'], ['ready', 'Ready', 'GA-AG7'], ['queued', 'Queued', 'GA-AG5'],
+    ]) {
+      const env = ph2Track(ph2AgEnv());
+      const byRow = await ph2Draw(env, width);
+      const byMap = await ph2Draw(env, width);
+      const row = ph2RowFor(byRow, id);
+      const tap = bubblingClick(row);
+      bubblingClick(ph2MapNodeFor(byMap, id));
+      const panel = byClass(byRow, 'graph-view-detail-panel');
+      assert(row?.parent?.className === `graph-view-frontier-group frontier-${key}`
+        && tap.stopped && env.opened.length === 0 && panel.length === 1
+        && byClass(panel[0], 'graph-view-detail-id')[0]?.textContent === id
+        && JSON.stringify(domShape(byRow)) === JSON.stringify(domShape(byMap)),
+      `PH2C-GROUP-ROW-TAP-SELECTS: at ${width} the ${label} row ${id} sits under ${label}, and its tap stops there, opens nothing, and leaves the same DOM as a tap on its ${mapNode}`);
+    }
+    for (const card of ['GA-AG7 Docs', 'GA-AG6 Exporter', 'GA-AG3 Migration', 'GA-AG5 Backfill']) {
+      const id = card.split(' ')[0];
+      const env = ph2Track(ph2AgEnv());
+      const byRow = await ph2Draw(env, width, { insights: false });
+      const byMap = await ph2Draw(env, width, { insights: false });
+      const row = ph2RowFor(byRow, id);
+      bubblingClick(row);
+      const openedByRow = JSON.stringify(env.opened);
+      bubblingClick(ph2MapNodeFor(byMap, id));
+      const opened = [`${env.boardDir}/${card}`, env.epicPath, false];
+      assert(row?.parent?.className === 'graph-view-frontier-group frontier-planned'
+        && openedByRow === JSON.stringify([opened]) && JSON.stringify(env.opened) === JSON.stringify([opened, opened])
+        && JSON.stringify(domShape(byRow)) === JSON.stringify(domShape(byMap)),
+      `PH2C-GROUP-ROW-TAP-SELECTS: at ${width} with GraphInsights missing, the Planned row ${id}'s tap opens its note, as a tap on its ${mapNode} then does, and both leave the same DOM`);
+    }
+  }
   // ---- PH2-ROOT-CAUSE-BLOCK (FL3-ROOT-CAUSE-BLOCK) ----
   // MUTATION GUARD: PH2-MUTANT-ROOT-CAUSE-OPENS turns RED at
   // "PH2-ROOT-CAUSE-BLOCK: at 390 the GA-ML8 jump link ..." if the jump link
@@ -10071,6 +10129,70 @@ async function main() {
       strip?.textContent ?? null,
     ], [[[`${env.boardDir}/GA-PF2 Paint budget`, env.epicPath, false]], [4], '4 done · hide'],
     `PH2C-FAIL-SOFT-EXPANDED-ROW: at ${width} with GraphInsights missing, a tap on the expanded GA-PF2 row opens its note, and the four done rows stay expanded under 4 done · hide`);
+  }
+
+  // One Slice: an epic with one planning slice, GA-SO1.
+  // MUTATION GUARD: PH2C-MUTANT-LIST-NEEDS-TWO-NODES turns RED at
+  // "PH2C-ONE-SLICE: One Slice at 390 ..." if render() draws the list only
+  // when the map has more than one node.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('One Slice', [{ card: 'GA-SO1 Only', status: 'planning' }])), width);
+    assert.deepStrictEqual(ph2Read(root), {
+      groups: [['graph-view-frontier-group frontier-next', 'Next up 1', ['GA-SO1', 'planning', 'next', null]]],
+      shipped: [],
+      strip: [],
+    }, `PH2C-ONE-SLICE: One Slice at ${width}: the list is exactly Next up 1, with GA-SO1 badged next`);
+  }
+  // Behind Parked: GA-PB1 is parked, and GA-PB2 (parked) and GA-PB3 (in
+  // progress) both depend on it, so each has GA-PB1 as a root cause.
+  // MUTATION GUARD: PH2C-MUTANT-NEEDS-YOU-BLOCKED-WORDING turns RED at
+  // "PH2C-BEHIND-PARKED: Behind Parked at 390 ..." if a Needs you row with a
+  // root cause reads blocked by <root> instead of its resume condition.
+  // MUTATION GUARD: PH2C-MUTANT-IN-PROGRESS-BLOCKED-WORDING turns RED at the
+  // same label if an In progress row with a root cause reads blocked by
+  // <root>.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Behind Parked', [
+      { card: 'GA-PB1 Vendor', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-PB2 Legal', status: 'parked', depends_on: ['[[GA-PB1 Vendor]]'], resume_condition: 'Resume after legal review.' },
+      { card: 'GA-PB3 Build', status: 'in_progress', depends_on: ['[[GA-PB1 Vendor]]'] },
+    ])), width);
+    assert.deepStrictEqual(ph2Read(root), {
+      groups: [
+        ['graph-view-frontier-group frontier-needs-you', 'Needs you 2',
+          ['GA-PB1', '⚑ waiting', null, 'Resume after the vendor call.'],
+          ['GA-PB2', '⚑ waiting', null, 'Resume after legal review.']],
+        ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GA-PB3', 'in progress', null, null]],
+      ],
+      shipped: [],
+      strip: [],
+    }, `PH2C-BEHIND-PARKED: Behind Parked at ${width}: the list is exactly Needs you 2 (GA-PB1 and GA-PB2, each with its resume condition) and In progress 1 (GA-PB3 with no wait line)`);
+  }
+  // Three Waits: GA-TW4 is planned after GA-TW3 (blocked), GA-TW1 (in
+  // progress), and GA-TW2 (planning), listed in that order in its
+  // depends_on.
+  // MUTATION GUARD: PH2C-MUTANT-AFTER-FIRST-TWO turns RED at
+  // "PH2C-THREE-WAITS: Three Waits at 390 ..." if a Queued row names at most
+  // two prerequisites.
+  // MUTATION GUARD: PH2C-MUTANT-AFTER-SORTED turns RED at the same label if
+  // a Queued row sorts its prerequisites.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Three Waits', [
+      { card: 'GA-TW1 Zeta', status: 'in_progress' },
+      { card: 'GA-TW2 Alpha', status: 'planning' },
+      { card: 'GA-TW3 Mid', status: 'blocked' },
+      { card: 'GA-TW4 Join', status: 'planning', depends_on: ['[[GA-TW3 Mid]]', '[[GA-TW1 Zeta]]', '[[GA-TW2 Alpha]]'] },
+    ])), width);
+    assert.deepStrictEqual(ph2Read(root), {
+      groups: [
+        ['graph-view-frontier-group frontier-next', 'Next up 1', ['GA-TW2', 'planning', 'next', null]],
+        ['graph-view-frontier-group frontier-in-progress', 'In progress 1', ['GA-TW1', 'in progress', null, null]],
+        ['graph-view-frontier-group frontier-blocked', 'Blocked 1', ['GA-TW3', 'blocked', null, null]],
+        ['graph-view-frontier-group frontier-queued', 'Queued 1', ['GA-TW4', 'planning', null, 'after GA-TW3, GA-TW1, GA-TW2']],
+      ],
+      shipped: [],
+      strip: [],
+    }, `PH2C-THREE-WAITS: Three Waits at ${width}: the list is exactly Next up 1 (GA-TW2), In progress 1 (GA-TW1), Blocked 1 (GA-TW3), and Queued 1, whose GA-TW4 row reads after GA-TW3, GA-TW1, GA-TW2`);
   }
 
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
