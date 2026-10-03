@@ -1079,6 +1079,110 @@ s += ' && { class: "NoSuchComment" });';`,
     refs: [],
     failures: [unreadable(1, 'customjs-guard object has 2 class keys')],
   },
+  // MUTATION GUARD: exempting every placeholder class value from the CALL_OPEN check (!placeholder) turns RED
+  // MUTATION GUARD: checking CALL_OPEN only when no part is joined (!closed && exprs.length === 0) turns RED
+  {
+    label: 'a helper whose class value is its widget parameter, whose guard call is left open in its string and joined with +=, fails the gate',
+    source: String.raw`function block(widget) {
+  let s = 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" }';
+  s += ' && { class: "NoSuchOpenHelper" });';
+  return s;
+}
+block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, CALL_OPEN)],
+  },
+  // MUTATION GUARD: exempting every placeholder class value from the CALL_OPEN check (!placeholder) turns RED
+  // MUTATION GUARD: checking CALL_OPEN only when no part is joined (!closed && exprs.length === 0) turns RED
+  {
+    label: 'a helper whose class value is its widget parameter, whose guard call is left open in its string and joined with .concat, fails the gate',
+    source: String.raw`function block(widget) {
+  return ('await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" }').concat(' && { class: "NoSuchOpenConcat" });');
+}
+block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, CALL_OPEN)],
+  },
+  // MUTATION GUARD: exempting every placeholder class value from the CALL_OPEN check (!placeholder) turns RED
+  // MUTATION GUARD: checking CALL_OPEN only when no part is joined (!closed && exprs.length === 0) turns RED
+  {
+    label: "a helper whose class value is its widget parameter, whose guard call is left open in its string and joined with [...].join(''), fails the gate",
+    source: String.raw`function block(widget) {
+  return ['await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" }', ' && { class: "NoSuchOpenJoin" });'].join('');
+}
+block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, CALL_OPEN)],
+  },
+  // MUTATION GUARD: accepting ) only with no whitespace before it (/^\)/), or only after spaces (/^ *\)/), turns RED
+  {
+    label: 'a guard call whose ) follows a newline and two spaces after its object is read',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }\n  );';`,
+    refs: ['OperatorStation'],
+    failures: [],
+  },
+  // MUTATION GUARD: dropping the mixed-value exemption from the CALL_OPEN check, or keeping only its collision half, turns RED
+  {
+    label: 'a guard call whose class value joins name after Operator, and whose call is left open in its string and closed with +=, fails as a mixed value',
+    source: String.raw`const name = 'Station';
+let s = 'await dv.view("ranch/views/customjs-guard", { class: "Operator' + name + '" }';
+s += ');';`,
+    refs: [],
+    failures: [unreadable(2, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders')],
+  },
+  // MUTATION GUARD: keeping only the collision half of the CALL_SPLICE exemption turns RED
+  {
+    label: 'a guard object whose class value joins name after Operator and whose x value joins name fails as a mixed value',
+    source: String.raw`const name = 'Station';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "Operator' + name + '", x: "' + name + '" });';`,
+    refs: [],
+    failures: [unreadable(2, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders')],
+  },
+  // MUTATION GUARD: dropping the collision exemption from the CALL_OPEN check, or keeping only its mixed-value half, turns RED
+  {
+    label: 'a helper whose guard object has class "__sauceClassExpr0__" beside widget, and whose call is left open in its string and closed with +=, fails as a collision',
+    source: String.raw`function block(widget) {
+  let s = 'await dv.view("ranch/views/customjs-guard", { class: "__sauceClassExpr0__", x: "' + widget + '" }';
+  s += ');';
+  return s;
+}
+block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders')],
+  },
+  // MUTATION GUARD: exempting from CALL_CHAIN a part whose placeholder is contained in, not equal to, the text between the class value quotes turns RED
+  {
+    label: 'a helper whose class value is written as a backslash followed by widget fails the gate',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "\\' + widget + '" });';
+}
+block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: exempting template literal parts from the CALL_CHAIN check turns RED
+  {
+    label: 'a guard call whose object is followed in its + chain by the template `${t}` fails the gate',
+    source: "const t = 'x';\n"
+      + "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\" }' + `${t}` + ');';",
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: exempting member expression parts from the CALL_CHAIN check turns RED
+  {
+    label: 'a guard call whose object is followed in its + chain by o.tail fails the gate',
+    source: String.raw`const o = { tail: ' && { class: "NoSuchMemberTail" }' };
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + o.tail + ');';`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: parsing the call as a module (sourceType: 'module') in place of allowAwaitOutsideFunction turns RED
+  {
+    label: 'a class value written in the note text with the octal escape \\117peratorStation is read as OperatorStation',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "\\117peratorStation" });';`,
+    refs: ['OperatorStation'],
+    failures: [],
+  },
 ];
 
 const COORDINATOR_GATE_FIXTURES = [
