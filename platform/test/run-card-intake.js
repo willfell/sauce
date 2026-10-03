@@ -1137,7 +1137,7 @@ function sync2IntakeStubMain() {
           stalled = true;
           parentPort.postMessage({ type: 'stalling', at: Date.now() });
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, o.stallMs);
-          parentPort.postMessage({ type: 'resumed', at: Date.now() });
+          parentPort.postMessage({ type: 'resumed', at: Date.now(), marker: o.stallMarker ? fs.existsSync(o.stallMarker) : null });
         }
         if (o.putStatus) { answer(o.putStatus, json, JSON.stringify({ errorCode: o.putStatus * 100, message: `stub refused the write${echo}` })); return; }
         fs.mkdirSync(path.dirname(absOf(entry.rel)), { recursive: true });
@@ -1485,7 +1485,8 @@ function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(leas
     // before its lock, waits holding no lock, and read-modify-writes the board.
     {
       const coordinator = require('../../scripts/autoloop/codex-coordinator');
-      const raceFx = await fixture('reachable', { stallOnPut: 'spice/projects/demo-project/demo-project-board.md', stallMs: 2500 });
+      const verbRefused = path.join(root, 'd2-verb-refused');
+      const raceFx = await fixture('reachable', { stallOnPut: 'spice/projects/demo-project/demo-project-board.md', stallMs: 2500, stallMarker: verbRefused });
       const ctx = { stateDir: path.join(raceFx.base, 'state') };
       const railWrite = (file, text) => {
         vaultIndex.beforeNoteWrite();
@@ -1500,13 +1501,13 @@ function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(leas
       };
       let verbInside = false;
       let boardWhenRefused = null;
-      let stallOverAtRefusal = null;
       const verb = vaultIndex.withVaultIndex(raceFx.vault, () => coordinator.withLock(ctx, 'selector', async () => {
         verbInside = true;
         await until(() => raceFx.stub.events.some((event) => event.type === 'stalling'), 5000);
         await new Promise((resolve) => { setTimeout(resolve, 200); });
         try { rewriteBoard(); return { ok: true }; } catch (error) {
-          stallOverAtRefusal = raceFx.stub.events.some((event) => event.type === 'resumed');
+          fs.writeFileSync(`${verbRefused}.tmp`, 'refused\n');
+          fs.renameSync(`${verbRefused}.tmp`, verbRefused);
           boardWhenRefused = fs.readFileSync(raceFx.boardPath, 'utf8');
           return { ok: false, code: error.code, message: error.message };
         }
@@ -1527,8 +1528,8 @@ function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(leas
       const finalBoard = fs.readFileSync(raceFx.boardPath, 'utf8');
       const resumedAt = (raceFx.stub.events.find((event) => event.type === 'resumed') || {}).at;
       ok(raceFx.stub.events.some((event) => event.type === 'stalling'), 'SYNC2-TURN-INTAKE-RACE precondition: the stub stalled on a PUT of the parent board');
-      ok(firstAttempt.ok === false && firstAttempt.code === 'LOCKED' && stallOverAtRefusal === false && !boardWhenRefused.includes('[[Coordinator verb write]]'),
-        `SYNC2B-NO-WAIT-IN-LOCK D2: the verb inside its lock is refused the mint's turn during the stall and writes nothing (${firstAttempt.code})`);
+      ok(firstAttempt.ok === false && firstAttempt.code === 'LOCKED' && (raceFx.stub.events.find((event) => event.type === 'resumed') || {}).marker === true && !boardWhenRefused.includes('[[Coordinator verb write]]'),
+        `SYNC2B-NO-WAIT-IN-LOCK D2: the verb inside its lock is refused the mint's turn and writes nothing; the marker it publishes on refusal exists when the stub ends its stall (${firstAttempt.code})`);
       eq([finalBoard.includes('[[Coordinator verb write]]'), finalBoard.includes(`[[${epicTitle}]]`), mintRun.code],
         [true, true, 0], 'SYNC2-TURN-INTAKE-RACE D2: the parent board keeps both the verb\'s write and the mint after the stall');
       ok(resumedAt > 0 && verbWroteAt >= resumedAt,

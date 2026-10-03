@@ -14716,7 +14716,7 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
             res.on('finish', () => {
               parentPort.postMessage({ type: 'stalling', at: Date.now() });
               block(o.stallMs);
-              parentPort.postMessage({ type: 'resumed', at: Date.now() });
+              parentPort.postMessage({ type: 'resumed', at: Date.now(), marker: o.stallMarker ? fs.existsSync(o.stallMarker) : null });
             });
           }
           return;
@@ -15426,7 +15426,8 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, 'v0\n');
       const ctx = { stateDir: path.join(sync2Root, 'turn-nested-state') };
-      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir, stallMs: 2500 });
+      const b1Refused = path.join(sync2Root, 'd1-b1-refused');
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir, stallMs: 2500, stallMarker: b1Refused });
       await sync2RestConfig(vault, stub.port);
       const append = (line) => { vaultIndex.beforeNoteRewrite(); sync2RailWrite(file, `${fs.readFileSync(file, 'utf8')}${line}`); };
       const a = vaultIndex.withVaultIndex(vault, async () => coordinator.withLock(ctx, 'gates-x', async () => {
@@ -15439,7 +15440,8 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
         await coordinator.withLock(ctx, 'completion-projection', async () => { append('B1\n'); });
         return { ok: true };
       })).then(() => ({ code: 'ok' }), (error) => ({ code: error.code, message: error.message }));
-      const stallOverAtB1 = stub.events.some((event) => event.type === 'resumed');
+      fs.writeFileSync(`${b1Refused}.tmp`, 'returned\n');
+      fs.renameSync(`${b1Refused}.tmp`, b1Refused);
       const afterB1 = fs.readFileSync(file, 'utf8');
       const locksAfterB1 = fs.readdirSync(path.join(ctx.stateDir, 'locks')).filter((name) => name.endsWith('.lock'));
       let b2WroteAt = 0;
@@ -15455,8 +15457,9 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       await stub.settled();
       const resumedAt = (stub.events.find((event) => event.type === 'resumed') || {}).at;
       ok(stub.events.some((event) => event.type === 'stalling'), 'SYNC2-TURN-NESTED-LOCKS precondition: the stub stalled on A\'s PUT');
-      ok(b1.code === 'LOCKED' && /vault-write-turn/.test(b1.message) && !stallOverAtB1 && afterB1 === 'v0\nA\n' && locksAfterB1.length === 0,
-        `SYNC2B-NO-WAIT-IN-LOCK D1: B1, inside its locks, is refused the held turn while A's PUT is still stalled, and writes nothing (${b1.code})`);
+      const resumedEvent = stub.events.find((event) => event.type === 'resumed') || {};
+      ok(b1.code === 'LOCKED' && /vault-write-turn/.test(b1.message) && resumedEvent.marker === true && afterB1 === 'v0\nA\n' && locksAfterB1.length === 0,
+        `SYNC2B-NO-WAIT-IN-LOCK D1: B1, inside its locks, is refused the held turn, and writes nothing; the marker it publishes on returning exists when the stub ends the stall of A's PUT (${b1.code}, marker ${resumedEvent.marker})`);
       ok(resumedAt > 0 && b2WroteAt >= resumedAt,
         'SYNC2-TURN-NESTED-LOCKS D1: B2 writes the board only after the stub handled A\'s stalled PUT');
       eq(fs.readFileSync(file, 'utf8'), 'v0\nA\nB\n',
@@ -16666,27 +16669,32 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       eq(runs.find((entry) => entry.name === 'claim').run.receipt.no_op, true, 'SYNC2C-DRY-RUN-AND-PROSE precondition: claim --dry-run is the selector preview');
     }
 
-    // SYNC2D-READ-ONLY-TURN-FREE: read-only verbs and modes not covered by
-    // SYNC2C-DRY-RUN-AND-PROSE take no turn. Each run below has a live holder
-    // of its own, which keeps the turn until its release file, written after
-    // the run returned, exists or its 30s timer fires, so a run that waited
-    // for the turn forces a release by the timer. A1 is moved to deployed so
-    // that reconcile-metadata --dry-run plans it. recover-deployed --dry-run
-    // is not run: it reads its evidence from GitHub.
+    // SYNC2D-READ-ONLY-TURN-FREE: the coordinator verbs and modes that write
+    // no note, and are not run by SYNC2C-DRY-RUN-AND-PROSE, take no turn. Each
+    // run below has a live holder of its own, which keeps the turn until its
+    // release file, written after the run returned, exists or its 30s timer
+    // fires, so a run that waited for the turn forces a release by the timer.
+    // A fake gh that always fails is first on PATH, so record-pr reaches no
+    // GitHub. Three runs are refused in this fixture, each after running its
+    // path up to that refusal: record-pr when gh fails, recover-deployed
+    // --dry-run because A1 is not a supervised_only card, and the parked
+    // rebind --apply because its --spec does not exist.
+    // A1 is moved to deployed before reconcile-metadata --dry-run, so that it
+    // plans A1, and break-lease runs last. verify-gates is not run here:
+    // SYNC2B-TURN-ONLY-FOR-NOTE-WRITES runs it with its preflights.
     {
       const fx = sync2CliFixture('read-only-turn-free');
+      const bin = path.join(fx.base, 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      fx.env.PATH = `${bin}${path.delimiter}${fx.env.PATH}`;
       const claim = await sync2Cli(fx, ['claim', '--json']);
       eq(claim.code, 0, `SYNC2D-READ-ONLY-TURN-FREE precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
-      sync2cPatchLedger(fx, { phase: 'deployed' });
+      const worktreeHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sync2cLedger(fx).worktree, encoding: 'utf8' }).trim();
       await sync2RestConfig(fx.vault, await sync2ClosedPort());
       const auditScript = path.join(__dirname, '../../scripts/autoloop/audit-delivery.js');
-      for (const [label, args, script] of [
-        ['status', ['status', '--json']],
-        ['board-health without --write-note', ['board-health', '--json']],
-        ['supersession-depth', ['supersession-depth', '--json', '--card', SYNC2_CARD]],
-        ['reconcile-metadata --dry-run', ['reconcile-metadata', '--json', '--card', SYNC2_CARD, '--dry-run']],
-        ['audit-delivery without --repair', ['--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath], auditScript],
-      ]) {
+      const token = sync2LeaseToken(claim);
+      const turnFree = async (label, args, script) => {
         const releaseFile = path.join(fx.base, `release-${label.replace(/[^a-z]+/g, '-')}`);
         const holder = await sync2Holder(fx.vault, 30000, '', releaseFile);
         const run = await sync2Cli(fx, args, script ? { script } : {});
@@ -16695,7 +16703,21 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
         await holder.closed;
         eq([run.code !== null && !/LOCKED/.test(run.stderr), owner && owner.token, await holder.releasedBy], [true, 'holder', 'file'],
           `SYNC2D-READ-ONLY-TURN-FREE ${label} returns while a live holder still holds the turn, which the holder then releases by its release file — exit ${run.code} ${run.stderr.slice(0, 160)}`);
-      }
+        return run;
+      };
+      await turnFree('status', ['status', '--json']);
+      await turnFree('board-health without --write-note', ['board-health', '--json']);
+      await turnFree('supersession-depth', ['supersession-depth', '--json', '--card', SYNC2_CARD]);
+      await turnFree('recover', ['recover']);
+      await turnFree('record-review', ['record-review', '--json', '--card', SYNC2_CARD, '--lens', 'correctness', '--verdict', 'pass',
+        '--summary', 'A sufficiently specific exact-head correctness summary for this fixture.', '--expected-head', worktreeHead, '--lease-token', token]);
+      await turnFree('record-pr', ['record-pr', '--json', '--card', SYNC2_CARD, '--pr', '7', '--lease-token', token]);
+      await turnFree('recover-deployed --dry-run', ['recover-deployed', '--json', '--card', SYNC2_CARD, '--reason', 'sync2d', '--dry-run']);
+      await turnFree('the parked rebind --apply', ['reconcile-metadata', '--parked-rebind', '--json', '--apply', '--reason', 'sync2d', '--spec', path.join(fx.base, 'absent.json')]);
+      await turnFree('audit-delivery without --repair', ['--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath], auditScript);
+      sync2cPatchLedger(fx, { phase: 'deployed' });
+      await turnFree('reconcile-metadata --dry-run', ['reconcile-metadata', '--json', '--card', SYNC2_CARD, '--dry-run']);
+      await turnFree('break-lease', ['break-lease', '--json', '--card', SYNC2_CARD, '--reason', 'sync2d']);
     }
 
     // SYNC2D-USAGE-BEFORE-TURN: a usage refusal behind a live turn holder exits
