@@ -7,11 +7,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { AsyncLocalStorage, createHook } = require('async_hooks');
-// SYNC2D-HARNESS-ISOLATION. Every node child started with an argument array
-// gets a HOME inside the temp root unless its env already names one there, so
-// a child that resolves this repo's .loop/config.json binding, or the
-// coordinator's ~/obsidian fallbacks, finds its vaults under harnessHome and
-// never in a real vault. Each of those vaults gets a REST config naming a
+// SYNC2D-HARNESS-ISOLATION. Every child this process starts through
+// child_process gets a HOME inside the temp root unless its env already names
+// one there, when it is a node child (node, process.execPath or fork) or a
+// shell child (exec, execSync, or a shell option); other children, such as
+// git, keep the env they are given. So a child that resolves this repo's
+// .loop/config.json binding, or the coordinator's ~/obsidian fallbacks, finds
+// its vaults under harnessHome and never in a real vault. Each of those vaults gets a REST config naming a
 // closed port, so a child that takes a write turn there leaves
 // .sauce-obsidian-writes behind, and harnessIsolationProblems() lists it.
 const harnessTemp = fs.realpathSync(os.tmpdir());
@@ -34,14 +36,30 @@ for (const vault of harnessVaults) {
 (() => {
   const childProcess = require('child_process');
   const insideTemp = (dir) => typeof dir === 'string' && path.resolve(dir).startsWith(`${harnessTemp}${path.sep}`);
-  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync']) {
+  const pinned = (options) => {
+    const env = (options && options.env) || process.env;
+    return insideTemp(env.HOME) ? options : { ...(options || {}), env: { ...env, HOME: harnessHome } };
+  };
+  const isNode = (command) => command === process.execPath || command === 'node';
+  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork']) {
     const real = childProcess[name];
     childProcess[name] = function harnessPinnedHome(command, args, options, ...rest) {
-      if ((command !== process.execPath && command !== 'node') || !Array.isArray(args)) return real.call(this, command, args, options, ...rest);
+      if (!Array.isArray(args) && args !== undefined && typeof args !== 'function') {
+        rest.unshift(options);
+        options = args;
+        args = [];
+      }
       if (typeof options === 'function') { rest.unshift(options); options = undefined; }
-      const env = (options && options.env) || process.env;
-      if (insideTemp(env.HOME)) return real.call(this, command, args, options, ...rest);
-      return real.call(this, command, args, { ...(options || {}), env: { ...env, HOME: harnessHome } }, ...rest);
+      const pin = name === 'fork' || isNode(command) || Boolean(options && options.shell);
+      const effective = pin ? pinned(options) : options;
+      return real.call(this, command, args, ...(effective === undefined ? [] : [effective]), ...rest.filter((item) => item !== undefined));
+    };
+  }
+  for (const name of ['exec', 'execSync']) {
+    const real = childProcess[name];
+    childProcess[name] = function harnessPinnedHome(command, options, ...rest) {
+      if (typeof options === 'function') { rest.unshift(options); options = undefined; }
+      return real.call(this, command, pinned(options), ...rest);
     };
   }
 })();
@@ -16852,6 +16870,31 @@ Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null
         'SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: a dry run leaves a marker its step did not set, and writes no projection');
     }
 
+    // origin/main's coordinator for the SYNC2D comparisons: the merge base of
+    // HEAD and origin/main, extracted once with git archive. It is null, with
+    // the reason in sync2dMainSkip, when git does not find that merge base or
+    // the merge base already has vault-index.js.
+    let sync2dMainSkip = null;
+    let sync2dMainTreeDir;
+    const sync2dMainTree = () => {
+      if (sync2dMainTreeDir !== undefined) return sync2dMainTreeDir;
+      const repoRoot = path.join(__dirname, '../..');
+      const git = (args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      let mainRev = null;
+      try { mainRev = git(['merge-base', 'HEAD', 'origin/main']); } catch (_) { sync2dMainSkip = 'git merge-base HEAD origin/main failed in this checkout'; }
+      if (mainRev) {
+        try { git(['cat-file', '-e', `${mainRev}:scripts/autoloop/vault-index.js`]); sync2dMainSkip = `origin/main ${mainRev.slice(0, 12)} already has vault-index.js`; } catch (_) { /* main predates vault-index */ }
+      }
+      if (sync2dMainSkip) { sync2dMainTreeDir = null; return null; }
+      const mainTree = path.join(sync2Root, 'main-tree');
+      const tarball = path.join(sync2Root, 'main-tree.tar');
+      fs.mkdirSync(mainTree, { recursive: true });
+      git(['archive', '-o', tarball, mainRev, 'scripts', 'platform/mechanisms']);
+      execFileSync('tar', ['-xf', tarball, '-C', mainTree], { stdio: 'pipe' });
+      sync2dMainTreeDir = mainTree;
+      return mainTree;
+    };
+
     // SYNC2D-NO-REST-MATCHES-MAIN: without REST config, the scenarios below
     // run here as they do on origin/main's own coordinator. Main is the merge
     // base of HEAD and origin/main, extracted with git archive. The comparison
@@ -16872,20 +16915,9 @@ Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null
     // sha256 of that card's note on disk.
     {
       const repoRoot = path.join(__dirname, '../..');
-      const git = (args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      let mainRev = null;
-      let skip = null;
-      try { mainRev = git(['merge-base', 'HEAD', 'origin/main']); } catch (_) { skip = 'git merge-base HEAD origin/main failed in this checkout'; }
-      if (mainRev) {
-        try { git(['cat-file', '-e', `${mainRev}:scripts/autoloop/vault-index.js`]); skip = `origin/main ${mainRev.slice(0, 12)} already has vault-index.js`; } catch (_) { /* main predates vault-index */ }
-      }
-      if (skip) console.log(`SYNC2D-NO-REST-MATCHES-MAIN skipped: ${skip}`);
+      const mainTree = sync2dMainTree();
+      if (!mainTree) console.log(`SYNC2D-NO-REST-MATCHES-MAIN skipped: ${sync2dMainSkip}`);
       else {
-        const mainTree = path.join(sync2Root, 'main-tree');
-        const tarball = path.join(sync2Root, 'main-tree.tar');
-        fs.mkdirSync(mainTree, { recursive: true });
-        git(['archive', '-o', tarball, mainRev, 'scripts', 'platform/mechanisms']);
-        execFileSync('tar', ['-xf', tarball, '-C', mainTree], { stdio: 'pipe' });
         const trees = { main: mainTree, head: repoRoot };
         const SYNC2D_TIME_FIELDS = ['projection_reconciled_at', 'at', 'status_changed_at', 'updated_at'];
         const cli = (tree) => (fx, args) => sync2Cli(fx, args, { frozen: true, script: path.join(trees[tree], 'scripts/autoloop/codex-coordinator.js') });
@@ -16971,6 +17003,266 @@ Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null
           });
         }
         eq(compared, expected, 'SYNC2D-NO-REST-MATCHES-MAIN precondition: every scenario step was compared');
+      }
+    }
+
+    // SYNC2D-USAGE-SWEEP: usage and argument refusals of the coordinator verbs
+    // that take the write turn (claim and reconcile have none). Each case
+    // runs once against this tree in a vault with a REST config while a live
+    // holder of its own keeps the turn, and must give the exit code and
+    // stderr pinned in SYNC2D_SWEEP_PINS, which were captured from origin/main's
+    // coordinator. When sync2dMainTree() finds that coordinator, each case
+    // also runs there and must give its pin. Each holder releases the turn by
+    // its release file, written after its case returned, or by its 20s
+    // timer, so a case that waited for the turn forces a release by the
+    // timer. The fixture has A1 claimed and moved to deployed, and A2's note
+    // marked completed, so the adopt and reconcile-metadata --apply cases
+    // reach the checks that need that state on origin/main.
+    {
+      const A1 = SYNC2_CARD;
+      const A2 = SYNC2_SIBLING;
+      const sha = 'a'.repeat(40);
+      const SYNC2D_SWEEP_CASES = [
+        ['backfill-ratifications without --json', () => ['backfill-ratifications']],
+        ['backfill-ratifications with an unknown option', () => ['backfill-ratifications', '--json', '--bogus']],
+        ['backfill-ratifications with an extra positional', () => ['backfill-ratifications', 'extra', '--json']],
+        ['consume-ratification without --json', () => ['consume-ratification', '--card', A1]],
+        ['consume-ratification with an unknown option', () => ['consume-ratification', '--json', '--card', A1, '--bogus']],
+        ['consume-ratification with an extra positional', () => ['consume-ratification', 'extra', '--json', '--card', A1]],
+        ['consume-ratification without --card', () => ['consume-ratification', '--json']],
+        ['consume-ratification with a non-canonical --card', () => ['consume-ratification', '--json', '--card', `[[${A1}]]`]],
+        ['consume-ratification with an --artifact outside the vault', () => ['consume-ratification', '--json', '--card', A1, '--artifact', '../escape.md']],
+        ['consume-ratification with a non-Markdown --artifact', () => ['consume-ratification', '--json', '--card', A1, '--artifact', 'note.txt']],
+        ['consume-ratification with an --artifact outside the ratifications directory', () => ['consume-ratification', '--json', '--card', A1, '--artifact', 'missing.md']],
+        ['amend-contract with an unknown option', () => ['amend-contract', '--json', '--bogus']],
+        ['amend-contract with an extra positional', () => ['amend-contract', 'extra', '--json']],
+        ['amend-contract without --card', () => ['amend-contract', '--json']],
+        ['amend-contract with a malformed --expected-head', () => ['amend-contract', '--json', '--card', A1, '--expected-head', 'abc']],
+        ['amend-contract with a malformed --expected-origin-main', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', 'abc']],
+        ['amend-contract without --reason', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha]],
+        ['amend-contract with an empty --add-touch-zone', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--add-touch-zone', '']],
+        ['amend-contract with a malformed --expected-deployment', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--expected-deployment', 'garbage']],
+        ['amend-contract with a malformed --desired-deployment', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--desired-deployment', 'garbage']],
+        ['amend-contract with a malformed --desired-batch-policy', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--desired-batch-policy', 'bogus']],
+        ['park without --json', () => ['park', '--card', A1, '--depends-on', A2, '--resume-condition', 'c']],
+        ['park with an unknown option', () => ['park', '--json', '--card', A1, '--bogus']],
+        ['park without --card', () => ['park', '--json', '--depends-on', A2, '--resume-condition', 'c']],
+        ['park without --depends-on', () => ['park', '--json', '--card', A1, '--resume-condition', 'c']],
+        ['park without --resume-condition', () => ['park', '--json', '--card', A1, '--depends-on', A2]],
+        ['park depending on itself', () => ['park', '--json', '--card', A1, '--depends-on', A1, '--resume-condition', 'c']],
+        ['amend-park without --json', () => ['amend-park', '--card', A1]],
+        ['amend-park with an unknown option', () => ['amend-park', '--json', '--card', A1, '--bogus']],
+        ['amend-park without --card', () => ['amend-park', '--json']],
+        ['amend-park with a malformed --expected-head', () => ['amend-park', '--json', '--card', A1, '--expected-head', 'abc']],
+        ['amend-park without --reason', () => ['amend-park', '--json', '--card', A1, '--expected-head', sha]],
+        ['amend-park with neither --clear-dependencies nor --depends-on', () => ['amend-park', '--json', '--card', A1, '--expected-head', sha, '--reason', 'r']],
+        ['amend-park depending on itself', () => ['amend-park', '--json', '--card', A1, '--expected-head', sha, '--reason', 'r', '--depends-on', A1]],
+        ['resume without --json', () => ['resume', '--card', A1]],
+        ['resume with an unknown option', () => ['resume', '--json', '--card', A1, '--bogus']],
+        ['resume without --card', () => ['resume', '--json']],
+        ['heal-epic-bindings without --json', () => ['heal-epic-bindings', '--apply']],
+        ['heal-epic-bindings with an unknown option', () => ['heal-epic-bindings', '--json', '--apply', '--bogus']],
+        ['heal-epic-bindings with both --apply and --dry-run', () => ['heal-epic-bindings', '--json', '--apply', '--dry-run']],
+        ['heal-epic-bindings with neither --apply nor --dry-run', () => ['heal-epic-bindings', '--json']],
+        ['adopt without --json', () => ['adopt', '--card', A2, '--pr', '7', '--reason', 'r', '--merge-sha', sha]],
+        ['adopt with an unknown option', () => ['adopt', '--json', '--card', A2, '--bogus']],
+        ['adopt without --pr', () => ['adopt', '--json', '--card', A2, '--reason', 'r', '--merge-sha', sha]],
+        ['adopt with a non-numeric --pr', () => ['adopt', '--json', '--card', A2, '--pr', 'x', '--reason', 'r', '--merge-sha', sha]],
+        ['adopt without --reason', () => ['adopt', '--json', '--card', A2, '--pr', '7', '--merge-sha', sha]],
+        ['adopt without --merge-sha', () => ['adopt', '--json', '--card', A2, '--pr', '7', '--reason', 'r']],
+        ['adopt with a malformed --merge-sha', () => ['adopt', '--json', '--card', A2, '--pr', '7', '--reason', 'r', '--merge-sha', 'abc']],
+        ['board-health --write-note without --json', () => ['board-health', '--write-note']],
+        ['board-health --write-note with an unknown option', () => ['board-health', '--json', '--write-note', '--bogus']],
+        ['discard without --json', () => ['discard', '--card', A2, '--reason', 'r']],
+        ['discard without --card', () => ['discard', '--json', '--reason', 'r']],
+        ['discard without --reason', () => ['discard', '--json', '--card', A2]],
+        ['discard with an empty --carried-fixture', () => ['discard', '--json', '--card', A2, '--reason', 'r', '--carried-fixture', '']],
+        ['reap without --json', () => ['reap']],
+        ['reap with an empty --also', () => ['reap', '--json', '--also', '']],
+        ['restructure without --json', (fx) => ['restructure', '--spec', path.join(fx.base, 'targets.json')]],
+        ['restructure without --spec', () => ['restructure', '--json']],
+        ['restructure with a --spec that does not exist', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'absent.json')]],
+        ['restructure with a --spec that is not JSON', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'bad.json')]],
+        ['restructure with a --spec without epics', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'no-epics.json')]],
+        ['restructure with a --spec whose project_root does not exist', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'targets.json')]],
+        ['cutover without --json', () => ['cutover', '--chain-prefix', 'A']],
+        ['cutover --off without --reason', () => ['cutover', '--json', '--off']],
+        ['cutover --off with --require-card', () => ['cutover', '--json', '--off', '--reason', 'r', '--require-card', A1]],
+        ['cutover with an empty --require-card', () => ['cutover', '--json', '--require-card', '']],
+        ['cutover with an empty --chain-prefix', () => ['cutover', '--json', '--chain-prefix', '']],
+        ['cutover without a chain declaration', () => ['cutover', '--json']],
+        ['recover-deployed without --card', () => ['recover-deployed', '--json', '--reason', 'r', '--apply']],
+        ['recover-deployed without --reason', () => ['recover-deployed', '--json', '--card', A1, '--apply']],
+        ['recover-deployed with both --apply and --dry-run', () => ['recover-deployed', '--json', '--card', A1, '--reason', 'r', '--apply', '--dry-run']],
+        ['the contract-frontmatter restamp with an unknown option', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--apply', '--bogus']],
+        ['the contract-frontmatter restamp without --json', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--apply']],
+        ['the contract-frontmatter restamp without --reason', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--apply']],
+        ['the contract-frontmatter restamp with neither --apply nor --dry-run', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r']],
+        ['the contract-frontmatter restamp --apply without --spec', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply']],
+        ['the contract-frontmatter restamp --dry-run with --spec', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--dry-run', '--spec', path.join(fx.base, 'bad.json')]],
+        ['the contract-frontmatter restamp --apply with a --spec that does not exist', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply', '--spec', path.join(fx.base, 'absent.json')]],
+        ['the contract-frontmatter restamp --apply with a --spec that is not JSON', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply', '--spec', path.join(fx.base, 'bad.json')]],
+        ['the contract-frontmatter restamp --apply with a --spec of the wrong shape', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply', '--spec', path.join(fx.base, 'no-epics.json')]],
+        ['reconcile-metadata without --card', () => ['reconcile-metadata', '--json', '--apply', '--reason', 'r']],
+        ['reconcile-metadata with both --apply and --dry-run', () => ['reconcile-metadata', '--json', '--card', A1, '--apply', '--dry-run']],
+        ['reconcile-metadata --apply without --reason', () => ['reconcile-metadata', '--json', '--card', A1, '--apply']],
+        ['reconcile-metadata --apply without --expected-card-sha256', () => ['reconcile-metadata', '--json', '--card', A1, '--apply', '--reason', 'r']],
+        ['reconcile-metadata --apply with a malformed --expected-card-sha256', () => ['reconcile-metadata', '--json', '--card', A1, '--apply', '--reason', 'r', '--expected-card-sha256', 'abc']],
+        ['reconcile-dependencies without --json', () => ['reconcile-dependencies', '--all', '--reason', 'r', '--apply']],
+        ['reconcile-dependencies with neither --card nor --all', () => ['reconcile-dependencies', '--json', '--reason', 'r', '--apply']],
+        ['reconcile-dependencies with both --card and --all', () => ['reconcile-dependencies', '--json', '--card', A1, '--all', '--reason', 'r', '--apply']],
+        ['reconcile-dependencies without --reason', () => ['reconcile-dependencies', '--json', '--all', '--apply']],
+        ['reconcile-dependencies with --to but no --clear', () => ['reconcile-dependencies', '--json', '--all', '--reason', 'r', '--apply', '--to', A2]],
+        ['advance without --card', () => ['advance']],
+        ['deploy without --card', () => ['deploy']],
+      ];
+      const SYNC2D_SWEEP_PINS = {
+        "backfill-ratifications without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"backfill-ratifications requires --json for a machine-readable receipt\"}\n"],
+        "backfill-ratifications with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"backfill-ratifications received unsupported option --bogus\"}\n"],
+        "backfill-ratifications with an extra positional": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"backfill-ratifications requires the exact command verb\"}\n"],
+        "consume-ratification without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires --json for a machine-readable receipt\"}\n"],
+        "consume-ratification with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification received unsupported option --bogus\"}\n"],
+        "consume-ratification with an extra positional": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires the exact command verb\"}\n"],
+        "consume-ratification without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires one exact canonical --card identity\"}\n"],
+        "consume-ratification with a non-canonical --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires one exact canonical --card identity\"}\n"],
+        "consume-ratification with an --artifact outside the vault": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification artifact must be a canonical vault-relative Markdown path\"}\n"],
+        "consume-ratification with a non-Markdown --artifact": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification artifact must be a canonical vault-relative Markdown path\"}\n"],
+        "consume-ratification with an --artifact outside the ratifications directory": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification artifact must stay inside the project ratifications directory\"}\n"],
+        "amend-contract with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract refuses unsupported option --bogus\"}\n"],
+        "amend-contract with an extra positional": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract refuses unexpected positional arguments\"}\n"],
+        "amend-contract without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires an exact --card\"}\n"],
+        "amend-contract with a malformed --expected-head": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires a 40-character --expected-head SHA\"}\n"],
+        "amend-contract with a malformed --expected-origin-main": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires a 40-character --expected-origin-main SHA\"}\n"],
+        "amend-contract without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires a non-empty --reason\"}\n"],
+        "amend-contract with an empty --add-touch-zone": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract refuses unexpected positional arguments\"}\n"],
+        "amend-contract with a malformed --expected-deployment": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--expected-deployment must be valid JSON: <JSON.parse message>\"}\n"],
+        "amend-contract with a malformed --desired-deployment": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires --expected-deployment\"}\n"],
+        "amend-contract with a malformed --desired-batch-policy": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires --expected-deployment\"}\n"],
+        "park without --json": [1, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"park requires --json for a machine-readable receipt\"}\n"],
+        "park with an unknown option": [1, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"park does not accept --bogus\"}\n"],
+        "park without --card": [2, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"park requires --card\"}\n"],
+        "park without --depends-on": [2, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"park requires one or more --depends-on prerequisite cards\"}\n"],
+        "park without --resume-condition": [2, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"park requires a non-empty --resume-condition\"}\n"],
+        "park depending on itself": [1, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"self_dependency\",\"message\":\"A1 First slice cannot depend on itself\"}\n"],
+        "amend-park without --json": [1, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"amend-park requires --json for a machine-readable receipt\"}\n"],
+        "amend-park with an unknown option": [1, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"amend-park does not accept --bogus\"}\n"],
+        "amend-park without --card": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires --card\"}\n"],
+        "amend-park with a malformed --expected-head": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires --expected-head as one exact lowercase 40-hex SHA of the preserved worktree HEAD\"}\n"],
+        "amend-park without --reason": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires a non-empty audit --reason\"}\n"],
+        "amend-park with neither --clear-dependencies nor --depends-on": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires exactly one of --clear-dependencies or one-or-more --depends-on\"}\n"],
+        "amend-park depending on itself": [1, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"self_dependency\",\"message\":\"A1 First slice cannot depend on itself\"}\n"],
+        "resume without --json": [1, "{\"action\":\"resume-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"resume requires --json for a machine-readable receipt\"}\n"],
+        "resume with an unknown option": [1, "{\"action\":\"resume-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"resume does not accept --bogus\"}\n"],
+        "resume without --card": [2, "{\"action\":\"resume-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"resume requires --card\"}\n"],
+        "heal-epic-bindings without --json": [1, "{\"action\":\"heal-epic-bindings-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"heal-epic-bindings requires --json for a machine-readable receipt\"}\n"],
+        "heal-epic-bindings with an unknown option": [1, "{\"action\":\"heal-epic-bindings-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"heal-epic-bindings does not accept --bogus\"}\n"],
+        "heal-epic-bindings with both --apply and --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"heal-epic-bindings requires exactly one of --apply or --dry-run\"}\n"],
+        "heal-epic-bindings with neither --apply nor --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"heal-epic-bindings requires exactly one of --apply or --dry-run\"}\n"],
+        "adopt without --json": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"adopt requires --json for a machine-readable receipt\"}\n"],
+        "adopt with an unknown option": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"adopt does not accept --bogus\"}\n"],
+        "adopt without --pr": [2, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"adopt requires --card and numeric --pr\"}\n"],
+        "adopt with a non-numeric --pr": [2, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"adopt requires --card and numeric --pr\"}\n"],
+        "adopt without --reason": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"adopt_reason_required\",\"message\":\"adopt requires a non-empty --reason\"}\n"],
+        "adopt without --merge-sha": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"adopt_sha_unreachable\",\"message\":\"--merge-sha must be a 40-hex commit sha (got \\\"undefined\\\")\"}\n"],
+        "adopt with a malformed --merge-sha": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"adopt_sha_unreachable\",\"message\":\"--merge-sha must be a 40-hex commit sha (got \\\"abc\\\")\"}\n"],
+        "board-health --write-note without --json": [1, "{\"action\":\"board-health-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"board-health requires --json for a machine-readable receipt\"}\n"],
+        "board-health --write-note with an unknown option": [1, "{\"action\":\"board-health-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"board-health does not accept --bogus\"}\n"],
+        "discard without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"discard requires --json for a machine-readable receipt\"}\n"],
+        "discard without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"discard requires --card\"}\n"],
+        "discard without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"discard requires a non-empty --reason\"}\n"],
+        "discard with an empty --carried-fixture": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--carried-fixture values must be non-empty strings\"}\n"],
+        "reap without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reap requires --json for a machine-readable receipt\"}\n"],
+        "reap with an empty --also": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--also values must be non-empty card names\"}\n"],
+        "restructure without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure requires --json for a machine-readable receipt\"}\n"],
+        "restructure without --spec": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure requires --spec <map.json>\"}\n"],
+        "restructure with a --spec that does not exist": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure cannot read --spec: ENOENT: no such file or directory, open '<base>/absent.json'\"}\n"],
+        "restructure with a --spec that is not JSON": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure --spec must be valid JSON: <JSON.parse message>\"}\n"],
+        "restructure with a --spec without epics": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure --spec requires a non-empty epics array\"}\n"],
+        "restructure with a --spec whose project_root does not exist": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure --spec project_root must be an existing project directory\"}\n"],
+        "cutover without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover requires --json for a machine-readable receipt\"}\n"],
+        "cutover --off without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover --off requires a non-empty --reason\"}\n"],
+        "cutover --off with --require-card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover --off never evaluates criteria; drop --require-card/--chain-prefix\"}\n"],
+        "cutover with an empty --require-card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--require-card values must be non-empty card names\"}\n"],
+        "cutover with an empty --chain-prefix": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--chain-prefix requires a non-empty id-token prefix\"}\n"],
+        "cutover without a chain declaration": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover requires an explicit chain declaration: repeatable --require-card <exact name> and/or --chain-prefix <prefix>\"}\n"],
+        "recover-deployed without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"recover-deployed requires exact --card\"}\n"],
+        "recover-deployed without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"recover-deployed requires non-empty --reason\"}\n"],
+        "recover-deployed with both --apply and --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"recover-deployed accepts only one of --apply or --dry-run\"}\n"],
+        "the contract-frontmatter restamp with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp refuses unsupported --bogus operand\"}\n"],
+        "the contract-frontmatter restamp without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp requires literal --contract-frontmatter-restamp and --json\"}\n"],
+        "the contract-frontmatter restamp without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp requires non-empty --reason\"}\n"],
+        "the contract-frontmatter restamp with neither --apply nor --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp requires exactly one of --apply or --dry-run\"}\n"],
+        "the contract-frontmatter restamp --apply without --spec": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp accepts --spec only with --apply\"}\n"],
+        "the contract-frontmatter restamp --dry-run with --spec": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp accepts --spec only with --apply\"}\n"],
+        "the contract-frontmatter restamp --apply with a --spec that does not exist": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"ENOENT\",\"message\":\"ENOENT: no such file or directory, open '<base>/absent.json'\"}\n"],
+        "the contract-frontmatter restamp --apply with a --spec that is not JSON": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"contract frontmatter restamp spec is malformed JSON: <JSON.parse message>\"}\n"],
+        "the contract-frontmatter restamp --apply with a --spec of the wrong shape": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"contract frontmatter restamp spec does not exactly match the dry-run contract and literal reason\"}\n"],
+        "reconcile-metadata without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata requires exact --card\"}\n"],
+        "reconcile-metadata with both --apply and --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata accepts only one of --apply or --dry-run\"}\n"],
+        "reconcile-metadata --apply without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --apply requires non-empty --reason\"}\n"],
+        "reconcile-metadata --apply without --expected-card-sha256": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run\"}\n"],
+        "reconcile-metadata --apply with a malformed --expected-card-sha256": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run\"}\n"],
+        "reconcile-dependencies without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies requires --json\"}\n"],
+        "reconcile-dependencies with neither --card nor --all": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies requires --card or --all\"}\n"],
+        "reconcile-dependencies with both --card and --all": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies accepts --card or --all, not both\"}\n"],
+        "reconcile-dependencies without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies requires a non-empty --reason\"}\n"],
+        "reconcile-dependencies with --to but no --clear": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies --to requires --clear to name the dead pointer\"}\n"],
+        "advance without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"advance requires --card\"}\n"],
+        "deploy without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"deploy requires a known --card\"}\n"],
+      };
+      const sweepFixture = async (label) => {
+        const fx = sync2CliFixture(label);
+        await sync2Cli(fx, ['claim', '--json']);
+        sync2cPatchLedger(fx, { phase: 'deployed' });
+        const sibling = path.join(path.dirname(fx.cardPath), `${A2}.md`);
+        fs.writeFileSync(sibling, fs.readFileSync(sibling, 'utf8').replace(/^status: planning$/m, 'status: completed'));
+        fs.writeFileSync(path.join(fx.base, 'bad.json'), '{ not json');
+        fs.writeFileSync(path.join(fx.base, 'no-epics.json'), JSON.stringify({ project_root: fx.projectRoot, board: fx.boardPath }));
+        fs.writeFileSync(path.join(fx.base, 'targets.json'), JSON.stringify({
+          project_root: path.join(fx.base, 'no-such-project'), board: path.join(fx.base, 'no-such-project', 'board.md'),
+          epics: [{ epic: 'E1', members: ['M1'] }],
+        }));
+        return fx;
+      };
+      // The JSON.parse message quoted in a refusal differs between Node
+      // versions, so it is replaced by <JSON.parse message> here and in the pins.
+      const jsonParseMessage = (text) => text.replace(/((?:valid|malformed) JSON): .*("\}\n?)$/s, '$1: <JSON.parse message>$2');
+      // With held, each case runs while a holder of its own keeps the turn,
+      // and records whether that holder still owned the turn when the case
+      // returned and why it then released it.
+      const sweep = async (fx, script, held = false) => {
+        const results = {};
+        const turns = {};
+        for (const [index, [label, argsOf]] of SYNC2D_SWEEP_CASES.entries()) {
+          const releaseFile = path.join(fx.base, `release-sweep-holder-${index}`);
+          const holder = held ? await sync2Holder(fx.vault, 20000, '', releaseFile) : null;
+          const run = await sync2Cli(fx, argsOf(fx), script ? { script } : {});
+          results[label] = [run.code, jsonParseMessage(run.stderr.split(fx.base).join('<base>'))];
+          if (holder) {
+            const owner = sync2cTurnOwner(fx);
+            fs.writeFileSync(releaseFile, '');
+            await holder.closed;
+            turns[label] = [await holder.releasedBy, owner && owner.token];
+          }
+        }
+        return { results, turns };
+      };
+      const heldFixture = await sweepFixture('usage-sweep-head');
+      await sync2RestConfig(heldFixture.vault, await sync2ClosedPort());
+      const head = await sweep(heldFixture, null, true);
+      eq(Object.keys(SYNC2D_SWEEP_PINS), SYNC2D_SWEEP_CASES.map(([label]) => label), 'SYNC2D-USAGE-SWEEP precondition: every case has a pinned refusal');
+      for (const [label] of SYNC2D_SWEEP_CASES) {
+        eq(head.results[label], SYNC2D_SWEEP_PINS[label], `SYNC2D-USAGE-SWEEP ${label}: the exit code and stderr behind a live turn holder are main's`);
+        eq(head.turns[label], ['file', 'holder'],
+          `SYNC2D-USAGE-SWEEP ${label}: it returned while its holder still owned the turn, which the holder then released by its release file`);
+      }
+      const mainTree = sync2dMainTree();
+      if (!mainTree) console.log(`SYNC2D-USAGE-SWEEP main check skipped: ${sync2dMainSkip}`);
+      else {
+        const { results: mainResults } = await sweep(await sweepFixture('usage-sweep-main'), path.join(mainTree, 'scripts/autoloop/codex-coordinator.js'));
+        for (const [label] of SYNC2D_SWEEP_CASES) {
+          eq(mainResults[label], SYNC2D_SWEEP_PINS[label], `SYNC2D-USAGE-SWEEP ${label}: the pinned refusal is the one origin/main's coordinator gives`);
+        }
       }
     }
 
