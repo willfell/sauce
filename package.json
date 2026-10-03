@@ -72,6 +72,7 @@
     "test:graph-view-contract": "node platform/test/run-graph-view-contract.js",
     "test:graph-view-focus-contract": "node platform/test/run-graph-view-focus-contract.js",
     "test:operator-station": "node platform/test/run-operator-station.js",
+    "test:board-health": "node platform/test/run-board-health.js",
     "test:audit-delivery": "node platform/test/run-audit-delivery.js",
     "test:projects-hub": "node platform/test/run-projects-hub-cards.js",
     "test:chrome-bar": "node platform/test/run-chrome-bar.js",

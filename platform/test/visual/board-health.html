@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BoardHealth — responsive proof</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#d9dce3;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-x:hidden}
+#fixtures{display:grid;gap:24px;justify-items:stretch}
+.theme-light{--background-primary:#ffffff;--background-secondary:#f3f4f6;--text-normal:#25262a;--text-muted:#6d717a;--text-faint:#9296a0;--background-modifier-border:#dddfe5;--link-color:#6b57d9;--color-orange:#c56b18;--font-monospace:Menlo,Consolas,monospace;--font-ui-smaller:12px}
+.theme-dark{--background-primary:#202124;--background-secondary:#2a2b2f;--text-normal:#e7e7e7;--text-muted:#aaaeb7;--text-faint:#777b84;--background-modifier-border:#3b3d43;--link-color:#9b87f5;--color-orange:#e2a05f;--font-monospace:Menlo,Consolas,monospace;--font-ui-smaller:12px}
+.fixture{padding:16px;background:var(--background-primary);color:var(--text-normal);min-width:0;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="fixtures"></div>
+<script src="../../mechanisms/section-label/section-label.js"></script>
+<script src="../../mechanisms/render-safe/render-safe.js"></script>
+<script src="../../blueprints/project/helpers/board-health.js"></script>
+<script>
+(() => {
+  const failures = [];
+  let checks = 0;
+  const checkNames = [];
+  const expect = (condition, label) => {
+    checks += 1;
+    checkNames.push(label.split(":").slice(0, 2).join(":"));
+    if (!condition) failures.push(label);
+  };
+  const tolerance = 0.5;
+  const remedy = "heal-epic-bindings --dry-run --json";
+  const longCard = "GA-X9 A deliberately long  projection-error card title that keeps going well past the phone width";
+  const unbrokenCard = "GAX9ProjectionErrorCardNameWithNoHyphenAndNoSpaceThatKeepsGoingWellPastThePhoneWidthAndPastTheDesktopWidthOfTheWideFixtureToo";
+  const listRest = ["board-health --json", " to list them"];
+  const fileTime = new Date(2026, 7, 23, 21, 18).getTime();
+  const longPath = "/Users/example/obsidian/vault/spice/projects/sauce/tasks/Loop-Ops-with-a-deliberately-long-folder-name/board/GA-X9-without-break-points.md";
+  const payloads = {
+    full: {
+      type: "board-health", schema_version: "1.0.0", project: "sauce", ledger: "present", no_op: false,
+      checked: { epics: 20, slices: 185, records: 2004 },
+      untracked_members: [
+        { epic: "Perf and Instant Updates", card: "GA-P1m Ambient-feature-isolated canonical-state release fixture with a long name", note_status: "completed", stamp: null, provenance: "foreign", issue: "x", remedy: "adopt" },
+        { epic: null, card: "GA-P1l2 Cross-clone-member-name-without-any-natural-break-points-anywhere-in-it", note_status: "parked", stamp: "2026-07-29T16:30:37.343Z", provenance: "coordinator", issue: "x", remedy: "cross-clone: no action in this clone" },
+      ],
+      untracked_members_overflow_count: 5,
+      untracked_members_by_provenance: { coordinator: 4, foreign: 3 },
+      unprojectable_epics: [{ epic: "Ghost Epic With A Long Name That Wraps", error: `canonical epic projection refused: ${longPath} does not bind its canonical parent board`, remedy }],
+      unprojectable_epics_overflow_count: 0,
+      binding_drift: { atlases: 2, slices: 1, orphan_lines: 1, reports: 2, report_codes: { parent_card_conflict_with_a_long_code_name: 2 }, remedy },
+      lane_divergence: [
+        { epic: "An-epic-name-without-any-natural-break-points-that-must-wrap-inside-the-phone-viewport", derived: "active", painted: "In Progress", agrees: false },
+        { epic: "Agree Epic", derived: "blocked", painted: "Blocked", agrees: true },
+      ],
+      lane_divergence_overflow_count: 3,
+      projection_errors: [
+        { card: longCard, phase: "implementing", error: `projection refused: ${longPath}` },
+        { card: unbrokenCard, phase: "feature_pr", error: "slice note is missing" },
+      ],
+      projection_errors_overflow_count: 2002,
+      foreign_writes: [{ card: "GA-FW1 Foreign write on a card with a long title that wraps", phase: "feature_pr", foreign_write: {} }],
+      foreign_writes_overflow_count: 0,
+    },
+    healthy: {
+      type: "board-health", schema_version: "1.0.0", project: "sauce", ledger: "empty", no_op: true,
+      checked: { epics: 3, slices: 7, records: 0 },
+      untracked_members: [], untracked_members_overflow_count: 0,
+      untracked_members_by_provenance: { coordinator: 0, foreign: 0 },
+      unprojectable_epics: [], unprojectable_epics_overflow_count: 0,
+      binding_drift: { atlases: 0, slices: 0, orphan_lines: 0, remedy },
+      lane_divergence: [], lane_divergence_overflow_count: 0,
+      projection_errors: [], projection_errors_overflow_count: 0,
+      foreign_writes: [], foreign_writes_overflow_count: 0,
+    },
+  };
+  payloads.broken = { ...payloads.full };
+  delete payloads.broken.checked;
+  payloads.throws = { ...payloads.full };
+  const expectedTargets = (payload) => {
+    if (!payload.checked) return 0;
+    const agree = payload.lane_divergence.filter((item) => item.agrees).length;
+    const disagree = payload.lane_divergence.length - agree;
+    const noAction = payload.untracked_members_by_provenance.coordinator + agree + (payload.binding_drift.reports || 0);
+    return disagree + payload.projection_errors.length + payload.unprojectable_epics.length
+      + payload.foreign_writes.length + payload.untracked_members.length + agree + (noAction ? 1 : 0);
+  };
+  const expectedState = {
+    full: (section) => section.querySelector(".board-health-headline")?.textContent === "At least 2014 findings need action in this clone"
+      && section.querySelectorAll(".board-health-section").length === 6
+      && section.querySelectorAll("details.board-health-no-action").length === 1
+      && !section.querySelector(".board-health-recovery"),
+    healthy: (section) => section.querySelector(".board-health-headline")?.textContent === "Board healthy"
+      && section.querySelectorAll(".board-health-ledger-skipped").length === 1
+      && !section.querySelector(".board-health-section"),
+    broken: (section) => section.querySelectorAll(".board-health-recovery").length === 1
+      && !section.querySelector(".board-health-headline"),
+    throws: (section) => section.querySelectorAll(".board-health-recovery").length === 1
+      && !section.querySelector(".board-health-headline"),
+  };
+  const footer = ["Note file last changed 2026-08-23 21:18"];
+  const notePath = "spice/projects/sauce/Board Health.md";
+  const laneEpic = "An-epic-name-without-any-natural-break-points-that-must-wrap-inside-the-phone-viewport";
+  const label = (text) => ["hr:", `div:${text}`];
+  const expectedShape = {
+    full: {
+      tags: ["A", "CODE", "DETAILS", "DIV", "HR", "SPAN", "SUMMARY"],
+      outline: [
+        "board-health-headline", "board-health-scope",
+        ...label("Lane disagreements"), "board-health-section", ...label("Projection errors"), "board-health-section",
+        ...label("Unprojectable epics"), "board-health-section", ...label("Binding drift"), "board-health-section",
+        ...label("Foreign writes"), "board-health-section", ...label("Foreign-written members"), "board-health-section",
+        ...label("No action in this clone"), "board-health-no-action", "board-health-footer",
+      ],
+      rows: [
+        ["board-health-section", [laneEpic, "board lane In Progress · derived active"]],
+        ["board-health-section", [longCard, `phase implementing · projection refused: ${longPath}`, `reconcile --card '${longCard}'`]],
+        ["board-health-section", [unbrokenCard, "phase feature_pr · slice note is missing", `reconcile --card '${unbrokenCard}'`]],
+        ["board-health-section", ["Ghost Epic With A Long Name That Wraps", `canonical epic projection refused: ${longPath} does not bind its canonical parent board`, remedy]],
+        ["board-health-section", ["2 atlases · 1 slice · 1 orphan board line", remedy]],
+        ["board-health-section", ["GA-FW1 Foreign write on a card with a long title that wraps", "phase feature_pr · note bytes differ from the coordinator's last write"]],
+        ["board-health-section", ["GA-P1m Ambient-feature-isolated canonical-state release fixture with a long name", "Perf and Instant Updates · note says completed · remedy: adopt"]],
+        ["board-health-no-action", ["GA-P1l2 Cross-clone-member-name-without-any-natural-break-points-anywhere-in-it", "note says parked · cross-clone: no action in this clone"]],
+        ["board-health-no-action", ["Agree Epic", "board lane Blocked matches derived blocked"]],
+        ["board-health-no-action", ["2 binding reports the heal will not change: parent_card_conflict_with_a_long_code_name ×2"]],
+      ],
+      notListedIn: ["board-health-section", "board-health-section", "board-health-section", "board-health-no-action"],
+    },
+    healthy: {
+      tags: ["DIV"],
+      outline: ["board-health-headline", "board-health-scope", "board-health-ledger-skipped", "board-health-footer"],
+      rows: [],
+      notListedIn: [],
+    },
+    broken: {
+      tags: ["DIV"],
+      outline: ["board-health-recovery"],
+      rows: [],
+      notListedIn: [],
+    },
+  };
+  expectedShape.throws = expectedShape.broken;
+  const expectedText = {
+    full: {
+      scope: ["sauce · 20 epics · 185 slices · 2004 ledger records"],
+      remedies: [`reconcile --card '${longCard}'`, `reconcile --card '${unbrokenCard}'`, remedy, remedy],
+      notListed: [
+        "3 more lane rows are not listed here — run board-health --json to list them",
+        "2002 more projection errors are not listed here — run board-health --json to list them",
+        "2 more foreign-written members need adopt review and are not listed here — run board-health --json to list them",
+        "3 more cross-clone members are not listed here — run board-health --json to list them",
+      ],
+      footer,
+      lines: [
+        "At least 2014 findings need action in this clone", "sauce · 20 epics · 185 slices · 2004 ledger records",
+        "Lane disagreements",
+        "An-epic-name-without-any-natural-break-points-that-must-wrap-inside-the-phone-viewport", "board lane In Progress · derived active",
+        "3 more lane rows are not listed here — run ", ...listRest,
+        "Projection errors",
+        longCard, `phase implementing · projection refused: ${longPath}`, `reconcile --card '${longCard}'`,
+        unbrokenCard, "phase feature_pr · slice note is missing", `reconcile --card '${unbrokenCard}'`,
+        "2002 more projection errors are not listed here — run ", ...listRest,
+        "Unprojectable epics",
+        "Ghost Epic With A Long Name That Wraps", `canonical epic projection refused: ${longPath} does not bind its canonical parent board`, remedy,
+        "Binding drift", "2 atlases · 1 slice · 1 orphan board line", remedy,
+        "Foreign writes", "GA-FW1 Foreign write on a card with a long title that wraps", "phase feature_pr · note bytes differ from the coordinator's last write",
+        "Foreign-written members",
+        "GA-P1m Ambient-feature-isolated canonical-state release fixture with a long name", "Perf and Instant Updates · note says completed · remedy: adopt",
+        "2 more foreign-written members need adopt review and are not listed here — run ", ...listRest,
+        "No action in this clone", "4 cross-clone members · at least 1 agreeing lane · 2 binding reports — no action in this clone",
+        "GA-P1l2 Cross-clone-member-name-without-any-natural-break-points-anywhere-in-it", "note says parked · cross-clone: no action in this clone",
+        "3 more cross-clone members are not listed here — run ", ...listRest,
+        "Agree Epic", "board lane Blocked matches derived blocked",
+        "2 binding reports the heal will not change: parent_card_conflict_with_a_long_code_name ×2",
+        ...footer,
+      ],
+    },
+    healthy: {
+      scope: ["sauce · 3 epics · 7 slices · 0 ledger records"],
+      remedies: [],
+      notListed: [],
+      footer,
+      lines: [
+        "Board healthy", "sauce · 3 epics · 7 slices · 0 ledger records",
+        "Ledger empty in this clone — lane, projection-error, and foreign-write checks were skipped", ...footer,
+      ],
+    },
+    broken: {
+      scope: [],
+      remedies: [],
+      notListed: [],
+      footer: [],
+      lines: ["Board health unavailable — run board-health --json, then reinstall project if needed."],
+    },
+  };
+  expectedText.throws = expectedText.broken;
+  const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+  const texts = (section, selector) => [...section.querySelectorAll(selector)].map((node) => node.textContent);
+  const textNodes = (section) => {
+    const out = [];
+    const walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) if (walker.currentNode.data) out.push(walker.currentNode.data);
+    return out;
+  };
+  const lineBoxes = (node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top))).size;
+  };
+  const labelCentred = (target) => {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const text = range.getBoundingClientRect();
+    const box = target.getBoundingClientRect();
+    return Math.abs((text.top + text.bottom) / 2 - (box.top + box.bottom) / 2) <= 1;
+  };
+  const opened = [];
+  const created = [];
+  const headlines = [];
+  const sweptNodes = new Set();
+  const isHeadline = (node) => node.classList.contains("board-health-headline");
+  try {
+    Element.prototype.createEl = function createEl(tag, options = {}) {
+      const element = document.createElement(tag);
+      if (options.cls) element.className = options.cls;
+      if (options.text != null) element.textContent = String(options.text);
+      this.appendChild(element);
+      created.push(element);
+      return element;
+    };
+    window.app = {
+      workspace: { getActiveFile: () => null, openLinkText: (...args) => { opened.push(args); } },
+      vault: { getAbstractFileByPath: () => null },
+    };
+    let page = null;
+    window.customJS = { SectionLabel: new SectionLabel(), RenderSafe: new RenderSafe() };
+    const mounts = [];
+    for (const theme of ["light", "dark"]) {
+      for (const [name, payload] of Object.entries(payloads)) {
+        const section = document.createElement("section");
+        section.className = `fixture theme-${theme}`;
+        section.dataset.fixture = `${name}-${theme}`;
+        document.getElementById("fixtures").appendChild(section);
+        const file = name === "throws"
+          ? { path: notePath, get mtime() { throw new Error("fixture file-time failure"); } }
+          : { path: notePath, mtime: fileTime };
+        page = { ...payload, file };
+        const from = created.length;
+        new BoardHealth().render({ container: section, current: () => page });
+        for (const node of created.slice(from).filter(isHeadline)) {
+          sweptNodes.add(node);
+          headlines.push({ fixture: section.dataset.fixture, laneOverflow: payload.lane_divergence_overflow_count, text: node.textContent });
+        }
+        const collapsed = [...section.querySelectorAll("details")].map((details) => details.open === false);
+        for (const details of section.querySelectorAll("details")) details.open = true;
+        mounts.push([name, section, payload, collapsed]);
+      }
+    }
+    const expected = Number(new URLSearchParams(location.search).get("viewport"));
+    expect(window.innerWidth === expected && document.documentElement.clientWidth === expected, "viewport");
+    expect(document.documentElement.scrollWidth <= document.documentElement.clientWidth + tolerance, "document-overflow");
+    for (const [name, section, payload, collapsed] of mounts) {
+      const id = section.dataset.fixture;
+      const box = section.getBoundingClientRect();
+      const nodes = [...section.querySelectorAll("*")];
+      expect(expectedState[name](section), `${id}:state`);
+      const want = expectedText[name];
+      expect(same(texts(section, ".board-health-scope"), want.scope), `${id}:scope`);
+      expect(same([...section.querySelectorAll(".board-health-remedy")].map((node) => node.innerText), want.remedies), `${id}:remedy-code`);
+      expect(same(texts(section, ".board-health-not-listed"), want.notListed), `${id}:not-listed`);
+      expect(same(texts(section, ".board-health-footer"), want.footer), `${id}:footer`);
+      expect(same(textNodes(section), want.lines), `${id}:lines`);
+      const shape = expectedShape[name];
+      expect(same(collapsed, name === "full" ? [true] : []), `${id}:details-collapsed`);
+      expect(same([...new Set([...section.querySelectorAll("*")].map((node) => node.tagName))].sort(), shape.tags), `${id}:tags`);
+      const roots = [...section.children];
+      expect(roots.length === 1 && roots[0].className === "board-health-root"
+        && same([...roots[0].children].map((child) => child.className || `${child.tagName.toLowerCase()}:${child.textContent}`), shape.outline),
+      `${id}:outline`);
+      expect(same([...section.querySelectorAll(".board-health-row")].map((row) => [row.parentElement.className, textNodes(row)]), shape.rows)
+        && same([...section.querySelectorAll(".board-health-not-listed")].map((line) => line.parentElement.className), shape.notListedIn)
+        && [...section.querySelectorAll(".board-health-not-listed")].every((line) => same([...line.children].map((child) => child.tagName), ["SPAN", "CODE", "SPAN"])),
+      `${id}:rows`);
+      const links = [...section.querySelectorAll(".board-health-link")];
+      const before = opened.length;
+      const prevented = links.map((link) => {
+        const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+        link.dispatchEvent(click);
+        return click.defaultPrevented;
+      });
+      expect(prevented.every(Boolean) && links.every((link) => link.getAttribute("href") === "#")
+        && same(opened.slice(before), links.map((link) => [link.textContent, notePath, false])), `${id}:link-clicks`);
+      const sideBySide = [...section.querySelectorAll(".board-health-row")].filter((row) => [...row.children].some((child, index, all) => index > 0
+        && child.getBoundingClientRect().top < all[index - 1].getBoundingClientRect().bottom - tolerance));
+      expect(sideBySide.length === 0, `${id}:rows-stack:${sideBySide.map((row) => row.textContent.slice(0, 24)).join("|")}`);
+      expect([...section.querySelectorAll("summary")].every((summary) => getComputedStyle(summary).display === "list-item"),
+        `${id}:summary-marker`);
+      const tapTargets = [...section.querySelectorAll(".board-health-link, summary")];
+      const offCentre = tapTargets.filter((target) => !labelCentred(target));
+      expect(offCentre.length === 0, `${id}:tap-label-centred:${offCentre.map((node) => node.textContent.slice(0, 24)).join("|")}`);
+      if (name === "full") {
+        const unbroken = links.filter((link) => link.textContent === unbrokenCard);
+        expect(unbroken.length === 1 && lineBoxes(unbroken[0]) >= 2
+          && unbroken[0].getBoundingClientRect().right <= box.right + tolerance, `${id}:unbroken-card-wraps`);
+        const headline = section.querySelector(".board-health-headline");
+        expect(expected !== 390 || (headline && lineBoxes(headline) >= 2), `${id}:headline-wraps-at-390`);
+      }
+      expect(section.scrollWidth <= section.clientWidth + tolerance, `${id}:section-overflow`);
+      const escaped = nodes.filter((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && (rect.left < box.left - tolerance || rect.right > box.right + tolerance);
+      });
+      expect(escaped.length === 0, `${id}:escaped:${escaped.map((node) => node.className || node.tagName).join("|")}`);
+      const scrolling = nodes.filter((node) => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + tolerance);
+      expect(scrolling.length === 0, `${id}:scrolling:${scrolling.map((node) => node.className || node.tagName).join("|")}`);
+      const targets = [...section.querySelectorAll("a, button, summary, input, select, textarea, [role=button]")];
+      const short = targets.filter((node) => node.getBoundingClientRect().height < 44 - tolerance);
+      expect(short.length === 0, `${id}:short-targets:${short.map((node) => node.textContent.slice(0, 24)).join("|")}`);
+      expect(targets.length === (name === "throws" ? 0 : expectedTargets(payload)), `${id}:target-count:${targets.length}`);
+    }
+  } catch (error) {
+    failures.push(`error:${error && error.message}`);
+  }
+  const marker = document.createElement("meta");
+  marker.id = "fixture-results";
+  marker.dataset.geometry = failures.length ? "fail" : "pass";
+  marker.dataset.failures = failures.join(",");
+  marker.dataset.checks = String(checks);
+  marker.dataset.checkNames = JSON.stringify(checkNames);
+  const colourNames = JSON.parse(new URLSearchParams(location.search).get("colours") || "[]");
+  marker.dataset.colourNames = String(colourNames.length);
+  marker.dataset.unsupportedColours = JSON.stringify(colourNames.filter((name) => !CSS.supports("color", name)));
+  marker.dataset.headlines = JSON.stringify(headlines);
+  marker.dataset.unsweptHeadlines = String([...created.filter(isHeadline), ...document.querySelectorAll(".board-health-headline")]
+    .filter((node) => !sweptNodes.has(node)).length);
+  document.head.appendChild(marker);
+})();
+</script>
+</body>
+</html>
