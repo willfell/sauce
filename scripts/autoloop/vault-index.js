@@ -80,6 +80,9 @@ function readRestConfig(vaultRoot) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, reason: 'malformed-rest-config' };
   const apiKey = typeof parsed.apiKey === 'string' && parsed.apiKey.trim() ? parsed.apiKey.trim() : null;
   if (!apiKey) return { ok: false, reason: 'malformed-rest-config' };
+  // A key that cannot be sent as a header value is a malformed config.
+  try { http.validateHeaderValue('Authorization', `Bearer ${apiKey}`); }
+  catch (_) { return { ok: false, reason: 'malformed-rest-config' }; }
   const port = (value) => {
     const n = Number(value);
     return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
@@ -147,7 +150,8 @@ function connect(channel) {
 }
 
 // Sends one request on a connected socket and resolves when the response ends
-// or the connection fails.
+// or the connection fails. A request that cannot be created resolves as
+// request-failed.
 function exchange(channel, socket, method, urlPath, headers, body) {
   return new Promise((resolve) => {
     let settled = false;
@@ -156,19 +160,26 @@ function exchange(channel, socket, method, urlPath, headers, body) {
       settled = true;
       resolve(value);
     };
-    const req = http.request({
+    let req;
+    try {
+      req = http.request({
       hostname: REST_HOST,
       port: channel.port,
       method,
       path: urlPath,
-      headers: { Authorization: channel.authorization, ...headers, ...(body ? { 'Content-Length': String(body.length) } : {}) },
-      createConnection: () => socket,
-    }, (res) => {
-      const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => settle({ status: res.statusCode, body: Buffer.concat(chunks) }));
-      res.on('error', () => settle({ failure: 'unreachable' }));
-    });
+        headers: { Authorization: channel.authorization, ...headers, ...(body ? { 'Content-Length': String(body.length) } : {}) },
+        createConnection: () => socket,
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => settle({ status: res.statusCode, body: Buffer.concat(chunks) }));
+        res.on('error', () => settle({ failure: 'unreachable' }));
+      });
+    } catch (_) {
+      socket.destroy();
+      settle({ failure: 'request-failed' });
+      return;
+    }
     req.on('error', () => settle({ failure: 'unreachable' }));
     req.end(body || undefined);
   });
@@ -222,7 +233,7 @@ async function channelOf(scope) {
   if (!config.ok) return channel;
   const reply = await get(channel, '/');
   if (reply.failure) {
-    channel.reason = reply.failure === 'timeout' ? 'probe-timeout' : 'unreachable';
+    channel.reason = { timeout: 'probe-timeout', 'request-failed': 'request-failed' }[reply.failure] || 'unreachable';
     return channel;
   }
   const root = reply.status === 200 ? parseJson(reply.body) : null;
@@ -531,9 +542,16 @@ async function flush(scope) {
 }
 
 // Flushes, then releases the write turn unless an outermost lock of the scope
-// is still held.
+// is still held. It never rejects: an error thrown while flushing marks the
+// scope's channel, once opened, unusable and every note still waiting to be
+// sent with internal-error, which obsidian_index then reports.
 async function settle(scope) {
-  try { await flush(scope); } finally {
+  try { await flush(scope); } catch (_) {
+    if (scope.channel) disable(scope.channel, 'internal-error');
+    for (const entry of scope.written.values()) {
+      if (entry.reason === 'not-sent') entry.reason = 'internal-error';
+    }
+  } finally {
     if (scope.outermost === 0) releaseTurn(scope);
   }
 }
