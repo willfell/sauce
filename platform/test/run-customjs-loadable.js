@@ -1987,12 +1987,10 @@ const s = block('NoSuchInStaticBlock');`,
 // without nesting; each statement position in POSITION_STATEMENTS wraps a payload in the
 // declarator-init slot; and seeded samples nest slots and positions to depth 2 or 3. It
 // pushes one fixture per generated source. The expected refs and failures come from the
-// payload's family, not from the gate: a guard literal or helper call whose class Dataview
-// would pass to dv.view is read, and fails exactly when that class does not ship; an
-// appearance of the helper other than as a direct call fails; a rebinding of the class
-// parameter anywhere inside the helper fails. A generated source identical to an earlier one,
-// or that V8 does not compile as a strict script, is dropped, and the last fixture asserts
-// that every position kind appears in every family.
+// payload's family, not from the gate, as the comment above POSITION_FAMILIES states.
+// A generated source identical to an earlier one, or that V8 does not compile as a strict
+// script, is dropped, and the last fixture asserts that every position kind appears in every
+// family.
 // MUTATION GUARD: the visitor not descending into any one node type used below (ClassBody,
 // StaticBlock, PropertyDefinition, MethodDefinition, SwitchCase, LabeledStatement,
 // IfStatement, WhileStatement, DoWhileStatement, ForStatement, ForInStatement,
@@ -2002,6 +2000,17 @@ const s = block('NoSuchInStaticBlock');`,
 // CallExpression, TaggedTemplateExpression, TemplateLiteral, ArrayExpression,
 // ObjectExpression, Property, ArrowFunctionExpression, FunctionExpression, ClassExpression,
 // UnaryExpression, AssignmentExpression, BinaryExpression) turns position fixtures RED
+// MUTATION GUARD: skipping untagged template or String.raw template parts, or reading String.raw
+// cooked, below any one of those node types turns the template payload fixtures RED
+// MUTATION GUARD: reading only the first customjs-guard occurrence of a part below any one of
+// those node types turns the two-call payload fixtures RED
+// MUTATION GUARD: resolving a helper once, caching its parameter index or its rebinding verdict
+// per function, or checking only the first argument for a spread turns the helper payload
+// fixtures RED
+// MUTATION GUARD: reading an empty tagged template, a sequence, a call on a static string, or a
+// void operand as a static string turns the chain and void payload fixtures RED
+// MUTATION GUARD: skipping the closing check for parts inside a class body turns the open-call
+// payload fixtures RED
 const POSITION_SEED = 20261003;
 const POSITION_SAMPLES = 40;
 const positionRandom = (seed) => () => {
@@ -2074,19 +2083,78 @@ const POSITION_STATEMENTS = [
   ['generator body', (s, n) => `function* y${n}() { ${s} }`],
   ['async function body', (s, n) => `async function z${n}() { ${s} }`],
 ];
-const POSITION_PRELUDE = "'use strict'; let c = 0, x, u, o = {}, a = []; const g = () => 0, G = function () {}, tag = () => 0;";
+const POSITION_PRELUDE = "'use strict'; let c = 0, x, u, o = {}, a = []; const g = () => 0, G = function () {}, tag = () => 0, j = ' && { class: \"NoSuchChainPart\" }', inj = () => j;";
 const positionGuard = (cls) => `await dv.view("ranch/views/customjs-guard", { class: "${cls}" });`;
 const POSITION_HELPER = "function block(widget) { return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }";
-// A payload yields the second and third lines of a source from a position wrapper, which takes
-// an expression and returns the third line, and the expected refs and failures.
+const POSITION_BACKSLASH = String.fromCharCode(92);
+const positionHelperOf = (params, classParam) => `function block(${params}) { return 'await dv.view("ranch/views/customjs-guard", { class: "' + ${classParam} + '" });'; }`;
+const POSITION_TWO_STRINGS = (rebind) => `function block(a, b) { ${rebind}const p = 'await dv.view("ranch/views/customjs-guard", { class: "' + a + '" });'; const q = 'await dv.view("ranch/views/customjs-guard", { class: "' + b + '" });'; return p + q; }`;
+const POSITION_RAW_ESCAPED = (cls, decoy) => `String.raw\`await dv.view("ranch/views/customjs-guard", { n: '${POSITION_BACKSLASH}${POSITION_BACKSLASH}', class: "${cls}" //', class: "${decoy}" })\n})\``;
+// The produced text of a payload is computed by evaluating its second line and expression in a
+// strict script, and the classes Dataview passes to dv.view for that text by running it as
+// Dataview runs a dataviewjs block, with a dv.view stub; the context runs its queued
+// microtasks after the script, so a call after an await is recorded.
+const positionProduced = (second, expr) => new (require('vm').Script)(`${POSITION_PRELUDE} ${second}\n(${expr});`).runInNewContext({});
+const positionDataview = (text) => {
+  const vm = require('vm');
+  const context = vm.createContext({ got: [] }, { microtaskMode: 'afterEvaluate' });
+  new vm.Script(`(function (dv) { 'use strict'; return (async () => { ${text} })(); })({ view: (p, input) => got.push(input.class) });`).runInContext(context);
+  return Array.from(context.got);
+};
+// Each family has a name and one of three shapes, and add() sets its expected refs and failures:
+// - An expression family has expr, which is placed in a position on line 3, and second, the
+//   second line (empty when absent). With read, the expected refs are the classes Dataview
+//   passes to dv.view for the text that second and expr produce, and the expected failures
+//   are a missing-class failure on line 3 for each of those classes that does not ship.
+//   Without read, the expected refs are refs (none when absent) and the expected failures are
+//   fail, each a line and a message.
+// - The alias family's second line is POSITION_HELPER followed by block('OperatorStation'),
+//   and line 3 places an alias from POSITION_ALIASES in a position. Its expected refs are
+//   ['OperatorStation'] and its expected failures are BLOCK_ARG on line 3, twice for
+//   ({ block }).
+// - The rebinding family's second line is a helper with a rebinding from POSITION_REBINDS
+//   placed in a position inside it, and line 3 is block('OperatorStation'). Its expected refs
+//   are none and its expected failure is MAY_NOT_HOLD('block') on line 2.
 const POSITION_FAMILIES = [
-  ['an unshipped guard literal', 'NoSuchPositionLiteral', (wrap, cls) => ['', wrap(`'${positionGuard(cls)}'`)]],
-  ['a shipped guard literal', 'OperatorStation', (wrap, cls) => ['', wrap(`'${positionGuard(cls)}'`)]],
-  ['an unshipped helper call', 'NoSuchPositionHelper', (wrap, cls) => [POSITION_HELPER, wrap(`block('${cls}')`)]],
-  ['a shipped helper call', 'OperatorStation', (wrap, cls) => [POSITION_HELPER, wrap(`block('${cls}')`)]],
-  ['a helper alias', null, (wrap, cls, alias) => [`${POSITION_HELPER} block('OperatorStation');`, wrap(alias)]],
-  ['a class parameter rebinding', null, (wrap, cls, alias, rebind) => [
-    `function block(widget) { ${wrap(rebind)} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }`, "block('OperatorStation');"]],
+  { name: 'an unshipped single-quoted guard literal', expr: `'${positionGuard('NoSuchPositionLiteral')}'`, read: true },
+  { name: 'a shipped single-quoted guard literal', expr: `'${positionGuard('OperatorStation')}'`, read: true },
+  { name: 'an unshipped double-quoted guard literal', expr: `"await dv.view('ranch/views/customjs-guard', { class: 'NoSuchPositionDouble' });"`, read: true },
+  { name: 'a shipped double-quoted guard literal', expr: `"await dv.view('ranch/views/customjs-guard', { class: 'OperatorStation' });"`, read: true },
+  { name: 'an unshipped template literal', expr: `\`${positionGuard('NoSuchPositionTemplate')}\``, read: true },
+  { name: 'a shipped template literal', expr: `\`${positionGuard('OperatorStation')}\``, read: true },
+  { name: 'an unshipped template with a substitution in the class value', expr: '`await dv.view("ranch/views/customjs-guard", { class: "${\'NoSuchPositionSubst\'}" });`', read: true },
+  { name: 'a shipped template with a substitution in the class value', expr: '`await dv.view("ranch/views/customjs-guard", { class: "${\'OperatorStation\'}" });`', read: true },
+  { name: 'an unshipped String.raw template', expr: `String.raw\`${positionGuard('NoSuchPositionRaw')}\``, read: true },
+  { name: 'a shipped String.raw template', expr: `String.raw\`${positionGuard('OperatorStation')}\``, read: true },
+  { name: 'an unshipped String.raw template whose escapes differ raw and cooked', expr: POSITION_RAW_ESCAPED('NoSuchPositionRawEscaped', 'OperatorStation'), read: true },
+  { name: 'a shipped String.raw template whose escapes differ raw and cooked', expr: POSITION_RAW_ESCAPED('OperatorStation', 'NoSuchPositionRawDecoy'), read: true },
+  { name: 'an unshipped + chain of static strings', expr: `('await dv.view("ranch/views/customjs-guard", { class: "' + 'NoSuchPositionChain' + '" });')`, read: true },
+  { name: 'a shipped + chain of static strings', expr: `('await dv.view("ranch/views/customjs-guard", { class: "' + 'OperatorStation' + '" });')`, read: true },
+  { name: 'an unshipped template whose chain goes on after the call', expr: `(\`${positionGuard('NoSuchPositionTail')}\` + ' /* tail */')`, read: true },
+  { name: 'a shipped template whose chain goes on after the call', expr: `(\`${positionGuard('OperatorStation')}\` + ' /* tail */')`, read: true },
+  { name: 'two guard calls in one string, shipped then unshipped', expr: `'${positionGuard('OperatorStation')} ${positionGuard('NoSuchPositionSecond')}'`, read: true },
+  { name: 'two guard calls in one string, unshipped then shipped', expr: `'${positionGuard('NoSuchPositionFirst')} ${positionGuard('OperatorStation')}'`, read: true },
+  { name: 'two guard calls in one string, both unshipped', expr: `'${positionGuard('NoSuchPositionOne')} ${positionGuard('NoSuchPositionTwo')}'`, read: true },
+  { name: 'two guard calls in one template, shipped then unshipped', expr: `\`${positionGuard('OperatorStation')} ${positionGuard('NoSuchPositionTemplateSecond')}\``, read: true },
+  { name: 'a guard call joined with an empty tagged template', expr: `('await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + inj\`\` + ');')`, fail: [[3, () => CALL_CHAIN]] },
+  { name: "a guard call joined with ('', j)", expr: `('await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + ('', j) + ');')`, fail: [[3, () => CALL_CHAIN]] },
+  { name: "a guard call joined with ''.concat(j)", expr: `('await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + ''.concat(j) + ');')`, fail: [[3, () => CALL_CHAIN]] },
+  { name: "a class value written void 'OperatorStation'", expr: `('await dv.view("ranch/views/customjs-guard", { class: "' + void 'OperatorStation' + '" });')`, fail: [[3, () => NOT_PARAM]] },
+  { name: 'an open guard call closed with += in a closure', expr: `(() => { let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }'; s += ' && { class: "NoSuchPositionOpen" });'; return s; })()`, fail: [[3, () => CALL_OPEN]] },
+  { name: 'an unshipped helper call', second: POSITION_HELPER, expr: "block('NoSuchPositionHelper')", read: true },
+  { name: 'a shipped helper call', second: POSITION_HELPER, expr: "block('OperatorStation')", read: true },
+  { name: 'a two-parameter helper with the class first', second: positionHelperOf('w, z', 'w'), expr: "block('NoSuchPositionParam0of2', 'x')", read: true },
+  { name: 'a two-parameter helper with the class second', second: positionHelperOf('z, w', 'w'), expr: "block('x', 'NoSuchPositionParam1of2')", read: true },
+  { name: 'a three-parameter helper with the class first', second: positionHelperOf('w, y, z', 'w'), expr: "block('NoSuchPositionParam0of3', 'x', 'x')", read: true },
+  { name: 'a three-parameter helper with the class second', second: positionHelperOf('y, w, z', 'w'), expr: "block('x', 'NoSuchPositionParam1of3', 'x')", read: true },
+  { name: 'a three-parameter helper with the class third', second: positionHelperOf('y, z, w', 'w'), expr: "block('x', 'x', 'NoSuchPositionParam2of3')", read: true },
+  { name: 'a helper with a guard string for each of two parameters', second: POSITION_TWO_STRINGS(''), expr: "block('OperatorStation', 'NoSuchPositionTwoStrings')", read: true },
+  { name: 'a helper with a guard string for each of two parameters, the second rebound', second: POSITION_TWO_STRINGS("b = 'NoSuchPositionRebound'; "), expr: "block('OperatorStation', 'OperatorStation')",
+    refs: ['OperatorStation'], fail: [[2, () => 'b is redeclared or assigned in block, or block names arguments, eval or with']] },
+  { name: 'a helper call with a spread before the class argument', second: positionHelperOf('y, z, w', 'w'), expr: "block('a', ...['b', 'NoSuchPositionSpread'], 'OperatorStation')", fail: [[3, () => BLOCK_ARG]] },
+  { name: 'a helper whose class parameter has a default', second: positionHelperOf("w = 'OperatorStation'", 'w'), expr: "block('NoSuchPositionDefault')", fail: [[2, () => NOT_PARAM]] },
+  { name: 'a helper alias', second: `${POSITION_HELPER} block('OperatorStation');`, alias: true },
+  { name: 'a class parameter rebinding', rebinding: true },
 ];
 // The shorthand alias ({ block }) is two Identifier nodes in acorn, its key and its value, and each
 // fails as an appearance other than a call.
@@ -2096,12 +2164,6 @@ const POSITION_REBINDS = ["(widget = 'NoSuchRebind')", "(widget += 'X')", '(widg
   "({ w: widget } = { w: 'NoSuchRebind' })", "(() => { widget = 'NoSuchRebind'; })", "(() => { const widget = 'NoSuchRebind'; return widget; })",
   "(() => { for (widget of ['NoSuchRebind']) {} })", "(() => { arguments[0] = 'NoSuchRebind'; })", "(() => { eval(\"widget = 'NoSuchRebind'\"); })"];
 // with is not generated: strict code, which the coordinator source is, rejects it as a SyntaxError.
-const positionDataviewClass = (cls) => {
-  const got = [];
-  const vm = require('vm');
-  new vm.Script(`(function (dv) { 'use strict'; return (async () => { ${positionGuard(cls)} })(); })`).runInNewContext({})({ view: (p, input) => got.push(input.class) });
-  return got[0];
-};
 const positionCompiles = (source) => {
   try { new (require('vm').Script)(source); return null; } catch (e) { return `generated source does not compile as a strict script: ${e.message}`; }
 };
@@ -2109,6 +2171,15 @@ const POSITION_FIXTURES = (() => {
   const defs = collectClassNames(REF_SCAN_DIRS);
   const random = positionRandom(POSITION_SEED);
   const pick = (list) => list[Math.floor(random() * list.length)];
+  const expectations = POSITION_FAMILIES.map((family) => {
+    if (family.alias || family.rebinding) return null;
+    const read = family.read ? positionDataview(positionProduced(family.second || '', family.expr)) : family.refs || [];
+    return {
+      refs: read,
+      failures: [...(family.fail || []).map(([line, message]) => unreadable(line, message())),
+        ...(family.read ? read.filter((cls) => !defs.has(cls)).map((cls) => missing(cls, 3)) : [])],
+    };
+  });
   let serial = 0;
   let skipped = 0;
   let repeated = 0;
@@ -2116,7 +2187,7 @@ const POSITION_FIXTURES = (() => {
   const fixtures = [];
   const seen = POSITION_FAMILIES.map(() => new Set());
   const add = (familyIndex, path, expression, variant = serial) => {
-    const [family, cls, build] = POSITION_FAMILIES[familyIndex];
+    const family = POSITION_FAMILIES[familyIndex];
     const alias = POSITION_ALIASES[variant % POSITION_ALIASES.length];
     const rebind = POSITION_REBINDS[variant % POSITION_REBINDS.length];
     const wrap = (payload) => {
@@ -2127,31 +2198,28 @@ const POSITION_FIXTURES = (() => {
       return text;
     };
     serial += 1;
-    const [second, third] = build(wrap, cls, alias, rebind);
+    const [second, third] = family.rebinding
+      ? [`function block(widget) { ${wrap(rebind)} return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; }`, "block('OperatorStation');"]
+      : [family.second || '', wrap(family.alias ? alias : family.expr)];
     const source = `${POSITION_PRELUDE}\n${second}\n${third}`;
     if (sources.has(source)) { repeated += 1; return; }
     sources.add(source);
     if (positionCompiles(source)) { skipped += 1; return; }
     for (const [kind] of [...expression, ...path]) seen[familyIndex].add(kind);
     const where = [...expression.map(([k]) => k), ...path.map(([k]) => k)].join(' in ')
-      + (family === 'a helper alias' ? ` (${alias})` : family === 'a class parameter rebinding' ? ` (${rebind})` : '');
-    let refs = [];
-    let failures = [];
-    if (cls) {
-      const seenClass = positionDataviewClass(cls);
-      refs = [seenClass];
-      failures = defs.has(seenClass) ? [] : [missing(seenClass, 3)];
-    } else if (family === 'a helper alias') {
+      + (family.alias ? ` (${alias})` : family.rebinding ? ` (${rebind})` : '');
+    let { refs, failures } = expectations[familyIndex] || {};
+    if (family.alias) {
       refs = ['OperatorStation'];
       failures = alias === '({ block })' ? [unreadable(3, BLOCK_ARG), unreadable(3, BLOCK_ARG)] : [unreadable(3, BLOCK_ARG)];
-    } else {
-      failures = [unreadable(2, MAY_NOT_HOLD('block'))];
+    } else if (family.rebinding) {
       refs = [];
+      failures = [unreadable(2, MAY_NOT_HOLD('block'))];
     }
-    fixtures.push({ label: `position property: ${family} in ${where}`, source, refs, failures });
+    fixtures.push({ label: `position property: ${family.name} in ${where}`, source, refs, failures });
   };
-  POSITION_FAMILIES.forEach(([, cls], i) => {
-    const variants = cls ? 1 : i === 4 ? POSITION_ALIASES.length : POSITION_REBINDS.length;
+  POSITION_FAMILIES.forEach((family, i) => {
+    const variants = family.alias ? POSITION_ALIASES.length : family.rebinding ? POSITION_REBINDS.length : 1;
     for (const e of POSITION_EXPRESSIONS) for (let v = 0; v < variants; v++) add(i, [], [e], v);
     for (const s of POSITION_STATEMENTS) add(i, [s], [POSITION_EXPRESSIONS[0]]);
     for (let n = 0; n < POSITION_SAMPLES; n++) {
@@ -2166,7 +2234,7 @@ const POSITION_FIXTURES = (() => {
   fixtures.push({
     label: `position property: each of the ${kinds.length} position kinds appears in each of the ${POSITION_FAMILIES.length} families among the ${fixtures.length} generated sources that compile as strict scripts (${repeated} repeats of an earlier source and ${skipped} sources that do not compile are dropped)`,
     precondition: () => {
-      const gaps = POSITION_FAMILIES.flatMap(([family], i) => kinds.filter((k) => !seen[i].has(k)).map((k) => `${family}: ${k}`));
+      const gaps = POSITION_FAMILIES.flatMap((family, i) => kinds.filter((k) => !seen[i].has(k)).map((k) => `${family.name}: ${k}`));
       return gaps.length ? `position kinds missing: ${gaps.join('; ')}` : null;
     },
     source: '',
