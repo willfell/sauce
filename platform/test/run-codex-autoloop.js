@@ -7,6 +7,74 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { AsyncLocalStorage, createHook } = require('async_hooks');
+// SYNC2D-HARNESS-ISOLATION. Every node child started with an argument array
+// gets a HOME inside the temp root unless its env already names one there, so
+// a child that resolves this repo's .loop/config.json binding, or the
+// coordinator's ~/obsidian fallbacks, finds its vaults under harnessHome and
+// never in a real vault. Each of those vaults gets a REST config naming a
+// closed port, so a child that takes a write turn there leaves
+// .sauce-obsidian-writes behind, and harnessIsolationProblems() lists it.
+const harnessTemp = fs.realpathSync(os.tmpdir());
+const harnessHome = fs.mkdtempSync(path.join(harnessTemp, 'harness-home-'));
+const harnessVaults = (() => {
+  const binding = JSON.parse(fs.readFileSync(path.join(__dirname, '../../.loop/config.json'), 'utf8'));
+  const roots = [
+    binding.vault && binding.vault.root,
+    ...((binding.policy && binding.policy.deploy_vaults) || []).map((vault) => vault.path),
+    '~/obsidian/headspace-sauce', '~/obsidian/accuris-sauce', '~/obsidian/ero-sauce',
+  ];
+  return [...new Set(roots.filter((root) => typeof root === 'string' && root.startsWith('~/'))
+    .map((root) => path.join(harnessHome, root.slice(2))))];
+})();
+for (const vault of harnessVaults) {
+  const config = path.join(vault, '.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json');
+  fs.mkdirSync(path.dirname(config), { recursive: true });
+  fs.writeFileSync(config, JSON.stringify({ apiKey: 'harness-tripwire', insecurePort: 1, enableInsecureServer: true, enableSecureServer: false }));
+}
+(() => {
+  const childProcess = require('child_process');
+  const insideTemp = (dir) => typeof dir === 'string' && path.resolve(dir).startsWith(`${harnessTemp}${path.sep}`);
+  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync']) {
+    const real = childProcess[name];
+    childProcess[name] = function harnessPinnedHome(command, args, options, ...rest) {
+      if ((command !== process.execPath && command !== 'node') || !Array.isArray(args)) return real.call(this, command, args, options, ...rest);
+      if (typeof options === 'function') { rest.unshift(options); options = undefined; }
+      const env = (options && options.env) || process.env;
+      if (insideTemp(env.HOME)) return real.call(this, command, args, options, ...rest);
+      return real.call(this, command, args, { ...(options || {}), env: { ...env, HOME: harnessHome } }, ...rest);
+    };
+  }
+})();
+// The env for a coordinator CLI child that is not given a fixture of its own:
+// a binding to a board in an empty temp vault with no REST config, instead of
+// this repo's .loop/config.json.
+const harnessCliVault = fs.mkdtempSync(path.join(harnessTemp, 'harness-cli-vault-'));
+const harnessCliEnv = () => ({
+  ...process.env,
+  SAUCE_LOOP_BOARD: path.join(harnessCliVault, 'spice', 'projects', 'harness', 'harness-board.md'),
+  SAUCE_LOOP_CARDS_ROOT: path.join(harnessCliVault, 'spice', 'projects', 'harness', 'tasks'),
+  SAUCE_LOOP_VAULTS: '[]',
+  SAUCE_LOOP_REPO: 'example/harness-cli',
+});
+// Paths, relative to harnessHome, of anything in those vaults besides their
+// REST configs.
+function harnessIsolationProblems() {
+  const expected = new Set();
+  for (const vault of harnessVaults) {
+    let entry = path.join(vault, '.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json');
+    while (entry.startsWith(`${vault}${path.sep}`)) { expected.add(entry); entry = path.dirname(entry); }
+  }
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (!expected.has(full)) found.push(path.relative(harnessHome, full));
+      if (entry.isDirectory()) walk(full);
+    }
+  };
+  for (const vault of harnessVaults) walk(vault);
+  return found.sort();
+}
 const { execFileSync, spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const Module = require('module');
@@ -1314,7 +1382,7 @@ const jsonFirstCli = await new Promise((resolve) => {
   const child = spawn(process.execPath, [
     path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
     'park', '--card', 'A', '--depends-on', 'B', '--resume-condition', 'B deploys',
-  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: os.tmpdir(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -1364,7 +1432,7 @@ const unknownOptionCli = await new Promise((resolve) => {
     'record-review', '--json', '--card', 'A', '--lens', 'correctness', '--verdict', 'pass',
     '--summary', 'A sufficiently specific exact-head correctness summary.',
     '--expected-heed', 'a'.repeat(40),
-  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: os.tmpdir(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -1380,7 +1448,7 @@ const usageCli = await new Promise((resolve) => {
   const child = spawn(process.execPath, [
     path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
     'record-pr', '--json',
-  ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: process.cwd(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -1616,7 +1684,7 @@ for (const [label, rawOperands] of [
 ]) {
   const cliResult = await new Promise((resolve) => {
     const child = spawn(process.execPath, [...rawLimitationCliBase, ...rawOperands], {
-      cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: os.tmpdir(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = ''; let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -8619,7 +8687,7 @@ eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash
       '--dry-run',
       '--reason',
       'side-effect-free routing probe',
-    ], { encoding: 'utf8', stdio: 'pipe' });
+    ], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /--parked-rebind requires literal --parked-rebind and --json/.test(String(cliError.stderr)),
     'GA-OPS14A2-CLI-ROUTING-UNCOVERED parser and main dispatch reach the parked-rebind-specific pre-read refusal');
@@ -10364,7 +10432,7 @@ eq(rollupResult.epic.state, 'planned', 'BGR-DISCARD-EPIC-ROLLUP receipt reports 
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI discard without --json refuses with a machine-parseable error before any read or write');
@@ -10650,7 +10718,7 @@ ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the replay still leaves th
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI reap without --json refuses with a machine-parseable error before any read or write');
@@ -11819,7 +11887,7 @@ for (const [verb, args, expected] of [
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli(process.execPath, [coordinatorCli, ...args], { encoding: 'utf8', stdio: 'pipe' });
+    execCli(process.execPath, [coordinatorCli, ...args], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && expected.test(String(cliError.stderr)),
     `GA-OPS19A2-CLI-DISPATCH-UNBOUND ${verb} reaches its real dispatcher branch and refuses before state read`);
@@ -11831,7 +11899,7 @@ for (const [verb, args, expected] of [
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI cutover without --json refuses with a machine-parseable error before any read or write');
@@ -11843,7 +11911,7 @@ for (const [verb, args, expected] of [
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'restructure', '--spec', 'missing.json'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'restructure', '--spec', 'missing.json'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI restructure without --json refuses with a machine-parseable error before any read or write');
@@ -15110,7 +15178,7 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
         'SYNC2-NO-REST-IDENTICAL main derives the exit code from the verb receipt alone');
       const outermostLockUses = [
         ['commandBackfillRatifications', "lock(ctx, 'selector'"],
-        ['commandConsumeRatification', 'validateRatificationArtifactOperand('],
+        ['commandConsumeRatification', "lock(ctx, 'selector'"],
         ['commandAmendContract', "transitionLock(ctx, 'selector'"],
         ['commandPark', "transitionLock(ctx, 'selector'"],
         ['commandAmendPark', "transitionLock(ctx, 'selector'"],
@@ -15162,7 +15230,7 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       const gatedTurn = {
         commandClaim: { gates: [/if \(!args\['dry-run'\]\) await vaultIndex\.awaitWriteTurn\(\);/g] },
         commandHealEpicBindings: { gates: [/if \(apply\) await vaultIndex\.awaitWriteTurn\(\);/g] },
-        commandRestampContractFrontmatter: { gates: [/if \(apply\) await vaultIndex\.awaitWriteTurn\(\);/g] },
+        commandRestampContractFrontmatter: { gates: [/if \(apply\) \{[^]*?await vaultIndex\.awaitWriteTurn\(\);\s*\}/g] },
         commandReconcileMetadata: { gates: [/if \(args\.apply === true\) await vaultIndex\.awaitWriteTurn\(\);/g] },
         commandReconcileDependencies: { gates: [/if \(apply\) await vaultIndex\.awaitWriteTurn\(\);/g] },
         commandRecoverDeployed: {
@@ -16562,6 +16630,41 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       eq(runs.find((entry) => entry.name === 'claim').run.receipt.no_op, true, 'SYNC2C-DRY-RUN-AND-PROSE precondition: claim --dry-run is the selector preview');
     }
 
+    // SYNC2D-USAGE-BEFORE-TURN: a usage refusal behind a live turn holder exits
+    // with the refusal the same verb gives without REST config and takes no
+    // turn. The holder releases the turn by its release file, written after
+    // the refusal returned, or by its 20s timer, so a refusal that waited for
+    // the turn forces a release by the timer.
+    {
+      const malformedSpec = path.join(sync2Root, 'usage-malformed-spec.json');
+      fs.writeFileSync(malformedSpec, '{ not json');
+      for (const [name, args, message] of [
+        ['consume-ratification without --json', ['consume-ratification', '--card', SYNC2_CARD],
+          /consume-ratification requires --json for a machine-readable receipt/],
+        ['the contract-frontmatter restamp --apply with a malformed --spec',
+          ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--apply', '--reason', 'sync2d', '--spec', malformedSpec],
+          /contract frontmatter restamp spec is malformed JSON/],
+      ]) {
+        const plain = sync2CliFixture('usage-plain');
+        const reference = await sync2Cli(plain, args);
+        const fx = sync2CliFixture('usage-held');
+        const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+        await sync2RestConfig(fx.vault, stub.port);
+        const releaseFile = path.join(fx.base, 'release-usage-holder');
+        const holder = await sync2Holder(fx.vault, 20000, '', releaseFile);
+        const refused = await sync2Cli(fx, args);
+        const owner = sync2cTurnOwner(fx);
+        fs.writeFileSync(releaseFile, '');
+        await holder.closed;
+        const stderrOf = (run, fixture) => run.stderr.split(fixture.base).join('<base>');
+        eq([refused.code, stderrOf(refused, fx)], [reference.code, stderrOf(reference, plain)],
+          `SYNC2D-USAGE-BEFORE-TURN ${name}: the exit code and stderr match the run without REST config`);
+        ok(refused.code !== 0 && message.test(refused.stderr), `SYNC2D-USAGE-BEFORE-TURN ${name}: it is refused with its usage message — ${refused.stderr.slice(0, 200)}`);
+        eq([await holder.releasedBy, owner && owner.token], ['file', 'holder'],
+          `SYNC2D-USAGE-BEFORE-TURN ${name}: the refusal returns before the holder releases the turn, and takes no turn`);
+      }
+    }
+
     // SYNC2-NO-REST-IDENTICAL: each verb without REST config against the same
     // verb with vault-index replaced by a no-op module (the shim run in the
     // labels). SYNC2D-NO-REST-MATCHES-MAIN compares with origin/main's
@@ -17042,5 +17145,9 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(boardPath), (journal) => 
   }
 }
 
+eq(harnessIsolationProblems(), [],
+  'SYNC2D-HARNESS-ISOLATION no node child took a write turn or created anything in the vaults the repo binding and the coordinator fallbacks name under the harness HOME');
+fs.rmSync(harnessHome, { recursive: true, force: true });
+fs.rmSync(harnessCliVault, { recursive: true, force: true });
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
 })().catch((err) => { console.error(err); process.exit(1); });
