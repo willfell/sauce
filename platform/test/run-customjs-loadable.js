@@ -187,6 +187,20 @@ function scanClassRefs() {
 // also fails when fewer than COORDINATOR_REF_FLOOR references are read or a
 // class in COORDINATOR_REQUIRED_CLASSES is not among them. Fixtures in
 // COORDINATOR_FIXTURES check reading rules against examples.
+//
+// Scope: a drift check on the text the coordinator source writes, not a
+// sandbox. Guard calls are parsed with await as a keyword, as Dataview runs a
+// block containing await in an async function. An occurrence is unreadable when
+// a later part of its template or + chain has no static string value and is not
+// its class value, or when its call's arguments are not followed by optional
+// whitespace and ) in that text. Not checked: parts joined before the
+// occurrence's string; code before the call in its own string; functions that
+// compute new text from the written text (a string method, a tag function given
+// it as a substitution, a rebound String.raw); guard calls whose customjs-guard
+// text is in no string literal or template part, such as text split across
+// literals, written with an escape like \x2d in the note text, or held in a
+// regex; and helper calls that do not name the helper as a call, such as
+// through eval or a global object.
 const acorn = require('acorn');
 
 const COORDINATOR_SOURCE = 'scripts/autoloop/codex-coordinator.js';
@@ -194,6 +208,8 @@ const COORDINATOR_REF_FLOOR = 6;
 const COORDINATOR_REQUIRED_CLASSES = ['BoardHealth', 'GraphView', 'OperatorStation'];
 const EXPR_PLACEHOLDER_RE = /__sauceClassExpr(\d+)__/;
 const CALL_SPLICE = 'customjs-guard call has __sauceClassExpr text between the opening quote of its path and the end of its object argument, outside its class value; a joined part with no static string value becomes such text';
+const CALL_CHAIN = 'a later part of the template or + chain of this customjs-guard string or template part has no static string value and is not written as the whole text between the quotes of its class value';
+const CALL_OPEN = "customjs-guard call's arguments are not followed by optional whitespace and ) in the text of this string or template part and the later parts of its template or + chain";
 
 function stringValue(node) {
   if (node && node.type === 'Literal' && typeof node.value === 'string') return node.value;
@@ -205,7 +221,7 @@ function readGuardCall(text, at) {
   const call = /\bdv\.view\(\s*["'`][^"'`]*$/.exec(text.slice(0, at));
   if (!call) return { error: 'customjs-guard does not follow dv.view( at the start of a word, optional whitespace and a quote in this string or template part, with no other quote between that quote and customjs-guard' };
   let parsed;
-  try { parsed = acorn.parseExpressionAt(text, call.index + call[0].search(/["'`]/), { ecmaVersion: 'latest' }); }
+  try { parsed = acorn.parseExpressionAt(text, call.index + call[0].search(/["'`]/), { ecmaVersion: 'latest', allowAwaitOutsideFunction: true }); }
   catch (_e) { return { error: "customjs-guard call's arguments do not parse as one comma expression from the path onward in this string and its + operands, with a placeholder for each part that has no static string value" }; }
   const args = parsed.type === 'SequenceExpression' ? parsed.expressions : [parsed];
   if (!/customjs-guard$/.test(stringValue(args[0]) || '')) return { error: "customjs-guard call's first argument, as parsed from the quote before customjs-guard, has no static string value ending in customjs-guard" };
@@ -218,7 +234,8 @@ function readGuardCall(text, at) {
   if (value === null) return { error: 'customjs-guard class value is not a string literal' };
   const from = call.index + call[0].search(/["'`]/);
   const outside = [text.slice(from, keys[0].value.start), text.slice(keys[0].value.end, config.end)];
-  return { value, spliced: outside.some((t) => t.includes('__sauceClassExpr')) };
+  const written = text.slice(keys[0].value.start + 1, keys[0].value.end - 1);
+  return { value, spliced: outside.some((t) => t.includes('__sauceClassExpr')), written, closed: /^\s*\)/.test(text.slice(parsed.end)) };
 }
 
 function coordinatorClassRefs(source) {
@@ -326,10 +343,12 @@ function coordinatorClassRefs(source) {
         return `__sauceClassExpr${exprs.length - 1}__`;
       }).join('');
       const collides = text.split('__sauceClassExpr').length - 1 > exprs.length;
-      const { value, error, spliced } = readGuardCall(text, at);
+      const { value, error, spliced, written, closed } = readGuardCall(text, at);
       const placeholder = value === undefined ? null : EXPR_PLACEHOLDER_RE.exec(value);
       if (error) problems.push({ line: part.line, message: error });
       else if (spliced && !(placeholder && (placeholder[0] !== value || collides))) problems.push({ line: part.line, message: CALL_SPLICE });
+      else if (!(placeholder && (placeholder[0] !== value || collides)) && exprs.some((_e, i) => written !== `__sauceClassExpr${i}__`)) problems.push({ line: part.line, message: CALL_CHAIN });
+      else if (!closed && !(placeholder && (placeholder[0] !== value || collides))) problems.push({ line: part.line, message: CALL_OPEN });
       else if (!placeholder) refs.push({ cls: value, line: part.line });
       else if (placeholder[0] !== value || collides) problems.push({ line: part.line, message: 'customjs-guard class value is not a single literal or expression, or the joined text contains __sauceClassExpr outside its placeholders' });
       else resolve(exprs[Number(placeholder[1])], part.line);
@@ -599,14 +618,24 @@ const e = 'await dv.view("ranch/views/customjs-guard", { class: "CliRefusal" });
     refs: ['operatorStation'],
     failures: [missing('operatorStation', 1)],
   },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
   {
-    label: 'each of the five customjs-guard calls in one returned string is read at the top-level class key of its own object',
+    label: 'in one returned string that joins widget into the fifth of its five customjs-guard calls, each of the first four calls fails the gate and the fifth is read at the top-level class key of its own object',
     source: String.raw`function block(widget) {
   return 'await dv.view("ranch/views/customjs-guard", { class: "Board Health" }); await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", args: [{ class: "NotTheGuardClass" }] }); await dv.view("ranch/views/customjs-guard", { args: [{ class: "NotGuard" }], class: "RealGuard" }); await dv.view("ranch/views/customjs-guard", { $class: "Wrong", "class": "Right" }); await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
 }
 block('MissingLastInString');`,
-    refs: ['Board Health', 'OperatorStation', 'RealGuard', 'Right', 'MissingLastInString'],
-    failures: [missing('Board Health', 2), missing('RealGuard', 2), missing('Right', 2), missing('MissingLastInString', 4)],
+    refs: ['MissingLastInString'],
+    failures: [unreadable(2, CALL_CHAIN), unreadable(2, CALL_CHAIN), unreadable(2, CALL_CHAIN), unreadable(2, CALL_CHAIN), missing('MissingLastInString', 4)],
+  },
+  // MUTATION GUARD: reading only the first customjs-guard occurrence in each string turns RED
+  {
+    label: 'each of the four customjs-guard calls in one returned string that joins no other part is read at the top-level class key of its own object',
+    source: String.raw`function block() {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "Board Health" }); await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", args: [{ class: "NotTheGuardClass" }] }); await dv.view("ranch/views/customjs-guard", { args: [{ class: "NotGuard" }], class: "RealGuard" }); await dv.view("ranch/views/customjs-guard", { $class: "Wrong", "class": "Right" });';
+}`,
+    refs: ['Board Health', 'OperatorStation', 'RealGuard', 'Right'],
+    failures: [missing('Board Health', 2), missing('RealGuard', 2), missing('Right', 2)],
   },
   {
     label: 'a property, method, field or label named like the helper is not an appearance of it; a computed one or an object shorthand one is',
@@ -892,6 +921,163 @@ const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation
     source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", note: "' + '__sauceClassExprZ' + '" });';`,
     refs: [],
     failures: [unreadable(1, CALL_SPLICE)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: "a guard call whose object is followed in its + chain by the const tail, ' && { class: \"NoSuchConst\" }', fails the gate",
+    source: String.raw`const tail = ' && { class: "NoSuchConst" }';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + tail + ');';`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: "a helper that joins its second parameter tail between its guard object and the closing ) fails the gate, though its call's class argument is OperatorStation",
+    source: String.raw`function block(widget, tail) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" }' + tail + ');';
+}
+block('OperatorStation', ' && { class: "NoSuchHelper" }');`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: 'a template whose guard object is followed by ${t} fails the gate',
+    source: 'function g(t) { return `await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }${t});`; }\n'
+      + "g(' ? { class: \"NoSuchTern\" } : 0');",
+    refs: [],
+    failures: [unreadable(1, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: "a guard call whose object is followed in its + chain by the const t, '.constructor({ class: \"NoSuchMember\" })', fails the gate",
+    source: String.raw`const t = '.constructor({ class: "NoSuchMember" })';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + t + ');';`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: "a guard call whose object is followed in its + chain by a space and the const t, '|| 0 ? { class: \"NoSuchSpace\" } : 0', fails the gate",
+    source: String.raw`const t = '|| 0 ? { class: "NoSuchSpace" } : 0';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } ' + t + ');';`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: 'a String.raw template whose guard object is followed by ${t} fails the gate',
+    source: 'function g(t) { return String.raw`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }${t});`; }\n'
+      + "g(' && { class: \"NoSuchRaw\" }');",
+    refs: [],
+    failures: [unreadable(1, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: 'a template whose guard object is followed by a space, ${""} and ${t} fails the gate',
+    source: 'function g(t) { return `await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } ${""}${t});`; }\n'
+      + "g(' && { class: \"NoSuchQuasi\" }');",
+    refs: [],
+    failures: [unreadable(1, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: 'a template holding a guard call up to its object, followed in its + chain by the const t, fails the gate',
+    source: "const t = ' && { class: \"NoSuchTplPlus\" }';\n"
+      + 'const s = `await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }` + t + \');\';',
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: 'a guard call whose object is followed in its + chain by t.trim() fails the gate',
+    source: String.raw`const t = ' && { class: "NoSuchTrim" }';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + t.trim() + ');';`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_CHAIN line in coordinatorClassRefs turns RED
+  {
+    label: "a guard call whose object is followed in its + chain by (t + ');') fails the gate",
+    source: String.raw`const t = ' && { class: "NoSuchNest" }';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }' + (t + ');');`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: exempting every part from the CALL_CHAIN check when the class value is a placeholder turns RED
+  {
+    label: 'a helper whose class value is its widget parameter and that joins its second parameter t after the closed guard call fails the gate',
+    source: String.raw`function block(widget, t) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });' + t;
+}
+block('OperatorStation', '; await dv.view("ranch/views/customjs-' + 'guard", { class: "NoSuchAfterClose" });');`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: exempting the part whose placeholder is the class value, in place of the part written as the whole text between its quotes, turns RED
+  {
+    label: 'a helper whose class value is written \\x5f_sauceClassExpr0__ and that joins widget after the closed guard call fails the gate',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "\\x5f_sauceClassExpr0__" }); // ' + widget;
+}
+block('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: deleting the CALL_OPEN line in coordinatorClassRefs turns RED
+  {
+    label: 'a guard call left open in its string and joined with += fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }';
+s += ' && { class: "NoSuchPlusEq" }';
+s += ');';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: deleting the CALL_OPEN line in coordinatorClassRefs turns RED
+  {
+    label: 'a guard call left open in its string and joined with .concat fails the gate',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }'.concat(' && { class: "NoSuchConcat" }', ');');`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: deleting the CALL_OPEN line in coordinatorClassRefs turns RED
+  {
+    label: "a guard call left open in its string and joined with [...].join('') fails the gate",
+    source: String.raw`const s = ['await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }', ' && { class: "NoSuchJoin" }', ');'].join('');`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: deleting the CALL_OPEN line in coordinatorClassRefs turns RED
+  {
+    label: 'a guard call left open in its string and joined by a wrapper function fails the gate',
+    source: String.raw`const close = (x, t) => x + t + ');';
+const s = close('await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }', ' && { class: "NoSuchWrap" }');`,
+    refs: [],
+    failures: [unreadable(2, CALL_OPEN)],
+  },
+  // MUTATION GUARD: deleting the CALL_OPEN line in coordinatorClassRefs turns RED
+  {
+    label: 'a guard call left open in its string and joined by a template holding that string in a variable fails the gate',
+    source: "const head = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\" }';\n"
+      + "const t = ' && { class: \"NoSuchTplVar\" }';\n"
+      + 'const s = `${head}${t});`;',
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: accepting ) anywhere later in the text, not only after optional whitespace, turns RED
+  {
+    label: 'a guard call left open in its string except for a ) inside a comment, and joined with +=, fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } /* ) */';
+s += ' && { class: "NoSuchComment" });';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: parsing the call without allowAwaitOutsideFunction turns RED
+  {
+    label: 'in the async body that runs the note, await /"/ is a regex, so a guard object with x: await /"/ before a second class key has 2 class keys and fails the gate',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", x: await /"/, class: \'NoSuchAwait\', y: /"/g });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard object has 2 class keys')],
   },
 ];
 
