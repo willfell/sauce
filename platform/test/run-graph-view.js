@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 4089;
+const ASSERTION_FLOOR = 4090;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -72,6 +72,20 @@ const WIDGET = path.join(ROOT, 'platform/blueprints/project/helpers/graph-view.j
 const LAYOUT = path.join(ROOT, 'platform/blueprints/project/helpers/graph-layout.js');
 const INSIGHTS = path.join(ROOT, 'platform/blueprints/project/helpers/graph-insights.js');
 const DASHBOARD = path.join(ROOT, 'platform/blueprints/project/helpers/epic-dashboard.js');
+// PH2C-FRONTIER-PROPERTY precondition, checked before anything else loads
+// the schema: its status pool derives from delivery-schema.json
+// status_aliases, which must be readable and map each lifecycle status to
+// itself.
+const PH2C_LIFECYCLE = ['planning', 'in_progress', 'blocked', 'parked', 'completed', 'discarded'];
+const PH2C_STATUS_ALIASES = (() => {
+  let aliases = null;
+  try {
+    aliases = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/mechanisms/delivery/data/delivery-schema.json'), 'utf8')).status_aliases;
+  } catch (_e) { aliases = null; }
+  assert(aliases && typeof aliases === 'object' && !Array.isArray(aliases) && PH2C_LIFECYCLE.every((status) => aliases[status] === status),
+    `PH2C-FRONTIER-PROPERTY precondition: delivery-schema.json status_aliases is readable and maps each of ${PH2C_LIFECYCLE.join(', ')} to itself, because the PH2C-FRONTIER-PROPERTY status pool derives from it (read: ${JSON.stringify(aliases)})`);
+  return aliases;
+})();
 const delivery = require(path.join(ROOT, 'platform/mechanisms/delivery'));
 const installer = require(path.join(ROOT, 'platform/install.js'));
 
@@ -11080,8 +11094,9 @@ async function main() {
       `PH2C-HOPS-PROPERTY: the cards read include at least 10 with each root cause count from 1 to 8 and 40 with 5 or more (${JSON.stringify([...rootCounts].sort((a, b) => a[0] - b[0]))})`);
   }
 
-  // PH2C-FRONTIER-PROPERTY: 300 seeded epics drawn through render() at 390
-  // and 1024, each compared in full with a reference frontier computed by
+  // PH2C-FRONTIER-PROPERTY: 300 seeded epics, and spelling epics that use
+  // each status spelling, drawn through render() at 390 and 1024, each
+  // compared in full with a reference frontier computed by
   // this harness from the card's rules. The reference takes its ranks,
   // rows, edges, and wait reasons from the real GraphLayout, its readiness,
   // root causes, hop counts, and summary counts from the real GraphInsights,
@@ -11091,12 +11106,16 @@ async function main() {
   // Inputs, per normalizer:
   // - status (delivery normalizeStatus via the lifecycle API, GraphLayout's
   //   trim, GraphInsights' trim and lower-case, _isExcludedStatus): each key
-  //   of delivery-schema.json's status_aliases (planning, in-planning,
-  //   in_progress, in-progress, blocked, parked, completed, discarded) in six
+  //   of delivery-schema.json's status_aliases, read at run time, in six
   //   spellings (as written, upper case, capitalised, padded with spaces,
   //   double-quoted, single-quoted), plus review, done, "in progress",
   //   archived (as written, padded, and double-quoted), the empty string,
-  //   the number 7, and no status key;
+  //   the number 7, and no status key. A seeded slice of a recognized
+  //   status takes a spelling that delivery and GraphInsights read alike
+  //   (see agrees) on a 0.8 branch, and otherwise any spelling of its
+  //   status; an unrecognized status has no such spelling. So the seeded
+  //   coverage does not depend on how many aliases the schema has; the
+  //   spelling epics use every spelling, ten to an epic;
   // - card names and ids (EpicDashboard._titleParts): ids GA-P<n>, QA-<n>x
   //   and ZZ-<n>, and id-less names of two words and a number;
   // - depends_on (GraphLayout._identity): [[card]], [[card|alias]], card,
@@ -11116,8 +11135,8 @@ async function main() {
   // the epic can be inserted anywhere in a lane order, so that ready slice
   // is lane entry 5 to 17.
   // MUTATION GUARD: PH2C-MUTANT-READY-CASE-SENSITIVE turns RED at
-  // "PH2C-FRONTIER-PROPERTY: at 390, 300 epics ..." if a slice is ready only
-  // when its raw status is planning or in-planning exactly.
+  // "PH2C-FRONTIER-PROPERTY: at 390, 300 seeded epics ..." if a slice is
+  // ready only when its raw status is planning or in-planning exactly.
   // MUTATION GUARD: PH2C-MUTANT-LANES-FIRST-FOUR turns RED at the same label
   // if Next up looks at the first four lane entries only.
   // MUTATION GUARD: PH2C-MUTANT-LANES-FIRST-EIGHT turns RED at the same
@@ -11130,33 +11149,59 @@ async function main() {
   // same label if the gather stops trimming a status before it checks for
   // archived or discarded.
   {
-    const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'platform/mechanisms/delivery/data/delivery-schema.json'), 'utf8'));
     const spellings = [
       ['as written', (raw) => raw], ['upper case', (raw) => raw.toUpperCase()],
       ['capitalised', (raw) => raw[0].toUpperCase() + raw.slice(1)], ['padded', (raw) => `  ${raw} `],
       ['double-quoted', (raw) => `"${raw}"`], ['single-quoted', (raw) => `'${raw}'`],
     ];
+    // Each spelling is filed under the status delivery normalizeStatus gives
+    // it (null as unrecognized). GraphInsights reads a status by trimming
+    // and lower-casing it, and only completed, blocked and parked change what
+    // it computes; an empty or missing status is a stub to it. A spelling
+    // agrees when normalizeStatus gives it a status and GraphInsights reads
+    // it as a non-empty status that is, when that status is completed,
+    // blocked or parked, the same one, and otherwise none of those three. A
+    // spelling normalizeStatus does not recognize never agrees.
+    const insightsRead = (raw) => {
+      if (raw == null) return null;
+      const text = String(raw).trim();
+      return text ? text.toLowerCase() : null;
+    };
+    const terminal = ['completed', 'blocked', 'parked'];
+    const agrees = (raw, normalized) => {
+      const read = insightsRead(raw);
+      if (read === null || !normalized) return false;
+      return terminal.includes(normalized) ? read === normalized : !terminal.includes(read);
+    };
     const pool = new Map();
-    for (const [alias, normalized] of Object.entries(schema.status_aliases)) {
-      for (const [spelling, spell] of spellings) {
-        const raw = spell(alias);
-        if (!pool.has(normalized)) pool.set(normalized, []);
-        pool.get(normalized).push({ raw, tag: `${alias}/${spelling}` });
-      }
+    const addSpelling = (raw, tag) => {
+      const normalized = delivery.normalizeStatus(raw);
+      const bucket = raw === null || normalized === null ? 'unrecognized' : normalized;
+      if (!pool.has(bucket)) pool.set(bucket, []);
+      pool.get(bucket).push({ raw, tag, agrees: agrees(raw, normalized) });
+    };
+    for (const alias of Object.keys(PH2C_STATUS_ALIASES)) {
+      for (const [spelling, spell] of spellings) addSpelling(spell(alias), `${alias}/${spelling}`);
     }
-    pool.set('unrecognized', ['review', 'done', 'in progress', 'archived', '  archived ', '"archived"', '', 7, null].map((raw) => ({ raw, tag: `raw/${raw === null ? 'no key' : JSON.stringify(raw)}` })));
+    for (const raw of ['review', 'done', 'in progress', 'archived', '  archived ', '"archived"', '', 7, null]) {
+      addSpelling(raw, `raw/${raw === null ? 'no key' : JSON.stringify(raw)}`);
+    }
     const weights = [['planning', 30], ['completed', 24], ['in_progress', 10], ['blocked', 13], ['parked', 8], ['discarded', 3], ['unrecognized', 12]];
     const rand = ph2cRandom(0x2c05);
-    // A spelling of the forced normalized status, or of one drawn by weight;
-    // plain leaves out the quoted spellings, which GraphInsights does not read
-    // as that status.
+    // A spelling of the forced status, or of one drawn by weight. plain keeps
+    // to agreeing spellings; otherwise the agreeing spellings are drawn from
+    // with probability 0.8, and all spellings of the status, agreeing or
+    // not, with probability 0.2. A status with no agreeing spelling draws
+    // from all of its spellings.
     const pickStatus = (forced, plain = false) => {
       let bucket = forced;
       if (!bucket) {
         let at = rand() * 100;
         bucket = weights.find(([, weight]) => (at -= weight) < 0)[0];
       }
-      return ph2cPick(rand, pool.get(bucket).filter((entry) => !plain || !/quoted$/.test(entry.tag)));
+      const all = pool.get(bucket);
+      const agreeing = all.filter((entry) => entry.agrees);
+      return ph2cPick(rand, agreeing.length && (plain || rand() < 0.8) ? agreeing : all);
     };
     const word = () => ph2cPick(rand, ph2cWords);
     const cardName = (number) => {
@@ -11224,6 +11269,18 @@ async function main() {
         stubStatus: ph2cPick(rand, ['completed', 'in_progress', 'planning']),
       };
     });
+    // Spelling epics: every spelling in the pool, ten to an epic, each slice
+    // after the one before it, then a planning slice with no prerequisite.
+    const seeded = epics.length;
+    const everySpelling = [...pool.values()].flat();
+    for (let at = 0; at < everySpelling.length; at += 10) {
+      const slices = [];
+      for (const entry of everySpelling.slice(at, at + 10)) {
+        slices.push({ card: cardName(slices.length + 1), raw: entry.raw, tag: entry.tag, depends_on: slices.length ? [link(slices[slices.length - 1].card)] : [] });
+      }
+      slices.push({ card: cardName(slices.length + 1), raw: 'planning', tag: 'spelling epic/planning', depends_on: [] });
+      epics.push({ slices, planningLane: [], progressLane: [], lanes: [], stubStatus: 'completed' });
+    }
     const otherDir = 'spice/projects/phone/tasks/Other Ops/board';
     const envFor = (index, epic) => {
       const env = ph2Track(ph2Env(`Frontier Property ${index}`, epic.slices.map(({ card, raw, depends_on: deps }) => ({
@@ -11363,9 +11420,10 @@ async function main() {
         if (width === 390) {
           for (const slice of epic.slices) {
             const bucket = slice.raw === null || delivery.normalizeStatus(slice.raw) === null ? 'unrecognized' : delivery.normalizeStatus(slice.raw);
-            tally.normalized.set(bucket, (tally.normalized.get(bucket) || 0) + 1);
+            if (index < seeded) tally.normalized.set(bucket, (tally.normalized.get(bucket) || 0) + 1);
             tally.tags.set(slice.tag, (tally.tags.get(slice.tag) || 0) + 1);
           }
+          if (index >= seeded) continue;
           if (!want.stats) { tally.noList += 1; continue; }
           tally.idless += want.stats.idless;
           if (want.stats.idlessNext) tally.idlessNext += 1;
@@ -11380,15 +11438,15 @@ async function main() {
         }
       }
       assert.deepStrictEqual(actual, expected,
-        `PH2C-FRONTIER-PROPERTY: at ${width}, 300 epics: each epic's stubs, frontier list, expanded done rows, and the Root cause lines of its blocked or planning slice with the most root causes equal the reference frontier`);
+        `PH2C-FRONTIER-PROPERTY: at ${width}, 300 seeded epics and ${epics.length - seeded} spelling epics: each epic's stubs, frontier list, expanded done rows, and the Root cause lines of its blocked or planning slice with the most root causes equal the reference frontier`);
     }
-    const tagsMissing = [...pool.values()].flat().map((entry) => entry.tag).filter((tag) => !tally.tags.get(tag));
+    const tagsMissing = everySpelling.map((entry) => entry.tag).filter((tag) => !tally.tags.get(tag));
     assert(['planning', 'in_progress', 'blocked', 'parked', 'completed', 'discarded', 'unrecognized'].every((bucket) => (tally.normalized.get(bucket) || 0) >= 40)
       && tagsMissing.length === 0,
-    `PH2C-FRONTIER-PROPERTY: the 300 epics give at least 40 slices to each normalized status and to unrecognized (${JSON.stringify([...tally.normalized])}), and use each of the ${[...pool.values()].flat().length} status spellings (missing: ${JSON.stringify(tagsMissing)})`);
+    `PH2C-FRONTIER-PROPERTY status coverage: the 300 seeded epics give at least 40 slices to each of planning, in_progress, blocked, parked, completed, discarded and unrecognized (${JSON.stringify([...tally.normalized])}), and the seeded and spelling epics use each of the ${everySpelling.length} status spellings derived from delivery-schema.json status_aliases and the raw forms (missing: ${JSON.stringify(tagsMissing)})`);
     assert(tally.idless >= 200 && tally.idlessNext >= 10 && tally.lane8 >= 10 && tally.lane12 >= 5 && tally.group11 >= 10
       && tally.after6 >= 10 && tally.roots10 >= 20 && tally.hops10 >= 20 && tally.folded11 >= 5 && tally.stubbed >= 20,
-    `PH2C-FRONTIER-PROPERTY: the 300 epics include at least 200 drawn slices with no id (${tally.idless}), 10 epics whose Next up has no id (${tally.idlessNext}), 10 whose Next up is lane entry 9 or later and not the first ready slice drawn (${tally.lane8}), 5 such at lane entry 13 or later (${tally.lane12}), 10 with a group of 11 or more rows (${tally.group11}), 10 with a Queued row after 6 or more slices (${tally.after6}), 20 whose Root cause card has 10 or more lines (${tally.roots10}), 20 with a Blocked row 10 or more hops below its first root cause (${tally.hops10}), 5 folding 11 or more done slices (${tally.folded11}), and 20 with a cross-epic stub (${tally.stubbed})`);
+    `PH2C-FRONTIER-PROPERTY shape coverage (ids, lane order, group sizes, after lists, root counts, hops, folds, stubs): the 300 seeded epics include at least 200 drawn slices with no id (${tally.idless}), 10 epics whose Next up has no id (${tally.idlessNext}), 10 whose Next up is lane entry 9 or later and not the first ready slice drawn (${tally.lane8}), 5 such at lane entry 13 or later (${tally.lane12}), 10 with a group of 11 or more rows (${tally.group11}), 10 with a Queued row after 6 or more slices (${tally.after6}), 20 whose Root cause card has 10 or more lines (${tally.roots10}), 20 with a Blocked row 10 or more hops below its first root cause (${tally.hops10}), 5 folding 11 or more done slices (${tally.folded11}), and 20 with a cross-epic stub (${tally.stubbed})`);
   }
 
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
