@@ -1479,6 +1479,28 @@ setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, fo
     eq(identical['no-config'].run.receipt.obsidian_index && [identical['no-config'].run.receipt.obsidian_index.available, identical['no-config'].run.receipt.obsidian_index.reason],
       [false, 'no-rest-config'], 'SYNC2-NO-REST-IDENTICAL obsidian_index reports that the vault has no REST config');
 
+    // SYNC2D-INVALID-KEY: an apiKey that cannot be sent as a header value
+    // makes the REST config malformed, so the CLI --apply mints as without
+    // REST config and the stub receives nothing.
+    {
+      const badKey = 'bad\u0101key';
+      const badFx = await fixture('reachable');
+      fs.writeFileSync(path.join(badFx.vault, vaultIndex.REST_CONFIG_RELATIVE), JSON.stringify({
+        port: await closedPort(), insecurePort: badFx.stub.port, enableInsecureServer: true, enableSecureServer: true, apiKey: badKey,
+      }, null, 2));
+      const beforeBad = snapshot(badFx.vault);
+      const badRun = await cli(badFx, ['--apply']);
+      outputs.push(badRun);
+      const afterBad = snapshot(badFx.vault);
+      const badIndex = badRun.receipt.obsidian_index || {};
+      eq([badRun.code, badRun.receipt.ok, badIndex.available, badIndex.reason], [0, true, false, 'malformed-rest-config'],
+        `SYNC2D-INVALID-KEY the CLI --apply exits 0 and reports obsidian_index reason malformed-rest-config — ${badRun.stderr.slice(0, 200)}`);
+      eq(changedBetween(beforeBad, afterBad).map((rel) => [rel, afterBad.get(rel)]), identical['no-config'].changed.map((rel) => [rel, identical['no-config'].after.get(rel)]),
+        'SYNC2D-INVALID-KEY the notes the apply changed, and their bytes, match the run without REST config');
+      eq((await badFx.stub.log()).requests.length, 0, 'SYNC2D-INVALID-KEY the stub receives no request');
+      ok(!badRun.stdout.includes(badKey) && !badRun.stderr.includes(badKey), 'SYNC2D-INVALID-KEY the apiKey appears on neither stdout nor stderr');
+    }
+
     // SYNC2-INDEXED-WHEN-HEALTHY through the CLI
     const cliFx = await fixture();
     const cliBefore = snapshot(cliFx.vault);
