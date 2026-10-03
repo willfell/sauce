@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 3953;
+const ASSERTION_FLOOR = 3957;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -9392,6 +9392,55 @@ async function main() {
         ['GA-MR2', 'blocked', null, null],
         ['GA-MR3', 'blocked', null, 'blocked by GA-MR1 · 1 hop up']],
     ], 'PH2-GROUPS-EXACT: multiple root causes: a blocked root blocker with nothing to wait on has no wait line, and GA-MR3 names its first root cause, GA-MR1');
+  }
+  // A card name with no id: the parked root blocker "Vendor sign-off" has
+  // no id, GA-V2 is blocked behind it, and GA-V3 is planned behind it.
+  // MUTATION GUARD: PH2-MUTANT-BLOCKED-ID-NO-FALLBACK turns RED at
+  // "PH2-GROUPS-EXACT: Idless Roots ..." if the Blocked row names a root
+  // blocker that has no id by its id alone.
+  // MUTATION GUARD: PH2-MUTANT-AFTER-ID-NO-FALLBACK turns RED at the same
+  // label if the Queued row names a prerequisite that has no id by its id
+  // alone.
+  for (const width of [390, 1024]) {
+    const root = await ph2Draw(ph2Track(ph2Env('Idless Roots', [
+      { card: 'Vendor sign-off', status: 'parked', resume_condition: 'Resume after the vendor call.' },
+      { card: 'GA-V2 Launch', status: 'blocked', depends_on: ['[[Vendor sign-off]]'] },
+      { card: 'GA-V3 Docs', status: 'planning', depends_on: ['[[Vendor sign-off]]'] },
+    ])), width);
+    assert.deepStrictEqual(ph2Read(root).groups.map((group) => group.slice(1)), [
+      ['Needs you 1', [null, '⚑ waiting', null, 'Resume after the vendor call.']],
+      ['Blocked 1', ['GA-V2', 'blocked', null, 'blocked by Vendor sign-off · 1 hop up']],
+      ['Queued 1', ['GA-V3', 'planning', null, 'after Vendor sign-off']],
+    ], `PH2-GROUPS-EXACT: Idless Roots at ${width}: the Blocked row reads blocked by Vendor sign-off · 1 hop up and the Queued row reads after Vendor sign-off, naming the id-less card by its whole name`);
+  }
+  // A planning slice queued behind a cross-epic stub, drawn through
+  // render(): GA-CQ2 depends on GA-OX1, a slice in the Other Ops epic.
+  // MUTATION GUARD: PH2-MUTANT-WIDE-RETURNS-NO-STUBS turns RED at
+  // "PH2-GROUPS-EXACT: Cross Queue at 1024 ..." if _renderGraph hands the
+  // list its nodes without the cross-epic stubs.
+  // MUTATION GUARD: PH2-MUTANT-COMPACT-RETURNS-NO-STUBS turns RED at
+  // "PH2-GROUPS-EXACT: Cross Queue at 390 ..." if _renderCompactMap hands
+  // the list its nodes without the cross-epic stubs.
+  for (const width of [390, 1024]) {
+    const env = ph2Track(ph2Env('Cross Queue', [
+      { card: 'GA-CQ1 Base', status: 'completed' },
+      { card: 'GA-CQ2 Consumer', status: 'planning', depends_on: ['[[GA-OX1 Upstream]]'] },
+    ]));
+    const otherPath = 'spice/projects/phone/tasks/Other Ops/board/GA-OX1 Upstream.md';
+    env.app.vault.getMarkdownFiles().push(file(otherPath, 99));
+    const ownCache = env.app.metadataCache.getFileCache;
+    env.app.metadataCache.getFileCache = (entry) => (entry.path === otherPath
+      ? { frontmatter: { type: 'slice', status: 'in_progress' } }
+      : ownCache(entry));
+    const root = await ph2Draw(env, width);
+    assert.deepStrictEqual([byClass(root, 'graph-view-stub').length, ph2Read(root)], [1, {
+      groups: [
+        ['graph-view-frontier-group frontier-queued', 'Queued 1', ['GA-CQ2', 'planning', null, 'after GA-OX1']],
+        ['graph-view-frontier-group frontier-done', null],
+      ],
+      shipped: [],
+      strip: ['1 done · show'],
+    }], `PH2-GROUPS-EXACT: Cross Queue at ${width}: render() draws one cross-epic stub, and GA-CQ2 lists under Queued with the wait line after GA-OX1`);
   }
   // FL3-TRIAGE-COUNTS: the Needs you and Blocked labels show GraphInsights'
   // summary counts, not the number of rows drawn under them.
