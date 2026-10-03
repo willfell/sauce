@@ -15070,8 +15070,13 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
         return starts.length ? starts[starts.length - 1][1] : null;
       });
       eq(putSites, ['putNote'], 'SYNC2-NO-POST-VERB-WRITE source scan: the only PUT the rail sends is built in putNote');
-      for (const name of ['putNote', 'exchange']) {
-        const body = sync2BodyOf(indexCode, name);
+      // exchange destroys the socket only when http.request throws, before
+      // req.end sends anything; that catch is removed before the check.
+      const unsentCatch = /\} catch \(_\) \{\s*socket\.destroy\(\);\s*settle\(\{ failure: 'request-failed' \}\);\s*return;\s*\}/;
+      const exchangeBody = sync2BodyOf(indexCode, 'exchange');
+      ok(unsentCatch.test(exchangeBody) && exchangeBody.search(unsentCatch) < exchangeBody.indexOf('req.end('),
+        'SYNC2D-INVALID-KEY source scan: exchange destroys the socket in a catch of http.request placed before req.end');
+      for (const [name, body] of [['putNote', sync2BodyOf(indexCode, 'putNote')], ['exchange', exchangeBody.replace(unsentCatch, '')]]) {
         ok(body && !/setTimeout|setInterval|destroy\(|abort|Promise\.race|timeout/i.test(body),
           `SYNC2-NO-POST-VERB-WRITE source scan: ${name} has no timer and never gives up on a sent request`);
       }
@@ -15088,7 +15093,9 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
         + 'try { return await withLockDirectory(ctx, name, () => gate.run(fn), opts); } finally { await gate.afterRelease(); } }',
         'SYNC2-NO-POST-VERB-WRITE source scan: withLock consults the write-turn gate before the lock and awaits the flush after releasing it');
       eq(sync2BodyOf(indexCode, 'settle').replace(/\s+/g, ' '),
-        '{ try { await flush(scope); } finally { if (scope.outermost === 0) releaseTurn(scope); } }',
+        "{ try { await flush(scope); } catch (_) { if (scope.channel) disable(scope.channel, 'internal-error'); "
+        + "for (const entry of scope.written.values()) { if (entry.reason === 'not-sent') entry.reason = 'internal-error'; } } "
+        + 'finally { if (scope.outermost === 0) releaseTurn(scope); } }',
         'SYNC2-TURN source scan: the write turn is released only after the flush has been awaited');
       for (const [label, code] of [['codex-coordinator.js', coordinatorCode], ['card-intake.js', intakeCode]]) {
         ok(!/require\('(?:http|https|net|tls|worker_threads)'\)|'PUT'/.test(code),
@@ -15185,7 +15192,7 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
         const gated = gates.every((gate) => [...body.matchAll(gate)].length > 0)
           && calls.length > 0 && calls.every((at) => spans.some(([from, to]) => at >= from && at < to));
         ok(gated && patterns.every((pattern) => pattern.test(body)), name === 'commandAdvance'
-          ? 'SYNC2D-DRY-RUN-ADVANCE-PROJECTS source scan: commandAdvance\'s only turn calls sit inside `if (completionPending)` and `if (transitionedTo || retried)`, and its completionPending, transitionedTo and retried assignments carry their dry-run guards'
+          ? 'SYNC2D-DRY-RUN-ADVANCE-PROJECTS source scan: commandAdvance\'s only turn calls sit inside `if (completionPending)` and `if (transitionedTo || retried)`, and the dry-run-guarded assignments of completionPending, transitionedTo and retried are present'
           : `SYNC2C-DRY-RUN-AND-PROSE source scan: ${name} calls awaitWriteTurn and projectPendingCompletion only in its apply or non-dry-run branch`);
       }
     }
@@ -15736,16 +15743,21 @@ vaultIndex.withVaultIndex(vault, async () => { await vaultIndex.awaitWriteTurn()
     }
 
     // A child that holds the vault's write turn as a live process, then after
-    // holdMs runs `then` (source text, with fs, path and the vault in scope),
+    // holdMs, or as soon as releaseFile exists when one is given, runs `then`
+    // (source text, with fs, path and lease, the turn's directory, in scope),
     // releases the turn and prints when.
-    const sync2Holder = async (vault, holdMs, then = '') => {
+    const sync2Holder = async (vault, holdMs, then = '', releaseFile = null) => {
       const child = spawn(process.execPath, ['-e', `
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const lease = ${JSON.stringify(sync2Turn(vault))};
 fs.mkdirSync(lease, { recursive: true });
 fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
 process.stdout.write('held\\n');
-setTimeout(() => { ${then}; const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + '\\n'); }, ${holdMs});
+const releaseFile = ${JSON.stringify(releaseFile)};
+let poll = null;
+const timer = setTimeout(release, ${holdMs});
+if (releaseFile) poll = setInterval(() => { if (fs.existsSync(releaseFile)) release(); }, 20);
+function release() { clearTimeout(timer); if (poll) clearInterval(poll); ${then}; const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + '\\n'); }
 `], { stdio: ['ignore', 'pipe', 'inherit'] });
       let out = '';
       child.stdout.on('data', (chunk) => { out += chunk; });
@@ -16509,17 +16521,18 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
         'SYNC2C-PROJECTION-AFTER-GATE board-health: it waits for the turn holding no lock, and a status launched meanwhile is not refused');
     }
 
-    // SYNC2C-DRY-RUN-AND-PROSE: each dry run below returns promptly behind a
-    // live turn holder and takes no turn.
+    // SYNC2C-DRY-RUN-AND-PROSE: each dry run below ends while a live holder
+    // still holds the turn, and takes no turn. The holder releases only once
+    // all six runs have returned (or after 45s), so a run that waited for the
+    // turn could not end before that release.
     {
       const fx = sync2CliFixture('dry-runs');
       const claim = await sync2Cli(fx, ['claim', '--json']);
       eq(claim.code, 0, `SYNC2C-DRY-RUN-AND-PROSE precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
       const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
       await sync2RestConfig(fx.vault, stub.port);
-      const holdMs = 8000;
-      const holder = await sync2Holder(fx.vault, holdMs);
-      const heldFrom = Date.now();
+      const releaseFile = path.join(fx.base, 'release-dry-run-holder');
+      const holder = await sync2Holder(fx.vault, 45000, '', releaseFile);
       const runs = [];
       for (const [name, mode, args] of [
         ['claim', '--dry-run', ['claim', '--json', '--dry-run']],
@@ -16530,11 +16543,11 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
         ['reconcile-dependencies', 'without --apply', ['reconcile-dependencies', '--json', '--all', '--reason', 'sync2c']],
       ]) runs.push({ name, mode, run: await sync2Cli(fx, args) });
       const owner = sync2cTurnOwner(fx);
-      await holder.closed;
+      fs.writeFileSync(releaseFile, '');
+      const releasedAt = await holder.closed;
       for (const { name, mode, run } of runs) {
-        sync2Outputs.push(run);
-        ok(run.ended - heldFrom < holdMs - 2000 && !/LOCKED/.test(run.stderr),
-          `SYNC2C-DRY-RUN-AND-PROSE ${name} ${mode} returns promptly behind a live turn holder (${run.ended - heldFrom}ms, exit ${run.code}) — ${run.stderr.slice(0, 200)}`);
+        ok(releasedAt > 0 && run.ended < releasedAt && !/LOCKED/.test(run.stderr),
+          `SYNC2C-DRY-RUN-AND-PROSE ${name} ${mode} ends while a live holder still holds the turn (took ${run.ended - run.started}ms, ended ${releasedAt - run.ended}ms before the release, exit ${run.code}) — ${run.stderr.slice(0, 200)}`);
       }
       eq(owner && owner.token, 'holder', 'SYNC2C-DRY-RUN-AND-PROSE claim --dry-run and the other runs above take no turn: the holder still owns it after they return');
       eq(runs.find((entry) => entry.name === 'claim').run.receipt.no_op, true, 'SYNC2C-DRY-RUN-AND-PROSE precondition: claim --dry-run is the selector preview');
@@ -16847,6 +16860,81 @@ Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null
         }
         eq(compared, expected, 'SYNC2D-NO-REST-MATCHES-MAIN precondition: every scenario step was compared');
       }
+    }
+
+    // SYNC2D-INVALID-KEY: an apiKey that cannot be sent as a header value
+    // makes the REST config malformed. claim and board-health --write-note
+    // then run as without REST config: the stub receives nothing and the
+    // vault files match a run without REST config after the fixture path and
+    // the two pids are replaced.
+    {
+      const badKey = 'badākey';
+      const runs = {};
+      for (const mode of ['plain', 'bad-key']) {
+        const fx = sync2CliFixture(`invalid-key-${mode}`);
+        let stub = null;
+        if (mode === 'bad-key') {
+          stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+          await sync2RestConfig(fx.vault, stub.port, { apiKey: badKey });
+        }
+        const claim = await sync2Cli(fx, ['claim', '--json'], { frozen: true });
+        const health = await sync2Cli(fx, ['board-health', '--json', '--write-note'], { frozen: true });
+        const normalize = (text) => [claim.pid, health.pid].reduce((out, pid) => out.replace(new RegExp(`\\b${pid}\\b`, 'g'), '<pid>'),
+          String(text).split(fx.base).join('<base>'));
+        runs[mode] = { stub, claim, health, vault: [...sync2Snapshot(fx.vault)].map(([rel, raw]) => [rel, normalize(raw)]) };
+      }
+      const bad = runs['bad-key'];
+      const reasonOf = (run) => run.receipt.obsidian_index && [run.receipt.obsidian_index.available, run.receipt.obsidian_index.reason];
+      eq([bad.claim.code, Boolean(bad.claim.receipt.lease_token), reasonOf(bad.claim)], [0, true, [false, 'malformed-rest-config']],
+        `SYNC2D-INVALID-KEY claim exits 0 with its lease_token and obsidian_index reason malformed-rest-config — ${bad.claim.stderr.slice(0, 200)}`);
+      eq([bad.health.code, bad.health.receipt.action, bad.health.receipt.note_error || null, reasonOf(bad.health)],
+        [0, 'board-health', null, [false, 'malformed-rest-config']],
+        `SYNC2D-INVALID-KEY board-health --write-note exits 0 with its receipt and obsidian_index reason malformed-rest-config — ${bad.health.stderr.slice(0, 200)}`);
+      eq(bad.vault, runs.plain.vault, 'SYNC2D-INVALID-KEY the vault files after claim and board-health match the run without REST config after the fixture path and the two pids are replaced');
+      eq((await bad.stub.log()).requests.length, 0, 'SYNC2D-INVALID-KEY the stub receives no request');
+      ok([bad.claim, bad.health].every((run) => !run.stdout.includes(badKey) && !run.stderr.includes(badKey)),
+        'SYNC2D-INVALID-KEY the apiKey appears on neither stdout nor stderr');
+    }
+
+    // SYNC2D-INVALID-KEY transport errors: an error thrown while the scope
+    // sends its notes never rejects the scope. A probe request that cannot
+    // be created is reported as request-failed; any other error thrown while
+    // flushing is reported as internal-error. Either way the note stays on
+    // disk and the turn is released.
+    {
+      const net = require('net');
+      const throwing = async (label, patch) => {
+        const vault = path.join(sync2Root, `transport-${label}`);
+        const note = path.join(vault, 'spice', `${label}.md`);
+        fs.mkdirSync(path.dirname(note), { recursive: true });
+        const stub = await sync2Stub({ vault });
+        await sync2RestConfig(vault, stub.port);
+        const restore = patch();
+        let outcome;
+        try {
+          outcome = await vaultIndex.withVaultIndex(vault, async () => { sync2RailWrite(note, `${label}\n`); return { ok: true }; })
+            .then((value) => ({ value }), (error) => ({ error }));
+        } finally { restore(); }
+        return { outcome, note, vault, stub };
+      };
+      const requestThrows = await throwing('request-throws', () => {
+        const real = http.request;
+        http.request = () => { throw new TypeError('request creation failed'); };
+        return () => { http.request = real; };
+      });
+      eq([Boolean(requestThrows.outcome.error), requestThrows.outcome.value && requestThrows.outcome.value.obsidian_index.reason],
+        [false, 'request-failed'], 'SYNC2D-INVALID-KEY a request that cannot be created resolves the scope with obsidian_index reason request-failed');
+      eq([fs.readFileSync(requestThrows.note, 'utf8'), sync2TurnHeld(requestThrows.vault), (await requestThrows.stub.log()).requests.length],
+        ['request-throws\n', false, 0], 'SYNC2D-INVALID-KEY after a request that cannot be created, the note is on disk, the turn is released and nothing was sent');
+      const connectBreaks = await throwing('connect-breaks', () => {
+        const real = net.connect;
+        net.connect = () => ({ destroy() {}, on() { throw new TypeError('socket unusable'); }, once() {} });
+        return () => { net.connect = real; };
+      });
+      eq([Boolean(connectBreaks.outcome.error), connectBreaks.outcome.value && connectBreaks.outcome.value.obsidian_index.reason],
+        [false, 'internal-error'], 'SYNC2D-INVALID-KEY another error thrown while flushing resolves the scope with obsidian_index reason internal-error');
+      eq([fs.readFileSync(connectBreaks.note, 'utf8'), sync2TurnHeld(connectBreaks.vault)], ['connect-breaks\n', false],
+        'SYNC2D-INVALID-KEY after that error the note is on disk and the turn is released');
     }
 
     // SYNC2-INDEXED-WHEN-HEALTHY
