@@ -1185,6 +1185,54 @@ s += '\n && { class: "NoSuchLineParen" });';`,
     refs: [],
     failures: [unreadable(1, CALL_OPEN)],
   },
+  // MUTATION GUARD: testing the closing ) with the m flag (/^\s*\)/m) turns RED
+  {
+    label: 'a guard call left open in its string except for a ) on the next line inside a block comment, and joined with +=, fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } /*\n) */';
+s += ' && { class: "NoSuchMFlag" });';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: accepting ) anywhere later in the text, not only after optional whitespace, turns RED
+  {
+    label: 'a guard call left open in its string except for a ) inside a block comment that holds /*, and joined with += to a part that starts with a newline, fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } /* /* ) */';
+s += '\n && { class: "NoSuchNestedLooking" });';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: accepting an HTML-like comment before ) (/^\s*(<!--.*)?\s*\)/) turns RED
+  {
+    label: 'a guard call left open in its string except for a ) after <!--, and joined with += to a part that starts with a newline, fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } <!-- )';
+s += '\n && { class: "NoSuchHtmlParen" });';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: exempting a literal class value from the CALL_OPEN check when the joined text collides (!((placeholder && placeholder[0] !== value) || collides)) turns RED
+  {
+    label: 'a guard call whose class value is the literal OperatorStation, with a comment holding __sauceClassExprZ, left open in its string and joined with +=, fails the gate',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" } /* __sauceClassExprZ */';
+s += ' && { class: "NoSuchOpenCollide" });';`,
+    refs: [],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
+  // MUTATION GUARD: exempting a literal class value from the CALL_CHAIN check when the joined text collides (!((placeholder && placeholder[0] !== value) || collides)) turns RED
+  {
+    label: 'a guard call whose class value is the literal OperatorStation, with a comment holding __sauceClassExprZ after the closed call and t joined after that, fails the gate',
+    source: String.raw`const t = '; await dv.view("ranch/views/customjs-' + 'guard", { class: "NoSuchChainCollide" });';
+const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }); /* __sauceClassExprZ */' + t;`,
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: checking CALL_OPEN only for the first customjs-guard occurrence in its string turns RED
+  {
+    label: 'a string whose first guard call is closed and read as OperatorStation, and whose second is left open and joined with +=, fails the gate at the second call',
+    source: String.raw`let s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }); await dv.view("ranch/views/customjs-guard", { class: "BoardHealth" }';
+s += ' && { class: "NoSuchSecondOpen" });';`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(1, CALL_OPEN)],
+  },
   // MUTATION GUARD: reading a template literal part by its raw text in place of its cooked text turns RED
   {
     label: 'a guard object whose comment after the class key joins a template literal part written \\x2a/ class: "NoSuchRawPart", /\\x2a has 2 class keys and fails the gate',
@@ -1207,6 +1255,59 @@ s += '\n && { class: "NoSuchLineParen" });';`,
     failures: [],
   },
 ];
+
+const GUARD_OPEN = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" }';
+const GUARD_CLOSED = `${GUARD_OPEN});`;
+const PART_SETUP = {
+  object: `const t = ' && { class: "NoSuchAfterObject" }'; const o = { t }; let u; let n = 0;`,
+  call: `const t = '; await dv.view("ranch/views/customjs-' + 'guard", { class: "NoSuchAfterCall" });'; const o = { t }; let u; let n = 0;`,
+};
+const guardText = (at) => (at === 'object' ? GUARD_OPEN : GUARD_CLOSED);
+const closeText = (at) => (at === 'object' ? "');'" : "''");
+const viewCall = (at) => `dv.view("ranch/views/customjs-" + "guard", { class: "${at === 'object' ? 'NoSuchAfterObject' : 'NoSuchAfterCall'}" })`;
+const joined = (part) => (at) => `const s = '${guardText(at)}' + ${part} + ${closeText(at)};`;
+const called = (fn) => (at) => (at === 'object'
+  ? `const s = '${GUARD_OPEN}, (' + ${fn(at)} + ')());';`
+  : `const s = '${GUARD_CLOSED} (' + ${fn(at)} + ')();';`);
+// MUTATION GUARD: exempting any one part type below from the CALL_CHAIN check turns both of that type's fixtures RED
+const PART_KINDS = [
+  ['Identifier', joined('t')],
+  ['MemberExpression', joined('o.t')],
+  ['CallExpression', joined('String(t)')],
+  ['CallExpression with a spread argument', joined('String(...[t])')],
+  ['NewExpression', joined('new String(t)')],
+  ['ConditionalExpression', joined("(t ? t : '')")],
+  ['LogicalExpression', joined("(t || '')")],
+  ['BinaryExpression', joined("(t + '')")],
+  ['AssignmentExpression', joined('(u = t)')],
+  ['SequenceExpression', joined('(0, t)')],
+  ['TaggedTemplateExpression', joined('String.raw`${t}`')],
+  ['TemplateLiteral', joined('`${t}`')],
+  ['ArrayExpression', joined('[t]')],
+  ['ObjectExpression', joined('{ toString: () => t }')],
+  ['ChainExpression', joined('o?.t')],
+  ['UnaryExpression', joined('(typeof t)')],
+  ['UpdateExpression', joined('n++')],
+  ['ThisExpression', (at) => `function f() { return '${guardText(at)}' + this + ${closeText(at)}; } const s = f.call(t);`],
+  ['AwaitExpression', (at) => `const s = (async () => '${guardText(at)}' + await t + ${closeText(at)})();`],
+  ['YieldExpression', (at) => `function* g() { return '${guardText(at)}' + (yield) + ${closeText(at)}; } const it = g(); it.next(); const s = it.next(t).value;`],
+  ['Literal (regex)', (at) => (at === 'object'
+    ? `const s = '${GUARD_OPEN}' + /x/ + ');';`
+    : `const s = '${GUARD_CLOSED} 1' + / (await dv.view("ranch\\/views\\/customjs-" + "guard", { class: "NoSuchAfterCall" })) / + '1;';`)],
+  ['ArrowFunctionExpression', called((at) => `(() => ${viewCall(at)})`)],
+  ['FunctionExpression', called((at) => `(function () { return ${viewCall(at)}; })`)],
+  ['ClassExpression', (at) => (at === 'object'
+    ? `const s = '${GUARD_OPEN}, new (' + (class { constructor() { ${viewCall(at)}; } }) + ')());';`
+    : `const s = '${GUARD_CLOSED} new (' + (class { constructor() { ${viewCall(at)}; } }) + ')();';`)],
+];
+const PART_KIND_FIXTURES = PART_KINDS.flatMap(([kind, line]) => ['object', 'call'].map((at) => ({
+  label: `part-kind matrix: ${/^[AEIOU]/.test(kind) ? 'an' : 'a'} ${kind} part joined after the ${at === 'object' ? 'guard object' : 'closed guard call'} fails the gate`,
+  source: `${PART_SETUP[at]}\n${line(at)}`,
+  refs: [],
+  failures: [unreadable(2, CALL_CHAIN)],
+})));
+
+COORDINATOR_FIXTURES.push(...PART_KIND_FIXTURES);
 
 const COORDINATOR_GATE_FIXTURES = [
   {
