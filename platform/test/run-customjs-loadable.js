@@ -704,6 +704,116 @@ nested('OperatorStation');`,
     refs: ['declaration'],
     failures: [missing('declaration', 1)],
   },
+  {
+    label: 'a string that starts with customjs-guard is checked: \'await dv.view("ranch/views/\' + \'customjs-guard", { class: "NoSuchSplitPath" });\' fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/' + 'customjs-guard", { class: "NoSuchSplitPath" });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard is not the path of a dv.view call within this string')],
+  },
+  {
+    label: "the helper as the object of a member expression is an appearance of it: block.call(null, 'NoSuchViaCall') fails the gate",
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');
+block.call(null, 'NoSuchViaCall');`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(5, BLOCK_ARG)],
+  },
+  {
+    label: 'the helper as the value of a property is an appearance of it: { make: block } fails the gate',
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');
+const o = { make: block };
+o.make('NoSuchViaAlias');`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(5, BLOCK_ARG)],
+  },
+  {
+    label: 'a class-writing helper naming arguments fails the gate also when arguments is not the object of a member expression: const a = arguments',
+    source: String.raw`function f(widget) { const a = arguments; a[0] = 'Ghost'; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('f'))],
+  },
+  {
+    label: "a call of a class-writing helper written before the helper declaration is checked: block('NoSuchHoisted') fails naming NoSuchHoisted",
+    source: String.raw`block('NoSuchHoisted');
+function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation');`,
+    refs: ['NoSuchHoisted', 'OperatorStation'],
+    failures: [missing('NoSuchHoisted', 1)],
+  },
+  {
+    label: "RR4B-HELPER-ARGUMENTS: for function block(widget, title), the call block(cls, 'OperatorStation'), whose class argument is the identifier cls, fails the gate",
+    source: String.raw`function block(widget, title) {
+  return '## ' + title + '\nawait dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+const cls = 'NoSuchVariable';
+block(cls, 'OperatorStation');`,
+    refs: [],
+    failures: [unreadable(5, BLOCK_ARG)],
+  },
+  {
+    label: "a customjs-guard call that does not parse from its own string and that string's + operands fails the gate, though a class key naming a shipped class follows customjs-guard in that string",
+    source: String.raw`const a = ['await dv.view("ranch/views/customjs-guard", { class: "OperatorStation",', '  class: "NoSuchSecondKey" });'].join('\n');`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard call does not parse from this string and its + operands, with non-literal operands as placeholders')],
+  },
+  {
+    label: 'a customjs-guard string in a template whose tag is the bare identifier raw, not String.raw, fails the gate',
+    source: 'const a = raw`await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });`;',
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard string is in a template with a tag not written String.raw')],
+  },
+  {
+    label: 'the class key is matched case-sensitively: { Class: "OperatorStation" } has 0 class keys and fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { Class: "OperatorStation" });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard object has 0 class keys')],
+  },
+  {
+    label: 'RR4B-CLASS-SET-EXACT: Name fails with that name, though a .js file under platform/blueprints or platform/mechanisms has a line whose first word is className',
+    precondition: () => (['platform/blueprints', 'platform/mechanisms'].flatMap((d) => walk(d, []))
+      .some((f) => /^[ \t]*className\b/m.test(fs.readFileSync(f, 'utf8')))
+      ? null : 'no line of a .js file under platform/blueprints or platform/mechanisms has className as its first word'),
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard", { class: "Name" });';`,
+    refs: ['Name'],
+    failures: [missing('Name', 1)],
+  },
+  {
+    label: "the helper passed as an argument to a call of itself is an appearance of it other than as a call: block('OperatorStation', block) fails the gate",
+    source: String.raw`function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}
+block('OperatorStation', block);`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(4, BLOCK_ARG)],
+  },
+  {
+    label: 'a class-writing helper naming eval fails the gate also when eval is not called: const e = eval',
+    source: String.raw`function f(widget) { const e = eval; return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });'; } f('OperatorStation');`,
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('f'))],
+  },
+  {
+    label: 'a customjs-guard call whose path argument is "ranch/views/customjs-guard" + x fails the gate',
+    source: String.raw`const a = 'await dv.view("ranch/views/customjs-guard" + x, { class: "OperatorStation" });';`,
+    refs: [],
+    failures: [unreadable(1, 'customjs-guard is not the path of a dv.view call within this string')],
+  },
+  {
+    label: 'a class-writing helper with no call fails the gate also when a string before it is a ref to a shipped class',
+    source: String.raw`const z = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" });';
+function block(widget) {
+  return 'await dv.view("ranch/views/customjs-guard", { class: "' + widget + '" });';
+}`,
+    refs: ['OperatorStation'],
+    failures: [unreadable(3, 'block has no call to read the class from')],
+  },
 ];
 
 const COORDINATOR_GATE_FIXTURES = [
