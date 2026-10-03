@@ -1299,6 +1299,15 @@ const PART_KINDS = [
   ['ClassExpression', (at) => (at === 'object'
     ? `const s = '${GUARD_OPEN}, new (' + (class { constructor() { ${viewCall(at)}; } }) + ')());';`
     : `const s = '${GUARD_CLOSED} new (' + (class { constructor() { ${viewCall(at)}; } }) + ')();';`)],
+  ['MetaProperty (new.target)', (at) => `function F() { if (!new.target) return ${viewCall(at)}; this.s = '${at === 'object' ? `${GUARD_OPEN}, (` : `${GUARD_CLOSED} (`}' + new.target + '${at === 'object' ? ')());' : ')();'}'; } const s = new F().s;`],
+  ['ImportExpression', joined('import(t)')],
+  ['Literal (number)', joined('1')],
+  // MUTATION GUARD: exempting an Identifier part by its name (u, undefined, NaN, Infinity or v) from the CALL_CHAIN check turns both of that name's fixtures RED
+  ['Identifier named u', (at) => `u = t; const s = '${guardText(at)}' + u + ${closeText(at)};`],
+  ['Identifier named undefined', (at) => `function f(undefined) { return '${guardText(at)}' + undefined + ${closeText(at)}; } const s = f(t);`],
+  ['Identifier named NaN', (at) => `function f(NaN) { return '${guardText(at)}' + NaN + ${closeText(at)}; } const s = f(t);`],
+  ['Identifier named Infinity', (at) => `function f(Infinity) { return '${guardText(at)}' + Infinity + ${closeText(at)}; } const s = f(t);`],
+  ['Identifier named v, written \\u0076', (at) => `const v = t; const s = '${guardText(at)}' + \\u0076 + ${closeText(at)};`],
 ];
 const PART_KIND_FIXTURES = PART_KINDS.flatMap(([kind, line]) => ['object', 'call'].map((at) => ({
   label: `part-kind matrix: ${/^[AEIOU]/.test(kind) ? 'an' : 'a'} ${kind} part joined after the ${at === 'object' ? 'guard object' : 'closed guard call'} fails the gate`,
