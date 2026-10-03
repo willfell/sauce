@@ -15745,7 +15745,8 @@ vaultIndex.withVaultIndex(vault, async () => { await vaultIndex.awaitWriteTurn()
     // A child that holds the vault's write turn as a live process, then after
     // holdMs, or as soon as releaseFile exists when one is given, runs `then`
     // (source text, with fs, path and lease, the turn's directory, in scope),
-    // releases the turn and prints when.
+    // releases the turn and prints when and why: file or timer. closed
+    // resolves with when, releasedBy with why.
     const sync2Holder = async (vault, holdMs, then = '', releaseFile = null) => {
       const child = spawn(process.execPath, ['-e', `
 const fs = require('fs'); const os = require('os'); const path = require('path');
@@ -15755,15 +15756,18 @@ fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.p
 process.stdout.write('held\\n');
 const releaseFile = ${JSON.stringify(releaseFile)};
 let poll = null;
-const timer = setTimeout(release, ${holdMs});
-if (releaseFile) poll = setInterval(() => { if (fs.existsSync(releaseFile)) release(); }, 20);
-function release() { clearTimeout(timer); if (poll) clearInterval(poll); ${then}; const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + '\\n'); }
+const timer = setTimeout(() => release('timer'), ${holdMs});
+if (releaseFile) poll = setInterval(() => { if (fs.existsSync(releaseFile)) release('file'); }, 20);
+function release(why) { clearTimeout(timer); if (poll) clearInterval(poll); ${then}; const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + ' ' + why + '\\n'); }
 `], { stdio: ['ignore', 'pipe', 'inherit'] });
       let out = '';
       child.stdout.on('data', (chunk) => { out += chunk; });
       const closed = new Promise((resolve) => child.on('close', resolve));
       await sync2Until(() => out.includes('held'), 10000);
-      return { closed: closed.then(() => Number((out.match(/released (\d+)/) || [])[1])) };
+      return {
+        closed: closed.then(() => Number((out.match(/released (\d+)/) || [])[1])),
+        releasedBy: closed.then(() => (out.match(/released \d+ (file|timer)/) || [])[1] || null),
+      };
     };
 
     // SYNC2B-TURN-ONLY-FOR-NOTE-WRITES: verify-gates, its preflights and its
@@ -16521,10 +16525,12 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
         'SYNC2C-PROJECTION-AFTER-GATE board-health: it waits for the turn holding no lock, and a status launched meanwhile is not refused');
     }
 
-    // SYNC2C-DRY-RUN-AND-PROSE: each dry run below ends while a live holder
-    // still holds the turn, and takes no turn. The holder releases only once
-    // all six runs have returned (or after 45s), so a run that waited for the
-    // turn could not end before that release.
+    // SYNC2C-DRY-RUN-AND-PROSE: each dry run below takes no turn. A live
+    // holder keeps the turn until the release file exists or its 45s timer
+    // fires. The file is written only after all six runs have returned, so a
+    // release by the file shows that none of them waited for the turn, and a
+    // run that waited forces a release by the timer. No run may be refused
+    // the turn with LOCKED.
     {
       const fx = sync2CliFixture('dry-runs');
       const claim = await sync2Cli(fx, ['claim', '--json']);
@@ -16545,9 +16551,12 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       const owner = sync2cTurnOwner(fx);
       fs.writeFileSync(releaseFile, '');
       const releasedAt = await holder.closed;
+      const releasedBy = await holder.releasedBy;
+      eq(releasedBy, 'file',
+        'SYNC2C-DRY-RUN-AND-PROSE the holder released the turn by the release file, written after all six dry runs returned, so none of them waited for the turn');
       for (const { name, mode, run } of runs) {
-        ok(releasedAt > 0 && run.ended < releasedAt && !/LOCKED/.test(run.stderr),
-          `SYNC2C-DRY-RUN-AND-PROSE ${name} ${mode} ends while a live holder still holds the turn (took ${run.ended - run.started}ms, ended ${releasedAt - run.ended}ms before the release, exit ${run.code}) — ${run.stderr.slice(0, 200)}`);
+        ok(!/LOCKED/.test(run.stderr),
+          `SYNC2C-DRY-RUN-AND-PROSE ${name} ${mode} is not refused the turn with LOCKED (diagnostics: took ${run.ended - run.started}ms, ended ${releasedAt - run.ended}ms before the release, exit ${run.code}) — ${run.stderr.slice(0, 200)}`);
       }
       eq(owner && owner.token, 'holder', 'SYNC2C-DRY-RUN-AND-PROSE claim --dry-run and the other runs above take no turn: the holder still owns it after they return');
       eq(runs.find((entry) => entry.name === 'claim').run.receipt.no_op, true, 'SYNC2C-DRY-RUN-AND-PROSE precondition: claim --dry-run is the selector preview');
