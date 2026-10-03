@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 4070;
+const ASSERTION_FLOOR = 4083;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -10732,6 +10732,259 @@ async function main() {
     ], [['GA-DN2', 'GA-DN1', 'GA-DN3'], [[['GA-DN2', 'done', null, null], ['GA-DN1', 'done', null, null]]]],
     `PH2C-DONE-ORDER: at ${width} the map draws GA-DN2, GA-DN1, GA-DN3, and the strip expands to GA-DN2 then GA-DN1, in that draw order`);
   }
+  // ---- PH2C properties: seeded random epics through render() ----
+  // A fixed-seed generator (mulberry32) builds slice sets with random
+  // statuses and depends_on edges; GraphLayout gives them their ranks and
+  // rows. Each epic is drawn through render() at 390 and 1024 with the real
+  // GraphLayout and GraphInsights, and the expected frontier is computed
+  // from the generated slices and the map's drawn order, read from the
+  // titles of its chips or pills. Each assertion covers a whole batch.
+  // PH2C-NEXT-UP-PROPERTY makes one per width for each of its two batches
+  // (4), PH2C-FOLD-PROPERTY one per width (2), and PH2C-HOPS-PROPERTY two
+  // per width, Blocked rows and card lines (4); each also makes one
+  // assertion that its epics reach the cases they are meant to cover.
+  const ph2cRandom = (seed) => () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const ph2cWords = ['Alpha', 'Bravo', 'Cargo', 'Delta', 'Echo', 'Fable', 'Gamma', 'Harbor', 'Index', 'Jolt', 'Kite', 'Lumen'];
+  const ph2cPick = (rand, list) => list[Math.floor(rand() * list.length)];
+  const ph2cShuffle = (rand, list) => {
+    const out = [...list];
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(rand() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+  // n slices with shuffled ids GA-P1..GA-Pn; slice k depends on each earlier
+  // slice with probability edgeP, and the slice just before it gets a
+  // further chance chainP.
+  const ph2cSlices = (rand, n, statusOf, { edgeP = 0.3, chainP = 0 } = {}) => {
+    const ids = ph2cShuffle(rand, Array.from({ length: n }, (_, k) => k + 1));
+    const cards = ids.map((id) => `GA-P${id} ${ph2cPick(rand, ph2cWords)}`);
+    return cards.map((card, k) => {
+      const deps = cards.slice(0, k).filter((_, j) => (j === k - 1 && rand() < chainP) || rand() < edgeP);
+      return { card, status: statusOf(k), depends_on: deps.map((dep) => `[[${dep}]]`) };
+    });
+  };
+  const ph2cIdOf = (card) => card.split(' ')[0];
+  // The drawn order, as slice ids: each chip or pill carries its card name
+  // in its title (a compact pill may show a shortened id).
+  const ph2cDrawn = (root) => byClass(root, 'graph-view-chip').map((chip) => ph2cIdOf(String(chip.attrs?.title ?? '')));
+  const ph2cGroupIds = (root, key) => byClass(root, `frontier-${key}`)
+    .flatMap((group) => byClass(group, 'graph-view-frontier-row').map((row) => byClass(row, 'graph-view-frontier-id')[0]?.textContent ?? null));
+  // Transitive prerequisites of each slice, by id.
+  const ph2cAncestors = (slices) => {
+    const byId = new Map(slices.map((slice) => [ph2cIdOf(slice.card), slice]));
+    const deps = (slice) => slice.depends_on.map((link) => ph2cIdOf(link.slice(2, -2)));
+    const out = new Map();
+    for (const slice of slices) {
+      const seen = new Map();
+      let frontier = deps(slice).map((id) => [id, 1]);
+      while (frontier.length) {
+        const next = [];
+        for (const [id, hops] of frontier) {
+          if (seen.has(id)) continue;
+          seen.set(id, hops);
+          for (const up of deps(byId.get(id))) next.push([up, hops + 1]);
+        }
+        frontier = next;
+      }
+      out.set(ph2cIdOf(slice.card), seen);
+    }
+    return { byId, out };
+  };
+  const ph2cReady = (slices) => {
+    const { byId, out } = ph2cAncestors(slices);
+    return new Set(slices.filter((slice) => slice.status === 'planning'
+      && [...out.get(ph2cIdOf(slice.card)).keys()].every((id) => byId.get(id).status === 'completed'))
+      .map((slice) => ph2cIdOf(slice.card)));
+  };
+
+  // PH2C-NEXT-UP-PROPERTY: 200 epics with an empty lane order, and 200
+  // with a lane order naming a shuffled subset of their slices. The rule:
+  // Next up is the first ready planning slice in the lane order, else the
+  // first ready slice in draw order (the card: "with an empty laneOrder the
+  // first ready node in draw order is Next up"); the other ready slices list
+  // under Ready in draw order.
+  // Ready means planning with every transitive prerequisite completed.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-FEWEST-GATES turns RED at
+  // "PH2C-NEXT-UP-PROPERTY: at 390, 200 epics with an empty lane order ..."
+  // if, with no lane match, Next up is the ready slice that gates the
+  // fewest slices.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-ROW-MAJOR turns RED at the same label
+  // if, with no lane match, Next up is the ready slice with the lowest row.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-PROPERTY-ALPHA turns RED at the same
+  // label if, with no lane match, Next up is the ready slice whose card
+  // name sorts first.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-PROPERTY-MOST-GATES turns RED at the
+  // same label if, with no lane match, Next up is the ready slice that
+  // gates the most slices.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-PROPERTY-HIGHEST-RANK turns RED at the
+  // same label if, with no lane match, Next up is the ready slice at the
+  // highest rank.
+  // MUTATION GUARD: PH2C-MUTANT-NEXT-PROPERTY-LAST-LANE turns RED at
+  // "PH2C-NEXT-UP-PROPERTY: at 390, 200 epics with a lane order ..." if Next
+  // up is the last ready slice the lane order names.
+  {
+    const batches = [['an empty lane order', 0x2c01, false], ['a lane order', 0x2c02, true]];
+    const coverage = { multiReady: 0, laneMatch: 0, laneMiss: 0, nextNotFirstName: 0 };
+    for (const [label, seed, withLanes] of batches) {
+      const rand = ph2cRandom(seed);
+      const epics = Array.from({ length: 200 }, () => {
+        const n = 3 + Math.floor(rand() * 7);
+        const slices = ph2cSlices(rand, n, () => ph2cPick(rand, ['planning', 'planning', 'planning', 'completed', 'completed', 'in_progress', 'blocked', 'parked']));
+        const lanes = withLanes ? ph2cShuffle(rand, slices.map((slice) => slice.card)).slice(0, Math.floor(rand() * (n + 1))) : [];
+        return { slices, lanes };
+      });
+      for (const width of [390, 1024]) {
+        const actual = [];
+        const expected = [];
+        for (const [index, { slices, lanes }] of epics.entries()) {
+          const root = await ph2Draw(ph2Track(ph2Env(`Next Property ${index}`, slices, lanes)), width);
+          const drawn = ph2cDrawn(root);
+          const ready = ph2cReady(slices);
+          const readyDrawn = drawn.filter((id) => ready.has(id));
+          const laneNext = lanes.map(ph2cIdOf).find((id) => ready.has(id)) || null;
+          const next = laneNext || readyDrawn[0] || null;
+          actual.push([index, ph2cGroupIds(root, 'next'), ph2cGroupIds(root, 'ready')]);
+          expected.push([index, next ? [next] : [], readyDrawn.filter((id) => id !== next)]);
+          if (width === 390) {
+            if (readyDrawn.length > 1) coverage.multiReady += 1;
+            if (withLanes && laneNext) coverage.laneMatch += 1;
+            if (withLanes && !laneNext && readyDrawn.length) coverage.laneMiss += 1;
+            if (next && next !== [...ready].sort()[0]) coverage.nextNotFirstName += 1;
+          }
+        }
+        assert.deepStrictEqual(actual, expected,
+          `PH2C-NEXT-UP-PROPERTY: at ${width}, 200 epics with ${label}: each epic's Next up row is the first ready slice in the lane order, else the first ready slice drawn, and its Ready rows are the other ready slices in draw order`);
+      }
+    }
+    assert(coverage.multiReady >= 100 && coverage.laneMatch >= 50 && coverage.laneMiss >= 10 && coverage.nextNotFirstName >= 30,
+      `PH2C-NEXT-UP-PROPERTY: the 400 epics include at least 100 with two or more ready slices (${coverage.multiReady}), 50 whose lane order names a ready slice (${coverage.laneMatch}), 10 whose lane order names none while one is ready (${coverage.laneMiss}), and 30 whose Next up is not the ready slice whose id sorts first (${coverage.nextNotFirstName})`);
+  }
+
+  // PH2C-FOLD-PROPERTY: 200 epics, each slice parked, blocked, planning, in
+  // progress, completed, or of the unrecognized status review, with done
+  // near half of live; some depend on a cross-epic slice, drawn as a stub;
+  // three have 51 live slices with 25 done. Card: "Done folded into an
+  // 'N done · show' strip at done / live >= 0.5 or listed under a Done
+  // label", and "stub nodes never count toward the ratio", so live is every
+  // slice drawn except cross-epic stubs, and done is the completed ones.
+  // MUTATION GUARD: PH2C-MUTANT-FOLD-COUNTS-PARKED-AS-DONE turns RED at
+  // "PH2C-FOLD-PROPERTY: at 390 ..." if parked slices count as done.
+  // MUTATION GUARD: PH2C-MUTANT-FOLD-LIVE-EXCLUDES-PARKED turns RED at the
+  // same label if parked slices are left out of live.
+  // MUTATION GUARD: PH2C-MUTANT-FOLD-PROPERTY-BELOW-HALF turns RED at the
+  // same label if done folds below half.
+  // MUTATION GUARD: PH2C-MUTANT-FOLD-PROPERTY-AT-49 turns RED at the same
+  // label if done folds from 0.49.
+  // MUTATION GUARD: PH2C-MUTANT-FOLD-PROPERTY-STUBS-COUNT turns RED at the
+  // same label if stubs count toward the ratio.
+  {
+    const rand = ph2cRandom(0x2c03);
+    const others = ['parked', 'blocked', 'planning', 'in_progress', 'review'];
+    const epics = Array.from({ length: 200 }, (_, index) => {
+      const n = index % 70 === 7 ? 51 : 2 + Math.floor(rand() * 9);
+      const doneCount = n === 51 ? 25 : Math.max(0, Math.min(n, Math.floor(n / 2) + Math.floor(rand() * 3) - 1));
+      const statuses = ph2cShuffle(rand, [
+        ...Array.from({ length: doneCount }, () => 'completed'),
+        ...Array.from({ length: n - doneCount }, (_, k) => (k === 0 ? 'parked' : ph2cPick(rand, others))),
+      ]);
+      const slices = ph2cSlices(rand, n, (k) => statuses[k], { edgeP: n > 12 ? 0.05 : 0.25 });
+      const stub = rand() < 0.4;
+      if (stub) slices[Math.floor(rand() * n)].depends_on.push('[[GA-OX1 Upstream]]');
+      return { slices, stub, doneCount, n };
+    });
+    const coverage = { parkedEdge: 0, stubEven: 0, large: 0 };
+    for (const width of [390, 1024]) {
+      const actual = [];
+      const expected = [];
+      for (const [index, { slices, stub, doneCount, n }] of epics.entries()) {
+        const env = ph2Track(ph2Env(`Fold Property ${index}`, slices));
+        if (stub) {
+          const otherPath = 'spice/projects/phone/tasks/Other Ops/board/GA-OX1 Upstream.md';
+          env.app.vault.getMarkdownFiles().push(file(otherPath, 99));
+          const ownCache = env.app.metadataCache.getFileCache;
+          env.app.metadataCache.getFileCache = (entry) => (entry.path === otherPath
+            ? { frontmatter: { type: 'slice', status: 'in_progress' } }
+            : ownCache(entry));
+        }
+        const root = await ph2Draw(env, width);
+        const read = ph2Read(root);
+        const doneGroup = read.groups.find((group) => group[0] === 'graph-view-frontier-group frontier-done') || null;
+        actual.push([index, byClass(root, 'graph-view-stub').length, read.strip, doneGroup ? doneGroup[1] : null]);
+        expected.push([index, stub ? 1 : 0,
+          doneCount && doneCount * 2 >= n ? [`${doneCount} done · show`] : [],
+          doneCount && doneCount * 2 < n ? `Done ${doneCount}` : null]);
+        if (width === 390) {
+          const parked = slices.filter((slice) => slice.status === 'parked').length;
+          if (parked && Math.abs(doneCount * 2 - n) <= 1) coverage.parkedEdge += 1;
+          if (stub && doneCount * 2 === n) coverage.stubEven += 1;
+          if (n === 51) coverage.large += 1;
+        }
+      }
+      assert.deepStrictEqual(actual, expected,
+        `PH2C-FOLD-PROPERTY: at ${width}, 200 epics: each epic draws its stubs, and folds its done slices into the strip N done · show when done * 2 >= live, lists them under Done N when fewer, and draws no Done group when none are done`);
+    }
+    assert(coverage.parkedEdge >= 60 && coverage.stubEven >= 15 && coverage.large === 3,
+      `PH2C-FOLD-PROPERTY: the 200 epics include at least 60 with a parked slice and twice the done count within one of live (${coverage.parkedEdge}), 15 with a stub and done exactly half (${coverage.stubEven}), and 3 with 25 of 51 done (${coverage.large})`);
+  }
+
+  // PH2C-HOPS-PROPERTY: 120 epics of mostly blocked and parked slices in
+  // long chains. GraphInsights' root causes of a slice are its stuck
+  // (blocked or parked) transitive prerequisites with no stuck prerequisite
+  // of their own, in draw order, each at its fewest hops up. Each Blocked row
+  // with a root cause reads blocked by its first one, and the card of the
+  // last drawn blocked slice with a root cause lists them all.
+  // MUTATION GUARD: PH2C-MUTANT-CARD-HOPS-CAP-THREE turns RED at
+  // "PH2C-HOPS-PROPERTY: at 390, 120 epics: the card ..." if a Root cause
+  // line shows at most 3 hops.
+  // MUTATION GUARD: PH2C-MUTANT-ROW-HOPS-CAP-THREE turns RED at
+  // "PH2C-HOPS-PROPERTY: at 390, 120 epics: each Blocked row ..." if a
+  // Blocked row shows at most 3 hops.
+  {
+    const rand = ph2cRandom(0x2c04);
+    const epics = Array.from({ length: 120 }, () => ph2cSlices(rand, 4 + Math.floor(rand() * 6),
+      () => ph2cPick(rand, ['blocked', 'blocked', 'blocked', 'blocked', 'parked', 'planning', 'planning', 'in_progress', 'completed']),
+      { edgeP: 0.12, chainP: 0.85 }));
+    const hopsText = (hops) => `${hops} hop${hops === 1 ? '' : 's'} up`;
+    let maxHops = 0;
+    for (const width of [390, 1024]) {
+      const rows = [[], []];
+      const lines = [[], []];
+      for (const [index, slices] of epics.entries()) {
+        const root = await ph2Draw(ph2Track(ph2Env(`Hops Property ${index}`, slices)), width);
+        const drawn = ph2cDrawn(root);
+        const { byId, out } = ph2cAncestors(slices);
+        const stuck = (id) => ['blocked', 'parked'].includes(byId.get(id).status);
+        const isRoot = (id) => stuck(id) && ![...out.get(id).keys()].some(stuck);
+        const causes = (id) => drawn.filter((up) => out.get(id).has(up) && isRoot(up)).map((up) => [up, hopsText(out.get(id).get(up))]);
+        for (const id of drawn.filter((each) => byId.get(each).status === 'blocked')) {
+          const wait = byClass(ph2RowFor(root, id), 'graph-view-frontier-wait')[0]?.textContent ?? null;
+          const first = causes(id)[0];
+          rows[0].push([index, id, wait && wait.startsWith('blocked by') ? wait : null]);
+          rows[1].push([index, id, first ? `blocked by ${first[0]} · ${first[1]}` : null]);
+          if (width === 390) for (const up of out.get(id).keys()) if (isRoot(up)) maxHops = Math.max(maxHops, out.get(id).get(up));
+        }
+        const target = [...drawn].reverse().find((id) => causes(id).length && byId.get(id).status === 'blocked');
+        if (target) {
+          bubblingClick(ph2RowFor(root, target));
+          lines[0].push([index, target, ph2cCauseLines(root)]);
+          lines[1].push([index, target, causes(target)]);
+        }
+      }
+      assert.deepStrictEqual(rows[0], rows[1],
+        `PH2C-HOPS-PROPERTY: at ${width}, 120 epics: each Blocked row with a root cause reads blocked by its first root cause in draw order and that cause's fewest hops up, and no other Blocked row reads blocked by`);
+      assert.deepStrictEqual(lines[0], lines[1],
+        `PH2C-HOPS-PROPERTY: at ${width}, 120 epics: the card of each epic's last drawn blocked slice with a root cause has Root cause lines naming every root cause in draw order, each with its fewest hops up`);
+    }
+    assert(maxHops >= 5, `PH2C-HOPS-PROPERTY: the 120 epics include a blocked slice with a root cause at least 5 hops up (${maxHops})`);
+  }
+
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
   // MUTATION GUARD: PH2-MUTANT-NEEDS-YOU-ON-BLOCKED turns RED at
   // "PH2-NEEDS-YOU-GLYPH-PARKED-ONLY: at 390 ..." if a blocked row's pill
