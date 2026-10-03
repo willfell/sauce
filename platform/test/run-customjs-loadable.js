@@ -1484,6 +1484,485 @@ const s = block('OperatorStation');`,
   },
 );
 
+COORDINATOR_FIXTURES.push(
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting += as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment += in block(widget) fails the gate",
+    source: "function block(widget) { widget += 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting -= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment -= in block(widget) fails the gate",
+    source: "function block(widget) { widget -= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting *= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment *= in block(widget) fails the gate",
+    source: "function block(widget) { widget *= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting **= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment **= in block(widget) fails the gate",
+    source: "function block(widget) { widget **= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting /= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment /= in block(widget) fails the gate",
+    source: "function block(widget) { widget /= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting %= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment %= in block(widget) fails the gate",
+    source: "function block(widget) { widget %= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting <<= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment <<= in block(widget) fails the gate",
+    source: "function block(widget) { widget <<= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting >>= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment >>= in block(widget) fails the gate",
+    source: "function block(widget) { widget >>= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting >>>= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment >>>= in block(widget) fails the gate",
+    source: "function block(widget) { widget >>>= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting &= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment &= in block(widget) fails the gate",
+    source: "function block(widget) { widget &= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting |= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment |= in block(widget) fails the gate",
+    source: "function block(widget) { widget |= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting ^= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment ^= in block(widget) fails the gate",
+    source: "function block(widget) { widget ^= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting &&= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment &&= in block(widget) fails the gate",
+    source: "function block(widget) { widget &&= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting ||= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment ||= in block(widget) fails the gate",
+    source: "function block(widget) { widget ||= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting only a plain = assignment as a rebinding turns RED
+  // MUTATION GUARD: not counting ??= as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: compound assignment ??= in block(widget) fails the gate",
+    source: "function block(widget) { widget ??= 'NoSuchCompound'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting ++ as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: update widget++ in block(widget) fails the gate",
+    source: "function block(widget) { widget++; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting -- as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: update widget-- in block(widget) fails the gate",
+    source: "function block(widget) { widget--; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting ++ as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: update ++widget in block(widget) fails the gate",
+    source: "function block(widget) { ++widget; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting -- as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: update --widget in block(widget) fails the gate",
+    source: "function block(widget) { --widget; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting a destructured property as a rebinding only when it is shorthand turns RED
+  // MUTATION GUARD: not counting a destructured property as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: object destructuring ({ x: widget } = ...) in block(widget) fails the gate",
+    source: "function block(widget) { ({ x: widget } = { x: 'NoSuchObjectPattern' }); return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: counting a destructured property as a rebinding only when it is shorthand turns RED
+  // MUTATION GUARD: not counting a destructured property as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: nested object destructuring ({ a: { b: widget } } = ...) in block(widget) fails the gate",
+    source: "function block(widget) { ({ a: { b: widget } } = { a: { b: 'NoSuchNestedObject' } }); return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a destructuring default as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: object destructuring with a default ({ x: widget = ... } = {}) in block(widget) fails the gate",
+    source: "function block(widget) { ({ x: widget = 'NoSuchObjectDefault' } = {}); return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a rest element as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: object rest ({ ...widget } = ...) in block(widget) fails the gate",
+    source: "function block(widget) { ({ ...widget } = { x: 1 }); return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting an array pattern element as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: array destructuring [widget] = ... in block(widget) fails the gate",
+    source: "function block(widget) { [widget] = ['NoSuchArrayPattern']; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting an array pattern element as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: nested array destructuring [[widget]] = ... in block(widget) fails the gate",
+    source: "function block(widget) { [[widget]] = [['NoSuchNestedArray']]; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a destructuring default as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: array destructuring with a default [widget = ...] = [] in block(widget) fails the gate",
+    source: "function block(widget) { [widget = 'NoSuchArrayDefault'] = []; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a rest element as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: array rest [...widget] = ... in block(widget) fails the gate",
+    source: "function block(widget) { [...widget] = ['NoSuchArrayRest']; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting an array pattern element as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: array inside object destructuring ({ a: [widget] } = ...) in block(widget) fails the gate",
+    source: "function block(widget) { ({ a: [widget] } = { a: ['NoSuchMixedPattern'] }); return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a for-in target as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: a for-in target in block(widget) fails the gate",
+    source: "function block(widget) { for (widget in { NoSuchForIn: 1 }) {}; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a for-of target as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: a for-of target in block(widget) fails the gate",
+    source: "function block(widget) { for (widget of ['NoSuchForOf']) {}; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a var declaration as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: var redeclaration in block(widget) fails the gate",
+    source: "function block(widget) { var widget = 'NoSuchVar'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not flagging arguments in the helper turns RED
+  {
+    label: "parameter-rebinding matrix: arguments[0] assignment in block(widget) fails the gate",
+    source: "function block(widget) { arguments[0] = 'NoSuchArguments'; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: not counting a catch parameter as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: a catch parameter named widget in block(widget) fails the gate",
+    source: "function block(widget) { try { throw 'NoSuchCatch'; } catch (widget) { return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; } }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  {
+    label: "parameter-rebinding matrix: a nested arrow function whose parameter is named widget in block(widget) fails the gate",
+    source: "function block(widget) { const f = (widget) => 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; return f('NoSuchShadowParam'); }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, NOT_PARAM)],
+  },
+  // MUTATION GUARD: not counting a nested function parameter as a rebinding turns RED
+  {
+    label: "parameter-rebinding matrix: a nested arrow function parameter named widget beside the guard string in block(widget) fails the gate",
+    source: "function block(widget) { const g = (widget) => widget; return 'await dv.view(\"ranch/views/customjs-guard\", { class: \"' + widget + '\" });'; }\nconst s = block('OperatorStation');",
+    refs: [],
+    failures: [unreadable(1, MAY_NOT_HOLD('block'))],
+  },
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: reading the occurrence's own quasi cooked turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\\\ in the first quasi: the guard call fails the gate",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '\\\\', class: \"NoSuchQuasi\" } //' }\n);`;",
+    refs: [],
+    failures: [unreadable(1, TWO_CLASS_KEYS)],
+  },
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: reading the occurrence's own quasi cooked turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\u0027 in the first quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '\\u0027, class: \"NoSuchQuasi\", z: \\u0027' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: reading the occurrence's own quasi cooked turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\x27 in the first quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '\\x27, class: \"NoSuchQuasi\", z: \\x27' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  {
+    label: "template-quasi matrix: String.raw, \\${ in the first quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: 'a\\${b' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  {
+    label: "template-quasi matrix: String.raw, a line continuation in the first quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: 'a\\\nb' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading every quasi raw turns RED
+  {
+    label: "template-quasi matrix: untagged template, \\\\ in the first quasi: the guard call is read as OperatorStation",
+    source: "const s = `await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '\\\\', class: \"NoSuchQuasi\" } //' }\n);`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading later String.raw quasis cooked turns RED
+  // MUTATION GUARD: reading only the first String.raw quasi raw turns RED
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\\\ in the middle quasi: the guard call fails the gate",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\\\'${''}, class: \"NoSuchQuasi\" } //' }\n);`;",
+    refs: [],
+    failures: [unreadable(1, TWO_CLASS_KEYS)],
+  },
+  // MUTATION GUARD: reading later String.raw quasis cooked turns RED
+  // MUTATION GUARD: reading only the first String.raw quasi raw turns RED
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\u0027 in the middle quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\u0027, class: \"NoSuchQuasi\", z: ${''}\\u0027' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading later String.raw quasis cooked turns RED
+  // MUTATION GUARD: reading only the first String.raw quasi raw turns RED
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\x27 in the middle quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\x27, class: \"NoSuchQuasi\", z: ${''}\\x27' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\${ in the middle quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: 'a${''}\\${${''}b' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, a line continuation in the middle quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: 'a${''}\\\n${''}b' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading every quasi raw turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: untagged template, \\\\ in the middle quasi: the guard call is read as OperatorStation",
+    source: "const s = `await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\\\'${''}, class: \"NoSuchQuasi\" } //' }\n);`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading later String.raw quasis cooked turns RED
+  // MUTATION GUARD: reading only the first String.raw quasi raw turns RED
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\\\ in the last quasi: the guard call fails the gate",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\\\', class: \"NoSuchQuasi\" } //' }\n);`;",
+    refs: [],
+    failures: [unreadable(1, TWO_CLASS_KEYS)],
+  },
+  // MUTATION GUARD: reading later String.raw quasis cooked turns RED
+  // MUTATION GUARD: reading only the first String.raw quasi raw turns RED
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\u0027 in the last quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\u0027, class: \"NoSuchQuasi\", z: \\u0027' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading later String.raw quasis cooked turns RED
+  // MUTATION GUARD: reading only the first String.raw quasi raw turns RED
+  // MUTATION GUARD: reading every quasi cooked turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\x27 in the last quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\x27, class: \"NoSuchQuasi\", z: \\x27' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, \\${ in the last quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: 'a${''}\\${b' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, a line continuation in the last quasi: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: 'a${''}\\\nb' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: reading every quasi raw turns RED
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: untagged template, \\\\ in the last quasi: the guard call is read as OperatorStation",
+    source: "const s = `await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${''}\\\\', class: \"NoSuchQuasi\" } //' }\n);`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  // MUTATION GUARD: treating string literal substitutions as parts with no static string value turns RED
+  {
+    label: "template-quasi matrix: String.raw, a string literal substitution: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${'x'}' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  {
+    label: "template-quasi matrix: String.raw, a template substitution: the guard call is read as OperatorStation",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\", n: '${`x`}' });`;",
+    refs: ["OperatorStation"],
+    failures: [],
+  },
+  {
+    label: "template-quasi matrix: String.raw, a number substitution after the closed call: the guard call fails the gate",
+    source: "const s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\" }); ${1}`;",
+    refs: [],
+    failures: [unreadable(1, CALL_CHAIN)],
+  },
+  {
+    label: "template-quasi matrix: String.raw, an identifier substitution after the closed call: the guard call fails the gate",
+    source: "const t = '; await dv.view(\"ranch/views/customjs-' + 'guard\", { class: \"NoSuchSubstIdent\" });';\nconst s = String.raw`await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\" }); ${t}`;",
+    refs: [],
+    failures: [unreadable(2, CALL_CHAIN)],
+  },
+  // MUTATION GUARD: skipping string literals that are template substitutions turns RED
+  {
+    label: "template-quasi matrix: a guard string literal used as a template substitution: the guard call fails naming NoSuchInSubst",
+    source: "const s = `${'await dv.view(\"ranch/views/customjs-guard\", { class: \"NoSuchInSubst\" });'}`;",
+    refs: ["NoSuchInSubst"],
+    failures: [missing("NoSuchInSubst", 1)],
+  },
+  {
+    label: "class-name matrix: the class all lower-case operatorstation fails naming operatorstation",
+    source: "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"operatorstation\" });';",
+    refs: ["operatorstation"],
+    failures: [missing("operatorstation", 1)],
+  },
+  {
+    label: "class-name matrix: the class all upper-case OPERATORSTATION fails naming OPERATORSTATION",
+    source: "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OPERATORSTATION\" });';",
+    refs: ["OPERATORSTATION"],
+    failures: [missing("OPERATORSTATION", 1)],
+  },
+  {
+    label: "class-name matrix: the class mixed case OperatorstatioN fails naming OperatorstatioN",
+    source: "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorstatioN\" });';",
+    refs: ["OperatorstatioN"],
+    failures: [missing("OperatorstatioN", 1)],
+  },
+  {
+    label: "class-name matrix: the class one letter different OperatorStatiom fails naming OperatorStatiom",
+    source: "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStatiom\" });';",
+    refs: ["OperatorStatiom"],
+    failures: [missing("OperatorStatiom", 1)],
+  },
+);
+
+COORDINATOR_FIXTURES.push(
+  // MUTATION GUARD: letting collectClassNames read class lines behind a // comment marker turns RED
+  {
+    label: 'would fails with that name, though a .js file under platform/blueprints or platform/mechanisms has a line whose text before the words class would is only spaces, tabs and //',
+    precondition: () => (['platform/blueprints', 'platform/mechanisms'].flatMap((d) => walk(d, []))
+      .some((f) => /^[ \t]*\/\/[ \t]*class\s+would\b/m.test(fs.readFileSync(f, 'utf8')))
+      ? null : 'no line of a .js file under platform/blueprints or platform/mechanisms has only spaces, tabs and // before the words class would'),
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "would" });';`,
+    refs: ['would'],
+    failures: [missing('would', 1)],
+  },
+);
+
 const COORDINATOR_GATE_FIXTURES = [
   {
     label: 'a coordinator source with 3 refs, one per required class, fails only the floor',
