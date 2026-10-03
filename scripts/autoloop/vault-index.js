@@ -18,8 +18,9 @@
  * it releases its last outermost coordinator lock or ends, and a turn taken
  * for a note written outside any lock is also given up before the next
  * outermost lock. Giving up the turn sends the scope's notes, waits for each
- * PUT until Obsidian answers or the connection fails, and only then releases
- * the turn.
+ * PUT until a complete HTTP response arrives, and only then releases the
+ * turn. Losing a response after sending may have begun leaves the process
+ * alive and the turn held indefinitely, outside coordinator locks.
  */
 
 const fs = require('fs');
@@ -149,39 +150,60 @@ function connect(channel) {
   });
 }
 
-// Sends one request on a connected socket and resolves when the response ends
-// or the connection fails. A request that cannot be created resolves as
-// request-failed.
-function exchange(channel, socket, method, urlPath, headers, body) {
+// A connected request. GET failures settle normally. Once a note PUT may
+// have sent content, losing the response cannot prove that Obsidian will not
+// apply those bytes later. Keep both the process and its turn alive until a
+// complete HTTP response arrives; a pending Promise alone cannot do that.
+function exchange(channel, socket, method, urlPath, headers, body, notePut = false) {
   return new Promise((resolve) => {
     let settled = false;
+    let mayHaveSent = false;
+    let keepalive = null;
     const settle = (value) => {
       if (settled) return;
       settled = true;
+      if (keepalive) clearInterval(keepalive);
       resolve(value);
+    };
+    const lostResponse = () => {
+      if (mayHaveSent) return;
+      settle({ failure: 'unreachable' });
     };
     let req;
     try {
       req = http.request({
-      hostname: REST_HOST,
-      port: channel.port,
-      method,
-      path: urlPath,
+        hostname: REST_HOST,
+        port: channel.port,
+        method,
+        path: urlPath,
         headers: { Authorization: channel.authorization, ...headers, ...(body ? { 'Content-Length': String(body.length) } : {}) },
         createConnection: () => socket,
       }, (res) => {
         const chunks = [];
         res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => settle({ status: res.statusCode, body: Buffer.concat(chunks) }));
-        res.on('error', () => settle({ failure: 'unreachable' }));
+        res.on('end', () => {
+          if (!res.complete) { lostResponse(); return; }
+          settle({ status: res.statusCode, body: Buffer.concat(chunks) });
+        });
+        res.on('error', lostResponse);
+        res.on('aborted', lostResponse);
+        res.on('close', () => { if (!res.complete) lostResponse(); });
       });
     } catch (_) {
       socket.destroy();
       settle({ failure: 'request-failed' });
       return;
     }
-    req.on('error', () => settle({ failure: 'unreachable' }));
-    req.end(body || undefined);
+    req.on('error', lostResponse);
+    req.on('close', lostResponse);
+    socket.on('error', lostResponse);
+    socket.on('close', lostResponse);
+    if (notePut) {
+      mayHaveSent = true;
+      // Intentionally ref'ed. No timeout can safely release this write turn.
+      keepalive = setInterval(() => {}, 60000);
+    }
+    try { req.end(body || undefined); } catch (_) { lostResponse(); }
   });
 }
 
@@ -198,12 +220,12 @@ async function get(channel, urlPath) {
   return reply;
 }
 
-// A note PUT. Once connected it waits for Obsidian's answer or a failed
-// connection, however long that takes.
+// A note PUT. A connection failure before sending is bounded. After sending
+// may have begun, only a complete HTTP response lets the scope release its turn.
 async function putNote(channel, rel, bytes) {
   const connected = await connect(channel);
   if (connected.failure) return { failure: `connect-${connected.failure}` };
-  return exchange(channel, connected.socket, 'PUT', vaultUrlPath(rel), { 'Content-Type': 'text/markdown' }, bytes);
+  return exchange(channel, connected.socket, 'PUT', vaultUrlPath(rel), { 'Content-Type': 'text/markdown' }, bytes, true);
 }
 
 function vaultUrlPath(rel) {
