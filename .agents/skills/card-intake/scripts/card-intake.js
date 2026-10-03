@@ -1099,7 +1099,8 @@ if (require.main === module) {
   let spec;
   try { spec = JSON.parse(fs.readFileSync(path.resolve(args.spec), 'utf8')); } catch (error) { fail(error); }
   runAndIndex(spec, Boolean(args.apply)).then((result) => {
-    console.log(args.json ? JSON.stringify(result, null, 2) : `${result.ok ? 'ok' : 'refused'}: ${result.result || (result.errors || []).join('; ')}`);
-    process.exit(result.ok ? 0 : 1);
+    const output = args.json ? JSON.stringify(result, null, 2) : `${result.ok ? 'ok' : 'refused'}: ${result.result || (result.errors || []).join('; ')}`;
+    // A receipt can outgrow a pipe's buffer. Finish its write before exiting.
+    process.stdout.write(`${output}\n`, () => process.exit(result.ok ? 0 : 1));
   }).catch(fail);
 }

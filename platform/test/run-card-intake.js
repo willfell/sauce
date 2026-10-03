@@ -1644,6 +1644,72 @@ function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(leas
         'SYNC2D-READ-ONLY-TURN-FREE card-intake without --apply returns while a live holder still holds the turn, which the holder then releases by its release file');
     }
 
+    // SYNC2D-CLI-STDOUT-DRAIN: the real CLI must finish its receipt before
+    // exiting. JSON whitespace supplies pipe pressure without changing the
+    // receipt; the parent pauses reading until the native write is queued.
+    {
+      const fx = await fixture('no-config');
+      const specFile = path.join(fx.base, 'drain-spec.json');
+      fs.writeFileSync(specFile, JSON.stringify(fx.spec));
+      const queuedFile = path.join(fx.base, 'stdout-queued.json');
+      const drainPreload = path.join(fx.base, 'stdout-backpressure.js');
+      const paddingBytes = 4 * 1024 * 1024;
+      const beforeDrain = snapshot(fx.vault);
+      fs.writeFileSync(drainPreload, `
+const fs = require('fs');
+const crypto = require('crypto');
+const write = process.stdout.write;
+process.stdout.write = function(chunk, encoding, callback) {
+  if (typeof encoding === 'function') { callback = encoding; encoding = undefined; }
+  const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+  const padding = Buffer.alloc(Number(process.env.SYNC2D_STDOUT_PADDING), 0x20);
+  const queued = write.call(this, Buffer.concat([padding, bytes]), callback);
+  fs.writeFileSync(process.env.SYNC2D_STDOUT_QUEUED, JSON.stringify({
+    backpressured: !queued, receiptBytes: bytes.length,
+    receiptSha: crypto.createHash('sha256').update(bytes).digest('hex'),
+  }));
+  return queued;
+};
+`);
+      const child = spawn(process.execPath, ['--require', drainPreload, intakePath, '--spec', specFile, '--apply', '--json'], {
+        cwd: root, env: { ...process.env, HOME: root, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`,
+          SYNC2D_STDOUT_PADDING: String(paddingBytes), SYNC2D_STDOUT_QUEUED: queuedFile }, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const out = []; const err = [];
+      let exited = false;
+      child.stdout.on('data', (chunk) => out.push(chunk));
+      child.stdout.pause();
+      child.stderr.on('data', (chunk) => err.push(chunk));
+      child.once('exit', () => { exited = true; });
+      const closed = new Promise((resolve) => child.once('close', resolve));
+      const timer = setTimeout(() => child.kill('SIGKILL'), 15000);
+      try {
+        const deadline = Date.now() + 5000;
+        while (!fs.existsSync(queuedFile) && !exited && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+        const queued = fs.existsSync(queuedFile) ? JSON.parse(fs.readFileSync(queuedFile, 'utf8')) : {};
+        ok(queued.backpressured === true, 'SYNC2D-CLI-STDOUT-DRAIN native pipe write encounters backpressure before the parent reads');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        ok(!exited, 'SYNC2D-CLI-STDOUT-DRAIN the CLI remains alive while its receipt is queued');
+        child.stdout.resume();
+        const code = await closed;
+        const stdout = Buffer.concat(out);
+        const receiptBytes = stdout.subarray(paddingBytes);
+        let receipt = null;
+        try { receipt = JSON.parse(stdout.toString('utf8')); } catch (_) {}
+        eq([code, stdout.length, crypto.createHash('sha256').update(receiptBytes).digest('hex')],
+          [0, paddingBytes + queued.receiptBytes, queued.receiptSha], 'SYNC2D-CLI-STDOUT-DRAIN the CLI exits only after every receipt byte reaches the pipe');
+        const changed = changedBetween(beforeDrain, snapshot(fx.vault)).map((rel) => path.join(fx.vault, ...rel.split('/'))).sort();
+        eq(receipt && [receipt.ok, receipt.applied, receipt.changed_paths.slice().sort()], [true, true, changed],
+          'SYNC2D-CLI-STDOUT-DRAIN the complete output is the real successful intake receipt');
+        eq(Buffer.concat(err).toString('utf8'), '', 'SYNC2D-CLI-STDOUT-DRAIN successful completion emits no stderr');
+      } finally {
+        clearTimeout(timer);
+        child.stdout.resume();
+        if (!exited) child.kill('SIGKILL');
+        await closed;
+      }
+    }
+
     // SYNC2D-INVALID-KEY: an apiKey that cannot be sent as a header value
     // makes the REST config malformed, so the CLI --apply mints as without
     // REST config and the stub receives nothing.

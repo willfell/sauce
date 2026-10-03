@@ -92,7 +92,11 @@ function readRestConfig(vaultRoot) {
     return { ok: true, protocol: 'http:', port: port(parsed.insecurePort), apiKey };
   }
   if (parsed.enableSecureServer !== false && port(parsed.port)) {
-    return { ok: true, protocol: 'https:', port: port(parsed.port), apiKey };
+    const ca = parsed.crypto && typeof parsed.crypto.cert === 'string' ? parsed.crypto.cert.trim() : null;
+    if (!ca) return { ok: false, reason: 'malformed-rest-config' };
+    try { new crypto.X509Certificate(ca); }
+    catch (_) { return { ok: false, reason: 'malformed-rest-config' }; }
+    return { ok: true, protocol: 'https:', port: port(parsed.port), apiKey, ca };
   }
   if (parsed.enableInsecureServer !== true && parsed.enableSecureServer === false) {
     return { ok: false, reason: 'rest-server-disabled' };
@@ -131,7 +135,7 @@ function connect(channel) {
     let socket;
     try {
       socket = secure
-        ? tls.connect({ host: REST_HOST, port: channel.port, rejectUnauthorized: false })
+        ? tls.connect({ host: REST_HOST, port: channel.port, ca: channel.ca, rejectUnauthorized: true })
         : net.connect({ host: REST_HOST, port: channel.port });
     } catch (_) {
       resolve({ failure: 'unreachable' });
@@ -248,6 +252,7 @@ async function channelOf(scope) {
     reason: config.ok ? null : config.reason,
     protocol: config.ok ? config.protocol : null,
     port: config.ok ? config.port : null,
+    ca: config.ok ? config.ca : null,
     authorization: config.ok ? `Bearer ${config.apiKey}` : null,
     timeoutMs: Number.isFinite(scope.options.timeoutMs) && scope.options.timeoutMs > 0 ? scope.options.timeoutMs : DEFAULT_TIMEOUT_MS,
   };

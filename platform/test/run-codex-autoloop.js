@@ -14629,6 +14629,135 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
   const sync2Root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sync2-'));
   const sync2Stubs = [];
   const sync2ApiKey = crypto.randomBytes(24).toString('hex');
+  // Public certificate templates with fixed validity dates. Fresh private
+  // keys are generated in memory; tests never read installed credentials.
+  const sync2Tls = {
+    matchingCert: `-----BEGIN CERTIFICATE-----
+MIIDEDCCAfigAwIBAgIBATANBgkqhkiG9w0BAQsFADAlMSMwIQYDVQQDDBpTWU5D
+MkQgZGlzcG9zYWJsZSBtYXRjaGluZzAgFw0wMDAxMDEwMDAwMDBaGA8yMDk5MDEw
+MTAwMDAwMFowJTEjMCEGA1UEAwwaU1lOQzJEIGRpc3Bvc2FibGUgbWF0Y2hpbmcw
+ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC3fRBtHpgrIg0zICcXmo3E
+EGJ1ponjysrYy3a607dq7Psrk6dqiM6buXvs1sunjp/mCRTGbTIBqFCaqEZlYr4H
+NwzwzscjSxY9NLAee3nH87JXgchRE6kyDr117OXmzr8/dnRheHPY317FCjpH74d7
+hWxB7tJJaMjAs9nNPrF4oTAimG9mL8lpb3kXUm1JV0RWtu+Bixnh5CptOHhutz53
+Y105wpxKwwXPHOLd+wieur3qcUkZt+1nY9lfaTF97zOFXtP6f6vVwIkFrZz8BIqp
+G11BDlCJ7SnhRX1OJWjwh4zXmsKqtHKArEacZ186i3UlMCytANDiGxyLC35je4Fp
+AgMBAAGjSTBHMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgKEMBMGA1Ud
+JQQMMAoGCCsGAQUFBwMBMA8GA1UdEQQIMAaHBH8AAAEwDQYJKoZIhvcNAQELBQAD
+ggEBAAPQexOcTCZMyAkPaKFsD7HOjLzRyfvNtBOAQ1vupkFZA21b9siIWSzgBzlh
+s7Ei461110hNnoWATAZ3xd6rk4Skz59yRJnmcy49E2tDLS2l6mLpINxDHuGTjNxG
+ABptM6ehJzlzAL7IuUqg4kyOaRG/ZNhHspY6Y8czA3rj1sBo0QbH0gPdJnqDtw2n
+MZM4AOp34ZfDUk7MpU0OxX7aHfyv3z8m/SNbVJA5FrEDPuYRQBinLkBsCnacAj1R
++WJeQ0Ujl9waMqoFGNNA6j1dRWYekPgq4gmzxvnz3cEW1UPpJf6ByX7ZL49+NkWI
+P/AhV3ApJPz7ysiWRCo1AYz7ZoI=
+-----END CERTIFICATE-----
+`,
+    foreignCert: `-----BEGIN CERTIFICATE-----
+MIIDDjCCAfagAwIBAgIBAjANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlTWU5D
+MkQgZGlzcG9zYWJsZSBmb3JlaWduMCAXDTAwMDEwMTAwMDAwMFoYDzIwOTkwMTAx
+MDAwMDAwWjAkMSIwIAYDVQQDDBlTWU5DMkQgZGlzcG9zYWJsZSBmb3JlaWduMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7DYJisskhFQQWMZZUJA9US12
+4F7vIQjWIy+L3F92WJRkQZbUsohQt4hl4DMBr9RGbBTAR05g8+9YmsI78tHhkQ68
+yiBoSVYjPsENDAbowAs3KRVSLhCudaXkm8O0HC+E3ShkJ3/KjCmBW8TLJcDA3U+z
+9L5WqNmVuWeDHjx2tsyKf3wb7zlnA5B7SK9L/G7ebxRlcwg4qfkYU3SilRIpZhlm
+IEo3Ak34nCg/G7CvXSaaMEthC6ZyWpXJK4yFULWK8sS6C4403+1GmGV9SkTl7DxY
+ealvqYqOnMMOkx+pcPi7OjdPFi4aJdDtcruG3ker/pII1w2I4PQJdFB9hUqZrQID
+AQABo0kwRzAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIChDATBgNVHSUE
+DDAKBggrBgEFBQcDATAPBgNVHREECDAGhwR/AAABMA0GCSqGSIb3DQEBCwUAA4IB
+AQAom8Sc4N9Q71D8tqgxgFq+HkAq5JiYhaEn7PRUpwuVT8PIO2nTevmIQPZMEt5K
+8wbDSm63pzDmFT6CWg8hSyJLTr1eRScJjXORvsieJX9XzN/96JjzsBTEFj/RcMHB
+2aX5eTPaITM6JWlosSJ0T9eF7AWCZ8qrfDaO39sJoacRsax6UsXQLaxtx77+smy1
+W57NL6ubN1vCs0Gzl/vYghAYJDp5xtPgG73/N/Ic2srsO+RHI53uhgc/ZD9T5MzA
+UHEJEYRwj9hFd0/+hPUkVzGeWp+fXgcE+wov+0vf9/5DMncVztN3fDvJpZYvgYyN
+GPfwrWW/9oENWH8WpoJryeY/
+-----END CERTIFICATE-----
+`,
+    wrongIpCert: `-----BEGIN CERTIFICATE-----
+MIIDDjCCAfagAwIBAgIBAzANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlTWU5D
+MkQgZGlzcG9zYWJsZSB3cm9uZ0lwMCAXDTAwMDEwMTAwMDAwMFoYDzIwOTkwMTAx
+MDAwMDAwWjAkMSIwIAYDVQQDDBlTWU5DMkQgZGlzcG9zYWJsZSB3cm9uZ0lwMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt30QbR6YKyINMyAnF5qNxBBi
+daaJ48rK2Mt2utO3auz7K5OnaojOm7l77NbLp46f5gkUxm0yAahQmqhGZWK+BzcM
+8M7HI0sWPTSwHnt5x/OyV4HIUROpMg69dezl5s6/P3Z0YXhz2N9exQo6R++He4Vs
+Qe7SSWjIwLPZzT6xeKEwIphvZi/JaW95F1JtSVdEVrbvgYsZ4eQqbTh4brc+d2Nd
+OcKcSsMFzxzi3fsInrq96nFJGbftZ2PZX2kxfe8zhV7T+n+r1cCJBa2c/ASKqRtd
+QQ5Qie0p4UV9TiVo8IeM15rCqrRygKxGnGdfOot1JTAsrQDQ4hsciwt+Y3uBaQID
+AQABo0kwRzAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIChDATBgNVHSUE
+DDAKBggrBgEFBQcDATAPBgNVHREECDAGhwR/AAACMA0GCSqGSIb3DQEBCwUAA4IB
+AQAFfklev4kdpuMlqcJ605VrzGFCU/L2mWon5rmuylp3kRQfW+FCxuh8uGvRJH7z
+d2bi5kodDT5uam6HjrOP+Khqk75CbhdYSnUz+KMvcYi3R2unVu97Z5nbPfa70LWi
+LXtYO1vYkKF7WOdpAQJn9YqkikRWbaPNRYeVH5Om2LL3GKvE4o/oWlyJVVR0wgUv
+4Ly337nI7RUZufJG5S2jDRpWuWX1f3sDK+eRnIR4THtdHH+teu0IyYvQAIFvzcge
+hcF48g8M3eaDB7FsiSYWVfQz1vwrhEAigA6bAZgh5acE90EPhscW2M57j2BAPGqK
+fZ+R9fGPkuklXPP9P9PsBMpe
+-----END CERTIFICATE-----
+`,
+    expiredCert: `-----BEGIN CERTIFICATE-----
+MIIDDDCCAfSgAwIBAgIBBDANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlTWU5D
+MkQgZGlzcG9zYWJsZSBleHBpcmVkMB4XDTAwMDEwMTAwMDAwMFoXDTAxMDEwMTAw
+MDAwMFowJDEiMCAGA1UEAwwZU1lOQzJEIGRpc3Bvc2FibGUgZXhwaXJlZDCCASIw
+DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALd9EG0emCsiDTMgJxeajcQQYnWm
+iePKytjLdrrTt2rs+yuTp2qIzpu5e+zWy6eOn+YJFMZtMgGoUJqoRmVivgc3DPDO
+xyNLFj00sB57ecfzsleByFETqTIOvXXs5ebOvz92dGF4c9jfXsUKOkfvh3uFbEHu
+0kloyMCz2c0+sXihMCKYb2YvyWlveRdSbUlXRFa274GLGeHkKm04eG63PndjXTnC
+nErDBc8c4t37CJ66vepxSRm37Wdj2V9pMX3vM4Ve0/p/q9XAiQWtnPwEiqkbXUEO
+UIntKeFFfU4laPCHjNeawqq0coCsRpxnXzqLdSUwLK0A0OIbHIsLfmN7gWkCAwEA
+AaNJMEcwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAoQwEwYDVR0lBAww
+CgYIKwYBBQUHAwEwDwYDVR0RBAgwBocEfwAAATANBgkqhkiG9w0BAQsFAAOCAQEA
+Xr3GGJyz9OxTzf38TTd4g8h63JlbGpVnYlUtfB2+KnOxU5VbXaUY3cEubdtmuQh5
+O9sPwbhANOJeEeAYvLCWahCv9NuzWohdTtLfe7gp8Cevrw6hmxPDTOVRtl/lQkMO
+MUiexyqVre84TScSIub5ePQyJCmYm6J/ZE2SEZxK2IP70sUu2i8b6TiwtMDI0XdU
+Cdl4G2rKKBBL2qcahflQpQv1hjlpisnio8Z/FXNoxP5ny/pIun3c2uk5mNDH+ads
+pEWRBQMRSucQ7uiDcb8+rLvYQIqcITTvouN6L42pooFS5DPIrO6eYSCH9PfJTZZF
+UVzqWkImm+bKgCrDzvTDZg==
+-----END CERTIFICATE-----
+`,
+  };
+  // Replace the public key and signature in these v3 RSA certificate
+  // templates. Their validity dates and IP extensions stay fixed.
+  const sync2TlsDer = (tag, content) => {
+    const lengths = [];
+    for (let n = content.length; n > 0; n = Math.floor(n / 256)) lengths.unshift(n % 256);
+    const length = content.length < 128 ? Buffer.from([content.length]) : Buffer.from([0x80 | lengths.length, ...lengths]);
+    return Buffer.concat([Buffer.from([tag]), length, content]);
+  };
+  const sync2TlsFields = (sequence) => {
+    assert.strictEqual(sequence[0], 0x30);
+    let at = 2 + (sequence[1] & 0x80 ? sequence[1] & 0x7f : 0);
+    const fields = [];
+    while (at < sequence.length) {
+      const start = at;
+      at += 1;
+      const first = sequence[at++];
+      let length = first;
+      if (first & 0x80) {
+        length = 0;
+        for (let i = 0; i < (first & 0x7f); i += 1) length = length * 256 + sequence[at++];
+      }
+      at += length;
+      assert.ok(at <= sequence.length);
+      fields.push(sequence.subarray(start, at));
+    }
+    return fields;
+  };
+  const sync2TlsSign = (template, keys) => {
+    const [tbs, algorithm] = sync2TlsFields(new crypto.X509Certificate(template).raw);
+    const fields = sync2TlsFields(tbs);
+    assert.strictEqual(fields[0][0], 0xa0);
+    assert.strictEqual(fields[6][0], 0x30);
+    fields[6] = keys.publicKey.export({ type: 'spki', format: 'der' });
+    const body = sync2TlsDer(0x30, Buffer.concat(fields));
+    const signature = crypto.sign('sha256', body, keys.privateKey);
+    const der = sync2TlsDer(0x30, Buffer.concat([body, algorithm, sync2TlsDer(3, Buffer.concat([Buffer.from([0]), signature]))]));
+    return `-----BEGIN CERTIFICATE-----\n${der.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----\n`;
+  };
+  const sync2TlsKeys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const sync2TlsForeignKeys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  for (const name of ['matching', 'wrongIp', 'expired']) sync2Tls[`${name}Cert`] = sync2TlsSign(sync2Tls[`${name}Cert`], sync2TlsKeys);
+  sync2Tls.foreignCert = sync2TlsSign(sync2Tls.foreignCert, sync2TlsForeignKeys);
+  sync2Tls.fixtureKey = sync2TlsKeys.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  sync2Tls.foreignKey = sync2TlsForeignKeys.privateKey.export({ type: 'pkcs8', format: 'pem' });
+
   const sync2CoordinatorPath = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   const sync2IndexPath = path.join(__dirname, '../../scripts/autoloop/vault-index.js');
   const sync2IntakePath = path.join(__dirname, '../../.agents/skills/card-intake/scripts/card-intake.js');
@@ -15379,6 +15508,204 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       }
     }
 
+    // SYNC2D-TLS-TRUST: exercise the sender against disposable TLS servers,
+    // including certificate rejection before any HTTP headers or note bytes.
+    {
+      const https = require('https');
+      for (const name of ['matching', 'foreign', 'wrongIp', 'expired']) {
+        const cert = new crypto.X509Certificate(sync2Tls[`${name}Cert`]);
+        const keys = name === 'foreign' ? sync2TlsForeignKeys : sync2TlsKeys;
+        eq([cert.checkIssued(cert), cert.verify(keys.publicKey), cert.publicKey.export({ type: 'spki', format: 'der' })
+          .equals(keys.publicKey.export({ type: 'spki', format: 'der' }))], [true, true, true],
+          `SYNC2D-TLS-TRUST ${name}: runtime certificate is self-signed with its corresponding fresh key`);
+        eq([Boolean(cert.checkIP('127.0.0.1')), Date.parse(cert.validFrom) <= Date.now() && Date.now() < Date.parse(cert.validTo)],
+          [name !== 'wrongIp', name !== 'expired'], `SYNC2D-TLS-TRUST ${name}: fixture has its named IP identity and validity`);
+      }
+      const cases = [
+        ['matching', sync2Tls.matchingCert, sync2Tls.matchingCert, null],
+        ['foreign', sync2Tls.foreignCert, sync2Tls.matchingCert, 'unreachable'],
+        ['wrong-ip', sync2Tls.wrongIpCert, sync2Tls.wrongIpCert, 'unreachable'],
+        ['expired', sync2Tls.expiredCert, sync2Tls.expiredCert, 'unreachable'],
+        ['missing', sync2Tls.matchingCert, undefined, 'malformed-rest-config'],
+        ['malformed', sync2Tls.matchingCert, 'invalid fixture certificate', 'malformed-rest-config'],
+        ['non-string', sync2Tls.matchingCert, { cert: sync2Tls.matchingCert }, 'malformed-rest-config'],
+        ['rotated-before-put', sync2Tls.matchingCert, sync2Tls.matchingCert, 'unreachable'],
+      ];
+      for (const [name, serverCert, configuredCert, failure] of cases) {
+        const label = `SYNC2D-TLS-TRUST ${name}`;
+        const vault = path.join(sync2Root, `tls-${name}`);
+        const note = path.join(vault, 'spice', 'TLS.md');
+        fs.mkdirSync(path.dirname(note), { recursive: true });
+        const requests = [];
+        const sockets = new Set();
+        const indexed = new Map();
+        const errors = [];
+        const server = https.createServer({
+          key: name === 'foreign' ? sync2Tls.foreignKey : sync2Tls.fixtureKey,
+          cert: serverCert,
+        }, (req, res) => {
+          const entry = { method: req.method, url: req.url, authorization: req.headers.authorization, body: null };
+          requests.push(entry);
+          const chunks = [];
+          req.on('data', (chunk) => chunks.push(chunk));
+          req.on('end', () => {
+            entry.body = Buffer.concat(chunks).toString('utf8');
+            if (req.url === '/') {
+              if (name === 'rotated-before-put') server.setSecureContext({ key: sync2Tls.foreignKey, cert: sync2Tls.foreignCert });
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ authenticated: req.headers.authorization === `Bearer ${sync2ApiKey}` }));
+            } else if (req.method === 'PUT') {
+              fs.writeFileSync(note, entry.body);
+              indexed.set('TLS.md', entry.body);
+              res.writeHead(204); res.end();
+            } else {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ files: [...indexed.keys()] }));
+            }
+          });
+        });
+        server.on('tlsClientError', (error) => errors.push(error.code));
+        server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+        try {
+          await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+          const port = server.address().port;
+          ok(port < 27123 || port > 27128, `${label}: ephemeral stub avoids live REST ports`);
+          const config = path.join(vault, vaultIndex.REST_CONFIG_RELATIVE);
+          fs.mkdirSync(path.dirname(config), { recursive: true });
+          fs.writeFileSync(config, JSON.stringify({ apiKey: sync2ApiKey, enableInsecureServer: false,
+            enableSecureServer: true, port, crypto: { cert: configuredCert } }));
+          const started = Date.now();
+          const result = await vaultIndex.withVaultIndex(vault, async () => {
+            sync2RailWrite(note, 'TLS rail bytes\n'); return { ok: true };
+          }, { timeoutMs: 250 });
+          const report = result.obsidian_index;
+          if (!failure) {
+            eq([report.available, report.seen, report.written_through, report.unseen, report.conflicts],
+              [true, ['spice/TLS.md'], ['spice/TLS.md'], [], []], `${label}: configured self-signed certificate indexes the new note before returning`);
+            eq(requests.map(({ method, url }) => [method, url]), [['GET', '/'], ['PUT', '/vault/spice/TLS.md'], ['GET', '/vault/spice/']],
+              `${label}: authenticated probe, note PUT and folder listing use TLS`);
+            eq([requests.every((entry) => entry.authorization === `Bearer ${sync2ApiKey}`), indexed.get('TLS.md'), errors],
+              [true, 'TLS rail bytes\n', []], `${label}: the accepted peer receives the key and exact bytes`);
+          } else {
+            eq([report.available, report.reason, report.written_through], [false, failure, []],
+              `${label}: rejected certificate settles with only a generic failure`);
+            eq(requests.map(({ method, url, body }) => [method, url, body]),
+              name === 'rotated-before-put' ? [['GET', '/', '']] : [],
+              `${label}: an unverified peer receives no HTTP Authorization or content (rotation receives only the earlier verified probe)`);
+            ok(Date.now() - started < 3000, `${label}: rejection settles before the three-second fixture bound`);
+            eq(indexed.size, 0, `${label}: no note was sent to an unverified peer`);
+          }
+          eq([fs.readFileSync(note, 'utf8'), sync2TurnHeld(vault)], ['TLS rail bytes\n', false],
+            `${label}: the disk write remains and the scope releases its turn`);
+          const receipt = JSON.stringify(result);
+          ok(!receipt.includes(sync2ApiKey) && !receipt.includes('BEGIN CERTIFICATE') && !receipt.includes('BEGIN PRIVATE KEY')
+            && !receipt.includes('invalid fixture certificate'), `${label}: receipt includes neither credentials nor TLS material/errors`);
+        } finally {
+          for (const socket of sockets) socket.destroy();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
+    }
+
+    // TLS exercises the same sent-PUT lifetime rule as the HTTP matrix below.
+    // Only these disposable children are killed when a response stays lost.
+    {
+      const https = require('https');
+      const driver = path.join(sync2Root, 'tls-lifetime-writer.js');
+      fs.writeFileSync(driver, `
+const fs = require('fs');
+const [indexPath, vault, note, text] = process.argv.slice(2);
+const index = require(indexPath);
+index.withVaultIndex(vault, async () => {
+  await index.awaitWriteTurn();
+  index.beforeNoteWrite();
+  const tmp = note + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, note);
+  index.noteWritten(note, text);
+  return { ok: true };
+}).then((result) => console.log(JSON.stringify(result)), (error) => {
+  console.error(error.message); process.exitCode = 1;
+});
+`);
+      for (const complete of [false, true]) {
+        const label = `SYNC2D-TLS-LIFETIME ${complete ? 'complete' : 'lost'} response`;
+        const fx = sync2CliFixture(`tls-lifetime-${complete}`);
+        const note = path.join(fx.vault, 'spice', 'TLS.md');
+        fs.writeFileSync(note, 'seed\n');
+        const sockets = new Set();
+        const children = [];
+        const timers = new Set();
+        const puts = [];
+        let late = null;
+        const server = https.createServer({ key: sync2Tls.fixtureKey, cert: sync2Tls.matchingCert }, (req, res) => {
+          const chunks = [];
+          req.on('data', (chunk) => chunks.push(chunk));
+          req.on('end', () => {
+            if (req.method !== 'PUT') {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(req.url === '/' ? { authenticated: true } : { files: ['TLS.md'] }));
+              return;
+            }
+            const body = Buffer.concat(chunks).toString('utf8');
+            puts.push({ complete: req.complete, body });
+            if (puts.length > 1) { fs.writeFileSync(note, body); res.writeHead(204); res.end(); return; }
+            if (!complete) req.socket.destroy();
+            const timer = setTimeout(() => {
+              timers.delete(timer);
+              fs.writeFileSync(note, body);
+              const owner = JSON.parse(fs.readFileSync(path.join(sync2Turn(fx.vault), 'owner.json'), 'utf8'));
+              late = { owner: owner.pid, alive: children.map((child) => !child.closed), returned: children.map((child) => Boolean(child.stdout)),
+                bytes: fs.readFileSync(note, 'utf8') };
+              if (complete) { res.writeHead(204); res.end(); }
+            }, 700);
+            timers.add(timer);
+          });
+        });
+        server.on('tlsClientError', () => {});
+        server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+        const launch = (text) => {
+          const proc = spawn(process.execPath, [driver, sync2IndexPath, fx.vault, note, text], { cwd: fx.repo, env: fx.env, stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = { proc, stdout: '', stderr: '', closed: false, code: null };
+          proc.stdout.on('data', (chunk) => { child.stdout += chunk.toString(); });
+          proc.stderr.on('data', (chunk) => { child.stderr += chunk.toString(); });
+          child.exited = new Promise((resolve) => proc.once('close', (code) => { child.closed = true; child.code = code; resolve(); }));
+          children.push(child); return child;
+        };
+        try {
+          await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+          const port = server.address().port;
+          ok(port < 27123 || port > 27128, `${label}: ephemeral stub avoids live REST ports`);
+          await sync2RestConfig(fx.vault, port, { enableInsecureServer: false, port, crypto: { cert: sync2Tls.matchingCert } });
+          const first = launch('older TLS bytes\n');
+          ok(await sync2Until(() => puts.length === 1 || first.closed, 5000) && puts.length === 1,
+            `${label}: first child sends a complete TLS PUT`);
+          launch('newer TLS bytes\n');
+          ok(await sync2Until(() => late !== null, 5000), `${label}: stub applies the saved body after response loss or delay`);
+          eq([puts[0], late.owner, late.alive, late.returned, late.bytes],
+            [{ complete: true, body: 'older TLS bytes\n' }, first.proc.pid, [true, true], [false, false], 'older TLS bytes\n'],
+            `${label}: at late application neither child returned and the sender is alive with the turn`);
+          if (complete) {
+            ok(await sync2Until(() => children.every((child) => child.closed), 5000), `${label}: complete responses let both children exit naturally`);
+            eq([children.map((child) => child.code), puts.length, fs.readFileSync(note, 'utf8'), sync2TurnHeld(fx.vault)],
+              [[0, 0], 2, 'newer TLS bytes\n', false], `${label}: completed replies release the turn and preserve newer bytes`);
+          } else {
+            await sync2Wait(150);
+            eq([children.map((child) => child.closed), children.map((child) => child.stdout), puts.length, sync2TurnHeld(fx.vault)],
+              [[false, false], ['', ''], 1, true], `${label}: a lost TLS reply leaves both children waiting and prevents a second PUT`);
+          }
+          ok(children.every((child) => !child.stderr && !child.stdout.includes(sync2ApiKey) && !child.stdout.includes('BEGIN CERTIFICATE')),
+            `${label}: child stdout/stderr contain no credentials or TLS material`);
+        } finally {
+          for (const timer of timers) clearTimeout(timer);
+          for (const child of children) if (!child.closed) child.proc.kill('SIGKILL');
+          await Promise.all(children.map((child) => child.exited));
+          for (const socket of sockets) socket.destroy();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
+    }
+
     // SYNC2-SAFETY-CARRIED config reading
     {
       const vault = path.join(sync2Root, 'config-modes');
@@ -15397,8 +15724,9 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       eq(vaultIndex.readRestConfig(vault), { ok: false, reason: 'rest-server-disabled' }, 'SYNC2-SAFETY-CARRIED both servers disabled is rest-server-disabled');
       write({ apiKey: ' k ', port: 27124, insecurePort: 27123, enableInsecureServer: true });
       eq(vaultIndex.readRestConfig(vault), { ok: true, protocol: 'http:', port: 27123, apiKey: 'k' }, 'SYNC2-SAFETY-CARRIED the insecure server is preferred when enabled');
-      write({ apiKey: 'k', port: 27124, insecurePort: 27123 });
-      eq(vaultIndex.readRestConfig(vault), { ok: true, protocol: 'https:', port: 27124, apiKey: 'k' }, 'SYNC2-SAFETY-CARRIED otherwise the secure server');
+      write({ apiKey: 'k', port: 27124, insecurePort: 27123, crypto: { cert: sync2Tls.matchingCert } });
+      eq(vaultIndex.readRestConfig(vault), { ok: true, protocol: 'https:', port: 27124, apiKey: 'k', ca: sync2Tls.matchingCert.trim() },
+        'SYNC2-SAFETY-CARRIED otherwise the secure server trusts its configured certificate');
     }
 
     // SYNC2-SAFETY-CARRIED + SYNC2-READ-ONLY-VERIFY in-process writes
