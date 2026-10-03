@@ -1487,7 +1487,6 @@ function ratificationAcceptedWait({ sibling, conflict, unmet = [], atCapacity = 
 
 async function commandConsumeRatification(ctx, args, deps = {}) {
   const boardPath = deps.boardPath || BOARD;
-  await vaultIndex.awaitWriteTurn();
   // OPX4-CONTAINMENT: resolve and physically contain the artifact before even
   // selecting a state reader. No malformed path can observe coordinator state.
   const operand = validateRatificationArtifactOperand(args, boardPath, deps);
@@ -1499,6 +1498,7 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
   const now = deps.now || (() => new Date().toISOString());
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   const project = deps.projectCard || projectCard;
+  await vaultIndex.awaitWriteTurn();
   return lock(ctx, 'selector', async () => withCardGateLock(ctx, operand.card, async () => {
     const state = loadState(ctx);
     const record = state.cards[operand.card];
@@ -9035,7 +9035,17 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
   const writeText = deps.atomicWriteText || atomicWriteText;
   const barrier = deps.durablePathBarrier || durablePathBarrier;
   const readSpec = deps.readSpec || ((file) => fs.readFileSync(file, 'utf8'));
-  if (apply) await vaultIndex.awaitWriteTurn();
+  // The --spec file is read and checked before the write turn is taken.
+  let specRaw = null;
+  let spec = null;
+  if (apply) {
+    specRaw = readSpec(path.resolve(String(args.spec)));
+    let parsed;
+    try { parsed = JSON.parse(specRaw); }
+    catch (err) { throw new Error(`contract frontmatter restamp spec is malformed JSON: ${err.message}`); }
+    spec = validateContractFrontmatterRestampSpec(parsed, args.reason, cardsRoot);
+    await vaultIndex.awaitWriteTurn();
+  }
   return lock(ctx, 'contract-frontmatter-restamp', async () => {
     if (!apply) {
       const spec = contractFrontmatterRestampPlan(cardsRoot, args.reason);
@@ -9047,11 +9057,6 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
         spec,
       };
     }
-    const specRaw = readSpec(path.resolve(String(args.spec)));
-    let parsed;
-    try { parsed = JSON.parse(specRaw); }
-    catch (err) { throw new Error(`contract frontmatter restamp spec is malformed JSON: ${err.message}`); }
-    const spec = validateContractFrontmatterRestampSpec(parsed, args.reason, cardsRoot);
     const request = {
       command_operands: Array.isArray(args._) ? [...args._] : [],
       restamp_operand: args['contract-frontmatter-restamp'],

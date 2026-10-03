@@ -1064,8 +1064,10 @@ function run(spec, apply = false, deps = {}) {
 }
 
 // Runs run() in a scope bound to the board's vault. An applying run reads the
-// coordinator status first, then waits for the write turn with
-// vaultIndex.awaitWriteTurn before run() reads the board.
+// coordinator status first, then runs run() without --apply as a read-only
+// pre-check: when that refuses, its refusal is returned and no turn is taken.
+// Otherwise it waits for the write turn with vaultIndex.awaitWriteTurn and
+// runs run() again with --apply, which reads the board again under the turn.
 async function runAndIndex(spec, apply = false, deps = {}) {
   return vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(spec && spec.board_path), async () => {
     if (!apply) return run(spec, apply, deps);
@@ -1073,6 +1075,8 @@ async function runAndIndex(spec, apply = false, deps = {}) {
     try { status = { value: (deps.readCoordinatorStatus || readInstalledCoordinatorStatus)() }; }
     catch (error) { status = { error }; }
     const readCoordinatorStatus = () => { if (status.error) throw status.error; return status.value; };
+    const precheck = run(spec, false, { ...deps, readCoordinatorStatus });
+    if (!precheck.ok) return precheck;
     await vaultIndex.awaitWriteTurn();
     return run(spec, apply, { ...deps, readCoordinatorStatus });
   }, deps.vaultIndex);
