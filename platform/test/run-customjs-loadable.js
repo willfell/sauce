@@ -633,7 +633,8 @@ block('MissingLastInString');`,
     label: 'each of the four customjs-guard calls in one returned string that joins no other part is read at the top-level class key of its own object',
     source: String.raw`function block() {
   return 'await dv.view("ranch/views/customjs-guard", { class: "Board Health" }); await dv.view("ranch/views/customjs-guard", { class: "OperatorStation", args: [{ class: "NotTheGuardClass" }] }); await dv.view("ranch/views/customjs-guard", { args: [{ class: "NotGuard" }], class: "RealGuard" }); await dv.view("ranch/views/customjs-guard", { $class: "Wrong", "class": "Right" });';
-}`,
+}
+block();`,
     refs: ['Board Health', 'OperatorStation', 'RealGuard', 'Right'],
     failures: [missing('Board Health', 2), missing('RealGuard', 2), missing('Right', 2)],
   },
@@ -1018,7 +1019,7 @@ block('OperatorStation', '; await dv.view("ranch/views/customjs-' + 'guard", { c
   {
     label: 'a helper whose class value is written \\x5f_sauceClassExpr0__ and that joins widget after the closed guard call fails the gate',
     source: String.raw`function block(widget) {
-  return 'await dv.view("ranch/views/customjs-guard", { class: "\\x5f_sauceClassExpr0__" }); // ' + widget;
+  return 'await dv.view("ranch/views/customjs-guard", { class: "\\x5f_sauceClassExpr0__" }); /* ' + widget + ' */';
 }
 block('OperatorStation');`,
     refs: [],
@@ -1163,7 +1164,7 @@ block('OperatorStation');`,
   // MUTATION GUARD: exempting template literal parts from the CALL_CHAIN check turns RED
   {
     label: 'a guard call whose object is followed in its + chain by the template `${t}` fails the gate',
-    source: "const t = 'x';\n"
+    source: "const t = ' && { class: \"NoSuchTplPart\" }';\n"
       + "const s = 'await dv.view(\"ranch/views/customjs-guard\", { class: \"OperatorStation\" }' + `${t}` + ');';",
     refs: [],
     failures: [unreadable(2, CALL_CHAIN)],
@@ -1178,8 +1179,8 @@ const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation
   },
   // MUTATION GUARD: parsing the call as a module (sourceType: 'module') in place of allowAwaitOutsideFunction turns RED
   {
-    label: 'a class value written in the note text with the octal escape \\117peratorStation is read as OperatorStation',
-    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "\\117peratorStation" });';`,
+    label: 'a guard object whose class value is followed by <!-- , class: "NoSuchHtml" and a newline is read as OperatorStation',
+    source: String.raw`const s = 'await dv.view("ranch/views/customjs-guard", { class: "OperatorStation" <!-- , class: "NoSuchHtml"\n });';`,
     refs: ['OperatorStation'],
     failures: [],
   },
