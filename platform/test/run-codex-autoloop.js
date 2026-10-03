@@ -14950,7 +14950,9 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
     const append = fs.appendFileSync.bind(fs);
     const log = process.env.SYNC2_PROBE_LOG;
     const record = (entry) => { if (log) append(log, `${JSON.stringify(entry)}\n`); };
-    const now = () => performance.timeOrigin + performance.now();
+    // Every probe time is Date.now() taken before any frozen clock replaces
+    // Date, the clock the stub and the other processes of these tests use.
+    const now = Date.now.bind(Date);
     if (process.env.SYNC2_FROZEN_CLOCK) {
       const RealDate = Date;
       const base = Number(process.env.SYNC2_FROZEN_CLOCK);
@@ -15005,8 +15007,8 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       http.request = function sync2Request(...args) {
         const req = realRequest.apply(this, args);
         const { method, path: urlPath } = args[0] || {};
-        record({ op: 'sent', method, path: urlPath, t: Date.now() });
-        req.on('response', () => record({ op: 'answered', method, path: urlPath, t: Date.now() }));
+        record({ op: 'sent', method, path: urlPath, t: now() });
+        req.on('response', () => record({ op: 'answered', method, path: urlPath, t: now() }));
         return req;
       };
       const vault = `${process.env.SYNC2_VAULT}${path.sep}`;
@@ -15407,7 +15409,7 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
         'SYNC2-NO-LATE-REVERT both writers complete');
       const firstPut = sync2Kind(requests, 'put').find((request) => request.body.toString() === 'first\n');
       eq(locksDuringStall, [], 'SYNC2-BOUNDED-LOCK-HOLD the first writer waits for Obsidian holding no lock');
-      ok(firstPut && secondEntered > firstPut.applied,
+      ok(firstPut && secondEntered >= firstPut.applied,
         'SYNC2-NO-LATE-REVERT a second writer enters the lock only after the stub applied the first writer\'s PUT');
       eq(fs.readFileSync(file, 'utf8'), 'second\n', 'SYNC2-NO-LATE-REVERT the later write is what the note holds after the stall');
     }
@@ -15433,11 +15435,11 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       }));
       await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 5000);
       await sync2Wait(200);
-      const b1Started = Date.now();
       const b1 = await vaultIndex.withVaultIndex(vault, async () => coordinator.withLock(ctx, 'gates-y', async () => {
         await coordinator.withLock(ctx, 'completion-projection', async () => { append('B1\n'); });
         return { ok: true };
-      })).then(() => ({ code: 'ok' }), (error) => ({ code: error.code, message: error.message, ms: Date.now() - b1Started }));
+      })).then(() => ({ code: 'ok' }), (error) => ({ code: error.code, message: error.message }));
+      const stallOverAtB1 = stub.events.some((event) => event.type === 'resumed');
       const afterB1 = fs.readFileSync(file, 'utf8');
       const locksAfterB1 = fs.readdirSync(path.join(ctx.stateDir, 'locks')).filter((name) => name.endsWith('.lock'));
       let b2WroteAt = 0;
@@ -15453,8 +15455,8 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
       await stub.settled();
       const resumedAt = (stub.events.find((event) => event.type === 'resumed') || {}).at;
       ok(stub.events.some((event) => event.type === 'stalling'), 'SYNC2-TURN-NESTED-LOCKS precondition: the stub stalled on A\'s PUT');
-      ok(b1.code === 'LOCKED' && /vault-write-turn/.test(b1.message) && b1.ms < 1000 && afterB1 === 'v0\nA\n' && locksAfterB1.length === 0,
-        `SYNC2B-NO-WAIT-IN-LOCK D1: B1, inside its locks, is refused the held turn at once and writes nothing (${b1.code}, ${b1.ms}ms)`);
+      ok(b1.code === 'LOCKED' && /vault-write-turn/.test(b1.message) && !stallOverAtB1 && afterB1 === 'v0\nA\n' && locksAfterB1.length === 0,
+        `SYNC2B-NO-WAIT-IN-LOCK D1: B1, inside its locks, is refused the held turn while A's PUT is still stalled, and writes nothing (${b1.code})`);
       ok(resumedAt > 0 && b2WroteAt >= resumedAt,
         'SYNC2-TURN-NESTED-LOCKS D1: B2 writes the board only after the stub handled A\'s stalled PUT');
       eq(fs.readFileSync(file, 'utf8'), 'v0\nA\nB\n',
@@ -15813,18 +15815,20 @@ vaultIndex.withVaultIndex(vault, async () => { await vaultIndex.awaitWriteTurn()
       const fx = sync2CliFixture('status-during-stall');
       const stub = await sync2Stub({ vault: fx.vault, stallMs: 4000 });
       await sync2RestConfig(fx.vault, stub.port);
-      const claimRun = sync2Cli(fx, ['claim', '--json']);
+      let claimExited = false;
+      const claimRun = sync2Cli(fx, ['claim', '--json']).then((run) => { claimExited = true; return run; });
       await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
       await sync2Wait(200);
       const heldDuringWait = fs.existsSync(path.join(fx.stateDir, 'locks')) ? fs.readdirSync(path.join(fx.stateDir, 'locks')).filter((name) => name.endsWith('.lock')) : [];
       const turnDuringWait = sync2TurnHeld(fx.vault);
       const status = await sync2Cli(fx, ['status', '--json']);
+      const claimExitedAtStatus = claimExited;
       const claim = await claimRun;
       sync2Outputs.push(status, claim);
       ok(turnDuringWait && heldDuringWait.length === 0,
         `SYNC2-BOUNDED-LOCK-HOLD precondition: the claim is waiting on the stalled stub holding the write turn and no lock (turn ${turnDuringWait}, locks ${heldDuringWait.join(', ')})`);
       eq([status.code, /LOCKED/.test(status.stderr)], [0, false], `SYNC2-BOUNDED-LOCK-HOLD SYNC1D-STALL-LOCK-HOLD a status launched while the claim waits is not refused LOCKED — ${status.stderr.slice(0, 200)}`);
-      ok(status.ended < claim.ended, `SYNC2-BOUNDED-LOCK-HOLD the status returns while the claim is still waiting on Obsidian (${status.ms}ms)`);
+      eq(claimExitedAtStatus, false, `SYNC2-BOUNDED-LOCK-HOLD the status returns before the claim waiting on Obsidian has exited (${status.ms}ms)`);
       eq(claim.code, 0, 'SYNC2-BOUNDED-LOCK-HOLD the claim then completes');
     }
 
@@ -15892,18 +15896,21 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
   sh, deployVaults: [{ id: 'fixture' }], runIsolatedWorkshopSelfInstall: () => { block(1000); },
 })).then((receipt) => { process.stdout.write(JSON.stringify(receipt)); process.exit(0); }, (error) => { process.stderr.write(error.message); process.exit(1); });
 `);
-      const verifyRun = sync2Cli(fx, [sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, sync2LeaseToken(claim), marker], { script: driver });
+      let verifyExited = false;
+      const verifyRun = sync2Cli(fx, [sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, sync2LeaseToken(claim), marker], { script: driver })
+        .then((run) => { verifyExited = true; return run; });
       await sync2Until(() => fs.existsSync(marker), 30000);
       const turnDuringPreflight = sync2TurnHeld(fx.vault);
       const discard = await sync2Cli(fx, sync2Second.discard());
+      const verifyExitedAtDiscard = verifyExited;
       const verify = await verifyRun;
       sync2Outputs.push(claim, discard, verify);
       eq([verify.code, verify.receipt.action, Object.keys(verify.receipt.checks || {})],
         [0, 'gates-passed', ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped']],
         `SYNC2B-TURN-ONLY-FOR-NOTE-WRITES precondition: the gated step runs both preflights and the self-install — ${verify.stderr.slice(0, 200)}`);
       eq(turnDuringPreflight, false, 'SYNC2B-TURN-ONLY-FOR-NOTE-WRITES verify-gates holds no write turn while its preflight runs');
-      ok(discard.code === 0 && discard.ended < verify.ended,
-        `SYNC2B-TURN-ONLY-FOR-NOTE-WRITES a sibling discard completes while verify-gates is still running (discard ${discard.ms}ms, ended ${verify.ended - discard.ended}ms before verify-gates) — ${discard.stderr.slice(0, 200)}`);
+      ok(discard.code === 0 && verifyExitedAtDiscard === false,
+        `SYNC2B-TURN-ONLY-FOR-NOTE-WRITES a sibling discard completes while verify-gates is still running (discard ${discard.ms}ms) — ${discard.stderr.slice(0, 200)}`);
       eq(discard.receipt.obsidian_index && discard.receipt.obsidian_index.written_through.includes(SYNC2_EPIC_BOARD_REL), true,
         'SYNC2B-TURN-ONLY-FOR-NOTE-WRITES the discard took the turn and wrote its epic board through');
     }
@@ -15920,17 +15927,21 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       const claimed = fs.readFileSync(fx.boardPath, 'utf8');
       fs.writeFileSync(fx.boardPath, claimed.replace('## In Planning\n', `## In Planning\n- [ ] [[${SYNC2_EPIC}]]\n`));
       const drifted = fs.readFileSync(fx.boardPath, 'utf8');
-      const holder = await sync2Holder(fx.vault, 1500);
-      const audit = await sync2Cli(fx, ['--repair', '--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath],
+      const releaseFile = path.join(fx.base, 'release-audit-holder');
+      const holder = await sync2Holder(fx.vault, 30000, '', releaseFile);
+      const auditRun = sync2Cli(fx, ['--repair', '--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath],
         { script: path.join(__dirname, '../../scripts/autoloop/audit-delivery.js') });
-      const releasedAt = await holder.closed;
+      await sync2Wait(1500);
+      const boardWhileHeld = fs.readFileSync(fx.boardPath, 'utf8');
+      fs.writeFileSync(releaseFile, '');
+      await holder.closed;
+      const audit = await auditRun;
       sync2Outputs.push(claim, audit);
       const repaired = fs.readFileSync(fx.boardPath, 'utf8');
       eq([audit.receipt.action, audit.receipt.repaired_cards, repaired !== drifted], ['repair-applied', [SYNC2_CARD], true],
         `SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: audit-delivery --repair reconciles the card and rewrites the parent board — ${audit.stderr.slice(0, 200)}`);
-      const rewrittenAt = fs.statSync(fx.boardPath).mtimeMs;
-      ok(releasedAt > 0 && rewrittenAt >= releasedAt,
-        `SYNC2B-EVERY-WRITER-TAKES-THE-TURN audit-delivery --repair rewrites the parent board only after another process releases the write turn (${Math.round(rewrittenAt - releasedAt)}ms after release)`);
+      eq([boardWhileHeld === drifted, await holder.releasedBy], [true, 'file'],
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN audit-delivery --repair leaves the parent board as it was while another process holds the write turn, and rewrites it after that process releases it');
       ok(Boolean(audit.receipt.obsidian_index) && audit.receipt.obsidian_index.written_through.includes(SYNC2_BOARD_REL),
         'SYNC2B-EVERY-WRITER-TAKES-THE-TURN audit-delivery --repair sends the parent board it rewrote to Obsidian');
     }
@@ -15947,7 +15958,7 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       const discard = await sync2Cli(fx, sync2Second.discard());
       const releasedAt = await holder.closed;
       const epicBoard = fs.readFileSync(fx.epicBoardPath, 'utf8');
-      eq([discard.code, epicBoard.includes(`[[${SYNC2_SIBLING}]]`), discard.ended > releasedAt], [0, false, true],
+      eq([discard.code, epicBoard.includes(`[[${SYNC2_SIBLING}]]`), discard.ended >= releasedAt], [0, false, true],
         `SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: the discard removes the sibling after the holder released — ${discard.stderr.slice(0, 200)}`);
       ok(epicBoard.includes('[[Written by the turn holder]]'),
         'SYNC2B-EVERY-WRITER-TAKES-THE-TURN discard reads the epic board only after it holds the write turn, so the holder\'s write survives');
@@ -15972,16 +15983,16 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       const waiterScript = path.join(sync2Root, 'deadlock-waiter.js');
       fs.writeFileSync(waiterScript, `
 const fs = require('fs');
+const path = require('path');
 const coordinator = require(${JSON.stringify(sync2CoordinatorPath)});
 const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
 const [vault, stateDir, board, signal] = process.argv.slice(2);
 const ctx = { stateDir };
-let inGateAt = 0;
+const turnOwner = () => { try { return JSON.parse(fs.readFileSync(path.join(vault, vaultIndex.PENDING_DIR, 'turn', 'owner.json'), 'utf8')); } catch (_) { return null; } };
 vaultIndex.withVaultIndex(vault, () => coordinator.withLock(ctx, 'gates-w', async () => {
-  inGateAt = Date.now();
   fs.writeFileSync(signal, 'in-gate');
   const record = { card: 'W card', card_path: board, phase: 'implementing' };
-  return coordinator.attemptProjection(ctx, record, board, {
+  const projection = await coordinator.attemptProjection(ctx, record, board, {
     state: { cards: {} },
     projectCard: (_cardPath, boardPath) => {
       vaultIndex.beforeNoteRewrite();
@@ -15994,7 +16005,9 @@ vaultIndex.withVaultIndex(vault, () => coordinator.withLock(ctx, 'gates-w', asyn
       return { changed: true };
     },
   });
-})).then((result) => { process.stdout.write(JSON.stringify({ ok: result.ok, error: result.error || null, ms: Date.now() - inGateAt })); process.exit(0); },
+  const owner = turnOwner();
+  return { ok: projection.ok, error: projection.error || null, turnOwnerPid: owner && owner.pid };
+})).then((result) => { process.stdout.write(JSON.stringify(result)); process.exit(0); },
   (error) => { process.stdout.write(JSON.stringify({ threw: error.message })); process.exit(1); });
 `);
       let waiter = null;
@@ -16030,8 +16043,8 @@ vaultIndex.withVaultIndex(vault, () => coordinator.withLock(ctx, 'gates-w', asyn
       const w = await waiter;
       eq([projected, attempts], [true, 1],
         'SYNC2B-DEADLOCK-FREE the turn holder takes completion-projection at once: the other scope never waits for the turn inside it');
-      ok(w.code === 0 && w.result && w.result.ok === false && /vault-write-turn/.test(String(w.result.error)) && w.result.ms < 1000,
-        `SYNC2B-NO-WAIT-IN-LOCK a projection inside a lock is refused the held turn at once and recorded as a projection failure (${JSON.stringify(w.result)})`);
+      ok(w.code === 0 && w.result && w.result.ok === false && /vault-write-turn/.test(String(w.result.error)) && w.result.turnOwnerPid === process.pid,
+        `SYNC2B-NO-WAIT-IN-LOCK a projection inside a lock is refused the turn while H still holds it, and recorded as a projection failure (${JSON.stringify(w.result)})`);
       eq(fs.readFileSync(board, 'utf8'), 'v0\nH\n', 'SYNC2B-NO-WAIT-IN-LOCK the refused projection writes nothing');
     }
 
@@ -16219,7 +16232,6 @@ const fs = require('fs'); const path = require('path');
 const coordinator = require(${JSON.stringify(sync2CoordinatorPath)});
 const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
 const [vault, stateDir, note] = process.argv.slice(2);
-const started = Date.now();
 vaultIndex.withVaultIndex(vault, () => coordinator.withLock({ stateDir }, 'selector', async () => {
   vaultIndex.beforeNoteRewrite();
   const next = fs.readFileSync(note, 'utf8') + 'in lock\\n';
@@ -16227,15 +16239,20 @@ vaultIndex.withVaultIndex(vault, () => coordinator.withLock({ stateDir }, 'selec
   fs.writeFileSync(note + '.tmp', next);
   fs.renameSync(note + '.tmp', note);
   vaultIndex.noteWritten(note, next);
-})).then(() => { process.stdout.write(JSON.stringify({ code: 'wrote', ms: Date.now() - started })); process.exit(0); },
-  (error) => { process.stdout.write(JSON.stringify({ code: error.code, message: error.message, ms: Date.now() - started })); process.exit(0); });
+})).then(() => { process.stdout.write(JSON.stringify({ code: 'wrote' })); process.exit(0); },
+  (error) => { process.stdout.write(JSON.stringify({ code: error.code, message: error.message })); process.exit(0); });
 `);
       const claimRun = sync2Cli(fx, ['claim', '--json']);
       await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
       await sync2Wait(200);
-      const writerRun = sync2Cli(fx, [fx.vault, fx.stateDir, note], { script: writerScript });
+      let stallOverAtWriter = null;
+      const writerRun = sync2Cli(fx, [fx.vault, fx.stateDir, note], { script: writerScript }).then((run) => {
+        stallOverAtWriter = stub.events.some((event) => event.type === 'resumed');
+        return run;
+      });
       await sync2Until(() => fs.existsSync(path.join(fx.stateDir, 'locks', 'selector.lock')), 1500);
       const status = await sync2Cli(fx, ['status', '--json']);
+      const stallOverAtStatus = stub.events.some((event) => event.type === 'resumed');
       const discardRun = sync2Cli(fx, sync2Second.discard());
       await sync2Wait(600);
       const locksWhileDiscardWaits = fs.readdirSync(path.join(fx.stateDir, 'locks')).filter((name) => name.endsWith('.lock'));
@@ -16245,13 +16262,13 @@ vaultIndex.withVaultIndex(vault, () => coordinator.withLock({ stateDir }, 'selec
       const stallEnded = (stub.events.find((event) => event.type === 'resumed') || {}).at;
       let writerResult = {};
       try { writerResult = JSON.parse(writer.stdout); } catch (_) { writerResult = { code: writer.stdout }; }
-      ok(writerResult.code === 'LOCKED' && /vault-write-turn/.test(writerResult.message) && writerResult.ms < 1500 && fs.readFileSync(note, 'utf8') === 'before\n',
-        `SYNC2B-NO-WAIT-IN-LOCK a writer inside the selector lock is refused the turn held by a stalled flush at once and writes nothing (${JSON.stringify(writerResult).slice(0, 160)})`);
+      ok(writerResult.code === 'LOCKED' && /vault-write-turn/.test(writerResult.message) && stallOverAtWriter === false && fs.readFileSync(note, 'utf8') === 'before\n',
+        `SYNC2B-NO-WAIT-IN-LOCK a writer inside the selector lock is refused the turn held by a stalled flush while the flush is still stalled, and writes nothing (${JSON.stringify(writerResult).slice(0, 160)})`);
       eq([status.code, /LOCKED/.test(status.stderr)], [0, false],
         `SYNC2B-NO-WAIT-IN-LOCK SYNC1D-STALL-LOCK-HOLD a status launched during the claim's stalled flush is not refused LOCKED — ${status.stderr.slice(0, 200)}`);
-      ok(status.ended < stallEnded, 'SYNC2B-NO-WAIT-IN-LOCK precondition: the status ran during the stall');
+      eq(stallOverAtStatus, false, 'SYNC2B-NO-WAIT-IN-LOCK precondition: the status returned during the stall');
       eq(locksWhileDiscardWaits, [], 'SYNC2B-NO-WAIT-IN-LOCK a discard that takes the turn before its lock waits for it holding no lock');
-      ok(claim.code === 0 && discard.code === 0 && discard.ended > stallEnded,
+      ok(claim.code === 0 && discard.code === 0 && discard.ended >= stallEnded,
         `SYNC2B-NO-WAIT-IN-LOCK the claim and then the waiting discard complete after the stall — ${discard.stderr.slice(0, 200)}`);
     }
 
@@ -16322,6 +16339,7 @@ vaultIndex.withVaultIndex(vault, () => coordinator.withLock({ stateDir }, 'selec
       const ownerWhileWaiting = sync2cTurnOwner(fx);
       const locksWhileWaiting = sync2cLocks(fx);
       const status = await sync2Cli(fx, ['status', '--json']);
+      const ownerAfterStatus = sync2cTurnOwner(fx);
       const releasedAt = await sessionB.closed;
       const advance = await advanceRun;
       sync2Outputs.push(status, advance);
@@ -16338,12 +16356,12 @@ vaultIndex.withVaultIndex(vault, () => coordinator.withLock({ stateDir }, 'selec
       const surfaces = sync2Surfaces(fx);
       eq([surfaces.card, surfaces.epicBoard[0]], [['completed', 'Completed'], 'Completed'],
         'SYNC2C-PROJECTION-AFTER-GATE advance: the final board has A\'s card in its deployed lane');
-      ok(bAnsweredAt > 0 && holds.length === 2 && holds[0].release < bAnsweredAt && holds[1].acquire > bAnsweredAt,
+      ok(bAnsweredAt > 0 && holds.length === 2 && holds[0].release < bAnsweredAt && holds[1].acquire >= bAnsweredAt,
         `SYNC2C-PROJECTION-AFTER-GATE advance: the card step releases its gate lock before B's stalled flush is answered, and the projection takes it again only after the stub applied B's stalled PUT (${JSON.stringify(holds.map((h) => [Math.round(h.acquire - bAnsweredAt), Math.round(h.release - bAnsweredAt)]))})`);
-      ok(fs.statSync(fx.cardPath).mtimeMs > bAnsweredAt, 'SYNC2C-PROJECTION-AFTER-GATE advance: the projection lands after the stub applied B\'s stalled PUT');
+      ok(fs.statSync(fx.cardPath).mtimeMs >= bAnsweredAt, 'SYNC2C-PROJECTION-AFTER-GATE advance: the projection lands after the stub applied B\'s stalled PUT');
       eq(locksWhileWaiting, [], 'SYNC2C-PROJECTION-AFTER-GATE bounded hold: no coordinator lock is held while the projection waits for the turn');
-      eq([status.code, /LOCKED/.test(status.stderr), status.ended < releasedAt], [0, false, true],
-        `SYNC2C-PROJECTION-AFTER-GATE bounded hold: a status launched while the projection waits is not refused — ${status.stderr.slice(0, 200)}`);
+      eq([status.code, /LOCKED/.test(status.stderr), Boolean(ownerAfterStatus) && ownerAfterStatus.token === ownerWhileWaiting.token], [0, false, true],
+        `SYNC2C-PROJECTION-AFTER-GATE bounded hold: a status launched while the projection waits is not refused, and returns while B still holds the turn — ${status.stderr.slice(0, 200)}`);
       ok(holds.every((hold) => hold.release - hold.acquire < 1500),
         `SYNC2C-PROJECTION-AFTER-GATE bounded hold: neither card-gate lock scope spans the wait (${holds.map((h) => Math.round(h.release - h.acquire)).join(', ')}ms)`);
       ok(Boolean(advance.receipt.obsidian_index) && advance.receipt.obsidian_index.written_through.includes(SYNC2_CARD_REL),
@@ -16392,7 +16410,7 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
         [0, 'complete', false, null, null],
         `SYNC2C-PROJECTION-AFTER-GATE deploy: deploy is not refused while B holds the turn; complete with no projection_error — ${deploy.stdout.slice(0, 300)} ${deploy.stderr.slice(0, 200)}`);
       eq(sync2Surfaces(fx).card, ['completed', 'Completed'], 'SYNC2C-PROJECTION-AFTER-GATE deploy: the final board has the card in its deployed lane');
-      ok(fs.statSync(fx.cardPath).mtimeMs > bAnsweredAt, 'SYNC2C-PROJECTION-AFTER-GATE deploy: the projection lands after the stub applied B\'s stalled PUT');
+      ok(fs.statSync(fx.cardPath).mtimeMs >= bAnsweredAt, 'SYNC2C-PROJECTION-AFTER-GATE deploy: the projection lands after the stub applied B\'s stalled PUT');
       eq(locksWhileWaiting, [], 'SYNC2C-PROJECTION-AFTER-GATE bounded hold: deploy holds no coordinator lock while its projection waits for the turn');
     }
 
@@ -16605,7 +16623,7 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       eq([health.code, health.receipt.action, health.receipt.note_error || null, Boolean(health.receipt.note && health.receipt.note.changed), fs.existsSync(notePath)],
         [0, 'board-health', null, true, true],
         `SYNC2C-PROJECTION-AFTER-GATE board-health: --write-note is not refused while B holds the turn and writes its note with no note_error — ${health.stdout.slice(0, 300)} ${health.stderr.slice(0, 200)}`);
-      ok(releasedAt > 0 && bAnsweredAt > 0 && fs.existsSync(notePath) && fs.statSync(notePath).mtimeMs > bAnsweredAt,
+      ok(releasedAt > 0 && bAnsweredAt > 0 && fs.existsSync(notePath) && fs.statSync(notePath).mtimeMs >= bAnsweredAt,
         'SYNC2C-PROJECTION-AFTER-GATE board-health: the note is written after the stub applied B\'s stalled PUT');
       eq([locksWhileWaiting, status.code, /LOCKED/.test(status.stderr)], [[], 0, false],
         'SYNC2C-PROJECTION-AFTER-GATE board-health: it waits for the turn holding no lock, and a status launched meanwhile is not refused');
@@ -16646,6 +16664,38 @@ vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BO
       }
       eq(owner && owner.token, 'holder', 'SYNC2C-DRY-RUN-AND-PROSE claim --dry-run and the other runs above take no turn: the holder still owns it after they return');
       eq(runs.find((entry) => entry.name === 'claim').run.receipt.no_op, true, 'SYNC2C-DRY-RUN-AND-PROSE precondition: claim --dry-run is the selector preview');
+    }
+
+    // SYNC2D-READ-ONLY-TURN-FREE: read-only verbs and modes not covered by
+    // SYNC2C-DRY-RUN-AND-PROSE take no turn. Each run below has a live holder
+    // of its own, which keeps the turn until its release file, written after
+    // the run returned, exists or its 30s timer fires, so a run that waited
+    // for the turn forces a release by the timer. A1 is moved to deployed so
+    // that reconcile-metadata --dry-run plans it. recover-deployed --dry-run
+    // is not run: it reads its evidence from GitHub.
+    {
+      const fx = sync2CliFixture('read-only-turn-free');
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2D-READ-ONLY-TURN-FREE precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      sync2cPatchLedger(fx, { phase: 'deployed' });
+      await sync2RestConfig(fx.vault, await sync2ClosedPort());
+      const auditScript = path.join(__dirname, '../../scripts/autoloop/audit-delivery.js');
+      for (const [label, args, script] of [
+        ['status', ['status', '--json']],
+        ['board-health without --write-note', ['board-health', '--json']],
+        ['supersession-depth', ['supersession-depth', '--json', '--card', SYNC2_CARD]],
+        ['reconcile-metadata --dry-run', ['reconcile-metadata', '--json', '--card', SYNC2_CARD, '--dry-run']],
+        ['audit-delivery without --repair', ['--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath], auditScript],
+      ]) {
+        const releaseFile = path.join(fx.base, `release-${label.replace(/[^a-z]+/g, '-')}`);
+        const holder = await sync2Holder(fx.vault, 30000, '', releaseFile);
+        const run = await sync2Cli(fx, args, script ? { script } : {});
+        const owner = sync2cTurnOwner(fx);
+        fs.writeFileSync(releaseFile, '');
+        await holder.closed;
+        eq([run.code !== null && !/LOCKED/.test(run.stderr), owner && owner.token, await holder.releasedBy], [true, 'holder', 'file'],
+          `SYNC2D-READ-ONLY-TURN-FREE ${label} returns while a live holder still holds the turn, which the holder then releases by its release file — exit ${run.code} ${run.stderr.slice(0, 160)}`);
+      }
     }
 
     // SYNC2D-USAGE-BEFORE-TURN: a usage refusal behind a live turn holder exits
@@ -16858,14 +16908,15 @@ Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null
       const marker = { phase: 'deployed', marked_at: '2026-09-28T12:00:00.000Z' };
       sync2cPatchLedger(fx, { projection_pending: marker });
       const cardBefore = fs.readFileSync(fx.cardPath, 'utf8');
-      const second = await sync2Holder(fx.vault, 8000);
-      const heldFrom = Date.now();
+      const secondRelease = path.join(fx.base, 'release-dry-replay-holder');
+      const second = await sync2Holder(fx.vault, 30000, '', secondRelease);
       const replay = await sync2Cli(fx, [...sync2cAdvance(sync2LeaseToken(claim)), '--dry-run']);
       const owner = sync2cTurnOwner(fx);
+      fs.writeFileSync(secondRelease, '');
       await second.closed;
       sync2Outputs.push(replay);
-      ok(replay.code === 0 && replay.ended - heldFrom < 6000 && owner && owner.token === 'holder',
-        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: a dry run at deployed returns promptly behind a live holder and takes no turn (${replay.ended - heldFrom}ms) — ${replay.stderr.slice(0, 200)}`);
+      ok(replay.code === 0 && owner && owner.token === 'holder' && await second.releasedBy === 'file',
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: a dry run at deployed returns while a live holder still holds the turn, which the holder then releases by its release file, and takes no turn — ${replay.stderr.slice(0, 200)}`);
       eq([sync2cLedger(fx).projection_pending, fs.readFileSync(fx.cardPath, 'utf8')], [marker, cardBefore],
         'SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: a dry run leaves a marker its step did not set, and writes no projection');
     }
@@ -17339,6 +17390,54 @@ Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null
         [false, 'internal-error'], 'SYNC2D-INVALID-KEY another error thrown while flushing resolves the scope with obsidian_index reason internal-error');
       eq([fs.readFileSync(connectBreaks.note, 'utf8'), sync2TurnHeld(connectBreaks.vault)], ['connect-breaks\n', false],
         'SYNC2D-INVALID-KEY after that error the note is on disk and the turn is released');
+    }
+
+    // SYNC2D-PROBE-TIMEOUT: an Obsidian that accepts the connection and never
+    // answers GET / is reported probe-timeout, after the 2s timeout of that
+    // GET, and the scope ends with the note on disk and the turn released.
+    // The bound below is 10s, measured in this process.
+    {
+      const net = require('net');
+      const vault = path.join(sync2Root, 'probe-timeout');
+      const note = path.join(vault, 'spice', 'Probe.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      const sockets = new Set();
+      const silent = net.createServer((socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+      await new Promise((resolve) => silent.listen(0, '127.0.0.1', resolve));
+      await sync2RestConfig(vault, silent.address().port);
+      const started = Date.now();
+      let settled = false;
+      const scope = vaultIndex.withVaultIndex(vault, async () => { sync2RailWrite(note, 'probe\n'); return { ok: true }; })
+        .then((value) => { settled = true; return { value }; }, (error) => { settled = true; return { error }; });
+      await sync2Until(() => settled, 10000);
+      const settledInTime = settled;
+      const elapsed = Date.now() - started;
+      for (const socket of sockets) socket.destroy();
+      const outcome = await scope;
+      await new Promise((resolve) => silent.close(resolve));
+      eq([settledInTime, outcome.value ? outcome.value.obsidian_index.reason : String(outcome.error)], [true, 'probe-timeout'],
+        `SYNC2D-PROBE-TIMEOUT a server that never answers GET / is reported probe-timeout within 10s (${elapsed}ms)`);
+      eq([fs.readFileSync(note, 'utf8'), sync2TurnHeld(vault)], ['probe\n', false],
+        'SYNC2D-PROBE-TIMEOUT the note stays on disk and the turn is released');
+    }
+
+    // SYNC2-READ-ONLY-VERIFY SYNC1B-SAME-LENGTH-CONFLICT with Obsidian closed:
+    // a note edited on disk to other bytes of the same length after the rail
+    // wrote it, in a vault whose REST port refuses connections, is reported
+    // as a conflict, and the edit stays on disk.
+    {
+      const vault = path.join(sync2Root, 'closed-conflict');
+      const note = path.join(vault, 'spice', 'Edited.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      await sync2RestConfig(vault, await sync2ClosedPort());
+      const result = await vaultIndex.withVaultIndex(vault, async () => {
+        sync2RailWrite(note, 'rail\n');
+        fs.writeFileSync(note, 'user\n');
+        return { ok: true };
+      });
+      eq([result.obsidian_index.conflicts, result.obsidian_index.unseen.map((item) => item.path), fs.readFileSync(note, 'utf8')],
+        [['spice/Edited.md'], [], 'user\n'],
+        'SYNC2-READ-ONLY-VERIFY SYNC1B-SAME-LENGTH-CONFLICT with Obsidian closed, a same-length edit after the rail write is reported as a conflict and stays on disk');
     }
 
     // SYNC2-INDEXED-WHEN-HEALTHY

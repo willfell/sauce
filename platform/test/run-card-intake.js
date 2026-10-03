@@ -1448,24 +1448,33 @@ setTimeout(() => {
     // never holds the turn while it needs a coordinator lock.
     {
       const statusFx = await fixture();
+      const statusRelease = path.join(statusFx.base, 'release-status-holder');
       const { spawn: spawnStatusHolder } = require('child_process');
       const statusHolder = spawnStatusHolder(process.execPath, ['-e', `
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const lease = ${JSON.stringify(turn(statusFx.vault))};
+const releaseFile = ${JSON.stringify(statusRelease)};
 fs.mkdirSync(lease, { recursive: true });
 fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
 process.stdout.write('held\\n');
-setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + '\\n'); }, 800);
+const timer = setTimeout(() => release('timer'), 20000);
+const poll = setInterval(() => { if (fs.existsSync(releaseFile)) release('file'); }, 20);
+function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + why + '\\n'); }
 `], { stdio: ['ignore', 'pipe', 'inherit'] });
       let statusHolderOut = '';
       statusHolder.stdout.on('data', (chunk) => { statusHolderOut += chunk; });
       const statusHolderClosed = new Promise((resolve) => statusHolder.on('close', resolve));
       await until(() => statusHolderOut.includes('held'), 10000);
-      let statusReadAt = 0;
-      const statusRun = await intake.runAndIndex(statusFx.spec, true, { readCoordinatorStatus: () => { statusReadAt = Date.now(); return nullStatus(); } });
+      // The status reader notes the turn's owner and then lets the holder go,
+      // so the mint can take the turn only after the status was read.
+      let ownerAtStatus = null;
+      const statusRun = await intake.runAndIndex(statusFx.spec, true, { readCoordinatorStatus: () => {
+        try { ownerAtStatus = JSON.parse(fs.readFileSync(path.join(turn(statusFx.vault), 'owner.json'), 'utf8')); } catch (_) { ownerAtStatus = null; }
+        fs.writeFileSync(statusRelease, '');
+        return nullStatus();
+      } });
       await statusHolderClosed;
-      const statusReleasedAt = Number((statusHolderOut.match(/released (\d+)/) || [])[1]);
-      eq([statusRun.ok, statusReadAt > 0 && statusReleasedAt > statusReadAt], [true, true],
+      eq([statusRun.ok, ownerAtStatus && ownerAtStatus.token, (statusHolderOut.match(/released (file|timer)/) || [])[1] || null], [true, 'holder', 'file'],
         'SYNC2B-INTAKE-STATUS-FIRST an applying mint reads the coordinator status while another process holds the turn, then waits for the turn');
     }
 
@@ -1491,13 +1500,13 @@ setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, fo
       };
       let verbInside = false;
       let boardWhenRefused = null;
-      let refusedAt = 0;
+      let stallOverAtRefusal = null;
       const verb = vaultIndex.withVaultIndex(raceFx.vault, () => coordinator.withLock(ctx, 'selector', async () => {
         verbInside = true;
         await until(() => raceFx.stub.events.some((event) => event.type === 'stalling'), 5000);
         await new Promise((resolve) => { setTimeout(resolve, 200); });
         try { rewriteBoard(); return { ok: true }; } catch (error) {
-          refusedAt = Date.now();
+          stallOverAtRefusal = raceFx.stub.events.some((event) => event.type === 'resumed');
           boardWhenRefused = fs.readFileSync(raceFx.boardPath, 'utf8');
           return { ok: false, code: error.code, message: error.message };
         }
@@ -1518,7 +1527,7 @@ setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, fo
       const finalBoard = fs.readFileSync(raceFx.boardPath, 'utf8');
       const resumedAt = (raceFx.stub.events.find((event) => event.type === 'resumed') || {}).at;
       ok(raceFx.stub.events.some((event) => event.type === 'stalling'), 'SYNC2-TURN-INTAKE-RACE precondition: the stub stalled on a PUT of the parent board');
-      ok(firstAttempt.ok === false && firstAttempt.code === 'LOCKED' && refusedAt < resumedAt && !boardWhenRefused.includes('[[Coordinator verb write]]'),
+      ok(firstAttempt.ok === false && firstAttempt.code === 'LOCKED' && stallOverAtRefusal === false && !boardWhenRefused.includes('[[Coordinator verb write]]'),
         `SYNC2B-NO-WAIT-IN-LOCK D2: the verb inside its lock is refused the mint's turn during the stall and writes nothing (${firstAttempt.code})`);
       eq([finalBoard.includes('[[Coordinator verb write]]'), finalBoard.includes(`[[${epicTitle}]]`), mintRun.code],
         [true, true, 0], 'SYNC2-TURN-INTAKE-RACE D2: the parent board keeps both the verb\'s write and the mint after the stall');
@@ -1598,6 +1607,40 @@ function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(leas
         'SYNC2D-USAGE-BEFORE-TURN intake --apply with a spec validateSpec refuses: it is refused with validateSpec\'s error');
       eq([(refusalHolderOut.match(/released (file|timer)/) || [])[1] || null, owner && owner.token], ['file', 'holder'],
         'SYNC2D-USAGE-BEFORE-TURN intake --apply with a spec validateSpec refuses: the refusal returns before the holder releases the turn, and takes no turn');
+    }
+
+    // SYNC2D-READ-ONLY-TURN-FREE: card-intake without --apply takes no turn.
+    // It runs while a live holder keeps the turn until its release file,
+    // written after the run returned, exists or its 20s timer fires, so a run
+    // that waited for the turn forces a release by the timer.
+    {
+      const dryHeldFx = await fixture('reachable');
+      const dryRelease = path.join(dryHeldFx.base, 'release-dry-intake-holder');
+      const { spawn: spawnDryHolder } = require('child_process');
+      const dryHolder = spawnDryHolder(process.execPath, ['-e', `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const lease = ${JSON.stringify(turn(dryHeldFx.vault))};
+const releaseFile = ${JSON.stringify(dryRelease)};
+fs.mkdirSync(lease, { recursive: true });
+fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
+process.stdout.write('held\\n');
+const timer = setTimeout(() => release('timer'), 20000);
+const poll = setInterval(() => { if (fs.existsSync(releaseFile)) release('file'); }, 20);
+function release(why) { clearTimeout(timer); clearInterval(poll); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + why + '\\n'); }
+`], { stdio: ['ignore', 'pipe', 'inherit'] });
+      let dryHolderOut = '';
+      dryHolder.stdout.on('data', (chunk) => { dryHolderOut += chunk; });
+      const dryHolderClosed = new Promise((resolve) => dryHolder.on('close', resolve));
+      await until(() => dryHolderOut.includes('held'), 10000);
+      const dryRun = await cli(dryHeldFx, []);
+      outputs.push(dryRun);
+      let dryOwner = null;
+      try { dryOwner = JSON.parse(fs.readFileSync(path.join(turn(dryHeldFx.vault), 'owner.json'), 'utf8')); } catch (_) { dryOwner = null; }
+      fs.writeFileSync(dryRelease, '');
+      await dryHolderClosed;
+      eq([dryRun.code, dryRun.receipt.ok, dryRun.receipt.applied, dryOwner && dryOwner.token, (dryHolderOut.match(/released (file|timer)/) || [])[1] || null],
+        [0, true, false, 'holder', 'file'],
+        'SYNC2D-READ-ONLY-TURN-FREE card-intake without --apply returns while a live holder still holds the turn, which the holder then releases by its release file');
     }
 
     // SYNC2D-INVALID-KEY: an apiKey that cannot be sent as a header value
