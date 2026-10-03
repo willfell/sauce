@@ -48,7 +48,7 @@ const assert = Object.assign(counted(nodeAssert), nodeAssert, Object.fromEntries
   'ok', 'equal', 'notEqual', 'strictEqual', 'notStrictEqual', 'deepEqual', 'notDeepEqual', 'deepStrictEqual',
   'notDeepStrictEqual', 'throws', 'doesNotThrow', 'rejects', 'doesNotReject', 'match', 'doesNotMatch', 'fail',
 ].map((name) => [name, counted(nodeAssert[name])])));
-const ASSERTION_FLOOR = 4093;
+const ASSERTION_FLOOR = 4098;
 let harnessPassed = false;
 function finishHarness() {
   if (assertionCount < ASSERTION_FLOOR) {
@@ -10769,7 +10769,8 @@ async function main() {
   // without GraphInsights (4). PH2C-NEXT-UP-PROPERTY also makes one coverage
   // assertion, PH2C-FOLD-PROPERTY and PH2C-HOPS-PROPERTY two each, and
   // PH2C-FRONTIER-PROPERTY three; its precondition is checked at the top of
-  // this harness.
+  // this harness. PH2C-ROW-TAP-PROPERTY, inside the PH2C-FRONTIER-PROPERTY
+  // block, makes one per run per width (4) and one coverage assertion.
   const ph2cRandom = (seed) => () => {
     seed = (seed + 0x6D2B79F5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -11588,6 +11589,83 @@ async function main() {
     assert(failSoft.belowHalf >= 20 && failSoft.atHalf >= 20 && failSoft.atHalfStub >= 5 && failSoft.parkedFlip >= 10
       && failSoft.needsYouStub >= 20 && failSoft.idlessPlanned >= 100 && failSoft.stubbed >= 20,
     `PH2C-FRONTIER-PROPERTY fail-soft coverage (fold edges, stubs, id-less slices, parked slices): the 300 seeded epics include at least 20 with twice the done count one less than live (${failSoft.belowHalf}), 20 with it equal to live (${failSoft.atHalf}), 5 of those with a stub (${failSoft.atHalfStub}), 10 whose done would fold if their parked slices left live (${failSoft.parkedFlip}), 20 with both a parked slice and a stub (${failSoft.needsYouStub}), 100 id-less slices under Planned (${failSoft.idlessPlanned}), and 20 with a stub (${failSoft.stubbed})`);
+    // PH2C-ROW-TAP-PROPERTY: the card says rows' "tap selects the node as
+    // its pill does". For the seeded epics whose index is 1 or 9 more than a
+    // multiple of 20, in both runs (with GraphInsights and without it) and at
+    // both widths, each row of each group, the listed Done rows and the rows
+    // the strip expands to included, is tapped on a fresh render, and that
+    // slice's map pill or chip is tapped on another fresh render (with the
+    // strip expanded too when the row was an expanded one). The two
+    // outcomes must match: whether the tap stopped, the notes opened, the
+    // whole DOM, and the root still being the only child of its container.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-NEEDS-YOU-ROW-DEAD turns RED at
+    // "PH2C-ROW-TAP-PROPERTY: without GraphInsights at 390 ..." if, without
+    // GraphInsights, a Needs you row's tap opens nothing.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-IN-PROGRESS-ROW-DEAD turns RED at
+    // the same label if, without GraphInsights, an In progress row's tap
+    // opens nothing.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-UNRECOGNIZED-ROW-DEAD turns RED at
+    // the same label if, without GraphInsights, the tap on a row whose status
+    // is unrecognized opens nothing.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-LISTED-DONE-ROW-DEAD turns RED at
+    // the same label if, without GraphInsights, a row listed under Done
+    // opens nothing.
+    // MUTATION GUARD: PH2C-MUTANT-FAIL-SOFT-IDLESS-ROW-DEAD turns RED at the
+    // same label if, without GraphInsights, the tap on a row with no id
+    // opens nothing.
+    {
+      const picked = epics.slice(0, seeded).map((epic, index) => [index, epic]).filter(([index]) => index % 20 === 1 || index % 20 === 9);
+      const chipFor = (root, key) => byClass(root, 'graph-view-chip').find((chip) => keyOf(String(chip.attrs?.title ?? '')) === key);
+      const outcome = async (index, epic, width, insights, expand, tapOf) => {
+        const env = envFor(index, epic);
+        const root = await ph2Draw(env, width, { insights });
+        if (expand) bubblingClick(byClass(root, 'graph-view-frontier-done-strip')[0]);
+        const target = tapOf(root);
+        const tap = target ? bubblingClick(target) : { stopped: null };
+        return [!!target, tap.stopped, JSON.stringify(env.opened), JSON.stringify(domShape(root)), root.parent?.children.length === 1 && root.parent.children[0] === root];
+      };
+      const tapCoverage = new Map();
+      for (const insights of [true, false]) {
+        const mode = insights ? 'with GraphInsights' : 'without GraphInsights';
+        for (const width of [390, 1024]) {
+          const actual = [];
+          const expected = [];
+          for (const [index, epic] of picked) {
+            const probe = await ph2Draw(envFor(index, epic), width, { insights });
+            const rows = byClass(probe, 'graph-view-frontier-group').flatMap((group) => byClass(group, 'graph-view-frontier-row')
+              .map((row) => [group.className.split(' frontier-')[1], ph2cRowKey(row), false]));
+            const strip = byClass(probe, 'graph-view-frontier-done-strip')[0];
+            if (strip) {
+              bubblingClick(strip);
+              for (const row of byClass(probe, 'graph-view-frontier-done-rows').flatMap((rowsBox) => rowsBox.children)) rows.push(['done (expanded)', ph2cRowKey(row), true]);
+            }
+            for (const [group, key, expand] of rows) {
+              const byRow = await outcome(index, epic, width, insights, expand, (root) => (expand
+                ? byClass(root, 'graph-view-frontier-done-rows').flatMap((rowsBox) => rowsBox.children).find((row) => ph2cRowKey(row) === key)
+                : ph2cRowFor(root, key)));
+              const byMap = await outcome(index, epic, width, insights, expand, (root) => chipFor(root, key));
+              actual.push([index, group, key, byRow]);
+              expected.push([index, group, key, byMap]);
+              if (width === 390) {
+                const slice = epic.slices.find((each) => keyOf(each.card) === key);
+                for (const tag of [group, ...(dashboard._titleParts(slice.card).id ? [] : ['no id']),
+                  ...(delivery.normalizeStatus(slice.raw) === null ? ['unrecognized status'] : [])]) {
+                  tapCoverage.set(`${mode}: ${tag}`, (tapCoverage.get(`${mode}: ${tag}`) || 0) + 1);
+                }
+              }
+            }
+          }
+          assert.deepStrictEqual(actual, expected,
+            `PH2C-ROW-TAP-PROPERTY: ${mode} at ${width}, ${picked.length} epics: each row's tap (listed and expanded Done rows included) has the same outcome as a tap on its slice's map pill or chip: stopped or not, notes opened, DOM, and no re-render`);
+        }
+      }
+      const needed = [
+        ...['needs-you', 'next', 'in-progress', 'blocked', 'ready', 'queued', 'done', 'done (expanded)', 'no id', 'unrecognized status'].map((tag) => `with GraphInsights: ${tag}`),
+        ...['needs-you', 'in-progress', 'planned', 'done', 'done (expanded)', 'no id', 'unrecognized status'].map((tag) => `without GraphInsights: ${tag}`),
+      ];
+      assert(needed.every((tag) => (tapCoverage.get(tag) || 0) >= 5),
+        `PH2C-ROW-TAP-PROPERTY coverage (rows tapped per group and mode): each of ${needed.join(', ')} has at least 5 rows tapped at 390 (${JSON.stringify([...tapCoverage].sort())})`);
+    }
   }
 
   // ---- PH2-NEEDS-YOU-GLYPH-PARKED-ONLY (FL3-NEEDS-YOU-MARKER) ----
