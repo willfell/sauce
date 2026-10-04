@@ -1,6 +1,6 @@
 {
   "name": "sauce",
-  "version": "0.301.0",
+  "version": "0.302.0",
   "private": true,
   "description": "Sauce: an Obsidian vault platform. Blueprints and mechanisms installed into vaults, usable by hand and by agents.",
   "engines": {
