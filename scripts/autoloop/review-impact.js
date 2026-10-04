@@ -121,10 +121,24 @@ function deriveReviewPlan(input) {
     for (const f of ['release_title', 'ci_skip_text', 'caller_digest', 'schema_digest']) if (before[f] !== after[f]) invalidate(`${f}_changed`);
     if (!equal([...before.scanned_subjects].sort(), [...assessment.discovery.before].sort()) || !equal([...after.scanned_subjects].sort(), [...assessment.discovery.after].sort())) invalidate('discovery_mismatch');
   }
-  // CI control text affects execution even when release metadata was supplied
-  // unchanged. Compare actual commit-message tokens, independent of labels.
-  const ciTokens = (s) => s.messages.flatMap((m) => m.message.match(/\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]/gi) || []).map((v) => v.toLowerCase()).sort();
-  if (!equal(ciTokens(previous), ciTokens(target))) invalidate('ci_skip_text_changed');
+  // Read actual HEAD subjects, not caller summaries. A body/comment or SHA
+  // repair can preserve a title; changed release subjects always invalidate.
+  const headTitle = (s) => s.messages.find((m) => m.sha === s.head_sha).message.split(/\r?\n/, 1)[0];
+  if (headTitle(previous) !== headTitle(target)) invalidate('release_title_changed');
+  if (before && after && (before.release_title !== headTitle(previous) || after.release_title !== headTitle(target))) invalidate('release_title_mismatch');
+  // Bind controls to each actual message identity. Aggregate token counts could
+  // hide moving a control between commits. Conservatively recognize trailers
+  // even without GitHub's two empty lines or terminal trailer placement; we
+  // cannot establish those ambiguous forms as harmless. Both skip-checks:true
+  // and skip-checks: true are covered, as are removals/value/spacing changes.
+  const messageControls = (s, pattern) => s.messages.flatMap((m) => {
+    const controls = m.message.match(pattern) || [];
+    return controls.length ? [{ sha: m.sha, is_head: m.sha === s.head_sha, controls }] : [];
+  });
+  const ciPattern = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]|\bskip-checks[ \t]*:[^\r\n]*/gi;
+  if (!equal(messageControls(previous, ciPattern), messageControls(target, ciPattern))) invalidate('ci_skip_text_changed');
+  const releasePattern = /\bbreaking(?:-|[ \t]+)change[ \t]*:[^\r\n]*|^[a-z][\w-]*(?:\([^\r\n)]*\))?![ \t]*:[^\r\n]*/gmi;
+  if (!equal(messageControls(previous, releasePattern), messageControls(target, releasePattern))) invalidate('release_message_control_changed');
   if (assessment.disputed) invalidate('classification_disputed');
   if (!assessment.discovery.complete) invalidate('consumers_incomplete');
   if (!equal([...assessment.discovery.before].sort(), [...assessment.discovery.after].sort())) invalidate('new_scanned_subjects');

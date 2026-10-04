@@ -262,8 +262,8 @@ const impactPath = process.env.SCOPED_REVIEW_IMPACT || path.resolve(__dirname, '
 const { validateImpactAssessment: impactCheck, deriveReviewPlan: plan } = require(impactPath);
 function impactFixture(kind = 'prose') {
   const b = fixture(), old = b.snapshots[0];
-  old.review_inputs = { release_title: 'feat: fixture', ci_skip_text: '', caller_digest: hex(20), schema_digest: hex(21), scanned_subjects: ['fixture.js', 'repair-subject', 'consumer.js'] };
-  const s = copy(old); Object.assign(s, { snapshot_id: 's1', head_sha: sha(6), tree_sha: sha(7), diff_digest: hex(6), messages: [...s.messages, { sha: sha(6), message: 'fix: repair' }] }); b.snapshots.push(s);
+  old.review_inputs = { release_title: 'feat: isolated fixture', ci_skip_text: '', caller_digest: hex(20), schema_digest: hex(21), scanned_subjects: ['fixture.js', 'repair-subject', 'consumer.js'] };
+  const s = copy(old); Object.assign(s, { snapshot_id: 's1', head_sha: sha(6), tree_sha: sha(7), diff_digest: hex(6), messages: [...s.messages, { sha: sha(6), message: 'feat: isolated fixture\n\nRepair comment with updated SHA reference' }] }); b.snapshots.push(s);
   b.evidence.push({ evidence_id: 'e-impact', snapshot_id: 's1', source_identity: 'synthetic independent assessment', locator: 'repair:1', digest: hex(8) });
   b.evidence.push({ ...copy(b.evidence[0]), evidence_id: 'e-current-correctness', snapshot_id: 's1' });
   const currentClaim = { ...copy(b.claims[0]), claim_id: 'claim-current-correctness', evidence_ids: ['e-current-correctness'] };
@@ -346,6 +346,42 @@ test('SR2-dependency-consumer-closure-invalidates-retention', () => {
   const f = impactFixture(); f.assessment.changes[0].identity = 'consumer.js'; assert.equal(scopes(decide(f))['regression-risk'], 'full');
   const g = impactFixture(); g.assessment.retention[1].dependencies.push(copy(g.assessment.retention[1].dependencies[0])); assert.equal(scopes(decide(g))['regression-risk'], 'full');
 });
+test('SR2-actual-HEAD-release-title-cannot-hide-behind-stale-summary', () => {
+  const f = impactFixture('message'); f.currentSnapshot.messages.at(-1).message = 'fix: changed release subject\n\nComment';
+  const p = decide(f); assert.equal(p.action, 'full-review'); assert.ok(p.invalidations.some(i => i.code === 'release_title_changed'));
+  const g = impactFixture('message'); g.currentSnapshot.messages.at(-1).message += '\n\nUpdated comment SHA ' + sha(42);
+  assert.equal(decide(g).action, 'scoped-review', 'body and SHA-only repair retains a verified unchanged subject');
+  const h = impactFixture('message'); h.currentSnapshot.review_inputs.release_title = 'feat: stale false title';
+  assert.equal(decide(h).action, 'full-review');
+});
+test('SR2-actual-CI-trailers-and-brackets-append-remove-alter-force-full-review', () => {
+  const controls = ['skip-checks:true', 'skip-checks: true', '[skip ci]', '[ci skip]', '[no ci]', '[skip actions]', '[actions skip]'];
+  for (const control of controls) {
+    const suffix = '\n\n\n' + control;
+    const f = impactFixture('message'); f.currentSnapshot.messages.at(-1).message += suffix;
+    const p = decide(f); assert.equal(p.action, 'full-review', `append ${control}`);
+    assert.ok(p.invalidations.some(i => i.code === 'ci_skip_text_changed')); assert.equal(p.retained.length, 0);
+    for (const replacement of ['', suffix.replace('true', 'false').toUpperCase()]) {
+      const g = impactFixture('message'); g.bundle.snapshots[0].messages[0].message += suffix;
+      g.currentSnapshot.messages[0].message += replacement;
+      assert.equal(decide(g).action, 'full-review', `remove/alter ${control} in non-HEAD history`);
+    }
+  }
+  const olderHead = impactFixture('message');
+  olderHead.bundle.snapshots[0].messages[0].message += '\n\n\nskip-checks:true';
+  olderHead.currentSnapshot.messages[0].message += '\n\n\nskip-checks:true';
+  assert.equal(decide(olderHead).action, 'full-review', 'old HEAD skip becomes non-HEAD after a new commit');
+  // Moving an identical control to another commit cannot hide behind total counts.
+  const moved = impactFixture('message'); moved.bundle.snapshots[0].messages[0].message += '\n\n\nskip-checks:true';
+  moved.currentSnapshot.messages.at(-1).message += '\n\n\nskip-checks:true';
+  assert.equal(decide(moved).action, 'full-review');
+});
+test('SR2-actual-release-controls-across-history-force-full-review', () => {
+  for (const control of ['BREAKING CHANGE: behavior changed', 'BREAKING-CHANGE: changed', 'feat!: changed major release']) {
+    const f = impactFixture('message'); f.currentSnapshot.messages[0].message += '\n\n' + control;
+    const p = decide(f); assert.equal(p.action, 'full-review'); assert.ok(p.invalidations.some(i => i.code === 'release_message_control_changed'));
+  }
+});
 test('SR2-signature-binds-whole-assessment-and-context-must-be-fresh', () => {
   const f = impactFixture(); f.assessment.changes[0].explanation += ' tampered';
   rejected(impactCheck(f.assessment, f.bundle), 'impact_signature_mismatch'); assert.equal(plan(f).action, 'refuse');
@@ -375,6 +411,21 @@ if (!process.env.SCOPED_REVIEW_MUTANT_CHILD) test('SR2-RED-disposable-impact-mut
     assert.equal(result.status, 1); assert.match(result.stderr, /FAIL SR2-executable-analyzer-under-test-or-Markdown-name-is-behavioral:/);
     assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND|SyntaxError|getter executed/);
     console.log('RED proof: impact role mutant triggered named SR2 executable analyzer assertion');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+if (!process.env.SCOPED_REVIEW_MUTANT_CHILD) test('SR2-RED-disposable-CI-trailer-detector-mutant', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-ci-control-red-'));
+  try {
+    const source = fs.readFileSync(impactPath, 'utf8');
+    const guard = "if (!equal(messageControls(previous, ciPattern), messageControls(target, ciPattern)))";
+    assert.ok(source.includes(guard));
+    fs.copyFileSync(contractPath, path.join(root, 'review-contract.js'));
+    const mutant = path.join(root, 'review-impact.js'); fs.writeFileSync(mutant, source.replace(guard, 'if (false)'));
+    const result = spawnSync(process.execPath, [__filename], { encoding: 'utf8', timeout: 20000, env: { ...process.env, HOME: root, SCOPED_REVIEW_IMPACT: mutant, SCOPED_REVIEW_MUTANT_CHILD: '1', SAUCE_LOOP_BOARD: path.join(root, 'unused-board.md'), DELIVERY_STATE: path.join(root, 'unused-state.json') } });
+    assert.equal(result.status, 1); assert.match(result.stderr, /FAIL SR2-actual-CI-trailers-and-brackets-append-remove-alter-force-full-review:/);
+    assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND|SyntaxError|getter executed/);
+    console.log('RED proof: CI detector mutant triggered named SR2 trailer/bracket assertion');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
