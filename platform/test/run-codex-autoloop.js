@@ -228,6 +228,298 @@ function canonicalEpicSlice({ name, epic, zones = ['Docs/example.md'], deps = []
     .replace('epic: "[[Test epic]]"', `epic: "[[${epic}]]"`);
 }
 
+// GA-RV1 — exercise the real pure module, including snapshot counting and
+// adversarial refusals. This contract intentionally has no coordinator writes.
+{
+  const repair = require('../../scripts/autoloop/repair-history');
+  const at = '2026-10-04T03:00:00.000Z';
+  const now = '2026-10-04T04:00:00.000Z';
+  const head = 'a'.repeat(40);
+  const base = 'b'.repeat(40);
+  const evidence = [{ source_identity: 'fixture repository', locator: 'fixture.js:1', revision: head }];
+  const empty = { schema_version: '1.0.0', lineage_id: 'GA-RV-fixture', events: [] };
+  const event = (sequence, kind, extra = {}) => {
+    const value = { schema_version: '1.0.0', event_id: `rv-${sequence}`, sequence,
+      card: 'GA-RV fixture', kind, at, head_sha: head, base_sha: base,
+      snapshot_id: repair.snapshotId(head, base), summary: 'Observed fixture transition',
+      reason: 'Exact recorded fixture evidence', evidence_refs: evidence, ...extra };
+    return value;
+  };
+  const add = (history, value) => {
+    const result = repair.appendRepairEvent(history, value);
+    eq(result.no_op, false, 'RV1-INTERFACES valid event appends through actual source');
+    ok(repair.validateRepairHistory(result.history).ok, 'RV1-EVENT-SHAPE appended history validates');
+    return result.history;
+  };
+  const freeze = (value, seen = new Set()) => {
+    if (value && typeof value === 'object' && !seen.has(value)) {
+      seen.add(value); Object.values(value).forEach((item) => freeze(item, seen)); Object.freeze(value);
+    }
+    return value;
+  };
+  eq(repair.validateRepairHistory(empty), { ok: true, errors: [] }, 'RV1-INTERFACES validates empty versioned history');
+  const registry = JSON.parse(fs.readFileSync(path.join(__dirname, '../schemas-index.json'), 'utf8'));
+  const indexed = registry.schemas.find((entry) => entry.id === 'sauce.repair-history.v1');
+  eq([indexed.source, indexed.validator, indexed.accepted_versions],
+    ['scripts/autoloop/repair-history.js', 'scripts/autoloop/repair-history.js', ['1.0.0']], 'RV1-INTERFACES registered source and validator');
+  let history = add(empty, event(1, 'activity_started'));
+  for (const lens of ['correctness', 'regression-risk', 'test-adequacy']) {
+    history = add(history, event(history.events.length + 1, 'review_completed', { lens, verdict: 'refute' }));
+  }
+  eq(repair.deriveRepairSummary(history, now).failed_rounds_total, 1,
+    'RV1-ROUND-COUNT three refuted lenses on one HEAD/base are one failed round');
+  const beforeReplay = JSON.stringify(history);
+  const replay = repair.appendRepairEvent(freeze(history), history.events[1]);
+  eq([replay.no_op, replay.history === history, JSON.stringify(replay.history)], [true, true, beforeReplay],
+    'RV1-REPLAY identical replay retains exact prior history bytes and object');
+  const reordered = Object.fromEntries(Object.entries(history.events[1]).reverse());
+  reordered.evidence_refs = reordered.evidence_refs.map((ref) => Object.fromEntries(Object.entries(ref).reverse()));
+  const reorderedReplay = repair.appendRepairEvent(history, reordered);
+  eq([reorderedReplay.no_op, reorderedReplay.history === history, JSON.stringify(reorderedReplay.history)],
+    [true, true, beforeReplay], 'RV1-REPLAY object property order has no identity semantics; replay preserves exact prior bytes');
+  eq(repair.appendRepairEvent(history, { ...history.events[1], summary: 'Different summary' }).code,
+    'event_id_conflict', 'RV1-REPLAY conflicting event ID refuses');
+  history = add(history, event(5, 'repair_recorded', { repair_id: 'repair-1' }));
+  history = add(history, event(6, 'review_completed', { lens: 'correctness', verdict: 'pass' }));
+  // Refreshes/lease renewals/checks/rebases may be recorded as extensions, but
+  // cannot create rounds, advance progress, or act as approvals.
+  for (const kind of ['projection_refresh', 'lease_renewal', 'successful_check', 'rebase']) {
+    history = add(history, event(history.events.length + 1, `extension:${kind}`, {
+      head_sha: 'c'.repeat(40), snapshot_id: repair.snapshotId('c'.repeat(40), base),
+    }));
+  }
+  eq(repair.deriveRepairSummary(history, now).failed_rounds_total, 1, 'RV1-ROUND-COUNT pass checks, extensions and rebase do not count failures');
+  const changedHead = 'd'.repeat(40);
+  history = add(history, event(11, 'review_completed', { lens: 'correctness', verdict: 'refute', repair_id: 'repair-1',
+    head_sha: changedHead, snapshot_id: repair.snapshotId(changedHead, base) }));
+  eq(repair.deriveRepairSummary(history, now).failed_rounds_total, 2, 'RV1-ROUND-COUNT reviewed repair snapshot refutation counts once');
+  history = add(history, event(12, 'reassessment_required'));
+  eq(repair.deriveRepairSummary(history, now).reassessment_state.state, 'required', 'RV1-EVENT-SHAPE reassessment requirement visible');
+  history = add(history, event(13, 'reassessment_recorded', { response: { decision: 'revise design' } }));
+  eq([repair.deriveRepairSummary(history, now).failed_rounds_total, repair.deriveRepairSummary(history, now).failed_rounds_since_reassessment],
+    [2, 0], 'RV1-ROUND-COUNT reassessment resets window but preserves historical total');
+  history = add(history, event(14, 'review_completed', { lens: 'test-adequacy', verdict: 'refute' }));
+  eq(repair.deriveRepairSummary(history, now).failed_rounds_since_reassessment, 0, 'RV1-ROUND-COUNT reobserving old refuted snapshot after reassessment does not invent new round');
+  const changedBase = 'e'.repeat(40);
+  history = add(history, event(15, 'review_completed', { lens: 'correctness', verdict: 'refute',
+    base_sha: changedBase, snapshot_id: repair.snapshotId(head, changedBase) }));
+  eq([repair.deriveRepairSummary(history, now).failed_rounds_total, repair.deriveRepairSummary(history, now).failed_rounds_since_reassessment],
+    [3, 1], 'RV1-ROUND-COUNT exact base distinguishes newly reviewed snapshot');
+  const progress = repair.deriveRepairSummary(history, now).last_progress_at;
+  for (const cause of ['infrastructure', 'mixed', 'unknown', 'product']) {
+    history = add(history, event(history.events.length + 1, 'infra_retry', { at: '2026-10-04T03:10:00Z', response: { cause } }));
+  }
+  const summary = repair.deriveRepairSummary(freeze(history), now);
+  eq([summary.infra_retries, summary.activity.retry_causes, summary.last_progress_at, summary.activity.age_seconds],
+    [1, { infrastructure: 1, product: 1, mixed: 1, unknown: 1 }, progress, 3000], 'RV1-ROUND-COUNT unknown/mixed/product retries explicit, never silently infrastructure or progress');
+  const frozenEvent = freeze(event(20, 'successor_linked', { at: '2026-10-04T03:10:00Z', response: { successor: 'GA-RV-next' } }));
+  const beforeAppendBytes = JSON.stringify(history);
+  const appended = repair.appendRepairEvent(history, frozenEvent);
+  appended.history.events[0].summary = 'Mutated return value';
+  appended.history.events[19].response.successor = 'Mutated response';
+  eq([JSON.stringify(history), frozenEvent.response.successor], [beforeAppendBytes, 'GA-RV-next'], 'RV1-REPLAY append clones nested input event');
+  eq(history.events[0].summary, 'Observed fixture transition', 'RV1-REPLAY append result cannot mutate original events');
+  eq(JSON.stringify(repair.deriveRepairSummary(history, now)), JSON.stringify(summary), 'RV1-REPLAY deterministic derivation on frozen history');
+  summary.latest_events[0].response.cause = 'changed return';
+  eq(history.events[18].response.cause, 'product', 'RV1-REPLAY summary latest events are detached from inputs');
+
+  const refusals = [
+    ['event_version_unsupported', { schema_version: '2.0.0' }],
+    ['event_sequence_invalid', { sequence: 21 }],
+    ['event_head_invalid', { head_sha: 'A'.repeat(40) }],
+    ['event_base_invalid', { base_sha: 'short' }],
+    ['snapshot_binding_invalid', { snapshot_id: repair.snapshotId(head, changedBase) }],
+    ['event_time_invalid', { at: '2026-02-30T03:10:00Z' }],
+    ['event_time_invalid', { at: 'yesterday' }],
+    ['event_time_reordered', { at: '2026-10-04T03:09:59Z' }],
+    ['evidence_identity_missing', { evidence_refs: [{ locator: 'fixture.js:1' }] }],
+    ['evidence_identity_missing', { evidence_refs: [{ source_identity: 'fixture repository' }] }],
+    ['evidence_identity_missing', { evidence_refs: [] }],
+    ['event_kind_unsupported', { kind: 'review_approved' }],
+    ['review_lens_invalid', { kind: 'review_completed', lens: 'unknown', verdict: 'pass' }],
+    ['review_verdict_invalid', { kind: 'review_completed', lens: 'correctness', verdict: 'approved' }],
+    ['retry_cause_invalid', { kind: 'infra_retry', response: { cause: 'transient' } }],
+    ['retry_cause_invalid', { kind: 'infra_retry' }],
+  ];
+  const immutableBytes = JSON.stringify(history);
+  for (const [code, patch] of refusals) {
+    const result = repair.appendRepairEvent(history, event(20, 'repair_recorded', { at: '2026-10-04T03:10:00Z', ...patch }));
+    eq(result.code, 'repair_event_invalid', `RV1-REPLAY stable refusal for ${code}`);
+    ok(result.errors.some((error) => error.code === code), `RV1-REPLAY specific invalid operand ${code}`);
+    eq(JSON.stringify(history), immutableBytes, 'RV1-REPLAY refusal is zero mutation');
+  }
+
+  // RV1-REASON-SHAPE-COVERAGE: invalidate one operand at a time, including
+  // deletion (not an undefined property). These are the existing guards' read
+  // contract, not additional event-kind policy. Assert both stable errors and
+  // purity at every public boundary; freezing also catches attempted writes.
+  const snapshot = (value) => require('util').inspect(value, { depth: null, sorted: true });
+  const hasError = (errors, expected, label) => ok(errors.some((error) => require('util').isDeepStrictEqual(error, expected)), label);
+  const returnsRefusal = (invoke, label) => {
+    let result;
+    assert.doesNotThrow(() => { result = invoke(); }, label); count++;
+    return result;
+  };
+  const eventRefusal = (name, value, code, field, message) => {
+    const input = freeze({ ...history, events: [...history.events, value] });
+    const before = [snapshot(input), snapshot(value), snapshot(history)];
+    const label = `RV1-REASON-SHAPE-COVERAGE ${name}`;
+    const validated = returnsRefusal(() => repair.validateRepairHistory(input), `${label} validator returns without throwing`);
+    eq(validated.ok, false, `${label} validator refuses`);
+    hasError(validated.errors, { code, field: `events[19]${field ? `.${field}` : ''}`, message }, `${label} exact validation error`);
+    const appended = returnsRefusal(() => repair.appendRepairEvent(history, value), `${label} append returns without throwing`);
+    eq([appended.ok, appended.code], [false, 'repair_event_invalid'], `${label} stable append refusal`);
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      eq(appended.errors, validated.errors, `${label} append preserves validation errors`);
+    } else {
+      eq(appended.errors, [{ code: 'event_shape_invalid', field: 'event', message: 'expected plain JSON event' }], `${label} exact append shape error`);
+    }
+    const derived = returnsRefusal(() => repair.deriveRepairSummary(input, now), `${label} summary returns without throwing`);
+    eq([derived.ok, derived.code, derived.errors], [false, 'repair_history_invalid', validated.errors], `${label} summary refuses invalid history`);
+    eq([snapshot(input), snapshot(value), snapshot(history)], before, `${label} all inputs unchanged`);
+  };
+  const fieldRefusals = (field, variants, code, message, extra = {}) => {
+    for (const [name, value] of variants) {
+      const invalid = event(20, 'repair_recorded', { at: '2026-10-04T03:10:00Z', ...extra });
+      if (name === 'absent') delete invalid[field];
+      else invalid[field] = value;
+      eventRefusal(`${field} ${name}`, invalid, code, field, message);
+    }
+  };
+  const invalidText = [['absent'], ['empty', ''], ['blank', ' \t '], ['null', null], ['number', 42], ['boolean', false], ['array', []], ['object', {}]];
+  for (const field of ['event_id', 'card', 'summary', 'reason']) {
+    fieldRefusals(field, invalidText, 'event_field_invalid', 'nonempty string is required');
+  }
+  fieldRefusals('schema_version', [...invalidText, ['unsupported', '2.0.0']], 'event_version_unsupported', 'expected 1.0.0');
+  fieldRefusals('sequence', [...invalidText, ['zero', 0], ['negative', -1], ['fraction', 20.5], ['noncontiguous', 21], ['numeric string', '20']],
+    'event_sequence_invalid', 'sequence must be contiguous and start at one');
+  fieldRefusals('kind', [...invalidText, ['unknown', 'review_approved'], ['empty extension', 'extension:'], ['uppercase extension', 'extension:Bad']],
+    'event_kind_unsupported', 'unsupported event kind');
+  fieldRefusals('at', [...invalidText, ['impossible date', '2026-02-30T03:10:00Z'], ['local time', '2026-10-04T03:10:00'],
+    ['offset time', '2026-10-04T03:10:00+00:00'], ['noncanonical precision', '2026-10-04T03:10:00.00Z']],
+  'event_time_invalid', 'server time must be a valid UTC ISO timestamp');
+  fieldRefusals('at', [['backwards', '2026-10-04T03:09:59Z']], 'event_time_reordered', 'server time cannot move backwards');
+  const invalidSha = [...invalidText, ['short', 'a'.repeat(39)], ['long', 'a'.repeat(41)], ['uppercase', 'A'.repeat(40)], ['nonhex', 'g'.repeat(40)]];
+  fieldRefusals('head_sha', invalidSha, 'event_head_invalid', 'expected exact lowercase 40-hex SHA');
+  fieldRefusals('base_sha', invalidSha.filter(([name]) => name !== 'null'), 'event_base_invalid', 'expected exact lowercase 40-hex SHA or unknown legacy base null');
+  fieldRefusals('snapshot_id', [...invalidText, ['different HEAD', repair.snapshotId(changedHead, base)], ['different base', repair.snapshotId(head, changedBase)]],
+    'snapshot_binding_invalid', 'snapshot must bind exact HEAD and base');
+  fieldRefusals('evidence_refs', [...invalidText, ['nonobject ref', [null]], ['array ref', [[]]], ['string ref', ['fixture.js:1']]],
+    'evidence_identity_missing', 'at least one source identity and locator is required');
+  for (const field of ['source_identity', 'locator']) {
+    for (const [name, value] of invalidText) {
+      const ref = { ...evidence[0] };
+      if (name === 'absent') delete ref[field]; else ref[field] = value;
+      fieldRefusals('evidence_refs', [[`${field} ${name}`, [ref]], [`invalid second ${field} ${name}`, [evidence[0], ref]]],
+        'evidence_identity_missing', 'at least one source identity and locator is required');
+    }
+  }
+  for (const kind of ['review_completed', 'repair_recorded']) {
+    const variants = kind === 'review_completed' ? invalidText : invalidText.filter(([name]) => name !== 'absent');
+    fieldRefusals('lens', [...variants, ['unknown', 'unknown']], 'review_lens_invalid', 'expected required review lens', { kind, verdict: 'pass' });
+    fieldRefusals('verdict', [...variants, ['unknown', 'approved']], 'review_verdict_invalid', 'expected pass or refute', { kind, lens: 'correctness' });
+  }
+  for (const field of ['finding_id', 'repair_id']) {
+    fieldRefusals(field, invalidText.filter(([name]) => name !== 'absent'), 'event_field_invalid', 'nonempty string is required');
+  }
+  fieldRefusals('response', invalidText.filter(([name]) => name !== 'absent' && name !== 'object'), 'event_response_invalid', 'expected response object');
+  for (const [name, value] of [...invalidText, ['unknown', 'transient']]) {
+    const response = {};
+    if (name !== 'absent') response.cause = value;
+    eventRefusal(`infra_retry cause ${name}`, event(20, 'infra_retry', { at: '2026-10-04T03:10:00Z', response }),
+      'retry_cause_invalid', 'response.cause', 'explicit infrastructure, product, mixed or unknown cause is required');
+  }
+  for (const [name, value] of [['null', null], ['array', []], ['string', 'event'], ['number', 42]]) {
+    eventRefusal(`event object ${name}`, value, 'event_shape_invalid', '', 'expected event object');
+  }
+  const duplicate = event(20, 'repair_recorded', { at: '2026-10-04T03:10:00Z', event_id: history.events[0].event_id });
+  const duplicateHistory = freeze({ ...history, events: [...history.events, duplicate] });
+  hasError(repair.validateRepairHistory(duplicateHistory).errors,
+    { code: 'event_id_conflict', field: 'events[19].event_id', message: 'event identity already exists' }, 'RV1-REASON-SHAPE-COVERAGE duplicate supplied event identity');
+
+  const historyRefusal = (name, value, code, field, message) => {
+    freeze(value);
+    const before = [snapshot(value), snapshot(frozenEvent)];
+    const label = `RV1-REASON-SHAPE-COVERAGE history ${name}`;
+    const validated = returnsRefusal(() => repair.validateRepairHistory(value), `${label} validator returns without throwing`);
+    eq(validated.ok, false, `${label} validator refuses`);
+    hasError(validated.errors, { code, field, message }, `${label} exact validation error`);
+    const appended = returnsRefusal(() => repair.appendRepairEvent(value, frozenEvent), `${label} append returns without throwing`);
+    eq([appended.ok, appended.code, appended.errors], [false, 'repair_history_invalid', validated.errors], `${label} stable append refusal`);
+    // Missing schema_version is the deliberately accepted legacy summary path.
+    if (value && !Array.isArray(value) && value.schema_version !== undefined) {
+      const derived = returnsRefusal(() => repair.deriveRepairSummary(value, now), `${label} summary returns without throwing`);
+      eq([derived.ok, derived.code, derived.errors], [false, 'repair_history_invalid', validated.errors], `${label} stable summary refusal`);
+    }
+    eq([snapshot(value), snapshot(frozenEvent)], before, `${label} all inputs unchanged`);
+  };
+  for (const [field, variants, code, message] of [
+    ['schema_version', [...invalidText, ['unsupported', '2.0.0']], 'history_version_unsupported', 'expected 1.0.0'],
+    ['lineage_id', invalidText, 'lineage_id_invalid', 'lineage identity is required'],
+    ['history_complete', invalidText.filter(([name]) => !['absent', 'boolean'].includes(name)), 'history_complete_invalid', 'expected boolean'],
+    ['events', invalidText.filter(([name]) => name !== 'array'), 'events_invalid', 'ordered events array is required'],
+  ]) {
+    for (const [name, value] of variants) {
+      const invalid = { ...empty };
+      if (name === 'absent') delete invalid[field]; else invalid[field] = value;
+      historyRefusal(`${field} ${name}`, invalid, code, field, message);
+    }
+  }
+  for (const [name, value] of [['absent', undefined], ['null', null], ['array', []], ['string', 'history'], ['number', 42], ['date', new Date(at)]]) {
+    historyRefusal(`object ${name}`, value, 'history_shape_invalid', 'history', 'history must be a plain JSON object');
+  }
+  // JSON-persistence guards apply recursively to history and new event operands.
+  // Exercise each guard without asking JSON.stringify to hide the bad value.
+  const cycle = {}; cycle.self = cycle;
+  const extraArrayKey = []; extraArrayKey.extra = 'lost';
+  for (const [name, value] of [['undefined', undefined], ['function', () => {}], ['symbol', Symbol('lost')], ['bigint', 1n],
+    ['NaN', NaN], ['infinity', Infinity], ['date', new Date(at)], ['cycle', cycle], ['sparse array', new Array(1)],
+    ['extra array key', extraArrayKey], ['nonplain object', Object.create({ inherited: true })],
+    ...['__proto__', 'constructor', 'prototype'].map((key) => [`reserved ${key}`, JSON.parse(`{"${key}":"unsafe"}`)])]) {
+    const invalidEvent = freeze(event(20, 'repair_recorded', { response: { value } }));
+    const before = [snapshot(history), snapshot(invalidEvent)];
+    const result = returnsRefusal(() => repair.appendRepairEvent(history, invalidEvent), `RV1-REASON-SHAPE-COVERAGE nonpersistable event ${name} returns without throwing`);
+    eq([result.ok, result.code, result.errors], [false, 'repair_event_invalid', [{ code: 'event_shape_invalid', field: 'event', message: 'expected plain JSON event' }]],
+      `RV1-REASON-SHAPE-COVERAGE nonpersistable event ${name} exact refusal`);
+    eq([snapshot(history), snapshot(invalidEvent)], before, `RV1-REASON-SHAPE-COVERAGE nonpersistable event ${name} zero mutation`);
+    historyRefusal(`nonpersistable ${name}`, { ...empty, extra: value }, 'history_shape_invalid', 'history', 'history must be a plain JSON object');
+  }
+  eq(repair.validateRepairHistory({ ...history, events: [...history.events].reverse() }).ok, false, 'RV1-REPLAY reordered history refuses');
+  eq(repair.validateRepairHistory({ ...history, events: [...history.events, history.events[0]] }).ok, false, 'RV1-REPLAY duplicate identity in supplied history refuses');
+  const invalidHistory = { ...history, schema_version: '2.0.0' };
+  eq(repair.appendRepairEvent(invalidHistory, frozenEvent).code, 'repair_history_invalid', 'RV1-REPLAY unsupported history version refuses append');
+  eq(repair.deriveRepairSummary(invalidHistory, now).code, 'repair_history_invalid', 'RV1-REPLAY unsupported history refuses summary');
+  eq(repair.deriveRepairSummary(history, 'invalid').code, 'summary_time_invalid', 'RV1-REPLAY invalid observation clock refuses');
+  eq(repair.deriveRepairSummary(history, at).code, 'summary_time_before_history', 'RV1-REPLAY clock preceding history refuses instead of pretending fresh');
+  const cyclic = event(20, 'repair_recorded'); cyclic.response = cyclic;
+  eq(repair.appendRepairEvent(history, cyclic).code, 'repair_event_invalid', 'RV1-REPLAY nonpersistable circular event refuses');
+  const sparse = { ...empty, events: new Array(1) };
+  eq(repair.validateRepairHistory(sparse).ok, false, 'RV1-REPLAY sparse history cannot silently serialize into altered events');
+  eq(repair.deriveRepairSummary([], now).code, 'repair_history_invalid', 'RV1-REPLAY malformed history is not treated as legacy');
+  const unknownBase = add(empty, event(1, 'review_completed', { lens: 'correctness', verdict: 'refute', base_sha: null, snapshot_id: repair.snapshotId(head, null) }));
+  eq([repair.deriveRepairSummary(unknownBase, now).history_complete, repair.deriveRepairSummary(unknownBase, now).failed_rounds_total],
+    [false, 1], 'RV1-REPLAY unknown legacy base stays explicitly incomplete, counts only observed refutation');
+  eq(repair.deriveRepairSummary({ ...empty, history_complete: false }, now).history_complete, false, 'RV1-REPLAY explicitly migrated history stays incomplete');
+  for (const legacy of [null, { lineage_id: 'legacy', reviews: { correctness: { verdict: 'refute', recorded_at: at } } }]) {
+    const result = repair.deriveRepairSummary(legacy, now);
+    eq([result.history_complete, result.failed_rounds_total, result.failed_rounds_since_reassessment, result.last_progress_at, result.activity.at, result.latest_events],
+      [false, 0, 0, null, null, []], 'RV1-REPLAY legacy receipts never fabricate rounds or old timestamps');
+  }
+  let extended = empty;
+  for (const kind of ['impact_assessed', 'judgment_retained', 'judgment_invalidated', 'evidence_reused', 'finding_resolved', 'authorization_composed']) {
+    extended = add(extended, event(extended.events.length + 1, kind, { lens: 'correctness', verdict: 'refute' }));
+  }
+  eq([repair.deriveRepairSummary(extended, now).failed_rounds_total, repair.deriveRepairSummary(extended, now).last_progress_at,
+    repair.deriveRepairSummary(extended, now).activity.kind], [0, null, 'unknown'], 'RV1-EVENT-SHAPE reserved future impact/retention events are uninterpreted and imply no approval/progress');
+  for (let n = 7; n <= 23; n++) extended = add(extended, event(n, 'activity_started'));
+  const capped = repair.deriveRepairSummary(extended, now);
+  eq([capped.latest_events.length, capped.overflow_count, capped.latest_events[0].sequence, capped.latest_events[19].sequence],
+    [20, 3, 23, 4], 'RV1-INTERFACES latest events bounded and newest first with honest overflow');
+  const deployed = add(extended, event(24, 'deployed'));
+  eq([repair.deriveRepairSummary(deployed, now).activity.kind, repair.deriveRepairSummary(deployed, now).last_progress_at],
+    ['deployed', at], 'RV1-EVENT-SHAPE deployed observation carries recorded progress');
+}
+
 (async () => {
 
 const meta = parseExecutionMeta(card({ profile: 'heavy', zones: ['platform/install.js', 'platform/test/run-x.js'], deps: ['A'] }));
