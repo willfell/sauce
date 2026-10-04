@@ -93,6 +93,40 @@ test('SR1-authorization-binds-entire-snapshot-and-bundle', () => {
   const a2 = authorization(b); b.claims[0].statement += ' altered'; rejected(authCheck(a2, b, b.snapshots[0]), 'bundle_mismatch');
   const old = fixture().snapshots[0], inherited = inheritedFixture(); rejected(authCheck(authorization(inherited), inherited, old), 'snapshot_mismatch');
 });
+test('SR1-hash-fields-reject-coercion-values', () => {
+  const cases = [
+    ...['tree_sha', 'head_sha', 'base_sha', 'merge_base_sha'].map((key) => [b => b.snapshots[0], key, sha(9), 'sha_invalid']),
+    ...['diff_digest', 'contract_digest', 'policy_digest'].map((key) => [b => b.snapshots[0], key, hex(9), 'digest_invalid']),
+    [b => b.snapshots[0].messages[0], 'sha', sha(1), 'messages_incomplete'],
+    [b => b.evidence[0], 'digest', hex(9), 'digest_invalid'],
+    [b => b.claims[0].dependencies[0], 'digest', hex(9), 'dependencies_missing'],
+  ];
+  for (const [target, key, valid, code] of cases) {
+    for (const value of [[valid], [[valid]], {}, null, false, 9]) {
+      const b = fixture(); target(b)[key] = value; rejected(bundleCheck(b), code);
+    }
+  }
+  for (const key of ['origin_head_sha', 'origin_base_sha']) {
+    const b = inheritedFixture(); b.judgments[3][key] = [b.judgments[3][key]];
+    rejected(bundleCheck(b), 'sha_invalid');
+  }
+  const b = fixture(), a = authorization(b); a.bundle_digest = [a.bundle_digest]; rejected(authCheck(a, b, b.snapshots[0]), 'digest_invalid');
+});
+test('SR1-direct-judgment-must-cite-covered-claim-evidence', () => {
+  const b = fixture();
+  b.evidence.push({ ...copy(b.evidence[0]), evidence_id: 'unrelated-evidence', locator: 'unrelated:1' });
+  b.judgments[0].evidence_ids = ['unrelated-evidence'];
+  rejected(bundleCheck(b), 'claim_evidence_missing');
+  rejected(authCheck(authorization(b), b, b.snapshots[0]), 'claim_evidence_missing');
+});
+test('SR1-inherited-judgment-cannot-omit-covered-claim-evidence', () => {
+  const b = inheritedFixture();
+  b.evidence.push({ ...copy(b.evidence[0]), evidence_id: 'additional-evidence', locator: 'additional:1' });
+  b.judgments[0].evidence_ids.push('additional-evidence');
+  b.judgments[3].evidence_ids = ['additional-evidence'];
+  rejected(bundleCheck(b), 'claim_evidence_missing');
+  rejected(authCheck(authorization(b), b, b.snapshots[1]), 'claim_evidence_missing');
+});
 test('SR1-self-review-refused', () => {
   const b = fixture(); b.judgments[0].reviewer_context_id = 'implementer'; rejected(bundleCheck(b), 'self_review');
 });
@@ -101,10 +135,21 @@ test('SR1-separate-three-lens-contexts-required', () => {
   rejected(authCheck(authorization(b), b, b.snapshots[0]), 'reviewer_context_reused');
 });
 test('SR1-missing-lens-coverage-and-evidence-refused', () => {
-  const b = fixture(); b.judgments[0].scope = 'delta'; b.judgments[0].claim_ids = [b.claims[1].claim_id];
+  const b = fixture(); b.judgments[0].scope = 'delta'; b.judgments[0].claim_ids = [b.claims[1].claim_id]; b.judgments[0].evidence_ids = b.claims[1].evidence_ids.slice();
   rejected(authCheck(authorization(b), b, b.snapshots[0]), 'coverage_incomplete');
   const b2 = fixture(); b2.evidence.pop(); rejected(bundleCheck(b2), 'reference_missing');
   const a = authorization(fixture()); delete a.lenses.correctness; rejected(authCheck(a, fixture(), fixture().snapshots[0]), 'lenses_missing');
+});
+test('SR1-all-covered-claim-evidence-required-for-full-and-delta', () => {
+  for (const scope of ['full', 'delta']) {
+    const b = fixture();
+    b.evidence.push({ ...copy(b.evidence[0]), evidence_id: 'second-required-evidence', locator: 'second:1' });
+    b.claims[0].evidence_ids.push('second-required-evidence');
+    b.judgments[0].scope = scope;
+    rejected(bundleCheck(b), 'claim_evidence_missing');
+    b.judgments[0].evidence_ids.push('second-required-evidence');
+    assert.equal(authCheck(authorization(b), b, b.snapshots[0]).ok, true);
+  }
 });
 test('SR1-refutation-history-valid-authorization-refused', () => {
   const b = fixture(); b.findings.push({ finding_id: 'f1', claim_id: b.claims[0].claim_id, status: 'unresolved', evidence_ids: ['e-correctness'] });
@@ -153,18 +198,25 @@ test('SR1-malformed-JSON-shapes-return-errors-without-throwing', () => {
 
 // Counterfactual executes the same assertions against a disposable source copy.
 // A specific behavior guard is removed; a named assertion must catch acceptance.
-if (!process.env.SCOPED_REVIEW_MUTANT_CHILD) test('SR1-RED-self-review-source-mutant', () => {
+if (!process.env.SCOPED_REVIEW_MUTANT_CHILD) test('SR1-RED-disposable-source-mutants', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-scoped-reviews-'));
   try {
     const source = fs.readFileSync(contractPath, 'utf8');
-    const guard = "if (snapshots.some((v) => v.implementer_context_id === j.reviewer_context_id))";
-    assert.ok(source.includes(guard), 'mutant guard exists');
-    const mutant = path.join(root, 'review-contract.js'); fs.writeFileSync(mutant, source.replace(guard, 'if (false)'));
-    const result = spawnSync(process.execPath, [__filename], { encoding: 'utf8', timeout: 20000, env: { ...process.env, HOME: root, SCOPED_REVIEW_CONTRACT: mutant, SCOPED_REVIEW_MUTANT_CHILD: '1', SAUCE_LOOP_BOARD: path.join(root, 'unused-board.md'), DELIVERY_STATE: path.join(root, 'unused-state.json') } });
-    assert.equal(result.status, 1, JSON.stringify(result));
-    assert.match(result.stderr, /FAIL SR1-self-review-refused: expected rejection self_review/);
-    assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND|SyntaxError|getter executed/);
-    console.log('RED proof: FAIL SR1-self-review-refused: expected rejection self_review (disposable mutant)');
+    const mutants = [
+      ['self-review', "if (snapshots.some((v) => v.implementer_context_id === j.reviewer_context_id))", 'if (false)', /FAIL SR1-self-review-refused: expected rejection self_review/],
+      ['hash-type', "const shaValue = (v) => typeof v === 'string' && SHA.test(v);", 'const shaValue = (v) => SHA.test(v);', /FAIL SR1-hash-fields-reject-coercion-values: expected rejection sha_invalid/],
+      ['claim-evidence', 'if (!claimEvidenceCovered(j, maps.claims))', 'if (false)', /FAIL SR1-direct-judgment-must-cite-covered-claim-evidence: expected rejection claim_evidence_missing/],
+    ];
+    for (const [name, guard, replacement, expectedFailure] of mutants) {
+      assert.ok(source.includes(guard), `${name} mutant guard exists`);
+      const mutant = path.join(root, `review-contract-${name}.js`); fs.writeFileSync(mutant, source.replace(guard, replacement));
+      const result = spawnSync(process.execPath, [__filename], { encoding: 'utf8', timeout: 20000, env: { ...process.env, HOME: root, SCOPED_REVIEW_CONTRACT: mutant, SCOPED_REVIEW_MUTANT_CHILD: '1', SAUCE_LOOP_BOARD: path.join(root, 'unused-board.md'), DELIVERY_STATE: path.join(root, 'unused-state.json') } });
+      assert.equal(result.status, 1, JSON.stringify(result));
+      assert.match(result.stderr, expectedFailure);
+      if (name === 'claim-evidence') assert.match(result.stderr, /FAIL SR1-inherited-judgment-cannot-omit-covered-claim-evidence: expected rejection claim_evidence_missing/);
+      assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND|SyntaxError|getter executed/);
+      console.log(`RED proof: ${name} guard mutant triggered its named assertion failure`);
+    }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 console.log(`scoped-reviews: ${passed} cases passed`);

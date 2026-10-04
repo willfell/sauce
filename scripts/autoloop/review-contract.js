@@ -6,6 +6,8 @@ const VERSION = '1.0.0';
 const LENSES = Object.freeze(['correctness', 'regression-risk', 'test-adequacy']);
 const SHA = /^[0-9a-f]{40}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
+const shaValue = (v) => typeof v === 'string' && SHA.test(v);
+const digestValue = (v) => typeof v === 'string' && DIGEST.test(v);
 const text = (v) => typeof v === 'string' && v.trim().length > 0;
 const contains = (v, id) => Array.isArray(v) && v.includes(id);
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -65,6 +67,14 @@ function canonicalReviewDigest(value) {
  * Bridge assessment and evidence authenticity remain caller policy obligations;
  * this module refuses broken provenance, it does not decide semantic retention.
  */
+function claimEvidenceCovered(judgment, claims) {
+  return Array.isArray(judgment.claim_ids) && judgment.claim_ids.every((id) => {
+    const claim = claims.get(id);
+    return claim && Array.isArray(claim.evidence_ids)
+      && claim.evidence_ids.every((evidenceId) => contains(judgment.evidence_ids, evidenceId));
+  });
+}
+
 function validateReviewBundle(bundle) {
   const errors = [];
   const fail = (code, field, message) => errors.push({ code, field, message });
@@ -95,10 +105,10 @@ function validateReviewBundle(bundle) {
     const f = `snapshots[${i}]`;
     version(s.schema_version, `${f}.schema_version`);
     for (const k of ['repository_id', 'card_id', 'implementer_context_id']) if (!text(s[k])) fail('identity_missing', `${f}.${k}`, 'nonempty identity required');
-    for (const k of ['head_sha', 'tree_sha', 'base_sha', 'merge_base_sha']) if (!SHA.test(s[k] || '')) fail('sha_invalid', `${f}.${k}`, '40 lowercase hex required');
-    for (const k of ['diff_digest', 'contract_digest', 'policy_digest']) if (!DIGEST.test(s[k] || '')) fail('digest_invalid', `${f}.${k}`, '64 lowercase hex required');
+    for (const k of ['head_sha', 'tree_sha', 'base_sha', 'merge_base_sha']) if (!shaValue(s[k])) fail('sha_invalid', `${f}.${k}`, '40 lowercase hex required');
+    for (const k of ['diff_digest', 'contract_digest', 'policy_digest']) if (!digestValue(s[k])) fail('digest_invalid', `${f}.${k}`, '64 lowercase hex required');
     if (i && (s.repository_id !== snapshots[0].repository_id || s.card_id !== snapshots[0].card_id)) fail('lineage_mismatch', f, 'all snapshots must belong to one repository/card');
-    if (!Array.isArray(s.messages) || !s.messages.length || s.messages.some((m) => !object(m) || !SHA.test(m.sha || '') || !text(m.message))
+    if (!Array.isArray(s.messages) || !s.messages.length || s.messages.some((m) => !object(m) || !shaValue(m.sha) || !text(m.message))
       || new Set(s.messages.map((m) => m && m.sha)).size !== s.messages.length || !s.messages.some((m) => m && m.sha === s.head_sha)) fail('messages_incomplete', `${f}.messages`, 'unique full branch-message inventory including HEAD required');
     if (!object(s.required_claims) || Object.keys(s.required_claims).length !== LENSES.length) fail('coverage_requirements_missing', `${f}.required_claims`, 'all three lens requirement lists required');
     for (const lens of LENSES) refs(s.required_claims && s.required_claims[lens], maps.claims, `${f}.required_claims.${lens}`);
@@ -107,12 +117,12 @@ function validateReviewBundle(bundle) {
     const f = `evidence.${e.evidence_id}`;
     if (!maps.snapshots.has(e.snapshot_id)) fail('reference_missing', f, 'evidence snapshot missing');
     for (const k of ['source_identity', 'locator']) if (!text(e[k])) fail('evidence_identity_missing', `${f}.${k}`, 'evidence source and locator required');
-    if (!DIGEST.test(e.digest || '')) fail('digest_invalid', `${f}.digest`, 'evidence digest required');
+    if (!digestValue(e.digest)) fail('digest_invalid', `${f}.digest`, 'evidence digest required');
   });
   list('claims').forEach((c) => {
     const f = `claims.${c.claim_id}`;
     if (!text(c.statement)) fail('claim_missing', f, 'explicit statement required');
-    if (!Array.isArray(c.dependencies) || !c.dependencies.length || c.dependencies.some((d) => !object(d) || !text(d.kind) || !text(d.identity) || !DIGEST.test(d.digest || ''))
+    if (!Array.isArray(c.dependencies) || !c.dependencies.length || c.dependencies.some((d) => !object(d) || !text(d.kind) || !text(d.identity) || !digestValue(d.digest))
       || new Set(c.dependencies.map(canonical)).size !== c.dependencies.length) fail('dependencies_missing', f, 'explicit unique dependency identities/digests required');
     refs(c.evidence_ids, maps.evidence, `${f}.evidence_ids`);
   });
@@ -144,6 +154,7 @@ function validateReviewBundle(bundle) {
     if (s && j.implementer_context_id !== s.implementer_context_id) fail('context_mismatch', f, 'judgment implementer must match snapshot');
     refs(j.claim_ids, maps.claims, `${f}.claim_ids`);
     refs(j.evidence_ids, maps.evidence, `${f}.evidence_ids`);
+    if (!claimEvidenceCovered(j, maps.claims)) fail('claim_evidence_missing', f, 'every covered claim requires its explicit evidence IDs in the judgment');
     refs(j.finding_ids, maps.findings, `${f}.finding_ids`, false);
     if (Array.isArray(j.finding_ids) && j.finding_ids.some((id) => maps.findings.has(id) && !contains(j.claim_ids, maps.findings.get(id).claim_id))) fail('finding_scope_mismatch', f, 'finding must belong to judgment claims');
     if (j.verdict === 'refute' && (!Array.isArray(j.finding_ids) || !j.finding_ids.length)) fail('refutation_unexplained', f, 'refutation requires finding');
@@ -152,6 +163,7 @@ function validateReviewBundle(bundle) {
       if (['source_receipt_id', 'bridge_id', 'origin_receipt_id', 'origin_head_sha', 'origin_base_sha'].some((k) => k in j)) fail('direct_inheritance_invalid', f, 'direct judgment cannot impersonate retained receipt');
       if (Array.isArray(j.evidence_ids) && j.evidence_ids.some((id) => maps.evidence.has(id) && maps.evidence.get(id).snapshot_id !== j.snapshot_id)) fail('evidence_snapshot_mismatch', f, 'direct evidence must bind reviewed snapshot');
     } else {
+      for (const k of ['origin_head_sha', 'origin_base_sha']) if (!shaValue(j[k])) fail('sha_invalid', `${f}.${k}`, 'origin SHA must be a 40 lowercase hex string');
       const source = maps.judgments.get(j.source_receipt_id);
       const bridge = maps.bridges.get(j.bridge_id);
       const origin = maps.judgments.get(j.origin_receipt_id);
@@ -193,6 +205,7 @@ function validateAuthorization(authorization, bundle, snapshot) {
   if (!text(authorization.authorization_id)) fail('identity_missing', 'authorization_id', 'authorization identity required');
   const current = bundle.snapshots[bundle.snapshots.length - 1];
   if (canonical(snapshot) !== canonical(current) || canonical(authorization.snapshot) !== canonical(current)) fail('snapshot_mismatch', 'snapshot', 'authorization must bind entire exact latest snapshot');
+  if (!digestValue(authorization.bundle_digest)) fail('digest_invalid', 'bundle_digest', 'bundle digest must be a 64 lowercase hex string');
   if (authorization.bundle_digest !== canonicalReviewDigest(bundle)) fail('bundle_mismatch', 'bundle_digest', 'entire validated bundle digest required');
   if (!object(authorization.lenses) || Object.keys(authorization.lenses).length !== LENSES.length) fail('lenses_missing', 'lenses', 'exact three lens slots required');
   const judgments = new Map(bundle.judgments.map((j) => [j.receipt_id, j]));
