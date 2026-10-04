@@ -3,6 +3,16 @@
   "schema_version": 1,
   "schemas": [
     {
+      "id": "sauce.repair-history.v1",
+      "kind": "contract",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "scripts/autoloop/repair-history.js",
+      "accepted_versions": ["1.0.0"],
+      "validator": "scripts/autoloop/repair-history.js",
+      "consumers": ["platform/test/run-codex-autoloop.js"],
+      "notes": "Immutable ordered repair events. Snapshot identity is head_sha:base_sha, with unknown legacy base encoded as head_sha:unknown. Events and histories use schema_version 1.0.0. extension:<name> kinds remain uninterpreted; append refuses conflicting IDs and returns byte-preserving literal replay."
+    },
+    {
       "id": "cowork-eod-review-sidecar",
       "kind": "sidecar-schema",
       "owner": {
