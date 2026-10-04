@@ -32,6 +32,7 @@ const { parseCommit, bumpLevel } = require('../release/lib/conventional');
 const deliveryStatusDigest = require('./delivery-status-digest');
 const deliveryReviewTriage = require('./delivery-review-triage');
 const { deliveryPaths } = require('./delivery-paths');
+const vaultIndex = require('./vault-index');
 const {
   EXIT_CODES, parseArgs, successReceipt, refuse, usage, requireJson, requireOnlyOptions, receiptForError,
 } = require('./cli-kit');
@@ -928,7 +929,20 @@ function lockDirectoryIsStale(lockPath, owner, staleMs) {
   catch (_) { return false; }
 }
 
+// A verb calls vaultIndex.awaitWriteTurn, holding no lock, before the
+// outermost lock of each lock scope in which it may write a vault note, so
+// each such lock scope loads the ledger and reads its notes only once the
+// verb holds the turn. Inside a lock the turn is never waited for: a held
+// turn is refused with LOCKED (see vault-index.js).
 async function withLock(ctx, name, fn, opts = {}) {
+  const gate = vaultIndex.lockGate();
+  if (!gate) return withLockDirectory(ctx, name, fn, opts);
+  await gate.beforeAcquire();
+  try { return await withLockDirectory(ctx, name, () => gate.run(fn), opts); }
+  finally { await gate.afterRelease(); }
+}
+
+async function withLockDirectory(ctx, name, fn, opts = {}) {
   ensureStateDir(ctx);
   const lockPath = path.join(ctx.stateDir, 'locks', `${name}.lock`);
   const staleMs = opts.staleMs || 30 * 60 * 1000;
@@ -1362,6 +1376,7 @@ async function commandBackfillRatifications(ctx, args, deps = {}) {
   if (extras.length) throw new Error(`backfill-ratifications received unsupported option --${extras[0]}`);
   const loadState = deps.readState || readState;
   const lock = deps.withLock || withLock;
+  await vaultIndex.awaitWriteTurn();
   return lock(ctx, 'selector', async () => {
     const receipt = scaffoldPendingRatifications(loadState(ctx), deps);
     if (receipt.errors.length) {
@@ -1483,6 +1498,7 @@ async function commandConsumeRatification(ctx, args, deps = {}) {
   const now = deps.now || (() => new Date().toISOString());
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   const project = deps.projectCard || projectCard;
+  await vaultIndex.awaitWriteTurn();
   return lock(ctx, 'selector', async () => withCardGateLock(ctx, operand.card, async () => {
     const state = loadState(ctx);
     const record = state.cards[operand.card];
@@ -2685,9 +2701,11 @@ function removeBoardCard(md, card) {
 }
 
 function atomicWriteText(file, value) {
+  vaultIndex.beforeNoteWrite();
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, value);
   fs.renameSync(tmp, file);
+  vaultIndex.noteWritten(file, value);
 }
 
 function physicalDescendant(root, target, label) {
@@ -3287,6 +3305,7 @@ function stampCardNoteSha(record, cardPath) {
 function projectCard(cardPath, boardPath, card, phase, opts = {}) {
   const mapping = projectionMapping(phase);
   if (!mapping) return { changed: false, skipped: true, foreign_write: null };
+  vaultIndex.beforeNoteRewrite();
   const resolvedCardPath = resolveCardPath(cardPath, card, opts.cardsRoot || CARDS_ROOT);
   const cardRaw = fs.readFileSync(resolvedCardPath, 'utf8');
   // Cross-process write detection. The selector lock lives in this clone's
@@ -3616,6 +3635,69 @@ function projectionMetadataProblem(record, cardsRoot = CARDS_ROOT) {
   } catch (err) {
     return { card: record.card, phase: record.phase, error: `card metadata is unreadable: ${err.message}` };
   }
+}
+
+// The completion projection of a card that reached deployed inside its
+// card-gate lock is not written in that lock. The record carries this marker
+// until projectPendingCompletion or reconcile removes it.
+function markCompletionPending(record, now = () => new Date().toISOString()) {
+  record.projection_pending = { phase: record.phase, marked_at: now() };
+}
+
+// Writes the completion projection a card-gate lock left pending, after that
+// lock is released. It waits for the vault write turn holding no lock, takes
+// the card-gate lock again and re-reads the ledger there. It projects only
+// when the card is still at the phase the marker names; a marker for another
+// phase is removed without projecting. The marker is removed in the same
+// ledger write as the projection's outcome, so a process that stops before
+// that write leaves it for a reconcile of the card, a literal re-run of
+// recover-deployed, or a re-run of advance without --dry-run that passes its
+// lease check.
+async function projectPendingCompletion(ctx, card, deps = {}) {
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const gateLock = deps.withLock || withLock;
+  const project = deps.attemptProjection || attemptProjection;
+  await vaultIndex.awaitWriteTurn();
+  try {
+    return await withCardGateLock(ctx, card, async () => {
+      const state = loadState(ctx);
+      const record = state.cards[card];
+      const pending = record && record.projection_pending;
+      if (!pending) return { status: 'none', record: record || null };
+      delete record.projection_pending;
+      if (pending.phase !== record.phase) {
+        persist(ctx, state, record);
+        return { status: 'phase-changed', record };
+      }
+      const projection = await project(ctx, record, deps.boardPath || BOARD, {
+        state, projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
+        cardsRoot: deps.cardsRoot, now: deps.now,
+      });
+      persist(ctx, state, record);
+      return { status: projection.ok ? 'projected' : 'failed', record, projection };
+    }, { card, staleMs: 60 * 60 * 1000 }, gateLock);
+  } catch (err) {
+    if (err && err.code === 'LOCKED') return { status: 'locked', record: null, error: err.message };
+    throw err;
+  }
+}
+
+// The advance or deploy receipt once projectPendingCompletion has run.
+function completionAfterGate(gateResult, completion) {
+  if (completion.status === 'none') return gateResult;
+  if (completion.status === 'projected' || completion.status === 'failed') return completionResult(completion.record);
+  const { projection_reconciled_at: _reconciled, ...rest } = gateResult;
+  return {
+    ...rest,
+    action: 'completion-projection-failed',
+    projection_error: completion.status === 'locked'
+      ? completion.error
+      : `card moved to ${completion.record.phase} before its completion projection was written`,
+    projection_failed_at: null,
+    reconcile: `reconcile --card ${gateResult.card}`,
+    ...(completion.status === 'locked' ? { projection_pending: true } : {}),
+  };
 }
 
 function completionResult(record) {
@@ -4085,7 +4167,7 @@ async function promoteAndDeploy(ctx, state, record) {
     const allOk = VAULTS.every((vault) => record.vault_receipts[vault.id] && record.vault_receipts[vault.id].ok);
     if (allOk) {
       record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
-      await attemptProjection(ctx, record, BOARD, { state });
+      markCompletionPending(record);
     }
     writeState(ctx, state, record);
     return allOk
@@ -4212,7 +4294,7 @@ async function stepCard(ctx, state, record, opts = {}, deps = {}) {
     if (deployVaults.length === 0) {
       record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
       record.merge_only = true;
-      await (deps.attemptProjection || attemptProjection)(ctx, record, deps.board || BOARD, { state });
+      markCompletionPending(record);
       persist(ctx, state, record);
       return completionResult(record);
     }
@@ -4334,6 +4416,7 @@ async function commandAmendContract(ctx, args, deps = {}) {
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx);
     const record = state.cards[card];
@@ -4520,6 +4603,7 @@ async function commandPark(ctx, args, deps = {}) {
   const project = deps.projectCard || projectCard;
   const now = deps.now || (() => new Date().toISOString());
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('park-refused', 'card_not_claimed', `card ${card} is not claimed`);
@@ -4614,6 +4698,7 @@ async function commandAmendPark(ctx, args, deps = {}) {
   const project = deps.projectCard || projectCard;
   const run = deps.sh || sh;
   const now = deps.now || (() => new Date().toISOString());
+  await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('amend-park-refused', 'card_not_claimed', `card ${card} is not claimed`);
@@ -4719,6 +4804,7 @@ async function commandResume(ctx, args, deps = {}) {
   const worktreeExists = deps.worktreeExists || fs.existsSync;
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
   const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
+  await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx); const record = state.cards[card];
     if (!record) refuse('resume-refused', 'card_not_claimed', `card ${card} is not claimed`);
@@ -5546,6 +5632,7 @@ async function commandHealEpicBindings(ctx, args, deps = {}) {
   const transitionLock = deps.withLock || withLock;
   const loadState = deps.readState || readState;
   const persist = deps.writeState || writeState;
+  if (apply) await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => {
     const plan = planEpicBindingHeal(cardsRoot, boardPath);
     const { atlases, slices, orphanLines } = plan;
@@ -5679,12 +5766,18 @@ function ghUnavailable(err) {
   return /not authenticated|gh auth login/i.test(text);
 }
 
-function adoptProvenance(args, deps, cwd) {
-  const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
+// The --merge-sha operand, refused unless it is a 40-hex sha.
+function adoptMergeSha(args) {
   const sha = String(args['merge-sha'] || '').trim().toLowerCase();
   if (!ADOPT_SHA_RE.test(sha)) {
     refuse('adopt-refused', 'adopt_sha_unreachable', `--merge-sha must be a 40-hex commit sha (got "${args['merge-sha']}")`);
   }
+  return sha;
+}
+
+function adoptProvenance(args, deps, cwd) {
+  const runGit = deps.git || ((gitArgs) => sh('git', gitArgs, { cwd }));
+  const sha = adoptMergeSha(args);
   try { runGit(['cat-file', '-e', `${sha}^{commit}`]); }
   catch (err) {
     refuse('adopt-refused', 'adopt_sha_unreachable', `merge sha ${sha} does not resolve in this repo: ${err.message}`);
@@ -5755,11 +5848,13 @@ async function commandAdopt(ctx, args, deps = {}) {
   }
   const reason = String(args.reason || '').trim();
   if (!reason) refuse('adopt-refused', 'adopt_reason_required', 'adopt requires a non-empty --reason');
+  adoptMergeSha(args);
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
   const boardPath = deps.boardPath || BOARD;
   const loadState = deps.readState || readState;
   const transitionLock = deps.withLock || withLock;
   const project = deps.projectCard || projectCard;
+  await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => {
     const state = loadState(ctx);
     state.cards ||= {};
@@ -6185,6 +6280,7 @@ function writeBoardHealthNote(payload, notePath, deps = {}) {
   const validation = validateBoardHealthPayload(payload);
   if (!validation.ok) throw new Error(`Board Health payload is invalid: ${validation.errors.join('; ')}`);
   const fields = loopStationFrontmatterFields(payload);
+  vaultIndex.beforeNoteRewrite();
   if (!exists(notePath)) {
     if (deps.ensureDir) deps.ensureDir(path.dirname(notePath));
     else fs.mkdirSync(path.dirname(notePath), { recursive: true });
@@ -6244,6 +6340,7 @@ async function commandBoardHealth(ctx, args, deps = {}) {
     }
     return receipt;
   };
+  if (args['write-note'] === true) await vaultIndex.awaitWriteTurn();
   try {
     return await transitionLock(ctx, 'selector', sweep, { staleMs: 60 * 60 * 1000 });
   } catch (err) {
@@ -6283,6 +6380,7 @@ async function commandDiscard(ctx, args, deps = {}) {
   const operands = discardOperands(args);
   const d = resolveDiscardDeps(deps);
   const gate = { card: operands.card, staleMs: 60 * 60 * 1000 };
+  await vaultIndex.awaitWriteTurn();
   return d.transitionLock(ctx, 'selector',
     async () => withCardGateLock(ctx, operands.card, async () => {
       // Supersession-depth circuit-breaker: a fresh supersession (--superseded-by)
@@ -6391,6 +6489,7 @@ async function commandReap(ctx, args, deps = {}) {
   if (args.also != null && !alsoNames.length) throw new Error('--also values must be non-empty card names');
   const d = resolveDiscardDeps(deps);
   const staleMs = 60 * 60 * 1000;
+  await vaultIndex.awaitWriteTurn();
   return d.transitionLock(ctx, 'selector', async () => {
     const discardOne = (operands, boardOverride) => withCardGateLock(
       ctx, operands.card,
@@ -7054,7 +7153,9 @@ function readRestructureJournal(journalPath) {
   } catch (_) { return null; }
 }
 
-async function restructureCore(ctx, spec, d) {
+// The project directory, parent board and tasks directory a --spec names,
+// refused unless each exists and the board sits directly in the project.
+function restructureSpecTargets(spec) {
   const projectRoot = spec.project_root;
   if (!fs.existsSync(projectRoot) || !fs.statSync(projectRoot).isDirectory()) {
     throw new Error('restructure --spec project_root must be an existing project directory');
@@ -7066,6 +7167,11 @@ async function restructureCore(ctx, spec, d) {
   }
   const cardsRoot = path.join(projectRoot, 'tasks');
   if (!fs.existsSync(cardsRoot)) throw new Error('restructure requires <project_root>/tasks to exist');
+  return { projectRoot, boardPath, cardsRoot };
+}
+
+async function restructureCore(ctx, spec, d) {
+  const { projectRoot, boardPath, cardsRoot } = restructureSpecTargets(spec);
   const prefix = physicalProjectPrefix(cardsRoot).prefix;
   const parentRaw = fs.readFileSync(boardPath, 'utf8');
   const state = d.loadState(ctx);
@@ -7123,6 +7229,8 @@ async function commandRestructure(ctx, args, deps = {}) {
   if (typeof args.spec !== 'string' || !args.spec.trim()) throw new Error('restructure requires --spec <map.json>');
   const d = resolveRestructureDeps(ctx, deps);
   const spec = loadRestructureSpec(args.spec.trim());
+  restructureSpecTargets(spec);
+  await vaultIndex.awaitWriteTurn();
   return d.transitionLock(ctx, 'selector', () => restructureCore(ctx, spec, d), { staleMs: RESTRUCTURE_STALE_MS });
 }
 
@@ -7130,6 +7238,7 @@ async function commandClaim(ctx, args, deps = {}) {
   const now = deps.now || (() => new Date().toISOString());
   const mintLeaseToken = deps.leaseToken || (() => crypto.randomUUID());
   const leaseNowMs = deps.leaseNowMs || (() => Date.now());
+  if (!args['dry-run']) await vaultIndex.awaitWriteTurn();
   return withLock(ctx, 'selector', async () => {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       return successReceipt('halted', { no_op: true, reason: '.autoloop-halt present' });
@@ -7457,9 +7566,10 @@ async function commandAdvance(ctx, args, deps = {}) {
   while (true) {
     if (fs.existsSync(path.join(ctx.root, '.autoloop-halt'))) {
       const halted = { action: 'halted', card, reason: '.autoloop-halt present' };
-      emit(halted); return halted;
+      await emit(halted); return halted;
     }
     let transitionedTo = null;
+    let completionPending = false;
     let result = await withCardGateLock(ctx, card, async () => {
       const state = loadState(ctx); const record = state.cards[card];
       if (!record) throw new Error(`card ${card} not in state`);
@@ -7470,8 +7580,15 @@ async function commandAdvance(ctx, args, deps = {}) {
       // record now owned by a different holder.
       requireLeaseToken(record, args, 'advance', leaseNowMs());
       const priorPhase = record.phase;
+      const priorPending = record.projection_pending;
       const stepped = await step(ctx, state, record, { dryRun: Boolean(args['dry-run']) });
       if (!args['dry-run'] && record.phase !== priorPhase) transitionedTo = record.phase;
+      // stepCard moves a merge-only card to deployed in a dry run too, and
+      // persists that phase with its marker, so a dry run whose step set the
+      // marker goes on to the completion projection and, with a REST config,
+      // takes the write turn for it. A dry run leaves a marker its step did
+      // not set.
+      if (record.projection_pending && (!args['dry-run'] || record.projection_pending !== priorPending)) completionPending = true;
       // Dry-run is a preview call — never durably release a lease on its
       // behalf, even when the (already-terminal) record's phase happens to
       // satisfy TERMINAL. Mirrors the transitionedTo gate immediately above.
@@ -7484,9 +7601,19 @@ async function commandAdvance(ctx, args, deps = {}) {
       }
       return stepped;
     }, { card, staleMs: 60 * 60 * 1000 }, gateLock);
-    if (transitionedTo) {
+    let completion = null;
+    if (completionPending) {
+      completion = await projectPendingCompletion(ctx, card, {
+        readState: loadState, writeState: persist, withLock: gateLock,
+        boardPath: deps.boardPath, cardsRoot: deps.cardsRoot,
+      });
+      result = completionAfterGate(result, completion);
+    }
+    const retried = !args['dry-run'] && !transitionedTo && completion && ['projected', 'failed'].includes(completion.status);
+    if (transitionedTo || retried) {
+      await vaultIndex.awaitWriteTurn();
       const station = await selectorLock(ctx, 'selector', async () => attemptLoopStationProjection(
-        ctx, loadState(ctx), transitionedTo === 'deployed' ? 'deploy' : 'advance',
+        ctx, loadState(ctx), transitionedTo === 'deployed' || retried ? 'deploy' : 'advance',
         {
           projectLoopStation: deps.projectLoopStation,
           boardPath: deps.boardPath,
@@ -7496,14 +7623,49 @@ async function commandAdvance(ctx, args, deps = {}) {
       result = { ...result, loop_station: station.receipt };
     }
     const fingerprint = JSON.stringify(result);
-    if (fingerprint !== last) { emit(result); last = fingerprint; }
+    if (fingerprint !== last) { await emit(result); last = fingerprint; }
     if (!['waiting', 'phase-change'].includes(result.action) || lease === 0) return result;
     if (Date.now() >= deadline) {
       const receipt = { action: 'waiting', card, phase: loadState(ctx).cards[card].phase, lease_expired: true, resume: `advance --card ${card}` };
-      emit(receipt); return receipt;
+      await emit(receipt); return receipt;
     }
     await sleep(Math.min(poll * 1000, Math.max(0, deadline - Date.now())));
   }
+}
+
+async function commandDeploy(ctx, args, deps = {}) {
+  const loadState = deps.readState || readState;
+  const persist = deps.writeState || writeState;
+  const gateLock = deps.withLock || withLock;
+  const deploy = deps.promoteAndDeploy || promoteAndDeploy;
+  let completionPending = false;
+  // Whole block runs under the card gate lock — not just the guard — so a
+  // concurrent attach during a multi-minute deploy can't have its lease
+  // clobbered by this dispatch's own whole-record writeState on terminal
+  // release. promoteAndDeploy locks under a distinct 'homebrew-promotion'
+  // name, so nesting here does not risk a same-name relock/deadlock.
+  const result = await withCardGateLock(ctx, args.card, async () => {
+    const state = loadState(ctx); const record = state.cards[args.card];
+    if (!record) throw new Error('deploy requires a known --card');
+    requireLeaseToken(record, args, 'deploy', Date.now());
+    const deployed = await deploy(ctx, state, record);
+    // promoteAndDeploy mutates `record` in place (same reference held in
+    // `state.cards`) and persists its own writes internally; once it lands
+    // the record in a TERMINAL phase (deployed), release the lease and
+    // persist the release as a follow-up write — same conditional-persist
+    // pattern as commandAdvance's terminal release, so an unleased card
+    // never triggers an extra write.
+    if (TERMINAL.has(record.phase)) {
+      const released = clearLease(record, 'lease_released_terminal', () => new Date().toISOString());
+      if (released) persist(ctx, state, record);
+    }
+    if (record.projection_pending) completionPending = true;
+    return deployed;
+  }, { card: args.card, staleMs: 60 * 60 * 1000 }, gateLock);
+  if (!completionPending) return result;
+  return completionAfterGate(result, await projectPendingCompletion(ctx, args.card, {
+    readState: loadState, writeState: persist, withLock: gateLock, boardPath: deps.boardPath, cardsRoot: deps.cardsRoot,
+  }));
 }
 
 function commandStatus(ctx, opts = {}) {
@@ -7870,6 +8032,7 @@ function projectLoopStation(ctx, state, updatedOn, deps = {}) {
   const readText = deps.readText || ((target) => fs.readFileSync(target, 'utf8'));
   const writeText = deps.writeText || atomicWriteText;
   const now = deps.now || (() => new Date().toISOString());
+  vaultIndex.beforeNoteRewrite();
   const updatedAt = now();
   const ratifications = scaffoldPendingRatifications(state, {
     boardPath,
@@ -7972,6 +8135,7 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
   const results = [];
   for (const card of cardNames) {
     try {
+      await vaultIndex.awaitWriteTurn();
       const legacyGateName = legacyCardGateLockName(card);
       const result = await withCardGateLock(ctx, card, async () => {
         const state = loadState(ctx);
@@ -8076,12 +8240,15 @@ async function commandReconcile(ctx, args = {}, deps = {}) {
             // A detected (or just-resolved) foreign write must force
             // persistence even when the projection itself made no change: it
             // is a durable ledger finding (`record.foreign_write`), not
-            // merely a receipt annotation.
+            // merely a receipt annotation. A pending completion marker is
+            // removed too: this writes the projection of the card's current
+            // phase.
             const stateChanged = Boolean(priorError || priorFailedAt || !record.projection_reconciled_at
-              || projected.changed || projected.foreign_write || hadForeignWrite);
+              || record.projection_pending || projected.changed || projected.foreign_write || hadForeignWrite);
             if (stateChanged) {
               delete record.projection_error;
               delete record.projection_failed_at;
+              delete record.projection_pending;
               record.projection_reconciled_at = now();
               persist(ctx, state, record);
             }
@@ -8182,6 +8349,7 @@ async function commandCutover(ctx, args, deps = {}) {
       throw new Error('cutover --off never evaluates criteria; drop --require-card/--chain-prefix');
     }
     const reason = args.reason.trim();
+    await vaultIndex.awaitWriteTurn();
     return transitionLock(ctx, 'selector', async () => {
       const state = loadState(ctx);
       if (!state.cutover || state.cutover.enabled !== true) {
@@ -8211,6 +8379,7 @@ async function commandCutover(ctx, args, deps = {}) {
   }
   const readPackageJson = deps.readPackageJson
     || (() => JSON.parse(fs.readFileSync(path.join(ctx.root, 'package.json'), 'utf8')));
+  await vaultIndex.awaitWriteTurn();
   return transitionLock(ctx, 'selector', async () => {
     const state = loadState(ctx);
     if (state.cutover && state.cutover.enabled === true) {
@@ -8306,8 +8475,8 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
   const persist = deps.writeState || writeState;
   const lock = deps.withLock || withLock;
   const collect = deps.collectDeployedRecoveryEvidence || collectDeployedRecoveryEvidence;
-  const project = deps.attemptProjection || attemptProjection;
   const now = deps.now || (() => new Date().toISOString());
+  let completionPending = false;
   const result = await withCardGateLock(ctx, request.card, async () => {
     const state = loadState(ctx);
     const record = state.cards[request.card];
@@ -8328,6 +8497,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
       };
     }
     if (replay) {
+      completionPending = Boolean(record.projection_pending);
       return { action: 'recovered-deployed', card: record.card, phase: record.phase, no_op: true, request, evidence };
     }
     const audit = {
@@ -8348,18 +8518,33 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
     record.phase = 'deployed';
     record.deployed_at = audit.recovered_at;
     clearLease(record, 'lease_cleared_supervised', now);
+    markCompletionPending(record, now);
     persist(ctx, state, record);
-    const projection = await project(ctx, record, deps.boardPath || BOARD, {
-      projectCard: deps.projectCard, withLock: deps.projectionLock || deps.withLock,
-      cardsRoot: deps.cardsRoot, now, state,
-    });
-    persist(ctx, state, record);
-    return {
-      action: projection.ok ? 'recovered-deployed' : 'recovered-deployed-projection-failed',
-      card: record.card, phase: record.phase, no_op: false, request, evidence, projection,
-    };
+    completionPending = true;
+    return { action: 'recovered-deployed', card: record.card, phase: record.phase, no_op: false, request, evidence };
   }, { card: request.card }, lock);
-  if (!apply || result.no_op) return result;
+  if (!apply || !completionPending) return result;
+  const completion = await projectPendingCompletion(ctx, request.card, {
+    readState: loadState, writeState: persist, withLock: lock, attemptProjection: deps.attemptProjection,
+    projectCard: deps.projectCard, projectionLock: deps.projectionLock,
+    boardPath: deps.boardPath, cardsRoot: deps.cardsRoot, now,
+  });
+  if (completion.status === 'none' && result.no_op) return result;
+  const projection = completion.projection || {
+    ok: false, changed: false,
+    error: {
+      locked: completion.error,
+      'phase-changed': `card moved to ${completion.record && completion.record.phase} before its completion projection was written`,
+      none: 'no completion projection was pending when the card-gate lock was taken again',
+    }[completion.status],
+  };
+  const recovered = {
+    ...result,
+    action: projection.ok ? 'recovered-deployed' : 'recovered-deployed-projection-failed',
+    projection,
+    ...(completion.status === 'locked' ? { projection_pending: true } : {}),
+  };
+  await vaultIndex.awaitWriteTurn();
   const station = await lock(ctx, 'selector', async () => attemptLoopStationProjection(
     ctx, loadState(ctx), 'recover', {
       projectLoopStation: deps.projectLoopStation,
@@ -8367,7 +8552,7 @@ async function commandRecoverDeployed(ctx, args = {}, deps = {}) {
       cardsRoot: deps.cardsRoot,
     },
   ));
-  return { ...result, loop_station: station.receipt };
+  return { ...recovered, loop_station: station.receipt };
 }
 
 function metadataScalar(value) {
@@ -8865,6 +9050,17 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
   const writeText = deps.atomicWriteText || atomicWriteText;
   const barrier = deps.durablePathBarrier || durablePathBarrier;
   const readSpec = deps.readSpec || ((file) => fs.readFileSync(file, 'utf8'));
+  // The --spec file is read and checked before the write turn is taken.
+  let specRaw = null;
+  let spec = null;
+  if (apply) {
+    specRaw = readSpec(path.resolve(String(args.spec)));
+    let parsed;
+    try { parsed = JSON.parse(specRaw); }
+    catch (err) { throw new Error(`contract frontmatter restamp spec is malformed JSON: ${err.message}`); }
+    spec = validateContractFrontmatterRestampSpec(parsed, args.reason, cardsRoot);
+    await vaultIndex.awaitWriteTurn();
+  }
   return lock(ctx, 'contract-frontmatter-restamp', async () => {
     if (!apply) {
       const spec = contractFrontmatterRestampPlan(cardsRoot, args.reason);
@@ -8876,11 +9072,6 @@ async function commandRestampContractFrontmatter(ctx, args = {}, deps = {}) {
         spec,
       };
     }
-    const specRaw = readSpec(path.resolve(String(args.spec)));
-    let parsed;
-    try { parsed = JSON.parse(specRaw); }
-    catch (err) { throw new Error(`contract frontmatter restamp spec is malformed JSON: ${err.message}`); }
-    const spec = validateContractFrontmatterRestampSpec(parsed, args.reason, cardsRoot);
     const request = {
       command_operands: Array.isArray(args._) ? [...args._] : [],
       restamp_operand: args['contract-frontmatter-restamp'],
@@ -8974,6 +9165,12 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   if (args.apply === true && (typeof args.reason !== 'string' || !args.reason.trim())) {
     throw new Error('reconcile-metadata --apply requires non-empty --reason');
   }
+  // A value that is not a lowercase 64-hex sha can never equal the card's
+  // sha256, which the apply below requires, so it is refused here, before
+  // the write turn, with that same message.
+  if (args.apply === true && !/^[0-9a-f]{64}$/.test(String(args['expected-card-sha256']))) {
+    throw new Error('reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run');
+  }
   const loadState = deps.readState || readState;
   const persist = deps.writeState || writeState;
   const lock = deps.withLock || withLock;
@@ -8981,6 +9178,7 @@ async function commandReconcileMetadata(ctx, args = {}, deps = {}) {
   const writeText = deps.atomicWriteText || atomicWriteText;
   const barrier = deps.durablePathBarrier || durablePathBarrier;
   const now = deps.now || (() => new Date().toISOString());
+  if (args.apply === true) await vaultIndex.awaitWriteTurn();
   return withCardGateLock(ctx, card, async () => {
     const state = loadState(ctx);
     const record = state.cards[card];
@@ -9096,6 +9294,7 @@ async function commandReconcileDependencies(ctx, args, deps = {}) {
   const writeText = deps.writeText || atomicWriteText;
   const lock = deps.withLock || withLock;
   const cardsRoot = deps.cardsRoot || CARDS_ROOT;
+  if (apply) await vaultIndex.awaitWriteTurn();
   return lock(ctx, 'selector', async () => {
     const state = loadState(ctx);
     // Same shape as scanDependentsForDiscard, this verb's direct sibling: it
@@ -9229,6 +9428,21 @@ async function main() {
   }
   if (command === 'record-review') recordReviewOperands(args);
   const ctx = workshopContext();
+  const vaultRoot = vaultIndex.vaultRootForBoard(BOARD);
+  const result = await vaultIndex.withVaultIndex(vaultRoot, (journal) => runCommand(ctx, command, args, journal));
+  if (command === 'advance') return;
+  console.log(JSON.stringify(result, null, 2));
+  if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
+}
+
+// Writes an advance receipt as one JSON line, with the obsidian_index of the
+// notes written since the previous receipt.
+async function emitAdvanceReceipt(receipt, journal, write = (line) => process.stdout.write(line)) {
+  const index = await vaultIndex.verifyJournal(journal);
+  write(`${JSON.stringify(vaultIndex.attachObsidianIndex(receipt, index))}\n`);
+}
+
+async function runCommand(ctx, command, args, journal) {
   let result;
   if (command === 'status') result = await commandStatusLocked(ctx);
   else if (command === 'claim') result = await commandClaim(ctx, args);
@@ -9249,39 +9463,19 @@ async function main() {
   else if (command === 'record-review') result = await commandRecordReview(ctx, args);
   else if (command === 'verify-gates') result = await commandVerifyGates(ctx, args);
   else if (command === 'record-pr') result = await commandRecordPr(ctx, args);
-  else if (command === 'advance') { await commandAdvance(ctx, args); return; }
+  else if (command === 'advance') {
+    await commandAdvance(ctx, args, { emit: (receipt) => emitAdvanceReceipt(receipt, journal) });
+    return undefined;
+  }
   else if (command === 'recover-deployed') result = await commandRecoverDeployed(ctx, args);
   else if (command === 'reconcile-metadata') result = await commandReconcileMetadata(ctx, args);
   else if (command === 'reconcile') result = await commandReconcile(ctx, args);
   else if (command === 'reconcile-dependencies') result = await commandReconcileDependencies(ctx, args);
   else if (command === 'cutover') result = await commandCutover(ctx, args);
-  else if (command === 'deploy') {
-    // Whole block runs under the card gate lock — not just the guard — so a
-    // concurrent attach during a multi-minute deploy can't have its lease
-    // clobbered by this dispatch's own whole-record writeState on terminal
-    // release. promoteAndDeploy locks under a distinct 'homebrew-promotion'
-    // name, so nesting here does not risk a same-name relock/deadlock.
-    result = await withCardGateLock(ctx, args.card, async () => {
-      const state = readState(ctx); const record = state.cards[args.card];
-      if (!record) throw new Error('deploy requires a known --card');
-      requireLeaseToken(record, args, 'deploy', Date.now());
-      const deployed = await promoteAndDeploy(ctx, state, record);
-      // promoteAndDeploy mutates `record` in place (same reference held in
-      // `state.cards`) and persists its own writes internally; once it lands
-      // the record in a TERMINAL phase (deployed), release the lease and
-      // persist the release as a follow-up write — same conditional-persist
-      // pattern as commandAdvance's terminal release, so an unleased card
-      // never triggers an extra write.
-      if (TERMINAL.has(record.phase)) {
-        const released = clearLease(record, 'lease_released_terminal', () => new Date().toISOString());
-        if (released) writeState(ctx, state, record);
-      }
-      return deployed;
-    }, { card: args.card, staleMs: 60 * 60 * 1000 });
-  } else if (command === 'recover') result = commandRecover(ctx);
+  else if (command === 'deploy') result = await commandDeploy(ctx, args);
+  else if (command === 'recover') result = commandRecover(ctx);
   else throw new Error('usage: codex-coordinator.js status|claim|amend-contract|park|amend-park|resume|break-lease|backfill-ratifications|consume-ratification|discard|supersession-depth|heal-epic-bindings|adopt|board-health|reap|restructure|record-review|verify-gates|record-pr|advance|deploy|recover-deployed|reconcile-metadata|reconcile|reconcile-dependencies|cutover|recover [options]');
-  console.log(JSON.stringify(result, null, 2));
-  if (result && result.ok === false) process.exitCode = EXIT_CODES.refusal;
+  return result;
 }
 
 module.exports = {
@@ -9307,7 +9501,8 @@ module.exports = {
   checkRollup, versionFrom, isReleasableTitle, gateReceiptStatus, pathCoveredByTouchZones, releasePrWaitReceipt,
   armFeatureAutoMerge, disableFeatureAutoMerge, runIsolatedWorkshopSelfInstall,
   commandAmendContract, commandPark, commandAmendPark, commandResume, commandBreakLease, commandDiscard, commandReap, commandRestructure,
-  commandSupersessionDepth,
+  emitAdvanceReceipt,
+  commandSupersessionDepth, commandDeploy, projectPendingCompletion, completionAfterGate, markCompletionPending,
   recordReviewOperands, commandRecordReview, commandVerifyGates, commandRecordPr, commandAdvance, stepCard,
   canonicalEpicProjection, deriveEpicProjection, noteProjectionMapping,
   commandHealEpicBindings, planEpicBindingHeal, owningEpicBoardPath,
@@ -9326,7 +9521,9 @@ module.exports = {
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error(JSON.stringify(receiptForError(err)));
+    const receipt = receiptForError(err);
+    if (err && err.obsidian_index) receipt.obsidian_index = err.obsidian_index;
+    console.error(JSON.stringify(receipt));
     process.exit(err.exitCode || EXIT_CODES.refusal);
   });
 }

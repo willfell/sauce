@@ -7,6 +7,92 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { AsyncLocalStorage, createHook } = require('async_hooks');
+// SYNC2D-HARNESS-ISOLATION. Every child this process starts through
+// child_process gets a HOME inside the temp root unless its env already names
+// one there, when it is a node child (node, process.execPath or fork) or a
+// shell child (exec, execSync, or a shell option); other children, such as
+// git, keep the env they are given. So a child that resolves this repo's
+// .loop/config.json binding, or the coordinator's ~/obsidian fallbacks, finds
+// its vaults under harnessHome and never in a real vault. Each of those vaults gets a REST config naming a
+// closed port, so a child that takes a write turn there leaves
+// .sauce-obsidian-writes behind, and harnessIsolationProblems() lists it.
+const harnessTemp = fs.realpathSync(os.tmpdir());
+const harnessHome = fs.mkdtempSync(path.join(harnessTemp, 'harness-home-'));
+const harnessVaults = (() => {
+  const binding = JSON.parse(fs.readFileSync(path.join(__dirname, '../../.loop/config.json'), 'utf8'));
+  const roots = [
+    binding.vault && binding.vault.root,
+    ...((binding.policy && binding.policy.deploy_vaults) || []).map((vault) => vault.path),
+    '~/obsidian/headspace-sauce', '~/obsidian/accuris-sauce', '~/obsidian/ero-sauce',
+  ];
+  return [...new Set(roots.filter((root) => typeof root === 'string' && root.startsWith('~/'))
+    .map((root) => path.join(harnessHome, root.slice(2))))];
+})();
+for (const vault of harnessVaults) {
+  const config = path.join(vault, '.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json');
+  fs.mkdirSync(path.dirname(config), { recursive: true });
+  fs.writeFileSync(config, JSON.stringify({ apiKey: 'harness-tripwire', insecurePort: 1, enableInsecureServer: true, enableSecureServer: false }));
+}
+(() => {
+  const childProcess = require('child_process');
+  const insideTemp = (dir) => typeof dir === 'string' && path.resolve(dir).startsWith(`${harnessTemp}${path.sep}`);
+  const pinned = (options) => {
+    const env = (options && options.env) || process.env;
+    return insideTemp(env.HOME) ? options : { ...(options || {}), env: { ...env, HOME: harnessHome } };
+  };
+  const isNode = (command) => command === process.execPath || command === 'node';
+  for (const name of ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork']) {
+    const real = childProcess[name];
+    childProcess[name] = function harnessPinnedHome(command, args, options, ...rest) {
+      if (!Array.isArray(args) && args !== undefined && typeof args !== 'function') {
+        rest.unshift(options);
+        options = args;
+        args = [];
+      }
+      if (typeof options === 'function') { rest.unshift(options); options = undefined; }
+      const pin = name === 'fork' || isNode(command) || Boolean(options && options.shell);
+      const effective = pin ? pinned(options) : options;
+      return real.call(this, command, args, ...(effective === undefined ? [] : [effective]), ...rest.filter((item) => item !== undefined));
+    };
+  }
+  for (const name of ['exec', 'execSync']) {
+    const real = childProcess[name];
+    childProcess[name] = function harnessPinnedHome(command, options, ...rest) {
+      if (typeof options === 'function') { rest.unshift(options); options = undefined; }
+      return real.call(this, command, pinned(options), ...rest);
+    };
+  }
+})();
+// The env for a coordinator CLI child that is not given a fixture of its own:
+// a binding to a board in an empty temp vault with no REST config, instead of
+// this repo's .loop/config.json.
+const harnessCliVault = fs.mkdtempSync(path.join(harnessTemp, 'harness-cli-vault-'));
+const harnessCliEnv = () => ({
+  ...process.env,
+  SAUCE_LOOP_BOARD: path.join(harnessCliVault, 'spice', 'projects', 'harness', 'harness-board.md'),
+  SAUCE_LOOP_CARDS_ROOT: path.join(harnessCliVault, 'spice', 'projects', 'harness', 'tasks'),
+  SAUCE_LOOP_VAULTS: '[]',
+  SAUCE_LOOP_REPO: 'example/harness-cli',
+});
+// Paths, relative to harnessHome, of anything in those vaults besides their
+// REST configs.
+function harnessIsolationProblems() {
+  const expected = new Set();
+  for (const vault of harnessVaults) {
+    let entry = path.join(vault, '.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json');
+    while (entry.startsWith(`${vault}${path.sep}`)) { expected.add(entry); entry = path.dirname(entry); }
+  }
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (!expected.has(full)) found.push(path.relative(harnessHome, full));
+      if (entry.isDirectory()) walk(full);
+    }
+  };
+  for (const vault of harnessVaults) walk(vault);
+  return found.sort();
+}
 const { execFileSync, spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const Module = require('module');
@@ -1204,7 +1290,9 @@ eq(waitRecord.phase, 'feature_merged', 'release wait does not advance durable st
   eq(mergeOnlyRecord.merge_only, true, 'LOOP-MERGE-ONLY record is stamped merge_only');
   ok(typeof mergeOnlyRecord.deployed_at === 'string' && mergeOnlyRecord.deployed_at.length > 0,
     'LOOP-MERGE-ONLY deployed_at is stamped');
-  eq(projected, 1, 'LOOP-MERGE-ONLY completion attempts board projection exactly once');
+  eq(projected, 0, 'SYNC2C-PROJECTION-AFTER-GATE LOOP-MERGE-ONLY the card step writes no completion projection inside its card-gate lock');
+  eq(mergeOnlyRecord.projection_pending && mergeOnlyRecord.projection_pending.phase, 'deployed',
+    'SYNC2C-PROJECTION-AFTER-GATE LOOP-MERGE-ONLY the card step leaves the deployed completion projection pending');
   eq(persisted, 1, 'LOOP-MERGE-ONLY completion persists exactly once');
 
   const releasePrRecord = { card: 'EM-Y Merge-only from release_pr', phase: 'release_pr', feature_merge_sha: 'def456' };
@@ -1312,7 +1400,7 @@ const jsonFirstCli = await new Promise((resolve) => {
   const child = spawn(process.execPath, [
     path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
     'park', '--card', 'A', '--depends-on', 'B', '--resume-condition', 'B deploys',
-  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: os.tmpdir(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -1362,7 +1450,7 @@ const unknownOptionCli = await new Promise((resolve) => {
     'record-review', '--json', '--card', 'A', '--lens', 'correctness', '--verdict', 'pass',
     '--summary', 'A sufficiently specific exact-head correctness summary.',
     '--expected-heed', 'a'.repeat(40),
-  ], { cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: os.tmpdir(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -1378,7 +1466,7 @@ const usageCli = await new Promise((resolve) => {
   const child = spawn(process.execPath, [
     path.resolve(__dirname, '../../scripts/autoloop/codex-coordinator.js'),
     'record-pr', '--json',
-  ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: process.cwd(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = ''; let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -1614,7 +1702,7 @@ for (const [label, rawOperands] of [
 ]) {
   const cliResult = await new Promise((resolve) => {
     const child = spawn(process.execPath, [...rawLimitationCliBase, ...rawOperands], {
-      cwd: os.tmpdir(), stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: os.tmpdir(), env: harnessCliEnv(), stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = ''; let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -8617,7 +8705,7 @@ eq(testSha256(fs.readFileSync(boardSeamRebind.boardPath, 'utf8')), boardSeamHash
       '--dry-run',
       '--reason',
       'side-effect-free routing probe',
-    ], { encoding: 'utf8', stdio: 'pipe' });
+    ], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /--parked-rebind requires literal --parked-rebind and --json/.test(String(cliError.stderr)),
     'GA-OPS14A2-CLI-ROUTING-UNCOVERED parser and main dispatch reach the parked-rebind-specific pre-read refusal');
@@ -10362,7 +10450,7 @@ eq(rollupResult.epic.state, 'planned', 'BGR-DISCARD-EPIC-ROLLUP receipt reports 
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'discard', '--card', 'X', '--reason', 'r'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI discard without --json refuses with a machine-parseable error before any read or write');
@@ -10648,7 +10736,7 @@ ok(fs.existsSync(symNotePath), 'BGR-REAP-RESIDUE-HEAL the replay still leaves th
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'reap'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI reap without --json refuses with a machine-parseable error before any read or write');
@@ -11817,7 +11905,7 @@ for (const [verb, args, expected] of [
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli(process.execPath, [coordinatorCli, ...args], { encoding: 'utf8', stdio: 'pipe' });
+    execCli(process.execPath, [coordinatorCli, ...args], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && expected.test(String(cliError.stderr)),
     `GA-OPS19A2-CLI-DISPATCH-UNBOUND ${verb} reaches its real dispatcher branch and refuses before state read`);
@@ -11829,7 +11917,7 @@ for (const [verb, args, expected] of [
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'cutover', '--chain-prefix', 'ES'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI cutover without --json refuses with a machine-parseable error before any read or write');
@@ -11841,7 +11929,7 @@ for (const [verb, args, expected] of [
   const coordinatorCli = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
   let cliError = null;
   try {
-    execCli('node', [coordinatorCli, 'restructure', '--spec', 'missing.json'], { encoding: 'utf8', stdio: 'pipe' });
+    execCli('node', [coordinatorCli, 'restructure', '--spec', 'missing.json'], { encoding: 'utf8', env: harnessCliEnv(), stdio: 'pipe' });
   } catch (err) { cliError = err; }
   ok(cliError && /requires --json/.test(String(cliError.stderr)),
     'CLI restructure without --json refuses with a machine-parseable error before any read or write');
@@ -14533,5 +14621,3762 @@ const fwBaseline = (record, notePath) => ({ ...record, card_note_sha: testSha256
   }
 }
 
+// --- SYNC-2 ---
+{
+  const vaultIndex = require('../../scripts/autoloop/vault-index');
+  const { Worker } = require('worker_threads');
+  const http = require('http');
+  const sync2Root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sync2-'));
+  const sync2Stubs = [];
+  const sync2ApiKey = crypto.randomBytes(24).toString('hex');
+  // Public certificate templates with fixed validity dates. Fresh private
+  // keys are generated in memory; tests never read installed credentials.
+  const sync2Tls = {
+    matchingCert: `-----BEGIN CERTIFICATE-----
+MIIDEDCCAfigAwIBAgIBATANBgkqhkiG9w0BAQsFADAlMSMwIQYDVQQDDBpTWU5D
+MkQgZGlzcG9zYWJsZSBtYXRjaGluZzAgFw0wMDAxMDEwMDAwMDBaGA8yMDk5MDEw
+MTAwMDAwMFowJTEjMCEGA1UEAwwaU1lOQzJEIGRpc3Bvc2FibGUgbWF0Y2hpbmcw
+ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC3fRBtHpgrIg0zICcXmo3E
+EGJ1ponjysrYy3a607dq7Psrk6dqiM6buXvs1sunjp/mCRTGbTIBqFCaqEZlYr4H
+NwzwzscjSxY9NLAee3nH87JXgchRE6kyDr117OXmzr8/dnRheHPY317FCjpH74d7
+hWxB7tJJaMjAs9nNPrF4oTAimG9mL8lpb3kXUm1JV0RWtu+Bixnh5CptOHhutz53
+Y105wpxKwwXPHOLd+wieur3qcUkZt+1nY9lfaTF97zOFXtP6f6vVwIkFrZz8BIqp
+G11BDlCJ7SnhRX1OJWjwh4zXmsKqtHKArEacZ186i3UlMCytANDiGxyLC35je4Fp
+AgMBAAGjSTBHMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgKEMBMGA1Ud
+JQQMMAoGCCsGAQUFBwMBMA8GA1UdEQQIMAaHBH8AAAEwDQYJKoZIhvcNAQELBQAD
+ggEBAAPQexOcTCZMyAkPaKFsD7HOjLzRyfvNtBOAQ1vupkFZA21b9siIWSzgBzlh
+s7Ei461110hNnoWATAZ3xd6rk4Skz59yRJnmcy49E2tDLS2l6mLpINxDHuGTjNxG
+ABptM6ehJzlzAL7IuUqg4kyOaRG/ZNhHspY6Y8czA3rj1sBo0QbH0gPdJnqDtw2n
+MZM4AOp34ZfDUk7MpU0OxX7aHfyv3z8m/SNbVJA5FrEDPuYRQBinLkBsCnacAj1R
++WJeQ0Ujl9waMqoFGNNA6j1dRWYekPgq4gmzxvnz3cEW1UPpJf6ByX7ZL49+NkWI
+P/AhV3ApJPz7ysiWRCo1AYz7ZoI=
+-----END CERTIFICATE-----
+`,
+    foreignCert: `-----BEGIN CERTIFICATE-----
+MIIDDjCCAfagAwIBAgIBAjANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlTWU5D
+MkQgZGlzcG9zYWJsZSBmb3JlaWduMCAXDTAwMDEwMTAwMDAwMFoYDzIwOTkwMTAx
+MDAwMDAwWjAkMSIwIAYDVQQDDBlTWU5DMkQgZGlzcG9zYWJsZSBmb3JlaWduMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7DYJisskhFQQWMZZUJA9US12
+4F7vIQjWIy+L3F92WJRkQZbUsohQt4hl4DMBr9RGbBTAR05g8+9YmsI78tHhkQ68
+yiBoSVYjPsENDAbowAs3KRVSLhCudaXkm8O0HC+E3ShkJ3/KjCmBW8TLJcDA3U+z
+9L5WqNmVuWeDHjx2tsyKf3wb7zlnA5B7SK9L/G7ebxRlcwg4qfkYU3SilRIpZhlm
+IEo3Ak34nCg/G7CvXSaaMEthC6ZyWpXJK4yFULWK8sS6C4403+1GmGV9SkTl7DxY
+ealvqYqOnMMOkx+pcPi7OjdPFi4aJdDtcruG3ker/pII1w2I4PQJdFB9hUqZrQID
+AQABo0kwRzAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIChDATBgNVHSUE
+DDAKBggrBgEFBQcDATAPBgNVHREECDAGhwR/AAABMA0GCSqGSIb3DQEBCwUAA4IB
+AQAom8Sc4N9Q71D8tqgxgFq+HkAq5JiYhaEn7PRUpwuVT8PIO2nTevmIQPZMEt5K
+8wbDSm63pzDmFT6CWg8hSyJLTr1eRScJjXORvsieJX9XzN/96JjzsBTEFj/RcMHB
+2aX5eTPaITM6JWlosSJ0T9eF7AWCZ8qrfDaO39sJoacRsax6UsXQLaxtx77+smy1
+W57NL6ubN1vCs0Gzl/vYghAYJDp5xtPgG73/N/Ic2srsO+RHI53uhgc/ZD9T5MzA
+UHEJEYRwj9hFd0/+hPUkVzGeWp+fXgcE+wov+0vf9/5DMncVztN3fDvJpZYvgYyN
+GPfwrWW/9oENWH8WpoJryeY/
+-----END CERTIFICATE-----
+`,
+    wrongIpCert: `-----BEGIN CERTIFICATE-----
+MIIDDjCCAfagAwIBAgIBAzANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlTWU5D
+MkQgZGlzcG9zYWJsZSB3cm9uZ0lwMCAXDTAwMDEwMTAwMDAwMFoYDzIwOTkwMTAx
+MDAwMDAwWjAkMSIwIAYDVQQDDBlTWU5DMkQgZGlzcG9zYWJsZSB3cm9uZ0lwMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt30QbR6YKyINMyAnF5qNxBBi
+daaJ48rK2Mt2utO3auz7K5OnaojOm7l77NbLp46f5gkUxm0yAahQmqhGZWK+BzcM
+8M7HI0sWPTSwHnt5x/OyV4HIUROpMg69dezl5s6/P3Z0YXhz2N9exQo6R++He4Vs
+Qe7SSWjIwLPZzT6xeKEwIphvZi/JaW95F1JtSVdEVrbvgYsZ4eQqbTh4brc+d2Nd
+OcKcSsMFzxzi3fsInrq96nFJGbftZ2PZX2kxfe8zhV7T+n+r1cCJBa2c/ASKqRtd
+QQ5Qie0p4UV9TiVo8IeM15rCqrRygKxGnGdfOot1JTAsrQDQ4hsciwt+Y3uBaQID
+AQABo0kwRzAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIChDATBgNVHSUE
+DDAKBggrBgEFBQcDATAPBgNVHREECDAGhwR/AAACMA0GCSqGSIb3DQEBCwUAA4IB
+AQAFfklev4kdpuMlqcJ605VrzGFCU/L2mWon5rmuylp3kRQfW+FCxuh8uGvRJH7z
+d2bi5kodDT5uam6HjrOP+Khqk75CbhdYSnUz+KMvcYi3R2unVu97Z5nbPfa70LWi
+LXtYO1vYkKF7WOdpAQJn9YqkikRWbaPNRYeVH5Om2LL3GKvE4o/oWlyJVVR0wgUv
+4Ly337nI7RUZufJG5S2jDRpWuWX1f3sDK+eRnIR4THtdHH+teu0IyYvQAIFvzcge
+hcF48g8M3eaDB7FsiSYWVfQz1vwrhEAigA6bAZgh5acE90EPhscW2M57j2BAPGqK
+fZ+R9fGPkuklXPP9P9PsBMpe
+-----END CERTIFICATE-----
+`,
+    expiredCert: `-----BEGIN CERTIFICATE-----
+MIIDDDCCAfSgAwIBAgIBBDANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlTWU5D
+MkQgZGlzcG9zYWJsZSBleHBpcmVkMB4XDTAwMDEwMTAwMDAwMFoXDTAxMDEwMTAw
+MDAwMFowJDEiMCAGA1UEAwwZU1lOQzJEIGRpc3Bvc2FibGUgZXhwaXJlZDCCASIw
+DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALd9EG0emCsiDTMgJxeajcQQYnWm
+iePKytjLdrrTt2rs+yuTp2qIzpu5e+zWy6eOn+YJFMZtMgGoUJqoRmVivgc3DPDO
+xyNLFj00sB57ecfzsleByFETqTIOvXXs5ebOvz92dGF4c9jfXsUKOkfvh3uFbEHu
+0kloyMCz2c0+sXihMCKYb2YvyWlveRdSbUlXRFa274GLGeHkKm04eG63PndjXTnC
+nErDBc8c4t37CJ66vepxSRm37Wdj2V9pMX3vM4Ve0/p/q9XAiQWtnPwEiqkbXUEO
+UIntKeFFfU4laPCHjNeawqq0coCsRpxnXzqLdSUwLK0A0OIbHIsLfmN7gWkCAwEA
+AaNJMEcwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAoQwEwYDVR0lBAww
+CgYIKwYBBQUHAwEwDwYDVR0RBAgwBocEfwAAATANBgkqhkiG9w0BAQsFAAOCAQEA
+Xr3GGJyz9OxTzf38TTd4g8h63JlbGpVnYlUtfB2+KnOxU5VbXaUY3cEubdtmuQh5
+O9sPwbhANOJeEeAYvLCWahCv9NuzWohdTtLfe7gp8Cevrw6hmxPDTOVRtl/lQkMO
+MUiexyqVre84TScSIub5ePQyJCmYm6J/ZE2SEZxK2IP70sUu2i8b6TiwtMDI0XdU
+Cdl4G2rKKBBL2qcahflQpQv1hjlpisnio8Z/FXNoxP5ny/pIun3c2uk5mNDH+ads
+pEWRBQMRSucQ7uiDcb8+rLvYQIqcITTvouN6L42pooFS5DPIrO6eYSCH9PfJTZZF
+UVzqWkImm+bKgCrDzvTDZg==
+-----END CERTIFICATE-----
+`,
+  };
+  // Replace the public key and signature in these v3 RSA certificate
+  // templates. Their validity dates and IP extensions stay fixed.
+  const sync2TlsDer = (tag, content) => {
+    const lengths = [];
+    for (let n = content.length; n > 0; n = Math.floor(n / 256)) lengths.unshift(n % 256);
+    const length = content.length < 128 ? Buffer.from([content.length]) : Buffer.from([0x80 | lengths.length, ...lengths]);
+    return Buffer.concat([Buffer.from([tag]), length, content]);
+  };
+  const sync2TlsFields = (sequence) => {
+    assert.strictEqual(sequence[0], 0x30);
+    let at = 2 + (sequence[1] & 0x80 ? sequence[1] & 0x7f : 0);
+    const fields = [];
+    while (at < sequence.length) {
+      const start = at;
+      at += 1;
+      const first = sequence[at++];
+      let length = first;
+      if (first & 0x80) {
+        length = 0;
+        for (let i = 0; i < (first & 0x7f); i += 1) length = length * 256 + sequence[at++];
+      }
+      at += length;
+      assert.ok(at <= sequence.length);
+      fields.push(sequence.subarray(start, at));
+    }
+    return fields;
+  };
+  const sync2TlsSign = (template, keys) => {
+    const [tbs, algorithm] = sync2TlsFields(new crypto.X509Certificate(template).raw);
+    const fields = sync2TlsFields(tbs);
+    assert.strictEqual(fields[0][0], 0xa0);
+    assert.strictEqual(fields[6][0], 0x30);
+    fields[6] = keys.publicKey.export({ type: 'spki', format: 'der' });
+    const body = sync2TlsDer(0x30, Buffer.concat(fields));
+    const signature = crypto.sign('sha256', body, keys.privateKey);
+    const der = sync2TlsDer(0x30, Buffer.concat([body, algorithm, sync2TlsDer(3, Buffer.concat([Buffer.from([0]), signature]))]));
+    return `-----BEGIN CERTIFICATE-----\n${der.toString('base64').match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----\n`;
+  };
+  const sync2TlsKeys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const sync2TlsForeignKeys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  for (const name of ['matching', 'wrongIp', 'expired']) sync2Tls[`${name}Cert`] = sync2TlsSign(sync2Tls[`${name}Cert`], sync2TlsKeys);
+  sync2Tls.foreignCert = sync2TlsSign(sync2Tls.foreignCert, sync2TlsForeignKeys);
+  sync2Tls.fixtureKey = sync2TlsKeys.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  sync2Tls.foreignKey = sync2TlsForeignKeys.privateKey.export({ type: 'pkcs8', format: 'pem' });
+
+  const sync2CoordinatorPath = path.join(__dirname, '../../scripts/autoloop/codex-coordinator.js');
+  const sync2IndexPath = path.join(__dirname, '../../scripts/autoloop/vault-index.js');
+  const sync2IntakePath = path.join(__dirname, '../../.agents/skills/card-intake/scripts/card-intake.js');
+  const sync2Code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+  const sync2BodyOf = (source, name) => {
+    const at = source.search(new RegExp(`^(?:async )?function ${name}\\s*\\(`, 'm'));
+    if (at < 0) return '';
+    const open = source.indexOf('{', source.indexOf(')', at));
+    let depth = 0;
+    for (let i = open; i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1;
+      else if (source[i] === '}') { depth -= 1; if (depth === 0) return source.slice(open, i + 1); }
+    }
+    return '';
+  };
+  const sync2Wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+  const sync2Until = async (predicate, ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await sync2Wait(10);
+    }
+    return predicate();
+  };
+
+  // A stub of the Local REST API plugin. Its index maps each note it knows to
+  // the sha256 of the bytes it last saw: every note on disk at startup, and
+  // each note it writes for a PUT. With stallMs, the first `stalls` times (one
+  // by default) it answers GET / it then blocks its thread for stallMs before
+  // handling whatever arrived meanwhile.
+  function sync2StubMain() {
+    const fs = require('fs');
+    const path = require('path');
+    const http = require('http');
+    const crypto = require('crypto');
+    const { parentPort, workerData: o } = require('worker_threads');
+    const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+    const stripBom = (bytes) => (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? bytes.subarray(3) : bytes);
+    const absOf = (rel) => path.join(o.vault, ...rel.split('/'));
+    const isFileOnDisk = (rel) => { try { return Boolean(rel) && fs.statSync(absOf(rel)).isFile(); } catch (_) { return false; } };
+    const index = new Map();
+    const scan = (dir) => {
+      let entries = [];
+      try { entries = fs.readdirSync(path.join(o.vault, ...dir.split('/').filter(Boolean)), { withFileTypes: true }); } catch (_) { entries = []; }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        const rel = dir ? `${dir}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) scan(rel);
+        else if (!entry.name.endsWith('.tmp')) index.set(rel, sha(fs.readFileSync(absOf(rel))));
+      }
+    };
+    scan('');
+    const requests = [];
+    const heldLocks = () => {
+      if (!o.stateDir) return [];
+      try { return fs.readdirSync(path.join(o.stateDir, 'locks')).filter((name) => name.endsWith('.lock')).sort(); } catch (_) { return []; }
+    };
+    let stalls = o.stallMs ? (o.stalls || 1) : 0;
+    const block = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    const server = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        const entry = {
+          at: Date.now(), method: req.method, url: req.url, host: req.headers.host, remote: req.socket.remoteAddress,
+          authorization: req.headers.authorization || null, contentType: req.headers['content-type'] || null,
+          body: Buffer.concat(chunks), kind: null, rel: null, status: null, held: heldLocks(), applied: null,
+        };
+        requests.push(entry);
+        const echo = o.hostile ? ` ${req.headers.authorization || ''}` : '';
+        const json = { 'Content-Type': 'application/json' };
+        const answer = (status, headers, body) => {
+          entry.status = status;
+          res.writeHead(status, headers);
+          res.end(body);
+        };
+        if (req.url === '/') {
+          entry.kind = 'root';
+          answer(200, json, JSON.stringify({
+            status: 'OK', service: 'Obsidian Local REST API',
+            authenticated: req.headers.authorization === `Bearer ${o.apiKey}`, ...(o.hostile ? { echo } : {}),
+          }));
+          if (stalls > 0) {
+            stalls -= 1;
+            res.on('finish', () => {
+              parentPort.postMessage({ type: 'stalling', at: Date.now() });
+              block(o.stallMs);
+              parentPort.postMessage({ type: 'resumed', at: Date.now(), marker: o.stallMarker ? fs.existsSync(o.stallMarker) : null });
+            });
+          }
+          return;
+        }
+        if (req.headers.authorization !== `Bearer ${o.apiKey}`) {
+          answer(401, json, JSON.stringify({ errorCode: 40101, message: `Authorization required.${echo}` }));
+          return;
+        }
+        if (!req.url.startsWith('/vault/')) { answer(404, json, JSON.stringify({ errorCode: 40400, message: 'Not Found' })); return; }
+        const raw = decodeURIComponent(req.url.slice('/vault/'.length));
+        entry.rel = raw.endsWith('/') ? raw.slice(0, -1) : raw;
+        if (req.method === 'PUT') {
+          entry.kind = 'put';
+          const status = o.putStatus || 204;
+          if (status < 200 || status >= 300) {
+            answer(status, json, JSON.stringify({ errorCode: status * 100, message: `stub refused the write${echo}` }));
+            return;
+          }
+          const written = Buffer.concat([stripBom(entry.body), Buffer.from(o.putMangle || '')]);
+          fs.mkdirSync(path.dirname(absOf(entry.rel)), { recursive: true });
+          fs.writeFileSync(absOf(entry.rel), written);
+          index.set(entry.rel, sha(written));
+          entry.applied = Date.now();
+          answer(status, {}, '');
+          return;
+        }
+        if (isFileOnDisk(entry.rel)) { entry.kind = 'note'; return; }
+        entry.kind = 'list';
+        const prefix = entry.rel ? `${entry.rel}/` : '';
+        const files = [...new Set([...index.keys()].filter((rel) => rel.startsWith(prefix)).map((rel) => {
+          const sub = rel.slice(prefix.length);
+          return sub.includes('/') ? sub.slice(0, sub.indexOf('/') + 1) : sub;
+        }))].sort();
+        if (!files.length) { answer(404, json, JSON.stringify({ errorCode: 40400, message: `File not found${echo}` })); return; }
+        answer(200, json, JSON.stringify({ files, ...(o.hostile ? { echo } : {}) }));
+      });
+    });
+    parentPort.on('message', (message) => {
+      if (message && message.type === 'log') {
+        parentPort.postMessage({ type: 'log', id: message.id, requests, index: Object.fromEntries(index) });
+      }
+    });
+    server.listen(0, '127.0.0.1', () => parentPort.postMessage({ type: 'ready', port: server.address().port }));
+  }
+  const sync2Stub = async (options = {}) => {
+    const worker = new Worker(`(${sync2StubMain.toString()})();`, {
+      eval: true, workerData: { apiKey: sync2ApiKey, ...options },
+    });
+    const events = [];
+    worker.on('message', (message) => { if (message && (message.type === 'stalling' || message.type === 'resumed')) events.push(message); });
+    const ready = await new Promise((resolve, reject) => {
+      const onMessage = (message) => { if (message && message.type === 'ready') { worker.off('message', onMessage); resolve(message); } };
+      worker.on('message', onMessage);
+      worker.once('error', reject);
+    });
+    let logSeq = 0;
+    let closedLog = null;
+    const fetchLog = () => new Promise((resolve) => {
+      const id = ++logSeq;
+      const onMessage = (message) => {
+        if (!message || message.type !== 'log' || message.id !== id) return;
+        worker.off('message', onMessage);
+        resolve({ requests: message.requests.map((request) => ({ ...request, body: Buffer.from(request.body) })), index: message.index });
+      };
+      worker.on('message', onMessage);
+      worker.postMessage({ type: 'log', id });
+    });
+    const stub = {
+      port: ready.port,
+      events,
+      log: () => (closedLog ? Promise.resolve(closedLog) : fetchLog()),
+      // Resolves once the stall is over and no request has arrived for 300ms.
+      settled: async () => {
+        if (options.stallMs) await sync2Until(() => events.some((event) => event.type === 'resumed'), options.stallMs + 30000);
+        let seen = -1;
+        for (;;) {
+          const { requests } = await fetchLog();
+          if (requests.length === seen) return;
+          seen = requests.length;
+          await sync2Wait(300);
+        }
+      },
+      close: async () => {
+        if (closedLog) return;
+        closedLog = await fetchLog();
+        await worker.terminate();
+      },
+    };
+    sync2Stubs.push(stub);
+    return stub;
+  };
+  const sync2Kind = (requests, kind, rel) => requests.filter((request) => request.kind === kind && (rel === undefined || request.rel === rel));
+  const sync2Loopback = (request) => /^(::ffff:)?127\.0\.0\.1$/.test(String(request.remote));
+  const sync2ClosedPort = async () => {
+    const probe = http.createServer();
+    await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address();
+    await new Promise((resolve) => probe.close(resolve));
+    return port;
+  };
+  const sync2RestConfig = async (vault, port, extra = {}) => {
+    const file = path.join(vault, vaultIndex.REST_CONFIG_RELATIVE);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({
+      port: await sync2ClosedPort(), insecurePort: port, enableInsecureServer: true, enableSecureServer: true,
+      apiKey: sync2ApiKey, ...extra,
+    }, null, 2));
+  };
+  const sync2Sha = (file) => testSha256(fs.readFileSync(file));
+  const sync2Snapshot = (vault) => {
+    const out = new Map();
+    const stack = [vault];
+    while (stack.length) {
+      const dir = stack.pop();
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === '.obsidian') continue;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) stack.push(full);
+        else out.set(path.relative(vault, full).split(path.sep).join('/'), fs.readFileSync(full, 'utf8'));
+      }
+    }
+    return out;
+  };
+  const sync2Changed = (before, after) => [...after].filter(([rel, raw]) => before.get(rel) !== raw).map(([rel]) => rel).sort();
+  const sync2Turn = (vault) => path.join(vault, vaultIndex.PENDING_DIR, 'turn');
+  const sync2TurnHeld = (vault) => fs.existsSync(sync2Turn(vault));
+  const sync2RailWrite = (file, text) => {
+    vaultIndex.beforeNoteWrite();
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, text);
+    fs.renameSync(tmp, file);
+    vaultIndex.noteWritten(file, text);
+  };
+
+  const SYNC2_EPIC = 'Epic A';
+  const SYNC2_CARD = 'A1 First slice';
+  const SYNC2_SIBLING = 'A2 Second slice';
+  const SYNC2_PREREQ = 'A0 Prereq';
+  const SYNC2_CARD_REL = `spice/projects/test/tasks/${SYNC2_EPIC}/board/${SYNC2_CARD}.md`;
+  const SYNC2_EPIC_BOARD_REL = `spice/projects/test/tasks/${SYNC2_EPIC}/board/${SYNC2_EPIC}-board.md`;
+  const SYNC2_BOARD_REL = 'spice/projects/test/test-board.md';
+  const sync2Slice = (name) => canonicalEpicSlice({ name, epic: SYNC2_EPIC })
+    .replace(`task_parent: "tasks/${SYNC2_EPIC}/${SYNC2_EPIC}.md"`, `task_parent: "spice/projects/test/tasks/${SYNC2_EPIC}/${SYNC2_EPIC}.md"`)
+    .replace(`source_board: "tasks/${SYNC2_EPIC}/board/${SYNC2_EPIC}-board.md"`, `source_board: "${SYNC2_EPIC_BOARD_REL}"`)
+    .replace(`kanban_board: "tasks/${SYNC2_EPIC}/board/${SYNC2_EPIC}-board.md"`, `kanban_board: "${SYNC2_EPIC_BOARD_REL}"\nkanban_column: In Planning`);
+  let sync2FixtureSeq = 0;
+  const sync2CliFixture = (label) => {
+    const base = path.join(sync2Root, `cli-${label}-${++sync2FixtureSeq}`);
+    const origin = path.join(base, 'origin.git');
+    const seed = path.join(base, 'seed');
+    const repo = path.join(base, 'repo');
+    const home = path.join(base, 'home');
+    fs.mkdirSync(seed, { recursive: true });
+    fs.mkdirSync(home, { recursive: true });
+    const gitEnv = {
+      ...process.env, GIT_AUTHOR_DATE: '2026-09-28T12:00:00Z', GIT_COMMITTER_DATE: '2026-09-28T12:00:00Z',
+      GIT_AUTHOR_NAME: 'sync2', GIT_AUTHOR_EMAIL: 'sync2@example.com', GIT_COMMITTER_NAME: 'sync2', GIT_COMMITTER_EMAIL: 'sync2@example.com',
+    };
+    const git = (args, cwd) => execFileSync('/usr/bin/git', args, { cwd, stdio: 'pipe', env: gitEnv });
+    git(['init', '--quiet', '--bare', '--initial-branch=main', origin]);
+    git(['init', '--quiet', '--initial-branch=main', seed]);
+    fs.writeFileSync(path.join(seed, 'README.md'), 'seed\n');
+    git(['add', 'README.md'], seed);
+    git(['commit', '--quiet', '-m', 'seed'], seed);
+    git(['remote', 'add', 'origin', origin], seed);
+    git(['push', '--quiet', 'origin', 'main'], seed);
+    git(['clone', '--quiet', origin, repo]);
+    const vault = path.join(base, 'vault');
+    const projectRoot = path.join(vault, 'spice', 'projects', 'test');
+    const cardsRoot = path.join(projectRoot, 'tasks');
+    const epicRoot = path.join(cardsRoot, SYNC2_EPIC);
+    const epicBoardDir = path.join(epicRoot, 'board');
+    fs.mkdirSync(epicBoardDir, { recursive: true });
+    fs.mkdirSync(path.join(epicRoot, 'context', 'runs'), { recursive: true });
+    const boardPath = path.join(projectRoot, 'test-board.md');
+    fs.writeFileSync(boardPath, [
+      '---', 'kanban-plugin: board', '---', '',
+      '## In Planning', `- [ ] [[${SYNC2_EPIC}]]`, '',
+      '## In Progress', '', '## Blocked', '', '## Completed', '', '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(epicRoot, `${SYNC2_EPIC}.md`), [
+      '---', 'type: epic', 'schema_version: 1.1.0',
+      `source_board: ${SYNC2_BOARD_REL}`, `kanban_board: ${SYNC2_BOARD_REL}`,
+      'status: planned', `epic_board: ${SYNC2_EPIC_BOARD_REL}`, 'posture: claimable', '---', 'atlas body', '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(epicBoardDir, `${SYNC2_EPIC}-board.md`), [
+      '---', 'kanban-plugin: board', 'board_role: epic', `epic: "[[${SYNC2_EPIC}]]"`, '---', '',
+      '## In Planning', `- [ ] [[${SYNC2_CARD}]]`, `- [ ] [[${SYNC2_SIBLING}]]`, '',
+      '## In Progress', '', '## Blocked', '', '## Completed', '', '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(epicBoardDir, `${SYNC2_CARD}.md`), sync2Slice(SYNC2_CARD));
+    fs.writeFileSync(path.join(epicBoardDir, `${SYNC2_SIBLING}.md`), sync2Slice(SYNC2_SIBLING));
+    fs.writeFileSync(path.join(cardsRoot, `${SYNC2_PREREQ}.md`), '---\nstatus: completed\n---\nDone.\n');
+    const stateDir = path.join(repo, '.git', 'sauce-autoloop');
+    const env = {
+      ...process.env,
+      HOME: home,
+      SAUCE_LOOP_BOARD: boardPath,
+      SAUCE_LOOP_CARDS_ROOT: cardsRoot,
+      SAUCE_LOOP_VAULTS: '[]',
+      SAUCE_LOOP_REPO: 'example/sync2-fixture',
+      SAUCE_LOOP_BOARD_TOPOLOGY: 'epic',
+      DELIVERY_FID: path.join(base, 'no-fid.md'),
+      DELIVERY_REPO_ROOT: repo,
+      DELIVERY_STATE: path.join(stateDir, 'state.json'),
+      SYNC2_VAULT: vault,
+      SYNC2_LOCKS: path.join(stateDir, 'locks'),
+    };
+    delete env.SAUCE_EPIC_SELECTION_SHADOW;
+    return {
+      base, repo, vault, projectRoot, cardsRoot, boardPath, env, stateDir,
+      statePath: path.join(stateDir, 'state.json'),
+      cardPath: path.join(epicBoardDir, `${SYNC2_CARD}.md`),
+      epicBoardPath: path.join(epicBoardDir, `${SYNC2_EPIC}-board.md`),
+    };
+  };
+
+  // Loaded with --require into a CLI child. SYNC2_PROBE_LOG records sockets,
+  // workers, vault file writes, coordinator lock acquire/release times, and
+  // when each HTTP request is sent and answered.
+  // SYNC2_FROZEN_CLOCK makes Date and crypto.randomUUID deterministic.
+  // SYNC2_MAIN_SHIM replaces vault-index with a module whose functions do
+  // nothing, so the caller code runs without it.
+  // SYNC2D_BOTTLE_VERSION answers reads of the Homebrew bottle manifest with
+  // that workshop_version, so promoteAndDeploy runs without Homebrew.
+  function sync2PreloadMain() {
+    const fs = require('fs');
+    const path = require('path');
+    const crypto = require('crypto');
+    const append = fs.appendFileSync.bind(fs);
+    const log = process.env.SYNC2_PROBE_LOG;
+    const record = (entry) => { if (log) append(log, `${JSON.stringify(entry)}\n`); };
+    // Every probe time is Date.now() taken before any frozen clock replaces
+    // Date, the clock the stub and the other processes of these tests use.
+    const now = Date.now.bind(Date);
+    if (process.env.SYNC2_FROZEN_CLOCK) {
+      const RealDate = Date;
+      const base = Number(process.env.SYNC2_FROZEN_CLOCK);
+      let tick = 0;
+      const next = () => { tick += 1; return process.env.SYNC2_CONSTANT_CLOCK ? base : base + tick; };
+      function FrozenDate(...args) {
+        if (!new.target) return new RealDate(next()).toString();
+        return args.length ? new RealDate(...args) : new RealDate(next());
+      }
+      FrozenDate.prototype = RealDate.prototype;
+      FrozenDate.now = next;
+      FrozenDate.parse = RealDate.parse;
+      FrozenDate.UTC = RealDate.UTC;
+      global.Date = FrozenDate;
+      let uuid = 0;
+      crypto.randomUUID = () => { uuid += 1; return `00000000-0000-4000-8000-${String(uuid).padStart(12, '0')}`; };
+    }
+    if (process.env.SYNC2D_BOTTLE_VERSION) {
+      const manifest = '/opt/homebrew/opt/sauce/libexec/platform/manifest.json';
+      const realRead = fs.readFileSync;
+      fs.readFileSync = function sync2dRead(file, ...rest) {
+        if (String(file) !== manifest) return realRead.call(this, file, ...rest);
+        const text = JSON.stringify({ workshop_version: process.env.SYNC2D_BOTTLE_VERSION });
+        return rest.length && rest[0] ? text : Buffer.from(text);
+      };
+    }
+    if (process.env.SYNC2_MAIN_SHIM) {
+      const target = process.env.SYNC2_MAIN_SHIM;
+      const shim = {
+        REST_CONFIG_RELATIVE: path.join('.obsidian', 'plugins', 'obsidian-local-rest-api', 'data.json'),
+        beforeNoteWrite() {},
+        beforeNoteRewrite() {},
+        noteWritten() {},
+        lockGate() { return null; },
+        async awaitWriteTurn() {},
+        async withVaultIndex(_vaultRoot, fn) { return fn(null); },
+        async verifyJournal() { return null; },
+        attachObsidianIndex(receipt) { return receipt; },
+        vaultRootForBoard(boardPath) { return path.resolve(path.dirname(boardPath), '../../..'); },
+      };
+      require.cache[target] = { id: target, filename: target, loaded: true, exports: shim, children: [], paths: [] };
+    }
+    if (log) {
+      const net = require('net');
+      const threads = require('worker_threads');
+      const connect = net.Socket.prototype.connect;
+      net.Socket.prototype.connect = function sync2Connect(...args) { record({ op: 'connect' }); return connect.apply(this, args); };
+      const RealWorker = threads.Worker;
+      threads.Worker = class extends RealWorker { constructor(...args) { record({ op: 'worker' }); super(...args); } };
+      const http = require('http');
+      const realRequest = http.request;
+      http.request = function sync2Request(...args) {
+        const req = realRequest.apply(this, args);
+        const { method, path: urlPath } = args[0] || {};
+        record({ op: 'sent', method, path: urlPath, t: now() });
+        req.on('response', () => record({ op: 'answered', method, path: urlPath, t: now() }));
+        return req;
+      };
+      const vault = `${process.env.SYNC2_VAULT}${path.sep}`;
+      const locks = `${process.env.SYNC2_LOCKS}${path.sep}`;
+      const lockName = (dir) => (String(dir).startsWith(locks) && String(dir).endsWith('.lock') && !String(dir).slice(locks.length).includes(path.sep)
+        ? path.basename(String(dir), '.lock') : null);
+      const wrap = (name, describe) => {
+        const real = fs[name];
+        fs[name] = function sync2Wrapped(...args) {
+          const result = real.apply(this, args);
+          const entry = describe(args);
+          if (entry) record(entry);
+          return result;
+        };
+      };
+      wrap('writeFileSync', ([file]) => (String(file).startsWith(vault) ? { op: 'write', file: String(file) } : null));
+      wrap('renameSync', ([from, to]) => (String(to).startsWith(vault) ? { op: 'rename', from: String(from), to: String(to) }
+        : String(to) === process.env.DELIVERY_STATE ? { op: 'ledger-rename', from: String(from), to: String(to) } : null));
+      wrap('unlinkSync', ([file]) => (String(file).startsWith(vault) ? { op: 'unlink', file: String(file) } : null));
+      wrap('mkdirSync', ([dir]) => {
+        if (lockName(dir)) return { op: 'acquire', lock: lockName(dir), t: now() };
+        return String(dir).startsWith(vault) ? { op: 'mkdir', dir: String(dir) } : null;
+      });
+      wrap('rmSync', ([dir]) => (lockName(dir) ? { op: 'release', lock: lockName(dir), t: now() } : null));
+    }
+  }
+  const sync2Preload = path.join(sync2Root, 'preload.js');
+  fs.writeFileSync(sync2Preload, `(${sync2PreloadMain.toString()})();\n`);
+  let sync2ProbeSeq = 0;
+  const sync2Outputs = [];
+  // Resolves when the child exits. With untilReceipt it resolves as soon as
+  // stdout parses as one JSON receipt, with `exited` resolving at exit. Each
+  // run is also added to sync2Outputs when it exits.
+  const sync2Cli = (fx, args, options = {}) => new Promise((resolve) => {
+    const started = Date.now();
+    const probeLog = options.probe ? path.join(fx.base, `probe-${++sync2ProbeSeq}.log`) : null;
+    const env = {
+      ...fx.env,
+      ...(probeLog ? { SYNC2_PROBE_LOG: probeLog } : {}),
+      ...(options.constantClock ? { SYNC2_CONSTANT_CLOCK: '1' } : {}),
+      ...(options.frozen ? { SYNC2_FROZEN_CLOCK: String(Date.parse('2026-09-28T20:00:00.000Z')) } : {}),
+      ...(options.mainShim ? { SYNC2_MAIN_SHIM: sync2IndexPath } : {}),
+    };
+    const script = options.script || sync2CoordinatorPath;
+    const child = spawn(process.execPath, ['--require', sync2Preload, script, ...args], { cwd: options.cwd || fx.repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = [];
+    const err = [];
+    let printed = null;
+    let resolveExit = null;
+    const exited = new Promise((done) => { resolveExit = done; });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 120000);
+    child.stdout.on('data', (chunk) => {
+      out.push(chunk);
+      if (printed !== null) return;
+      let receipt = null;
+      try { receipt = JSON.parse(Buffer.concat(out).toString('utf8')); } catch (_) { return; }
+      printed = Date.now();
+      if (options.untilReceipt) resolve({ receipt, started, printed, pid: child.pid, exited });
+    });
+    child.stderr.on('data', (chunk) => err.push(chunk));
+    child.on('close', (code) => {
+      const ended = Date.now();
+      clearTimeout(timer);
+      const stdout = Buffer.concat(out).toString('utf8');
+      let receipt = null;
+      try { receipt = JSON.parse(stdout); } catch (_) { receipt = null; }
+      let probe = [];
+      if (probeLog && fs.existsSync(probeLog)) {
+        probe = fs.readFileSync(probeLog, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+      }
+      const result = {
+        code, stdout, stderr: Buffer.concat(err).toString('utf8'), receipt: receipt || {}, started, printed: printed === null ? ended : printed,
+        ended, ms: ended - started, pid: child.pid, probe,
+      };
+      sync2Outputs.push(result);
+      resolveExit(result);
+      resolve(result);
+    });
+  });
+  const sync2LeaseToken = (claim) => String((claim.receipt && claim.receipt.lease_token) || '');
+  const sync2Second = {
+    park: (claim) => ['park', '--json', '--card', SYNC2_CARD, '--depends-on', SYNC2_PREREQ,
+      '--resume-condition', 'A0 deploys first', '--lease-token', sync2LeaseToken(claim)],
+    discard: () => ['discard', '--json', '--card', SYNC2_SIBLING, '--reason', 'sync2 discard'],
+    reconcile: () => ['reconcile', '--json', '--card', SYNC2_CARD],
+  };
+  const sync2ColumnOf = (board, name) => {
+    let column = null;
+    for (const line of String(board).split('\n')) {
+      const heading = line.match(/^## (.+)$/);
+      if (heading) column = heading[1].trim();
+      else if (line.includes(`[[${name}]]`)) return column;
+    }
+    return null;
+  };
+  // The card note, epic board, parent board and ledger, read together.
+  const sync2Surfaces = (fx) => {
+    let state = { cards: {} };
+    try { state = JSON.parse(fs.readFileSync(fx.statePath, 'utf8')); } catch (_) { state = { cards: {} }; }
+    const record = state.cards[SYNC2_CARD] || {};
+    const cardRaw = fs.readFileSync(fx.cardPath, 'utf8');
+    const epicBoard = fs.readFileSync(fx.epicBoardPath, 'utf8');
+    return {
+      phase: record.phase || null,
+      sibling: state.cards[SYNC2_SIBLING] ? state.cards[SYNC2_SIBLING].phase : null,
+      card: [testScalarField(cardRaw, 'status'), testScalarField(cardRaw, 'kanban_column')],
+      epicBoard: [sync2ColumnOf(epicBoard, SYNC2_CARD), sync2ColumnOf(epicBoard, SYNC2_SIBLING)],
+      parentBoard: sync2ColumnOf(fs.readFileSync(fx.boardPath, 'utf8'), SYNC2_EPIC),
+    };
+  };
+  // What the card note and epic board must say for the ledger's phase; the
+  // parent board's epic column is taken from the same sequence run without
+  // REST config.
+  const sync2Expected = (surfaces, reference) => {
+    const mapping = projectionMapping(surfaces.phase) || {};
+    return {
+      phase: surfaces.phase,
+      sibling: surfaces.sibling,
+      card: [mapping.status, mapping.column],
+      epicBoard: [mapping.column, surfaces.sibling === 'discarded' ? null : 'In Planning'],
+      parentBoard: reference.parentBoard,
+    };
+  };
+  const sync2Holds = (probe) => {
+    const open = new Map();
+    const totals = {};
+    for (const entry of probe) {
+      if (entry.op === 'acquire') open.set(entry.lock, entry.t);
+      else if (entry.op === 'release' && open.has(entry.lock)) {
+        totals[entry.lock] = (totals[entry.lock] || 0) + (entry.t - open.get(entry.lock));
+        open.delete(entry.lock);
+      }
+    }
+    return totals;
+  };
+  const sync2Median = (values) => {
+    const sorted = values.slice().sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  };
+
+  try {
+    // SYNC2D-CI-HISTORY: the archived-main oracle intentionally fails when
+    // its object or origin/main is absent. Each full-preflight checkout must
+    // furnish history. This extractor accepts ci.yml's literal, space-
+    // indented job/step mappings only; unsupported layouts fail the pin.
+    {
+      const fullHistoryCheckout = (source, job) => {
+        const lines = source.split(/\r?\n/);
+        if (lines.some((line) => /^\s*\t/.test(line))) return false;
+        const indexes = (predicate, from = 0, to = lines.length) => lines
+          .map((line, index) => ({ line, index })).filter(({ line, index }) => index >= from && index < to && predicate(line))
+          .map(({ index }) => index);
+        const jobs = indexes((line) => line === 'jobs:');
+        if (jobs.length !== 1) return false;
+        const jobsEnd = indexes((line) => /^[^\s#]/.test(line), jobs[0] + 1)[0] || lines.length;
+        const starts = indexes((line) => line === `  ${job}:`, jobs[0] + 1, jobsEnd);
+        if (starts.length !== 1) return false;
+        const jobEnd = indexes((line) => /^  [^\s#]/.test(line), starts[0] + 1, jobsEnd)[0] || jobsEnd;
+        const steps = indexes((line) => /^    steps:\s*$/.test(line), starts[0] + 1, jobEnd);
+        if (steps.length !== 1) return false;
+        const stepsEnd = indexes((line) => /^    [^\s#]/.test(line), steps[0] + 1, jobEnd)[0] || jobEnd;
+        const stepStarts = indexes((line) => /^      - /.test(line), steps[0] + 1, stepsEnd);
+        const stepBodies = stepStarts.map((start, index) => lines.slice(start, stepStarts[index + 1] || stepsEnd));
+        const checkouts = stepBodies.filter((step) => step.some((line) => /^(?:        uses:|      - uses:) actions\/checkout@/.test(line)));
+        if (checkouts.length !== 1 || checkouts[0] !== stepBodies[0]) return false;
+        const checkout = checkouts[0];
+        const uses = checkout.filter((line) => /^(?:        uses:|      - uses:)/.test(line));
+        const withFields = checkout.filter((line) => /^        with:/.test(line));
+        const withAt = checkout.findIndex((line) => /^        with:/.test(line));
+        const withEnd = checkout.findIndex((line, index) => index > withAt && /^        [^\s#]/.test(line));
+        const inputs = checkout.slice(withAt + 1, withEnd < 0 ? checkout.length : withEnd);
+        const depth = inputs.filter((line) => /^          fetch-depth:/.test(line));
+        return uses.length === 1 && /^(?:        uses:|      - uses:) actions\/checkout@v4\s*$/.test(uses[0])
+          && withFields.length === 1 && /^        with:\s*$/.test(withFields[0])
+          && depth.length === 1 && /^          fetch-depth: 0\s*$/.test(depth[0])
+          && !checkout.some((line) => /^(?:        if:|      - if:)/.test(line));
+      };
+      const ci = fs.readFileSync(path.join(__dirname, '../../.github/workflows/ci.yml'), 'utf8');
+      eq(fullHistoryCheckout(ci, 'preflight'), true,
+        'SYNC2D-CI-HISTORY protected preflight checkout provides full history for the required archived-main fixture');
+      const override = '        with:\n          fetch-depth: 0\n';
+      const checkout = '        uses: actions/checkout@v4\n';
+      const mutated = (replacement) => ci.replace(override, replacement);
+      eq(fullHistoryCheckout(mutated(''), 'preflight'), false,
+        'SYNC2D-CI-HISTORY removing the protected preflight override is rejected even though pr-title-bump still has full history');
+      eq(fullHistoryCheckout(mutated('        with:\n          fetch-depth: 1\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY an explicitly shallow protected checkout is rejected');
+      eq(fullHistoryCheckout(mutated('        with:\n          # fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a comment cannot provide the history prerequisite');
+      eq(fullHistoryCheckout(mutated('        with:\n          fetch-depth: |\n            0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a literal scalar cannot impersonate the numeric fetch-depth input');
+      eq(fullHistoryCheckout(mutated('        with:\n            fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a fetch-depth line at the wrong mapping depth is rejected');
+      eq(fullHistoryCheckout(mutated('        with:\n          fetch-depth: 0\n          fetch-depth: 1\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY duplicate fetch-depth keys are rejected');
+      eq(fullHistoryCheckout(ci.replace(checkout, `${checkout}        if: false\n`), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a conditional checkout cannot guarantee the required history');
+      eq(fullHistoryCheckout(ci.replace(checkout, `${checkout}        uses: actions/checkout@v4\n`), 'preflight'), false,
+        'SYNC2D-CI-HISTORY duplicate uses keys are rejected');
+      eq(fullHistoryCheckout(mutated('        with:\n        env:\n          fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY fetch-depth under another step mapping cannot replace the checkout input');
+      eq(fullHistoryCheckout(ci.replace('    steps:\n', '    steps:\n      - name: Earlier harness\n        run: npm run release:preflight\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a checkout after the harness cannot provide its history prerequisite');
+      eq(fullHistoryCheckout(ci.replace('      - name: Checkout sauce repo\n', '      - if: false\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a condition as the first checkout field is also rejected');
+      eq(fullHistoryCheckout(ci.replace('    steps:\n', '    steps:\n      - uses: actions/checkout@v4\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY multiple checkouts in the protected job are rejected');
+      eq(fullHistoryCheckout(ci.replace('  preflight:\n', '  # preflight:\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a commented job name cannot select the protected preflight job');
+      eq(fullHistoryCheckout(ci.replace('  preflight:\n', '  preflight:\n  preflight:\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY duplicate protected job keys are rejected');
+      eq(fullHistoryCheckout(mutated('        run: |\n          with:\n            fetch-depth: 0\n'), 'preflight'), false,
+        'SYNC2D-CI-HISTORY a checkout-looking line in a run block cannot furnish the prerequisite');
+    }
+
+    // SYNC2-NO-POST-VERB-WRITE source scan
+    {
+      const indexCode = sync2Code(fs.readFileSync(sync2IndexPath, 'utf8'));
+      const coordinatorCode = sync2Code(fs.readFileSync(sync2CoordinatorPath, 'utf8'));
+      const intakeCode = sync2Code(fs.readFileSync(sync2IntakePath, 'utf8'));
+      const putSites = [...indexCode.matchAll(/'PUT'/g)].map((match) => {
+        const starts = [...indexCode.slice(0, match.index).matchAll(/^(?:async )?function ([A-Za-z0-9_$]+)\s*\(/gm)];
+        return starts.length ? starts[starts.length - 1][1] : null;
+      });
+      eq(putSites, ['putNote'], 'SYNC2-NO-POST-VERB-WRITE source scan: the only PUT the rail sends is built in putNote');
+      // exchange destroys the socket only when http.request throws, before
+      // req.end sends anything; that catch is removed before the check.
+      const unsentCatch = /\} catch \(_\) \{\s*socket\.destroy\(\);\s*settle\(\{ failure: 'request-failed' \}\);\s*return;\s*\}/;
+      const exchangeBody = sync2BodyOf(indexCode, 'exchange');
+      ok(unsentCatch.test(exchangeBody) && exchangeBody.search(unsentCatch) < exchangeBody.indexOf('req.end('),
+        'SYNC2D-INVALID-KEY source scan: exchange destroys the socket in a catch of http.request placed before req.end');
+      const sendingBody = exchangeBody.replace(unsentCatch, '');
+      for (const [name, body] of [['putNote', sync2BodyOf(indexCode, 'putNote')], ['exchange', sendingBody]]) {
+        ok(body && !/setTimeout|destroy\(|\babort\(|Promise\.race|timeout/i.test(body),
+          `SYNC2-NO-POST-VERB-WRITE source scan: ${name} never times out or aborts a possibly sent request`);
+      }
+      ok(/if \(mayHaveSent\) return;\s*settle\(\{ failure: 'unreachable' \}\);/.test(sendingBody),
+        'SYNC2D-LOST-RESPONSE source scan: lost response settles only before sending may have begun');
+      ok(/mayHaveSent = true;\s*keepalive = setInterval\(\(\) => \{\}, 60000\);/.test(sendingBody)
+        && sendingBody.indexOf('keepalive = setInterval') < sendingBody.indexOf('req.end(') && !/unref/.test(sendingBody),
+        'SYNC2D-LOST-RESPONSE source scan: a refed empty interval pins the process before req.end can send');
+      ok(/if \(!res.complete\) \{ lostResponse\(\); return; \}\s*settle\(\{ status: res.statusCode/.test(sendingBody)
+        && /if \(keepalive\) clearInterval\(keepalive\)/.test(sendingBody),
+        'SYNC2D-LOST-RESPONSE source scan: completed responses settle and clear the liveness interval');
+      for (const event of ["req.on('error', lostResponse)", "req.on('close', lostResponse)",
+        "socket.on('error', lostResponse)", "socket.on('close', lostResponse)",
+        "res.on('error', lostResponse)", "res.on('aborted', lostResponse)"]) {
+        ok(sendingBody.includes(event), `SYNC2D-LOST-RESPONSE source scan: ${event} uses the guarded failure path`);
+      }
+      ok(sendingBody.includes("res.on('close', () => { if (!res.complete) lostResponse(); })")
+        && /try \{ req.end\(body \|\| undefined\); \} catch \(_\) \{ lostResponse\(\); \}/.test(sendingBody)
+        && /bytes, true\)/.test(sync2BodyOf(indexCode, 'putNote')),
+        'SYNC2D-LOST-RESPONSE source scan: incomplete close and synchronous req.end errors cannot release a sent note');
+      ok(/await putNote\(/.test(sync2BodyOf(indexCode, 'writeThrough')) && /await writeThrough\(/.test(sync2BodyOf(indexCode, 'flush')),
+        'SYNC2-NO-POST-VERB-WRITE source scan: flush awaits every PUT it sends');
+      const flushCalls = [...indexCode.matchAll(/(\S+)\s+flush\(scope\)/g)].map((match) => match[1]).filter((prefix) => prefix !== 'function');
+      ok(flushCalls.length > 0 && flushCalls.every((prefix) => prefix === 'await' || prefix === '=>'),
+        `SYNC2-NO-POST-VERB-WRITE source scan: every flush is awaited (${flushCalls.join(', ')})`);
+      ok(/await journal\.flush\(\)/.test(sync2BodyOf(indexCode, 'verifyJournal'))
+        && /await verifyJournal\(scope\.journal\)/.test(sync2BodyOf(indexCode, 'withVaultIndex')),
+      'SYNC2-NO-POST-VERB-WRITE source scan: a scope sends its last notes before it returns');
+      eq(sync2BodyOf(coordinatorCode, 'withLock').replace(/\s+/g, ' '),
+        '{ const gate = vaultIndex.lockGate(); if (!gate) return withLockDirectory(ctx, name, fn, opts); await gate.beforeAcquire(); '
+        + 'try { return await withLockDirectory(ctx, name, () => gate.run(fn), opts); } finally { await gate.afterRelease(); } }',
+        'SYNC2-NO-POST-VERB-WRITE source scan: withLock consults the write-turn gate before the lock and awaits the flush after releasing it');
+      eq(sync2BodyOf(indexCode, 'settle').replace(/\s+/g, ' '),
+        "{ try { await flush(scope); } catch (_) { if (scope.channel) disable(scope.channel, 'internal-error'); "
+        + "for (const entry of scope.written.values()) { if (entry.reason === 'not-sent') entry.reason = 'internal-error'; } } "
+        + 'finally { if (scope.outermost === 0) releaseTurn(scope); } }',
+        'SYNC2-TURN source scan: the write turn is released only after the flush has been awaited');
+      for (const [label, code] of [['codex-coordinator.js', coordinatorCode], ['card-intake.js', intakeCode]]) {
+        ok(!/require\('(?:http|https|net|tls|worker_threads)'\)|'PUT'/.test(code),
+          `SYNC2-NO-POST-VERB-WRITE source scan: ${label} opens no connection of its own`);
+      }
+      eq(sync2BodyOf(coordinatorCode, 'atomicWriteText').replace(/\s+/g, ' '),
+        '{ vaultIndex.beforeNoteWrite(); const tmp = `${file}.${process.pid}.${Date.now()}.tmp`; fs.writeFileSync(tmp, value); fs.renameSync(tmp, file); vaultIndex.noteWritten(file, value); }',
+        'SYNC2-NO-REST-IDENTICAL source scan: atomicWriteText keeps its tmp name and rename, between the turn check and the record');
+      ok(/fs\.renameSync\(tmp, file\);\s*vaultIndex\.noteWritten\(file, content\);/.test(sync2BodyOf(intakeCode, 'atomicWrite')),
+        'SYNC2-NO-REST-IDENTICAL source scan: card-intake atomicWrite renames as before and then records the note');
+      ok(!/obsidian_index|unseen|available/.test(sync2BodyOf(coordinatorCode, 'main')),
+        'SYNC2-NO-REST-IDENTICAL main derives the exit code from the verb receipt alone');
+      const outermostLockUses = [
+        ['commandBackfillRatifications', "lock(ctx, 'selector'"],
+        ['commandConsumeRatification', "lock(ctx, 'selector'"],
+        ['commandAmendContract', "transitionLock(ctx, 'selector'"],
+        ['commandPark', "transitionLock(ctx, 'selector'"],
+        ['commandAmendPark', "transitionLock(ctx, 'selector'"],
+        ['commandResume', "transitionLock(ctx, 'selector'"],
+        ['commandHealEpicBindings', "transitionLock(ctx, 'selector'"],
+        ['commandAdopt', "transitionLock(ctx, 'selector'"],
+        ['commandDiscard', "d.transitionLock(ctx, 'selector'"],
+        ['commandReap', "d.transitionLock(ctx, 'selector'"],
+        ['commandRestructure', "d.transitionLock(ctx, 'selector'"],
+        ['commandClaim', "withLock(ctx, 'selector'"],
+        ['commandAdvance', "selectorLock(ctx, 'selector'"],
+        ['commandReconcile', 'withCardGateLock(ctx, card'],
+        ['commandCutover', "transitionLock(ctx, 'selector'"],
+        ['commandRecoverDeployed', "lock(ctx, 'selector'"],
+        ['commandRestampContractFrontmatter', "lock(ctx, 'contract-frontmatter-restamp'"],
+        ['commandReconcileMetadata', 'return withCardGateLock(ctx, card'],
+        ['commandReconcileDependencies', "return lock(ctx, 'selector'"],
+        ['projectPendingCompletion', 'withCardGateLock(ctx, card'],
+        ['commandBoardHealth', "transitionLock(ctx, 'selector'"],
+      ];
+      eq(outermostLockUses.length, 21, 'SYNC2B-EVERY-WRITER-TAKES-THE-TURN source scan: 21 named functions are checked below');
+      for (const [name, firstUse] of outermostLockUses) {
+        const body = sync2BodyOf(coordinatorCode, name);
+        const uses = [...body.matchAll(new RegExp(firstUse.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))].map((match) => match.index);
+        const turns = [...body.matchAll(/await vaultIndex\.awaitWriteTurn\(\);/g)].map((match) => match.index);
+        ok(uses.length > 0 && uses.every((at) => turns.some((turn) => turn < at && !body.slice(turn, at).match(/Lock\(ctx|lock\(ctx/))),
+          `SYNC2B-EVERY-WRITER-TAKES-THE-TURN source scan: ${name} awaits the turn, with no lock call in between, before each ${firstUse}`);
+      }
+      const reconcileBody = sync2BodyOf(coordinatorCode, 'commandReconcile');
+      const reconcileTurnAt = reconcileBody.indexOf('await vaultIndex.awaitWriteTurn();');
+      const reconcileLoads = [...reconcileBody.matchAll(/const (state|lockedState) = loadState\(ctx\);/g)];
+      ok(reconcileTurnAt > 0
+        && [...reconcileBody.matchAll(/initialState/g)].length === 2
+        && /const cardNames = args\.card \? \[args\.card\] : Object\.keys\(initialState\.cards \|\| \{\}\);/.test(reconcileBody)
+        && reconcileLoads.length === 2 && reconcileLoads.every((match) => match.index > reconcileTurnAt)
+        && [...reconcileBody.matchAll(/persist\(ctx, ([A-Za-z]+)/g)].every((match) => ['state', 'lockedState', 'finalState'].includes(match[1]))
+        && /const finalState = loadState\(ctx\);\s*const prior/.test(reconcileBody),
+      'SYNC2B-EVERY-WRITER-TAKES-THE-TURN source scan: reconcile reads the ledger before its first turn only to list the cards; every per-card write uses the ledger it reloads under the turn, and the clean-streak write one it reloads just before');
+      for (const name of ['promoteAndDeploy', 'stepCard', 'commandAdvance', 'commandDeploy', 'commandRecoverDeployed']) {
+        ok(!/attemptProjection\(|projectCard\(|\bproject\(/.test(sync2BodyOf(coordinatorCode, name)),
+          `SYNC2C-PROJECTION-AFTER-GATE source scan: ${name}'s card step writes no completion projection inside its card-gate lock`);
+      }
+      ok(['promoteAndDeploy', 'stepCard'].every((name) => /markCompletionPending\(record\);/.test(sync2BodyOf(coordinatorCode, name)))
+        && /markCompletionPending\(record, now\);/.test(sync2BodyOf(coordinatorCode, 'commandRecoverDeployed')),
+      'SYNC2C-PROJECTION-AFTER-GATE source scan: each of promoteAndDeploy, stepCard and commandRecoverDeployed calls markCompletionPending');
+      // Each gate is a regex for the branch in which the function may take the
+      // turn; every awaitWriteTurn and projectPendingCompletion call must fall
+      // inside a match.
+      const gatedTurn = {
+        commandClaim: { gates: [/if \(!args\['dry-run'\]\) await vaultIndex\.awaitWriteTurn\(\);/g] },
+        commandHealEpicBindings: { gates: [/if \(apply\) await vaultIndex\.awaitWriteTurn\(\);/g] },
+        commandRestampContractFrontmatter: { gates: [/if \(apply\) \{[^]*?await vaultIndex\.awaitWriteTurn\(\);\s*\}/g] },
+        commandReconcileMetadata: { gates: [/if \(args\.apply === true\) await vaultIndex\.awaitWriteTurn\(\);/g] },
+        commandReconcileDependencies: { gates: [/if \(apply\) await vaultIndex\.awaitWriteTurn\(\);/g] },
+        commandRecoverDeployed: {
+          gates: [/if \(!apply \|\| !completionPending\) return result;[^]*$/g],
+          patterns: [/^[^]*?if \(!apply \|\| !completionPending\) return result;\s*const completion = await projectPendingCompletion\(/],
+        },
+        commandAdvance: {
+          gates: [/if \(completionPending\) \{\s*completion = await projectPendingCompletion\(/g,
+            /if \(transitionedTo \|\| retried\) \{\s*await vaultIndex\.awaitWriteTurn\(\);/g],
+          patterns: [/if \(!args\['dry-run'\] && record\.phase !== priorPhase\) transitionedTo = record\.phase;/,
+            /if \(record\.projection_pending && \(!args\['dry-run'\] \|\| record\.projection_pending !== priorPending\)\) completionPending = true;/,
+            /const retried = !args\['dry-run'\] && !transitionedTo && /],
+        },
+      };
+      const turnCall = /awaitWriteTurn\(|projectPendingCompletion\(/g;
+      const functionNames = [...coordinatorCode.matchAll(/^(?:async )?function ([A-Za-z0-9_$]+)\s*\(/gm)].map((match) => match[1]);
+      const turnTakersWithModes = functionNames.filter((name) => {
+        const body = sync2BodyOf(coordinatorCode, name);
+        return /awaitWriteTurn\(|projectPendingCompletion\(/.test(body) && /'dry-run'|dryRun|args\.apply\b|const apply\b/.test(body);
+      });
+      eq(turnTakersWithModes.sort(), Object.keys(gatedTurn).sort(),
+        'SYNC2C-DRY-RUN-AND-PROSE source scan: every function that takes the turn and has a dry-run or no-apply mode is checked below');
+      for (const [name, { gates, patterns = [] }] of Object.entries(gatedTurn)) {
+        const body = sync2BodyOf(coordinatorCode, name);
+        const calls = [...body.matchAll(turnCall)].map((match) => match.index);
+        const spans = gates.flatMap((gate) => [...body.matchAll(gate)].map((match) => [match.index, match.index + match[0].length]));
+        const gated = gates.every((gate) => [...body.matchAll(gate)].length > 0)
+          && calls.length > 0 && calls.every((at) => spans.some(([from, to]) => at >= from && at < to));
+        ok(gated && patterns.every((pattern) => pattern.test(body)), name === 'commandAdvance'
+          ? 'SYNC2D-DRY-RUN-ADVANCE-PROJECTS source scan: commandAdvance\'s only turn calls sit inside `if (completionPending)` and `if (transitionedTo || retried)`, and the dry-run-guarded assignments of completionPending, transitionedTo and retried are present'
+          : `SYNC2C-DRY-RUN-AND-PROSE source scan: ${name} calls awaitWriteTurn and projectPendingCompletion only in its apply or non-dry-run branch`);
+      }
+    }
+
+    // SYNC2D-TLS-TRUST: exercise the sender against disposable TLS servers,
+    // including certificate rejection before any HTTP headers or note bytes.
+    {
+      const https = require('https');
+      for (const name of ['matching', 'foreign', 'wrongIp', 'expired']) {
+        const cert = new crypto.X509Certificate(sync2Tls[`${name}Cert`]);
+        const keys = name === 'foreign' ? sync2TlsForeignKeys : sync2TlsKeys;
+        eq([cert.checkIssued(cert), cert.verify(keys.publicKey), cert.publicKey.export({ type: 'spki', format: 'der' })
+          .equals(keys.publicKey.export({ type: 'spki', format: 'der' }))], [true, true, true],
+          `SYNC2D-TLS-TRUST ${name}: runtime certificate is self-signed with its corresponding fresh key`);
+        eq([Boolean(cert.checkIP('127.0.0.1')), Date.parse(cert.validFrom) <= Date.now() && Date.now() < Date.parse(cert.validTo)],
+          [name !== 'wrongIp', name !== 'expired'], `SYNC2D-TLS-TRUST ${name}: fixture has its named IP identity and validity`);
+      }
+      const cases = [
+        ['matching', sync2Tls.matchingCert, sync2Tls.matchingCert, null],
+        ['foreign', sync2Tls.foreignCert, sync2Tls.matchingCert, 'unreachable'],
+        ['wrong-ip', sync2Tls.wrongIpCert, sync2Tls.wrongIpCert, 'unreachable'],
+        ['expired', sync2Tls.expiredCert, sync2Tls.expiredCert, 'unreachable'],
+        ['missing', sync2Tls.matchingCert, undefined, 'malformed-rest-config'],
+        ['malformed', sync2Tls.matchingCert, 'invalid fixture certificate', 'malformed-rest-config'],
+        ['non-string', sync2Tls.matchingCert, { cert: sync2Tls.matchingCert }, 'malformed-rest-config'],
+        ['rotated-before-put', sync2Tls.matchingCert, sync2Tls.matchingCert, 'unreachable'],
+      ];
+      for (const [name, serverCert, configuredCert, failure] of cases) {
+        const label = `SYNC2D-TLS-TRUST ${name}`;
+        const vault = path.join(sync2Root, `tls-${name}`);
+        const note = path.join(vault, 'spice', 'TLS.md');
+        fs.mkdirSync(path.dirname(note), { recursive: true });
+        const requests = [];
+        const sockets = new Set();
+        const indexed = new Map();
+        const errors = [];
+        const server = https.createServer({
+          key: name === 'foreign' ? sync2Tls.foreignKey : sync2Tls.fixtureKey,
+          cert: serverCert,
+        }, (req, res) => {
+          const entry = { method: req.method, url: req.url, authorization: req.headers.authorization, body: null };
+          requests.push(entry);
+          const chunks = [];
+          req.on('data', (chunk) => chunks.push(chunk));
+          req.on('end', () => {
+            entry.body = Buffer.concat(chunks).toString('utf8');
+            if (req.url === '/') {
+              if (name === 'rotated-before-put') server.setSecureContext({ key: sync2Tls.foreignKey, cert: sync2Tls.foreignCert });
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ authenticated: req.headers.authorization === `Bearer ${sync2ApiKey}` }));
+            } else if (req.method === 'PUT') {
+              fs.writeFileSync(note, entry.body);
+              indexed.set('TLS.md', entry.body);
+              res.writeHead(204); res.end();
+            } else {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ files: [...indexed.keys()] }));
+            }
+          });
+        });
+        server.on('tlsClientError', (error) => errors.push(error.code));
+        server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+        try {
+          await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+          const port = server.address().port;
+          ok(port < 27123 || port > 27128, `${label}: ephemeral stub avoids live REST ports`);
+          const config = path.join(vault, vaultIndex.REST_CONFIG_RELATIVE);
+          fs.mkdirSync(path.dirname(config), { recursive: true });
+          fs.writeFileSync(config, JSON.stringify({ apiKey: sync2ApiKey, enableInsecureServer: false,
+            enableSecureServer: true, port, crypto: { cert: configuredCert } }));
+          const started = Date.now();
+          const result = await vaultIndex.withVaultIndex(vault, async () => {
+            sync2RailWrite(note, 'TLS rail bytes\n'); return { ok: true };
+          }, { timeoutMs: 250 });
+          const report = result.obsidian_index;
+          if (!failure) {
+            eq([report.available, report.seen, report.written_through, report.unseen, report.conflicts],
+              [true, ['spice/TLS.md'], ['spice/TLS.md'], [], []], `${label}: configured self-signed certificate indexes the new note before returning`);
+            eq(requests.map(({ method, url }) => [method, url]), [['GET', '/'], ['PUT', '/vault/spice/TLS.md'], ['GET', '/vault/spice/']],
+              `${label}: authenticated probe, note PUT and folder listing use TLS`);
+            eq([requests.every((entry) => entry.authorization === `Bearer ${sync2ApiKey}`), indexed.get('TLS.md'), errors],
+              [true, 'TLS rail bytes\n', []], `${label}: the accepted peer receives the key and exact bytes`);
+          } else {
+            eq([report.available, report.reason, report.written_through], [false, failure, []],
+              `${label}: rejected certificate settles with only a generic failure`);
+            eq(requests.map(({ method, url, body }) => [method, url, body]),
+              name === 'rotated-before-put' ? [['GET', '/', '']] : [],
+              `${label}: an unverified peer receives no HTTP Authorization or content (rotation receives only the earlier verified probe)`);
+            ok(Date.now() - started < 3000, `${label}: rejection settles before the three-second fixture bound`);
+            eq(indexed.size, 0, `${label}: no note was sent to an unverified peer`);
+          }
+          eq([fs.readFileSync(note, 'utf8'), sync2TurnHeld(vault)], ['TLS rail bytes\n', false],
+            `${label}: the disk write remains and the scope releases its turn`);
+          const receipt = JSON.stringify(result);
+          ok(!receipt.includes(sync2ApiKey) && !receipt.includes('BEGIN CERTIFICATE') && !receipt.includes('BEGIN PRIVATE KEY')
+            && !receipt.includes('invalid fixture certificate'), `${label}: receipt includes neither credentials nor TLS material/errors`);
+        } finally {
+          for (const socket of sockets) socket.destroy();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
+    }
+
+    // TLS exercises the same sent-PUT lifetime rule as the HTTP matrix below.
+    // Only these disposable children are killed when a response stays lost.
+    {
+      const https = require('https');
+      const driver = path.join(sync2Root, 'tls-lifetime-writer.js');
+      fs.writeFileSync(driver, `
+const fs = require('fs');
+const [indexPath, vault, note, text] = process.argv.slice(2);
+const index = require(indexPath);
+index.withVaultIndex(vault, async () => {
+  await index.awaitWriteTurn();
+  index.beforeNoteWrite();
+  const tmp = note + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, note);
+  index.noteWritten(note, text);
+  return { ok: true };
+}).then((result) => console.log(JSON.stringify(result)), (error) => {
+  console.error(error.message); process.exitCode = 1;
+});
+`);
+      for (const complete of [false, true]) {
+        const label = `SYNC2D-TLS-LIFETIME ${complete ? 'complete' : 'lost'} response`;
+        const fx = sync2CliFixture(`tls-lifetime-${complete}`);
+        const note = path.join(fx.vault, 'spice', 'TLS.md');
+        fs.writeFileSync(note, 'seed\n');
+        const sockets = new Set();
+        const children = [];
+        const timers = new Set();
+        const puts = [];
+        let late = null;
+        const server = https.createServer({ key: sync2Tls.fixtureKey, cert: sync2Tls.matchingCert }, (req, res) => {
+          const chunks = [];
+          req.on('data', (chunk) => chunks.push(chunk));
+          req.on('end', () => {
+            if (req.method !== 'PUT') {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(req.url === '/' ? { authenticated: true } : { files: ['TLS.md'] }));
+              return;
+            }
+            const body = Buffer.concat(chunks).toString('utf8');
+            puts.push({ complete: req.complete, body });
+            if (puts.length > 1) { fs.writeFileSync(note, body); res.writeHead(204); res.end(); return; }
+            if (!complete) req.socket.destroy();
+            const timer = setTimeout(() => {
+              timers.delete(timer);
+              fs.writeFileSync(note, body);
+              const owner = JSON.parse(fs.readFileSync(path.join(sync2Turn(fx.vault), 'owner.json'), 'utf8'));
+              late = { owner: owner.pid, alive: children.map((child) => !child.closed), returned: children.map((child) => Boolean(child.stdout)),
+                bytes: fs.readFileSync(note, 'utf8') };
+              if (complete) { res.writeHead(204); res.end(); }
+            }, 700);
+            timers.add(timer);
+          });
+        });
+        server.on('tlsClientError', () => {});
+        server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+        const launch = (text) => {
+          const proc = spawn(process.execPath, [driver, sync2IndexPath, fx.vault, note, text], { cwd: fx.repo, env: fx.env, stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = { proc, stdout: '', stderr: '', closed: false, code: null };
+          proc.stdout.on('data', (chunk) => { child.stdout += chunk.toString(); });
+          proc.stderr.on('data', (chunk) => { child.stderr += chunk.toString(); });
+          child.exited = new Promise((resolve) => proc.once('close', (code) => { child.closed = true; child.code = code; resolve(); }));
+          children.push(child); return child;
+        };
+        try {
+          await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+          const port = server.address().port;
+          ok(port < 27123 || port > 27128, `${label}: ephemeral stub avoids live REST ports`);
+          await sync2RestConfig(fx.vault, port, { enableInsecureServer: false, port, crypto: { cert: sync2Tls.matchingCert } });
+          const first = launch('older TLS bytes\n');
+          ok(await sync2Until(() => puts.length === 1 || first.closed, 5000) && puts.length === 1,
+            `${label}: first child sends a complete TLS PUT`);
+          launch('newer TLS bytes\n');
+          ok(await sync2Until(() => late !== null, 5000), `${label}: stub applies the saved body after response loss or delay`);
+          eq([puts[0], late.owner, late.alive, late.returned, late.bytes],
+            [{ complete: true, body: 'older TLS bytes\n' }, first.proc.pid, [true, true], [false, false], 'older TLS bytes\n'],
+            `${label}: at late application neither child returned and the sender is alive with the turn`);
+          if (complete) {
+            ok(await sync2Until(() => children.every((child) => child.closed), 5000), `${label}: complete responses let both children exit naturally`);
+            eq([children.map((child) => child.code), puts.length, fs.readFileSync(note, 'utf8'), sync2TurnHeld(fx.vault)],
+              [[0, 0], 2, 'newer TLS bytes\n', false], `${label}: completed replies release the turn and preserve newer bytes`);
+          } else {
+            await sync2Wait(150);
+            eq([children.map((child) => child.closed), children.map((child) => child.stdout), puts.length, sync2TurnHeld(fx.vault)],
+              [[false, false], ['', ''], 1, true], `${label}: a lost TLS reply leaves both children waiting and prevents a second PUT`);
+          }
+          ok(children.every((child) => !child.stderr && !child.stdout.includes(sync2ApiKey) && !child.stdout.includes('BEGIN CERTIFICATE')),
+            `${label}: child stdout/stderr contain no credentials or TLS material`);
+        } finally {
+          for (const timer of timers) clearTimeout(timer);
+          for (const child of children) if (!child.closed) child.proc.kill('SIGKILL');
+          await Promise.all(children.map((child) => child.exited));
+          for (const socket of sockets) socket.destroy();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
+    }
+
+    // SYNC2-SAFETY-CARRIED config reading
+    {
+      const vault = path.join(sync2Root, 'config-modes');
+      const write = (value) => {
+        const file = path.join(vault, vaultIndex.REST_CONFIG_RELATIVE);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
+      };
+      fs.mkdirSync(vault, { recursive: true });
+      eq(vaultIndex.readRestConfig(vault), { ok: false, reason: 'no-rest-config' }, 'SYNC2-SAFETY-CARRIED no data.json reads as no-rest-config');
+      write('{not json');
+      eq(vaultIndex.readRestConfig(vault), { ok: false, reason: 'malformed-rest-config' }, 'SYNC2-SAFETY-CARRIED unparseable data.json is malformed-rest-config');
+      write({ port: 27124 });
+      eq(vaultIndex.readRestConfig(vault), { ok: false, reason: 'malformed-rest-config' }, 'SYNC2-SAFETY-CARRIED a config without apiKey is malformed-rest-config');
+      write({ apiKey: 'k', enableSecureServer: false, enableInsecureServer: false, port: 27124, insecurePort: 27123 });
+      eq(vaultIndex.readRestConfig(vault), { ok: false, reason: 'rest-server-disabled' }, 'SYNC2-SAFETY-CARRIED both servers disabled is rest-server-disabled');
+      write({ apiKey: ' k ', port: 27124, insecurePort: 27123, enableInsecureServer: true });
+      eq(vaultIndex.readRestConfig(vault), { ok: true, protocol: 'http:', port: 27123, apiKey: 'k' }, 'SYNC2-SAFETY-CARRIED the insecure server is preferred when enabled');
+      write({ apiKey: 'k', port: 27124, insecurePort: 27123, crypto: { cert: sync2Tls.matchingCert } });
+      eq(vaultIndex.readRestConfig(vault), { ok: true, protocol: 'https:', port: 27124, apiKey: 'k', ca: sync2Tls.matchingCert.trim() },
+        'SYNC2-SAFETY-CARRIED otherwise the secure server trusts its configured certificate');
+    }
+
+    // SYNC2-SAFETY-CARRIED + SYNC2-READ-ONLY-VERIFY in-process writes
+    {
+      const vault = path.join(sync2Root, 'in-process');
+      const folder = path.join(vault, 'spice', 'projects', 'test', 'tasks');
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(path.join(folder, 'Edited.md'), 'prior\n');
+      const ctx = { stateDir: path.join(sync2Root, 'in-process-state') };
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir });
+      await sync2RestConfig(vault, stub.port);
+      const bom = `﻿# starts with a byte-order mark\n`;
+      const receipt = await vaultIndex.withVaultIndex(vault, async () => {
+        await coordinator.withLock(ctx, 'selector', async () => {
+          sync2RailWrite(path.join(folder, 'Plain.md'), '# plain → ✓\n');
+          sync2RailWrite(path.join(folder, 'Bom.md'), bom);
+          sync2RailWrite(path.join(folder, 'Edited.md'), 'rail bytes\n');
+          sync2RailWrite(path.join(vault, '.hidden', 'Dot.md'), 'dot\n');
+          fs.writeFileSync(path.join(folder, 'Edited.md'), 'user bytes\n');
+        });
+        sync2RailWrite(path.join(folder, 'After.md'), 'after\n');
+        await coordinator.withLock(ctx, 'selector', async () => {});
+        fs.writeFileSync(path.join(folder, 'After.md'), 'user!\n');
+        return { ok: true };
+      });
+      const { requests } = await stub.log();
+      const puts = sync2Kind(requests, 'put');
+      eq(puts.map((request) => request.rel), ['spice/projects/test/tasks/Plain.md', 'spice/projects/test/tasks/After.md'],
+        'SYNC2-SAFETY-CARRIED SYNC1B-BOM-STRIP only the plain notes are sent: the BOM note, the dot-prefixed note and the edited note are not');
+      ok(puts.every((request) => !(request.body[0] === 0xef && request.body[1] === 0xbb)), 'SYNC2-SAFETY-CARRIED no PUT body starts with a BOM');
+      eq(fs.readFileSync(path.join(folder, 'Bom.md'), 'utf8'), bom, 'SYNC2-SAFETY-CARRIED the BOM note keeps its mark on disk');
+      eq([fs.readFileSync(path.join(folder, 'Edited.md'), 'utf8'), fs.readFileSync(path.join(folder, 'After.md'), 'utf8')], ['user bytes\n', 'user!\n'],
+        'SYNC2-READ-ONLY-VERIFY SYNC1B-SAME-LENGTH-CONFLICT a same-length edit made after the rail write stays on disk, before or after the note was sent');
+      const index = receipt.obsidian_index;
+      eq([index.conflicts.slice().sort(), index.not_written_through.slice().sort((a, b) => a.path.localeCompare(b.path))], [
+        ['spice/projects/test/tasks/After.md', 'spice/projects/test/tasks/Edited.md'],
+        [
+          { path: '.hidden/Dot.md', reason: 'dot-prefixed' },
+          { path: 'spice/projects/test/tasks/Bom.md', reason: 'bom' },
+          { path: 'spice/projects/test/tasks/Edited.md', reason: 'disk-changed' },
+        ],
+      ], 'SYNC2-READ-ONLY-VERIFY the edits are reported as conflicts; the skipped notes carry their reasons');
+      eq(index.skipped, [{ path: '.hidden/Dot.md', reason: vaultIndex.SKIP_NOT_INDEXED }], 'SYNC2-READ-ONLY-VERIFY a dot-prefixed note is skipped, not checked');
+      const firstList = requests.findIndex((request) => request.kind === 'list');
+      eq([sync2Kind(requests, 'note').length, requests.slice(firstList).filter((request) => request.kind !== 'list').length],
+        [0, 0], 'SYNC2-READ-ONLY-VERIFY SYNC1B-UNINDEXED-GET-HANGS the check lists folders only: no note GET, no PUT');
+      ok(requests.every((request) => request.held.length === 0), 'SYNC2-READ-ONLY-VERIFY no request reaches Obsidian while a coordinator lock is held');
+      eq(sync2TurnHeld(vault), false, 'SYNC2-TURN the scope releases the write turn');
+    }
+
+    // SYNC2-SAFETY-CARRIED fallback reasons and secret hygiene
+    {
+      for (const [label, extra, reason] of [['refused', { putStatus: 500, hostile: true }, 'put-http-500'], ['mangled', { putMangle: '\nmangled\n' }, 'put-bytes-differ']]) {
+        const vault = path.join(sync2Root, `fallback-${label}`);
+        const file = path.join(vault, 'spice', 'Note.md');
+        const stub = await sync2Stub({ vault, ...extra });
+        await sync2RestConfig(vault, stub.port);
+        const receipt = await vaultIndex.withVaultIndex(vault, () => { sync2RailWrite(file, 'note\n'); return { ok: true }; });
+        eq(receipt.obsidian_index.not_written_through, [{ path: 'spice/Note.md', reason }], `SYNC2-SAFETY-CARRIED a ${label} PUT is reported as ${reason}`);
+        let failure = null;
+        try {
+          await vaultIndex.withVaultIndex(vault, () => { sync2RailWrite(file, 'again\n'); throw new Error('verb failed'); });
+        } catch (error) { failure = error; }
+        ok(failure && failure.message === 'verb failed' && failure.obsidian_index, `SYNC2-SAFETY-CARRIED a failing verb keeps its error and carries obsidian_index (${label})`);
+        ok(![JSON.stringify(receipt), failure && failure.stack, failure && JSON.stringify(failure.obsidian_index)].some((text) => String(text).includes(sync2ApiKey)),
+          `SYNC2-SAFETY-CARRIED the apiKey never appears in a receipt or an error (${label} server${extra.hostile ? ' echoing it' : ''})`);
+      }
+    }
+
+    // SYNC2-NO-LATE-REVERT across concurrent writers: a writer that takes the
+    // turn with awaitWriteTurn before its lock, as a note-rewriting verb does,
+    // waits holding nothing until another scope's notes are answered.
+    {
+      const vault = path.join(sync2Root, 'concurrent');
+      const file = path.join(vault, 'spice', 'Shared.md');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'initial\n');
+      const ctx = { stateDir: path.join(sync2Root, 'concurrent-state') };
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir, stallMs: 1500 });
+      await sync2RestConfig(vault, stub.port);
+      let secondEntered = 0;
+      const first = vaultIndex.withVaultIndex(vault, async () => {
+        await vaultIndex.awaitWriteTurn();
+        await coordinator.withLock(ctx, 'selector', async () => { sync2RailWrite(file, 'first\n'); });
+        return { ok: true };
+      });
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 5000);
+      await sync2Wait(100);
+      const locksDuringStall = fs.readdirSync(path.join(ctx.stateDir, 'locks')).filter((name) => name.endsWith('.lock'));
+      const second = vaultIndex.withVaultIndex(vault, async () => {
+        await vaultIndex.awaitWriteTurn();
+        await coordinator.withLock(ctx, 'selector', async () => {
+          secondEntered = Date.now();
+          sync2RailWrite(file, 'second\n');
+        });
+        return { ok: true };
+      });
+      const writers = await Promise.allSettled([first, second]);
+      await stub.settled();
+      const { requests } = await stub.log();
+      eq(writers.map((writer) => (writer.status === 'fulfilled' ? 'ok' : writer.reason.message)), ['ok', 'ok'],
+        'SYNC2-NO-LATE-REVERT both writers complete');
+      const firstPut = sync2Kind(requests, 'put').find((request) => request.body.toString() === 'first\n');
+      eq(locksDuringStall, [], 'SYNC2-BOUNDED-LOCK-HOLD the first writer waits for Obsidian holding no lock');
+      ok(firstPut && secondEntered >= firstPut.applied,
+        'SYNC2-NO-LATE-REVERT a second writer enters the lock only after the stub applied the first writer\'s PUT');
+      eq(fs.readFileSync(file, 'utf8'), 'second\n', 'SYNC2-NO-LATE-REVERT the later write is what the note holds after the stall');
+    }
+
+    // SYNC2-TURN-NESTED-LOCKS (D1): A holds gates-x, writes the parent board
+    // under a nested completion-projection lock and releases the nested lock.
+    // While A's PUT of the board is stalled, B1 reaches the same nested lock
+    // under its own gates-y and is refused the turn there, writing nothing;
+    // B2 takes the turn before gates-y, waits holding no lock, and then
+    // read-modify-writes the board.
+    {
+      const vault = path.join(sync2Root, 'turn-nested');
+      const file = path.join(vault, 'spice', 'projects', 'test', 'test-board.md');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'v0\n');
+      const ctx = { stateDir: path.join(sync2Root, 'turn-nested-state') };
+      const b1Refused = path.join(sync2Root, 'd1-b1-refused');
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir, stallMs: 2500, stallMarker: b1Refused });
+      await sync2RestConfig(vault, stub.port);
+      const append = (line) => { vaultIndex.beforeNoteRewrite(); sync2RailWrite(file, `${fs.readFileSync(file, 'utf8')}${line}`); };
+      const a = vaultIndex.withVaultIndex(vault, async () => coordinator.withLock(ctx, 'gates-x', async () => {
+        await coordinator.withLock(ctx, 'completion-projection', async () => { append('A\n'); });
+        return { ok: true };
+      }));
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 5000);
+      await sync2Wait(200);
+      const b1 = await vaultIndex.withVaultIndex(vault, async () => coordinator.withLock(ctx, 'gates-y', async () => {
+        await coordinator.withLock(ctx, 'completion-projection', async () => { append('B1\n'); });
+        return { ok: true };
+      })).then(() => ({ code: 'ok' }), (error) => ({ code: error.code, message: error.message }));
+      fs.writeFileSync(`${b1Refused}.tmp`, 'returned\n');
+      fs.renameSync(`${b1Refused}.tmp`, b1Refused);
+      const afterB1 = fs.readFileSync(file, 'utf8');
+      const locksAfterB1 = fs.readdirSync(path.join(ctx.stateDir, 'locks')).filter((name) => name.endsWith('.lock'));
+      let b2WroteAt = 0;
+      const b2 = vaultIndex.withVaultIndex(vault, async () => {
+        await vaultIndex.awaitWriteTurn();
+        return coordinator.withLock(ctx, 'gates-y', async () => {
+          await coordinator.withLock(ctx, 'completion-projection', async () => { append('B\n'); b2WroteAt = Date.now(); });
+          return { ok: true };
+        });
+      });
+      const [aReceipt, bReceipt] = (await Promise.allSettled([a, b2])).map((outcome) => (outcome.status === 'fulfilled'
+        ? outcome.value : { obsidian_index: { conflicts: [`threw: ${outcome.reason.message}`], written_through: [] } }));
+      await stub.settled();
+      const resumedAt = (stub.events.find((event) => event.type === 'resumed') || {}).at;
+      ok(stub.events.some((event) => event.type === 'stalling'), 'SYNC2-TURN-NESTED-LOCKS precondition: the stub stalled on A\'s PUT');
+      const resumedEvent = stub.events.find((event) => event.type === 'resumed') || {};
+      ok(b1.code === 'LOCKED' && /vault-write-turn/.test(b1.message) && resumedEvent.marker === true && afterB1 === 'v0\nA\n' && locksAfterB1.length === 0,
+        `SYNC2B-NO-WAIT-IN-LOCK D1: B1, inside its locks, is refused the held turn, and writes nothing; the marker it publishes on returning exists when the stub ends the stall of A's PUT (${b1.code}, marker ${resumedEvent.marker})`);
+      ok(resumedAt > 0 && b2WroteAt >= resumedAt,
+        'SYNC2-TURN-NESTED-LOCKS D1: B2 writes the board only after the stub handled A\'s stalled PUT');
+      eq(fs.readFileSync(file, 'utf8'), 'v0\nA\nB\n',
+        'SYNC2-TURN-NESTED-LOCKS D1: B2\'s read-modify-write under a nested lock survives A\'s stalled PUT of the same note');
+      eq([aReceipt.obsidian_index.conflicts.filter((rel) => rel !== 'spice/projects/test/test-board.md'), bReceipt.obsidian_index.conflicts,
+        bReceipt.obsidian_index.written_through],
+      [[], [], ['spice/projects/test/test-board.md']],
+      'SYNC2-TURN-NESTED-LOCKS B2 reports no conflict and its board is written through; A reports at most the board B2 rewrote after A\'s turn');
+    }
+
+    // SYNC2-TURN a note written outside any coordinator lock waits for the
+    // write turn before it is renamed.
+    {
+      const vault = path.join(sync2Root, 'turn-depth0');
+      const file = path.join(vault, 'spice', 'Loose.md');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const stub = await sync2Stub({ vault });
+      await sync2RestConfig(vault, stub.port);
+      const holder = spawn(process.execPath, ['-e', `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const lease = ${JSON.stringify(sync2Turn(vault))};
+fs.mkdirSync(lease, { recursive: true });
+fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
+process.stdout.write('held\\n');
+setTimeout(() => { const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + '\\n'); }, 800);
+`], { stdio: ['ignore', 'pipe', 'inherit'] });
+      let holderOut = '';
+      holder.stdout.on('data', (chunk) => { holderOut += chunk; });
+      const holderClosed = new Promise((resolve) => holder.on('close', resolve));
+      await sync2Until(() => holderOut.includes('held'), 10000);
+      let writtenAt = 0;
+      const receipt = await vaultIndex.withVaultIndex(vault, () => { sync2RailWrite(file, 'loose\n'); writtenAt = Date.now(); return { ok: true }; });
+      await holderClosed;
+      const releasedAt = Number((holderOut.match(/released (\d+)/) || [])[1]);
+      ok(releasedAt > 0 && writtenAt >= releasedAt, `SYNC2-TURN a write outside any lock waits for another holder's write turn (${writtenAt - releasedAt}ms after release)`);
+      eq(receipt.obsidian_index.written_through, ['spice/Loose.md'], 'SYNC2-TURN the note written outside any lock is then written through');
+    }
+
+    // SYNC2B-TURN-ONLY-FOR-NOTE-WRITES a lock scope that writes no note takes
+    // no turn; a scope takes the turn at its first note write, holds it for
+    // the rest of its outermost lock, and releases it after its flush.
+    {
+      const vault = path.join(sync2Root, 'turn-lazy');
+      const file = path.join(vault, 'spice', 'Lazy.md');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const ctx = { stateDir: path.join(sync2Root, 'turn-lazy-state') };
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir });
+      await sync2RestConfig(vault, stub.port);
+      const seen = {};
+      const receipt = await vaultIndex.withVaultIndex(vault, async () => {
+        await coordinator.withLock(ctx, 'gate-without-writes', async () => {
+          await coordinator.withLock(ctx, 'nested-without-writes', async () => { seen.nested = sync2TurnHeld(vault); });
+          seen.noWrite = sync2TurnHeld(vault);
+        });
+        seen.between = sync2TurnHeld(vault);
+        await coordinator.withLock(ctx, 'gate-with-a-write', async () => {
+          seen.beforeWrite = sync2TurnHeld(vault);
+          sync2RailWrite(file, 'lazy\n');
+          seen.afterWrite = sync2TurnHeld(vault);
+          await sync2Wait(50);
+          seen.later = sync2TurnHeld(vault);
+        });
+        seen.released = sync2TurnHeld(vault);
+        await vaultIndex.awaitWriteTurn();
+        await coordinator.withLock(ctx, 'verb-that-rewrites', async () => { seen.reservedInside = sync2TurnHeld(vault); });
+        seen.reservedReleased = sync2TurnHeld(vault);
+        return { ok: true };
+      });
+      eq([seen.nested, seen.noWrite, seen.between, seen.beforeWrite], [false, false, false, false],
+        'SYNC2B-TURN-ONLY-FOR-NOTE-WRITES a lock scope that writes no note takes no turn, nested or outermost');
+      eq([seen.afterWrite, seen.later, seen.released, receipt.obsidian_index.written_through], [true, true, false, ['spice/Lazy.md']],
+        'SYNC2B-TURN-ONLY-FOR-NOTE-WRITES a scope takes the turn at its first note write, holds it to the end of its outermost lock and releases it after its flush');
+      eq([seen.reservedInside, seen.reservedReleased], [true, false],
+        'SYNC2B-TURN-BEFORE-LOCK a turn taken with awaitWriteTurn before an outermost lock is kept inside that lock, then released after it');
+    }
+
+    // SYNC2B-SETTLE-BEFORE-OUTERMOST a scope that took the turn outside any
+    // lock sends its notes and releases the turn before it takes an outermost
+    // lock, so it never holds the turn while taking one.
+    {
+      const vault = path.join(sync2Root, 'turn-settle-first');
+      const file = path.join(vault, 'spice', 'Loose first.md');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const ctx = { stateDir: path.join(sync2Root, 'turn-settle-first-state') };
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir });
+      await sync2RestConfig(vault, stub.port);
+      let inside = null;
+      await vaultIndex.withVaultIndex(vault, async () => {
+        sync2RailWrite(file, 'loose\n');
+        await coordinator.withLock(ctx, 'after-loose-write', async () => {
+          inside = { turn: sync2TurnHeld(vault), puts: sync2Kind((await stub.log()).requests, 'put').map((request) => request.rel) };
+        });
+        return { ok: true };
+      });
+      eq(inside, { turn: false, puts: ['spice/Loose first.md'] },
+        'SYNC2B-SETTLE-BEFORE-OUTERMOST a note written outside any lock is sent and the turn released before the next outermost lock is taken');
+    }
+
+    // SYNC2B-SYNC-WAIT-IN-PROCESS a synchronous wait for a turn held by
+    // another scope of the same process would block that holder for ever, so
+    // it throws. Run in a child so a hang fails instead of stalling the run.
+    {
+      const vault = path.join(sync2Root, 'turn-same-process');
+      fs.mkdirSync(path.join(vault, 'spice'), { recursive: true });
+      await sync2RestConfig(vault, await sync2ClosedPort());
+      const script = path.join(sync2Root, 'same-process.js');
+      fs.writeFileSync(script, `
+const fs = require('fs'); const path = require('path');
+const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
+const vault = process.argv[2];
+const write = (file, text) => { vaultIndex.beforeNoteWrite(); fs.writeFileSync(file, text); vaultIndex.noteWritten(file, text); };
+let release;
+const held = new Promise((resolve) => { release = resolve; });
+const first = vaultIndex.withVaultIndex(vault, async () => { await vaultIndex.awaitWriteTurn(); write(path.join(vault, 'spice', 'One.md'), 'one\\n'); await held; });
+setTimeout(() => {
+  vaultIndex.withVaultIndex(vault, async () => { write(path.join(vault, 'spice', 'Two.md'), 'two\\n'); })
+    .then(() => { process.stdout.write('wrote\\n'); }, (error) => { process.stdout.write('threw: ' + error.message + '\\n'); })
+    .then(() => { release(); return first; }).then(() => process.exit(0));
+}, 100);
+`);
+      const outcome = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [script, vault], { stdio: ['ignore', 'pipe', 'inherit'] });
+        let out = '';
+        child.stdout.on('data', (chunk) => { out += chunk; });
+        const timer = setTimeout(() => child.kill('SIGKILL'), 8000);
+        child.on('close', (code) => { clearTimeout(timer); resolve({ code, out }); });
+      });
+      eq([outcome.code, outcome.out.trim()], [0, 'threw: the vault write turn is held by another scope of this process'],
+        'SYNC2B-SYNC-WAIT-IN-PROCESS a synchronous wait for a turn held by another scope of the same process throws instead of hanging');
+    }
+
+    // SYNC2-TURN-PER-LOCK the turn is released after each outermost lock, not
+    // held for the whole verb, and not while any outermost lock of the scope
+    // is still held: another scope that waits for the turn before its lock
+    // enters only once both have been released.
+    {
+      const vault = path.join(sync2Root, 'turn-per-lock');
+      const file = path.join(vault, 'spice', 'PerLock.md');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const ctx = { stateDir: path.join(sync2Root, 'turn-per-lock-state') };
+      const stub = await sync2Stub({ vault });
+      await sync2RestConfig(vault, stub.port);
+      let firstReleased = false;
+      let otherDone = false;
+      let longVerbReturned = false;
+      let otherDoneBeforeLongVerb = null;
+      const longVerb = vaultIndex.withVaultIndex(vault, async () => {
+        await coordinator.withLock(ctx, 'phase-1', async () => { sync2RailWrite(file, 'phase 1\n'); });
+        firstReleased = true;
+        await sync2Until(() => otherDone, 3000);
+        longVerbReturned = true;
+        return { ok: true };
+      });
+      await sync2Until(() => firstReleased, 5000);
+      const other = await vaultIndex.withVaultIndex(vault, async () => coordinator.withLock(ctx, 'other', async () => { sync2RailWrite(file, 'other\n'); }))
+        .then(() => 'ok', (error) => error.message);
+      otherDoneBeforeLongVerb = other === 'ok' && !longVerbReturned;
+      otherDone = true;
+      await longVerb;
+      ok(otherDoneBeforeLongVerb === true,
+        'SYNC2-TURN-PER-LOCK another writer gets the turn between two outermost locks of one verb');
+
+      let branchReleased = 0;
+      let slowReleased = 0;
+      let slowDoneWhenEntered = null;
+      const branches = vaultIndex.withVaultIndex(vault, async () => {
+        await Promise.all([
+          coordinator.withLock(ctx, 'branch-fast', async () => { sync2RailWrite(file, 'fast\n'); await sync2Wait(100); }).then(() => { branchReleased = Date.now(); }),
+          coordinator.withLock(ctx, 'branch-slow', async () => { await sync2Wait(900); sync2RailWrite(file, 'slow\n'); slowReleased = Date.now(); }),
+        ]);
+        return { ok: true };
+      });
+      await sync2Until(() => branchReleased > 0, 5000);
+      await vaultIndex.withVaultIndex(vault, async () => {
+        await vaultIndex.awaitWriteTurn();
+        await coordinator.withLock(ctx, 'late', async () => { slowDoneWhenEntered = slowReleased > 0; });
+      });
+      await branches;
+      ok(slowDoneWhenEntered === true,
+        'SYNC2-TURN-PER-LOCK the turn is kept while another outermost lock of the same scope is still held');
+    }
+
+    // SYNC2-TURN-LIVENESS who may take over a held turn.
+    {
+      const vault = path.join(sync2Root, 'turn-liveness');
+      fs.mkdirSync(vault, { recursive: true });
+      await sync2RestConfig(vault, await sync2ClosedPort());
+      const probeScript = path.join(sync2Root, 'turn-probe.js');
+      fs.writeFileSync(probeScript, `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
+const [vault, swapToken, livePid] = process.argv.slice(2);
+if (swapToken) {
+  const write = fs.writeFileSync;
+  fs.writeFileSync = function swapAfterGate(file, ...rest) {
+    const result = write.call(this, file, ...rest);
+    if (String(file).endsWith('reclaim-' + swapToken)) {
+      write.call(fs, path.join(vault, ${JSON.stringify(vaultIndex.PENDING_DIR)}, 'turn', 'owner.json'),
+        JSON.stringify({ pid: Number(livePid), host: os.hostname(), token: 'new-live', started_at: new Date().toISOString() }));
+    }
+    return result;
+  };
+}
+vaultIndex.withVaultIndex(vault, async () => { await vaultIndex.awaitWriteTurn(); process.stdout.write('got\\n'); })
+  .then(() => process.exit(0), () => process.exit(1));
+`);
+      const takes = (ms, swapToken) => new Promise((resolve) => {
+        const child = spawn(process.execPath, [probeScript, vault, ...(swapToken ? [swapToken, String(process.pid)] : [])], { stdio: ['ignore', 'pipe', 'inherit'] });
+        let out = '';
+        child.stdout.on('data', (chunk) => { out += chunk; });
+        const timer = setTimeout(() => child.kill('SIGKILL'), ms);
+        child.on('close', () => { clearTimeout(timer); resolve(out.includes('got')); });
+      });
+      const seed = (owner, ageMs = 0) => {
+        fs.rmSync(sync2Turn(vault), { recursive: true, force: true });
+        fs.mkdirSync(sync2Turn(vault), { recursive: true });
+        if (owner) fs.writeFileSync(path.join(sync2Turn(vault), 'owner.json'), JSON.stringify(owner));
+        if (ageMs) { const at = new Date(Date.now() - ageMs); fs.utimesSync(sync2Turn(vault), at, at); }
+      };
+      const dead = spawn(process.execPath, ['-e', '0']);
+      await new Promise((resolve) => dead.on('close', resolve));
+      const now = new Date().toISOString();
+      const old = new Date(Date.now() - vaultIndex.FOREIGN_TURN_MS - 60000).toISOString();
+      seed({ pid: process.pid, host: os.hostname(), token: 'live', started_at: now });
+      eq(await takes(800), false, 'SYNC2-TURN-LIVENESS a turn held by a live process on this host is waited for');
+      seed({ pid: dead.pid, host: os.hostname(), token: 'dead', started_at: now });
+      eq(await takes(5000), true, 'SYNC2-TURN-LIVENESS a turn whose holder process on this host is gone is taken over');
+      seed({ pid: 1, host: 'elsewhere.invalid', token: 'foreign-young', started_at: now });
+      eq(await takes(800), false, 'SYNC2-TURN-LIVENESS a fresh turn held from another host is waited for');
+      seed({ pid: 1, host: 'elsewhere.invalid', token: 'foreign-old', started_at: old });
+      eq(await takes(5000), true, 'SYNC2-TURN-LIVENESS a turn held from another host for longer than FOREIGN_TURN_MS is taken over');
+      seed(null);
+      eq(await takes(800), false, 'SYNC2-TURN-LIVENESS a fresh turn with no owner record yet is waited for');
+      seed(null, vaultIndex.EMPTY_TURN_MS + 5000);
+      eq(await takes(5000), true, 'SYNC2-TURN-LIVENESS a turn with no owner record older than EMPTY_TURN_MS is taken over');
+      const gate = path.join(vault, vaultIndex.PENDING_DIR, 'reclaim-dead-gated');
+      seed({ pid: dead.pid, host: os.hostname(), token: 'dead-gated', started_at: now });
+      fs.writeFileSync(gate, '');
+      eq(await takes(800), false, 'SYNC2-TURN-LIVENESS-RECLAIM a dead holder\'s lease is not removed while another process holds its reclaim file');
+      const staleAt = new Date(Date.now() - vaultIndex.EMPTY_TURN_MS - 5000);
+      fs.writeFileSync(gate, '');
+      fs.utimesSync(gate, staleAt, staleAt);
+      eq(await takes(5000), true, 'SYNC2-TURN-LIVENESS-RECLAIM a reclaim file older than EMPTY_TURN_MS is removed and the dead holder\'s lease is taken over');
+      seed({ pid: dead.pid, host: os.hostname(), token: 'dead-swapped', started_at: now });
+      eq(await takes(800, 'dead-swapped'), false,
+        'SYNC2-TURN-LIVENESS-RECLAIM a lease that changed holder after it was read as abandoned is not removed');
+      let keptOwner = null;
+      try { keptOwner = JSON.parse(fs.readFileSync(path.join(sync2Turn(vault), 'owner.json'), 'utf8')); } catch (_) { keptOwner = null; }
+      eq(keptOwner && keptOwner.token, 'new-live',
+        'SYNC2-TURN-LIVENESS-RECLAIM the new holder keeps its lease');
+      eq(fs.readdirSync(path.join(vault, vaultIndex.PENDING_DIR)).filter((name) => name.startsWith('reclaim-')), [],
+        'SYNC2-TURN-LIVENESS no reclaim gate file is left behind');
+    }
+
+    // SYNC2-NO-LATE-REVERT + SYNC2-NO-POST-VERB-WRITE against a stalled stub
+    const sync2Sequences = [];
+    for (const stallMs of [0, 7000, 12000]) {
+      for (const second of ['park', 'discard', 'reconcile']) sync2Sequences.push({ stallMs, second });
+    }
+    const sync2SequenceRuns = await Promise.all(sync2Sequences.map(async ({ stallMs, second }) => {
+      const fx = sync2CliFixture(`stall-${stallMs}-${second}`);
+      const stub = stallMs ? await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir, stallMs }) : null;
+      if (stub) await sync2RestConfig(fx.vault, stub.port);
+      const claimed = await sync2Cli(fx, ['claim', '--json'], { probe: true, untilReceipt: true });
+      const nexted = await sync2Cli(fx, sync2Second[second](claimed), { probe: true, untilReceipt: true });
+      const afterVerbs = sync2Snapshot(fx.vault);
+      const claim = await claimed.exited;
+      const next = await nexted.exited;
+      if (stub) await stub.settled();
+      const { requests } = stub ? await stub.log() : { requests: [] };
+      return {
+        stallMs, second, fx, claim, next, requests, afterVerbs,
+        afterStall: sync2Snapshot(fx.vault), surfaces: sync2Surfaces(fx), stalledAt: stub ? (stub.events.find((event) => event.type === 'stalling') || {}).at : null,
+      };
+    }));
+    const sync2References = Object.fromEntries(sync2SequenceRuns.filter((run) => !run.stallMs).map((run) => [run.second, run]));
+    for (const run of Object.values(sync2References)) {
+      eq([run.claim.code, run.next.code], [0, 0], `SYNC2-NO-LATE-REVERT reference claim then ${run.second} without REST config succeeds`);
+      eq(run.surfaces, sync2Expected(run.surfaces, run.surfaces), `SYNC2-NO-LATE-REVERT reference claim then ${run.second}: the surfaces agree with the ledger`);
+    }
+    for (const run of sync2SequenceRuns.filter((each) => each.stallMs)) {
+      const label = `claim then ${run.second}, ${run.stallMs / 1000}s stall`;
+      sync2Outputs.push(run.claim, run.next);
+      eq([run.claim.code, run.claim.receipt.action, run.next.code], [0, 'implement', 0],
+        `SYNC2-NO-LATE-REVERT ${label}: both verbs succeed — ${run.claim.stderr.slice(0, 200)} ${run.next.stderr.slice(0, 200)}`);
+      const sentPuts = (verb) => verb.probe.filter((op) => op.op === 'sent' && op.method === 'PUT');
+      ok(sentPuts(run.claim).length > 0 && run.stalledAt > run.claim.started && run.stalledAt < run.claim.printed,
+        `SYNC2-NO-LATE-REVERT ${label}: precondition, the stub stalled while the claim was sending notes`);
+      ok(run.claim.printed - run.claim.started >= run.stallMs - 1000,
+        `SYNC2-NO-POST-VERB-WRITE ${label}: the claim waits for the stalled stub before it returns (${run.claim.printed - run.claim.started}ms)`);
+      for (const [name, verb] of [['claim', run.claim], [run.second, run.next]]) {
+        const answered = verb.probe.filter((op) => op.op === 'answered' && op.method === 'PUT' && op.t <= verb.printed);
+        eq(answered.length, sentPuts(verb).length,
+          `SYNC2-NO-POST-VERB-WRITE ${label}: every PUT the ${name} sent was answered before it printed its receipt`);
+      }
+      eq(sync2Kind(run.requests, 'put').filter((request) => request.applied > run.next.printed).map((request) => request.rel), [],
+        `SYNC2-NO-POST-VERB-WRITE ${label}: the stub applies no PUT after the second verb returned`);
+      eq(sync2Changed(run.afterVerbs, run.afterStall), [],
+        `SYNC2-NO-LATE-REVERT SYNC1D-STALL-LATE-PUT-REVERT ${label}: no note changes after the verbs returned`);
+      eq(run.surfaces, sync2Expected(run.surfaces, sync2References[run.second].surfaces),
+        `SYNC2-NO-LATE-REVERT ${label}: card note, epic board, parent board and ledger agree after the stall`);
+      eq(run.surfaces.phase, run.second === 'park' ? 'parked' : 'implementing', `SYNC2-NO-LATE-REVERT ${label}: the ledger holds the second verb's outcome`);
+      ok(sync2Kind(run.requests, 'put').every((request) => request.held.length === 0),
+        `SYNC2-NO-POST-VERB-WRITE ${label}: every PUT reaches Obsidian with no coordinator lock held`);
+      eq(sync2TurnHeld(run.fx.vault), false, `SYNC2-TURN ${label}: the write turn is free after the verbs`);
+    }
+    eq(sync2SequenceRuns.filter((run) => run.second === 'discard').map((run) => run.surfaces.epicBoard[1]), [null, null, null],
+      'SYNC2-NO-LATE-REVERT the discarded sibling stays off the epic board after the stall');
+
+    // SYNC2-BOUNDED-LOCK-HOLD
+    {
+      const trials = 3;
+      const modes = ['none', 'stalled', 'closed', 'other-vault'];
+      const holdVerbs = ['claim', 'discard', 'park'];
+      const holds = {};
+      for (const mode of modes) {
+        holds[mode] = Object.fromEntries(holdVerbs.map((verb) => [verb, []]));
+        for (let trial = 0; trial < trials; trial += 1) {
+          const fx = sync2CliFixture(`hold-${mode}-${trial}`);
+          if (mode === 'stalled') {
+            const stub = await sync2Stub({ vault: fx.vault, stallMs: 2500, stalls: holdVerbs.length });
+            await sync2RestConfig(fx.vault, stub.port);
+          } else if (mode === 'closed') {
+            await sync2RestConfig(fx.vault, await sync2ClosedPort());
+          } else if (mode === 'other-vault') {
+            const stub = await sync2Stub({ vault: fx.vault, apiKey: crypto.randomBytes(24).toString('hex') });
+            await sync2RestConfig(fx.vault, stub.port);
+          }
+          const claim = await sync2Cli(fx, ['claim', '--json'], { probe: true });
+          const discard = await sync2Cli(fx, sync2Second.discard(), { probe: true });
+          const park = await sync2Cli(fx, sync2Second.park(claim), { probe: true });
+          sync2Outputs.push(claim, discard, park);
+          eq([claim.code, discard.code, park.code], [0, 0, 0],
+            `SYNC2-BOUNDED-LOCK-HOLD ${mode} trial ${trial + 1}: claim, discard and park succeed — ${claim.stderr.slice(0, 200)} ${discard.stderr.slice(0, 200)} ${park.stderr.slice(0, 200)}`);
+          holds[mode].claim.push(sync2Holds(claim.probe));
+          holds[mode].discard.push(sync2Holds(discard.probe));
+          holds[mode].park.push(sync2Holds(park.probe));
+          if (mode === 'stalled') {
+            ok([claim, discard, park].every((run) => run.ms >= 2000), `SYNC2-BOUNDED-LOCK-HOLD precondition: every verb of stalled trial ${trial + 1} met a stall (${[claim.ms, discard.ms, park.ms].join(', ')}ms)`);
+          }
+        }
+      }
+      for (const verb of holdVerbs) {
+        const names = Object.keys(holds.none[verb][0]).sort();
+        ok(names.includes('selector'), `SYNC2-BOUNDED-LOCK-HOLD precondition: ${verb} takes the selector lock (${names.join(', ')})`);
+        const baseline = Object.fromEntries(names.map((name) => [name, sync2Median(holds.none[verb].map((trial) => trial[name] || 0))]));
+        for (const mode of modes.slice(1)) {
+          eq(Object.keys(holds[mode][verb][0]).sort(), names, `SYNC2-BOUNDED-LOCK-HOLD ${verb} takes the same locks with Obsidian ${mode}`);
+          const added = Object.fromEntries(names.map((name) => [name, sync2Median(holds[mode][verb].map((trial) => trial[name] || 0)) - baseline[name]]));
+          console.log(`SYNC2-BOUNDED-LOCK-HOLD ${verb} with Obsidian ${mode}: median added hold per lock ${JSON.stringify(Object.fromEntries(Object.entries(added).map(([name, ms]) => [name, Math.round(ms)])))}`);
+          ok(Object.values(added).every((ms) => ms <= 250),
+            `SYNC2-BOUNDED-LOCK-HOLD SYNC1D-STALL-LOCK-HOLD ${verb} with Obsidian ${mode}: the median hold of each lock over three trials is at most 250ms longer than without REST config`);
+        }
+      }
+
+      const fx = sync2CliFixture('status-during-stall');
+      const stub = await sync2Stub({ vault: fx.vault, stallMs: 4000 });
+      await sync2RestConfig(fx.vault, stub.port);
+      let claimExited = false;
+      const claimRun = sync2Cli(fx, ['claim', '--json']).then((run) => { claimExited = true; return run; });
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
+      await sync2Wait(200);
+      const heldDuringWait = fs.existsSync(path.join(fx.stateDir, 'locks')) ? fs.readdirSync(path.join(fx.stateDir, 'locks')).filter((name) => name.endsWith('.lock')) : [];
+      const turnDuringWait = sync2TurnHeld(fx.vault);
+      const status = await sync2Cli(fx, ['status', '--json']);
+      const claimExitedAtStatus = claimExited;
+      const claim = await claimRun;
+      sync2Outputs.push(status, claim);
+      ok(turnDuringWait && heldDuringWait.length === 0,
+        `SYNC2-BOUNDED-LOCK-HOLD precondition: the claim is waiting on the stalled stub holding the write turn and no lock (turn ${turnDuringWait}, locks ${heldDuringWait.join(', ')})`);
+      eq([status.code, /LOCKED/.test(status.stderr)], [0, false], `SYNC2-BOUNDED-LOCK-HOLD SYNC1D-STALL-LOCK-HOLD a status launched while the claim waits is not refused LOCKED — ${status.stderr.slice(0, 200)}`);
+      eq(claimExitedAtStatus, false, `SYNC2-BOUNDED-LOCK-HOLD the status returns before the claim waiting on Obsidian has exited (${status.ms}ms)`);
+      eq(claim.code, 0, 'SYNC2-BOUNDED-LOCK-HOLD the claim then completes');
+    }
+
+    // A child that holds the vault's write turn as a live process, then after
+    // holdMs, or as soon as releaseFile exists when one is given, runs `then`
+    // (source text, with fs, path and lease, the turn's directory, in scope),
+    // releases the turn and prints when and why: file or timer. closed
+    // resolves with when, releasedBy with why.
+    const sync2Holder = async (vault, holdMs, then = '', releaseFile = null) => {
+      const child = spawn(process.execPath, ['-e', `
+const fs = require('fs'); const os = require('os'); const path = require('path');
+const lease = ${JSON.stringify(sync2Turn(vault))};
+fs.mkdirSync(lease, { recursive: true });
+fs.writeFileSync(path.join(lease, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'holder', started_at: new Date().toISOString() }));
+process.stdout.write('held\\n');
+const releaseFile = ${JSON.stringify(releaseFile)};
+let poll = null;
+const timer = setTimeout(() => release('timer'), ${holdMs});
+if (releaseFile) poll = setInterval(() => { if (fs.existsSync(releaseFile)) release('file'); }, 20);
+function release(why) { clearTimeout(timer); if (poll) clearInterval(poll); ${then}; const at = Date.now(); fs.rmSync(lease, { recursive: true, force: true }); process.stdout.write('released ' + at + ' ' + why + '\\n'); }
+`], { stdio: ['ignore', 'pipe', 'inherit'] });
+      let out = '';
+      child.stdout.on('data', (chunk) => { out += chunk; });
+      const closed = new Promise((resolve) => child.on('close', resolve));
+      await sync2Until(() => out.includes('held'), 10000);
+      return {
+        closed: closed.then(() => Number((out.match(/released (\d+)/) || [])[1])),
+        releasedBy: closed.then(() => (out.match(/released \d+ (file|timer)/) || [])[1] || null),
+      };
+    };
+
+    // SYNC2B-TURN-ONLY-FOR-NOTE-WRITES: verify-gates, its preflights and its
+    // self-install write no vault note and take no turn, so a sibling discard
+    // on the same vault completes while they run.
+    {
+      const fx = sync2CliFixture('verify-gates');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2B-TURN-ONLY-FOR-NOTE-WRITES precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      const marker = path.join(fx.base, 'preflight-started');
+      const driver = path.join(sync2Root, 'verify-gates-driver.js');
+      fs.writeFileSync(driver, `
+const fs = require('fs'); const path = require('path');
+const [coordinatorPath, indexPath, repo, card, leaseToken, marker] = process.argv.slice(2);
+const coordinator = require(coordinatorPath);
+const vaultIndex = require(indexPath);
+const commonDir = path.join(repo, '.git');
+const stateDir = path.join(commonDir, 'sauce-autoloop');
+const ctx = { root: repo, commonDir, stateDir, statePath: path.join(stateDir, 'state.json') };
+const block = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const head = 'a'.repeat(40);
+const sh = (cmd, args) => {
+  const line = [cmd, ...args].join(' ');
+  if (line === 'git status --short' || line.startsWith('git fetch') || line.startsWith('git diff --name-only')) return '';
+  if (line === 'git rev-parse HEAD') return head;
+  if (line === 'git rev-parse origin/main') return 'b'.repeat(40);
+  if (line.startsWith('git show -s')) return 'feat(sync2b): a gated step that writes no note';
+  if (line.includes('verify-adequacy')) return JSON.stringify({ adequate: true, behavioral: false });
+  if (line === 'npm run release:preflight') { fs.writeFileSync(marker, String(Date.now())); block(2500); return ''; }
+  if (line === 'npm run release:preflight-bumped') { block(1000); return ''; }
+  throw new Error('unexpected command ' + line);
+};
+vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BOARD), () => coordinator.commandVerifyGates(ctx, { card, 'lease-token': leaseToken }, {
+  sh, deployVaults: [{ id: 'fixture' }], runIsolatedWorkshopSelfInstall: () => { block(1000); },
+})).then((receipt) => { process.stdout.write(JSON.stringify(receipt)); process.exit(0); }, (error) => { process.stderr.write(error.message); process.exit(1); });
+`);
+      let verifyExited = false;
+      const verifyRun = sync2Cli(fx, [sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, sync2LeaseToken(claim), marker], { script: driver })
+        .then((run) => { verifyExited = true; return run; });
+      await sync2Until(() => fs.existsSync(marker), 30000);
+      const turnDuringPreflight = sync2TurnHeld(fx.vault);
+      const discard = await sync2Cli(fx, sync2Second.discard());
+      const verifyExitedAtDiscard = verifyExited;
+      const verify = await verifyRun;
+      sync2Outputs.push(claim, discard, verify);
+      eq([verify.code, verify.receipt.action, Object.keys(verify.receipt.checks || {})],
+        [0, 'gates-passed', ['adequacy', 'release_preflight', 'workshop_self_install', 'release_preflight_bumped']],
+        `SYNC2B-TURN-ONLY-FOR-NOTE-WRITES precondition: the gated step runs both preflights and the self-install — ${verify.stderr.slice(0, 200)}`);
+      eq(turnDuringPreflight, false, 'SYNC2B-TURN-ONLY-FOR-NOTE-WRITES verify-gates holds no write turn while its preflight runs');
+      ok(discard.code === 0 && verifyExitedAtDiscard === false,
+        `SYNC2B-TURN-ONLY-FOR-NOTE-WRITES a sibling discard completes while verify-gates is still running (discard ${discard.ms}ms) — ${discard.stderr.slice(0, 200)}`);
+      eq(discard.receipt.obsidian_index && discard.receipt.obsidian_index.written_through.includes(SYNC2_EPIC_BOARD_REL), true,
+        'SYNC2B-TURN-ONLY-FOR-NOTE-WRITES the discard took the turn and wrote its epic board through');
+    }
+
+    // SYNC2B-EVERY-WRITER-TAKES-THE-TURN: audit-delivery --repair runs
+    // reconcile in its own process and waits for a turn another live process
+    // holds before it rewrites the parent board.
+    {
+      const fx = sync2CliFixture('audit-repair');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      const claimed = fs.readFileSync(fx.boardPath, 'utf8');
+      fs.writeFileSync(fx.boardPath, claimed.replace('## In Planning\n', `## In Planning\n- [ ] [[${SYNC2_EPIC}]]\n`));
+      const drifted = fs.readFileSync(fx.boardPath, 'utf8');
+      const releaseFile = path.join(fx.base, 'release-audit-holder');
+      const holder = await sync2Holder(fx.vault, 30000, '', releaseFile);
+      const auditRun = sync2Cli(fx, ['--repair', '--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath],
+        { script: path.join(__dirname, '../../scripts/autoloop/audit-delivery.js') });
+      await sync2Wait(1500);
+      const boardWhileHeld = fs.readFileSync(fx.boardPath, 'utf8');
+      fs.writeFileSync(releaseFile, '');
+      await holder.closed;
+      const audit = await auditRun;
+      sync2Outputs.push(claim, audit);
+      const repaired = fs.readFileSync(fx.boardPath, 'utf8');
+      eq([audit.receipt.action, audit.receipt.repaired_cards, repaired !== drifted], ['repair-applied', [SYNC2_CARD], true],
+        `SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: audit-delivery --repair reconciles the card and rewrites the parent board — ${audit.stderr.slice(0, 200)}`);
+      eq([boardWhileHeld === drifted, await holder.releasedBy], [true, 'file'],
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN audit-delivery --repair leaves the parent board as it was while another process holds the write turn, and rewrites it after that process releases it');
+      ok(Boolean(audit.receipt.obsidian_index) && audit.receipt.obsidian_index.written_through.includes(SYNC2_BOARD_REL),
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN audit-delivery --repair sends the parent board it rewrote to Obsidian');
+    }
+
+    // SYNC2B-EVERY-WRITER-TAKES-THE-TURN: a coordinator verb takes the turn
+    // before it reads a note it will rewrite, so a holder's write to that
+    // note survives. The holder appends to the epic board, then releases.
+    {
+      const fx = sync2CliFixture('read-after-turn');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const holder = await sync2Holder(fx.vault, 1200,
+        `fs.appendFileSync(${JSON.stringify(fx.epicBoardPath)}, '- [ ] [[Written by the turn holder]]\\n')`);
+      const discard = await sync2Cli(fx, sync2Second.discard());
+      const releasedAt = await holder.closed;
+      const epicBoard = fs.readFileSync(fx.epicBoardPath, 'utf8');
+      eq([discard.code, epicBoard.includes(`[[${SYNC2_SIBLING}]]`), discard.ended >= releasedAt], [0, false, true],
+        `SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: the discard removes the sibling after the holder released — ${discard.stderr.slice(0, 200)}`);
+      ok(epicBoard.includes('[[Written by the turn holder]]'),
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN discard reads the epic board only after it holds the write turn, so the holder\'s write survives');
+    }
+
+    // SYNC2B-DEADLOCK-FREE: H takes the turn at a note write under its gate
+    // lock and then needs completion-projection. W, another process, is
+    // inside its own gate lock and reaches a projection under
+    // completion-projection while H holds the turn. W is refused the turn
+    // there and releases its locks: H retries the lock for up to 4s, so a W
+    // that waited for H's turn holding the lock would leave both waiting on
+    // each other.
+    {
+      const vault = path.join(sync2Root, 'deadlock');
+      const board = path.join(vault, 'spice', 'projects', 'test', 'test-board.md');
+      fs.mkdirSync(path.dirname(board), { recursive: true });
+      fs.writeFileSync(board, 'v0\n');
+      const ctx = { stateDir: path.join(sync2Root, 'deadlock-state') };
+      const stub = await sync2Stub({ vault, stateDir: ctx.stateDir });
+      await sync2RestConfig(vault, stub.port);
+      const signal = path.join(sync2Root, 'deadlock-w-in-gate');
+      const waiterScript = path.join(sync2Root, 'deadlock-waiter.js');
+      fs.writeFileSync(waiterScript, `
+const fs = require('fs');
+const path = require('path');
+const coordinator = require(${JSON.stringify(sync2CoordinatorPath)});
+const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
+const [vault, stateDir, board, signal] = process.argv.slice(2);
+const ctx = { stateDir };
+const turnOwner = () => { try { return JSON.parse(fs.readFileSync(path.join(vault, vaultIndex.PENDING_DIR, 'turn', 'owner.json'), 'utf8')); } catch (_) { return null; } };
+vaultIndex.withVaultIndex(vault, () => coordinator.withLock(ctx, 'gates-w', async () => {
+  fs.writeFileSync(signal, 'in-gate');
+  const record = { card: 'W card', card_path: board, phase: 'implementing' };
+  const projection = await coordinator.attemptProjection(ctx, record, board, {
+    state: { cards: {} },
+    projectCard: (_cardPath, boardPath) => {
+      vaultIndex.beforeNoteRewrite();
+      const next = fs.readFileSync(boardPath, 'utf8') + 'W\\n';
+      const tmp = boardPath + '.w.tmp';
+      vaultIndex.beforeNoteWrite();
+      fs.writeFileSync(tmp, next);
+      fs.renameSync(tmp, boardPath);
+      vaultIndex.noteWritten(boardPath, next);
+      return { changed: true };
+    },
+  });
+  const owner = turnOwner();
+  return { ok: projection.ok, error: projection.error || null, turnOwnerPid: owner && owner.pid };
+})).then((result) => { process.stdout.write(JSON.stringify(result)); process.exit(0); },
+  (error) => { process.stdout.write(JSON.stringify({ threw: error.message })); process.exit(1); });
+`);
+      let waiter = null;
+      let attempts = 0;
+      let projected = false;
+      await vaultIndex.withVaultIndex(vault, () => coordinator.withLock(ctx, 'gates-h', async () => {
+        sync2RailWrite(path.join(vault, 'spice', 'H first.md'), 'h\n');
+        waiter = new Promise((resolve) => {
+          const child = spawn(process.execPath, [waiterScript, vault, ctx.stateDir, board, signal], { stdio: ['ignore', 'pipe', 'inherit'] });
+          let out = '';
+          child.stdout.on('data', (chunk) => { out += chunk; });
+          const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
+          child.on('close', (code) => { clearTimeout(timer); let parsed = null; try { parsed = JSON.parse(out); } catch (_) { parsed = null; } resolve({ code, result: parsed }); });
+        });
+        await sync2Until(() => fs.existsSync(signal), 10000);
+        await sync2Wait(400);
+        const deadline = Date.now() + 4000;
+        while (!projected) {
+          attempts += 1;
+          try {
+            await coordinator.withLock(ctx, 'completion-projection', async () => {
+              vaultIndex.beforeNoteRewrite();
+              sync2RailWrite(board, `${fs.readFileSync(board, 'utf8')}H\n`);
+            });
+            projected = true;
+          } catch (error) {
+            if (error.code !== 'LOCKED' || Date.now() > deadline) break;
+            await sync2Wait(50);
+          }
+        }
+        return { ok: true };
+      }));
+      const w = await waiter;
+      eq([projected, attempts], [true, 1],
+        'SYNC2B-DEADLOCK-FREE the turn holder takes completion-projection at once: the other scope never waits for the turn inside it');
+      ok(w.code === 0 && w.result && w.result.ok === false && /vault-write-turn/.test(String(w.result.error)) && w.result.turnOwnerPid === process.pid,
+        `SYNC2B-NO-WAIT-IN-LOCK a projection inside a lock is refused the turn while H still holds it, and recorded as a projection failure (${JSON.stringify(w.result)})`);
+      eq(fs.readFileSync(board, 'utf8'), 'v0\nH\n', 'SYNC2B-NO-WAIT-IN-LOCK the refused projection writes nothing');
+    }
+
+    // Children for the SYNC-2b read-modify-write fixtures. Each runs with
+    // SAUCE_LOOP_* pointed at the fixture vault.
+    const sync2bHolderScript = path.join(sync2Root, 'rmw-holder.js');
+    fs.writeFileSync(sync2bHolderScript, `
+const fs = require('fs'); const path = require('path');
+const o = JSON.parse(process.argv[2]);
+const coordinator = require(${JSON.stringify(sync2CoordinatorPath)});
+const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
+const write = (file, text) => { vaultIndex.beforeNoteWrite(); const tmp = file + '.holder.tmp'; fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); vaultIndex.noteWritten(file, text); };
+vaultIndex.withVaultIndex(o.vault, async () => {
+  write(path.join(o.vault, 'spice', 'Holder.md'), 'holder\\n');
+  fs.writeFileSync(o.signal, 'held');
+  await new Promise((resolve) => setTimeout(resolve, o.holdMs));
+  if (o.ledgerCard) {
+    const ctx = { stateDir: o.stateDir, statePath: path.join(o.stateDir, 'state.json') };
+    const state = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+    Object.assign(state.cards[o.ledgerCard], o.ledgerPatch);
+    coordinator.writeState(ctx, state, state.cards[o.ledgerCard]);
+  }
+  if (o.rmwNote) {
+    vaultIndex.beforeNoteRewrite();
+    const raw = fs.readFileSync(o.rmwNote, 'utf8');
+    write(o.rmwNote, raw.replace(o.rmwFind, o.rmwReplace));
+  }
+}).then(() => { process.stdout.write('released ' + Date.now() + '\\n'); process.exit(0); }, (error) => { process.stdout.write('threw ' + error.message + '\\n'); process.exit(1); });
+`);
+    const sync2bVerbScript = path.join(sync2Root, 'rmw-verb.js');
+    fs.writeFileSync(sync2bVerbScript, `
+const fs = require('fs'); const path = require('path');
+const o = JSON.parse(process.argv[2]);
+const coordinator = require(${JSON.stringify(sync2CoordinatorPath)});
+const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
+const ctx = { root: o.root, stateDir: o.stateDir, statePath: path.join(o.stateDir, 'state.json'), commonDir: o.stateDir };
+const started = Date.now();
+vaultIndex.withVaultIndex(o.vault, () => coordinator[o.verb](ctx, o.args, { cardsRoot: o.cardsRoot, boardPath: o.boardPath }))
+  .then((result) => { process.stdout.write(JSON.stringify({ ok: true, result, ms: Date.now() - started })); process.exit(0); },
+    (error) => { process.stdout.write(JSON.stringify({ ok: false, code: error.code || null, message: error.message, ms: Date.now() - started })); process.exit(0); });
+`);
+    const sync2bVault = async (label) => {
+      const root = path.join(sync2Root, `rmw-${label}`);
+      const vault = path.join(root, 'vault');
+      const project = path.join(vault, 'spice', 'projects', 'p');
+      const cardsRoot = path.join(project, 'tasks');
+      const stateDir = path.join(root, 'state');
+      fs.mkdirSync(cardsRoot, { recursive: true });
+      fs.mkdirSync(path.join(stateDir, 'locks'), { recursive: true });
+      const boardPath = path.join(project, 'board.md');
+      fs.writeFileSync(boardPath, '---\nkanban-plugin: board\n---\n\n## In Planning\n\n');
+      const stub = await sync2Stub({ vault, stateDir });
+      await sync2RestConfig(vault, stub.port);
+      const env = {
+        ...process.env, HOME: root, SAUCE_LOOP_BOARD: boardPath, SAUCE_LOOP_CARDS_ROOT: cardsRoot, SAUCE_LOOP_VAULTS: '[]',
+        SAUCE_LOOP_REPO: 'example/sync2b', SAUCE_LOOP_BOARD_TOPOLOGY: 'epic', DELIVERY_FID: path.join(root, 'no-fid.md'),
+        DELIVERY_REPO_ROOT: root, DELIVERY_STATE: path.join(stateDir, 'state.json'),
+      };
+      delete env.SAUCE_EPIC_SELECTION_SHADOW;
+      const child = (script, options) => new Promise((resolve) => {
+        const proc = spawn(process.execPath, [script, JSON.stringify(options)], { cwd: root, env, stdio: ['ignore', 'pipe', 'inherit'] });
+        let out = '';
+        proc.stdout.on('data', (chunk) => { out += chunk; });
+        const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
+        proc.on('close', (code) => { clearTimeout(timer); resolve({ code, out }); });
+      });
+      // Holds the turn, then after holdMs makes its writes and releases it;
+      // resolves with when it released. The verb starts once the turn is held.
+      const race = async (holder, verb) => {
+        const signal = path.join(root, `held-${Date.now()}`);
+        const held = child(sync2bHolderScript, { vault, stateDir, signal, holdMs: 1500, ...holder });
+        await sync2Until(() => fs.existsSync(signal), 10000);
+        const ran = await child(sync2bVerbScript, { root, vault, stateDir, cardsRoot, boardPath, ...verb });
+        const h = await held;
+        let parsed = null;
+        try { parsed = JSON.parse(ran.out); } catch (_) { parsed = { ok: false, message: ran.out }; }
+        return { verb: parsed, releasedAt: Number((h.out.match(/released (\d+)/) || [])[1]), holderOut: h.out };
+      };
+      const writeState = (cards) => fs.writeFileSync(path.join(stateDir, 'state.json'), `${JSON.stringify({ schema_version: 1, cards }, null, 2)}\n`);
+      const readLedger = () => JSON.parse(fs.readFileSync(path.join(stateDir, 'state.json'), 'utf8'));
+      return { root, vault, project, cardsRoot, stateDir, boardPath, stub, race, writeState, readLedger };
+    };
+
+    // SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-dependencies --apply (the
+    // lens's two repros): while another process holds the turn it persists a
+    // ledger change to Y and rewrites dependent D. The verb must not write
+    // back a D or a ledger it read before that.
+    {
+      const fx = await sync2bVault('reconcile-dependencies');
+      const dPath = path.join(fx.cardsRoot, 'D.md');
+      fs.writeFileSync(dPath, '---\ntype: slice\nstatus: blocked\ndepends_on:\n  - "[[X]]"\n---\n\nD body\n');
+      fs.writeFileSync(path.join(fx.cardsRoot, 'X2.md'), '---\ntype: slice\nstatus: planning\n---\n\nX2\n');
+      fx.writeState({
+        X: { card: 'X', phase: 'discarded', superseded_by: 'X2' },
+        D: { card: 'D', phase: 'blocked', card_path: dPath },
+        Y: { card: 'Y', phase: 'tap_pr' },
+      });
+      const run = await fx.race(
+        { ledgerCard: 'Y', ledgerPatch: { phase: 'tap_merged', tap_pr: 42 }, rmwNote: dPath, rmwFind: '---\n\nD body', rmwReplace: 'holder_field: added-by-holder\n---\n\nD body' },
+        { verb: 'commandReconcileDependencies', args: { _: ['reconcile-dependencies'], json: true, all: true, apply: true, reason: 'sync2b' } },
+      );
+      const d = fs.readFileSync(dPath, 'utf8');
+      ok(run.verb.ok === true && /\[\[X2\]\]/.test(d),
+        `SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-dependencies --apply waits for the turn, then repoints D — ${JSON.stringify(run.verb).slice(0, 200)}`);
+      ok(d.includes('holder_field: added-by-holder'),
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-dependencies --apply keeps the holder\'s write to D: it reads D only after it holds the turn');
+      eq(fx.readLedger().cards.Y.phase, 'tap_merged',
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-dependencies --apply keeps the ledger write made while it waited: it loads the ledger only after it holds the turn');
+    }
+
+    // SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-metadata --apply: the
+    // holder edits the card after the dry-run. The verb must read the card
+    // only after the turn, see the change, and refuse it rather than write
+    // its dry-run bytes over it.
+    {
+      const fx = await sync2bVault('reconcile-metadata');
+      const name = 'Metadata turn';
+      const cardPath = path.join(fx.cardsRoot, `${name}.md`);
+      const currentRaw = card({ name, profile: 'heavy', zones: ['platform/meta'] })
+        .replace('---\n', '---\nkanban_column: Completed\n').replace('status: planning', 'status: completed');
+      const current = prepareDeliveryCard(currentRaw, name).card;
+      fs.writeFileSync(cardPath, currentRaw.replace(`schema_version: ${delivery.CONTRACT_VERSION}`, 'schema_version: 1.0.0'));
+      fx.writeState({
+        [name]: {
+          card: name, phase: 'deployed', card_path: cardPath, delivery_contract: current, delivery_contract_version: delivery.CONTRACT_VERSION,
+          dependencies: current.depends_on, touch_zones: current.touch_zones, deploy_subscriptions: current.deploy_subscriptions,
+          batch_policy: current.batch_policy,
+        },
+      });
+      const ctx = { root: fx.root, stateDir: fx.stateDir, statePath: path.join(fx.stateDir, 'state.json'), commonDir: fx.stateDir };
+      const dry = await coordinator.commandReconcileMetadata(ctx, { card: name, 'dry-run': true }, { cardsRoot: fx.cardsRoot });
+      ok(Boolean(dry.card_sha256) && dry.changed_fields.includes('schema_version'), 'SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: the metadata dry-run plans a card write');
+      const run = await fx.race(
+        { rmwNote: cardPath, rmwFind: 'Bounded work.', rmwReplace: 'Bounded work.\n\nHOLDER-LINE' },
+        { verb: 'commandReconcileMetadata', args: { card: name, apply: true, reason: 'sync2b metadata', 'expected-card-sha256': dry.card_sha256, json: true } },
+      );
+      const after = fs.readFileSync(cardPath, 'utf8');
+      ok(after.includes('HOLDER-LINE') && after.includes('schema_version: 1.0.0'),
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-metadata --apply never writes its dry-run bytes over the holder\'s change to the card');
+      ok(run.verb.ok === false && /expected-card-sha256/.test(run.verb.message),
+        `SYNC2B-EVERY-WRITER-TAKES-THE-TURN reconcile-metadata --apply reads the card only after it holds the turn, and refuses the changed card — ${JSON.stringify(run.verb).slice(0, 200)}`);
+    }
+
+    // SYNC2B-EVERY-WRITER-TAKES-THE-TURN contract-frontmatter-restamp --apply:
+    // the holder persists a ledger change to Y while the verb waits; the
+    // verb's merge-form persist must not revert it.
+    {
+      const fx = await sync2bVault('restamp');
+      const name = 'Restamp turn';
+      const cardPath = path.join(fx.cardsRoot, `${name}.md`);
+      fs.writeFileSync(cardPath, `${card({ name })}\nBODY\n`);
+      fx.writeState({ [name]: { card: name, phase: 'deployed', card_path: cardPath }, Y: { card: 'Y', phase: 'tap_pr' } });
+      const ctx = { root: fx.root, stateDir: fx.stateDir, statePath: path.join(fx.stateDir, 'state.json'), commonDir: fx.stateDir };
+      const reason = 'sync2b restamp';
+      const plan = await coordinator.commandReconcileMetadata(ctx, {
+        _: ['reconcile-metadata'], 'contract-frontmatter-restamp': true, 'dry-run': true, reason, json: true,
+      }, { cardsRoot: fx.cardsRoot });
+      eq(plan.exact_target_count, 1, 'SYNC2B-EVERY-WRITER-TAKES-THE-TURN precondition: the restamp dry-run plans one card');
+      const specPath = path.join(fx.root, 'restamp.json');
+      fs.writeFileSync(specPath, `${JSON.stringify(plan.spec, null, 2)}\n`);
+      const run = await fx.race(
+        { ledgerCard: 'Y', ledgerPatch: { phase: 'tap_merged', tap_pr: 7 } },
+        { verb: 'commandReconcileMetadata', args: { _: ['reconcile-metadata'], 'contract-frontmatter-restamp': true, apply: true, reason, spec: specPath, json: true } },
+      );
+      const ledger = fx.readLedger();
+      ok(run.verb.ok === true && run.verb.result.changed_count === 1 && Boolean(ledger.cards[name].card_note_sha),
+        `SYNC2B-EVERY-WRITER-TAKES-THE-TURN contract-frontmatter-restamp --apply waits for the turn, then restamps and stamps the card — ${JSON.stringify(run.verb).slice(0, 200)}`);
+      eq(ledger.cards.Y.phase, 'tap_merged',
+        'SYNC2B-EVERY-WRITER-TAKES-THE-TURN contract-frontmatter-restamp --apply keeps the ledger write made while it waited: it loads the ledger only after it holds the turn');
+    }
+
+    // SYNC2B-NO-WAIT-IN-LOCK: while a claim's flush is stalled, a writer
+    // inside the selector lock is refused the turn at once and writes
+    // nothing, a status launched meanwhile is not refused, and a verb that
+    // takes the turn before its lock waits holding no lock.
+    {
+      const fx = sync2CliFixture('contended-in-lock');
+      const stub = await sync2Stub({ vault: fx.vault, stallMs: 4000 });
+      await sync2RestConfig(fx.vault, stub.port);
+      const note = path.join(fx.projectRoot, 'In lock.md');
+      fs.writeFileSync(note, 'before\n');
+      const writerScript = path.join(sync2Root, 'in-lock-writer.js');
+      fs.writeFileSync(writerScript, `
+const fs = require('fs'); const path = require('path');
+const coordinator = require(${JSON.stringify(sync2CoordinatorPath)});
+const vaultIndex = require(${JSON.stringify(sync2IndexPath)});
+const [vault, stateDir, note] = process.argv.slice(2);
+vaultIndex.withVaultIndex(vault, () => coordinator.withLock({ stateDir }, 'selector', async () => {
+  vaultIndex.beforeNoteRewrite();
+  const next = fs.readFileSync(note, 'utf8') + 'in lock\\n';
+  vaultIndex.beforeNoteWrite();
+  fs.writeFileSync(note + '.tmp', next);
+  fs.renameSync(note + '.tmp', note);
+  vaultIndex.noteWritten(note, next);
+})).then(() => { process.stdout.write(JSON.stringify({ code: 'wrote' })); process.exit(0); },
+  (error) => { process.stdout.write(JSON.stringify({ code: error.code, message: error.message })); process.exit(0); });
+`);
+      const claimRun = sync2Cli(fx, ['claim', '--json']);
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
+      await sync2Wait(200);
+      let stallOverAtWriter = null;
+      const writerRun = sync2Cli(fx, [fx.vault, fx.stateDir, note], { script: writerScript }).then((run) => {
+        stallOverAtWriter = stub.events.some((event) => event.type === 'resumed');
+        return run;
+      });
+      await sync2Until(() => fs.existsSync(path.join(fx.stateDir, 'locks', 'selector.lock')), 1500);
+      const status = await sync2Cli(fx, ['status', '--json']);
+      const stallOverAtStatus = stub.events.some((event) => event.type === 'resumed');
+      const discardRun = sync2Cli(fx, sync2Second.discard());
+      await sync2Wait(600);
+      const locksWhileDiscardWaits = fs.readdirSync(path.join(fx.stateDir, 'locks')).filter((name) => name.endsWith('.lock'));
+      const writer = await writerRun;
+      const [claim, discard] = await Promise.all([claimRun, discardRun]);
+      sync2Outputs.push(claim, status, discard, writer);
+      const stallEnded = (stub.events.find((event) => event.type === 'resumed') || {}).at;
+      let writerResult = {};
+      try { writerResult = JSON.parse(writer.stdout); } catch (_) { writerResult = { code: writer.stdout }; }
+      ok(writerResult.code === 'LOCKED' && /vault-write-turn/.test(writerResult.message) && stallOverAtWriter === false && fs.readFileSync(note, 'utf8') === 'before\n',
+        `SYNC2B-NO-WAIT-IN-LOCK a writer inside the selector lock is refused the turn held by a stalled flush while the flush is still stalled, and writes nothing (${JSON.stringify(writerResult).slice(0, 160)})`);
+      eq([status.code, /LOCKED/.test(status.stderr)], [0, false],
+        `SYNC2B-NO-WAIT-IN-LOCK SYNC1D-STALL-LOCK-HOLD a status launched during the claim's stalled flush is not refused LOCKED — ${status.stderr.slice(0, 200)}`);
+      eq(stallOverAtStatus, false, 'SYNC2B-NO-WAIT-IN-LOCK precondition: the status returned during the stall');
+      eq(locksWhileDiscardWaits, [], 'SYNC2B-NO-WAIT-IN-LOCK a discard that takes the turn before its lock waits for it holding no lock');
+      ok(claim.code === 0 && discard.code === 0 && discard.ended >= stallEnded,
+        `SYNC2B-NO-WAIT-IN-LOCK the claim and then the waiting discard complete after the stall — ${discard.stderr.slice(0, 200)}`);
+    }
+
+    // SYNC-2c helpers. A1 is claimed without REST config and then moved to
+    // feature_merged in the ledger, so a real advance takes the merge-only
+    // path (SAUCE_LOOP_VAULTS is []) from feature_merged to deployed.
+    const sync2cLedger = (fx) => {
+      try { return JSON.parse(fs.readFileSync(fx.statePath, 'utf8')).cards[SYNC2_CARD] || {}; } catch (_) { return {}; }
+    };
+    const sync2cPatchLedger = (fx, patch) => {
+      const state = JSON.parse(fs.readFileSync(fx.statePath, 'utf8'));
+      Object.assign(state.cards[SYNC2_CARD], patch);
+      fs.writeFileSync(fx.statePath, `${JSON.stringify(state, null, 2)}\n`);
+    };
+    const sync2cMerged = async (label, patch = {}) => {
+      const fx = sync2CliFixture(label);
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2C-PROJECTION-AFTER-GATE precondition (${label}): the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      sync2cPatchLedger(fx, { phase: 'feature_merged', feature_merge_sha: 'a'.repeat(40), ...patch });
+      return { fx, token: sync2LeaseToken(claim) };
+    };
+    const sync2cAdvance = (token) => ['advance', '--card', SYNC2_CARD, '--lease-token', token, '--lease-seconds', '0'];
+    const sync2cLocks = (fx) => (fs.existsSync(path.join(fx.stateDir, 'locks'))
+      ? fs.readdirSync(path.join(fx.stateDir, 'locks')).filter((name) => name.endsWith('.lock')) : []);
+    const sync2cGateHolds = (probe) => {
+      const name = `gates-${SYNC2_CARD.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+      const holds = [];
+      for (const entry of probe) {
+        if (entry.lock !== name) continue;
+        if (entry.op === 'acquire') holds.push({ acquire: entry.t, release: null });
+        else if (entry.op === 'release' && holds.length) holds[holds.length - 1].release = entry.t;
+      }
+      return holds;
+    };
+    let sync2cSeq = 0;
+    // Session B: takes the write turn at a note write through vault-index,
+    // holds it for holdMs (patching the ledger then, when asked), then sends
+    // its note, which against a stalling stub stalls its flush with the turn
+    // still held. Resolves `closed` with the time it printed after releasing
+    // the turn.
+    const sync2cSessionB = async (fx, options = {}) => {
+      const signal = path.join(fx.base, `session-b-${++sync2cSeq}`);
+      const proc = spawn(process.execPath, [sync2bHolderScript, JSON.stringify({ vault: fx.vault, stateDir: fx.stateDir, signal, holdMs: 0, ...options })],
+        { cwd: fx.repo, env: fx.env, stdio: ['ignore', 'pipe', 'inherit'] });
+      let out = '';
+      proc.stdout.on('data', (chunk) => { out += chunk; });
+      const closed = new Promise((resolve) => proc.on('close', () => resolve(Number((out.match(/released (\d+)/) || [])[1]) || 0)));
+      await sync2Until(() => fs.existsSync(signal), 10000);
+      return { closed };
+    };
+    const sync2cTurnOwner = (fx) => {
+      try { return JSON.parse(fs.readFileSync(path.join(sync2Turn(fx.vault), 'owner.json'), 'utf8')); } catch (_) { return null; }
+    };
+
+    // SYNC2C-PROJECTION-AFTER-GATE advance: session B holds the turn with its
+    // flush stalled while A's advance card step moves the card to deployed.
+    // A is not refused: the projection waits for the turn holding no lock and
+    // lands after B releases.
+    {
+      const { fx, token } = await sync2cMerged('after-gate-advance');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir, stallMs: 4000 });
+      await sync2RestConfig(fx.vault, stub.port);
+      const sessionB = await sync2cSessionB(fx);
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
+      const advanceRun = sync2Cli(fx, sync2cAdvance(token), { probe: true });
+      const markedWhileHeld = await sync2Until(() => Boolean(sync2cLedger(fx).projection_pending), 10000);
+      await sync2Wait(300);
+      const ownerWhileWaiting = sync2cTurnOwner(fx);
+      const locksWhileWaiting = sync2cLocks(fx);
+      const status = await sync2Cli(fx, ['status', '--json']);
+      const ownerAfterStatus = sync2cTurnOwner(fx);
+      const releasedAt = await sessionB.closed;
+      const advance = await advanceRun;
+      sync2Outputs.push(status, advance);
+      const record = sync2cLedger(fx);
+      const holds = sync2cGateHolds(advance.probe);
+      const { requests } = await stub.log();
+      const bAnsweredAt = (sync2Kind(requests, 'put', 'spice/Holder.md')[0] || {}).applied || 0;
+      ok(markedWhileHeld && ownerWhileWaiting && ownerWhileWaiting.pid !== advance.pid && releasedAt > 0,
+        'SYNC2C-PROJECTION-AFTER-GATE precondition: A\'s card step reached deployed while session B held the turn with its flush stalled');
+      eq([advance.code, advance.receipt.action, Object.prototype.hasOwnProperty.call(advance.receipt, 'projection_error')], [0, 'complete', false],
+        `SYNC2C-PROJECTION-AFTER-GATE advance: A is not refused while B holds the turn; its receipt is complete with no projection_error — ${advance.stdout.slice(0, 300)} ${advance.stderr.slice(0, 200)}`);
+      eq([record.phase, record.projection_pending || null, record.projection_error || null], ['deployed', null, null],
+        'SYNC2C-PROJECTION-AFTER-GATE advance: the ledger ends deployed with no pending marker and no projection_error');
+      const surfaces = sync2Surfaces(fx);
+      eq([surfaces.card, surfaces.epicBoard[0]], [['completed', 'Completed'], 'Completed'],
+        'SYNC2C-PROJECTION-AFTER-GATE advance: the final board has A\'s card in its deployed lane');
+      ok(bAnsweredAt > 0 && holds.length === 2 && holds[0].release < bAnsweredAt && holds[1].acquire >= bAnsweredAt,
+        `SYNC2C-PROJECTION-AFTER-GATE advance: the card step releases its gate lock before B's stalled flush is answered, and the projection takes it again only after the stub applied B's stalled PUT (${JSON.stringify(holds.map((h) => [Math.round(h.acquire - bAnsweredAt), Math.round(h.release - bAnsweredAt)]))})`);
+      ok(fs.statSync(fx.cardPath).mtimeMs >= bAnsweredAt, 'SYNC2C-PROJECTION-AFTER-GATE advance: the projection lands after the stub applied B\'s stalled PUT');
+      eq(locksWhileWaiting, [], 'SYNC2C-PROJECTION-AFTER-GATE bounded hold: no coordinator lock is held while the projection waits for the turn');
+      eq([status.code, /LOCKED/.test(status.stderr), Boolean(ownerAfterStatus) && ownerAfterStatus.token === ownerWhileWaiting.token], [0, false, true],
+        `SYNC2C-PROJECTION-AFTER-GATE bounded hold: a status launched while the projection waits is not refused, and returns while B still holds the turn — ${status.stderr.slice(0, 200)}`);
+      ok(holds.every((hold) => hold.release - hold.acquire < 1500),
+        `SYNC2C-PROJECTION-AFTER-GATE bounded hold: neither card-gate lock scope spans the wait (${holds.map((h) => Math.round(h.release - h.acquire)).join(', ')}ms)`);
+      ok(Boolean(advance.receipt.obsidian_index) && advance.receipt.obsidian_index.written_through.includes(SYNC2_CARD_REL),
+        'SYNC2C-PROJECTION-AFTER-GATE advance: the projected card note is sent to Obsidian');
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE deploy: the same contention for deploy's
+    // card step. Its promoteAndDeploy is replaced by one that ends as the real
+    // one does on success: deployed, marked pending, persisted.
+    {
+      const { fx, token } = await sync2cMerged('after-gate-deploy');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir, stallMs: 3000 });
+      await sync2RestConfig(fx.vault, stub.port);
+      const driver = path.join(sync2Root, 'deploy-driver.js');
+      fs.writeFileSync(driver, `
+const path = require('path');
+const [coordinatorPath, indexPath, repo, card, leaseToken] = process.argv.slice(2);
+const coordinator = require(coordinatorPath);
+const vaultIndex = require(indexPath);
+const commonDir = path.join(repo, '.git');
+const stateDir = path.join(commonDir, 'sauce-autoloop');
+const ctx = { root: repo, commonDir, stateDir, statePath: path.join(stateDir, 'state.json') };
+vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BOARD), () => coordinator.commandDeploy(ctx, { card, 'lease-token': leaseToken }, {
+  promoteAndDeploy: async (stepCtx, state, record) => {
+    record.phase = 'deployed'; record.deployed_at = new Date().toISOString();
+    coordinator.markCompletionPending(record);
+    coordinator.writeState(stepCtx, state, record);
+    return coordinator.completionResult(record);
+  },
+})).then((receipt) => { process.stdout.write(JSON.stringify(receipt)); process.exit(0); }, (error) => { process.stderr.write(error.message); process.exit(1); });
+`);
+      const sessionB = await sync2cSessionB(fx);
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
+      const deployRun = sync2Cli(fx, [sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, token], { script: driver });
+      const marked = await sync2Until(() => Boolean(sync2cLedger(fx).projection_pending), 10000);
+      await sync2Wait(300);
+      const locksWhileWaiting = sync2cLocks(fx);
+      const releasedAt = await sessionB.closed;
+      const deploy = await deployRun;
+      sync2Outputs.push(deploy);
+      const record = sync2cLedger(fx);
+      const { requests } = await stub.log();
+      const bAnsweredAt = (sync2Kind(requests, 'put', 'spice/Holder.md')[0] || {}).applied || 0;
+      ok(marked && releasedAt > 0 && bAnsweredAt > 0, 'SYNC2C-PROJECTION-AFTER-GATE precondition: deploy\'s card step reached deployed while session B held the turn');
+      eq([deploy.code, deploy.receipt.action, Object.prototype.hasOwnProperty.call(deploy.receipt, 'projection_error'), record.projection_error || null, record.projection_pending || null],
+        [0, 'complete', false, null, null],
+        `SYNC2C-PROJECTION-AFTER-GATE deploy: deploy is not refused while B holds the turn; complete with no projection_error — ${deploy.stdout.slice(0, 300)} ${deploy.stderr.slice(0, 200)}`);
+      eq(sync2Surfaces(fx).card, ['completed', 'Completed'], 'SYNC2C-PROJECTION-AFTER-GATE deploy: the final board has the card in its deployed lane');
+      ok(fs.statSync(fx.cardPath).mtimeMs >= bAnsweredAt, 'SYNC2C-PROJECTION-AFTER-GATE deploy: the projection lands after the stub applied B\'s stalled PUT');
+      eq(locksWhileWaiting, [], 'SYNC2C-PROJECTION-AFTER-GATE bounded hold: deploy holds no coordinator lock while its projection waits for the turn');
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE phase change: while A's projection waits
+    // for the turn, session B moves the card out of deployed in the ledger.
+    // A re-reads the ledger under the turn and writes no deployed projection.
+    {
+      const { fx, token } = await sync2cMerged('after-gate-phase-change');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const before = fs.readFileSync(fx.cardPath, 'utf8');
+      const sessionB = await sync2cSessionB(fx, { holdMs: 3000, ledgerCard: SYNC2_CARD, ledgerPatch: { phase: 'blocked', reason: 'moved while the projection waited' } });
+      const advanceRun = sync2Cli(fx, sync2cAdvance(token));
+      const marked = await sync2Until(() => Boolean(sync2cLedger(fx).projection_pending) && sync2cLedger(fx).phase === 'deployed', 10000);
+      await sessionB.closed;
+      const advance = await advanceRun;
+      sync2Outputs.push(advance);
+      const record = sync2cLedger(fx);
+      ok(marked, 'SYNC2C-PROJECTION-AFTER-GATE precondition: A\'s card step reached deployed before B moved the card');
+      eq([record.phase, record.projection_pending || null], ['blocked', null],
+        'SYNC2C-PROJECTION-AFTER-GATE phase change: the ledger keeps the phase written while the projection waited, and the stale marker is removed');
+      eq([fs.readFileSync(fx.cardPath, 'utf8') === before, sync2Surfaces(fx).epicBoard[0]], [true, 'In Progress'],
+        'SYNC2C-PROJECTION-AFTER-GATE phase change: the projection re-reads the ledger under the turn and writes no deployed projection for a card that left deployed');
+      eq([advance.code, advance.receipt.action, /moved to blocked/.test(String(advance.receipt.projection_error)), advance.receipt.reconcile],
+        [0, 'completion-projection-failed', true, `reconcile --card ${SYNC2_CARD}`],
+        `SYNC2C-PROJECTION-AFTER-GATE phase change: the receipt says no completion projection was written and routes to reconcile — ${advance.stdout.slice(0, 300)}`);
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE retry: A is killed while its projection
+    // waits for a turn another process holds, leaving the card deployed with
+    // the projection pending. A re-run of advance writes it.
+    {
+      const { fx, token } = await sync2cMerged('after-gate-retry-advance');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const holder = await sync2Holder(fx.vault, 5000);
+      const crashed = spawn(process.execPath, [sync2CoordinatorPath, ...sync2cAdvance(token)], { cwd: fx.repo, env: fx.env, stdio: 'ignore' });
+      const crashedExit = new Promise((resolve) => crashed.on('close', resolve));
+      const marked = await sync2Until(() => Boolean(sync2cLedger(fx).projection_pending), 10000);
+      await sync2Wait(300);
+      crashed.kill('SIGKILL');
+      await crashedExit;
+      await holder.closed;
+      const crashedRecord = sync2cLedger(fx);
+      const crashedCard = sync2Surfaces(fx).card;
+      ok(marked && crashedRecord.phase === 'deployed' && crashedRecord.projection_pending && crashedRecord.projection_pending.phase === 'deployed'
+        && crashedCard[1] === 'In Progress',
+      `SYNC2C-PROJECTION-AFTER-GATE precondition: a crash between the card step and the projection leaves deployed with the projection pending (${JSON.stringify(crashedCard)})`);
+      const rerun = await sync2Cli(fx, sync2cAdvance(token));
+      sync2Outputs.push(rerun);
+      const record = sync2cLedger(fx);
+      eq([rerun.code, rerun.receipt.action, record.projection_pending || null, record.projection_error || null, sync2Surfaces(fx).card],
+        [0, 'complete', null, null, ['completed', 'Completed']],
+        `SYNC2C-PROJECTION-AFTER-GATE retry: a re-run of advance writes the projection a crash left pending — ${rerun.stdout.slice(0, 300)} ${rerun.stderr.slice(0, 200)}`);
+      ok(Boolean(rerun.receipt.loop_station), 'SYNC2C-PROJECTION-AFTER-GATE retry: the re-run also refreshes the Loop Station');
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE retry: the same crash in recover-deployed;
+    // a literal re-run (a replay) writes the pending projection.
+    {
+      const head = 'c'.repeat(40);
+      const { fx } = await sync2cMerged('after-gate-retry-recover', {
+        batch_policy: 'supervised_only',
+        gate_receipt: { status: 'pass', head_sha: head },
+        reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: head }])),
+      });
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const driver = path.join(sync2Root, 'recover-driver.js');
+      fs.writeFileSync(driver, `
+const path = require('path');
+const [coordinatorPath, indexPath, repo, card, head] = process.argv.slice(2);
+const coordinator = require(coordinatorPath);
+const vaultIndex = require(indexPath);
+const commonDir = path.join(repo, '.git');
+const stateDir = path.join(commonDir, 'sauce-autoloop');
+const ctx = { root: repo, commonDir, stateDir, statePath: path.join(stateDir, 'state.json') };
+const evidence = {
+  feature_pr: { merge_sha: 'd'.repeat(40) }, release_pr: { number: 2, url: 'https://example.test/release/2', merge_sha: 'e'.repeat(40) },
+  tag: 'v9.9.9', version: '9.9.9', tap_pr: { number: 3, url: 'https://example.test/tap/3' }, brew_version: '9.9.9', vault_receipts: {},
+};
+vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BOARD), () => coordinator.commandRecoverDeployed(ctx,
+  { card, 'expected-head': head, reason: 'sync2c recovery', apply: true }, { collectDeployedRecoveryEvidence: () => evidence },
+)).then((receipt) => { process.stdout.write(JSON.stringify(receipt)); process.exit(0); }, (error) => { process.stderr.write(error.message); process.exit(1); });
+`);
+      const holder = await sync2Holder(fx.vault, 5000);
+      const crashed = spawn(process.execPath, [driver, sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, head], { cwd: fx.repo, env: fx.env, stdio: 'ignore' });
+      const crashedExit = new Promise((resolve) => crashed.on('close', resolve));
+      const marked = await sync2Until(() => Boolean(sync2cLedger(fx).projection_pending), 10000);
+      await sync2Wait(300);
+      crashed.kill('SIGKILL');
+      await crashedExit;
+      await holder.closed;
+      const crashedRecord = sync2cLedger(fx);
+      ok(marked && crashedRecord.phase === 'deployed' && (crashedRecord.deployed_recoveries || []).length === 1 && sync2Surfaces(fx).card[1] === 'In Progress',
+        'SYNC2C-PROJECTION-AFTER-GATE precondition: a crash after recover-deployed\'s card step leaves deployed with the projection pending');
+      const rerun = await sync2Cli(fx, [sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, head], { script: driver });
+      sync2Outputs.push(rerun);
+      const record = sync2cLedger(fx);
+      eq([rerun.code, rerun.receipt.action, rerun.receipt.no_op, rerun.receipt.projection && rerun.receipt.projection.ok,
+        record.projection_pending || null, (record.deployed_recoveries || []).length, sync2Surfaces(fx).card],
+      [0, 'recovered-deployed', true, true, null, 1, ['completed', 'Completed']],
+      `SYNC2C-PROJECTION-AFTER-GATE retry: a re-run of recover-deployed writes the projection a crash left pending — ${rerun.stdout.slice(0, 300)} ${rerun.stderr.slice(0, 200)}`);
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE retry: reconcile writes a pending
+    // projection and removes the marker.
+    {
+      const { fx } = await sync2cMerged('after-gate-reconcile', { phase: 'deployed', projection_pending: { phase: 'deployed', marked_at: '2026-10-02T00:00:00.000Z' } });
+      const reconcile = await sync2Cli(fx, sync2Second.reconcile());
+      sync2Outputs.push(reconcile);
+      eq([reconcile.code, sync2cLedger(fx).projection_pending || null, sync2Surfaces(fx).card], [0, null, ['completed', 'Completed']],
+        `SYNC2C-PROJECTION-AFTER-GATE retry: reconcile writes a pending projection and removes its marker — ${reconcile.stderr.slice(0, 200)}`);
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE a card-gate lock held by another process
+    // when the projection comes back for it: the marker stays and the
+    // receipt routes to reconcile and reports projection_pending.
+    {
+      const state = { cards: { X: { card: 'X', phase: 'deployed', projection_pending: { phase: 'deployed', marked_at: 't' } } } };
+      const held = Object.assign(new Error('lock gates-x held by pid 1'), { code: 'LOCKED' });
+      let completion;
+      try {
+        completion = await coordinator.projectPendingCompletion({}, 'X', {
+          readState: () => state, writeState: () => { throw new Error('no write expected'); }, withLock: async () => { throw held; },
+        });
+      } catch (error) {
+        completion = { status: 'threw', error: error.message };
+      }
+      const receipt = completion.status === 'locked' ? coordinator.completionAfterGate({
+        action: 'complete', deployment: 'deployed', card: 'X', version: '1.0.0', receipts: {}, projection_reconciled_at: null,
+      }, completion) : {};
+      eq([completion.status, state.cards.X.projection_pending.phase], ['locked', 'deployed'],
+        'SYNC2C-PROJECTION-AFTER-GATE a held card-gate lock leaves the pending marker in the ledger for a re-run');
+      eq([receipt.action, receipt.projection_error, receipt.projection_pending, receipt.reconcile, 'projection_reconciled_at' in receipt],
+        ['completion-projection-failed', 'lock gates-x held by pid 1', true, 'reconcile --card X', false],
+        'SYNC2C-PROJECTION-AFTER-GATE a held card-gate lock is reported as a pending projection routed to reconcile');
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE recover-deployed replay: another process
+    // holds the card-gate lock after the replay's first scope. A replay with
+    // no pending marker takes no second scope and returns the plain no-op
+    // replay receipt with no Loop Station write; one with a marker reports
+    // the marker as pending.
+    {
+      const head = 'c'.repeat(40);
+      const request = { card: 'Replay card', expected_head: head, reason: 'replay' };
+      const replayRecord = (marker) => ({
+        card: 'Replay card', phase: 'deployed', batch_policy: 'supervised_only', card_path: path.join(sync2Root, 'Replay card.md'),
+        gate_receipt: { status: 'pass', head_sha: head },
+        reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: head }])),
+        deployed_recoveries: [{ request, prior_phase: 'blocked' }],
+        ...(marker ? { projection_pending: { phase: 'deployed', marked_at: 't' } } : {}),
+      });
+      const replay = async (marker) => {
+        const state = { cards: { 'Replay card': replayRecord(marker) } };
+        const gateScopes = [];
+        const stations = [];
+        let writes = 0;
+        let receipt;
+        try {
+          receipt = await coordinator.commandRecoverDeployed({ root: sync2Root }, { card: 'Replay card', 'expected-head': head, reason: 'replay', apply: true }, {
+            readState: () => state,
+            writeState: () => { writes += 1; },
+            withLock: async (_ctx, name, fn) => {
+              if (/^gates-/.test(name)) {
+                gateScopes.push(name);
+                if (gateScopes.length > 2) throw Object.assign(new Error(`lock ${name} held by pid 999`), { code: 'LOCKED' });
+              }
+              return fn();
+            },
+            collectDeployedRecoveryEvidence: () => ({ fixture: true }),
+            projectLoopStation: (_ctx, _state, updatedOn) => { stations.push(updatedOn); return { action: 'loop-station-projected', no_op: false, updated_on: updatedOn }; },
+          });
+        } catch (error) {
+          receipt = { threw: error.message };
+        }
+        return { receipt, stations, writes, gateScopes, marker: state.cards['Replay card'].projection_pending || null };
+      };
+      const plain = await replay(false);
+      eq([plain.receipt, plain.stations, plain.writes, plain.gateScopes.length, plain.marker],
+        [{ action: 'recovered-deployed', card: 'Replay card', phase: 'deployed', no_op: true, request, evidence: { fixture: true } }, [], 0, 2, null],
+        `SYNC2C-PROJECTION-AFTER-GATE recover-deployed: a replay with no pending marker takes no second card-gate scope, and returns the plain no-op replay receipt with no Loop Station write (${JSON.stringify(plain.receipt).slice(0, 200)})`);
+      const marked = await replay(true);
+      eq([marked.receipt.action, marked.receipt.no_op, marked.receipt.projection_pending, Boolean(marked.marker)],
+        ['recovered-deployed-projection-failed', true, true, true],
+        'SYNC2C-PROJECTION-AFTER-GATE recover-deployed: a replay with a pending marker that meets a held card-gate lock reports the marker the ledger keeps');
+    }
+
+    // SYNC2C-PROJECTION-AFTER-GATE board-health --write-note: session B holds
+    // the turn with its flush stalled; the note is written after the stub
+    // applied B's stalled PUT, with no note_error, and no lock is held while
+    // it waits.
+    {
+      const fx = sync2CliFixture('board-health-turn');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir, stallMs: 3000 });
+      await sync2RestConfig(fx.vault, stub.port);
+      const notePath = path.join(fx.projectRoot, 'Board Health.md');
+      const sessionB = await sync2cSessionB(fx);
+      await sync2Until(() => stub.events.some((event) => event.type === 'stalling'), 20000);
+      const healthRun = sync2Cli(fx, ['board-health', '--json', '--write-note']);
+      await sync2Wait(800);
+      const locksWhileWaiting = sync2cLocks(fx);
+      const status = await sync2Cli(fx, ['status', '--json']);
+      const releasedAt = await sessionB.closed;
+      const health = await healthRun;
+      sync2Outputs.push(status, health);
+      const { requests } = await stub.log();
+      const bAnsweredAt = (sync2Kind(requests, 'put', 'spice/Holder.md')[0] || {}).applied || 0;
+      eq([health.code, health.receipt.action, health.receipt.note_error || null, Boolean(health.receipt.note && health.receipt.note.changed), fs.existsSync(notePath)],
+        [0, 'board-health', null, true, true],
+        `SYNC2C-PROJECTION-AFTER-GATE board-health: --write-note is not refused while B holds the turn and writes its note with no note_error — ${health.stdout.slice(0, 300)} ${health.stderr.slice(0, 200)}`);
+      ok(releasedAt > 0 && bAnsweredAt > 0 && fs.existsSync(notePath) && fs.statSync(notePath).mtimeMs >= bAnsweredAt,
+        'SYNC2C-PROJECTION-AFTER-GATE board-health: the note is written after the stub applied B\'s stalled PUT');
+      eq([locksWhileWaiting, status.code, /LOCKED/.test(status.stderr)], [[], 0, false],
+        'SYNC2C-PROJECTION-AFTER-GATE board-health: it waits for the turn holding no lock, and a status launched meanwhile is not refused');
+    }
+
+    // SYNC2C-DRY-RUN-AND-PROSE: each dry run below takes no turn. A live
+    // holder keeps the turn until the release file exists or its 45s timer
+    // fires. The file is written only after all six runs have returned, so a
+    // release by the file shows that none of them waited for the turn, and a
+    // run that waited forces a release by the timer. No run may be refused
+    // the turn with LOCKED.
+    {
+      const fx = sync2CliFixture('dry-runs');
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2C-DRY-RUN-AND-PROSE precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const releaseFile = path.join(fx.base, 'release-dry-run-holder');
+      const holder = await sync2Holder(fx.vault, 45000, '', releaseFile);
+      const runs = [];
+      for (const [name, mode, args] of [
+        ['claim', '--dry-run', ['claim', '--json', '--dry-run']],
+        ['advance', '--dry-run', ['advance', '--card', SYNC2_CARD, '--lease-token', sync2LeaseToken(claim), '--lease-seconds', '0', '--dry-run']],
+        ['heal-epic-bindings', '--dry-run', ['heal-epic-bindings', '--json', '--dry-run']],
+        ['contract-frontmatter-restamp', '--dry-run', ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--dry-run', '--reason', 'sync2c']],
+        ['parked-rebind', '--dry-run', ['reconcile-metadata', '--parked-rebind', '--json', '--dry-run', '--reason', 'sync2c']],
+        ['reconcile-dependencies', 'without --apply', ['reconcile-dependencies', '--json', '--all', '--reason', 'sync2c']],
+      ]) runs.push({ name, mode, run: await sync2Cli(fx, args) });
+      const owner = sync2cTurnOwner(fx);
+      fs.writeFileSync(releaseFile, '');
+      const releasedAt = await holder.closed;
+      const releasedBy = await holder.releasedBy;
+      eq(releasedBy, 'file',
+        'SYNC2C-DRY-RUN-AND-PROSE the holder released the turn by the release file, written after all six dry runs returned, so none of them waited for the turn');
+      for (const { name, mode, run } of runs) {
+        ok(!/LOCKED/.test(run.stderr),
+          `SYNC2C-DRY-RUN-AND-PROSE ${name} ${mode} is not refused the turn with LOCKED (diagnostics: took ${run.ended - run.started}ms, ended ${releasedAt - run.ended}ms before the release, exit ${run.code}) — ${run.stderr.slice(0, 200)}`);
+      }
+      eq(owner && owner.token, 'holder', 'SYNC2C-DRY-RUN-AND-PROSE claim --dry-run and the other runs above take no turn: the holder still owns it after they return');
+      eq(runs.find((entry) => entry.name === 'claim').run.receipt.no_op, true, 'SYNC2C-DRY-RUN-AND-PROSE precondition: claim --dry-run is the selector preview');
+    }
+
+    // SYNC2D-READ-ONLY-TURN-FREE: source audit of the coordinator's complete
+    // no-note read-only set: status, supersession-depth and recover are
+    // read-only verbs; board-health is read-only when --write-note is absent.
+    // claim --dry-run, advance --dry-run, heal-epic-bindings --dry-run,
+    // reconcile-metadata dry-run modes, and reconcile-dependencies without
+    // --apply are pinned by SYNC2C-DRY-RUN-AND-PROSE. The remaining cases
+    // below are state-only writers or refusals, included to check they do not
+    // take a vault turn. Each has a live holder that releases by a file
+    // published after its run returns; a timed release fails that check.
+    // A fake gh that always fails is first on PATH, so record-pr reaches no
+    // GitHub. recover-deployed --dry-run is a policy refusal for this standard
+    // card before it reads GitHub evidence. The parked rebind --apply is a
+    // malformed-spec refusal. A1 is moved to deployed before
+    // reconcile-metadata --dry-run so it plans A1, and break-lease runs last.
+    // verify-gates is pinned with its preflights by
+    // SYNC2B-TURN-ONLY-FOR-NOTE-WRITES.
+    {
+      const fx = sync2CliFixture('read-only-turn-free');
+      const bin = path.join(fx.base, 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      fx.env.PATH = `${bin}${path.delimiter}${fx.env.PATH}`;
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2D-READ-ONLY-TURN-FREE precondition: the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      const worktreeHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sync2cLedger(fx).worktree, encoding: 'utf8' }).trim();
+      await sync2RestConfig(fx.vault, await sync2ClosedPort());
+      const auditScript = path.join(__dirname, '../../scripts/autoloop/audit-delivery.js');
+      const token = sync2LeaseToken(claim);
+      const turnFree = async (label, args, script) => {
+        const releaseFile = path.join(fx.base, `release-${label.replace(/[^a-z]+/g, '-')}`);
+        const holder = await sync2Holder(fx.vault, 30000, '', releaseFile);
+        const run = await sync2Cli(fx, args, script ? { script } : {});
+        const owner = sync2cTurnOwner(fx);
+        fs.writeFileSync(releaseFile, '');
+        await holder.closed;
+        eq([run.code !== null && !/LOCKED/.test(run.stderr), owner && owner.token, await holder.releasedBy], [true, 'holder', 'file'],
+          `SYNC2D-READ-ONLY-TURN-FREE ${label} returns while a live holder still holds the turn, which the holder then releases by its release file — exit ${run.code} ${run.stderr.slice(0, 160)}`);
+        return run;
+      };
+      await turnFree('status', ['status', '--json']);
+      await turnFree('board-health without --write-note', ['board-health', '--json']);
+      await turnFree('supersession-depth', ['supersession-depth', '--json', '--card', SYNC2_CARD]);
+      await turnFree('recover', ['recover']);
+      await turnFree('record-review', ['record-review', '--json', '--card', SYNC2_CARD, '--lens', 'correctness', '--verdict', 'pass',
+        '--summary', 'A sufficiently specific exact-head correctness summary for this fixture.', '--expected-head', worktreeHead, '--lease-token', token]);
+      await turnFree('record-pr', ['record-pr', '--json', '--card', SYNC2_CARD, '--pr', '7', '--lease-token', token]);
+      await turnFree('recover-deployed --dry-run policy refusal', ['recover-deployed', '--json', '--card', SYNC2_CARD, '--reason', 'sync2d', '--dry-run']);
+      await turnFree('parked rebind --apply malformed-spec refusal', ['reconcile-metadata', '--parked-rebind', '--json', '--apply', '--reason', 'sync2d', '--spec', path.join(fx.base, 'absent.json')]);
+      await turnFree('audit-delivery without --repair', ['--json', '--board', fx.boardPath, '--cards-root', fx.cardsRoot, '--state', fx.statePath], auditScript);
+      sync2cPatchLedger(fx, { phase: 'deployed' });
+      await turnFree('reconcile-metadata --dry-run', ['reconcile-metadata', '--json', '--card', SYNC2_CARD, '--dry-run']);
+      await turnFree('break-lease', ['break-lease', '--json', '--card', SYNC2_CARD, '--reason', 'sync2d']);
+    }
+
+    // SYNC2D-USAGE-BEFORE-TURN: a usage refusal behind a live turn holder exits
+    // with the refusal the same verb gives without REST config and takes no
+    // turn. The holder releases the turn by its release file, written after
+    // the refusal returned, or by its 20s timer, so a refusal that waited for
+    // the turn forces a release by the timer.
+    {
+      const malformedSpec = path.join(sync2Root, 'usage-malformed-spec.json');
+      fs.writeFileSync(malformedSpec, '{ not json');
+      for (const [name, args, message] of [
+        ['consume-ratification without --json', ['consume-ratification', '--card', SYNC2_CARD],
+          /consume-ratification requires --json for a machine-readable receipt/],
+        ['the contract-frontmatter restamp --apply with a malformed --spec',
+          ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--apply', '--reason', 'sync2d', '--spec', malformedSpec],
+          /contract frontmatter restamp spec is malformed JSON/],
+      ]) {
+        const plain = sync2CliFixture('usage-plain');
+        const reference = await sync2Cli(plain, args);
+        const fx = sync2CliFixture('usage-held');
+        const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+        await sync2RestConfig(fx.vault, stub.port);
+        const releaseFile = path.join(fx.base, 'release-usage-holder');
+        const holder = await sync2Holder(fx.vault, 20000, '', releaseFile);
+        const refused = await sync2Cli(fx, args);
+        const owner = sync2cTurnOwner(fx);
+        fs.writeFileSync(releaseFile, '');
+        await holder.closed;
+        const stderrOf = (run, fixture) => run.stderr.split(fixture.base).join('<base>');
+        eq([refused.code, stderrOf(refused, fx)], [reference.code, stderrOf(reference, plain)],
+          `SYNC2D-USAGE-BEFORE-TURN ${name}: the exit code and stderr match the run without REST config`);
+        ok(refused.code !== 0 && message.test(refused.stderr), `SYNC2D-USAGE-BEFORE-TURN ${name}: it is refused with its usage message — ${refused.stderr.slice(0, 200)}`);
+        eq([await holder.releasedBy, owner && owner.token], ['file', 'holder'],
+          `SYNC2D-USAGE-BEFORE-TURN ${name}: the refusal returns before the holder releases the turn, and takes no turn`);
+      }
+    }
+
+    // SYNC2-NO-REST-IDENTICAL: each verb without REST config against the same
+    // verb with vault-index replaced by a no-op module (the shim run in the
+    // labels). SYNC2D-NO-REST-MATCHES-MAIN compares with origin/main's
+    // coordinator.
+    {
+      const verbs = [
+        ['claim', () => ['claim', '--json']],
+        ['discard', () => sync2Second.discard()],
+        ['reconcile', () => sync2Second.reconcile()],
+        ['park', (claim) => sync2Second.park(claim)],
+        ['status', () => ['status', '--json']],
+      ];
+      const runs = {};
+      for (const mode of ['main', 'no-config']) {
+        const fx = sync2CliFixture(`identical-${mode}`);
+        runs[mode] = { fx, verbs: [] };
+        let claim = null;
+        for (const [name, argsOf] of verbs) {
+          const run = await sync2Cli(fx, argsOf(claim), { probe: true, frozen: true, mainShim: mode === 'main' });
+          if (name === 'claim') claim = run;
+          sync2Outputs.push(run);
+          runs[mode].verbs.push({ name, run, vault: sync2Snapshot(fx.vault) });
+        }
+      }
+      const normalize = (text, fx, pid) => String(text).split(fx.base).join('<base>').replace(new RegExp(`\\b${pid}\\b`, 'g'), '<pid>');
+      for (let i = 0; i < verbs.length; i += 1) {
+        const name = verbs[i][0];
+        const main = runs.main.verbs[i];
+        const plain = runs['no-config'].verbs[i];
+        const receiptOf = (entry, fx) => {
+          const { obsidian_index: _index, ...rest } = JSON.parse(normalize(entry.run.stdout, fx, entry.run.pid) || '{}');
+          return rest;
+        };
+        const opsOf = (entry, fx) => entry.run.probe.filter((op) => ['write', 'rename', 'unlink', 'mkdir', 'connect', 'worker'].includes(op.op))
+          .map((op) => normalize(JSON.stringify(op), fx, entry.run.pid));
+        const vaultOf = (entry, fx) => [...entry.vault].map(([rel, raw]) => [rel, normalize(raw, fx, entry.run.pid)]);
+        eq(plain.run.code, main.run.code, `SYNC2-NO-REST-IDENTICAL ${name}: the exit code matches the shim run (${main.run.code})`);
+        eq(receiptOf(plain, runs['no-config'].fx), receiptOf(main, runs.main.fx), `SYNC2-NO-REST-IDENTICAL ${name}: the receipt matches the shim run apart from obsidian_index`);
+        eq(vaultOf(plain, runs['no-config'].fx), vaultOf(main, runs.main.fx), `SYNC2-NO-REST-IDENTICAL ${name}: every board and card-note byte matches the shim run`);
+        eq(opsOf(plain, runs['no-config'].fx), opsOf(main, runs.main.fx), `SYNC2-NO-REST-IDENTICAL ${name}: the same vault writes, tmp names and renames as the shim run, in order`);
+        eq(plain.run.probe.filter((op) => op.op === 'connect' || op.op === 'worker'), [], `SYNC2-NO-REST-IDENTICAL ${name}: no socket and no worker without REST config`);
+        const index = plain.run.receipt.obsidian_index;
+        const wrote = plain.run.probe.some((op) => op.op === 'rename');
+        ok(wrote ? Boolean(index && index.available === false && index.reason === 'no-rest-config') : !index,
+          `SYNC2-NO-REST-IDENTICAL ${name}: obsidian_index is the one additive key, present exactly when the verb wrote a note`);
+      }
+      ok(runs.main.verbs.some((entry) => entry.run.probe.some((op) => op.op === 'rename')), 'SYNC2-NO-REST-IDENTICAL precondition: the compared verbs write notes');
+    }
+
+    // SYNC-2d helpers. sync2dFixture puts a fake gh that always fails first on
+    // PATH, so no run reaches GitHub through gh. With release, the fixture deploys to one vault: its
+    // repo has a v1.0.0 tag on its HEAD, a fake sauce CLI installs 1.0.0 into
+    // that vault, and the Homebrew bottle manifest reads as 1.0.0, so the
+    // release path runs promoteAndDeploy itself.
+    const sync2dFixture = (label, options = {}) => {
+      const fx = sync2CliFixture(label);
+      const bin = path.join(fx.base, 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      fx.env.PATH = `${bin}${path.delimiter}${fx.env.PATH}`;
+      if (options.release) {
+        execFileSync('/usr/bin/git', ['tag', 'v1.0.0'], { cwd: fx.repo, stdio: 'pipe' });
+        execFileSync('/usr/bin/git', ['push', '--quiet', 'origin', 'v1.0.0'], { cwd: fx.repo, stdio: 'pipe' });
+        fx.headSha = execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: fx.repo, encoding: 'utf8' }).trim();
+        const deployVault = path.join(fx.base, 'deploy-vault');
+        fs.mkdirSync(path.join(deployVault, 'ranch'), { recursive: true });
+        fs.writeFileSync(path.join(deployVault, 'ranch', 'platform-config.json'),
+          JSON.stringify({ workshop_relative_path: '/opt/homebrew/opt/sauce/libexec' }));
+        fs.writeFileSync(path.join(deployVault, 'ranch', 'platform-installed.json'), JSON.stringify({ history: [] }));
+        fs.writeFileSync(path.join(bin, 'sauce'), [
+          '#!/bin/sh',
+          'if [ "$1" = update ]; then printf \'{"workshop_version":"1.0.0","history":[{"event":"install"}]}\\n\' > ranch/platform-installed.json; fi',
+          'echo ok', '',
+        ].join('\n'), { mode: 0o755 });
+        fx.env.SAUCE_LOOP_VAULTS = JSON.stringify([{ id: 'headspace', path: deployVault }]);
+        fx.env.SYNC2D_BOTTLE_VERSION = '1.0.0';
+      }
+      return fx;
+    };
+    const sync2dRecoverDriver = path.join(sync2Root, 'recover-deployed-driver.js');
+    // Runs recover-deployed with the given arguments against the coordinator
+    // in the given tree, with recovery evidence injected in place of the
+    // GitHub and Homebrew reads, inside withVaultIndex as the CLI does when
+    // that tree has vault-index.js, and prints the receipt as JSON.
+    fs.writeFileSync(sync2dRecoverDriver, `
+const fs = require('fs'); const path = require('path');
+const [tree, argsJson, evidenceJson] = process.argv.slice(2);
+const coordinator = require(path.join(tree, 'scripts/autoloop/codex-coordinator.js'));
+const indexPath = path.join(tree, 'scripts/autoloop/vault-index.js');
+const commonDir = path.join(process.cwd(), '.git');
+const stateDir = path.join(commonDir, 'sauce-autoloop');
+const ctx = { root: process.cwd(), commonDir, stateDir, statePath: path.join(stateDir, 'state.json') };
+const run = () => coordinator.commandRecoverDeployed(ctx, JSON.parse(argsJson), { collectDeployedRecoveryEvidence: () => JSON.parse(evidenceJson) });
+const scoped = fs.existsSync(indexPath)
+  ? (() => { const vaultIndex = require(indexPath); return vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(process.env.SAUCE_LOOP_BOARD), run); })()
+  : run();
+Promise.resolve(scoped).then((result) => console.log(JSON.stringify(result, null, 2)), (err) => { console.error(err.message); process.exit(1); });
+`);
+    const sync2dHead = 'c'.repeat(40);
+    const sync2dRecoverArgs = { card: SYNC2_CARD, 'expected-head': sync2dHead, reason: 'sync2d recovery', apply: true };
+    const sync2dEvidence = {
+      expected_head: sync2dHead,
+      feature_pr: { number: 7, url: 'https://example.invalid/pr/7', head_sha: sync2dHead, merge_sha: 'a'.repeat(40) },
+      release_pr: { number: 9, url: 'https://example.invalid/pr/9', merge_sha: 'b'.repeat(40) },
+      tag: 'v1.0.0', version: '1.0.0',
+      tap_pr: { number: 3, url: 'https://example.invalid/pr/3', merge_sha: 'd'.repeat(40) },
+      brew_version: '1.0.0', vault_receipts: {}, verified_at: '2026-09-28T12:00:00.000Z',
+    };
+    const sync2dBlocked = {
+      phase: 'blocked', reason: 'sync2d recovery target', batch_policy: 'supervised_only', feature_pr: 7,
+      gate_receipt: { status: 'pass', head_sha: sync2dHead },
+      reviews: Object.fromEntries(['correctness', 'regression-risk', 'test-adequacy'].map((lens) => [lens, { lens, verdict: 'pass', head_sha: sync2dHead }])),
+    };
+
+    // SYNC2D-DRY-RUN-ADVANCE-PROJECTS: advance --dry-run on a merge-only card
+    // at feature_merged or release_pr moves it to deployed and writes its
+    // completion projection, as a run without --dry-run does, and leaves the
+    // Loop Station alone.
+    for (const phase of ['feature_merged', 'release_pr']) {
+      const real = sync2dFixture(`dry-projects-real-${phase}`);
+      const dry = sync2dFixture(`dry-projects-${phase}`);
+      const runs = {};
+      for (const [mode, fx] of [['real', real], ['dry', dry]]) {
+        const claim = await sync2Cli(fx, ['claim', '--json']);
+        eq(claim.code, 0, `SYNC2D-DRY-RUN-ADVANCE-PROJECTS precondition (${phase}, ${mode}): the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+        sync2cPatchLedger(fx, { phase, feature_merge_sha: 'a'.repeat(40), feature_pr: 7 });
+        const station = fs.readFileSync(path.join(fx.projectRoot, 'Loop Station.md'), 'utf8');
+        const advance = await sync2Cli(fx, [...sync2cAdvance(sync2LeaseToken(claim)), ...(mode === 'dry' ? ['--dry-run'] : [])]);
+        const status = await sync2Cli(fx, ['status', '--json']);
+        sync2Outputs.push(claim, advance, status);
+        runs[mode] = { fx, advance, status, station, lines: advance.stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line)) };
+      }
+      const { fx, advance, status, station, lines } = runs.dry;
+      const record = sync2cLedger(fx);
+      const atlas = (target) => testScalarField(fs.readFileSync(path.join(target.cardsRoot, SYNC2_EPIC, `${SYNC2_EPIC}.md`), 'utf8'), 'status');
+      eq([advance.code, lines.map((line) => line.action), record.phase, record.projection_pending || null, record.projection_error || null],
+        [0, ['complete'], 'deployed', null, null],
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS ${phase}: the dry run reaches deployed with a complete receipt and no pending marker — ${advance.stdout.slice(0, 300)} ${advance.stderr.slice(0, 200)}`);
+      const surfaces = sync2Surfaces(fx);
+      eq([surfaces.card, surfaces.epicBoard[0]], [['completed', 'Completed'], 'Completed'],
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS ${phase}: the card note and the epic board show the card in Completed`);
+      eq([surfaces.parentBoard, atlas(fx)], [sync2Surfaces(runs.real.fx).parentBoard, atlas(runs.real.fx)],
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS ${phase}: the parent board and the atlas show what an advance without --dry-run projects (${surfaces.parentBoard}, ${atlas(fx)})`);
+      eq([status.code, status.receipt.projection_problems, status.receipt.board_drift || []], [0, [], []],
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS ${phase}: status then reports no projection_problems and no board_drift`);
+      eq(fs.readFileSync(path.join(fx.projectRoot, 'Loop Station.md'), 'utf8'), station,
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS ${phase}: the dry run leaves the Loop Station unchanged`);
+    }
+
+    // SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: that dry run takes the write turn
+    // for its projection, so behind a live turn holder it lands only once the
+    // holder releases, and with a healthy Obsidian its notes are sent. A dry
+    // run at deployed with a marker its step did not set leaves it and takes
+    // no turn.
+    {
+      const fx = sync2dFixture('dry-projects-turn');
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2D-DRY-RUN-ADVANCE-PROJECTS precondition (turn): the claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      sync2cPatchLedger(fx, { phase: 'feature_merged', feature_merge_sha: 'a'.repeat(40), feature_pr: 7 });
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const holdMs = 3000;
+      const holder = await sync2Holder(fx.vault, holdMs);
+      const advance = await sync2Cli(fx, [...sync2cAdvance(sync2LeaseToken(claim)), '--dry-run']);
+      const releasedAt = await holder.closed;
+      sync2Outputs.push(claim, advance);
+      const line = JSON.parse(advance.stdout.split('\n').filter(Boolean)[0] || '{}');
+      ok(advance.code === 0 && releasedAt > 0 && advance.ended >= releasedAt && fs.statSync(fx.cardPath).mtimeMs >= releasedAt,
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: the dry run's projection waits for the turn and lands after the holder releases it — ${advance.stderr.slice(0, 200)}`);
+      ok(Boolean(line.obsidian_index) && [SYNC2_CARD_REL, SYNC2_EPIC_BOARD_REL].every((rel) => line.obsidian_index.written_through.includes(rel)),
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: the projected card note and epic board are sent to Obsidian — ${JSON.stringify(line.obsidian_index)}`);
+
+      const marker = { phase: 'deployed', marked_at: '2026-09-28T12:00:00.000Z' };
+      sync2cPatchLedger(fx, { projection_pending: marker });
+      const cardBefore = fs.readFileSync(fx.cardPath, 'utf8');
+      const secondRelease = path.join(fx.base, 'release-dry-replay-holder');
+      const second = await sync2Holder(fx.vault, 30000, '', secondRelease);
+      const replay = await sync2Cli(fx, [...sync2cAdvance(sync2LeaseToken(claim)), '--dry-run']);
+      const owner = sync2cTurnOwner(fx);
+      fs.writeFileSync(secondRelease, '');
+      await second.closed;
+      sync2Outputs.push(replay);
+      ok(replay.code === 0 && owner && owner.token === 'holder' && await second.releasedBy === 'file',
+        `SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: a dry run at deployed returns while a live holder still holds the turn, which the holder then releases by its release file, and takes no turn — ${replay.stderr.slice(0, 200)}`);
+      eq([sync2cLedger(fx).projection_pending, fs.readFileSync(fx.cardPath, 'utf8')], [marker, cardBefore],
+        'SYNC2D-DRY-RUN-ADVANCE-PROJECTS turn: a dry run leaves a marker its step did not set, and writes no projection');
+    }
+
+    // The last origin/main before this slice is a durable historical oracle.
+    // Full-history CI keeps it after this feature merges; a missing object is
+    // a failing fixture precondition, never a skipped equivalence assertion.
+    const SYNC2D_MAIN_REV = 'd0d713990706bb36b915c44aef2b26a63ac5ff23';
+    let sync2dMainTreeDir;
+    const sync2dMainTree = () => {
+      if (sync2dMainTreeDir) return sync2dMainTreeDir;
+      const repoRoot = path.join(__dirname, '../..');
+      const git = (args) => execFileSync('/usr/bin/git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      try {
+        git(['cat-file', '-e', `${SYNC2D_MAIN_REV}^{commit}`]);
+        git(['merge-base', '--is-ancestor', SYNC2D_MAIN_REV, 'origin/main']);
+      } catch (error) {
+        throw new Error(`SYNC2D-NO-REST-MATCHES-MAIN requires full history and origin/main containing ${SYNC2D_MAIN_REV}: ${error.message}`);
+      }
+      const mainTree = path.join(sync2Root, 'main-tree');
+      const tarball = path.join(sync2Root, 'main-tree.tar');
+      fs.mkdirSync(mainTree, { recursive: true });
+      git(['archive', '-o', tarball, SYNC2D_MAIN_REV, 'scripts', 'platform/mechanisms']);
+      execFileSync('tar', ['-xf', tarball, '-C', mainTree], { stdio: 'pipe' });
+      eq(fs.existsSync(path.join(mainTree, 'scripts/autoloop/vault-index.js')), false,
+        'SYNC2D-NO-REST-MATCHES-MAIN baseline is the archived main coordinator before vault-index');
+      sync2dMainTreeDir = mainTree;
+      return mainTree;
+    };
+
+    // SYNC2D-NO-REST-MATCHES-MAIN compares successful writes with the
+    // git-archived pre-feature main. Fixtures supply only external GitHub and
+    // preflight evidence; coordinator locks, ledger persistence and note
+    // writers remain real. Every required writer case proves a mutation before
+    // comparing receipts, stderr, all board-vault files and the ledger.
+    // A constant fixture clock fixes time reads; roots, pids and the hashes
+    // of path-bearing spec operands are normalized as below. The deploy
+    // fixture's separate installation vault is outside this board comparison.
+    {
+      const repoRoot = path.join(__dirname, '../..');
+      const mainTree = sync2dMainTree();
+      {
+        const trees = { main: mainTree, head: repoRoot };
+        const cli = (tree) => (fx, args) => sync2Cli(fx, args, { frozen: true, constantClock: true, probe: true, script: path.join(trees[tree], 'scripts/autoloop/codex-coordinator.js') });
+        const recover = (tree) => (fx) => sync2Cli(fx, [trees[tree], JSON.stringify(sync2dRecoverArgs), JSON.stringify(sync2dEvidence)],
+          { frozen: true, constantClock: true, probe: true, script: sync2dRecoverDriver });
+        const claimed = async (run, fx) => { const claim = await run(fx, ['claim', '--json']); fx.token = sync2LeaseToken(claim); return claim; };
+        claimed.writer = 'commandClaim';
+        const advanceAt = (patch, dryRun) => async (run, fx) => {
+          sync2cPatchLedger(fx, typeof patch === 'function' ? patch(fx) : patch);
+          return run(fx, [...sync2cAdvance(fx.token), ...(dryRun ? ['--dry-run'] : [])]);
+        };
+        const mergedAt = (phase) => ({ phase, feature_merge_sha: 'a'.repeat(40), feature_pr: 7 });
+        const tapMerged = (fx) => ({ phase: 'tap_merged', feature_merge_sha: fx.headSha, feature_pr: 7, tag: 'v1.0.0', required_version: '1.0.0' });
+        const releaseMerged = (fx) => ({ phase: 'feature_merged', feature_merge_sha: fx.headSha, feature_pr: 7 });
+        const status = (run, fx) => run(fx, ['status', '--json']);
+        const driver = path.join(sync2Root, 'main-writer-driver.js');
+        fs.writeFileSync(driver, `
+const fs = require('fs'); const path = require('path'); const cp = require('child_process');
+const [tree, fn, argsJson, mode] = process.argv.slice(2);
+const co = require(path.join(tree, 'scripts/autoloop/codex-coordinator.js'));
+const stateDir = path.join(process.cwd(), '.git', 'sauce-autoloop');
+const ctx = { root: process.cwd(), commonDir: path.join(process.cwd(), '.git'), stateDir, statePath: path.join(stateDir, 'state.json') };
+const args = JSON.parse(argsJson); const state = JSON.parse(fs.readFileSync(ctx.statePath, 'utf8'));
+const record = state.cards[args.card];
+const git = (argv, cwd) => cp.execFileSync('/usr/bin/git', argv, { cwd: cwd || process.cwd(), encoding: 'utf8', stdio: 'pipe' }).trim();
+const title = 'feat(fixture): verify a coordinator writer';
+const deps = {};
+if (mode === 'gates') deps.sh = (cmd, argv, opts = {}) => {
+  if (cmd === 'node' && argv.includes('verify-adequacy')) return JSON.stringify({ adequate: true, behavioral: false });
+  if (cmd === 'git' && argv[0] === 'show') return title;
+  if (cmd === 'git') return git(argv, opts.cwd);
+  throw new Error('unexpected external gate command ' + cmd);
+};
+if (mode === 'pr') deps.prView = () => ({ number: 7, headRefName: record.branch, baseRefName: 'main',
+  headRefOid: git(['rev-parse', 'HEAD'], record.worktree), baseRefOid: git(['rev-parse', 'origin/main']), title,
+  url: 'https://example.invalid/pr/7' });
+if (mode === 'adopt') deps.prView = () => ({ state: 'MERGED', mergeCommit: { oid: args['merge-sha'] }, url: 'https://example.invalid/pr/7' });
+const run = () => co[fn](ctx, args, deps);
+const indexPath = path.join(tree, 'scripts/autoloop/vault-index.js');
+const scoped = fs.existsSync(indexPath) ? require(indexPath).withVaultIndex(require(indexPath).vaultRootForBoard(process.env.SAUCE_LOOP_BOARD), run) : run();
+Promise.resolve(scoped).then((receipt) => console.log(JSON.stringify(receipt)), (error) => { console.error(error.stack); process.exit(1); });
+`);
+        const invoke = (fn, argsOf, mode) => (run, fx) => run.invoke(fx, fn, typeof argsOf === 'function' ? argsOf(fx) : argsOf, mode);
+        const headOf = (fx) => execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: sync2cLedger(fx).worktree || fx.repo, encoding: 'utf8' }).trim();
+        const patchState = (fx, patch) => {
+          const state = JSON.parse(fs.readFileSync(fx.statePath, 'utf8'));
+          Object.assign(state, patch); fs.writeFileSync(fx.statePath, `${JSON.stringify(state, null, 2)}\n`);
+        };
+        const writer = (key, step) => Object.assign(step, { writer: key });
+        const parked = async (run, fx) => run(fx, sync2Second.park({ receipt: { lease_token: fx.token } }));
+        const ratificationSetup = async (run, fx) => {
+          const claim = await claimed(run, fx);
+          sync2cPatchLedger(fx, { phase: 'parked', resume_condition: 'Will must ratify the exact bounded continuation.',
+            gate_receipt: { status: 'pass', head_sha: headOf(fx) }, dependencies: [], lease: null });
+          return claim;
+        };
+        const restampPlan = async (run, fx) => {
+          fs.writeFileSync(fx.cardPath, card({ name: SYNC2_CARD }));
+          const result = await run(fx, ['reconcile-metadata', '--contract-frontmatter-restamp', '--dry-run', '--json', '--reason', 'main parity']);
+          fx.specPath = path.join(fx.base, 'restamp.json');
+          fx.specRaw = JSON.stringify(result.receipt.spec);
+          fs.writeFileSync(fx.specPath, fx.specRaw);
+          return result;
+        };
+        const metadataPlan = async (run, fx) => {
+          sync2cPatchLedger(fx, { phase: 'deployed' });
+          const result = await run(fx, ['reconcile-metadata', '--json', '--card', SYNC2_CARD, '--dry-run']);
+          fx.metadataSha = result.receipt.card_sha256;
+          return result;
+        };
+        const parkedRebindPlan = async (run, fx) => {
+          const state = JSON.parse(fs.readFileSync(fx.statePath, 'utf8'));
+          delete state.cards[SYNC2_CARD];
+          for (const name of PARKED_METADATA_REBIND_CARDS) {
+            const note = path.join(fx.cardsRoot, `${name}.md`);
+            const raw = card({ name, deps: ['Satisfied dependency'] }).replace('---\n', '---\nkanban_column: In Progress\nresume_condition: "wait for bounded authority"\n')
+              .replace('status: planning', 'status: parked').replace('epic: "[[Test epic]]"', 'epic: "[[Feature Polish]]"');
+            fs.writeFileSync(note, raw);
+            const projected = prepareDeliveryCard(raw, name).card;
+            state.cards[name] = { card: name, phase: 'parked', card_path: note,
+              delivery_contract: { ...projected, status: 'planning', epic: '[[Priorities for GA]]' },
+              delivery_contract_version: delivery.CONTRACT_VERSION, dependencies: projected.depends_on,
+              touch_zones: projected.touch_zones, deploy_subscriptions: projected.deploy_subscriptions,
+              batch_policy: projected.batch_policy, resume_condition: 'wait for bounded authority' };
+          }
+          fs.writeFileSync(fx.statePath, JSON.stringify(state));
+          const result = await run(fx, ['reconcile-metadata', '--parked-rebind', '--dry-run', '--json', '--reason', 'main parity']);
+          fx.specPath = path.join(fx.base, 'parked-rebind.json');
+          fx.specRaw = JSON.stringify(result.receipt.spec);
+          fs.writeFileSync(fx.specPath, fx.specRaw);
+          return result;
+        };
+        const scenarios = [
+          ['claim dry-run and read-only verbs', {}, [
+            (run, fx) => run(fx, ['claim', '--json', '--dry-run']), claimed, status,
+            (run, fx) => run(fx, ['supersession-depth', '--json', '--card', SYNC2_CARD]),
+            (run, fx) => run(fx, ['recover']), (run, fx) => run(fx, ['board-health', '--json'])]],
+          ['active resume attach', {}, [claimed, writer('commandResume:attach', (run, fx) => {
+            sync2cPatchLedger(fx, { lease: null });
+            return run(fx, ['resume', '--json', '--card', SYNC2_CARD]);
+          })]],
+          ['ratification backfill and consume', {}, [ratificationSetup,
+            writer('commandBackfillRatifications', (run, fx) => run(fx, ['backfill-ratifications', '--json'])),
+            writer('commandConsumeRatification', (run, fx) => {
+              const artifact = path.join(fx.projectRoot, 'ratifications', 'A1.md');
+              fs.writeFileSync(artifact, fs.readFileSync(artifact, 'utf8').replace('"decision": ""', '"decision": "accepted"')
+                .replace('"accepted_at": ""', '"accepted_at": "2026-09-28T12:00:00.000Z"').replace('"authority": ""', '"authority": "delegate"'));
+              return run(fx, ['consume-ratification', '--json', '--card', SYNC2_CARD]);
+            })]],
+          ['contract amendment', {}, [claimed, writer('commandAmendContract', (run, fx) => run(fx,
+            ['amend-contract', '--json', '--card', SYNC2_CARD, '--lease-token', fx.token,
+              '--expected-head', headOf(fx), '--expected-origin-main', headOf(fx), '--reason', 'main parity',
+              '--add-touch-zone', 'fixture-extra.js', '--expected-deployment', JSON.stringify(sync2cLedger(fx).deploy_subscriptions),
+              '--desired-deployment', JSON.stringify(sync2cLedger(fx).deploy_subscriptions),
+              '--expected-batch-policy', sync2cLedger(fx).batch_policy, '--desired-batch-policy', sync2cLedger(fx).batch_policy]))]],
+          ['park amendment', {}, [claimed, parked, writer('commandAmendPark', (run, fx) => run(fx,
+            ['amend-park', '--json', '--card', SYNC2_CARD, '--expected-head', headOf(fx), '--reason', 'main parity', '--clear-dependencies']))]],
+          ['lease break', {}, [claimed, writer('commandBreakLease', (run, fx) => run(fx,
+            ['break-lease', '--json', '--card', SYNC2_CARD, '--reason', 'main parity']))]],
+          ['review, gates and PR recording', {}, [claimed,
+            writer('commandRecordReview', (run, fx) => run(fx, ['record-review', '--json', '--card', SYNC2_CARD,
+              '--lease-token', fx.token, '--lens', 'correctness', '--verdict', 'pass', '--expected-head', headOf(fx),
+              '--summary', 'A sufficiently specific fixture correctness judgment at its exact head.'])),
+            writer('commandVerifyGates', invoke('commandVerifyGates', (fx) => ({ card: SYNC2_CARD, 'lease-token': fx.token }), 'gates')),
+            writer('commandRecordPr', invoke('commandRecordPr', (fx) => ({ json: true, card: SYNC2_CARD, pr: 7, 'lease-token': fx.token }), 'pr'))]],
+          ['heal atlas, slice and orphan bindings', {}, [claimed,
+            writer('commandHealEpicBindings', (run, fx) => {
+              const atlas = path.join(fx.cardsRoot, SYNC2_EPIC, `${SYNC2_EPIC}.md`);
+              fs.writeFileSync(atlas, fs.readFileSync(atlas, 'utf8').replace(`source_board: ${SYNC2_BOARD_REL}`, 'source_board: wrong.md'));
+              fs.writeFileSync(fx.cardPath, fs.readFileSync(fx.cardPath, 'utf8').replace('task_parent:', 'old_task_parent:'));
+              fs.appendFileSync(fx.epicBoardPath, '- [ ] [[Missing orphan]]\n');
+              return run(fx, ['heal-epic-bindings', '--json', '--apply']);
+            })]],
+          ['adoption', {}, [claimed, writer('commandAdopt', invoke('commandAdopt', (fx) => {
+            const note = path.join(path.dirname(fx.cardPath), `${SYNC2_SIBLING}.md`);
+            fs.writeFileSync(note, fs.readFileSync(note, 'utf8').replace('status: planning', 'status: completed'));
+            return { json: true, card: SYNC2_SIBLING, pr: 7, 'merge-sha': headOf(fx), reason: 'main parity' };
+          }, 'adopt'))]],
+          ['reap explicit planning residue', {}, [claimed, writer('commandReap', (run, fx) => run(fx,
+            ['reap', '--json', '--also', SYNC2_SIBLING]))]],
+          ['flat board restructure', {}, [claimed, writer('commandRestructure', (run, fx) => {
+            const name = 'Flat planned member';
+            fs.writeFileSync(path.join(fx.cardsRoot, `${name}.md`), '---\ntype: task-hub\nstatus: planning\ndepends_on: []\n---\nBody\n');
+            fs.writeFileSync(fx.boardPath, fs.readFileSync(fx.boardPath, 'utf8').replace('## In Planning', `## In Planning\n- [ ] [[${name}]]`));
+            const spec = path.join(fx.base, 'restructure.json');
+            fx.specRaw = JSON.stringify({ project_root: fx.projectRoot, board: fx.boardPath,
+              epics: [{ epic: 'New family', members: [name] }] });
+            fs.writeFileSync(spec, fx.specRaw);
+            return run(fx, ['restructure', '--json', '--spec', spec]);
+          })]],
+          ['metadata apply', {}, [claimed, metadataPlan,
+            writer('commandReconcileMetadata', (run, fx) => run(fx, ['reconcile-metadata', '--json', '--card', SYNC2_CARD,
+              '--apply', '--reason', 'main parity', '--expected-card-sha256', fx.metadataSha]))]],
+          ['structured frontmatter restamp', {}, [claimed, restampPlan,
+            writer('commandRestampContractFrontmatter', (run, fx) => run(fx, ['reconcile-metadata', '--contract-frontmatter-restamp', '--apply', '--json',
+              '--reason', 'main parity', '--spec', fx.specPath]))]],
+          ['parked metadata rebind', {}, [claimed, parkedRebindPlan,
+            writer('commandRebindParkedMetadata', (run, fx) => run(fx, ['reconcile-metadata', '--parked-rebind', '--apply', '--json',
+              '--reason', 'main parity', '--spec', fx.specPath]))]],
+          ['dependency auto repoint, explicit repoint and clear', {}, [claimed,
+            ...['auto', 'to', 'clear'].map((mode) => writer(`commandReconcileDependencies:${mode}`, (run, fx) => {
+              const missing = 'Dead predecessor';
+              const name = mode === 'auto' ? 'Dead successor (supersedes Dead)' : SYNC2_CARD;
+              if (mode === 'auto') fs.writeFileSync(path.join(fx.cardsRoot, `${name}.md`), '---\nstatus: planning\n---\n');
+              const note = path.join(path.dirname(fx.cardPath), `${SYNC2_SIBLING}.md`);
+              fs.writeFileSync(note, fs.readFileSync(note, 'utf8').replace(/^depends_on:.*$/m, `depends_on: ["${missing}"]`));
+              if (mode === 'auto') {
+                const state = JSON.parse(fs.readFileSync(fx.statePath, 'utf8'));
+                state.cards[SYNC2_SIBLING] = { card: SYNC2_SIBLING, phase: 'blocked', card_path: note };
+                fs.writeFileSync(fx.statePath, JSON.stringify(state));
+              }
+              return run(fx, ['reconcile-dependencies', '--json', '--card', SYNC2_SIBLING, '--apply', '--reason', 'main parity',
+                ...(mode === 'auto' ? [] : ['--clear', missing]), ...(mode === 'to' ? ['--to', name] : [])]);
+            }))]],
+          ['cutover enable and disable', {}, [claimed, writer('commandCutover:on', (run, fx) => {
+            sync2cPatchLedger(fx, { phase: 'deployed' }); patchState(fx, { reconcile_clean_streak: 3 });
+            fs.writeFileSync(path.join(fx.repo, 'package.json'), JSON.stringify({ scripts: { test: 'node platform/test/run-codex-autoloop.js' } }));
+            return run(fx, ['cutover', '--json', '--require-card', SYNC2_CARD]);
+          }), writer('commandCutover:off', (run, fx) => run(fx, ['cutover', '--json', '--off', '--reason', 'main parity']))]],
+          ['explicit deploy release path', { release: true }, [claimed, writer('commandDeploy', (run, fx) => {
+            sync2cPatchLedger(fx, tapMerged(fx));
+            return run(fx, ['deploy', '--json', '--card', SYNC2_CARD, '--lease-token', fx.token]);
+          })]],
+          ['claim, park, resume', {}, [claimed, writer('commandPark', parked),
+            writer('commandResume', (run, fx) => {
+              fs.writeFileSync(fx.boardPath, fs.readFileSync(fx.boardPath, 'utf8').replace('## Completed', `## Completed\n- [x] [[${SYNC2_PREREQ}]]`));
+              return run(fx, ['resume', '--json', '--card', SYNC2_CARD]);
+            }), status]],
+          ['discard, reconcile', {}, [claimed, writer('commandDiscard', (run, fx) => run(fx, sync2Second.discard())), writer('commandReconcile', (run, fx) => {
+              sync2cPatchLedger(fx, { phase: 'blocked', reason: 'main parity projection repair' });
+              return run(fx, sync2Second.reconcile());
+            }),
+            (run, fx) => run(fx, ['reconcile', '--json']), status]],
+          ['board-health', {}, [claimed, writer('commandBoardHealth', (run, fx) => {
+              fs.appendFileSync(fx.epicBoardPath, '- [ ] [[Health finding missing note]]\n');
+              return run(fx, ['board-health', '--json', '--write-note']);
+            }), (run, fx) => run(fx, ['board-health', '--json'])]],
+          ...['feature_merged', 'release_pr'].flatMap((phase) => [false, true].map((dryRun) => [
+            `advance merge-only at ${phase}${dryRun ? ' --dry-run' : ''}`, {},
+            [claimed, writer(`commandAdvance:merge-only:${phase}:${dryRun}`, advanceAt(mergedAt(phase), dryRun)), status]])),
+          ['advance merge-only, then again, then reconcile', {}, [claimed, advanceAt(mergedAt('feature_merged'), false),
+            (run, fx) => run(fx, sync2cAdvance(fx.token)), (run, fx) => run(fx, sync2Second.reconcile()), status]],
+          ...[false, true].flatMap((dryRun) => [
+            [`advance release path at feature_merged${dryRun ? ' --dry-run' : ''}`, { release: true }, [claimed, ...(dryRun ? [advanceAt(releaseMerged, dryRun)] : [writer('commandAdvance:release:feature_merged', advanceAt(releaseMerged, dryRun))]), status]],
+            [`advance release path at tap_merged${dryRun ? ' --dry-run' : ''}`, { release: true }, [claimed, ...(dryRun ? [advanceAt(tapMerged, dryRun)] : [writer('commandAdvance:release:tap_merged', advanceAt(tapMerged, dryRun))]), status]],
+          ]),
+          ['recover-deployed apply, then replay', {}, [claimed, writer('commandRecoverDeployed', (run, fx) => { sync2cPatchLedger(fx, sync2dBlocked); return run.recover(fx); }),
+            (run, fx) => run.recover(fx), status]],
+        ];
+        // Follow identifier references in the parsed source, including aliases
+        // such as `persist = deps.writeState || writeState`, to the three
+        // canonical persistence functions. This checks the inventory in both
+        // archived main and HEAD; a new writer command needs a writing case.
+        const writerInventory = (file) => {
+          const acorn = require('acorn');
+          const ast = acorn.parse(fs.readFileSync(file, 'utf8'), { ecmaVersion: 'latest' });
+          const functions = new Map(ast.body.filter((node) => node.type === 'FunctionDeclaration').map((node) => [node.id.name, node]));
+          const references = (node) => {
+            const names = new Set();
+            const walk = (value, key) => {
+              if (!value || typeof value !== 'object') return;
+              if (value.type === 'Identifier' && key !== 'property') names.add(value.name);
+              for (const [childKey, child] of Object.entries(value)) {
+                if (Array.isArray(child)) child.forEach((item) => walk(item, childKey));
+                else if (child && typeof child === 'object') walk(child, childKey);
+              }
+            };
+            walk(node.body); return names;
+          };
+          const sinks = new Set(['writeState', 'atomicWriteText', 'atomicWriteJson']);
+          const writes = (name, seen = new Set()) => {
+            if (sinks.has(name)) return true;
+            if (seen.has(name) || !functions.has(name)) return false;
+            seen.add(name);
+            return [...references(functions.get(name))].some((ref) => writes(ref, seen));
+          };
+          const names = [...functions.keys()].filter((name) => /^command/.test(name) && writes(name));
+          // Archived main dispatches deploy inline; HEAD extracted that same
+          // writer into commandDeploy. Keep the public verb in the inventory.
+          if (!functions.has('commandDeploy') && functions.has('main')
+            && /command === 'deploy'/.test(fs.readFileSync(file, 'utf8')) && writes('promoteAndDeploy')) names.push('commandDeploy');
+          return names.sort();
+        };
+        const caseWriters = [...new Set(scenarios.flatMap(([, , steps]) => steps.filter((step) => step.writer).map((step) => step.writer.split(':')[0])))].sort();
+        for (const [tree, root] of Object.entries(trees)) {
+          eq(caseWriters, writerInventory(path.join(root, 'scripts/autoloop/codex-coordinator.js')),
+            `SYNC2D-NO-REST-MATCHES-MAIN ${tree}: every source-derived state/note writer has a successful writing differential case`);
+        }
+        // A spec hash is replaced only when it equals the independently
+        // computed SHA of the exact fixture operand; a wrong digest survives.
+        const normalize = (text, fx, pid) => String(text).split(fx.base).join('<base>')
+          .replace(new RegExp(`\\b${pid}\\b`, 'g'), '<pid>')
+          .replace(fx.specRaw ? new RegExp(testSha256(fx.specRaw), 'g') : /$^/, fx.specRaw ? testSha256(fx.specRaw.split(fx.base).join('<base>')) : '');
+        const receiptsOf = (run, fx) => {
+          const text = normalize(run.stdout, fx, run.pid).trim();
+          if (!text) return [];
+          const parsed = (() => { try { return [JSON.parse(text)]; } catch (_) { return text.split('\n').map((line) => JSON.parse(line)); } })();
+          return parsed.map((value) => {
+            if (!value || typeof value !== 'object') return value;
+            const { obsidian_index: _index, ...rest } = value; return rest;
+          });
+        };
+        const errorOf = (run, fx) => {
+          const text = normalize(run.stderr, fx, run.pid).trim();
+          try { const { obsidian_index: _index, ...rest } = JSON.parse(text); return rest; } catch (_) { return text; }
+        };
+        const keyPaths = (value, prefix = '') => (value && typeof value === 'object'
+          ? Object.keys(value).flatMap((key) => [`${prefix}${key}`, ...keyPaths(value[key], `${prefix}${key}.`)]) : []);
+        let compared = 0;
+        const expected = scenarios.reduce((sum, [, , steps]) => sum + steps.length, 0);
+        for (const [name, options, steps] of scenarios) {
+          const seen = {};
+          for (const tree of ['main', 'head']) {
+            const fx = sync2dFixture(`matches-main-${tree}`, options);
+            const run = cli(tree);
+            run.invoke = (fx, fn, args, mode = '') => sync2Cli(fx, [trees[tree], fn, JSON.stringify(args), mode], { frozen: true, constantClock: true, probe: true, script: driver });
+            run.recover = recover(tree);
+            seen[tree] = [];
+            for (const step of steps) {
+              const result = await step(run, fx);
+              sync2Outputs.push(result);
+              if (step.writer) {
+                eq(result.code, 0, `SYNC2D-NO-REST-MATCHES-MAIN ${tree} ${step.writer}: successful writing path — ${result.stderr.slice(0, 500)} ${result.stdout.slice(0, 500)}`);
+                const paths = result.probe.filter((op) => ['rename', 'ledger-rename'].includes(op.op)).map((op) => op.to || op.file || op.path);
+                ok(result.probe.some((op) => ['rename', 'ledger-rename'].includes(op.op)),
+                  `SYNC2D-NO-REST-MATCHES-MAIN ${tree} ${step.writer}: the command itself performed a ledger/note rename (${JSON.stringify(paths)})`);
+                ok(!receiptsOf(result, fx).some((receipt) => receipt.no_op === true || receipt.ok === false || /refused|failed/.test(receipt.action || '')),
+                  `SYNC2D-NO-REST-MATCHES-MAIN ${tree} ${step.writer}: no refusal or replay counts as successful coverage`);
+              }
+              eq(result.probe.filter((op) => ['connect', 'worker'].includes(op.op)), [],
+                `SYNC2D-NO-REST-MATCHES-MAIN ${tree} ${name}: no socket or worker without REST config`);
+              const raw = fs.existsSync(fx.statePath) ? JSON.parse(fs.readFileSync(fx.statePath, 'utf8')) : null;
+              for (const [card, record] of Object.entries((raw && raw.cards) || {})) {
+                const note = path.join(path.dirname(fx.cardPath), `${card}.md`);
+                if (record.card_note_sha && fs.existsSync(note) && record.card_note_sha === sync2Sha(note)) record.card_note_sha = '<sha256 of the card note>';
+              }
+              const ledger = raw && JSON.parse(normalize(JSON.stringify(raw, null, 2), fx, result.pid));
+              seen[tree].push({
+                code: result.code, receipts: receiptsOf(result, fx), error: errorOf(result, fx),
+                vault: [...sync2Snapshot(fx.vault)].map(([rel, raw]) => [rel, normalize(raw, fx, result.pid)]),
+                keys: keyPaths(ledger).sort(), ledger,
+                operations: result.probe.filter((op) => ['write', 'rename', 'unlink', 'mkdir', 'connect', 'worker'].includes(op.op))
+                  .map((op) => normalize(JSON.stringify(op), fx, result.pid)),
+              });
+            }
+          }
+          seen.main.forEach((main, i) => {
+            const head = seen.head[i];
+            const label = `SYNC2D-NO-REST-MATCHES-MAIN ${name}, step ${i + 1}`;
+            eq(head.code, main.code, `${label}: the exit code matches main (${main.code})`);
+            eq(head.receipts, main.receipts, `${label}: the receipts match main apart from obsidian_index`);
+            eq(head.error, main.error, `${label}: stderr matches main apart from obsidian_index`);
+            eq(head.vault, main.vault, `${label}: the text of every file in the board's vault outside .obsidian (boards, card notes, atlas, Loop Station) matches main`);
+            eq(head.keys, main.keys, `${label}: the ledger key set matches main`);
+            eq(head.ledger, main.ledger, `${label}: the ledger matches main with the constant fixture clock`);
+            eq(head.operations, main.operations, `${label}: the vault write operations, tmp names and deletions match main in order`);
+            compared += 1;
+          });
+        }
+        eq(compared, expected, 'SYNC2D-NO-REST-MATCHES-MAIN precondition: every scenario step was compared');
+      }
+    }
+
+
+    // SYNC2D-USAGE-SWEEP: usage and argument refusals of the coordinator verbs
+    // that take the write turn (claim and reconcile have none). Each case
+    // runs once against this tree in a vault with a REST config while a live
+    // holder of its own keeps the turn, and must give the exit code and
+    // stderr pinned in SYNC2D_SWEEP_PINS, which were captured from origin/main's
+    // coordinator. Each case also runs against the required archived main
+    // baseline and must give its pin. Each holder releases the turn by
+    // its release file, written after its case returned, or by its 20s
+    // timer, so a case that waited for the turn forces a release by the
+    // timer. The fixture has A1 claimed and moved to deployed, and A2's note
+    // marked completed, so the adopt and reconcile-metadata --apply cases
+    // reach the checks that need that state on origin/main.
+    {
+      const A1 = SYNC2_CARD;
+      const A2 = SYNC2_SIBLING;
+      const sha = 'a'.repeat(40);
+      const SYNC2D_SWEEP_CASES = [
+        ['backfill-ratifications without --json', () => ['backfill-ratifications']],
+        ['backfill-ratifications with an unknown option', () => ['backfill-ratifications', '--json', '--bogus']],
+        ['backfill-ratifications with an extra positional', () => ['backfill-ratifications', 'extra', '--json']],
+        ['consume-ratification without --json', () => ['consume-ratification', '--card', A1]],
+        ['consume-ratification with an unknown option', () => ['consume-ratification', '--json', '--card', A1, '--bogus']],
+        ['consume-ratification with an extra positional', () => ['consume-ratification', 'extra', '--json', '--card', A1]],
+        ['consume-ratification without --card', () => ['consume-ratification', '--json']],
+        ['consume-ratification with a non-canonical --card', () => ['consume-ratification', '--json', '--card', `[[${A1}]]`]],
+        ['consume-ratification with an --artifact outside the vault', () => ['consume-ratification', '--json', '--card', A1, '--artifact', '../escape.md']],
+        ['consume-ratification with a non-Markdown --artifact', () => ['consume-ratification', '--json', '--card', A1, '--artifact', 'note.txt']],
+        ['consume-ratification with an --artifact outside the ratifications directory', () => ['consume-ratification', '--json', '--card', A1, '--artifact', 'missing.md']],
+        ['amend-contract with an unknown option', () => ['amend-contract', '--json', '--bogus']],
+        ['amend-contract with an extra positional', () => ['amend-contract', 'extra', '--json']],
+        ['amend-contract without --card', () => ['amend-contract', '--json']],
+        ['amend-contract with a malformed --expected-head', () => ['amend-contract', '--json', '--card', A1, '--expected-head', 'abc']],
+        ['amend-contract with a malformed --expected-origin-main', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', 'abc']],
+        ['amend-contract without --reason', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha]],
+        ['amend-contract with an empty --add-touch-zone', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--add-touch-zone', '']],
+        ['amend-contract with a malformed --expected-deployment', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--expected-deployment', 'garbage']],
+        ['amend-contract with a malformed --desired-deployment', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--desired-deployment', 'garbage']],
+        ['amend-contract with a malformed --desired-batch-policy', () => ['amend-contract', '--json', '--card', A1, '--expected-head', sha, '--expected-origin-main', sha, '--reason', 'r', '--desired-batch-policy', 'bogus']],
+        ['park without --json', () => ['park', '--card', A1, '--depends-on', A2, '--resume-condition', 'c']],
+        ['park with an unknown option', () => ['park', '--json', '--card', A1, '--bogus']],
+        ['park without --card', () => ['park', '--json', '--depends-on', A2, '--resume-condition', 'c']],
+        ['park without --depends-on', () => ['park', '--json', '--card', A1, '--resume-condition', 'c']],
+        ['park without --resume-condition', () => ['park', '--json', '--card', A1, '--depends-on', A2]],
+        ['park depending on itself', () => ['park', '--json', '--card', A1, '--depends-on', A1, '--resume-condition', 'c']],
+        ['amend-park without --json', () => ['amend-park', '--card', A1]],
+        ['amend-park with an unknown option', () => ['amend-park', '--json', '--card', A1, '--bogus']],
+        ['amend-park without --card', () => ['amend-park', '--json']],
+        ['amend-park with a malformed --expected-head', () => ['amend-park', '--json', '--card', A1, '--expected-head', 'abc']],
+        ['amend-park without --reason', () => ['amend-park', '--json', '--card', A1, '--expected-head', sha]],
+        ['amend-park with neither --clear-dependencies nor --depends-on', () => ['amend-park', '--json', '--card', A1, '--expected-head', sha, '--reason', 'r']],
+        ['amend-park depending on itself', () => ['amend-park', '--json', '--card', A1, '--expected-head', sha, '--reason', 'r', '--depends-on', A1]],
+        ['resume without --json', () => ['resume', '--card', A1]],
+        ['resume with an unknown option', () => ['resume', '--json', '--card', A1, '--bogus']],
+        ['resume without --card', () => ['resume', '--json']],
+        ['heal-epic-bindings without --json', () => ['heal-epic-bindings', '--apply']],
+        ['heal-epic-bindings with an unknown option', () => ['heal-epic-bindings', '--json', '--apply', '--bogus']],
+        ['heal-epic-bindings with both --apply and --dry-run', () => ['heal-epic-bindings', '--json', '--apply', '--dry-run']],
+        ['heal-epic-bindings with neither --apply nor --dry-run', () => ['heal-epic-bindings', '--json']],
+        ['adopt without --json', () => ['adopt', '--card', A2, '--pr', '7', '--reason', 'r', '--merge-sha', sha]],
+        ['adopt with an unknown option', () => ['adopt', '--json', '--card', A2, '--bogus']],
+        ['adopt without --pr', () => ['adopt', '--json', '--card', A2, '--reason', 'r', '--merge-sha', sha]],
+        ['adopt with a non-numeric --pr', () => ['adopt', '--json', '--card', A2, '--pr', 'x', '--reason', 'r', '--merge-sha', sha]],
+        ['adopt without --reason', () => ['adopt', '--json', '--card', A2, '--pr', '7', '--merge-sha', sha]],
+        ['adopt without --merge-sha', () => ['adopt', '--json', '--card', A2, '--pr', '7', '--reason', 'r']],
+        ['adopt with a malformed --merge-sha', () => ['adopt', '--json', '--card', A2, '--pr', '7', '--reason', 'r', '--merge-sha', 'abc']],
+        ['board-health --write-note without --json', () => ['board-health', '--write-note']],
+        ['board-health --write-note with an unknown option', () => ['board-health', '--json', '--write-note', '--bogus']],
+        ['discard without --json', () => ['discard', '--card', A2, '--reason', 'r']],
+        ['discard without --card', () => ['discard', '--json', '--reason', 'r']],
+        ['discard without --reason', () => ['discard', '--json', '--card', A2]],
+        ['discard with an empty --carried-fixture', () => ['discard', '--json', '--card', A2, '--reason', 'r', '--carried-fixture', '']],
+        ['reap without --json', () => ['reap']],
+        ['reap with an empty --also', () => ['reap', '--json', '--also', '']],
+        ['restructure without --json', (fx) => ['restructure', '--spec', path.join(fx.base, 'targets.json')]],
+        ['restructure without --spec', () => ['restructure', '--json']],
+        ['restructure with a --spec that does not exist', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'absent.json')]],
+        ['restructure with a --spec that is not JSON', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'bad.json')]],
+        ['restructure with a --spec without epics', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'no-epics.json')]],
+        ['restructure with a --spec whose project_root does not exist', (fx) => ['restructure', '--json', '--spec', path.join(fx.base, 'targets.json')]],
+        ['cutover without --json', () => ['cutover', '--chain-prefix', 'A']],
+        ['cutover --off without --reason', () => ['cutover', '--json', '--off']],
+        ['cutover --off with --require-card', () => ['cutover', '--json', '--off', '--reason', 'r', '--require-card', A1]],
+        ['cutover with an empty --require-card', () => ['cutover', '--json', '--require-card', '']],
+        ['cutover with an empty --chain-prefix', () => ['cutover', '--json', '--chain-prefix', '']],
+        ['cutover without a chain declaration', () => ['cutover', '--json']],
+        ['recover-deployed without --card', () => ['recover-deployed', '--json', '--reason', 'r', '--apply']],
+        ['recover-deployed without --reason', () => ['recover-deployed', '--json', '--card', A1, '--apply']],
+        ['recover-deployed with both --apply and --dry-run', () => ['recover-deployed', '--json', '--card', A1, '--reason', 'r', '--apply', '--dry-run']],
+        ['the contract-frontmatter restamp with an unknown option', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--apply', '--bogus']],
+        ['the contract-frontmatter restamp without --json', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--apply']],
+        ['the contract-frontmatter restamp without --reason', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--apply']],
+        ['the contract-frontmatter restamp with neither --apply nor --dry-run', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r']],
+        ['the contract-frontmatter restamp --apply without --spec', () => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply']],
+        ['the contract-frontmatter restamp --dry-run with --spec', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--dry-run', '--spec', path.join(fx.base, 'bad.json')]],
+        ['the contract-frontmatter restamp --apply with a --spec that does not exist', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply', '--spec', path.join(fx.base, 'absent.json')]],
+        ['the contract-frontmatter restamp --apply with a --spec that is not JSON', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply', '--spec', path.join(fx.base, 'bad.json')]],
+        ['the contract-frontmatter restamp --apply with a --spec of the wrong shape', (fx) => ['reconcile-metadata', '--contract-frontmatter-restamp', '--json', '--reason', 'r', '--apply', '--spec', path.join(fx.base, 'no-epics.json')]],
+        ['reconcile-metadata without --card', () => ['reconcile-metadata', '--json', '--apply', '--reason', 'r']],
+        ['reconcile-metadata with both --apply and --dry-run', () => ['reconcile-metadata', '--json', '--card', A1, '--apply', '--dry-run']],
+        ['reconcile-metadata --apply without --reason', () => ['reconcile-metadata', '--json', '--card', A1, '--apply']],
+        ['reconcile-metadata --apply without --expected-card-sha256', () => ['reconcile-metadata', '--json', '--card', A1, '--apply', '--reason', 'r']],
+        ['reconcile-metadata --apply with a malformed --expected-card-sha256', () => ['reconcile-metadata', '--json', '--card', A1, '--apply', '--reason', 'r', '--expected-card-sha256', 'abc']],
+        ['reconcile-dependencies without --json', () => ['reconcile-dependencies', '--all', '--reason', 'r', '--apply']],
+        ['reconcile-dependencies with neither --card nor --all', () => ['reconcile-dependencies', '--json', '--reason', 'r', '--apply']],
+        ['reconcile-dependencies with both --card and --all', () => ['reconcile-dependencies', '--json', '--card', A1, '--all', '--reason', 'r', '--apply']],
+        ['reconcile-dependencies without --reason', () => ['reconcile-dependencies', '--json', '--all', '--apply']],
+        ['reconcile-dependencies with --to but no --clear', () => ['reconcile-dependencies', '--json', '--all', '--reason', 'r', '--apply', '--to', A2]],
+        ['advance without --card', () => ['advance']],
+        ['deploy without --card', () => ['deploy']],
+      ];
+      const SYNC2D_SWEEP_PINS = {
+        "backfill-ratifications without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"backfill-ratifications requires --json for a machine-readable receipt\"}\n"],
+        "backfill-ratifications with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"backfill-ratifications received unsupported option --bogus\"}\n"],
+        "backfill-ratifications with an extra positional": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"backfill-ratifications requires the exact command verb\"}\n"],
+        "consume-ratification without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires --json for a machine-readable receipt\"}\n"],
+        "consume-ratification with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification received unsupported option --bogus\"}\n"],
+        "consume-ratification with an extra positional": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires the exact command verb\"}\n"],
+        "consume-ratification without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires one exact canonical --card identity\"}\n"],
+        "consume-ratification with a non-canonical --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification requires one exact canonical --card identity\"}\n"],
+        "consume-ratification with an --artifact outside the vault": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification artifact must be a canonical vault-relative Markdown path\"}\n"],
+        "consume-ratification with a non-Markdown --artifact": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification artifact must be a canonical vault-relative Markdown path\"}\n"],
+        "consume-ratification with an --artifact outside the ratifications directory": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"consume-ratification artifact must stay inside the project ratifications directory\"}\n"],
+        "amend-contract with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract refuses unsupported option --bogus\"}\n"],
+        "amend-contract with an extra positional": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract refuses unexpected positional arguments\"}\n"],
+        "amend-contract without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires an exact --card\"}\n"],
+        "amend-contract with a malformed --expected-head": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires a 40-character --expected-head SHA\"}\n"],
+        "amend-contract with a malformed --expected-origin-main": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires a 40-character --expected-origin-main SHA\"}\n"],
+        "amend-contract without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires a non-empty --reason\"}\n"],
+        "amend-contract with an empty --add-touch-zone": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract refuses unexpected positional arguments\"}\n"],
+        "amend-contract with a malformed --expected-deployment": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--expected-deployment must be valid JSON: <JSON.parse message>\"}\n"],
+        "amend-contract with a malformed --desired-deployment": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires --expected-deployment\"}\n"],
+        "amend-contract with a malformed --desired-batch-policy": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"amend-contract requires --expected-deployment\"}\n"],
+        "park without --json": [1, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"park requires --json for a machine-readable receipt\"}\n"],
+        "park with an unknown option": [1, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"park does not accept --bogus\"}\n"],
+        "park without --card": [2, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"park requires --card\"}\n"],
+        "park without --depends-on": [2, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"park requires one or more --depends-on prerequisite cards\"}\n"],
+        "park without --resume-condition": [2, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"park requires a non-empty --resume-condition\"}\n"],
+        "park depending on itself": [1, "{\"action\":\"park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"self_dependency\",\"message\":\"A1 First slice cannot depend on itself\"}\n"],
+        "amend-park without --json": [1, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"amend-park requires --json for a machine-readable receipt\"}\n"],
+        "amend-park with an unknown option": [1, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"amend-park does not accept --bogus\"}\n"],
+        "amend-park without --card": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires --card\"}\n"],
+        "amend-park with a malformed --expected-head": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires --expected-head as one exact lowercase 40-hex SHA of the preserved worktree HEAD\"}\n"],
+        "amend-park without --reason": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires a non-empty audit --reason\"}\n"],
+        "amend-park with neither --clear-dependencies nor --depends-on": [2, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"amend-park requires exactly one of --clear-dependencies or one-or-more --depends-on\"}\n"],
+        "amend-park depending on itself": [1, "{\"action\":\"amend-park-refused\",\"ok\":false,\"no_op\":false,\"code\":\"self_dependency\",\"message\":\"A1 First slice cannot depend on itself\"}\n"],
+        "resume without --json": [1, "{\"action\":\"resume-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"resume requires --json for a machine-readable receipt\"}\n"],
+        "resume with an unknown option": [1, "{\"action\":\"resume-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"resume does not accept --bogus\"}\n"],
+        "resume without --card": [2, "{\"action\":\"resume-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"resume requires --card\"}\n"],
+        "heal-epic-bindings without --json": [1, "{\"action\":\"heal-epic-bindings-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"heal-epic-bindings requires --json for a machine-readable receipt\"}\n"],
+        "heal-epic-bindings with an unknown option": [1, "{\"action\":\"heal-epic-bindings-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"heal-epic-bindings does not accept --bogus\"}\n"],
+        "heal-epic-bindings with both --apply and --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"heal-epic-bindings requires exactly one of --apply or --dry-run\"}\n"],
+        "heal-epic-bindings with neither --apply nor --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"heal-epic-bindings requires exactly one of --apply or --dry-run\"}\n"],
+        "adopt without --json": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"adopt requires --json for a machine-readable receipt\"}\n"],
+        "adopt with an unknown option": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"adopt does not accept --bogus\"}\n"],
+        "adopt without --pr": [2, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"adopt requires --card and numeric --pr\"}\n"],
+        "adopt with a non-numeric --pr": [2, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"invalid_arguments\",\"message\":\"adopt requires --card and numeric --pr\"}\n"],
+        "adopt without --reason": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"adopt_reason_required\",\"message\":\"adopt requires a non-empty --reason\"}\n"],
+        "adopt without --merge-sha": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"adopt_sha_unreachable\",\"message\":\"--merge-sha must be a 40-hex commit sha (got \\\"undefined\\\")\"}\n"],
+        "adopt with a malformed --merge-sha": [1, "{\"action\":\"adopt-refused\",\"ok\":false,\"no_op\":false,\"code\":\"adopt_sha_unreachable\",\"message\":\"--merge-sha must be a 40-hex commit sha (got \\\"abc\\\")\"}\n"],
+        "board-health --write-note without --json": [1, "{\"action\":\"board-health-refused\",\"ok\":false,\"no_op\":false,\"code\":\"json_required\",\"message\":\"board-health requires --json for a machine-readable receipt\"}\n"],
+        "board-health --write-note with an unknown option": [1, "{\"action\":\"board-health-refused\",\"ok\":false,\"no_op\":false,\"code\":\"unknown_option\",\"message\":\"board-health does not accept --bogus\"}\n"],
+        "discard without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"discard requires --json for a machine-readable receipt\"}\n"],
+        "discard without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"discard requires --card\"}\n"],
+        "discard without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"discard requires a non-empty --reason\"}\n"],
+        "discard with an empty --carried-fixture": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--carried-fixture values must be non-empty strings\"}\n"],
+        "reap without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reap requires --json for a machine-readable receipt\"}\n"],
+        "reap with an empty --also": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--also values must be non-empty card names\"}\n"],
+        "restructure without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure requires --json for a machine-readable receipt\"}\n"],
+        "restructure without --spec": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure requires --spec <map.json>\"}\n"],
+        "restructure with a --spec that does not exist": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure cannot read --spec: ENOENT: no such file or directory, open '<base>/absent.json'\"}\n"],
+        "restructure with a --spec that is not JSON": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure --spec must be valid JSON: <JSON.parse message>\"}\n"],
+        "restructure with a --spec without epics": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure --spec requires a non-empty epics array\"}\n"],
+        "restructure with a --spec whose project_root does not exist": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"restructure --spec project_root must be an existing project directory\"}\n"],
+        "cutover without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover requires --json for a machine-readable receipt\"}\n"],
+        "cutover --off without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover --off requires a non-empty --reason\"}\n"],
+        "cutover --off with --require-card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover --off never evaluates criteria; drop --require-card/--chain-prefix\"}\n"],
+        "cutover with an empty --require-card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--require-card values must be non-empty card names\"}\n"],
+        "cutover with an empty --chain-prefix": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"--chain-prefix requires a non-empty id-token prefix\"}\n"],
+        "cutover without a chain declaration": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"cutover requires an explicit chain declaration: repeatable --require-card <exact name> and/or --chain-prefix <prefix>\"}\n"],
+        "recover-deployed without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"recover-deployed requires exact --card\"}\n"],
+        "recover-deployed without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"recover-deployed requires non-empty --reason\"}\n"],
+        "recover-deployed with both --apply and --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"recover-deployed accepts only one of --apply or --dry-run\"}\n"],
+        "the contract-frontmatter restamp with an unknown option": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp refuses unsupported --bogus operand\"}\n"],
+        "the contract-frontmatter restamp without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp requires literal --contract-frontmatter-restamp and --json\"}\n"],
+        "the contract-frontmatter restamp without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp requires non-empty --reason\"}\n"],
+        "the contract-frontmatter restamp with neither --apply nor --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp requires exactly one of --apply or --dry-run\"}\n"],
+        "the contract-frontmatter restamp --apply without --spec": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp accepts --spec only with --apply\"}\n"],
+        "the contract-frontmatter restamp --dry-run with --spec": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --contract-frontmatter-restamp accepts --spec only with --apply\"}\n"],
+        "the contract-frontmatter restamp --apply with a --spec that does not exist": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"ENOENT\",\"message\":\"ENOENT: no such file or directory, open '<base>/absent.json'\"}\n"],
+        "the contract-frontmatter restamp --apply with a --spec that is not JSON": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"contract frontmatter restamp spec is malformed JSON: <JSON.parse message>\"}\n"],
+        "the contract-frontmatter restamp --apply with a --spec of the wrong shape": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"contract frontmatter restamp spec does not exactly match the dry-run contract and literal reason\"}\n"],
+        "reconcile-metadata without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata requires exact --card\"}\n"],
+        "reconcile-metadata with both --apply and --dry-run": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata accepts only one of --apply or --dry-run\"}\n"],
+        "reconcile-metadata --apply without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --apply requires non-empty --reason\"}\n"],
+        "reconcile-metadata --apply without --expected-card-sha256": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run\"}\n"],
+        "reconcile-metadata --apply with a malformed --expected-card-sha256": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-metadata --apply requires the exact --expected-card-sha256 from its dry-run\"}\n"],
+        "reconcile-dependencies without --json": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies requires --json\"}\n"],
+        "reconcile-dependencies with neither --card nor --all": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies requires --card or --all\"}\n"],
+        "reconcile-dependencies with both --card and --all": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies accepts --card or --all, not both\"}\n"],
+        "reconcile-dependencies without --reason": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies requires a non-empty --reason\"}\n"],
+        "reconcile-dependencies with --to but no --clear": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"reconcile-dependencies --to requires --clear to name the dead pointer\"}\n"],
+        "advance without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"advance requires --card\"}\n"],
+        "deploy without --card": [1, "{\"action\":\"error\",\"ok\":false,\"no_op\":false,\"code\":\"command_failed\",\"message\":\"deploy requires a known --card\"}\n"],
+      };
+      const sweepFixture = async (label) => {
+        const fx = sync2CliFixture(label);
+        await sync2Cli(fx, ['claim', '--json']);
+        sync2cPatchLedger(fx, { phase: 'deployed' });
+        const sibling = path.join(path.dirname(fx.cardPath), `${A2}.md`);
+        fs.writeFileSync(sibling, fs.readFileSync(sibling, 'utf8').replace(/^status: planning$/m, 'status: completed'));
+        fs.writeFileSync(path.join(fx.base, 'bad.json'), '{ not json');
+        fs.writeFileSync(path.join(fx.base, 'no-epics.json'), JSON.stringify({ project_root: fx.projectRoot, board: fx.boardPath }));
+        fs.writeFileSync(path.join(fx.base, 'targets.json'), JSON.stringify({
+          project_root: path.join(fx.base, 'no-such-project'), board: path.join(fx.base, 'no-such-project', 'board.md'),
+          epics: [{ epic: 'E1', members: ['M1'] }],
+        }));
+        return fx;
+      };
+      // The JSON.parse message quoted in a refusal differs between Node
+      // versions, so it is replaced by <JSON.parse message> here and in the pins.
+      const jsonParseMessage = (text) => text.replace(/((?:valid|malformed) JSON): .*("\}\n?)$/s, '$1: <JSON.parse message>$2');
+      // With held, each case runs while a holder of its own keeps the turn,
+      // and records whether that holder still owned the turn when the case
+      // returned and why it then released it.
+      const sweep = async (fx, script, held = false) => {
+        const results = {};
+        const turns = {};
+        for (const [index, [label, argsOf]] of SYNC2D_SWEEP_CASES.entries()) {
+          const releaseFile = path.join(fx.base, `release-sweep-holder-${index}`);
+          const holder = held ? await sync2Holder(fx.vault, 20000, '', releaseFile) : null;
+          const run = await sync2Cli(fx, argsOf(fx), script ? { script } : {});
+          results[label] = [run.code, jsonParseMessage(run.stderr.split(fx.base).join('<base>'))];
+          if (holder) {
+            const owner = sync2cTurnOwner(fx);
+            fs.writeFileSync(releaseFile, '');
+            await holder.closed;
+            turns[label] = [await holder.releasedBy, owner && owner.token];
+          }
+        }
+        return { results, turns };
+      };
+      const heldFixture = await sweepFixture('usage-sweep-head');
+      await sync2RestConfig(heldFixture.vault, await sync2ClosedPort());
+      const head = await sweep(heldFixture, null, true);
+      eq(Object.keys(SYNC2D_SWEEP_PINS), SYNC2D_SWEEP_CASES.map(([label]) => label), 'SYNC2D-USAGE-SWEEP precondition: every case has a pinned refusal');
+      for (const [label] of SYNC2D_SWEEP_CASES) {
+        eq(head.results[label], SYNC2D_SWEEP_PINS[label], `SYNC2D-USAGE-SWEEP ${label}: the exit code and stderr behind a live turn holder are main's`);
+        eq(head.turns[label], ['file', 'holder'],
+          `SYNC2D-USAGE-SWEEP ${label}: it returned while its holder still owned the turn, which the holder then released by its release file`);
+      }
+      const mainTree = sync2dMainTree();
+      {
+        const { results: mainResults } = await sweep(await sweepFixture('usage-sweep-main'), path.join(mainTree, 'scripts/autoloop/codex-coordinator.js'));
+        for (const [label] of SYNC2D_SWEEP_CASES) {
+          eq(mainResults[label], SYNC2D_SWEEP_PINS[label], `SYNC2D-USAGE-SWEEP ${label}: the pinned refusal is the one origin/main's coordinator gives`);
+        }
+      }
+    }
+
+    // SYNC2D-INVALID-KEY: an apiKey that cannot be sent as a header value
+    // makes the REST config malformed. claim and board-health --write-note
+    // then run as without REST config: the stub receives nothing and the
+    // vault files match a run without REST config after the fixture path and
+    // the two pids are replaced.
+    {
+      const badKey = 'badākey';
+      const runs = {};
+      for (const mode of ['plain', 'bad-key']) {
+        const fx = sync2CliFixture(`invalid-key-${mode}`);
+        let stub = null;
+        if (mode === 'bad-key') {
+          stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+          await sync2RestConfig(fx.vault, stub.port, { apiKey: badKey });
+        }
+        const claim = await sync2Cli(fx, ['claim', '--json'], { frozen: true });
+        const health = await sync2Cli(fx, ['board-health', '--json', '--write-note'], { frozen: true });
+        const normalize = (text) => [claim.pid, health.pid].reduce((out, pid) => out.replace(new RegExp(`\\b${pid}\\b`, 'g'), '<pid>'),
+          String(text).split(fx.base).join('<base>'));
+        runs[mode] = { stub, claim, health, vault: [...sync2Snapshot(fx.vault)].map(([rel, raw]) => [rel, normalize(raw)]) };
+      }
+      const bad = runs['bad-key'];
+      const reasonOf = (run) => run.receipt.obsidian_index && [run.receipt.obsidian_index.available, run.receipt.obsidian_index.reason];
+      eq([bad.claim.code, Boolean(bad.claim.receipt.lease_token), reasonOf(bad.claim)], [0, true, [false, 'malformed-rest-config']],
+        `SYNC2D-INVALID-KEY claim exits 0 with its lease_token and obsidian_index reason malformed-rest-config — ${bad.claim.stderr.slice(0, 200)}`);
+      eq([bad.health.code, bad.health.receipt.action, bad.health.receipt.note_error || null, reasonOf(bad.health)],
+        [0, 'board-health', null, [false, 'malformed-rest-config']],
+        `SYNC2D-INVALID-KEY board-health --write-note exits 0 with its receipt and obsidian_index reason malformed-rest-config — ${bad.health.stderr.slice(0, 200)}`);
+      eq(bad.vault, runs.plain.vault, 'SYNC2D-INVALID-KEY the vault files after claim and board-health match the run without REST config after the fixture path and the two pids are replaced');
+      eq((await bad.stub.log()).requests.length, 0, 'SYNC2D-INVALID-KEY the stub receives no request');
+      ok([bad.claim, bad.health].every((run) => !run.stdout.includes(badKey) && !run.stderr.includes(badKey)),
+        'SYNC2D-INVALID-KEY the apiKey appears on neither stdout nor stderr');
+    }
+
+    // SYNC2D-INVALID-KEY errors before content can be sent: a probe request
+    // that cannot be created reports request-failed; unusable socket setup
+    // reports internal-error. The disk write remains and the turn releases.
+    {
+      const net = require('net');
+      const throwing = async (label, patch) => {
+        const vault = path.join(sync2Root, `transport-${label}`);
+        const note = path.join(vault, 'spice', `${label}.md`);
+        fs.mkdirSync(path.dirname(note), { recursive: true });
+        const stub = await sync2Stub({ vault });
+        await sync2RestConfig(vault, stub.port);
+        const restore = patch();
+        let outcome;
+        try {
+          outcome = await vaultIndex.withVaultIndex(vault, async () => { sync2RailWrite(note, `${label}\n`); return { ok: true }; })
+            .then((value) => ({ value }), (error) => ({ error }));
+        } finally { restore(); }
+        return { outcome, note, vault, stub };
+      };
+      const requestThrows = await throwing('request-throws', () => {
+        const real = http.request;
+        http.request = () => { throw new TypeError('request creation failed'); };
+        return () => { http.request = real; };
+      });
+      eq([Boolean(requestThrows.outcome.error), requestThrows.outcome.value && requestThrows.outcome.value.obsidian_index.reason],
+        [false, 'request-failed'], 'SYNC2D-INVALID-KEY a request that cannot be created resolves the scope with obsidian_index reason request-failed');
+      eq([fs.readFileSync(requestThrows.note, 'utf8'), sync2TurnHeld(requestThrows.vault), (await requestThrows.stub.log()).requests.length],
+        ['request-throws\n', false, 0], 'SYNC2D-INVALID-KEY after a request that cannot be created, the note is on disk, the turn is released and nothing was sent');
+      const connectBreaks = await throwing('connect-breaks', () => {
+        const real = net.connect;
+        net.connect = () => ({ destroy() {}, on() { throw new TypeError('socket unusable'); }, once() {} });
+        return () => { net.connect = real; };
+      });
+      eq([Boolean(connectBreaks.outcome.error), connectBreaks.outcome.value && connectBreaks.outcome.value.obsidian_index.reason],
+        [false, 'internal-error'], 'SYNC2D-INVALID-KEY unusable socket setup before sending resolves the scope with obsidian_index reason internal-error');
+      eq([fs.readFileSync(connectBreaks.note, 'utf8'), sync2TurnHeld(connectBreaks.vault)], ['connect-breaks\n', false],
+        'SYNC2D-INVALID-KEY after that error the note is on disk and the turn is released');
+    }
+
+    // SYNC2D-LOST-RESPONSE: only isolated children are intentionally left
+    // waiting. A stub saves a complete PUT, loses its response, and applies
+    // the saved bytes 700ms later. The sending verb must still be alive and
+    // retain its turn at that application; a newer writer waits outside locks.
+    {
+      const driver = path.join(sync2Root, 'lost-response-writer.js');
+      fs.writeFileSync(driver, `
+        const fs = require('fs');
+        const http = require('http');
+        const [indexPath, coordinatorPath, vault, stateDir, note, text, mode, events] = process.argv.slice(2);
+        const record = (event) => fs.appendFileSync(events, JSON.stringify({ event, at: Date.now() }) + '\\n');
+        const request = http.request;
+        http.request = function(options, callback) {
+          const put = options.method === 'PUT';
+          const req = request.call(this, options, (res) => {
+            if (put) for (const event of ['error', 'aborted', 'close', 'end']) res.on(event, () => record('res-' + event));
+            if (put && mode === 'socket-error-after-body') res.once('data', () => req.socket.emit('error', new Error('fixture socket error after full body')));
+            callback(res);
+          });
+          if (put) {
+            for (const event of ['error', 'close']) req.on(event, () => record('req-' + event));
+            req.on('socket', (socket) => {
+              for (const event of ['error', 'close']) socket.on(event, () => record('socket-' + event));
+            });
+            if (mode.startsWith('end-throws')) {
+              const end = req.end;
+              req.end = function(...args) {
+                const result = end.apply(this, args);
+                record('end-threw-after-send');
+                throw new Error('fixture end threw after invoking native end');
+              };
+            }
+          }
+          return req;
+        };
+        const index = require(indexPath);
+        const co = require(coordinatorPath);
+        (async () => {
+          const result = await index.withVaultIndex(vault, async () => {
+            await index.awaitWriteTurn();
+            return co.withLock({ stateDir }, 'selector', () => {
+              index.beforeNoteWrite();
+              const tmp = note + '.' + process.pid + '.' + Date.now() + '.tmp';
+              fs.writeFileSync(tmp, text);
+              fs.renameSync(tmp, note);
+              index.noteWritten(note, text);
+              return { ok: true };
+            });
+          });
+          console.log(JSON.stringify(result));
+        })().catch((error) => { console.error(error.stack); process.exitCode = 1; });
+      `);
+      for (const mode of ['reset-after-body', 'truncated-response', 'socket-error-after-body', 'close-without-response',
+        'end-throws-reset', 'end-throws-then-ack', 'complete-response']) {
+        const fx = sync2CliFixture(`lost-response-${mode}`);
+        const note = path.join(fx.vault, 'spice', 'Lost response.md');
+        fs.writeFileSync(note, 'seed\n');
+        const sockets = new Set();
+        const children = [];
+        const timers = new Set();
+        const requests = [];
+        let first = null;
+        let second = null;
+        let late = null;
+        const locks = () => {
+          try { return fs.readdirSync(path.join(fx.stateDir, 'locks')).filter((name) => name.endsWith('.lock')); }
+          catch (_) { return []; }
+        };
+        const server = http.createServer((req, res) => {
+          const chunks = [];
+          req.on('data', (chunk) => chunks.push(chunk));
+          req.on('end', () => {
+            if (req.method !== 'PUT') {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(req.url === '/' ? { authenticated: true } : { files: ['Lost response.md'] }));
+              return;
+            }
+            const entry = { body: Buffer.concat(chunks).toString('utf8'), complete: req.complete, at: Date.now(), held: locks() };
+            requests.push(entry);
+            if (requests.length > 1) {
+              fs.writeFileSync(note, entry.body);
+              res.writeHead(204); res.end();
+              return;
+            }
+            const acknowledge = mode === 'complete-response' || mode === 'end-throws-then-ack';
+            if (mode === 'truncated-response' || mode === 'socket-error-after-body') {
+              res.writeHead(200, { 'Content-Length': '100' });
+              res.write('partial');
+              if (mode === 'truncated-response') {
+                const closeTimer = setTimeout(() => { timers.delete(closeTimer); res.destroy(); }, 20);
+                timers.add(closeTimer);
+              }
+            } else if (mode === 'close-without-response') req.socket.end();
+            else if (!acknowledge) req.socket.destroy();
+            const applyTimer = setTimeout(() => {
+              timers.delete(applyTimer);
+              fs.writeFileSync(note, entry.body);
+              // Record before the completed-response variants acknowledge.
+              late = { at: Date.now(), firstAlive: Boolean(first && !first.closed), firstReturned: Boolean(first && first.stdout),
+                secondAlive: Boolean(second && !second.closed), secondReturned: Boolean(second && second.stdout),
+                held: locks(), owner: (() => {
+                  try { return JSON.parse(fs.readFileSync(path.join(sync2Turn(fx.vault), 'owner.json'), 'utf8')); }
+                  catch (_) { return null; }
+                })(),
+                bytes: fs.readFileSync(note, 'utf8') };
+              if (acknowledge) { res.writeHead(204); res.end(); }
+            }, 700);
+            timers.add(applyTimer);
+          });
+        });
+        server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+        const launch = (text, childMode) => {
+          const events = path.join(fx.base, `events-${children.length}.jsonl`);
+          const proc = spawn(process.execPath, [driver, sync2IndexPath, sync2CoordinatorPath, fx.vault, fx.stateDir,
+            note, text, childMode, events], { cwd: fx.repo, env: fx.env, stdio: ['ignore', 'pipe', 'pipe'] });
+          const run = { proc, stdout: '', stderr: '', closed: false, code: null, events };
+          proc.stdout.on('data', (chunk) => { run.stdout += chunk.toString(); });
+          proc.stderr.on('data', (chunk) => { run.stderr += chunk.toString(); });
+          run.exited = new Promise((resolve) => proc.once('close', (code) => { run.closed = true; run.code = code; resolve(); }));
+          children.push(run);
+          return run;
+        };
+        const label = `SYNC2D-LOST-RESPONSE ${mode}`;
+        try {
+          await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+          ok(server.address().port < 27123 || server.address().port > 27128, `${label}: stub uses an ephemeral port outside live REST ports`);
+          await sync2RestConfig(fx.vault, server.address().port);
+          first = launch('older rail bytes\n', mode);
+          ok(await sync2Until(() => requests.length === 1 || first.closed, 5000) && requests.length === 1,
+            `${label}: first child sends a complete PUT — ${first.stderr}`);
+          eq([requests[0].complete, requests[0].body, requests[0].held], [true, 'older rail bytes\n', []],
+            `${label}: the complete request body reaches the stub after releasing the coordinator lock`);
+          second = launch('newer rail bytes\n', 'normal');
+          const status = await sync2Cli(fx, ['status', '--json']);
+          eq([status.code, /LOCKED/.test(status.stderr)], [0, false], `${label}: concurrent status succeeds while the first writer waits`);
+          ok(await sync2Until(() => late !== null, 5000), `${label}: stub applies the saved body later`);
+          eq([late.firstAlive, late.firstReturned, late.secondAlive, late.secondReturned, late.held,
+            late.owner && late.owner.pid, late.bytes, late.at - requests[0].at >= 650],
+          [true, false, true, false, [], first.proc.pid, 'older rail bytes\n', true],
+          `${label}: at late application the sender is alive, neither writer returned, its turn is retained, and no coordinator lock is held`);
+          const acknowledged = mode === 'complete-response' || mode === 'end-throws-then-ack';
+          if (acknowledged) {
+            ok(await sync2Until(() => first.closed && second.closed, 5000), `${label}: both children naturally exit after complete responses (no process.exit masking a timer leak)`);
+            eq([first.code, second.code, requests.length, fs.readFileSync(note, 'utf8'), sync2TurnHeld(fx.vault)],
+              [0, 0, 2, 'newer rail bytes\n', false], `${label}: completed HTTP responses release the turn and preserve the newer write`);
+          } else {
+            await sync2Wait(150);
+            eq([first.closed, first.stdout, second.closed, second.stdout, requests.length, locks(), sync2TurnHeld(fx.vault)],
+              [false, '', false, '', 1, [], true], `${label}: after socket closure and delayed application, both children remain waiting outside locks without a second PUT`);
+          }
+          const events = fs.existsSync(first.events) ? fs.readFileSync(first.events, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line).event) : [];
+          if (mode.startsWith('end-throws')) ok(events.includes('end-threw-after-send'), `${label}: fixture actually throws synchronously after invoking native req.end`);
+          if (!acknowledged) {
+            ok(events.includes('socket-close') && events.includes('req-close'), `${label}: socket and request close paths actually run`);
+            if (mode === 'truncated-response' || mode === 'socket-error-after-body') ok(events.includes('res-aborted') && events.includes('res-error') && events.includes('res-close') && !events.includes('res-end'),
+              `${label}: aborted, error and close response paths actually run without a complete response end`);
+            else ok(events.includes('req-error'), `${label}: the request error path actually runs`);
+            if (mode === 'socket-error-after-body') ok(events.includes('socket-error'), `${label}: an injected socket error after complete body receipt actually runs`);
+          }
+        } finally {
+          for (const timer of timers) clearTimeout(timer);
+          for (const run of children) if (!run.closed) run.proc.kill('SIGKILL');
+          await Promise.all(children.map((run) => run.exited));
+          for (const socket of sockets) socket.destroy();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      }
+    }
+
+    // SYNC2D-PROBE-TIMEOUT: an Obsidian that accepts the connection and never
+    // answers GET / is reported probe-timeout, after the 2s timeout of that
+    // GET, and the scope ends with the note on disk and the turn released.
+    // The bound below is 10s, measured in this process.
+    {
+      const net = require('net');
+      const vault = path.join(sync2Root, 'probe-timeout');
+      const note = path.join(vault, 'spice', 'Probe.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      const sockets = new Set();
+      const silent = net.createServer((socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+      await new Promise((resolve) => silent.listen(0, '127.0.0.1', resolve));
+      await sync2RestConfig(vault, silent.address().port);
+      const started = Date.now();
+      let settled = false;
+      const scope = vaultIndex.withVaultIndex(vault, async () => { sync2RailWrite(note, 'probe\n'); return { ok: true }; })
+        .then((value) => { settled = true; return { value }; }, (error) => { settled = true; return { error }; });
+      await sync2Until(() => settled, 10000);
+      const settledInTime = settled;
+      const elapsed = Date.now() - started;
+      for (const socket of sockets) socket.destroy();
+      const outcome = await scope;
+      await new Promise((resolve) => silent.close(resolve));
+      eq([settledInTime, outcome.value ? outcome.value.obsidian_index.reason : String(outcome.error)], [true, 'probe-timeout'],
+        `SYNC2D-PROBE-TIMEOUT a server that never answers GET / is reported probe-timeout within 10s (${elapsed}ms)`);
+      eq([fs.readFileSync(note, 'utf8'), sync2TurnHeld(vault)], ['probe\n', false],
+        'SYNC2D-PROBE-TIMEOUT the note stays on disk and the turn is released');
+    }
+
+    // SYNC2-READ-ONLY-VERIFY SYNC1B-SAME-LENGTH-CONFLICT with Obsidian closed:
+    // a note edited on disk to other bytes of the same length after the rail
+    // wrote it, in a vault whose REST port refuses connections, is reported
+    // as a conflict, and the edit stays on disk.
+    {
+      const vault = path.join(sync2Root, 'closed-conflict');
+      const note = path.join(vault, 'spice', 'Edited.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      await sync2RestConfig(vault, await sync2ClosedPort());
+      const result = await vaultIndex.withVaultIndex(vault, async () => {
+        sync2RailWrite(note, 'rail\n');
+        fs.writeFileSync(note, 'user\n');
+        return { ok: true };
+      });
+      eq([result.obsidian_index.conflicts, result.obsidian_index.unseen.map((item) => item.path), fs.readFileSync(note, 'utf8')],
+        [['spice/Edited.md'], [], 'user\n'],
+        'SYNC2-READ-ONLY-VERIFY SYNC1B-SAME-LENGTH-CONFLICT with Obsidian closed, a same-length edit after the rail write is reported as a conflict and stays on disk');
+    }
+
+    // SYNC2-INDEXED-WHEN-HEALTHY
+    {
+      const fx = sync2CliFixture('healthy');
+      const stub = await sync2Stub({ vault: fx.vault, stateDir: fx.stateDir });
+      await sync2RestConfig(fx.vault, stub.port);
+      const check = async (label, run, before) => {
+        const changed = sync2Changed(before, sync2Snapshot(fx.vault)).filter((rel) => !rel.startsWith('.'));
+        const { index } = await stub.log();
+        ok(changed.length > 0, `SYNC2-INDEXED-WHEN-HEALTHY precondition: ${label} writes notes (${changed.join(', ')})`);
+        eq(changed.filter((rel) => index[rel] !== sync2Sha(path.join(fx.vault, ...rel.split('/')))), [],
+          `SYNC2-INDEXED-WHEN-HEALTHY SYNC1-WRITE-THROUGH-REPAIRS every note ${label} wrote is in the stub's index with its bytes when the verb returns`);
+        const receiptIndex = run && run.receipt && run.receipt.obsidian_index;
+        if (receiptIndex) {
+          eq([receiptIndex.available, receiptIndex.seen.slice().sort(), receiptIndex.written_through.slice().sort(), receiptIndex.unseen, receiptIndex.conflicts],
+            [true, changed, changed, [], []], `SYNC2-INDEXED-WHEN-HEALTHY SYNC1-TOUCH-NOT-RELIABLE the ${label} receipt reports every note written through and seen`);
+        }
+        return changed;
+      };
+      let before = sync2Snapshot(fx.vault);
+      const claim = await sync2Cli(fx, ['claim', '--json']);
+      eq(claim.code, 0, `SYNC2-INDEXED-WHEN-HEALTHY claim succeeds — ${claim.stderr.slice(0, 200)}`);
+      const claimChanged = await check('claim', claim, before);
+      eq(claimChanged, ['spice/projects/test/Loop Station.md', `spice/projects/test/tasks/${SYNC2_EPIC}/${SYNC2_EPIC}.md`, SYNC2_CARD_REL, SYNC2_EPIC_BOARD_REL, SYNC2_BOARD_REL],
+        'SYNC2-INDEXED-WHEN-HEALTHY claim writes the station, atlas, card note, epic board and parent board');
+      before = sync2Snapshot(fx.vault);
+      const discard = await sync2Cli(fx, sync2Second.discard());
+      await check('discard', discard, before);
+      before = sync2Snapshot(fx.vault);
+      const park = await sync2Cli(fx, sync2Second.park(claim));
+      sync2Outputs.push(park);
+      eq(park.code, 0, `SYNC2-INDEXED-WHEN-HEALTHY park succeeds — ${park.stderr.slice(0, 300)}`);
+      await check('park', park, before);
+      before = sync2Snapshot(fx.vault);
+      const driver = path.join(sync2Root, 'advance-driver.js');
+      fs.writeFileSync(driver, `
+const path = require('path');
+const [coordinatorPath, indexPath, repo, card, leaseToken] = process.argv.slice(2);
+const coordinator = require(coordinatorPath);
+const vaultIndex = require(indexPath);
+const commonDir = path.join(repo, '.git');
+const stateDir = path.join(commonDir, 'sauce-autoloop');
+const ctx = { root: repo, commonDir, stateDir, statePath: path.join(stateDir, 'state.json') };
+const boardPath = process.env.SAUCE_LOOP_BOARD;
+const cardsRoot = process.env.SAUCE_LOOP_CARDS_ROOT;
+vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(boardPath), (journal) => coordinator.commandAdvance(ctx, { card, 'lease-token': leaseToken, 'lease-seconds': '0' }, {
+  boardPath, cardsRoot,
+  stepCard: async (stepCtx, state, record) => {
+    record.phase = 'blocked';
+    coordinator.projectCard(record.card_path, boardPath, record.card, 'blocked', { state, record, cardsRoot });
+    coordinator.writeState(stepCtx, state, record);
+    return { action: 'blocked', card: record.card, phase: 'blocked' };
+  },
+  emit: (receipt) => coordinator.emitAdvanceReceipt(receipt, journal),
+})).then(() => process.exit(0), (error) => { console.error(error.message); process.exit(1); });
+`);
+      const advance = await sync2Cli(fx, [sync2CoordinatorPath, sync2IndexPath, fx.repo, SYNC2_CARD, sync2LeaseToken(claim)], { script: driver });
+      sync2Outputs.push(claim, discard, advance);
+      eq(advance.code, 0, `SYNC2-INDEXED-WHEN-HEALTHY advance succeeds — ${advance.stderr.slice(0, 300)}`);
+      const advanceChanged = await check('advance', null, before);
+      const lines = advance.stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+      eq(lines.map((line) => line.action), ['blocked'], 'SYNC2-INDEXED-WHEN-HEALTHY advance streams one receipt');
+      eq(lines[0].obsidian_index && [lines[0].obsidian_index.seen.slice().sort(), lines[0].obsidian_index.written_through.slice().sort()],
+        [advanceChanged, advanceChanged], 'SYNC2-INDEXED-WHEN-HEALTHY the streamed advance receipt reports every note written through and seen');
+      const { requests } = await stub.log();
+      eq([sync2Kind(requests, 'note').length, requests.filter((request) => request.held.length > 0).map((request) => request.kind)], [0, []],
+        'SYNC2-READ-ONLY-VERIFY SYNC1B-UNINDEXED-GET-HANGS across the verbs: no note GET, and nothing reaches Obsidian while a coordinator lock is held');
+
+      const wrongKey = sync2CliFixture('wrong-key');
+      const wrongStub = await sync2Stub({ vault: wrongKey.vault, apiKey: crypto.randomBytes(24).toString('hex') });
+      await sync2RestConfig(wrongKey.vault, wrongStub.port);
+      const wrongClaim = await sync2Cli(wrongKey, ['claim', '--json']);
+      sync2Outputs.push(wrongClaim);
+      const wrongLog = await wrongStub.log();
+      eq([wrongClaim.code, wrongLog.requests.map((request) => request.kind), wrongClaim.receipt.obsidian_index && wrongClaim.receipt.obsidian_index.reason],
+        [0, ['root'], 'rest-unauthorized'], 'SYNC2-SAFETY-CARRIED a server that rejects the vault key receives only the probe: no write, no listing');
+
+      const hostile = sync2CliFixture('hostile');
+      const hostileStub = await sync2Stub({ vault: hostile.vault, hostile: true, putStatus: 500 });
+      await sync2RestConfig(hostile.vault, hostileStub.port);
+      const hostileClaim = await sync2Cli(hostile, ['claim', '--json']);
+      sync2Outputs.push(hostileClaim);
+      ok(hostileClaim.code === 0 && hostileClaim.receipt.obsidian_index && hostileClaim.receipt.obsidian_index.not_written_through.length > 0,
+        `SYNC2-SAFETY-CARRIED precondition: the echoing server refused the claim's PUTs and the claim succeeded — ${hostileClaim.stderr.slice(0, 200)}`);
+      ok(!sync2Outputs.some((run) => run.stdout.includes(sync2ApiKey) || run.stderr.includes(sync2ApiKey)),
+        'SYNC2-SAFETY-CARRIED the apiKey appears on the stdout or stderr of no run started through sync2Cli');
+      const every = [];
+      for (const each of sync2Stubs) every.push(...(await each.log()).requests.map((request) => ({ ...request, port: each.port })));
+      ok(every.length > 0 && every.every((request) => sync2Loopback(request) && request.host === `127.0.0.1:${request.port}`),
+        'SYNC2-SAFETY-CARRIED every request goes to 127.0.0.1');
+    }
+  } finally {
+    for (const stub of sync2Stubs) await stub.close();
+    fs.rmSync(sync2Root, { recursive: true, force: true });
+  }
+}
+
+eq(harnessIsolationProblems(), [],
+  'SYNC2D-HARNESS-ISOLATION no node child took a write turn or created anything in the vaults the repo binding and the coordinator fallbacks name under the harness HOME');
+fs.rmSync(harnessHome, { recursive: true, force: true });
+fs.rmSync(harnessCliVault, { recursive: true, force: true });
 console.log(`CODEX-AUTOLOOP PASS (${count} assertions)`);
 })().catch((err) => { console.error(err); process.exit(1); });

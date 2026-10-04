@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const childProcess = require('child_process');
 const delivery = require('../../../../platform/mechanisms/delivery');
+const vaultIndex = require('../../../../scripts/autoloop/vault-index');
 
 const CLASSIFICATIONS = new Set(['bug', 'direct_execution', 'parent_children', 'roadmap_theme', 'ga_exception', 'post_ga']);
 const EPIC_SCHEMA_VERSION = '1.1.0';
@@ -760,10 +761,12 @@ function cardPath(spec, card, options = {}) {
 }
 
 function atomicWrite(file, content) {
+  vaultIndex.beforeNoteWrite();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.card-intake-${process.pid}.tmp`;
   fs.writeFileSync(tmp, content, 'utf8');
   fs.renameSync(tmp, file);
+  vaultIndex.noteWritten(file, content);
 }
 
 function priorCreatedAt(markdown) {
@@ -1017,6 +1020,7 @@ function run(spec, apply = false, deps = {}) {
   } catch (error) {
     return { ok: false, errors: [`fresh installed coordinator status failed: ${error.message}`] };
   }
+  if (apply) vaultIndex.beforeNoteRewrite();
   const boardRaw = fs.existsSync(spec.board_path) ? fs.readFileSync(spec.board_path, 'utf8') : '';
   if (spec.epic_native !== undefined && typeof spec.epic_native !== 'boolean') {
     return { ok: false, errors: ['epic_native must be a boolean when present'] };
@@ -1059,8 +1063,27 @@ function run(spec, apply = false, deps = {}) {
   };
 }
 
+// Runs run() in a scope bound to the board's vault. An applying run reads the
+// coordinator status first, then runs run() without --apply as a read-only
+// pre-check: when that refuses, its refusal is returned and no turn is taken.
+// Otherwise it waits for the write turn with vaultIndex.awaitWriteTurn and
+// runs run() again with --apply, which reads the board again under the turn.
+async function runAndIndex(spec, apply = false, deps = {}) {
+  return vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(spec && spec.board_path), async () => {
+    if (!apply) return run(spec, apply, deps);
+    let status;
+    try { status = { value: (deps.readCoordinatorStatus || readInstalledCoordinatorStatus)() }; }
+    catch (error) { status = { error }; }
+    const readCoordinatorStatus = () => { if (status.error) throw status.error; return status.value; };
+    const precheck = run(spec, false, { ...deps, readCoordinatorStatus });
+    if (!precheck.ok) return precheck;
+    await vaultIndex.awaitWriteTurn();
+    return run(spec, apply, { ...deps, readCoordinatorStatus });
+  }, deps.vaultIndex);
+}
+
 module.exports = {
-  validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, roadmapContent, cardPath,
+  validateSpec, validateDeliveryContract, deliveryContract, renderCard, parseBoard, run, runAndIndex, roadmapContent, cardPath,
   resolveInstalledCoordinator, readInstalledCoordinatorStatus, epicRoute, canonicalEpicSurface,
   renderEpicAtlas, renderEpicBoard, renderContextPack,
 };
@@ -1068,12 +1091,16 @@ module.exports = {
 if (require.main === module) {
   const args = argsOf(process.argv.slice(2));
   if (!args.spec) { console.error('usage: card-intake.js --spec <plan.json> [--apply] [--json]'); process.exit(2); }
-  try {
-    const result = run(JSON.parse(fs.readFileSync(path.resolve(args.spec), 'utf8')), Boolean(args.apply));
-    console.log(args.json ? JSON.stringify(result, null, 2) : `${result.ok ? 'ok' : 'refused'}: ${result.result || (result.errors || []).join('; ')}`);
-    process.exit(result.ok ? 0 : 1);
-  } catch (error) {
-    console.error(args.json ? JSON.stringify({ ok: false, errors: [error.message] }, null, 2) : error.message);
+  const fail = (error) => {
+    const receipt = { ok: false, errors: [error.message], ...(error.obsidian_index ? { obsidian_index: error.obsidian_index } : {}) };
+    console.error(args.json ? JSON.stringify(receipt, null, 2) : error.message);
     process.exit(1);
-  }
+  };
+  let spec;
+  try { spec = JSON.parse(fs.readFileSync(path.resolve(args.spec), 'utf8')); } catch (error) { fail(error); }
+  runAndIndex(spec, Boolean(args.apply)).then((result) => {
+    const output = args.json ? JSON.stringify(result, null, 2) : `${result.ok ? 'ok' : 'refused'}: ${result.result || (result.errors || []).join('; ')}`;
+    // A receipt can outgrow a pipe's buffer. Finish its write before exiting.
+    process.stdout.write(`${output}\n`, () => process.exit(result.ok ? 0 : 1));
+  }).catch(fail);
 }

@@ -12,6 +12,7 @@ const {
   commandReconcile,
   durablePathBarrier,
 } = require('./codex-coordinator');
+const vaultIndex = require('./vault-index');
 
 const DEFAULT_PROJECT = path.join(os.homedir(), 'obsidian/headspace-sauce/spice/projects/sauce');
 const DEFAULT_BOARD = path.join(DEFAULT_PROJECT, 'sauce-board.md');
@@ -218,7 +219,7 @@ async function repairAuditThroughCoordinator(report) {
     cardsRoot: report.cards_root,
     statePath,
   };
-  return repairAudit(report, {
+  return vaultIndex.withVaultIndex(vaultIndex.vaultRootForBoard(report.board_path), () => repairAudit(report, {
     projectRoot: path.dirname(report.board_path),
     reconcile: async (card) => {
       const result = await commandReconcile(ctx, { card }, {
@@ -231,7 +232,7 @@ async function repairAuditThroughCoordinator(report) {
       }
     },
     reaudit: async () => auditDelivery(auditOptions),
-  });
+  }));
 }
 
 async function main(argv = process.argv.slice(2)) {
