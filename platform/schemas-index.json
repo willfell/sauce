@@ -3,6 +3,40 @@
   "schema_version": 1,
   "schemas": [
     {
+      "id": "sauce.review-bundle.v1",
+      "kind": "contract",
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
+      "source": "scripts/autoloop/review-contract.js",
+      "accepted_versions": [
+        "1.0.0"
+      ],
+      "validator": "scripts/autoloop/review-contract.js",
+      "consumers": [
+        "platform/test/run-scoped-reviews.js"
+      ],
+      "notes": "Pure versioned bundle provenance contract (validateReviewBundle); exact snapshots, explicit claim/evidence coverage and assessed adjacent inheritance. Structural validation only; does not activate live retention or alter delivery card schema."
+    },
+    {
+      "id": "sauce.review-authorization.v1",
+      "kind": "contract",
+      "owner": {
+        "type": "workshop",
+        "name": "sauce"
+      },
+      "source": "scripts/autoloop/review-contract.js",
+      "accepted_versions": [
+        "1.0.0"
+      ],
+      "validator": "scripts/autoloop/review-contract.js",
+      "consumers": [
+        "platform/test/run-scoped-reviews.js"
+      ],
+      "notes": "Pure versioned authorization provenance contract (validateAuthorization); exact snapshots, explicit claim/evidence coverage and assessed adjacent inheritance. Structural validation only; does not activate live retention or alter delivery card schema."
+    },
+    {
       "id": "sauce.repair-history.v1",
       "kind": "contract",
       "owner": { "type": "workshop", "name": "sauce" },

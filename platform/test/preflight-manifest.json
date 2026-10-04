@@ -900,6 +900,11 @@
       "lane": "parallel"
     },
     {
+      "id": "scoped-reviews",
+      "cmd": ["node", "platform/test/run-scoped-reviews.js"],
+      "lane": "parallel"
+    },
+    {
       "id": "autoloop-select",
       "cmd": [
         "node",
