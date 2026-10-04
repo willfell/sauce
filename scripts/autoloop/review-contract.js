@@ -264,4 +264,4 @@ function validateAuthorization(authorization, bundle, snapshot) {
   return { ok: !errors.length, errors };
 }
 
-module.exports = { VERSION, LENSES, canonicalReviewDigest, validateReviewBundle, validateAuthorization };
+module.exports = { VERSION, LENSES, isPlainReviewJson: jsonValue, canonicalReviewDigest, validateReviewBundle, validateAuthorization };

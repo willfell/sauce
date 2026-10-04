@@ -257,6 +257,127 @@ test('SR1-malformed-JSON-shapes-return-errors-without-throwing', () => {
   for (const field of ['claim_ids', 'evidence_ids', 'finding_ids']) { const b = inheritedFixture(); b.judgments[0][field] = {}; assert.equal(bundleCheck(b).ok, false, field); }
 });
 
+// Synthetic decision inputs, never live repair history or measured timing.
+const impactPath = process.env.SCOPED_REVIEW_IMPACT || path.resolve(__dirname, '../../scripts/autoloop/review-impact.js');
+const { validateImpactAssessment: impactCheck, deriveReviewPlan: plan } = require(impactPath);
+function impactFixture(kind = 'prose') {
+  const b = fixture(), old = b.snapshots[0];
+  old.review_inputs = { release_title: 'feat: fixture', ci_skip_text: '', caller_digest: hex(20), schema_digest: hex(21), scanned_subjects: ['fixture.js', 'repair-subject', 'consumer.js'] };
+  const s = copy(old); Object.assign(s, { snapshot_id: 's1', head_sha: sha(6), tree_sha: sha(7), diff_digest: hex(6), messages: [...s.messages, { sha: sha(6), message: 'fix: repair' }] }); b.snapshots.push(s);
+  b.evidence.push({ evidence_id: 'e-impact', snapshot_id: 's1', source_identity: 'synthetic independent assessment', locator: 'repair:1', digest: hex(8) });
+  b.evidence.push({ ...copy(b.evidence[0]), evidence_id: 'e-current-correctness', snapshot_id: 's1' });
+  const currentClaim = { ...copy(b.claims[0]), claim_id: 'claim-current-correctness', evidence_ids: ['e-current-correctness'] };
+  b.claims.push(currentClaim); s.required_claims.correctness = [currentClaim.claim_id];
+  b.judgments.push({ schema_version: VERSION, receipt_id: 'fresh-correctness', kind: 'direct', snapshot_id: 's1', lens: 'correctness', verdict: 'pass', reviewer_context_id: 'fresh-independent-context', implementer_context_id: 'implementer', scope: 'delta', claim_ids: [currentClaim.claim_id], finding_ids: [], evidence_ids: ['e-current-correctness', 'e-impact'] });
+  const a = { schema_version: VERSION, assessment_id: 'impact-1', from_snapshot_id: 's0', to_snapshot_id: 's1', assessor_context_id: 'fresh-independent-context', correctness_receipt_id: 'fresh-correctness', evidence_ids: ['e-impact'], disputed: false,
+    changes: [{ identity: 'repair-subject', kind, behavioral: false, roles: [], removed_or_weakened: false, isolated: true, additive: true, explanation: 'Explicit semantic inspection of the isolated repair', evidence_ids: ['e-impact'] }],
+    discovery: { complete: true, before: [...old.review_inputs.scanned_subjects], after: [...s.review_inputs.scanned_subjects], consumers: [{ dependency: { kind: 'source', identity: 'fixture.js' }, consumer_ids: ['consumer.js'] }], evidence_ids: ['e-impact'] },
+    retention: b.claims.slice(0, 3).map((c) => ({ claim_id: c.claim_id, unchanged: true, assumptions: ['The documented subject and its consumers preserve behavior'], explanation: 'Inspected dependencies and complete consumers remain untouched', dependencies: c.dependencies.map((d) => ({ kind: d.kind, identity: d.identity, from_digest: d.digest, to_digest: d.digest, evidence_ids: ['e-impact'] })), consumer_ids: ['consumer.js'], evidence_ids: ['e-impact'] })) };
+  b.judgments.at(-1).impact_assessment_digest = digest(a);
+  return { bundle: b, assessment: a, currentSnapshot: s };
+}
+// Matrix edits model a new independent signed assessment; tampering tests call
+// plan directly and cannot regenerate this signature.
+function decide(f) { f.bundle.judgments.at(-1).impact_assessment_digest = digest(f.assessment); return plan(f); }
+function scopes(p) { return Object.fromEntries(p.lenses.map((v) => [v.lens, v.scope])); }
+test('SR2-PH-comment-and-SHA-prose-repair-narrows-C', () => {
+  const f = impactFixture(), before = digest(f), p = decide(f);
+  assert.deepEqual(impactCheck(f.assessment, f.bundle), { ok: true, errors: [] });
+  assert.equal(p.action, 'scoped-review'); assert.deepEqual(scopes(p), { correctness: 'delta' });
+  assert.deepEqual(p.retained.map((r) => r.lens), ['regression-risk', 'test-adequacy']); assert.equal(digest(f), before);
+});
+test('SR2-PH-isolated-additive-fixture-requires-C-and-T', () => {
+  const f = impactFixture('test'); f.assessment.changes[0].roles = ['assertion'];
+  const p = decide(f); assert.deepEqual(scopes(p), { correctness: 'delta', 'test-adequacy': 'delta' });
+  assert.deepEqual(p.retained.map((r) => r.lens), ['regression-risk']);
+});
+test('SR2-fresh-independent-correctness-signs-target-impact', () => {
+  for (const change of [f => f.assessment.assessor_context_id = 'implementer', f => f.assessment.correctness_receipt_id = 'r-correctness', f => f.bundle.judgments.at(-1).evidence_ids.pop()]) {
+    const f = impactFixture(); change(f); assert.equal(decide(f).action, 'refuse');
+  }
+});
+test('SR2-never-passed-and-refuted-lenses-require-full-cumulative-review', () => {
+  const f = impactFixture(); f.bundle.judgments.splice(1, 1);
+  const p = decide(f); assert.equal(scopes(p)['regression-risk'], 'full');
+  assert.ok(p.invalidations.some((i) => i.code === 'lens_unpassed'));
+  const g = impactFixture(); g.bundle.findings.push({ finding_id: 'old-refutation', claim_id: 'claim-regression-risk', status: 'resolved', evidence_ids: ['e-regression-risk'] });
+  g.bundle.judgments.push({ ...copy(g.bundle.judgments[1]), receipt_id: 'later-refute', verdict: 'refute', finding_ids: ['old-refutation'] });
+  assert.equal(scopes(decide(g))['regression-risk'], 'full');
+});
+test('SR2-hash-match-alone-cannot-retain-a-judgment', () => {
+  for (const change of [f => f.assessment.retention = [], f => f.assessment.retention[1].unchanged = false, f => f.assessment.retention[1].consumer_ids = [], f => f.assessment.discovery.consumers = [], f => f.assessment.retention[1].dependencies[0].to_digest = hex(99)]) {
+    const f = impactFixture(); change(f); const p = decide(f); assert.equal(scopes(p)['regression-risk'], 'full');
+  }
+  const f = impactFixture(); f.assessment.retention[1].assumptions = []; assert.equal(decide(f).action, 'refuse');
+});
+test('SR2-RR-enclosing-template-and-sequence-transfer-invalidates-all-lenses', () => {
+  for (const identity of ['fixture.js', 'repair-subject']) {
+    const f = impactFixture('behavioral'); Object.assign(f.assessment.changes[0], { identity, behavioral: true, roles: ['runtime'], explanation: 'RR enclosing-template sequence transfer changes runtime behavior' });
+    const p = decide(f); assert.equal(p.action, 'full-review'); assert.equal(p.retained.length, 0);
+    assert.deepEqual(scopes(p), Object.fromEntries(LENSES.map(l => [l, 'delta'])));
+  }
+});
+test('SR2-executable-analyzer-under-test-or-Markdown-name-is-behavioral', () => {
+  for (const identity of ['platform/test/run-analyzer.js', 'execute.md']) {
+    const f = impactFixture('test'); f.assessment.discovery.before.push(identity); f.assessment.discovery.after.push(identity);
+    f.bundle.snapshots[0].review_inputs.scanned_subjects.push(identity); f.currentSnapshot.review_inputs.scanned_subjects.push(identity);
+    Object.assign(f.assessment.changes[0], { identity, roles: ['analyzer'], explanation: 'Callable executable analyzer, not an isolated assertion' });
+    const p = decide(f); assert.equal(p.retained.length, 0); assert.equal(p.lenses.length, 3);
+  }
+});
+test('SR2-weakened-assertions-or-shared-oracles-require-all-three', () => {
+  for (const change of [c => c.removed_or_weakened = true, c => c.roles = ['oracle'], c => c.roles = ['shared-generator'], c => c.isolated = false, c => c.additive = false]) {
+    const f = impactFixture('test'); change(f.assessment.changes[0]); assert.equal(decide(f).retained.length, 0); assert.equal(decide(f).lenses.length, 3);
+  }
+});
+test('SR2-SYNC-archived-history-prerequisites-unknown-or-missing-refuses-reuse', () => {
+  const f = impactFixture(); f.assessment.from_snapshot_id = 'missing-archived-history'; assert.equal(decide(f).action, 'refuse');
+  for (const change of [g => g.assessment.changes[0].kind = 'unknown', g => g.assessment.disputed = true, g => g.assessment.discovery.complete = false, g => g.assessment.discovery.after.push('new-scanned-file'), g => g.assessment.discovery.before.pop()]) {
+    const g = impactFixture(); change(g); const p = decide(g); assert.equal(p.action, 'full-review'); assert.equal(p.retained.length, 0); assert.ok(p.lenses.every(l => l.scope === 'full'));
+  }
+});
+test('SR2-release-CI-base-contract-policy-caller-schema-inputs-force-full-review', () => {
+  for (const change of [f => f.currentSnapshot.base_sha = sha(99), f => f.currentSnapshot.merge_base_sha = sha(99), f => f.currentSnapshot.contract_digest = hex(99), f => f.currentSnapshot.policy_digest = hex(99), ...['release_title','ci_skip_text','caller_digest','schema_digest'].map(k => f => f.currentSnapshot.review_inputs[k] += ' changed'), f => delete f.currentSnapshot.review_inputs, f => f.currentSnapshot.messages.at(-1).message += ' [skip ci]']) {
+    const f = impactFixture(); change(f); const p = decide(f); assert.equal(p.action, 'full-review'); assert.ok(p.lenses.every(l => l.scope === 'full'));
+  }
+  const f = impactFixture(); f.currentSnapshot = copy(f.currentSnapshot); f.currentSnapshot.head_sha = sha(99); assert.equal(decide(f).action, 'refuse');
+});
+test('SR2-dependency-consumer-closure-invalidates-retention', () => {
+  const f = impactFixture(); f.assessment.changes[0].identity = 'consumer.js'; assert.equal(scopes(decide(f))['regression-risk'], 'full');
+  const g = impactFixture(); g.assessment.retention[1].dependencies.push(copy(g.assessment.retention[1].dependencies[0])); assert.equal(scopes(decide(g))['regression-risk'], 'full');
+});
+test('SR2-signature-binds-whole-assessment-and-context-must-be-fresh', () => {
+  const f = impactFixture(); f.assessment.changes[0].explanation += ' tampered';
+  rejected(impactCheck(f.assessment, f.bundle), 'impact_signature_mismatch'); assert.equal(plan(f).action, 'refuse');
+  const g = impactFixture(); g.assessment.assessor_context_id = 'reviewer-regression-risk'; g.bundle.judgments.at(-1).reviewer_context_id = 'reviewer-regression-risk';
+  assert.equal(decide(g).action, 'refuse');
+});
+test('SR2-malicious-and-malformed-inputs-never-dispatch-or-throw', () => {
+  let calls = 0;
+  for (const malicious of callerArrays(() => calls++)) {
+    const f = impactFixture(); f.assessment.changes = malicious;
+    rejected(impactCheck(f.assessment, f.bundle), 'non_json'); assert.equal(plan(f).action, 'refuse');
+  }
+  assert.equal(calls, 0);
+  for (const field of ['changes', 'discovery', 'retention']) for (const value of [null, {}, [], [null], [{}]]) {
+    const f = impactFixture(); f.assessment[field] = value; assert.doesNotThrow(() => plan(f));
+  }
+});
+if (!process.env.SCOPED_REVIEW_MUTANT_CHILD) test('SR2-RED-disposable-impact-mutant', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-impact-red-'));
+  try {
+    const source = fs.readFileSync(impactPath, 'utf8'), guard = "!c.roles.length && !c.removed_or_weakened";
+    assert.ok(source.includes(guard));
+    const mutant = path.join(root, 'review-impact.js');
+    fs.copyFileSync(contractPath, path.join(root, 'review-contract.js'));
+    fs.writeFileSync(mutant, source.replaceAll(guard, 'true').replace("c.roles.every((r) => r === 'assertion')", 'true'));
+    const result = spawnSync(process.execPath, [__filename], { encoding: 'utf8', timeout: 20000, env: { ...process.env, HOME: root, SCOPED_REVIEW_IMPACT: mutant, SCOPED_REVIEW_MUTANT_CHILD: '1', SAUCE_LOOP_BOARD: path.join(root, 'unused-board.md'), DELIVERY_STATE: path.join(root, 'unused-state.json') } });
+    assert.equal(result.status, 1); assert.match(result.stderr, /FAIL SR2-executable-analyzer-under-test-or-Markdown-name-is-behavioral:/);
+    assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND|SyntaxError|getter executed/);
+    console.log('RED proof: impact role mutant triggered named SR2 executable analyzer assertion');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // Counterfactual executes the same assertions against a disposable source copy.
 // A specific behavior guard is removed; a named assertion must catch acceptance.
 if (!process.env.SCOPED_REVIEW_MUTANT_CHILD) test('SR1-RED-disposable-source-mutants', () => {
