@@ -241,12 +241,18 @@ layout and the new controls change. Saves clear `rank` when `due` changed.
     completions would need new storage (a non-goal). Recurring use is rare (1 of 272 tasks in the
     reference vault).
 11. Existing task write paths are not moved onto RenderSafe (see Anti-goals); only new writes are.
+    The generalized `reschedule(row, task, newDue, …)` that backs Backlog, Pick date, week-strip
+    drops and the bulk date moves counts as the existing path: it is `rescheduleTomorrow` with
+    the date parameterized, keeping its own optimistic removal, rollback and in-flight guard.
 12. The sectioned Home/daily panel renders only for today's date; past/future daily notes keep
     the current panel.
 13. Title shortcuts apply in create mode only. In edit mode an existing title such as "Prep for
     Friday" would otherwise lose its last word and move its date on the first keystroke.
 14. The task row's ⋯ menu uses the shared `MenuPopover` primitive rather
     than Obsidian's `Menu` global, which is not reliably reachable from CustomJS.
+15. On mobile, `→ Tomorrow` and `→ Mon <d>` stay visible on the row (§2 put row actions behind
+    `⋯` on mobile); the next-Monday move was asked for beside "move to next day", so it stays
+    one tap away. Other actions stay in `⋯`.
 
 ## Left to the builder
 
