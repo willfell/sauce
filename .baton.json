@@ -1,0 +1,1 @@
+{"server": "http://127.0.0.1:3000", "project": "SAUCE", "worktrees": {"dir": ".baton/worktrees", "setup": "npm ci --ignore-scripts"}}

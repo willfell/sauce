@@ -40,3 +40,5 @@ node_modules/
 .superpowers/
 .local/
 
+
+.baton/
