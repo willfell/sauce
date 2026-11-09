@@ -1,44 +1,56 @@
 /**
- * ToDoDailyFilterView (CustomJS) — one flat live task-note list with
- * client-only scope and sort controls. TV-4 mounts this helper in the daily
- * template; TV-3 keeps it independently renderable for behavioral coverage.
+ * ToDoDailyFilterView (CustomJS) — the daily To-Do view: a tab bar (Today /
+ * This week / Overdue / Backlog / All open), Sort and Group menus, one flat
+ * live task-note list and, on the Today tab, a Done today section. Tab, sort
+ * and group persist under one device-wide prefs key (not keyed by note date).
+ * TV-4 mounts this helper in the daily template; TV-3 keeps it independently
+ * renderable for behavioral coverage.
+ *
+ * Render layout (hosts are stable so later features slot in without touching
+ * the paint code): above-tabs host, controls row (tabs left, `right` cluster
+ * for Sort / Group), rule, list host, done host.
  *
  * BARE CLASS ONLY. CustomJS evaluates this file as one expression.
  */
 class ToDoDailyFilterView {
-    static get STORAGE_KEY() { return 'sauce-todo-filter:state'; }
-    static get DEFAULT_SCOPE() { return 'today'; }
-    static get SCOPE_KEYS() { return ['today', 'overdue', 'upcoming', 'no-date', 'all']; }
-
-    static _defaultState(date) {
-        return {
-            scope: ToDoDailyFilterView.DEFAULT_SCOPE,
-            includeDone: false,
-            sort: 'due',
-            groupByProject: false,
-            date: String(date == null ? '' : date),
-        };
+    static get PREFS_KEY() { return 'sauce-todo-filter:prefs:v2'; }
+    static get TABS() { return ['today', 'week', 'overdue', 'backlog', 'all']; }
+    static get SORT_MODES() { return ['smart', 'manual', 'priority', 'due', 'oldest', 'touched']; }
+    static get GROUP_MODES() { return ['none', 'project', 'priority', 'due']; }
+    static get STALE_DIVIDER_LABEL() { return 'Stale · overdue 30+ days'; }
+    static get SILENT_REOPEN_REASONS() {
+        return ['in-flight', 'render-safe-unavailable', 'not-done', 'task file not found'];
     }
 
-    static _normalizeState(value, date) {
-        const wanted = String(date == null ? '' : date);
-        if (!value || typeof value !== 'object') return ToDoDailyFilterView._defaultState(wanted);
-        // A blob written before the scope bar correction carries `scopes[]` and no
-        // `date` key. Discard it whole rather than guessing which single scope an
-        // array of scopes meant.
-        if (typeof value.date !== 'string' || value.date !== wanted) {
-            return ToDoDailyFilterView._defaultState(wanted);
-        }
-        const scope = String(value.scope == null ? '' : value.scope).trim().toLowerCase();
-        return {
-            scope: ToDoDailyFilterView.SCOPE_KEYS.includes(scope)
-                ? scope
-                : ToDoDailyFilterView.DEFAULT_SCOPE,
-            includeDone: value.includeDone === true,
-            sort: String(value.sort || '').trim().toLowerCase() === 'priority' ? 'priority' : 'due',
-            groupByProject: value.groupByProject === true,
-            date: wanted,
-        };
+    static get SORT_OPTIONS() {
+        return [
+            { key: 'smart', label: 'Smart', sublabel: 'your order → priority → days late' },
+            { key: 'manual', label: 'My order', sublabel: 'drag to arrange' },
+            { key: 'priority', label: 'Priority', sublabel: 'highest first' },
+            { key: 'due', label: 'Due date', sublabel: 'soonest first' },
+            { key: 'oldest', label: 'Oldest first', sublabel: 'by created date' },
+            { key: 'touched', label: 'Last touched', sublabel: 'recently edited first' },
+        ];
+    }
+
+    static get GROUP_OPTIONS() {
+        return [
+            { key: 'none', label: 'None', sublabel: '' },
+            { key: 'project', label: 'Project', sublabel: '' },
+            { key: 'priority', label: 'Priority', sublabel: '' },
+            { key: 'due', label: 'Due day', sublabel: '' },
+        ];
+    }
+
+    static _defaultPrefs() { return { tab: 'today', sort: 'smart', group: 'none' }; }
+
+    static _normalizePrefs(value) {
+        const out = ToDoDailyFilterView._defaultPrefs();
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+        if (ToDoDailyFilterView.TABS.includes(value.tab)) out.tab = value.tab;
+        if (ToDoDailyFilterView.SORT_MODES.includes(value.sort)) out.sort = value.sort;
+        if (ToDoDailyFilterView.GROUP_MODES.includes(value.group)) out.group = value.group;
+        return out;
     }
 
     static storage() {
@@ -46,62 +58,200 @@ class ToDoDailyFilterView {
         catch (_e) { return null; }
     }
 
-    static readState(storage, date) {
+    static _readRaw(storage) {
         try {
-            if (!storage || typeof storage.getItem !== 'function') {
-                return ToDoDailyFilterView._defaultState(date);
+            if (!storage || typeof storage.getItem !== 'function') return {};
+            const raw = storage.getItem(ToDoDailyFilterView.PREFS_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (_e) { return {}; }
+    }
+
+    static readPrefs(storage) {
+        return ToDoDailyFilterView._normalizePrefs(ToDoDailyFilterView._readRaw(storage));
+    }
+
+    /**
+     * Read-merge-write: keys this view does not own survive, and the owned keys
+     * are normalised per key. Persistence is best-effort and never throws.
+     */
+    static writePrefs(storage, patch) {
+        const raw = ToDoDailyFilterView._readRaw(storage);
+        const merged = ToDoDailyFilterView._normalizePrefs({ ...raw, ...(patch || {}) });
+        try {
+            if (storage && typeof storage.setItem === 'function') {
+                storage.setItem(ToDoDailyFilterView.PREFS_KEY, JSON.stringify({ ...raw, ...merged }));
             }
-            const raw = storage.getItem(ToDoDailyFilterView.STORAGE_KEY);
-            if (!raw) return ToDoDailyFilterView._defaultState(date);
-            return ToDoDailyFilterView._normalizeState(JSON.parse(raw), date);
-        } catch (_e) {
-            return ToDoDailyFilterView._defaultState(date);
+        } catch (_e) { /* local preference persistence is best-effort */ }
+        return merged;
+    }
+
+    static _te(ref) {
+        if (ref) return ref;
+        try {
+            return (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null;
+        } catch (_e) { return null; }
+    }
+
+    static _dueOf(task) {
+        const v = task && task.due;
+        if (v == null || v === '') return '';
+        if (typeof v === 'string') {
+            const m = /^\s*(\d{4}-\d{2}-\d{2})/.exec(v);
+            return m ? m[1] : '';
+        }
+        try {
+            if (typeof v.toISODate === 'function') return v.toISODate() || '';
+            if (typeof v.toFormat === 'function') return v.toFormat('yyyy-MM-dd') || '';
+        } catch (_e) { return ''; }
+        return '';
+    }
+
+    static _openTasks(tasks) {
+        return (Array.isArray(tasks) ? tasks : []).filter((task) =>
+            task && String(task.status || 'open').toLowerCase() === 'open');
+    }
+
+    /** Monday..Sunday (inclusive) of the ISO week holding `todayStr`. */
+    static weekRange(todayStr, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(todayStr == null ? '' : todayStr));
+        if (!TE || !m) return null;
+        const dow = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+        const monday = TE.addDays(todayStr, -((dow + 6) % 7));
+        const sunday = TE.addDays(monday, 6);
+        return monday && sunday ? { from: monday, to: sunday } : null;
+    }
+
+    /** Overdue (1..29 days late) and stale (30+) open tasks, each in input order. */
+    static splitOverdue(tasks, todayStr, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        const out = { overdue: [], stale: [] };
+        if (!TE) return out;
+        for (const task of ToDoDailyFilterView._openTasks(tasks)) {
+            const bucket = TE.bucketOf(task, todayStr);
+            if (bucket === 'overdue') out.overdue.push(task);
+            else if (bucket === 'stale') out.stale.push(task);
+        }
+        return out;
+    }
+
+    static selectTab(tasks, tab, todayStr, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        if (!TE) return [];
+        const open = ToDoDailyFilterView._openTasks(tasks);
+        const key = ToDoDailyFilterView.TABS.includes(tab) ? tab : 'today';
+        switch (key) {
+            case 'all':
+                return open;
+            case 'backlog':
+                return open.filter((task) => TE.isBacklog(task));
+            case 'overdue': {
+                const split = ToDoDailyFilterView.splitOverdue(open, todayStr, TE);
+                return [...split.overdue, ...split.stale];
+            }
+            case 'week': {
+                const range = ToDoDailyFilterView.weekRange(todayStr, TE);
+                if (!range) return [];
+                return open.filter((task) => {
+                    const bucket = TE.bucketOf(task, todayStr);
+                    if (bucket !== 'today' && bucket !== 'upcoming') return false;
+                    const due = ToDoDailyFilterView._dueOf(task);
+                    return due >= range.from && due <= range.to;
+                });
+            }
+            default:
+                return open.filter((task) => TE.bucketOf(task, todayStr) === 'today');
         }
     }
 
-    static writeState(storage, state, date) {
-        const normalized = ToDoDailyFilterView._normalizeState(
-            { ...(state || {}), date: String(date == null ? '' : date) },
-            date,
-        );
-        try {
-            if (storage && typeof storage.setItem === 'function') {
-                storage.setItem(ToDoDailyFilterView.STORAGE_KEY, JSON.stringify(normalized));
-            }
-        } catch (_e) { /* local preference persistence is best-effort */ }
-        return normalized;
+    /** Done tasks completed on `todayStr`, latest completion first. */
+    static doneToday(tasks, todayStr, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        if (!TE) return [];
+        return (Array.isArray(tasks) ? tasks : [])
+            .filter((task) => task && task.status === 'done' && TE.completedDay(task) === todayStr)
+            .map((task, index) => ({ task, index, time: ToDoDailyFilterView.doneTimeLabel(task.completed_at) }))
+            .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : a.index - b.index))
+            .map((entry) => entry.task);
     }
 
-    static selectByScope(tasks, scope, includeDone, todayIso) {
-        const raw = String(scope == null ? '' : scope).trim().toLowerCase();
-        const key = ToDoDailyFilterView.SCOPE_KEYS.includes(raw)
-            ? raw
-            : ToDoDailyFilterView.DEFAULT_SCOPE;
-        const all = key === 'all';
-        const today = String(todayIso || '');
-        return (Array.isArray(tasks) ? tasks : []).filter((task) => {
-            if (!task) return false;
-            const status = String(task.status || 'open').toLowerCase();
-            if (status === 'done') {
-                // Completion is an independent include, evaluated for its own sake —
-                // never an early return that the `all` widening cannot reach.
-                if (!includeDone) return false;
-                if (all) return true;
-                if (!task.completed_at) return false;
-                const completed = task.completed_at;
-                if (typeof completed === 'object' && typeof completed.toFormat === 'function') {
-                    return completed.toFormat('yyyy-MM-dd') === today;
-                }
-                return String(completed).slice(0, 10) === today;
+    static doneTimeLabel(value) {
+        try {
+            if (value == null || value === '') return '';
+            if (typeof value === 'object' && typeof value.toFormat === 'function') {
+                return String(value.toFormat('HH:mm') || '');
             }
-            if (status !== 'open') return false;
-            if (all) return true;
-            const due = task.due == null ? '' : String(task.due).trim();
-            if (!due) return key === 'no-date';
-            if (due === today) return key === 'today';
-            if (due < today) return key === 'overdue';
-            return key === 'upcoming';
-        });
+            const m = /T(\d{2}):(\d{2})/.exec(String(value));
+            return m ? `${m[1]}:${m[2]}` : '';
+        } catch (_e) { return ''; }
+    }
+
+    static sortTasks(tasks, mode, todayStr, TEref) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        const TE = ToDoDailyFilterView._te(TEref);
+        if (!TE || typeof TE.compareBy !== 'function') return list.slice();
+        const compare = TE.compareBy(mode, todayStr);
+        return list
+            .map((task, index) => ({ task, index }))
+            .sort((a, b) => compare(a.task, b.task) || a.index - b.index)
+            .map((entry) => entry.task);
+    }
+
+    static groupTasks(tasks, group, _todayStr) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        if (!list.length) return [];
+        const push = (groups, label, task) => {
+            if (!groups.has(label)) groups.set(label, []);
+            groups.get(label).push(task);
+        };
+        switch (group) {
+            case 'project': {
+                const groups = ToDoDailyFilterView.groupByProject(list);
+                const none = groups.findIndex((g) => g.label === 'No Project');
+                if (none >= 0 && none !== groups.length - 1) groups.push(groups.splice(none, 1)[0]);
+                return groups;
+            }
+            case 'priority': {
+                const order = ['highest', 'high', 'medium', 'low', 'none'];
+                const labels = { highest: 'Highest', high: 'High', medium: 'Medium', low: 'Low', none: 'None' };
+                const groups = new Map(order.map((level) => [labels[level], []]));
+                for (const task of list) push(groups, labels[ToDoDailyFilterView.priorityLevel(task)], task);
+                return [...groups].map(([label, rows]) => ({ label, tasks: rows })).filter((g) => g.tasks.length);
+            }
+            case 'due': {
+                const dated = new Map();
+                const undated = [];
+                for (const task of list) {
+                    const due = ToDoDailyFilterView._dueOf(task);
+                    if (due) push(dated, due, task);
+                    else undated.push(task);
+                }
+                const out = [...dated.keys()].sort().map((due) => ({
+                    label: ToDoDailyFilterView._dayLabel(due), tasks: dated.get(due),
+                }));
+                if (undated.length) out.push({ label: 'No date', tasks: undated });
+                return out;
+            }
+            default:
+                return [{ label: '', tasks: list.slice() }];
+        }
+    }
+
+    static _dayLabel(dateStr) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr));
+        if (!m) return String(dateStr);
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+        return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${+m[3]}`;
+    }
+
+    /** The date a ToDo-YYYY-MM-DD note shows; any other note shows `todayStr`. */
+    static viewedDay(page, todayStr) {
+        const name = page && page.file && page.file.name;
+        const match = /ToDo-(\d{4}-\d{2}-\d{2})/.exec(String(name == null ? '' : name));
+        return match ? match[1] : String(todayStr == null ? '' : todayStr);
     }
 
     static _projectLabel(task) {
@@ -159,56 +309,27 @@ class ToDoDailyFilterView {
         return dot;
     }
 
-    // The persistence bucket for a note. `date` is compared for equality only
-    // (see _normalizeState), so any stable, distinct string works. A dated
-    // ToDo- note buckets by its date, which is what makes state reset each day.
-    // Anything else buckets by its own filename under a `note:` prefix, so two
-    // undated notes cannot silently share one another's saved filters the way a
-    // bare '' fallback made every one of them do.
-    static noteDate(page) {
-        const name = page && page.file && page.file.name;
-        const raw = String(name == null ? '' : name);
-        const match = /ToDo-(\d{4}-\d{2}-\d{2})/.exec(raw);
-        if (match) return match[1];
-        return `note:${raw}`;
+    static _addClass(el, cls) {
+        if (!el) return;
+        try {
+            if (el.classList && typeof el.classList.add === 'function') { el.classList.add(cls); return; }
+        } catch (_e) { /* fall through to className */ }
+        el.className = `${el.className || ''} ${cls}`.trim();
     }
 
-    static _fallbackDue(a, b) {
-        const ad = String(a && a.due != null ? a.due : '').trim();
-        const bd = String(b && b.due != null ? b.due : '').trim();
-        if (ad === bd) return 0;
-        if (!ad) return 1;
-        if (!bd) return -1;
-        return ad < bd ? -1 : 1;
-    }
-
-    static _fallbackPriority(a, b) {
-        const ranks = { highest: 4, high: 3, medium: 2, low: 1 };
-        const rank = (task) => ranks[String(task && task.priority || '').trim().toLowerCase()] || 0;
-        return rank(b) - rank(a) || ToDoDailyFilterView._fallbackDue(a, b);
-    }
-
-    static sortTasks(tasks, mode, dashboardRef) {
-        let dashboard = dashboardRef || null;
-        if (dashboard && typeof dashboard.compareTasksByDue !== 'function'
-            && dashboard.constructor && dashboard.constructor !== Object) {
-            dashboard = dashboard.constructor;
-        }
-        const priority = String(mode || '').toLowerCase() === 'priority';
-        const method = priority ? 'compareTasksByPriority' : 'compareTasksByDue';
-        const shared = dashboard && typeof dashboard[method] === 'function'
-            ? (a, b) => dashboard[method](a, b)
-            : (priority ? ToDoDailyFilterView._fallbackPriority : ToDoDailyFilterView._fallbackDue);
-        return (Array.isArray(tasks) ? tasks : [])
-            .map((task, index) => ({ task, index }))
-            .sort((left, right) => shared(left.task, right.task) || left.index - right.index)
-            .map((entry) => entry.task);
+    static _notice(message) {
+        try {
+            const Ctor = (typeof Notice !== 'undefined' && Notice)
+                || (typeof window !== 'undefined' && window.Notice) || null;
+            if (Ctor) new Ctor(message);
+        } catch (_e) { /* a Notice must never break a gesture */ }
     }
 
     async render(dv) {
         if (!dv || !dv.container) return;
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
 
+        const View = ToDoDailyFilterView;
         const CJS = typeof window !== 'undefined' && window.customJS ? window.customJS : null;
         const TE = CJS && CJS.TaskEntity;
         const TTL = CJS && CJS.TaskTodayList;
@@ -220,10 +341,12 @@ class ToDoDailyFilterView {
             : (typeof dv.current === 'function' ? dv.current() : null);
         if (!page) return;
 
-        // Read the live clock exactly once; every scope decision below is pure.
-        const todayIso = typeof window.moment === 'function'
+        // Read the live clock exactly once; every decision below is pure on it.
+        const todayStr = typeof window.moment === 'function'
             ? window.moment().format('YYYY-MM-DD')
             : '';
+        if (!todayStr) return;
+        const viewedDay = View.viewedDay(page, todayStr);
 
         let tasks = [];
         try {
@@ -238,150 +361,233 @@ class ToDoDailyFilterView {
 
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
-        const storage = ToDoDailyFilterView.storage();
-        // Persistence is keyed to the note's own date so opening another day never
-        // silently restores a filter chosen on a different one. Scope arithmetic
-        // below still resolves against the live clock, not this date.
-        const noteDate = ToDoDailyFilterView.noteDate(page);
-        let state = ToDoDailyFilterView.readState(storage, noteDate);
+        const storage = View.storage();
+        let prefs = View.readPrefs(storage);
+        const TD = CJS.TaskDialog || null;
+        const SL = CJS.SectionLabel || null;
 
         const root = dv.container.createEl('div', { cls: 'sauce-todo-daily-filter-view' });
         root.style.cssText = 'display:flex; flex-direction:column; gap:10px; width:100%;';
 
+        root.createEl('div', { cls: 'sauce-todo-above-tabs' });
         const controls = root.createEl('div', { cls: 'sauce-todo-filter-controls' });
-        const scopeGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-scopes' });
-        scopeGroup.setAttribute('role', 'group');
-        scopeGroup.setAttribute('aria-label', 'Filter tasks by date scope');
-
+        const tabGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-tabs' });
+        tabGroup.setAttribute('role', 'tablist');
+        tabGroup.setAttribute('aria-label', 'Task view');
         const rightSide = controls.createEl('div', { cls: 'sauce-todo-filter-right' });
-        const doneGroup = rightSide.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-done' });
-        doneGroup.setAttribute('role', 'group');
-        doneGroup.setAttribute('aria-label', 'Include completed tasks');
-        rightSide.createEl('div', { cls: 'sauce-todo-filter-sep' }).setAttribute('aria-hidden', 'true');
-        const sortGroup = rightSide.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-sort' });
-        sortGroup.setAttribute('role', 'group');
-        sortGroup.setAttribute('aria-label', 'Sort tasks');
-        rightSide.createEl('div', { cls: 'sauce-todo-filter-sep' }).setAttribute('aria-hidden', 'true');
-        const groupGroup = rightSide.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-group' });
-        groupGroup.setAttribute('role', 'group');
-        groupGroup.setAttribute('aria-label', 'Group tasks');
-
         root.createEl('div', { cls: 'sauce-todo-filter-rule' }).setAttribute('aria-hidden', 'true');
-
         const listHost = root.createEl('div', { cls: 'sauce-todo-daily-filter-list-host' });
         listHost.style.cssText = 'display:flex; flex-direction:column; gap:8px; width:100%;';
+        const doneHost = root.createEl('div', { cls: 'sauce-todo-filter-done-host' });
+        doneHost.style.cssText = 'display:flex; flex-direction:column; gap:4px; width:100%;';
 
-        const scopeButtons = {};
-        const sortButtons = {};
-        let doneButton = null;
-        let groupButton = null;
-        const setPill = (button, active) => {
-            button.className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
-            button.setAttribute('aria-pressed', active ? 'true' : 'false');
-        };
-        const updateButtons = () => {
-            for (const key of ToDoDailyFilterView.SCOPE_KEYS) {
-                setPill(scopeButtons[key], state.scope === key);
+        const clear = (host) => { while (host.firstChild) host.removeChild(host.firstChild); };
+        const label = (parent, text) => {
+            const holder = parent.createEl('div', { cls: 'sauce-todo-filter-section-label' });
+            if (SL && typeof SL.render === 'function') {
+                try { SL.render({ ...dv, container: holder }, { text }); return holder; }
+                catch (_e) { /* fall through to plain text */ }
             }
-            setPill(doneButton, state.includeDone);
-            for (const key of ['due', 'priority']) setPill(sortButtons[key], state.sort === key);
-            setPill(groupButton, state.groupByProject);
+            holder.textContent = text;
+            holder.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); font-weight:600;';
+            return holder;
         };
-
-        const dashboard = CJS.SpaceDailyDashboard || null;
-        const TD = CJS.TaskDialog || null;
         const makeList = (parent) => {
             const list = parent.createEl('ul', { cls: 'sauce-todo-daily-filter-list' });
             list.style.cssText = 'display:flex; flex-direction:column; gap:0; margin:0; padding:0; list-style:none; width:100%;';
             return list;
         };
-        const renderRows = (list, rows) => {
-            for (const task of rows) {
-                try {
-                    const row = TTL.renderTaskRow(list, task, TD);
-                    if (task.status === 'done' && row && typeof row.querySelector === 'function') {
-                        const checkbox = row.querySelector('input[type="checkbox"]');
-                        if (checkbox) checkbox.checked = true;
-                    }
-                } catch (_e) { /* isolate bad notes */ }
-            }
+
+        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open' };
+        const tabButtons = {};
+        const tabText = (key) => {
+            if (key !== 'overdue' && key !== 'backlog') return TAB_LABELS[key];
+            const n = View.selectTab(tasks, key, todayStr, TE).length;
+            return n > 0 ? `${TAB_LABELS[key]} · ${n}` : TAB_LABELS[key];
         };
-        const renderList = () => {
-            while (listHost.firstChild) listHost.removeChild(listHost.firstChild);
-            const selected = ToDoDailyFilterView.selectByScope(
-                tasks, state.scope, state.includeDone, todayIso);
-            const sorted = ToDoDailyFilterView.sortTasks(selected, state.sort, dashboard);
-            if (!sorted.length) {
-                const list = makeList(listHost);
-                const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: 'No tasks in this scope.' });
-                empty.style.cssText = 'color:var(--text-muted); font-size:0.85em; font-style:italic; padding:6px 0;';
-                return;
+        const setPill = (button, active) => {
+            button.className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
+        };
+        const updateControls = () => {
+            for (const key of View.TABS) {
+                const button = tabButtons[key];
+                button.textContent = tabText(key);
+                setPill(button, prefs.tab === key);
+                button.setAttribute('aria-selected', prefs.tab === key ? 'true' : 'false');
             }
-            if (!state.groupByProject) {
-                renderRows(makeList(listHost), sorted);
-                return;
-            }
-            const SL = CJS.SectionLabel || null;
-            for (const group of ToDoDailyFilterView.groupByProject(sorted)) {
-                const section = listHost.createEl('div', { cls: 'sauce-todo-filter-project-group' });
-                const label = section.createEl('div', { cls: 'sauce-todo-filter-project-label' });
-                if (SL && typeof SL.render === 'function') {
-                    try { SL.render({ ...dv, container: label }, { text: group.label }); }
-                    catch (_e) { label.textContent = group.label; }
-                } else {
-                    label.textContent = group.label;
-                    label.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); font-weight:600;';
-                }
-                renderRows(makeList(section), group.tasks);
-            }
+            setPill(sortButton, prefs.sort !== 'smart');
+            setPill(groupButton, prefs.group !== 'none');
         };
 
-        const commit = (next) => {
-            state = ToDoDailyFilterView.writeState(storage, next, noteDate);
-            updateButtons();
-            renderList();
+        const renderRow = (list, task, stale) => {
+            let row = null;
+            try {
+                row = TTL.renderTaskRow(list, task, TD, {
+                    viewedDay,
+                    todayStr,
+                    onRescheduled: (moved, due) => {
+                        const live = tasks.find((t) => t.path && t.path === moved.path) || moved;
+                        live.due = due || null;
+                        live.rank = null;
+                        paint();
+                    },
+                });
+            } catch (_e) { return; }
+            if (stale && row) {
+                View._addClass(row, 'is-stale');
+                if (row.style) row.style.opacity = '0.6';
+            }
+        };
+        const paintRows = (host, rows, stale) => {
+            const sorted = View.sortTasks(rows, prefs.sort, todayStr, TE);
+            if (prefs.group === 'none') {
+                const list = makeList(host);
+                for (const task of sorted) renderRow(list, task, stale);
+                return;
+            }
+            for (const group of View.groupTasks(sorted, prefs.group, todayStr)) {
+                const section = host.createEl('div', { cls: 'sauce-todo-filter-project-group' });
+                label(section, group.label);
+                const list = makeList(section);
+                for (const task of group.tasks) renderRow(list, task, stale);
+            }
+        };
+        const paintList = () => {
+            clear(listHost);
+            if (prefs.tab === 'overdue') {
+                const split = View.splitOverdue(tasks, todayStr, TE);
+                if (!split.overdue.length && !split.stale.length) { paintEmpty(); return; }
+                if (split.overdue.length) paintRows(listHost, split.overdue, false);
+                if (split.stale.length) {
+                    const divider = listHost.createEl('div', {
+                        cls: 'sauce-todo-stale-divider', text: View.STALE_DIVIDER_LABEL,
+                    });
+                    divider.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); font-weight:600; padding-top:6px; border-top:1px solid var(--background-modifier-border);';
+                    paintRows(listHost, split.stale, true);
+                }
+                return;
+            }
+            const rows = View.selectTab(tasks, prefs.tab, todayStr, TE);
+            if (!rows.length) { paintEmpty(); return; }
+            paintRows(listHost, rows, false);
+        };
+        const paintEmpty = () => {
+            const list = makeList(listHost);
+            const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: 'No tasks in this view.' });
+            empty.style.cssText = 'color:var(--text-muted); font-size:0.85em; font-style:italic; padding:6px 0;';
+        };
+
+        const reopen = async (task, undo) => {
+            if (undo.disabled) return;
+            undo.disabled = true;
+            let res = null;
+            const dialog = CJS.TaskDialog;
+            try { res = dialog && typeof dialog.reopen === 'function' ? await dialog.reopen(task.path) : null; }
+            catch (_e) { res = null; }
+            if (res && res.ok === true) {
+                task.status = 'open';
+                task.completed_at = null;
+                task.path = res.path || task.path;
+                paint();
+                return;
+            }
+            undo.disabled = false;
+            if (res && res.no_op) return;
+            const reason = String((res && res.reason) || '');
+            if (!res || View.SILENT_REOPEN_REASONS.includes(reason)) {
+                View._notice(`Could not reopen task: ${reason || 'unknown'}`);
+            }
+        };
+        const paintDone = () => {
+            clear(doneHost);
+            if (prefs.tab !== 'today') return;
+            const done = View.doneToday(tasks, todayStr, TE);
+            if (!done.length) return;
+            label(doneHost, `Done today · ${done.length}`);
+            for (const task of done) {
+                const row = doneHost.createEl('div', { cls: 'sauce-today-done-row' });
+                row.dataset.sauceTaskPath = String(task.path || '');
+                row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:3px 6px; font-size:0.9em;';
+                const title = row.createEl('span', { cls: 'sauce-today-done-title' });
+                title.style.cssText = 'flex:1 1 auto; min-width:0; text-decoration:line-through; color:var(--text-muted); overflow-wrap:anywhere; cursor:pointer;';
+                const text = task.title || '(untitled)';
+                if (typeof TTL.renderInlineLinks === 'function') {
+                    try { TTL.renderInlineLinks(title, text, task.path); } catch (_e) { title.textContent = text; }
+                } else {
+                    title.textContent = text;
+                }
+                title.addEventListener('click', () => {
+                    try {
+                        const appRef = (typeof window !== 'undefined' && window.app) || null;
+                        if (task.path && appRef && appRef.workspace) appRef.workspace.openLinkText(task.path, '');
+                    } catch (e) { View._notice(`Could not open task: ${e && (e.message || e)}`); }
+                });
+                const time = View.doneTimeLabel(task.completed_at);
+                if (time) {
+                    const stamp = row.createEl('span', { cls: 'sauce-today-done-time', text: time });
+                    stamp.style.cssText = 'font-size:0.8em; color:var(--text-faint); font-variant-numeric:tabular-nums; flex-shrink:0;';
+                }
+                const canUndo = String(task.path || '').indexOf('spice/tasks/_done/') === 0
+                    && CJS.TaskDialog && typeof CJS.TaskDialog.reopen === 'function';
+                if (canUndo) {
+                    const undo = row.createEl('button', { cls: 'sauce-today-undo', text: 'Undo' });
+                    undo.setAttribute('type', 'button');
+                    undo.setAttribute('aria-label', `Undo: ${text}`);
+                    undo.addEventListener('click', onClick(() => reopen(task, undo)));
+                }
+            }
+        };
+        const paint = () => {
+            updateControls();
+            paintList();
+            paintDone();
+        };
+
+        const commit = (patch) => {
+            prefs = View.writePrefs(storage, { ...prefs, ...patch });
+            paint();
         };
         const onClick = (handler) => (event) => {
             try { event.preventDefault(); event.stopPropagation(); } catch (_e) {}
-            handler();
+            return handler();
         };
 
-        const scopeLabels = {
-            today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming',
-            'no-date': 'No date', all: 'All',
+        const openMenu = (anchor, options, key, current) => {
+            const MP = CJS.MenuPopover;
+            if (MP && typeof MP.open === 'function') {
+                MP.open(options.map((option) => ({
+                    label: option.label,
+                    ...(option.sublabel ? { sublabel: option.sublabel } : {}),
+                    ...(option.key === prefs[key] ? { icon: '✓' } : {}),
+                    onSelect: () => { commit({ [key]: option.key }); },
+                })), { anchor });
+                return;
+            }
+            const index = options.findIndex((option) => option.key === current);
+            commit({ [key]: options[(index + 1) % options.length].key });
         };
-        for (const key of ToDoDailyFilterView.SCOPE_KEYS) {
-            const button = scopeGroup.createEl('button', { text: scopeLabels[key] });
-            scopeButtons[key] = button;
+
+        for (const key of View.TABS) {
+            const button = tabGroup.createEl('button', { text: TAB_LABELS[key] });
+            tabButtons[key] = button;
             button.setAttribute('type', 'button');
-            // Single-select: choosing a scope replaces the previous one. There is no
-            // deselect, so a click can never empty the selection — re-clicking the
-            // active scope keeps it active, it just skips the redundant write and
-            // list rebuild that committing an identical state would cost.
+            button.setAttribute('role', 'tab');
             button.addEventListener('click', onClick(() => {
-                if (state.scope === key) return;
-                commit({ ...state, scope: key });
+                if (prefs.tab === key) return;
+                commit({ tab: key });
             }));
         }
-
-        doneButton = doneGroup.createEl('button', { text: 'Done' });
-        doneButton.setAttribute('type', 'button');
-        doneButton.addEventListener('click', onClick(
-            () => commit({ ...state, includeDone: !state.includeDone })));
-
-        for (const key of ['due', 'priority']) {
-            const button = sortGroup.createEl('button', { text: key === 'due' ? 'Due' : 'Priority' });
-            sortButtons[key] = button;
-            button.setAttribute('type', 'button');
-            button.addEventListener('click', onClick(() => commit({ ...state, sort: key })));
-        }
-
-        groupButton = groupGroup.createEl('button', { text: 'By Project' });
+        const sortButton = rightSide.createEl('button', { text: 'Sort ▾' });
+        sortButton.setAttribute('type', 'button');
+        sortButton.setAttribute('aria-haspopup', 'menu');
+        sortButton.addEventListener('click', onClick(
+            () => openMenu(sortButton, View.SORT_OPTIONS, 'sort', prefs.sort)));
+        const groupButton = rightSide.createEl('button', { text: 'Group ▾' });
         groupButton.setAttribute('type', 'button');
+        groupButton.setAttribute('aria-haspopup', 'menu');
         groupButton.addEventListener('click', onClick(
-            () => commit({ ...state, groupByProject: !state.groupByProject })));
+            () => openMenu(groupButton, View.GROUP_OPTIONS, 'group', prefs.group)));
 
-        updateButtons();
-        renderList();
+        paint();
     }
 }
