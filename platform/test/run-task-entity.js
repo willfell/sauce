@@ -3921,7 +3921,7 @@ async function runTaskDialogSauceModalTests() {
     global.window = { app, customJS };
     const dialog = new TaskDialogClass();
     const creates = [];
-    dialog._create = async (_app, payload) => { creates.push(payload); };
+    dialog._create = async (_app, payload) => { creates.push(payload); return { ok: true, path: 'spice/tasks/x.md' }; };
     dialog.open({ surface: 'daily', today: '2026-07-20' });
     const body = findByCls(doc.body, 'sauce-modal-body');
     const titleInput = findInput(body);
@@ -3975,7 +3975,7 @@ async function runTaskDialogSauceModalTests() {
       let releaseCreate;
       const createPending = new Promise((resolve) => { releaseCreate = resolve; });
       const dialog = new TaskDialogClass();
-      dialog._create = async () => { createCalls += 1; await createPending; };
+      dialog._create = async () => { createCalls += 1; await createPending; return { ok: true, path: 'spice/tasks/x.md' }; };
       dialog.open({ surface: 'daily', today: '2026-07-20' });
       const body = findByCls(doc.body, 'sauce-modal-body');
       const titleInput = findInput(body);

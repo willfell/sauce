@@ -77,6 +77,8 @@ class TaskDialog {
     projectMatches(names, query, limit) { return TaskDialog.projectMatches(names, query, limit); }
     _recentTaskRows(app, todayStr) { return TaskDialog._recentTaskRows(app, todayStr); }
     _parentCandidates(app, editPath) { return TaskDialog._parentCandidates(app, editPath); }
+    _linkBasename(v) { return TaskDialog._linkBasename(v); }
+    _submitKeyHint(app) { return TaskDialog._submitKeyHint(app); }
     _todayStr(given) { return TaskDialog._todayStr(given); }
     _readOpenAfterPref() { return TaskDialog._readOpenAfterPref(); }
     _writeOpenAfterPref(on) { return TaskDialog._writeOpenAfterPref(on); }
@@ -865,7 +867,9 @@ class TaskDialog {
                 closeX.setAttribute('type', 'button');
                 closeX.setAttribute('aria-label', 'Close');
                 closeX.onclick = () => closeOverlay();
-                modalEl.appendChild(closeX);
+                // Before the body so it follows the heading in DOM and tab order.
+                if (host && typeof modalEl.insertBefore === 'function') modalEl.insertBefore(closeX, host);
+                else modalEl.appendChild(closeX);
             }
         } catch (_e) { /* the header close is a convenience; Escape still closes */ }
 
@@ -898,6 +902,7 @@ class TaskDialog {
         // look like a token.
         titleInput = left.createEl('input', { type: 'text', cls: 'sauce-task-title' });
         titleInput.placeholder = 'Task title';
+        try { titleInput.setAttribute('aria-label', 'Task title'); } catch (_e) {}
         titleInput.value = state.title;
         titleInput.oninput = () => { state.title = titleInput.value; applyShortcuts(); updateSubmit(); };
         // Autofocus the title ONLY in create mode (FIX 4) — opening the dialog on an
@@ -916,6 +921,7 @@ class TaskDialog {
         // back into the task's OWN file only (single-file invariant intact).
         const notesInput = left.createEl('textarea', { cls: 'sauce-task-notes' });
         notesInput.placeholder = 'Notes';
+        try { notesInput.setAttribute('aria-label', 'Notes'); } catch (_e) {}
         notesInput.value = state.notes;
         notesInput.oninput = () => { state.notes = notesInput.value; };
         if (editPath && editFile && app.vault && typeof app.vault.read === 'function') {
@@ -1428,7 +1434,7 @@ class TaskDialog {
             openAfterCb.onchange = () => TaskDialog._writeOpenAfterPref(!!openAfterCb.checked);
         }
 
-        const kbd = TaskDialog._submitKeyHint();
+        const kbd = TaskDialog._submitKeyHint(app);
         if (!editPath) {
             addAnotherBtn = mkBtn(rightGroup, { label: 'Create & add another', variant: 'ghost', cls: 'sauce-task-add-another' });
             addAnotherBtn.onclick = (event) => modalHandle.submit(event);
@@ -1468,6 +1474,9 @@ class TaskDialog {
                     return true;
                 }
                 const res = await this._create(app, buildPayload(), state.notes);
+                // _create resolves without a result when it bails (TaskEntity
+                // missing, payload rejected): keep the dialog and its contents.
+                if (!res || !res.ok) return false;
                 if (mode === 'another') { resetForAnother(); return true; }
                 closeOverlay();
                 if (openAfterCb && openAfterCb.checked && res && (res.file || res.path)) await this._openCreated(app, res);
@@ -1527,8 +1536,12 @@ class TaskDialog {
         return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
     }
 
-    /** "⌘↵" on Apple platforms, "Ctrl↵" elsewhere. */
-    static _submitKeyHint() {
+    /** "⌘↵" on Apple platforms, "Ctrl↵" elsewhere, "" on mobile (no hardware keyboard to hint at). */
+    static _submitKeyHint(app) {
+        try {
+            if (app && app.isMobile) return '';
+            if (typeof Platform !== 'undefined' && Platform && Platform.isMobile) return '';
+        } catch (_e) { /* fall through to the desktop hint */ }
         try {
             const nav = typeof navigator !== 'undefined' ? navigator : null;
             const plat = String((nav && (nav.platform || nav.userAgent)) || '');
@@ -1546,7 +1559,7 @@ class TaskDialog {
 
     /**
      * `{ project, created_at }` rows for recentProjects: task notes under
-     * spice/tasks/ (any status, `type: task`) whose file was created within 45
+     * spice/tasks/ (any status, `type: task`, not _trash/) whose file was created within 45
      * days of todayStr, read from metadataCache (no Dataview in a
      * button-invoked dialog). Empty on any failure.
      */
@@ -1558,7 +1571,8 @@ class TaskDialog {
             const out = [];
             for (const f of app.vault.getMarkdownFiles() || []) {
                 try {
-                    if (!f || String(f.path || '').indexOf('spice/tasks/') !== 0) continue;
+                    const fp = String((f && f.path) || '');
+                    if (fp.indexOf('spice/tasks/') !== 0 || fp.indexOf('spice/tasks/_trash/') === 0) continue;
                     const ctime = Number(f.stat && f.stat.ctime);
                     if (!(ctime >= cutoff)) continue;
                     const cache = app.metadataCache.getFileCache(f);
@@ -1573,26 +1587,51 @@ class TaskDialog {
         }
     }
 
+    /** Basename a parent_task value points at: `[[X]]`, `[[path/X|alias]]`, a Link, or plain text. */
+    static _linkBasename(v) {
+        return TaskDialog._projectDisplay(v).replace(/^.*\//, '').replace(/\.md$/i, '').trim();
+    }
+
     /**
-     * Basenames of open top-level task notes (not _done/ or _trash/, not the
-     * task being edited), most recently modified first — the Subtask of…
-     * picker's candidates. Empty on any failure.
+     * Basenames of open top-level task notes (not _done/ or _trash/), most
+     * recently modified first — the Subtask of… picker's candidates. When
+     * editing, the task itself and every task whose parent chain reaches it
+     * are excluded, so a pick can never make a cycle (the walk is loop-guarded).
+     * Empty on any failure.
      */
     static _parentCandidates(app, editPath) {
         try {
             const PREFIX = 'spice/tasks/';
+            const parentOf = new Map();
             const cand = [];
             for (const f of app.vault.getMarkdownFiles() || []) {
                 const p = String((f && f.path) || '');
-                if (p.indexOf(PREFIX) !== 0 || p.slice(PREFIX.length).indexOf('/') >= 0) continue;
-                if (editPath && p === editPath) continue;
+                if (p.indexOf(PREFIX) !== 0) continue;
                 const cache = app.metadataCache.getFileCache(f);
                 const fmx = cache && cache.frontmatter;
-                if (!fmx || fmx.type !== 'task' || (fmx.status && fmx.status !== 'open')) continue;
-                cand.push({ name: String(f.basename || ''), mtime: (f.stat && Number(f.stat.mtime)) || 0 });
+                if (!fmx || fmx.type !== 'task') continue;
+                const name = String(f.basename || '');
+                const parent = TaskDialog._linkBasename(fmx.parent_task);
+                if (name && parent && !parentOf.has(name)) parentOf.set(name, parent);
+                if (p.slice(PREFIX.length).indexOf('/') >= 0) continue;
+                if (fmx.status && fmx.status !== 'open') continue;
+                cand.push({ name, path: p, mtime: (f.stat && Number(f.stat.mtime)) || 0 });
             }
+            const self = editPath ? String(editPath).replace(/^.*\//, '').replace(/\.md$/i, '') : '';
+            const reachesSelf = (name) => {
+                const seen = new Set();
+                let cur = name;
+                while (cur && !seen.has(cur)) {
+                    if (cur === self) return true;
+                    seen.add(cur);
+                    cur = parentOf.get(cur) || '';
+                }
+                return false;
+            };
             cand.sort((a, b) => (b.mtime - a.mtime) || a.name.localeCompare(b.name));
-            return cand.filter((c) => c.name).map((c) => c.name);
+            return cand
+                .filter((c) => c.name && !(editPath && (c.path === editPath || reachesSelf(c.name))))
+                .map((c) => c.name);
         } catch (_e) {
             return [];
         }
