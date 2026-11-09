@@ -61,6 +61,13 @@ class TaskDialog {
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
     _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
     _renderSafe() { return TaskDialog._renderSafe(); }
+    whenOptions(todayStr) { return TaskDialog.whenOptions(todayStr); }
+    whenKeyForDue(due, todayStr) { return TaskDialog.whenKeyForDue(due, todayStr); }
+    whenCaption(key, due) { return TaskDialog.whenCaption(key, due); }
+    recentProjects(parsedTasks, todayStr, limit) { return TaskDialog.recentProjects(parsedTasks, todayStr, limit); }
+    _utcDatePlus(dateStr, n) { return TaskDialog._utcDatePlus(dateStr, n); }
+    _utcNextMonday(dateStr) { return TaskDialog._utcNextMonday(dateStr); }
+    _projectDisplay(v) { return TaskDialog._projectDisplay(v); }
 
     // ---------- Static pure helpers ----------
 
@@ -77,6 +84,7 @@ class TaskDialog {
         const o = opts || {};
         switch (o.surface) {
             case 'daily':
+            case 'home':
                 return { due: o.today || '', source: 'daily' };
             case 'project':
                 return { project: o.project, source: 'project' };
@@ -92,6 +100,120 @@ class TaskDialog {
             default:
                 return { source: 'manual' };
         }
+    }
+
+    // ---------- When picker / recent-project helpers (pure) ----------
+
+    /** YYYY-MM-DD plus n days via Date.UTC only; null on unparseable input. */
+    static _utcDatePlus(dateStr, n) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr == null ? '' : dateStr));
+        if (!m) return null;
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + (Number(n) || 0)));
+        const p = (x) => String(x).padStart(2, '0');
+        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+    }
+
+    /** Next Monday strictly after dateStr (a Monday yields +7); null on unparseable input. */
+    static _utcNextMonday(dateStr) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr == null ? '' : dateStr));
+        if (!m) return null;
+        const cur = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+        return TaskDialog._utcDatePlus(dateStr, ((1 - cur + 7) % 7) || 7);
+    }
+
+    /**
+     * The quick "when" choices, in display order. `due` is the resolved date:
+     * '' for No date, null for Pick date (the user chooses). Prefers the stored
+     * TaskEntity for tomorrow/next-Monday, falling back to a local UTC helper.
+     */
+    static whenOptions(todayStr) {
+        let tomorrow = null, nextMon = null;
+        const TE = TaskDialog._taskEntity();
+        try {
+            if (TE && typeof TE.tomorrow === 'function') tomorrow = TE.tomorrow(todayStr);
+            if (TE && typeof TE.nextMonday === 'function') nextMon = TE.nextMonday(todayStr);
+        } catch (_e) { /* fall through to the local helper */ }
+        if (!tomorrow) tomorrow = TaskDialog._utcDatePlus(todayStr, 1);
+        if (!nextMon) nextMon = TaskDialog._utcNextMonday(todayStr);
+        return [
+            { key: 'today', label: 'Today', due: todayStr },
+            { key: 'tomorrow', label: 'Tomorrow', due: tomorrow },
+            { key: 'nextmon', label: 'Next Mon', due: nextMon },
+            { key: 'pick', label: 'Pick date…', due: null },
+            { key: 'none', label: 'No date', due: '' },
+        ];
+    }
+
+    /** Which quick choice a due date corresponds to: '' -> none; today/tomorrow/next Monday -> their key; else pick. */
+    static whenKeyForDue(due, todayStr) {
+        const d = due == null ? '' : String(due).trim();
+        if (!d) return 'none';
+        const hit = TaskDialog.whenOptions(todayStr).find(o => o.due && o.due === d);
+        return hit ? hit.key : 'pick';
+    }
+
+    /** Caption under the when picker: `Due Mon Nov 16`, `No date: goes to the backlog`, `Pick a date`. */
+    static whenCaption(key, due) {
+        if (key === 'none') return 'No date: goes to the backlog';
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(due == null ? '' : due));
+        if (!m) return 'Pick a date';
+        const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+        return 'Due ' + WD[d.getUTCDay()] + ' ' + MO[d.getUTCMonth()] + ' ' + (+m[3]);
+    }
+
+    /** Display name of a project value: `[[Name]]` / `[[Name|alias]]` -> Name; Dataview Link -> display or path basename. */
+    static _projectDisplay(v) {
+        if (v == null) return '';
+        if (typeof v === 'object') {
+            if (v.display != null && String(v.display).trim()) return String(v.display).trim();
+            if (v.path != null) return String(v.path).trim().replace(/^.*\//, '').replace(/\.md$/i, '');
+            return '';
+        }
+        let s = TaskDialog._stripWikilink(v);
+        const pipe = s.indexOf('|');
+        if (pipe >= 0) s = s.slice(0, pipe);
+        return s.trim();
+    }
+
+    /**
+     * Project display names among tasks created in the 30 days ending todayStr
+     * (inclusive), ranked by count desc then most recent created_at, capped at
+     * `limit` (default 6). Tasks with no project or an unparseable created_at
+     * are ignored.
+     */
+    static recentProjects(parsedTasks, todayStr, limit) {
+        const max = limit == null ? 6 : limit;
+        const lo = TaskDialog._utcDatePlus(todayStr, -29);
+        const hi = TaskDialog._utcDatePlus(todayStr, 0);
+        if (!lo || !hi || !Array.isArray(parsedTasks)) return [];
+        const stats = new Map();
+        for (const t of parsedTasks) {
+            if (!t) continue;
+            const name = TaskDialog._projectDisplay(t.project);
+            if (!name) continue;
+            let c = t.created_at;
+            if (c != null && typeof c === 'object') {
+                if (typeof c.toISO === 'function') c = c.toISO();
+                else if (typeof c.toISOString === 'function') c = c.toISOString();
+            }
+            c = c == null ? '' : String(c).trim();
+            const dm = /^(\d{4}-\d{2}-\d{2})/.exec(c);
+            if (!dm) continue;
+            const day = dm[1];
+            if (day < lo || day > hi) continue;
+            let ms = Date.parse(c);
+            if (isNaN(ms)) ms = Date.parse(day + 'T00:00:00Z');
+            const cur = stats.get(name) || { name: name, count: 0, last: -Infinity };
+            cur.count++;
+            if (ms > cur.last) cur.last = ms;
+            stats.set(name, cur);
+        }
+        return Array.from(stats.values())
+            .sort((a, b) => (b.count - a.count) || (b.last - a.last) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+            .slice(0, max)
+            .map(x => x.name);
     }
 
     /**

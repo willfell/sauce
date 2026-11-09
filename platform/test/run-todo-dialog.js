@@ -915,6 +915,71 @@ function reloadWithDom() {
     }));
 })();
 
+// --- RD-DH-*: pure helpers for the redesigned task dialog ---
+(function () {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'mechanisms', 'task-entity', 'task-dialog.js'), 'utf8');
+    // eslint-disable-next-line no-new-func
+    const TD = new Function('window', src + '; return TaskDialog;')({});
+    const TDI = new TD();
+    const TODAY = '2026-11-09';
+
+    const opts = TD.whenOptions(TODAY);
+    ok('RD-DH-WHEN keys',
+        JSON.stringify(opts.map(o => o.key)) === JSON.stringify(['today', 'tomorrow', 'nextmon', 'pick', 'none']));
+    ok('RD-DH-WHEN labels',
+        JSON.stringify(opts.map(o => o.label)) === JSON.stringify(['Today', 'Tomorrow', 'Next Mon', 'Pick date…', 'No date']));
+    ok('RD-DH-WHEN dues',
+        JSON.stringify(opts.map(o => o.due)) === JSON.stringify(['2026-11-09', '2026-11-10', '2026-11-16', null, '']));
+    ok('RD-DH-WHEN instance delegate',
+        JSON.stringify(TDI.whenOptions(TODAY)) === JSON.stringify(opts));
+
+    ok('RD-DH-KEY none', TD.whenKeyForDue('', TODAY) === 'none');
+    ok('RD-DH-KEY null', TD.whenKeyForDue(null, TODAY) === 'none');
+    ok('RD-DH-KEY today', TD.whenKeyForDue('2026-11-09', TODAY) === 'today');
+    ok('RD-DH-KEY tomorrow', TD.whenKeyForDue('2026-11-10', TODAY) === 'tomorrow');
+    ok('RD-DH-KEY nextmon', TD.whenKeyForDue('2026-11-16', TODAY) === 'nextmon');
+    ok('RD-DH-KEY pick', TD.whenKeyForDue('2026-11-20', TODAY) === 'pick');
+    ok('RD-DH-KEY instance delegate', TDI.whenKeyForDue('2026-11-20', TODAY) === 'pick');
+
+    ok('RD-DH-CAPTION nextmon', TD.whenCaption('nextmon', '2026-11-16') === 'Due Mon Nov 16');
+    ok('RD-DH-CAPTION no zero pad', TD.whenCaption('today', '2026-12-03') === 'Due Thu Dec 3');
+    ok('RD-DH-CAPTION tomorrow', TD.whenCaption('tomorrow', '2026-11-10') === 'Due Tue Nov 10');
+    ok('RD-DH-CAPTION pick with date', TD.whenCaption('pick', '2026-11-20') === 'Due Fri Nov 20');
+    ok('RD-DH-CAPTION none', TD.whenCaption('none', '') === 'No date: goes to the backlog');
+    ok('RD-DH-CAPTION pick empty', TD.whenCaption('pick', null) === 'Pick a date');
+    ok('RD-DH-CAPTION instance delegate', TDI.whenCaption('nextmon', '2026-11-16') === 'Due Mon Nov 16');
+
+    const mk = (project, created) => ({ project, created_at: created });
+    const fixture = [
+        mk('[[Alpha]]', '2026-11-08T10:00:00Z'),
+        mk('[[Alpha]]', '2026-11-01'),
+        mk('[[Beta]]', '2026-11-07'),
+        mk('[[Beta]]', '2026-10-20'),
+        mk('[[Gamma]]', '2026-11-09'),
+        mk('[[Delta|The Delta]]', '2026-11-05'),
+        mk('[[Old]]', '2026-09-29'),
+        mk('[[Old]]', '2026-09-30'),
+        mk('[[Edge]]', '2026-10-11'),
+        mk('[[TooOld]]', '2026-10-10'),
+        mk(null, '2026-11-08'),
+        mk('[[Bad]]', 'not-a-date'),
+        mk('[[Missing]]', null),
+    ];
+    ok('RD-DH-RECENT order and window',
+        JSON.stringify(TD.recentProjects(fixture, TODAY)) === JSON.stringify(['Alpha', 'Beta', 'Gamma', 'Delta', 'Edge']),
+        JSON.stringify(TD.recentProjects(fixture, TODAY)));
+    ok('RD-DH-RECENT limit', JSON.stringify(TD.recentProjects(fixture, TODAY, 2)) === JSON.stringify(['Alpha', 'Beta']));
+    ok('RD-DH-RECENT empty', TD.recentProjects([], TODAY).length === 0 && TD.recentProjects(null, TODAY).length === 0);
+    ok('RD-DH-RECENT instance delegate',
+        JSON.stringify(TDI.recentProjects(fixture, TODAY, 1)) === JSON.stringify(['Alpha']));
+
+    ok('RD-DH-HOME same as daily',
+        JSON.stringify(TD.defaultsForSurface({ surface: 'home', today: TODAY }))
+        === JSON.stringify({ due: TODAY, source: 'daily' })
+        && JSON.stringify(TD.defaultsForSurface({ surface: 'home', today: TODAY }))
+        === JSON.stringify(TD.defaultsForSurface({ surface: 'daily', today: TODAY })));
+})();
+
 // Allow all async EDIT-* cases to settle before final tally.
 Promise.all(pendingAsync).then(() => {
     console.log('');
