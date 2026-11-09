@@ -175,6 +175,17 @@ ok('TE-3b renderNote emits links as a YAML flow array (round-trips)', () => {
   assert(/\nlinks: \[\]\n/.test(empty), 'empty links → `links: []`: ' + empty.split('\n').filter((l) => l.indexOf('links') === 0)[0]);
 });
 
+// 3c. A quoted scalar escapes backslashes as well as quotes. Without that, a
+// title like `Fix C:\temp "x"` is written as `"Fix C:\temp \"x\""`, which
+// YAML reads with `\t` as a tab (or rejects an unknown escape outright).
+ok('TE-3c renderNote escapes backslashes inside a quoted scalar', () => {
+  const title = 'Fix C:\\temp "x" \\\\share';
+  const text = TaskDialog.renderNote({ title }, '');
+  const m = /\ntitle: (".*")\n/.exec(text);
+  assert(m, 'title is double-quoted: ' + JSON.stringify(text));
+  assert(JSON.parse(m[1]) === title, 'title round-trips: ' + m[1]);
+});
+
 ok('TE-recur-1 composeNote emits recurrence (set + empty)', () => {
   const withRecur = TaskEntity.composeNote({ title: 'Feed the dogs', recurrence: 'every day', moment: fixedMoment });
   assert(withRecur.frontmatter.recurrence === 'every day', 'recurrence set: ' + withRecur.frontmatter.recurrence);

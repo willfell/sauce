@@ -493,7 +493,7 @@ class TaskDialog {
     static _yamlScalar(val) {
         const s = String(val);
         if (/[[\]:#"]|^\s/.test(s)) {
-            return '"' + s.replace(/"/g, '\\"') + '"';
+            return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
         }
         return s;
     }
