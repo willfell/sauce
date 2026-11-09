@@ -652,6 +652,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-note-rerender",
+      "cmd": [
+        "node",
+        "platform/test/run-task-note-rerender.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "wiki-render-guards",
       "cmd": [
         "node",
