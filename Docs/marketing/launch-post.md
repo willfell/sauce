@@ -10,6 +10,6 @@ So I moved the shape of the work into the note itself. A graph in a fenced block
 
 It is called Sauce. Open source, MIT, pre-1.0, built solo, installs with Homebrew, lives in Obsidian.
 
-https://github.com/willfell/sauce
+https://github.com/wacwini/sauce
 
 If you run agents against your own notes, what does your loop look like?

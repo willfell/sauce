@@ -118,7 +118,7 @@ jobs:
         id: sha
         run: |
           VERSION="${{ steps.tag.outputs.version }}"
-          URL="https://github.com/willfell/sauce/archive/refs/tags/v${VERSION}.tar.gz"
+          URL="https://github.com/wacwini/sauce/archive/refs/tags/v${VERSION}.tar.gz"
           SHA=""
           for i in 1 2 3 4 5; do
             if SHA=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}'); then
@@ -160,7 +160,7 @@ jobs:
           commit-message: "feat: sauce v${{ steps.tag.outputs.version }} formula"
           title: "sauce v${{ steps.tag.outputs.version }}"
           body: |
-            Auto-generated bump from `willfell/sauce` release of v${{ steps.tag.outputs.version }}.
+            Auto-generated bump from `wacwini/sauce` release of v${{ steps.tag.outputs.version }}.
 
             - URL: `${{ steps.sha.outputs.url }}`
             - SHA256: `${{ steps.sha.outputs.sha }}`

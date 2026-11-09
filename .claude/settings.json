@@ -3,7 +3,7 @@
     "sauce": {
       "source": {
         "source": "github",
-        "repo": "willfell/sauce"
+        "repo": "wacwini/sauce"
       }
     }
   },

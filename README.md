@@ -118,7 +118,7 @@ A worker's verdict is the `result.json` it publishes by rename, never a parsed t
 
 ### The delivery loop: a Kanban board that ships code
 
-The **sauce** plugin (`plugins/sauce`) binds a code repository to a project board in a vault. You turn requirements into epics and slices (`/sauce:propose`, `/sauce:plan`, `/sauce:intake`). A deterministic coordinator then drives each slice through an adequacy gate, a three-lens review quorum, a pull request, release, and deploy, with a receipt at every step (`/sauce:loop`, `/sauce:status`, `/sauce:review`). Install it with `/plugin marketplace add willfell/sauce` then `/plugin install sauce@sauce`. See [`Docs/agent-guides/sauce-plugin.md`](Docs/agent-guides/sauce-plugin.md).
+The **sauce** plugin (`plugins/sauce`) binds a code repository to a project board in a vault. You turn requirements into epics and slices (`/sauce:propose`, `/sauce:plan`, `/sauce:intake`). A deterministic coordinator then drives each slice through an adequacy gate, a three-lens review quorum, a pull request, release, and deploy, with a receipt at every step (`/sauce:loop`, `/sauce:status`, `/sauce:review`). Install it with `/plugin marketplace add wacwini/sauce` then `/plugin install sauce@sauce`. See [`Docs/agent-guides/sauce-plugin.md`](Docs/agent-guides/sauce-plugin.md).
 
 The board is an ordinary project-blueprint board, so you read it the way you read any other note, including on a phone.
 

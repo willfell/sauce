@@ -43,7 +43,7 @@ Stop and ask the user before any of these. The router's "What not to do" section
 - **Force-pushing or rewriting history** on `origin/main` of the `sauce` remote: `git push --force`, `git reset --hard origin/...`, `git rebase -i` on already-pushed commits, etc.
 - **Skipping hooks** (`--no-verify`, `--no-gpg-sign`, etc.) without explicit user request. If a pre-commit hook fails, fix the underlying issue and create a NEW commit.
 - **Creating/pushing git tags by hand.** Release tags `v<X.Y.Z>` are created automatically by the `tag-and-ship` job once the auto-merged release PR lands — don't tag manually. A hand-cut tag (escape hatch, automation down) still requires user approval before pushing.
-- **Changes to GitHub branch-protection rules on `origin/main`.** The `gh api -X PUT repos/willfell/sauce/branches/main/protection ...` calls documented in `build-test-verify.md` § "Branch + PR workflow" require user approval before invocation. Rule changes affect every contributor and silently change the merge gate.
+- **Changes to GitHub branch-protection rules on `origin/main`.** The `gh api -X PUT repos/wacwini/sauce/branches/main/protection ...` calls documented in `build-test-verify.md` § "Branch + PR workflow" require user approval before invocation. Rule changes affect every contributor and silently change the merge gate.
 
 ## New top-level files / directories
 

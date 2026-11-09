@@ -421,7 +421,7 @@ is briefly unguarded; rename them late and every PR sits on "Expected —
 waiting for status to be reported" forever, stalling the automated release
 train. Observed live on PR #793: all checks green, `mergeStateStatus=BLOCKED`,
 until the contexts were swapped. Back up first:
-`gh api repos/willfell/sauce/branches/main/protection > backup.json`.
+`gh api repos/wacwini/sauce/branches/main/protection > backup.json`.
 Also set an explicit job `name:` — without one GitHub derives the check name
 from every matrix key, so `platform`/`runner` keys would yield
 `preflight (linux, sauce)`.

@@ -93,7 +93,7 @@ sauce-bootstrap() {
     echo "sauce-bootstrap: pantry/ already exists at $PWD/pantry. Use sauce-refresh instead, or pass --overwrite." >&2
     [ "${1:-}" = "--overwrite" ] || return 1
   fi
-  curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh \
+  curl -fsSL https://raw.githubusercontent.com/wacwini/sauce/main/install.sh \
     | bash -s -- --vault . "$@"
 }
 

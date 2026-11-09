@@ -17,7 +17,7 @@ For architectural context see [how.md](how.md). For ongoing operations see [use.
 > [!abstract] The whole install
 > ```bash
 > cd /path/to/your/vault
-> curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh | bash
+> curl -fsSL https://raw.githubusercontent.com/wacwini/sauce/main/install.sh | bash
 > ```
 
 The script runs four phases with sectioned output:
@@ -407,12 +407,12 @@ Per provider:
 > Fixes:
 > 1. **Download the script first** then run it directly (it can prompt):
 >    ```bash
->    curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh -o install.sh
+>    curl -fsSL https://raw.githubusercontent.com/wacwini/sauce/main/install.sh -o install.sh
 >    bash install.sh
 >    ```
 > 2. **Force-overwrite (backs up to `pantry.bak`)**:
 >    ```bash
->    bash <(curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh) --overwrite
+>    bash <(curl -fsSL https://raw.githubusercontent.com/wacwini/sauce/main/install.sh) --overwrite
 >    ```
 >
 > The script preserves any prior `pantry.bak` by timestamping it (`pantry.bak.YYYYMMDD-HHMMSS`) — backups are never destroyed.
