@@ -91,3 +91,38 @@ Before any write, run `ls /Users/willfell/Documents/GitHub/sauce`. Expected top-
 - Don't edit content between `claude-surface` marker pairs. The `platform-claude` mechanism rewrites those regions in `CLAUDE.md` on every install; this file's copies mirror them.
 - Don't manually version, tag, sweep version pins, or merge the release PR — the release pipeline is **fully automatic**. Write conventional commits and merge feature work to `main`; the bumper computes per-component + umbrella semver, opens the release PR (which **auto-merges** once CI passes), tags, and ships to brew. Hand-editing `workshop_version` / `package.json` / per-component + seed-vault manifests / `ranch` pins, creating tags, widening `HC-V0*-VERSION-*` regexes/literals, or merging the release PR yourself is the pipeline's job, not yours — see [`Docs/agent-guides/build-test-verify.md`](Docs/agent-guides/build-test-verify.md) § Release workflow.
 - Don't take destructive, cross-vault, or shared-state actions without confirming — see [`Docs/agent-guides/asking-before-acting.md`](Docs/agent-guides/asking-before-acting.md).
+
+## Commands
+
+Use Node.js 20, as CI does.
+
+```sh
+npm ci --ignore-scripts
+npm run status
+node platform/test/run-<harness>.js
+npm run release:preflight
+```
+
+`release:preflight` runs every harness in `platform/test/preflight-manifest.json`; CI runs it on Linux and macOS for every PR.
+
+## Boundaries
+
+A crate never:
+
+- Changes a version, creates a tag or merges a `chore(release)` PR. The release pipeline computes versions from conventional commits, opens the release PR, merges it, tags and ships to the tap; a PR title names the bump its commits carry, which `pr-title-bump` checks.
+- Writes to a consumer vault under `~/obsidian/`, or to `.obsidian/` outside the installer's allowlist (landmine #12 in [`Docs/landmines.md`](Docs/landmines.md)).
+- Edits inside a `claude-surface` marker pair in `CLAUDE.md`.
+- Changes branch protection, repository secrets, the tap `willfell/homebrew-sauce`, or the `sauce` and `sauce-macos` runners.
+- Force-pushes `main` or skips hooks.
+- Adds a top-level path outside the sanctioned set.
+
+The rest of what needs the owner first is in [`Docs/agent-guides/asking-before-acting.md`](Docs/agent-guides/asking-before-acting.md).
+
+## Working with Baton
+
+This repository is project `SAUCE` on the Baton board; `.baton.json` at the root binds it, so `baton` commands run here need no project key. Work on this repository goes on the Baton board; the sauce plugin's delivery loop and the vault board do not ship it.
+
+- Merge command: `gh pr merge N --squash --delete-branch`
+- Board: https://wacwini.com/baton
+
+`N` in the merge command is the PR number. The review policy (the review quorum, the required checks and who merges) is the project's, set on its Project page under `Board`; a claim hands each crate the policy it was picked up under. What agents must not change or run is in Boundaries above; a crate that needs it is parked for the owner. Name a crate or order to a person as a link to its page under `Board`: `[KEY-N title](Board/crates/KEY-N)`, `[KEY-E title](Board/orders/KEY-E)`.
