@@ -68,8 +68,80 @@ class TaskTodayList {
     manualOrder(deps) { return TaskTodayList.manualOrder(deps); }
     doneTimeLabel(task) { return TaskTodayList.doneTimeLabel(task); }
     renderDoneRow(container, task, options) { return TaskTodayList.renderDoneRow(container, task, options); }
+    get SORT_OPTIONS() { return TaskTodayList.SORT_OPTIONS; }
+    get GROUP_OPTIONS() { return TaskTodayList.GROUP_OPTIONS; }
+    get DRAG_MIME() { return TaskTodayList.DRAG_MIME; }
+    _isMobile(appRef) { return TaskTodayList._isMobile(appRef); }
+    _fromFormField(event) { return TaskTodayList._fromFormField(event); }
+    clearDateLabel(task) { return TaskTodayList.clearDateLabel(task); }
 
     // ---------- Static pure helper ----------
+
+    /**
+     * Sort / Group menu entries shared by every task surface that offers them
+     * (the To-Do daily view and the Today panel on Home and the daily note), so
+     * the two never drift apart in wording.
+     */
+    static get SORT_OPTIONS() {
+        return [
+            { key: 'smart', label: 'Smart', sublabel: 'your order \u2192 priority \u2192 days late' },
+            { key: 'manual', label: 'My order', sublabel: 'drag to arrange' },
+            { key: 'priority', label: 'Priority', sublabel: 'highest first' },
+            { key: 'due', label: 'Due date', sublabel: 'soonest first' },
+            { key: 'oldest', label: 'Oldest first', sublabel: 'by created date' },
+            { key: 'touched', label: 'Last touched', sublabel: 'recently edited first' },
+        ];
+    }
+
+    static get GROUP_OPTIONS() {
+        return [
+            { key: 'none', label: 'None', sublabel: '' },
+            { key: 'project', label: 'Project', sublabel: '' },
+            { key: 'priority', label: 'Priority', sublabel: '' },
+            { key: 'due', label: 'Due day', sublabel: '' },
+        ];
+    }
+
+    /**
+     * Drag payload type for a task row. A custom type (not text/plain) so a
+     * row dropped into the editor inserts nothing.
+     */
+    static get DRAG_MIME() { return 'application/x-sauce-task-path'; }
+
+    /** Obsidian mobile (app.isMobile or Platform.isMobile); false when unknown. */
+    static _isMobile(appRef) {
+        try {
+            if (appRef && appRef.isMobile) return true;
+            if (typeof Platform !== 'undefined' && Platform && Platform.isMobile) return true;
+        } catch (_e) { /* treat as desktop */ }
+        return false;
+    }
+
+    /** True when a drag starts inside a form field (e.g. the inline date picker). */
+    static _fromFormField(event) {
+        try {
+            const target = event && event.target;
+            return !!(target && typeof target.closest === 'function' && target.closest('input,textarea,select'));
+        } catch (_e) { return false; }
+    }
+
+    /**
+     * Label for the action that clears a task's due date. Only a personal task
+     * lands in the Backlog (TaskEntity.isBacklog); a project, trip, meeting or
+     * subtask just loses its date.
+     */
+    static clearDateLabel(task) {
+        const t = Object.assign({}, task || {}, { due: null, status: 'open' });
+        let backlog;
+        try {
+            const TE = TaskTodayList._rowTaskEntity();
+            if (TE && typeof TE.isBacklog === 'function') backlog = !!TE.isBacklog(t);
+        } catch (_e) { backlog = undefined; }
+        if (backlog === undefined) {
+            backlog = !(t.project_slug || t.trip_slug || t.parent_task || t.source === 'meeting');
+        }
+        return backlog ? 'Move to backlog' : 'Remove date';
+    }
 
     /**
      * Refusals the write rails return silently, before any write (no Notice of
@@ -832,7 +904,8 @@ class TaskTodayList {
     }
 
     /**
-     * `N KB notes` when the user's own notes below the chrome exceed ~200 bytes;
+     * `notes` when the user's own notes below the chrome exceed 200 bytes, or
+     * `N KB notes` once they reach 1024 bytes;
      * computed from file stat + frontmatter end offset (no file read). Any
      * missing piece yields '' (no chip).
      */
@@ -852,7 +925,8 @@ class TaskTodayList {
             if (typeof fmEnd !== 'number') return '';
             const bytes = TE.notesBytes(size, fmEnd);
             if (!(bytes > 200)) return '';
-            return Math.max(1, Math.round(bytes / 1024)) + ' KB notes';
+            if (bytes < 1024) return 'notes';
+            return Math.round(bytes / 1024) + ' KB notes';
         } catch (_e) { return ''; }
     }
 
@@ -944,7 +1018,8 @@ class TaskTodayList {
             const drag = titleGroup.createEl('span', { cls: 'sauce-task-drag' });
             drag.style.cssText = 'display: inline-flex; align-items: center; height: 1.5em; flex-shrink: 0; cursor: grab; color: var(--text-faint, #999); user-select: none; touch-action: none;';
             drag.draggable = true;
-            try { drag.setAttribute('draggable', 'true'); drag.setAttribute('aria-label', 'Drag to reorder'); } catch (_e) {}
+            const dragLabel = typeof opts.dragHandle === 'string' ? opts.dragHandle : 'Drag to reorder';
+            try { drag.setAttribute('draggable', 'true'); drag.setAttribute('aria-label', dragLabel); } catch (_e) {}
             if (path) drag.dataset.path = String(path);
             drag.textContent = '\u22EE\u22EE';
         }
@@ -1202,7 +1277,7 @@ class TaskTodayList {
             if (!MP || typeof MP.open !== 'function') return;
             try {
                 const entries = [
-                    { label: 'Move to backlog', onSelect: () => doReschedule('') },
+                    { label: TaskTodayList.clearDateLabel(task), onSelect: () => doReschedule('') },
                     { label: 'Pick date\u2026', onSelect: () => doPickDate() },
                 ];
                 if (typeof opts.onMove === 'function') {

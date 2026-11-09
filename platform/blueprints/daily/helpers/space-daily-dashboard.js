@@ -112,8 +112,8 @@
  */
 class SpaceDailyDashboard {
   // Instance delegates. CustomJS stores this class as an INSTANCE, so
-  // cross-class callers (SpaceHome's glance counts) reach these through
-  // `customJS.SpaceDailyDashboard.x(...)`; a static alone is undefined there.
+  // cross-class callers (SpaceHome's glance counts) reach these through the
+  // stored customJS instance; a static alone is undefined there.
   computeCounts(dv, todayStr, TE) { return SpaceDailyDashboard.computeCounts(dv, todayStr, TE); }
   selectTasks(dv, todayStr, TE) { return SpaceDailyDashboard.selectTasks(dv, todayStr, TE); }
   selectMeetings(dv, todayStr) { return SpaceDailyDashboard.selectMeetings(dv, todayStr); }
@@ -271,6 +271,29 @@ class SpaceDailyDashboard {
   static isLivePanel(viewedDay, todayStr) {
     const v = typeof viewedDay === "string" ? viewedDay : "";
     return /^\d{4}-\d{2}-\d{2}$/.test(v) && v === todayStr;
+  }
+
+  /**
+   * Every TaskTodayList member the live Today panel calls. A TaskTodayList from
+   * an older install that lacks any of them keeps the legacy panel instead of
+   * half-rendering the new one.
+   */
+  static get LIVE_PANEL_TTL_METHODS() {
+    return [
+      "renderTaskRow", "renderDoneRow", "classifyOutcome", "manualOrder", "reschedule",
+      "_projectChipText", "_isMobile", "_fromFormField", "clearDateLabel",
+    ];
+  }
+
+  static hasLivePanelApi(TTL) {
+    if (!TTL) return false;
+    try {
+      for (const name of SpaceDailyDashboard.LIVE_PANEL_TTL_METHODS) {
+        if (typeof TTL[name] !== "function") return false;
+      }
+      return Array.isArray(TTL.SORT_OPTIONS) && Array.isArray(TTL.GROUP_OPTIONS)
+        && typeof TTL.DRAG_MIME === "string" && !!TTL.DRAG_MIME;
+    } catch (_e) { return false; }
   }
 
   /**
@@ -645,7 +668,7 @@ class SpaceDailyDashboard {
       || null;
     const liveTTL = liveCjs && liveCjs.TaskTodayList;
     const livePanel = SpaceDailyDashboard.isLivePanel(today, wallToday)
-      && !!liveTTL && typeof liveTTL.renderTaskRow === "function";
+      && SpaceDailyDashboard.hasLivePanelApi(liveTTL);
 
     // 2→1 sweep reduction: the dashboard used to sweep the whole vault TWICE —
     // once in _getActivityCount (gate pre-count + segmented-accent byBlueprint)
@@ -1631,7 +1654,7 @@ class SpaceDailyDashboard {
       const TTL = st.TTL || (cjs && cjs.TaskTodayList) || null;
       const TE = (cjs && cjs.TaskEntity) || null;
       const TD = (cjs && cjs.TaskDialog) || null;
-      if (!TTL || typeof TTL.renderTaskRow !== "function") return;
+      if (!SpaceDailyDashboard.hasLivePanelApi(TTL)) return;
       const prefs = SpaceDailyDashboard.readTodayPrefs();
       const rerender = () => this._renderTodayPanel(host, st);
       const notice = (msg) => { try { if (typeof Notice === "function") new Notice(msg, 6000); } catch (_e) {} };
@@ -1665,6 +1688,28 @@ class SpaceDailyDashboard {
         if (due === todayStr) model.today.push(Object.assign(task, { due: todayStr, rank: null }));
       };
       const onRescheduled = (task, due) => { applyMoved(task, due); rerender(); };
+      // A checkbox completion: the row leaves its section and, unless it is a
+      // recurring task (which rolls its due date forward instead of reaching
+      // _done/), shows up at the top of Done today.
+      const onDone = (task) => {
+        if (!task || !task.path) return;
+        dropFromModel(task.path);
+        if (!task.recurrence) {
+          let donePath = task.path;
+          try { if (TD && typeof TD.donePath === "function") donePath = TD.donePath(task.path) || task.path; } catch (_e) {}
+          let stamp = todayStr;
+          try {
+            const M = (typeof window !== "undefined" && window.moment)
+              || (typeof moment !== "undefined" && moment)
+              || null;
+            const now = typeof M === "function" ? String(M().format() || "") : "";
+            if (now.slice(0, 10) === todayStr) stamp = now;
+          } catch (_e) {}
+          model.doneToday = [Object.assign({}, task, { status: "done", completed_at: stamp, path: donePath })]
+            .concat(model.doneToday.filter((d) => d && d.path !== donePath));
+        }
+        rerender();
+      };
       const btnCss = "padding: 1px 8px; font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; border-radius: var(--radius-s, 4px); border: 1px solid var(--background-modifier-border); background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto;";
       const linkCss = "font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-accent); cursor: pointer; background: none; border: none; padding: 0; box-shadow: none; height: auto;";
       const mkButton = (parent, cls, label, css) => {
@@ -1677,34 +1722,41 @@ class SpaceDailyDashboard {
 
       const panel = host.createEl("div", { cls: "sauce-today-panel" });
 
-      // Sort / Group controls (Up next only) share the to-do view's prefs.
-      const SORT_LABELS = { smart: "Smart", manual: "Manual", priority: "Priority", due: "Due", oldest: "Oldest", touched: "Touched" };
-      const GROUP_LABELS = { none: "None", project: "Project", priority: "Priority", due: "Due" };
+      // Sort / Group controls (Up next only) share the to-do view's prefs and
+      // its menu wording (TaskTodayList.SORT_OPTIONS / GROUP_OPTIONS).
+      const sortOptions = TTL.SORT_OPTIONS;
+      const groupOptions = TTL.GROUP_OPTIONS;
+      const labelOf = (options, key, fallback) => {
+        const hit = options.find((o) => o && o.key === key);
+        return hit ? hit.label : fallback;
+      };
       const controls = panel.createEl("div", { cls: "sauce-today-controls" });
       controls.style.cssText = "display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin: 0 0 6px 0;";
-      const choose = (btn, labels, current, pick) => {
-        const keys = Object.keys(labels);
+      const choose = (btn, options, current, pick) => {
+        if (!options.length) return;
         const MP = cjs && cjs.MenuPopover;
         if (MP && typeof MP.open === "function") {
           try {
-            MP.open(keys.map((k) => ({
-              label: labels[k] + (k === current ? " ✓" : ""),
-              onSelect: () => pick(k),
-            })), { anchor: btn });
+            MP.open(options.map((o) => Object.assign(
+              { label: o.label, onSelect: () => pick(o.key) },
+              o.sublabel ? { sublabel: o.sublabel } : {},
+              o.key === current ? { icon: "✓" } : {},
+            )), { anchor: btn });
             return;
           } catch (_e) {}
         }
-        pick(keys[(keys.indexOf(current) + 1) % keys.length]);
+        const i = options.findIndex((o) => o.key === current);
+        pick(options[(i + 1) % options.length].key);
       };
-      const sortBtn = mkButton(controls, "sauce-today-sort", "Sort: " + (SORT_LABELS[prefs.sort] || "Smart") + " ▾");
+      const sortBtn = mkButton(controls, "sauce-today-sort", "Sort: " + labelOf(sortOptions, prefs.sort, "Smart") + " ▾");
       sortBtn.addEventListener("click", (ev) => {
         stop(ev);
-        choose(sortBtn, SORT_LABELS, prefs.sort, (k) => { SpaceDailyDashboard.writeTodayPrefs({ sort: k }); rerender(); });
+        choose(sortBtn, sortOptions, prefs.sort, (k) => { SpaceDailyDashboard.writeTodayPrefs({ sort: k }); rerender(); });
       });
-      const groupBtn = mkButton(controls, "sauce-today-group", "Group: " + (GROUP_LABELS[prefs.group] || "None") + " ▾");
+      const groupBtn = mkButton(controls, "sauce-today-group", "Group: " + labelOf(groupOptions, prefs.group, "None") + " ▾");
       groupBtn.addEventListener("click", (ev) => {
         stop(ev);
-        choose(groupBtn, GROUP_LABELS, prefs.group, (k) => { SpaceDailyDashboard.writeTodayPrefs({ group: k }); rerender(); });
+        choose(groupBtn, groupOptions, prefs.group, (k) => { SpaceDailyDashboard.writeTodayPrefs({ group: k }); rerender(); });
       });
 
       const mkSection = (name, label) => {
@@ -1721,10 +1773,13 @@ class SpaceDailyDashboard {
         const list = s.createEl("div", { cls: "sauce-today-list" });
         return { s, head, tools, list };
       };
-      const rowOpts = (extra) => Object.assign({ viewedDay: todayStr, todayStr, onRescheduled }, extra || {});
+      const rowOpts = (extra) => Object.assign({ viewedDay: todayStr, todayStr, onRescheduled, onDone }, extra || {});
 
       // 1. Up next — today's tasks (all sources), shared sort, optional group.
-      const groupMode = prefs.group === "project" || prefs.group === "priority" ? prefs.group : "none";
+      // Any grouping (the To-Do view's rule) turns manual order off.
+      const groupMode = SpaceDailyDashboard.TODAY_GROUP_MODES.includes(prefs.group) ? prefs.group : "none";
+      const isMobile = TTL._isMobile(appRef);
+      const dragMime = TTL.DRAG_MIME;
       const cmp = TE && typeof TE.compareBy === "function" ? TE.compareBy(prefs.sort, todayStr) : null;
       const upNext = stableSort(model.today.slice(), cmp);
       const canReorder = (prefs.sort === "smart" || prefs.sort === "manual") && groupMode === "none"
@@ -1749,31 +1804,48 @@ class SpaceDailyDashboard {
       const reorder = (fromPath, toPath) => (order ? order.reorder(fromPath, toPath) : undefined);
       const onMove = (task, dir) => (order ? order.move(task, dir) : undefined);
 
+      // Desktop only (HTML5 drag-and-drop does not run on Obsidian mobile, where
+      // the row menu's Move up / Move down does the same). Only the handle starts
+      // a drag, a drag that starts in a form field is cancelled, and the payload
+      // is a custom type so a row dropped into the editor inserts nothing.
       let dragPath = null;
       const wireDrag = (row, task) => {
-        if (!row || typeof row.addEventListener !== "function") return;
-        row.addEventListener("dragstart", (ev) => {
-          dragPath = task.path;
-          try {
-            if (ev && ev.dataTransfer) {
-              ev.dataTransfer.effectAllowed = "move";
-              ev.dataTransfer.setData("text/plain", String(task.path));
-              if (typeof ev.dataTransfer.setDragImage === "function") ev.dataTransfer.setDragImage(row, 12, 12);
+        if (isMobile || !row || typeof row.addEventListener !== "function") return;
+        const handle = typeof row.querySelector === "function" ? row.querySelector(".sauce-task-drag") : null;
+        if (handle && typeof handle.addEventListener === "function") {
+          handle.addEventListener("dragstart", (ev) => {
+            if (TTL._fromFormField(ev)) {
+              try { ev.preventDefault(); } catch (_e) {}
+              dragPath = null;
+              return;
             }
-          } catch (_e) {}
-        });
+            dragPath = task.path;
+            try {
+              if (ev && ev.dataTransfer) {
+                ev.dataTransfer.effectAllowed = "move";
+                ev.dataTransfer.setData(dragMime, String(task.path));
+                if (typeof ev.dataTransfer.setDragImage === "function") ev.dataTransfer.setDragImage(row, 12, 12);
+              }
+            } catch (_e) {}
+          });
+          handle.addEventListener("dragend", () => { dragPath = null; });
+        }
         row.addEventListener("dragover", (ev) => {
           if (!dragPath) return;
           try { ev.preventDefault(); if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move"; } catch (_e) {}
         });
         row.addEventListener("drop", (ev) => {
           try { ev.preventDefault(); } catch (_e) {}
-          const from = dragPath;
+          let carried = "";
+          try {
+            const dt = ev && ev.dataTransfer;
+            carried = dt && typeof dt.getData === "function" ? String(dt.getData(dragMime) || "") : "";
+          } catch (_e) { carried = ""; }
+          const from = carried || dragPath;
           dragPath = null;
           if (!from) return undefined;
           return reorder(from, task.path);
         });
-        row.addEventListener("dragend", () => { dragPath = null; });
       };
 
       if (upNext.length === 0) {
@@ -1782,7 +1854,8 @@ class SpaceDailyDashboard {
         hint.style.cssText = "font-size: 0.85em; color: var(--text-faint); padding: 4px 6px;";
       } else if (groupMode === "none") {
         for (const t of upNext) {
-          const row = TTL.renderTaskRow(up.list, t, TD, rowOpts(canReorder ? { dragHandle: true, onMove } : null));
+          const manualOpts = canReorder ? (isMobile ? { onMove } : { dragHandle: true, onMove }) : null;
+          const row = TTL.renderTaskRow(up.list, t, TD, rowOpts(manualOpts));
           if (row) upRows.set(t.path, row);
           if (canReorder) wireDrag(row, t);
         }
@@ -1790,10 +1863,24 @@ class SpaceDailyDashboard {
         const groups = new Map();
         const PRIO = ["highest", "high", "medium", "low", ""];
         const PRIO_LABEL = { highest: "Highest", high: "High", medium: "Medium", low: "Low", "": "No priority" };
+        const dueKey = (t) => {
+          try { return TE && typeof TE._toDateStr === "function" ? String(TE._toDateStr(t.due) || "") : String(t.due || "").slice(0, 10); }
+          catch (_e) { return ""; }
+        };
+        const dayLabel = (d) => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ""));
+          if (!m) return "No date";
+          const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+          const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          const at = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+          return days[at.getUTCDay()] + " " + months[at.getUTCMonth()] + " " + (+m[3]);
+        };
         for (const t of upNext) {
           let key = "";
           if (groupMode === "project") {
             try { key = t.project ? String(TTL._projectChipText(t.project) || "") : ""; } catch (_e) { key = ""; }
+          } else if (groupMode === "due") {
+            key = dueKey(t);
           } else {
             key = String(t.priority || "").trim().toLowerCase();
             if (!PRIO.includes(key)) key = "";
@@ -1809,7 +1896,9 @@ class SpaceDailyDashboard {
         });
         for (const key of keys) {
           const g = up.list.createEl("div", { cls: "sauce-today-group-label" });
-          g.textContent = groupMode === "priority" ? PRIO_LABEL[key] : (key || "No project");
+          g.textContent = groupMode === "priority" ? PRIO_LABEL[key]
+            : groupMode === "due" ? dayLabel(key)
+            : (key || "No project");
           g.style.cssText = "font-size: 0.8em; color: var(--text-faint); margin: 6px 0 2px 6px;";
           for (const t of groups.get(key)) TTL.renderTaskRow(up.list, t, TD, rowOpts());
         }
@@ -1877,7 +1966,8 @@ class SpaceDailyDashboard {
             try { res = await TTL.reschedule(row, t, due, todayStr, TD); } catch (_e) { res = null; }
             if (res && res.ok) { applyMoved(t, due); rerender(); }
           };
-          const backlogBtn = mkButton(inline, "sauce-today-stale-backlog", "Backlog");
+          const backlogBtn = mkButton(inline, "sauce-today-stale-backlog",
+            TTL.clearDateLabel(t) === "Remove date" ? "Remove date" : "Backlog");
           backlogBtn.addEventListener("click", (ev) => { stop(ev); return move(""); });
           const pickBtn = mkButton(inline, "sauce-today-stale-pick", "Pick a date");
           pickBtn.addEventListener("click", (ev) => {

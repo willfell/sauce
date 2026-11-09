@@ -26,26 +26,6 @@ class ToDoDailyFilterView {
     static get GROUP_MODES() { return ['none', 'project', 'priority', 'due']; }
     static get STALE_DIVIDER_LABEL() { return 'Stale · overdue 30+ days'; }
 
-    static get SORT_OPTIONS() {
-        return [
-            { key: 'smart', label: 'Smart', sublabel: 'your order → priority → days late' },
-            { key: 'manual', label: 'My order', sublabel: 'drag to arrange' },
-            { key: 'priority', label: 'Priority', sublabel: 'highest first' },
-            { key: 'due', label: 'Due date', sublabel: 'soonest first' },
-            { key: 'oldest', label: 'Oldest first', sublabel: 'by created date' },
-            { key: 'touched', label: 'Last touched', sublabel: 'recently edited first' },
-        ];
-    }
-
-    static get GROUP_OPTIONS() {
-        return [
-            { key: 'none', label: 'None', sublabel: '' },
-            { key: 'project', label: 'Project', sublabel: '' },
-            { key: 'priority', label: 'Priority', sublabel: '' },
-            { key: 'due', label: 'Due day', sublabel: '' },
-        ];
-    }
-
     static _defaultPrefs() { return { tab: 'today', sort: 'smart', group: 'none' }; }
 
     static _normalizePrefs(value) {
@@ -431,23 +411,6 @@ class ToDoDailyFilterView {
         return all.get(key);
     }
 
-    /** Obsidian mobile (app.isMobile or Platform.isMobile); false when unknown. */
-    static _isMobile(appRef) {
-        try {
-            if (appRef && appRef.isMobile) return true;
-            if (typeof Platform !== 'undefined' && Platform && Platform.isMobile) return true;
-        } catch (_e) { /* treat as desktop */ }
-        return false;
-    }
-
-    /** True when a drag starts inside a form field (e.g. the inline date picker). */
-    static _fromFormField(event) {
-        try {
-            const target = event && event.target;
-            return !!(target && typeof target.closest === 'function' && target.closest('input,textarea,select'));
-        } catch (_e) { return false; }
-    }
-
     /** Stand-in row for a selected task that is not painted on the current tab. */
     static _detachedRow() {
         return { dataset: {}, parentNode: null, remove() {} };
@@ -558,7 +521,18 @@ class ToDoDailyFilterView {
         // switches; leaving Select mode clears it.
         const state = View._dayState(todayStr);
         const selected = state.selected;
-        const isMobile = View._isMobile(typeof window !== 'undefined' ? window.app : null);
+        const isMobile = typeof TTL._isMobile === 'function'
+            && TTL._isMobile(typeof window !== 'undefined' ? window.app : null);
+        const dragMime = String(TTL.DRAG_MIME || 'application/x-sauce-task-path');
+        const fromFormField = (event) => typeof TTL._fromFormField === 'function' && TTL._fromFormField(event);
+        const droppedPath = (event) => {
+            let carried = '';
+            try {
+                const dt = event && event.dataTransfer;
+                carried = dt && typeof dt.getData === 'function' ? String(dt.getData(dragMime) || '') : '';
+            } catch (_e) { carried = ''; }
+            return carried || dragPath;
+        };
         let dragPath = null;
         let focusDay = null;
         let manualOrder = [];
@@ -632,26 +606,32 @@ class ToDoDailyFilterView {
             }
         };
         // Desktop only: HTML5 drag-and-drop does not run on Obsidian mobile,
-        // where the row menu's Move up / Move down is the equivalent.
+        // where the row menu's Move up / Move down is the equivalent. Only the
+        // row's handle starts a drag, so mouse text selection of a title still
+        // works; the row itself is a drop target only where manual order applies.
         const wireDrag = (row, task, manual) => {
             if (isMobile || !row || typeof row.addEventListener !== 'function') return;
-            row.draggable = true;
-            try { row.setAttribute('draggable', 'true'); } catch (_e) { /* property already set */ }
-            row.addEventListener('dragstart', (event) => {
-                if (View._fromFormField(event)) {
-                    try { event.preventDefault(); } catch (_e) { /* the drag is cancelled either way */ }
-                    dragPath = null;
-                    return;
-                }
-                dragPath = task.path;
-                try {
-                    if (event && event.dataTransfer) {
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', String(task.path));
+            let handle = null;
+            try { handle = typeof row.querySelector === 'function' ? row.querySelector('.sauce-task-drag') : null; }
+            catch (_e) { handle = null; }
+            if (handle && typeof handle.addEventListener === 'function') {
+                handle.addEventListener('dragstart', (event) => {
+                    if (fromFormField(event)) {
+                        try { event.preventDefault(); } catch (_e) { /* the drag is cancelled either way */ }
+                        dragPath = null;
+                        return;
                     }
-                } catch (_e) { /* drag data is advisory */ }
-            });
-            row.addEventListener('dragend', () => { dragPath = null; });
+                    dragPath = task.path;
+                    try {
+                        if (event && event.dataTransfer) {
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData(dragMime, String(task.path));
+                            if (typeof event.dataTransfer.setDragImage === 'function') event.dataTransfer.setDragImage(row, 12, 12);
+                        }
+                    } catch (_e) { /* drag data is advisory */ }
+                });
+                handle.addEventListener('dragend', () => { dragPath = null; });
+            }
             if (!manual) return;
             row.addEventListener('dragover', (event) => {
                 if (!dragPath || !manualOrder.some((t) => t.path === dragPath)) return;
@@ -662,7 +642,7 @@ class ToDoDailyFilterView {
             });
             row.addEventListener('drop', (event) => {
                 try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
-                const from = dragPath;
+                const from = droppedPath(event);
                 dragPath = null;
                 if (!from) return undefined;
                 return reorder(from, task.path);
@@ -692,10 +672,8 @@ class ToDoDailyFilterView {
                     paintBulk();
                 };
             }
-            if (manual) {
-                if (!isMobile) options.dragHandle = true;
-                options.onMove = onMove;
-            }
+            if (!isMobile) options.dragHandle = manual ? true : 'Drag to a day';
+            if (manual) options.onMove = onMove;
             let row = null;
             try {
                 row = TTL.renderTaskRow(list, task, TD, options);
@@ -816,7 +794,7 @@ class ToDoDailyFilterView {
                 button.addEventListener('drop', (event) => {
                     try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
                     button.style.background = 'transparent';
-                    const from = dragPath;
+                    const from = droppedPath(event);
                     dragPath = null;
                     if (!from) return undefined;
                     return dropOnDay(from, cell.date);
@@ -913,7 +891,9 @@ class ToDoDailyFilterView {
             action('→ Next Mon', () => bulkReschedule(TE.nextMonday(todayStr)));
             action('Priority ▾', (button) => openPicker(button, priorityEntries())).setAttribute('aria-haspopup', 'menu');
             action('Project ▾', (button) => openPicker(button, projectEntries())).setAttribute('aria-haspopup', 'menu');
-            action('Backlog', () => bulkReschedule(''));
+            const backlog = action('Backlog', () => bulkReschedule(''));
+            backlog.setAttribute('title', 'Remove date (personal tasks go to Backlog)');
+            backlog.setAttribute('aria-label', 'Remove date (personal tasks go to Backlog)');
             action('Mark done', () => bulkDone());
         };
 
@@ -955,6 +935,7 @@ class ToDoDailyFilterView {
         };
 
         const openMenu = (anchor, options, key, current) => {
+            if (!Array.isArray(options) || !options.length) return;
             const MP = CJS.MenuPopover;
             if (MP && typeof MP.open === 'function') {
                 MP.open(options.map((option) => ({
@@ -983,12 +964,12 @@ class ToDoDailyFilterView {
         sortButton.setAttribute('type', 'button');
         sortButton.setAttribute('aria-haspopup', 'menu');
         sortButton.addEventListener('click', onClick(
-            () => openMenu(sortButton, View.SORT_OPTIONS, 'sort', prefs.sort)));
+            () => openMenu(sortButton, TTL.SORT_OPTIONS || [], 'sort', prefs.sort)));
         const groupButton = rightSide.createEl('button', { text: 'Group ▾' });
         groupButton.setAttribute('type', 'button');
         groupButton.setAttribute('aria-haspopup', 'menu');
         groupButton.addEventListener('click', onClick(
-            () => openMenu(groupButton, View.GROUP_OPTIONS, 'group', prefs.group)));
+            () => openMenu(groupButton, TTL.GROUP_OPTIONS || [], 'group', prefs.group)));
         state.live = { paint, taskByPath };
         const selectButton = rightSide.createEl('button', { text: 'Select' });
         selectButton.setAttribute('type', 'button');

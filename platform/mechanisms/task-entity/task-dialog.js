@@ -70,7 +70,7 @@ class TaskDialog {
     _renderSafe() { return TaskDialog._renderSafe(); }
     whenOptions(todayStr) { return TaskDialog.whenOptions(todayStr); }
     whenKeyForDue(due, todayStr) { return TaskDialog.whenKeyForDue(due, todayStr); }
-    whenCaption(key, due) { return TaskDialog.whenCaption(key, due); }
+    whenCaption(key, due, owned) { return TaskDialog.whenCaption(key, due, owned); }
     recentProjects(parsedTasks, todayStr, limit) { return TaskDialog.recentProjects(parsedTasks, todayStr, limit); }
     _utcDatePlus(dateStr, n) { return TaskDialog._utcDatePlus(dateStr, n); }
     _utcNextMonday(dateStr) { return TaskDialog._utcNextMonday(dateStr); }
@@ -169,15 +169,32 @@ class TaskDialog {
         return hit ? hit.key : 'pick';
     }
 
-    /** Caption under the when picker: `Due Mon Nov 16`, `No date: goes to the backlog`, `Pick a date`. */
-    static whenCaption(key, due) {
-        if (key === 'none') return 'No date: goes to the backlog';
+    /**
+     * Caption under the when picker: `Due Mon Nov 16`, `No date: goes to the
+     * backlog`, `Pick a date`. `owned` (the task has a project, trip, parent
+     * or meeting) means an undated task stays with its owner instead of going
+     * to the backlog, so the No date caption is just `No date`.
+     */
+    static whenCaption(key, due, owned) {
+        if (key === 'none') return owned ? 'No date' : 'No date: goes to the backlog';
         const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(due == null ? '' : due));
         if (!m) return 'Pick a date';
         const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
         return 'Due ' + WD[d.getUTCDay()] + ' ' + MO[d.getUTCMonth()] + ' ' + (+m[3]);
+    }
+
+    /**
+     * Whether the dialog's task has an owner (project, trip, parent task or a
+     * meeting source), in which case clearing its date does not send it to
+     * the backlog (TaskEntity.isBacklog).
+     */
+    static _ownedForCaption(state) {
+        const s = state || {};
+        return !!(String(s.projectName || '').trim() || String(s.tripName || '').trim()
+            || String(s.tripSlug || '').trim() || String(s.parentTask || '').trim()
+            || s.source === 'meeting');
     }
 
     /** Display name of a project value: `[[Name]]` / `[[Name|alias]]` -> Name; Dataview Link -> display or path basename. */
@@ -802,6 +819,9 @@ class TaskDialog {
             tripName: fm ? TaskDialog._stripWikilink(fm.trip) : (defaults.trip && defaults.trip.name) || '',
             tripSlug: fm ? (fm.trip_slug || '') : (defaults.trip && defaults.trip.slug) || '',
             notes: '',
+            // Edit mode: true only once the task body has been read, so a save
+            // never rewrites notes it has not seen. Create mode starts loaded.
+            notesLoaded: !editPath,
             // Structured card links (FIX 5) — load the edit file's `links[]` (via
             // TaskEntity._normLinks so a Dataview-array-of-Link-objects coerces to
             // clean strings); create mode starts empty. Rendered as removable chips.
@@ -920,20 +940,44 @@ class TaskDialog {
         // existing body (minus its frontmatter) just-in-time so notes/hyperlinks
         // can be added or edited on an existing task; the save path writes them
         // back into the task's OWN file only (single-file invariant intact).
+        //
+        // Edit mode never writes the body until the read has succeeded: until
+        // then the textarea is disabled ("Loading notes…") and a save touches
+        // only the frontmatter, so a slow or failed read can never blank the
+        // task's existing notes.
         const notesInput = left.createEl('textarea', { cls: 'sauce-task-notes' });
         notesInput.placeholder = 'Notes';
         try { notesInput.setAttribute('aria-label', 'Notes'); } catch (_e) {}
         notesInput.value = state.notes;
-        notesInput.oninput = () => { state.notes = notesInput.value; };
-        if (editPath && editFile && app.vault && typeof app.vault.read === 'function') {
-            app.vault.read(editFile).then((txt) => {
-                // Load ONLY the user-notes portion (below <!-- TASK_NOTES -->), not
-                // the regenerable chrome. A legacy note with no marker falls back
-                // to the whole body (minus frontmatter) so nothing is lost.
-                const body = TaskDialog._bodyNotesBelowMarker(txt);
-                notesInput.value = body;
-                state.notes = body;
-            }).catch(() => { /* leave notes blank on read failure */ });
+        notesInput.oninput = () => { if (state.notesLoaded) state.notes = notesInput.value; };
+        const setNotesState = (placeholder, disabled, busy) => {
+            notesInput.placeholder = placeholder;
+            notesInput.disabled = !!disabled;
+            try { notesInput.setAttribute('aria-busy', busy ? 'true' : 'false'); } catch (_e) {}
+        };
+        if (editPath) {
+            const failed = () => { state.notesLoaded = false; setNotesState('Notes could not be loaded', true, false); };
+            if (editFile && app.vault && typeof app.vault.read === 'function') {
+                setNotesState('Loading notes\u2026', true, true);
+                let pending = null;
+                try { pending = Promise.resolve(app.vault.read(editFile)); } catch (_e) { pending = null; }
+                if (!pending) failed();
+                else {
+                    pending.then((txt) => {
+                        // Load ONLY the user-notes portion (below <!-- TASK_NOTES -->), not
+                        // the regenerable chrome. A legacy note with no marker falls back
+                        // to the whole body (minus frontmatter) so nothing is lost.
+                        if (typeof txt !== 'string') { failed(); return; }
+                        const body = TaskDialog._bodyNotesBelowMarker(txt);
+                        notesInput.value = body;
+                        state.notes = body;
+                        state.notesLoaded = true;
+                        setNotesState('Notes', false, false);
+                    }).catch(failed);
+                }
+            } else {
+                failed();
+            }
         }
 
         // ----- Structured LINKS + parent (both modes) — FIX 5 -----
@@ -969,7 +1013,7 @@ class TaskDialog {
                 parentBox.createSpan({ text: TaskDialog._stripWikilink(pt) });
                 const x = parentBox.createEl('button', { cls: 'sauce-task-chip-x', text: '✕' });
                 x.setAttribute('aria-label', 'Remove parent task');
-                x.onclick = () => { state.parentTask = ''; renderParent(); };
+                x.onclick = () => { state.parentTask = ''; renderParent(); renderWhen(); };
             };
             renderParent();
 
@@ -1040,6 +1084,7 @@ class TaskDialog {
                     'sauce-task-parent-option', (n) => {
                         state.parentTask = TaskDialog._wikilink(n);
                         renderParent();
+                        renderWhen();
                         closeInserter();
                     });
             };
@@ -1095,7 +1140,7 @@ class TaskDialog {
             for (const w of whenBtns) setPressed(w.el, 'sauce-task-pill sauce-task-when', w.key === state.whenKey);
             whenDate.style.display = state.whenKey === 'pick' ? '' : 'none';
             if (state.whenKey === 'pick' && whenDate.value !== (state.due || '')) whenDate.value = state.due || '';
-            whenCaption.textContent = TaskDialog.whenCaption(state.whenKey, state.due);
+            whenCaption.textContent = TaskDialog.whenCaption(state.whenKey, state.due, TaskDialog._ownedForCaption(state));
         };
         // Pick keeps the current date and reveals the native input to change it.
         const setWhen = (key) => {
@@ -1180,7 +1225,7 @@ class TaskDialog {
             projCaption.textContent = caption;
             projCaption.style.display = caption ? '' : 'none';
         };
-        const setProject = (name) => { state.projectName = name || ''; projSearch.value = ''; renderProjects(); };
+        const setProject = (name) => { state.projectName = name || ''; projSearch.value = ''; renderProjects(); renderWhen(); };
         projSearch.oninput = renderProjects;
         // Enter in the search picks the first match instead of saving the task
         // (SauceModal only treats Enter in the title as Save).
@@ -1470,7 +1515,7 @@ class TaskDialog {
             if (saveBtn.disabled) return false;
             try {
                 if (editPath) {
-                    await this._saveEdit(app, editFile, buildPayload(), state.notes);
+                    await this._saveEdit(app, editFile, buildPayload(), state.notesLoaded ? state.notes : null);
                     closeOverlay();
                     return true;
                 }

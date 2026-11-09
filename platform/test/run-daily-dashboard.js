@@ -206,6 +206,10 @@ async function renderDailyTaskFixture(today, options) {
   };
 }
 
+// Fail closed: a test promise that never settles would otherwise let the
+// event loop drain and exit 0 before the summary prints.
+process.exitCode = 1;
+
 (async () => {
   const TODAY = '2026-07-03';
 
@@ -1125,7 +1129,13 @@ async function renderDailyTaskFixture(today, options) {
         if (o.reopenResult) return o.reopenResult(p);
         return { ok: true, path: p.replace('/_done/', '/') };
       },
+      markDone: async (p) => {
+        (calls.markDone || (calls.markDone = [])).push(p);
+        return { ok: true };
+      },
+      donePath: (p) => String(p).replace('spice/tasks/', 'spice/tasks/_done/'),
     };
+    if (o.mutateTTL) o.mutateTTL(TTL);
     let inFlight = 0;
     let maxInFlight = 0;
     TTL.reschedule = async (row, task, newDue, viewedDay, TDref) => {
@@ -1140,6 +1150,7 @@ async function renderDailyTaskFixture(today, options) {
     const storage = memoryStorage(o.prefs ? { [P_PREFS_KEY]: JSON.stringify(o.prefs) } : {});
     const knownPaths = new Set([...(o.taskPages || []), ...(o.donePages || [])].map((p) => p.file.path));
     const app = {
+      isMobile: !!o.isMobile,
       vault: {
         getAbstractFileByPath: (p) => (knownPaths.has(p) ? { path: p } : null),
         adapter: { read: async () => { throw new Error('ENOENT'); }, write: async () => {}, mkdir: async () => {} },
@@ -1436,7 +1447,7 @@ async function renderDailyTaskFixture(today, options) {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       assert(rows.every((r) => r.querySelector('.sauce-task-drag')), 'Up next rows carry drag handles');
       const dt = { setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
-      await rows[3]._fire('dragstart', { dataTransfer: dt });
+      await rows[3].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('dragover', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(JSON.stringify(f.calls.setFields) === JSON.stringify([
@@ -1458,7 +1469,7 @@ async function renderDailyTaskFixture(today, options) {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       rows[1].remove();
       const dt = { setData() {}, setDragImage() {} };
-      await rows[4]._fire('dragstart', { dataTransfer: dt });
+      await rows[4].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(!f.calls.setFields.some((c) => c.path === 'spice/tasks/bravo.md'), 'detached row never written');
       assert(JSON.stringify(f.calls.setFields) === JSON.stringify([
@@ -1476,7 +1487,7 @@ async function renderDailyTaskFixture(today, options) {
     try {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       const dt = { setData() {}, setDragImage() {} };
-      await rows[3]._fire('dragstart', { dataTransfer: dt });
+      await rows[3].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(f.notices.length === 1, 'exactly one panel notice for the silent refusal: ' + JSON.stringify(f.notices));
       assert(f.calls.setFields.length === 4, 'remaining writes still attempted sequentially');
@@ -1516,7 +1527,7 @@ async function renderDailyTaskFixture(today, options) {
     try {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       const dt = { setData() {}, setDragImage() {} };
-      await rows[3]._fire('dragstart', { dataTransfer: dt });
+      await rows[3].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(f.calls.setFields.length === 4, 'four rank writes attempted: ' + f.calls.setFields.length);
       assert(f.calls.writes === 4, 'each reached processFrontMatter (which threw): ' + f.calls.writes);
@@ -1628,8 +1639,8 @@ async function renderDailyTaskFixture(today, options) {
       assert(JSON.stringify(groups) === JSON.stringify(['Harbor', 'No project']), 'project groups: ' + JSON.stringify(groups));
       await f.root.querySelector('.sauce-today-sort')._fire('click');
       const menu = f.calls.menus[f.calls.menus.length - 1];
-      const due = menu && menu.entries.find((e) => e.label === 'Due');
-      assert(due, 'sort menu offers Due');
+      const due = menu && menu.entries.find((e) => e.label === 'Due date');
+      assert(due, 'sort menu offers Due date');
       await due.onSelect();
       const saved = JSON.parse(f.storage.getItem(P_PREFS_KEY));
       assert(saved.sort === 'due' && saved.tab === 'backlog' && saved.group === 'project', 'sort read-merge-written: ' + JSON.stringify(saved));
@@ -1637,6 +1648,174 @@ async function renderDailyTaskFixture(today, options) {
     } finally { f.cleanup(); }
   });
 
+  const findInput = (node, type) => {
+    for (const c of node.children) {
+      if (c._tag === 'input' && c.type === type) return c;
+      const hit = findInput(c, type);
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  await ok('RD-P-MOBILE mobile: no drag handle or drag listeners; Move up / down stays in the row menu', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages, isMobile: true });
+    try {
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      assert(rows.length === 5, 'five rows: ' + rows.length);
+      assert(rows.every((r) => !r.querySelector('.sauce-task-drag')), 'no drag handles on mobile');
+      for (const r of rows) {
+        for (const type of ['dragstart', 'dragover', 'drop', 'dragend']) {
+          assert(!(r._listeners[type] || []).length, 'no ' + type + ' listener on a mobile row');
+        }
+      }
+      const row = f.rowFor('upnext', 'spice/tasks/bravo.md');
+      await row.querySelector('.sauce-task-action-more')._fire('click');
+      const menu = f.calls.menus[f.calls.menus.length - 1];
+      const up = menu && menu.entries.find((e) => e.label === 'Move up');
+      assert(up, 'Move up still offered on mobile');
+      await up.onSelect();
+      await new Promise((r) => setTimeout(r, 5));
+      assert(JSON.stringify(f.calls.setFields.map((c) => c.path)) === JSON.stringify(['spice/tasks/bravo.md', 'spice/tasks/alpha.md']),
+        'Move up renumbers on mobile: ' + JSON.stringify(f.calls.setFields));
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-DRAG-FIELD desktop: a drag from a form field is cancelled; payload is the custom type, never text/plain', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages });
+    try {
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      assert(rows.every((r) => !(r._listeners.dragstart || []).length), 'the row itself starts no drag');
+      const handle = rows[3].querySelector('.sauce-task-drag');
+      const field = { closest: (sel) => (/input/.test(sel) && /textarea/.test(sel) && /select/.test(sel) ? field : null) };
+      let cancelled = false;
+      await handle._fire('dragstart', {
+        target: field,
+        dataTransfer: { setData() { throw new Error('no drag data from a form field'); } },
+        preventDefault() { cancelled = true; },
+      });
+      assert(cancelled, 'dragstart from a form field is cancelled');
+      await rows[0]._fire('drop', { dataTransfer: { getData: () => '' } });
+      assert(f.calls.setFields.length === 0, 'nothing reordered after a cancelled drag: ' + JSON.stringify(f.calls.setFields));
+
+      const types = [];
+      await handle._fire('dragstart', {
+        target: { closest: () => null },
+        dataTransfer: { setData(type, value) { types.push([type, value]); }, setDragImage() {} },
+      });
+      assert(JSON.stringify(types) === JSON.stringify([['application/x-sauce-task-path', 'spice/tasks/delta.md']]),
+        'only the custom type is set: ' + JSON.stringify(types));
+      await rows[0]._fire('drop', { dataTransfer: { getData: (t) => (t === 'application/x-sauce-task-path' ? 'spice/tasks/delta.md' : '') } });
+      assert(f.calls.setFields.length === 4 && f.calls.setFields[0].path === 'spice/tasks/delta.md',
+        'the drop reads the custom type: ' + JSON.stringify(f.calls.setFields));
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-LIVE-GATE-SKEW an older TaskTodayList missing a live-panel member keeps the legacy panel', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    assert(Array.isArray(Dash.LIVE_PANEL_TTL_METHODS)
+      && ['renderDoneRow', 'classifyOutcome', 'manualOrder'].every((m) => Dash.LIVE_PANEL_TTL_METHODS.includes(m)),
+      'the gate lists the members the panel calls');
+    for (const missing of ['renderDoneRow', 'classifyOutcome', 'manualOrder', '_isMobile', 'clearDateLabel']) {
+      const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, mutateTTL: (ttl) => { ttl[missing] = undefined; } });
+      try {
+        assert(f.sections().length === 0, missing + ' missing: no sectioned panel');
+        assert(f.root.querySelectorAll('.sauce-daily-task-today-list').length === 1, missing + ' missing: legacy panel renders');
+      } finally { f.cleanup(); }
+    }
+    const g = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, mutateTTL: (ttl) => { Object.defineProperty(ttl, 'SORT_OPTIONS', { value: undefined }); } });
+    try {
+      assert(g.sections().length === 0, 'missing SORT_OPTIONS: legacy panel');
+    } finally { g.cleanup(); }
+  });
+
+  await ok('RD-P-ONDONE checking an Up next / Overdue / Stale row moves it into Done today at once', async () => {
+    for (const [section, p, title] of [
+      ['upnext', 'spice/tasks/today-a.md', 'Today alpha'],
+      ['overdue', 'spice/tasks/late-7.md', 'Late seven'],
+      ['stale', 'spice/tasks/stale-40.md', 'Stale forty'],
+    ]) {
+      const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+      try {
+        const row = f.rowFor(section, p);
+        const cb = findInput(row, 'checkbox');
+        assert(cb, section + ': row checkbox present');
+        cb.checked = true;
+        await cb._fire('change');
+        await new Promise((r) => setTimeout(r, 2));
+        assert(JSON.stringify(f.calls.markDone) === JSON.stringify([p]), section + ': markDone called');
+        assert(!f.rowPaths(section).includes(p), section + ': row left its section');
+        assert(f.labels().includes('Done today · 3'), section + ': Done today count: ' + JSON.stringify(f.labels()));
+        const doneRows = f.section('done').querySelectorAll('.sauce-today-done-row');
+        assert(doneRows[0].dataset.sauceTaskPath === p.replace('spice/tasks/', 'spice/tasks/_done/'),
+          section + ': newest done row is the _done/ path: ' + doneRows[0].dataset.sauceTaskPath);
+        assert(doneRows[0].querySelector('.sauce-today-done-title').textContent === title, section + ': title');
+      } finally { f.cleanup(); }
+    }
+    const recurring = [pTask('water', 'Water plants', P_TODAY, { recurrence: 'every day' })];
+    const r = await renderLivePanel({ taskPages: recurring });
+    try {
+      const cb = findInput(r.rowFor('upnext', 'spice/tasks/water.md'), 'checkbox');
+      cb.checked = true;
+      await cb._fire('change');
+      await new Promise((res) => setTimeout(res, 2));
+      assert(!r.rowPaths('upnext').includes('spice/tasks/water.md'), 'recurring row leaves Up next');
+      assert(!r.section('done'), 'a recurring completion never reaches Done today');
+    } finally { r.cleanup(); }
+  });
+
+  await ok('RD-P-LABELS Sort / Group use the To-Do view wording; any grouping (incl. Due day) turns reorder off', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages, prefs: { tab: 'today', sort: 'manual', group: 'none' } });
+    try {
+      assert(/Sort: My order/.test(f.root.querySelector('.sauce-today-sort').textContent), 'manual sort reads My order');
+      await f.root.querySelector('.sauce-today-sort')._fire('click');
+      const sortMenu = f.calls.menus[f.calls.menus.length - 1];
+      assert(JSON.stringify(sortMenu.entries.map((e) => e.label)) === JSON.stringify(f.TTL.SORT_OPTIONS.map((o) => o.label)),
+        'sort menu labels are the shared ones: ' + JSON.stringify(sortMenu.entries.map((e) => e.label)));
+      assert(sortMenu.entries.find((e) => e.label === 'My order').icon === '✓', 'current sort marked');
+      await f.root.querySelector('.sauce-today-group')._fire('click');
+      const groupMenu = f.calls.menus[f.calls.menus.length - 1];
+      assert(JSON.stringify(groupMenu.entries.map((e) => e.label)) === JSON.stringify(['None', 'Project', 'Priority', 'Due day']),
+        'group menu labels: ' + JSON.stringify(groupMenu.entries.map((e) => e.label)));
+      await groupMenu.entries.find((e) => e.label === 'Due day').onSelect();
+      assert(/Group: Due day/.test(f.root.querySelector('.sauce-today-group').textContent), 'group button reads Due day');
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      assert(rows.length === 5 && rows.every((r) => !r.querySelector('.sauce-task-drag')), 'grouped by due: no drag handles');
+      assert(rows.every((r) => !(r._listeners.drop || []).length), 'grouped by due: rows are no drop targets');
+      const labels = f.section('upnext').querySelectorAll('.sauce-today-group-label').map((n) => n.textContent);
+      assert(JSON.stringify(labels) === JSON.stringify(['Fri Jul 3']), 'due-day group label: ' + JSON.stringify(labels));
+      await rows[1].querySelector('.sauce-task-action-more')._fire('click');
+      const rowMenu = f.calls.menus[f.calls.menus.length - 1];
+      assert(!rowMenu.entries.some((e) => e.label === 'Move up'), 'no Move up while grouped');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-CLEAR-DATE-LABEL a project / trip / meeting / subtask row says Remove date, a personal row Move to backlog', async () => {
+    const pages = [
+      pTask('mine', 'Mine', P_TODAY),
+      pTask('proj', 'Proj', P_TODAY, { project_slug: 'harbor', project: '[[Harbor]]', source: 'project' }),
+      pTask('trip', 'Trip', P_TODAY, { trip_slug: 'lisbon', trip: '[[Lisbon]]' }),
+      pTask('meet', 'Meet', P_TODAY, { source: 'meeting' }),
+      pTask('sub', 'Sub', P_TODAY, { parent_task: '[[Mine]]' }),
+      pTask('stale-proj', 'Old proj', '2026-05-01', { project_slug: 'harbor', project: '[[Harbor]]', source: 'project' }),
+    ];
+    const f = await renderLivePanel({ taskPages: pages });
+    try {
+      const firstLabel = async (p) => {
+        const row = f.rowFor('upnext', p);
+        await row.querySelector('.sauce-task-action-more')._fire('click');
+        return f.calls.menus[f.calls.menus.length - 1].entries[0].label;
+      };
+      assert(await firstLabel('spice/tasks/mine.md') === 'Move to backlog', 'personal task -> Move to backlog');
+      for (const slug of ['proj', 'trip', 'meet', 'sub']) {
+        const label = await firstLabel('spice/tasks/' + slug + '.md');
+        assert(label === 'Remove date', slug + ' -> Remove date, got ' + label);
+      }
+      const staleBtn = f.rowFor('stale', 'spice/tasks/stale-proj.md').querySelector('.sauce-today-stale-backlog');
+      assert(staleBtn.textContent === 'Remove date', 'stale project row inline button: ' + staleBtn.textContent);
+    } finally { f.cleanup(); }
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
-  process.exit(fail === 0 ? 0 : 1);
+  process.exitCode = fail === 0 ? 0 : 1;
+  process.exit(process.exitCode);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });

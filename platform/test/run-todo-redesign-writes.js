@@ -182,6 +182,10 @@ function makeEnv(initialFiles, opts) {
   return { files, log };
 }
 
+// Fail closed: a test promise that never settles would otherwise let the
+// event loop drain and exit 0 before the summary prints.
+process.exitCode = 1;
+
 (async () => {
   await ok('RD-W-RESCHED', async () => {
     const p = 'spice/tasks/x.md';
@@ -368,7 +372,13 @@ function makeEnv(initialFiles, opts) {
     assert(chip && chip.textContent === '5 KB notes', 'chip ' + (chip && chip.textContent));
     rowEnv({ app: mk(400 + chromeLen + 300, 400) });
     row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    assert(findByCls(row, 'sauce-task-notes').textContent === '1 KB notes', 'min 1 KB');
+    assert(findByCls(row, 'sauce-task-notes').textContent === 'notes', 'under 1 KB -> notes');
+    rowEnv({ app: mk(400 + chromeLen + 1023, 400) });
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    assert(findByCls(row, 'sauce-task-notes').textContent === 'notes', '1023 bytes -> notes');
+    rowEnv({ app: mk(400 + chromeLen + 1024, 400) });
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    assert(findByCls(row, 'sauce-task-notes').textContent === '1 KB notes', '1024 bytes -> 1 KB notes');
     rowEnv({ app: mk(400 + chromeLen + 150, 400) });
     row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
     assert(!findByCls(row, 'sauce-task-notes'), 'at or under 200 bytes -> no chip');
@@ -1035,5 +1045,6 @@ function makeEnv(initialFiles, opts) {
   global.Notice = prevNotice;
 
   console.log(passes + ' passed, ' + fails + ' failed');
-  process.exit(fails ? 1 : 0);
-})();
+  process.exitCode = fails ? 1 : 0;
+  process.exit(process.exitCode);
+})().catch((e) => { console.error('run-todo-redesign-writes threw:', e); process.exit(1); });

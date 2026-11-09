@@ -7,9 +7,9 @@
  *   2. a GLANCE line      — a rolled-up count line ("N today · M overdue ·
  *                            K meetings · J done"; zeros hidden; all-zero →
  *                            "Clear day — nothing scheduled"),
- *   3. a QUICK-CAPTURE band — an inline "Jot a task…" input + Add (one-gesture
- *                            task create, no modal), then one-tap buttons:
- *                            Meeting, Sticky Note, Article, Journal,
+ *   3. header ACTIONS      — a "New task" button (opens the full task dialog)
+ *                            and a "Capture" dropdown: Meeting, Sticky Note,
+ *                            Article, Journal, Trip,
  *   4. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
@@ -198,10 +198,9 @@ class SpaceHome {
    * The dispatch per key is wired in render() (kept out of the spec so the spec
    * stays pure + Node-testable).
    *
-   * NOTE: the `todo` entry was REMOVED — task capture is now an inline
-   * "Jot a task…" input + Add button (built in render, wired to
-   * TaskDialog.createQuick) that sits ABOVE these buttons. So this spec is the
-   * remaining buttons: Meeting, Sticky Note, Article, Journal, Trip.
+   * NOTE: there is no `todo` entry — task creation is the header's separate
+   * "New task" button (full task dialog). This spec is the Capture dropdown:
+   * Meeting, Sticky Note, Article, Journal, Trip.
    */
   static _captureSpec() {
     const svg = (inner) =>
@@ -235,7 +234,8 @@ class SpaceHome {
     const overdue = toInt(c.overdue);
     const meetings = toInt(c.meetings);
     const done = toInt(c.done);
-    if (!today && !overdue && !meetings && !done) {
+    const backlog = toInt(c.backlog);
+    if (!today && !overdue && !meetings && !done && !backlog) {
       return { empty: true };
     }
     const chips = [];
@@ -243,7 +243,70 @@ class SpaceHome {
     if (overdue > 0)  chips.push({ n: overdue,  label: "overdue",                            cls: "sauce-section-overdue-pill" });
     if (meetings > 0) chips.push({ n: meetings, label: meetings === 1 ? "meeting" : "meetings", cls: "" });
     if (done > 0)     chips.push({ n: done,     label: "done",                               cls: "" });
+    if (backlog > 0)  chips.push({ n: backlog,  label: "backlog",                            cls: "sauce-home-glance-link sauce-home-glance-backlog", action: "backlog" });
     return { empty: false, chips };
+  }
+
+  /**
+   * Count of open backlog task notes (TaskEntity.isBacklog) from ONE
+   * dv.pages('"spice/tasks"') pass; _done/ and _trash/ archives and non-task
+   * notes are skipped. Cold load (no TaskEntity) or a throwing dv → 0.
+   */
+  static _countBacklog(dv, TE) {
+    try {
+      if (!dv || typeof dv.pages !== "function") return 0;
+      if (!TE || typeof TE.parseNote !== "function" || typeof TE.isBacklog !== "function") return 0;
+      const r = dv.pages('"spice/tasks"');
+      if (!r) return 0;
+      const pages = typeof r.array === "function" ? r.array() : Array.from(r);
+      let n = 0;
+      for (const p of pages) {
+        if (!p || p.type !== "task" || p.status !== "open") continue;
+        const path = p.file && p.file.path;
+        if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
+        if (TE.isBacklog(TE.parseNote(p))) n += 1;
+      }
+      return n;
+    } catch (_e) {
+      return 0;
+    }
+  }
+
+  /**
+   * Backlog chip click: persist tab:'backlog' into the shared to-do filter
+   * prefs (read-merge-write, so sort/group survive), then open today's To-Do
+   * note via SpaceDailyDashboard._openTodayToDo (the daily dashboard's own
+   * open-or-create helper). Every step is guarded; storage failure never
+   * blocks navigation.
+   */
+  static async _openBacklog(dv, today) {
+    const KEY = "sauce-todo-filter:prefs:v2";
+    try {
+      const ls = (typeof window !== "undefined" && window.localStorage)
+        || (typeof localStorage !== "undefined" && localStorage)
+        || null;
+      if (ls) {
+        let prefs = {};
+        try {
+          const raw = ls.getItem(KEY);
+          const parsed = raw ? JSON.parse(raw) : null;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prefs = parsed;
+        } catch (_e) { prefs = {}; }
+        prefs.tab = "backlog";
+        try { ls.setItem(KEY, JSON.stringify(prefs)); } catch (_e) {}
+      }
+    } catch (_e) { /* storage unavailable — navigate anyway */ }
+    try {
+      const cjs = (typeof customJS !== "undefined" && customJS)
+        || (typeof window !== "undefined" && window.customJS)
+        || null;
+      const sdd = cjs && cjs.SpaceDailyDashboard;
+      if (sdd && typeof sdd._openTodayToDo === "function") {
+        await sdd._openTodayToDo(today, { dv });
+      } else {
+        try { new Notice("Could not open today's To-Do."); } catch (_e) {}
+      }
+    } catch (_e) { /* never throw out of a click handler */ }
   }
 
   /**
@@ -285,9 +348,7 @@ class SpaceHome {
    * host injection); the composer resolves its own live `today`/`hour`.
    */
   async render(dv, params) {
-    // Capture `this` for the async re-render after an inline task capture (the
-    // input/Add handlers await createQuick then call self.render to refresh).
-    const self = this;
+    if (!dv || !dv.container || typeof dv.el !== "function") return;
 
     // Cold-start reflow guard: on the FIRST render of any app session, wait for
     // Obsidian's workspace layout (panes/sidebars) to finish restoring before
@@ -359,37 +420,133 @@ class SpaceHome {
         counts = SDD.computeCounts(dv, today, TE) || counts;
       }
     } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
+    counts = Object.assign({}, counts, { backlog: SpaceHome._countBacklog(dv, TE) });
+
+    // Surface-owned state survives CustomJS helper replacement and Dataview
+    // re-execution because the container, rather than this render closure or
+    // class identity, owns mutation and nested-mount authority.
+    let surface;
+    try {
+      surface = dv.container.__sauceHomeSurface;
+      if (!surface || typeof surface !== "object") {
+        surface = {
+          signature: null,
+          generation: 0,
+          dashboard: { mounted: false, key: null, nodes: [], token: null, generation: 0 },
+        };
+        dv.container.__sauceHomeSurface = surface;
+      }
+    } catch (_e) {
+      surface = {
+        signature: null,
+        generation: 0,
+        dashboard: { mounted: false, key: null, nodes: [], token: null, generation: 0 },
+      };
+    }
+    const mountDashboard = async () => {
+      const dashboard = surface.dashboard;
+      const children = () => Array.from((dv && dv.container && dv.container.children) || []);
+      const liveNodes = () => (Array.isArray(dashboard.nodes) ? dashboard.nodes : [])
+        .filter((node) => children().includes(node));
+      if (dashboard.mounted && dashboard.key === today && liveNodes().length) return;
+      if (dashboard.mounted && dashboard.key !== today) {
+        for (const node of liveNodes()) {
+          try { node.remove?.(); } catch (_e) {}
+        }
+      }
+      dashboard.mounted = false;
+      dashboard.key = null;
+      dashboard.nodes = [];
+      if (dashboard.token) {
+        await dashboard.token.promise;
+        return mountDashboard();
+      }
+      if (!dv || typeof dv.view !== "function") return;
+      const token = {
+        generation: dashboard.generation,
+        receipt: { ok: false, node: null },
+        guardReceipt: { status: "pending", node: null },
+        promise: null,
+      };
+      dashboard.token = token;
+      token.promise = (async () => {
+        try {
+          await dv.view("ranch/views/customjs-guard", {
+            class: "SpaceDailyDashboard",
+            guardReceipt: token.guardReceipt,
+            args: [{ asOf: today, live: true, mountReceipt: token.receipt }],
+          });
+          if (dashboard.token === token) {
+            const mountedNode = token.receipt.ok === true && children().includes(token.receipt.node)
+              ? token.receipt.node
+              : null;
+            dashboard.nodes = mountedNode ? [mountedNode] : [];
+            dashboard.mounted = !!mountedNode;
+            dashboard.key = dashboard.mounted ? today : null;
+            if (!dashboard.mounted) {
+              // The guard owns unavailable diagnostics and returns their exact
+              // identity. Remove only that receipt so retries do not accumulate
+              // placeholders; never infer ownership from text or a DOM diff.
+              const unavailable = token.guardReceipt.status === "unavailable"
+                ? token.guardReceipt.node
+                : null;
+              if (unavailable && children().includes(unavailable)) {
+                try { unavailable.remove?.(); } catch (_e) {}
+              }
+            }
+          }
+        } catch (_e) {
+          if (dashboard.token === token) {
+            dashboard.mounted = false;
+            dashboard.key = null;
+            dashboard.nodes = [];
+          }
+        } finally {
+          if (dashboard.token === token) dashboard.token = null;
+        }
+      })();
+      await token.promise;
+    };
 
     // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
     // (the reported "reloading every time" feel) and is wasted work whenever
     // NOTHING actually changed since the last render in THIS render() call —
-    // e.g. our own post-capture self.render() re-invocation firing while the
-    // glance counts happen to be identical. Skipping also PRESERVES any
-    // in-progress state a rebuild would otherwise wipe (an open "+" menu, a
-    // partially-typed "Jot a task…" draft). This does NOT (and cannot) cover
+    // e.g. a re-invocation firing while the glance counts happen to be
+    // identical. Skipping also PRESERVES any in-progress state a rebuild would
+    // otherwise wipe (an open Capture menu). This does NOT (and cannot) cover
     // Dataview's OWN periodic re-execution of the whole block, which clears
     // dv.container itself before calling render() again — this guard only
     // short-circuits redundant work WE would otherwise do within one still-
-    // live container.
+    // live container. A failed or unavailable nested dashboard is deliberately
+    // retried before returning from an otherwise identical render.
     const sig = today + "|" + JSON.stringify(counts);
-    try {
-      const w = (typeof window !== "undefined" && window) || null;
-      if (w && w.__sauceHomeLastSig === sig && dv.container.querySelector(".sauce-home")) {
-        return;
-      }
-      if (w) w.__sauceHomeLastSig = sig;
-    } catch (_e) { /* never throw — fall through to a normal rebuild */ }
+    const prior = dv.container.querySelector(".sauce-home");
+    if (prior && surface.signature === sig) {
+      await mountDashboard();
+      return;
+    }
+    if (!prior && !surface.dashboard.token) {
+      // Dataview cleared this container. A settled mount was removed and must
+      // be retried. An in-flight mount, however, remains the sole authority:
+      // invalidating it cannot cancel its eventual DOM write and would permit
+      // a duplicate replacement mount.
+      surface.dashboard.generation += 1;
+      surface.dashboard.mounted = false;
+      surface.dashboard.key = null;
+      surface.dashboard.nodes = [];
+    }
+    surface.signature = sig;
+    surface.generation += 1;
 
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.
-    const prior = dv.container.querySelector(".sauce-home");
     if (prior) prior.remove();
 
     const home = dv.el("div", "", { cls: "sauce-home" });
 
-    // 1) Header row — the date (left) + a subtle "+" quick-add (right) ────────
+    // 1) Header row — the date (left) + "New task" / "Capture ▾" (right) ──────
     // Just the date now (no greeting): a clean, sharp header line with the accent
-    // tick. Capture lives behind the quiet "+" that springs open a dropdown.
+    // tick. Captures live behind the quiet Capture button's dropdown.
     const head = home.createEl("div", { cls: "sauce-home-head" });
     const greeting = head.createEl("div", { cls: "sauce-home-greeting" });
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
@@ -429,17 +586,35 @@ class SpaceHome {
       } catch (_e) { /* never throw out of a click handler */ }
     };
 
-    // 1b) Quick-add "+" → a compact dropdown of capture actions. The menu is
-    // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").
-    // It holds a one-gesture "Jot a task…" input + New Meeting / New Sticky Note /
-    // Open today's daily. Outside-click + Escape close it (guarded — no-op on a
-    // cold/stub document so this never throws out of render).
-    const addWrap = head.createEl("div", { cls: "sauce-home-add-wrap" });
-    const addBtn = addWrap.createEl("button", { cls: "sauce-home-add" });
+    // 1b) Header actions (right): "New task" (accent) opens the FULL task dialog
+    // in create mode, defaulting to Today; "Capture ▾" opens a compact dropdown
+    // of the other captures (Meeting / Sticky Note / Article / Journal / Trip).
+    // The menu is built now (hidden via CSS) and toggled by the Capture button.
+    // Outside-click + Escape close it (guarded — no-op on a cold/stub document so
+    // this never throws out of render).
+    const actions = head.createEl("div", { cls: "sauce-home-actions" });
+    const newBtn = actions.createEl("button", { cls: "sauce-home-new-task" });
+    newBtn.setAttribute("type", "button");
+    newBtn.textContent = "New task";
+    newBtn.onclick = () => {
+      try {
+        const cjsNow = (typeof customJS !== "undefined" && customJS)
+          || (typeof window !== "undefined" && window.customJS)
+          || null;
+        const td = cjsNow && cjsNow.TaskDialog;
+        if (!td || typeof td.open !== "function") {
+          try { new Notice("Tasks are still loading — try again in a moment"); } catch (_e) {}
+          return;
+        }
+        td.open({ surface: "home", today });
+      } catch (_e) { /* never throw out of a click handler */ }
+    };
+
+    const addWrap = actions.createEl("div", { cls: "sauce-home-add-wrap" });
+    const addBtn = addWrap.createEl("button", { cls: "sauce-home-capture-toggle" });
     addBtn.setAttribute("type", "button");
-    addBtn.setAttribute("aria-label", "Quick add");
-    addBtn.innerHTML =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`;
+    addBtn.setAttribute("aria-label", "Capture");
+    addBtn.textContent = "Capture";
     const menu = addWrap.createEl("div", { cls: "sauce-home-add-menu" });
 
     let menuOpen = false;
@@ -469,41 +644,6 @@ class SpaceHome {
     addBtn.onclick = () => {
       setMenu(!menuOpen);
     };
-
-    // Menu — one-gesture task capture (Enter or Add → TaskDialog.createQuick,
-    // guarded; then close the menu + re-render so the Tasks panel + glance chip
-    // reflect the new task). NO autofocus — opening the menu (via "+") must
-    // never pop the mobile keyboard; the user taps the input to type.
-    const captureRow = menu.createEl("div", { cls: "sauce-home-add-input-row" });
-    const input = captureRow.createEl("input", { cls: "sauce-home-capture-input" });
-    input.setAttribute("type", "text");
-    input.setAttribute("placeholder", "Jot a task…");
-    const addTaskBtn = captureRow.createEl("button", { cls: "sauce-home-capture-add" });
-    addTaskBtn.setAttribute("type", "button");
-    addTaskBtn.textContent = "Add";
-    const submitCapture = async () => {
-      const text = input.value;
-      if (!(typeof text === "string" && text.trim())) return;
-      const cjsNow = (typeof customJS !== "undefined" && customJS)
-        || (typeof window !== "undefined" && window.customJS)
-        || null;
-      const td = cjsNow && cjsNow.TaskDialog;
-      try {
-        if (td && typeof td.createQuick === "function") {
-          await td.createQuick({ title: text, source: "daily" });
-        }
-      } catch (_e) { /* capture is best-effort; never throw out of the handler */ }
-      setMenu(false);
-      await self.render(dv, params);
-    };
-    addTaskBtn.onclick = () => { submitCapture(); };
-    input.addEventListener("keydown", (ev) => {
-      if (ev && ev.key === "Enter" && !ev.isComposing) {
-        if (typeof ev.preventDefault === "function") ev.preventDefault();
-        if (typeof ev.stopPropagation === "function") ev.stopPropagation();
-        submitCapture();
-      }
-    });
 
     // Menu — the secondary capture actions: Meeting, Sticky Note, Article,
     // Journal, Trip. Article and Journal are gated on their entity-create
@@ -574,6 +714,17 @@ class SpaceHome {
           sep.textContent = "·";
         }
         const chipEl = glance.createEl("span", { cls: "sauce-home-glance-chip" + (chip.cls ? " " + chip.cls : "") });
+        if (chip.action === "backlog") {
+          chipEl.setAttribute("role", "button");
+          chipEl.setAttribute("tabindex", "0");
+          chipEl.onclick = () => SpaceHome._openBacklog(dv, today);
+          chipEl.addEventListener("keydown", (ev) => {
+            if (ev && (ev.key === "Enter" || ev.key === " ")) {
+              if (typeof ev.preventDefault === "function") ev.preventDefault();
+              SpaceHome._openBacklog(dv, today);
+            }
+          });
+        }
         const nEl = chipEl.createEl("span", { cls: "sauce-home-glance-n" });
         nEl.textContent = String(chip.n);
         const lEl = chipEl.createEl("span", { cls: "sauce-home-glance-label" });
@@ -585,10 +736,7 @@ class SpaceHome {
     // Injected via the DRY seam so Home always shows THIS calendar day's agenda,
     // independent of any note's filename date. Mounts AFTER greeting + capture so
     // it appends below them, into dv.container (the guard renders there).
-    await dv.view("ranch/views/customjs-guard", {
-      class: "SpaceDailyDashboard",
-      args: [{ asOf: today, live: true }],
-    });
+    await mountDashboard();
   }
 
   /**
@@ -603,8 +751,8 @@ class SpaceHome {
    *               — the exact same flow as the "New Trip" button on
    *               spice/trips/Trips.md (TripsChromeBar's "new-trip" dispatch)
    *   openDaily → app.commands.executeCommandById("daily-notes")
-   * (The former `todo` button is gone — task capture is now the inline
-   * "Jot a task…" input wired directly to TaskDialog.createQuick in render.)
+   * (There is no `todo` key — task creation is the header's "New task" button,
+   * wired directly to TaskDialog.open in render.)
    */
   static _dispatch(key, dv, today) {
     const cjs = (typeof customJS !== "undefined" && customJS)

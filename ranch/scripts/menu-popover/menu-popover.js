@@ -85,12 +85,24 @@ class MenuPopover {
   // it closes the overlay first, then runs the entry's onSelect. danger:true
   // colors the label var(--text-error). `compact` (grid sections) trims the
   // padding/gap slightly so 2-up rows don't feel cramped in a narrower column.
+  // Labels and sublabels are caller text (project names, task titles), so they
+  // are escaped before they reach innerHTML; `icon` stays raw because callers
+  // pass trusted SVG markup there.
+  _escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   _buildRow(doc, entry, close, isMobile, compact) {
     const row = doc.createElement("button");
     const icon = (entry && entry.icon) || "";
-    const label = (entry && entry.label) || "";
+    const label = this._escapeHtml((entry && entry.label) || "");
     const danger = !!(entry && entry.danger);
-    const sublabel = (entry && entry.sublabel) || "";
+    const sublabel = this._escapeHtml((entry && entry.sublabel) || "");
     const labelColor = danger ? "var(--text-error)" : "var(--text-normal)";
     const labelSpan = `<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${labelColor};">${label}</span>`;
     const iconSpan = `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:0 0 auto;">${icon}</span>`;

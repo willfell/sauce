@@ -6,14 +6,16 @@
  * Renders on a `type: to-do` daily note (invoked via customjs-guard, so its
  * entry method is the instance `render(dv)`). It live-queries the task notes
  * under `spice/tasks/` (open only, excluding _done/ + _trash/), partitions them
- * into a "Today" band (rendered FIRST) and an "Overdue / Carryover" band, and
- * draws each task as a row with a functional done-checkbox + metadata chips.
+ * into a "Today" band (rendered FIRST), an "Overdue / Carryover" band, and an
+ * "Upcoming" band (future-due, rendered LAST), and draws each task as a row
+ * with a functional done-checkbox + metadata chips.
  * Task CREATION lives in ToDoLeafActions' single nav-button "New Task" (this
- * widget renders no create button of its own). Every mutation is DELEGATED to
- * TaskDialog — the widget only READS the task notes; it never writes one
- * directly. That keeps the single-file-write invariant (a bad write can only
- * ever touch one task's file) entirely inside TaskDialog:
+ * widget renders no create button of its own). Mutations are either delegated
+ * to TaskDialog or, for the narrow move-to-tomorrow row action, use Obsidian's
+ * processFrontMatter rail against the resolved task file. Every gesture keeps
+ * the single-file-write invariant (a bad write can only ever touch one task):
  *   - checkbox change → TaskDialog.markDone(path)   (status=done + move to _done/)
+ *   - tomorrow action → processFrontMatter(file, fm => fm.due = nextDay(viewedDay))
  *   - title click     → app.workspace.openLinkText(path)  (opens the task NOTE;
  *                       its TaskNoteView carries the Edit button for editing)
  *
@@ -31,7 +33,8 @@
  * the statics, load via `new Function(src + "\nreturn TaskTodayList;")()`.
  *
  * Static API (Node-testable, pure):
- *   TaskTodayList.buildBands(parsedTasks, todayStr) → { today, overdue }
+ *   TaskTodayList.nextDay(todayStr) → next YYYY-MM-DD calendar date
+ *   TaskTodayList.buildBands(parsedTasks, todayStr) → { today, overdue, upcoming }
  *
  * Instance API (browser-side):
  *   TaskTodayList.render(dv)   ← the customjs-guard entry point
@@ -47,82 +50,691 @@ class TaskTodayList {
     // TaskEntity / TaskDialog).
 
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
-    renderTaskRow(container, task, TDref) { return TaskTodayList.renderTaskRow(container, task, TDref); }
+    nextDay(todayStr) { return TaskTodayList.nextDay(todayStr); }
+    markTaskRow(row, task) { return TaskTodayList.markTaskRow(row, task); }
+    reschedule(row, task, newDue, viewedDay, TDref) { return TaskTodayList.reschedule(row, task, newDue, viewedDay, TDref); }
+    rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
+    renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
     _parseInlineLinks(text) { return TaskTodayList._parseInlineLinks(text); }
     _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
     _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
     _projectChipText(v) { return TaskTodayList._projectChipText(v); }
+    get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
+    classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
+    moveInOrder(list, path, dir) { return TaskTodayList.moveInOrder(list, path, dir); }
+    reorderInOrder(list, fromPath, toPath) { return TaskTodayList.reorderInOrder(list, fromPath, toPath); }
+    applyManualOrder(next, deps) { return TaskTodayList.applyManualOrder(next, deps); }
+    manualOrder(deps) { return TaskTodayList.manualOrder(deps); }
+    doneTimeLabel(task) { return TaskTodayList.doneTimeLabel(task); }
+    renderDoneRow(container, task, options) { return TaskTodayList.renderDoneRow(container, task, options); }
+    get SORT_OPTIONS() { return TaskTodayList.SORT_OPTIONS; }
+    get GROUP_OPTIONS() { return TaskTodayList.GROUP_OPTIONS; }
+    get DRAG_MIME() { return TaskTodayList.DRAG_MIME; }
+    _isMobile(appRef) { return TaskTodayList._isMobile(appRef); }
+    _fromFormField(event) { return TaskTodayList._fromFormField(event); }
+    clearDateLabel(task) { return TaskTodayList.clearDateLabel(task); }
 
     // ---------- Static pure helper ----------
+
+    /**
+     * Sort / Group menu entries shared by every task surface that offers them
+     * (the To-Do daily view and the Today panel on Home and the daily note), so
+     * the two never drift apart in wording.
+     */
+    static get SORT_OPTIONS() {
+        return [
+            { key: 'smart', label: 'Smart', sublabel: 'your order \u2192 priority \u2192 days late' },
+            { key: 'manual', label: 'My order', sublabel: 'drag to arrange' },
+            { key: 'priority', label: 'Priority', sublabel: 'highest first' },
+            { key: 'due', label: 'Due date', sublabel: 'soonest first' },
+            { key: 'oldest', label: 'Oldest first', sublabel: 'by created date' },
+            { key: 'touched', label: 'Last touched', sublabel: 'recently edited first' },
+        ];
+    }
+
+    static get GROUP_OPTIONS() {
+        return [
+            { key: 'none', label: 'None', sublabel: '' },
+            { key: 'project', label: 'Project', sublabel: '' },
+            { key: 'priority', label: 'Priority', sublabel: '' },
+            { key: 'due', label: 'Due day', sublabel: '' },
+        ];
+    }
+
+    /**
+     * Drag payload type for a task row. A custom type (not text/plain) so a
+     * row dropped into the editor inserts nothing.
+     */
+    static get DRAG_MIME() { return 'application/x-sauce-task-path'; }
+
+    /** Obsidian mobile (app.isMobile or Platform.isMobile); false when unknown. */
+    static _isMobile(appRef) {
+        try {
+            if (appRef && appRef.isMobile) return true;
+            if (typeof Platform !== 'undefined' && Platform && Platform.isMobile) return true;
+        } catch (_e) { /* treat as desktop */ }
+        return false;
+    }
+
+    /** True when a drag starts inside a form field (e.g. the inline date picker). */
+    static _fromFormField(event) {
+        try {
+            const target = event && event.target;
+            return !!(target && typeof target.closest === 'function' && target.closest('input,textarea,select'));
+        } catch (_e) { return false; }
+    }
+
+    /**
+     * Label for the action that clears a task's due date. Only a personal task
+     * lands in the Backlog (TaskEntity.isBacklog); a project, trip, meeting or
+     * subtask just loses its date.
+     */
+    static clearDateLabel(task) {
+        const t = Object.assign({}, task || {}, { due: null, status: 'open' });
+        let backlog;
+        try {
+            const TE = TaskTodayList._rowTaskEntity();
+            if (TE && typeof TE.isBacklog === 'function') backlog = !!TE.isBacklog(t);
+        } catch (_e) { backlog = undefined; }
+        if (backlog === undefined) {
+            backlog = !(t.project_slug || t.trip_slug || t.parent_task || t.source === 'meeting');
+        }
+        return backlog ? 'Move to backlog' : 'Remove date';
+    }
+
+    /**
+     * Refusals the write rails return silently, before any write (no Notice of
+     * their own). A surface that starts a write adds its own Notice for these.
+     */
+    static get SILENT_REASONS() {
+        return [
+            'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
+            'app unavailable', 'no-fields', 'task-entity-unavailable',
+        ];
+    }
+
+    /**
+     * Today-surface failure policy. Returns:
+     *   'ok'      - succeeded
+     *   'skipped' - a no_op refusal (cold load, in flight, task no longer open)
+     *   'silent'  - refused before writing with no Notice (see SILENT_REASONS),
+     *               or the call itself threw past its own guard (null result)
+     *   'noticed' - the write failed and its rail already told the user
+     */
+    static classifyOutcome(res) {
+        if (res && res.ok === true) return 'ok';
+        if (res && res.no_op) return 'skipped';
+        if (!res) return 'silent';
+        const reason = String(res.reason || '');
+        return TaskTodayList.SILENT_REASONS.includes(reason) ? 'silent' : 'noticed';
+    }
+
+    // ---------- Manual order (shared by the daily panel and the To-Do view) ----------
+
+    /**
+     * `list` (tasks with a `path`, top to bottom) with the task at `path`
+     * swapped one step up (dir < 0) or down; null when it is not in the list
+     * or already at that edge. Pure; the input is not changed.
+     */
+    static moveInOrder(list, path, dir) {
+        const current = Array.isArray(list) ? list : [];
+        const i = current.findIndex((t) => t && path && t.path === path);
+        const j = i + (dir < 0 ? -1 : 1);
+        if (i < 0 || j < 0 || j >= current.length) return null;
+        const next = current.slice();
+        next[i] = current[j];
+        next[j] = current[i];
+        return next;
+    }
+
+    /**
+     * `list` with the task at `fromPath` taken out and inserted at the index
+     * `toPath` held; null when either is missing or they are the same. Pure.
+     */
+    static reorderInOrder(list, fromPath, toPath) {
+        const current = Array.isArray(list) ? list : [];
+        const paths = current.map((t) => t && t.path);
+        const from = paths.indexOf(fromPath);
+        const to = paths.indexOf(toPath);
+        if (from < 0 || to < 0 || from === to) return null;
+        const next = current.slice();
+        next.splice(to, 0, next.splice(from, 1)[0]);
+        return next;
+    }
+
+    /**
+     * Persist a manual order. `next` is the new top-to-bottom task list (each
+     * `{ path, rank }`, mutated in place). deps:
+     *   setFields(path, fields) -> result   the rank write (one task at a time)
+     *   renumber(paths, rankByPath) -> [{ path, rank }]   only changed ranks
+     *   repaint()                           redraw from the task objects
+     *   notice(message)                     one Notice for silent failures
+     *   lock: { set, key }                  refuses while `set` holds `key`
+     *   classify(res)                       default TaskTodayList.classifyOutcome
+     * Ranks apply optimistically (one repaint); a failed write restores that
+     * task's prior rank and repaints once more. The lock is released in
+     * `finally`. Resolves { written, failed } or null when refused / unchanged.
+     */
+    static async applyManualOrder(next, deps) {
+        const d = deps || {};
+        const list = Array.isArray(next) ? next.filter((t) => t && t.path) : [];
+        const lockSet = d.lock && d.lock.set && typeof d.lock.set.has === 'function' ? d.lock.set : null;
+        const lockKey = d.lock ? d.lock.key : undefined;
+        if (lockSet && lockSet.has(lockKey)) return null;
+        if (typeof d.setFields !== 'function' || typeof d.renumber !== 'function') return null;
+        const classify = typeof d.classify === 'function' ? d.classify : (res) => TaskTodayList.classifyOutcome(res);
+        const repaint = () => { try { if (typeof d.repaint === 'function') d.repaint(); } catch (_e) {} };
+        if (lockSet) lockSet.add(lockKey);
+        try {
+            const rankByPath = {};
+            for (const t of list) rankByPath[t.path] = t.rank;
+            let changes = [];
+            try { changes = d.renumber(list.map((t) => t.path), rankByPath) || []; } catch (_e) { changes = []; }
+            if (!changes.length) return null;
+            const prior = new Map(list.map((t) => [t.path, t.rank]));
+            const byPath = new Map(list.map((t) => [t.path, t]));
+            list.forEach((t, i) => { t.rank = i + 1; });
+            repaint();
+            const written = [];
+            const failed = [];
+            let silent = 0;
+            for (const change of changes) {
+                let res = null;
+                try { res = await d.setFields(change.path, { rank: change.rank }); } catch (_e) { res = null; }
+                let outcome = 'silent';
+                try { outcome = classify(res); } catch (_e) { outcome = 'silent'; }
+                if (outcome === 'ok') { written.push(change.path); continue; }
+                failed.push(change.path);
+                if (outcome === 'silent') silent += 1;
+                const t = byPath.get(change.path);
+                if (t) t.rank = prior.get(change.path);
+            }
+            if (failed.length) repaint();
+            if (silent > 0 && typeof d.notice === 'function') {
+                try { d.notice('Could not save the new task order'); } catch (_e) {}
+            }
+            return { written, failed };
+        } finally {
+            if (lockSet) lockSet.delete(lockKey);
+        }
+    }
+
+    /**
+     * Manual-order controller over a painted list. deps as applyManualOrder,
+     * plus order() -> the painted tasks top to bottom and rows: Map(path ->
+     * row). Only rows still attached take part: a row completed or rescheduled
+     * by its own controls has already left the list. Returns
+     * { move(task, dir), reorder(fromPath, toPath) }, each resolving like
+     * applyManualOrder (undefined when the gesture is not a move).
+     */
+    static manualOrder(deps) {
+        const d = deps || {};
+        const visible = () => {
+            let list = [];
+            try { list = typeof d.order === 'function' ? (d.order() || []) : []; } catch (_e) { list = []; }
+            return list.filter((t) => {
+                const row = t && d.rows && typeof d.rows.get === 'function' ? d.rows.get(t.path) : null;
+                return !!(row && row.parentNode);
+            });
+        };
+        return {
+            move: (task, dir) => {
+                const next = TaskTodayList.moveInOrder(visible(), task && task.path, dir);
+                return next ? TaskTodayList.applyManualOrder(next, d) : undefined;
+            },
+            reorder: (fromPath, toPath) => {
+                const next = TaskTodayList.reorderInOrder(visible(), fromPath, toPath);
+                return next ? TaskTodayList.applyManualOrder(next, d) : undefined;
+            },
+        };
+    }
+
+    /**
+     * Local HH:mm of a task's completed_at (or of a bare completed_at value):
+     * Luxon via toFormat, else the time part of an ISO string (written with its
+     * own offset, so it is the local wall time). Missing / unparseable -> ''.
+     */
+    static doneTimeLabel(task) {
+        try {
+            let v = task;
+            if (v && typeof v === 'object' && typeof v.toFormat !== 'function' && 'completed_at' in v) {
+                v = v.completed_at;
+            }
+            if (v == null || v === '') return '';
+            if (typeof v === 'object' && typeof v.toFormat === 'function') return String(v.toFormat('HH:mm') || '');
+            const m = /T(\d{2}):(\d{2})/.exec(String(v));
+            return m ? m[1] + ':' + m[2] : '';
+        } catch (_e) { return ''; }
+    }
+
+    /**
+     * One Done-today row: struck title (click opens the note), completion HH:mm
+     * and, for a task archived under spice/tasks/_done/, an Undo button
+     * (aria-label "Undo: <title>") that hands the reopen flow to
+     * options.onUndo(task, button). options.undoLabel renames the button and
+     * its aria-label prefix (default "Undo"); options.showProject adds the
+     * project chip before the time. options.notice(msg) reports an open failure
+     * (default: an Obsidian Notice). Never throws; returns the row or null.
+     */
+    static renderDoneRow(container, task, options) {
+        if (!container || typeof container.createEl !== 'function' || !task) return null;
+        const opts = options || {};
+        const notice = typeof opts.notice === 'function'
+            ? opts.notice
+            : (msg) => { try { if (typeof Notice === 'function') new Notice(msg, 6000); } catch (_e) {} };
+        const row = container.createEl('div', { cls: 'sauce-today-done-row' });
+        row.dataset.sauceTaskPath = String(task.path || '');
+        row.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 3px 6px; font-size: 0.9em;';
+        const title = row.createEl('span', { cls: 'sauce-today-done-title' });
+        title.style.cssText = 'flex: 1 1 auto; min-width: 0; text-decoration: line-through; color: var(--text-muted); overflow-wrap: anywhere; cursor: pointer;';
+        const text = task.title || '(untitled)';
+        try { TaskTodayList.renderInlineLinks(title, text, task.path); } catch (_e) { title.textContent = text; }
+        title.addEventListener('click', () => {
+            try {
+                const appRef = (typeof window !== 'undefined' && window.app)
+                    || (typeof app !== 'undefined' && app) || null;
+                if (task.path && appRef && appRef.workspace) appRef.workspace.openLinkText(task.path, '');
+            } catch (e) { notice('Could not open task: ' + (e && (e.message || e))); }
+        });
+        if (opts.showProject && task.project) {
+            const projectText = TaskTodayList._projectChipText(task.project);
+            if (projectText) {
+                const chip = row.createEl('span', { cls: 'sauce-today-done-project' });
+                chip.textContent = projectText;
+                chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted); flex-shrink: 0;';
+            }
+        }
+        const time = TaskTodayList.doneTimeLabel(task);
+        if (time) {
+            const stamp = row.createEl('span', { cls: 'sauce-today-done-time' });
+            stamp.textContent = time;
+            stamp.style.cssText = 'font-size: 0.8em; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0;';
+        }
+        let TD = null;
+        try {
+            TD = opts.TD || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog) || null;
+        } catch (_e) { TD = null; }
+        const canUndo = String(task.path || '').indexOf('spice/tasks/_done/') === 0
+            && !!TD && typeof TD.reopen === 'function' && typeof opts.onUndo === 'function';
+        if (canUndo) {
+            const undo = row.createEl('button', { cls: 'sauce-today-undo' });
+            const undoLabel = opts.undoLabel ? String(opts.undoLabel) : 'Undo';
+            undo.textContent = undoLabel;
+            undo.style.cssText = 'font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-accent); cursor: pointer; background: none; border: none; padding: 0; box-shadow: none; height: auto;';
+            try { undo.setAttribute('type', 'button'); undo.setAttribute('aria-label', undoLabel + ': ' + text); } catch (_e) {}
+            undo.addEventListener('click', (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try { return opts.onUndo(task, undo); } catch (_e) { return undefined; }
+            });
+        }
+        return row;
+    }
+
+    /**
+     * Return the next calendar date after a normalized YYYY-MM-DD string.
+     * Calendar arithmetic is performed directly rather than through Date/Luxon,
+     * so the result cannot shift with the host timezone. Invalid dates fail
+     * closed with an empty string; never throws.
+     */
+    static nextDay(todayStr) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(todayStr || ''));
+        if (!match) return '';
+        let year = Number(match[1]);
+        let month = Number(match[2]);
+        let day = Number(match[3]);
+        const isLeap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+        const daysInMonth = (y, m) =>
+            [31, isLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] || 0;
+        const maxDay = daysInMonth(year, month);
+        if (!maxDay || day < 1 || day > maxDay) return '';
+        day += 1;
+        if (day > maxDay) {
+            day = 1;
+            month += 1;
+            if (month > 12) {
+                month = 1;
+                year += 1;
+            }
+        }
+        return String(year).padStart(4, '0') + '-'
+            + String(month).padStart(2, '0') + '-'
+            + String(day).padStart(2, '0');
+    }
+
+    /**
+     * Stamp a rendered row with stable task identity + render order. The identity
+     * prevents an in-flight rollback from duplicating a replacement row after a
+     * Dataview rerender. Render order lets concurrent adjacent failures recover
+     * correctly even when every original sibling anchor is temporarily detached.
+     */
+    static markTaskRow(row, task) {
+        try {
+            if (!row || !row.dataset || !task || !task.path) return row;
+            row.dataset.sauceTaskPath = String(task.path);
+            if (!row.dataset.sauceTaskOrder) {
+                TaskTodayList._rescheduleRowSequence =
+                    Number(TaskTodayList._rescheduleRowSequence || 0) + 1;
+                row.dataset.sauceTaskOrder = String(TaskTodayList._rescheduleRowSequence);
+            }
+        } catch (_e) {}
+        return row;
+    }
+
+    static _removeRowReceipt(row, task, focusTarget) {
+        TaskTodayList.markTaskRow(row, task);
+        const parent = row && row.parentNode;
+        const children = (() => {
+            try { return Array.from((parent && (parent.childNodes || parent.children)) || []); }
+            catch (_e) { return []; }
+        })();
+        const index = children.indexOf(row);
+        const receipt = {
+            parent, node: row, path: String((task && task.path) || ''),
+            index, following: index >= 0 ? children.slice(index + 1) : [],
+            preceding: index >= 0 ? children.slice(0, index).reverse() : [],
+            order: Number(row && row.dataset && row.dataset.sauceTaskOrder),
+            focusTarget,
+        };
+        try { if (row && typeof row.remove === 'function') row.remove(); } catch (_e) {}
+        return receipt;
+    }
+
+    static _restoreRowReceipt(receipt) {
+        const r = receipt || {};
+        const parent = r.parent;
+        const row = r.node;
+        if (!parent || !row || row.parentNode) return false;
+        if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+        const childList = () => {
+            try { return Array.from((parent.childNodes || parent.children) || []); }
+            catch (_e) { return []; }
+        };
+        const current = childList();
+        if (r.path && current.some((node) => node !== row && node && node.dataset
+            && String(node.dataset.sauceTaskPath || '') === r.path)) return true;
+        const insert = (anchor) => {
+            if (anchor != null && anchor.parentNode !== parent) return false;
+            try { parent.insertBefore(row, anchor || null); return row.parentNode === parent; }
+            catch (_e) { return false; }
+        };
+        const next = (r.following || []).find((node) => node && node.parentNode === parent);
+        if (!(next && insert(next)) && Number.isFinite(r.order)) {
+            const ordered = childList().filter((node) => node && node.dataset
+                && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+            const later = ordered.find((node) => Number(node.dataset.sauceTaskOrder) > r.order);
+            if (later) insert(later);
+            else {
+                const earlier = ordered.filter((node) => Number(node.dataset.sauceTaskOrder) < r.order).pop();
+                if (earlier) insert(earlier.nextSibling || null);
+            }
+        }
+        if (!row.parentNode) {
+            const previous = (r.preceding || []).find((node) => node && node.parentNode === parent);
+            if (previous) insert(previous.nextSibling || null);
+        }
+        if (!row.parentNode) {
+            const now = childList();
+            const index = Number.isFinite(r.index) ? Math.max(0, Math.min(r.index, now.length)) : now.length;
+            if (!insert(now[index] || null)) {
+                try { parent.appendChild(row); } catch (_e) {}
+            }
+        }
+        try { if (r.focusTarget && typeof r.focusTarget.focus === 'function') r.focusTarget.focus(); } catch (_e) {}
+        return row.parentNode === parent;
+    }
+
+    /**
+     * Reschedule one OPEN task to the day after `viewedDay`, using the canonical
+     * Obsidian processFrontMatter rail. This is shared by TaskTodayList's own
+     * row and SpaceDailyDashboard's private row renderer.
+     *
+     * The row is removed before awaiting the write for instant feedback. On
+     * failure, rollback selects only a still-valid anchor, falls back to stable
+     * render order when adjacent rows are also in flight, and recognizes a
+     * rerendered replacement so it never inserts a stale duplicate. TaskDialog
+     * remains the readiness boundary: before it or the app/file rail exists,
+     * this is a silent no-op. Completed/archive rows are rejected even if a
+     * caller invokes this method directly.
+     */
+    static async rescheduleTomorrow(row, task, viewedDay, TDref) {
+        let baseDay = String(viewedDay || '');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDay)) {
+            const momentRef = (typeof window !== 'undefined' && window.moment) || null;
+            baseDay = typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
+        }
+        const tomorrow = TaskTodayList.nextDay(baseDay);
+        if (!tomorrow) return { ok: false, no_op: true };
+        return TaskTodayList.reschedule(row, task, tomorrow, viewedDay, TDref);
+    }
+
+    /**
+     * Reschedule one OPEN task to an explicit `newDue` (YYYY-MM-DD, or '' to move
+     * it to the backlog) with the same optimistic-removal / rollback / in-flight
+     * mechanics as rescheduleTomorrow, and clear any manual `rank` in the same
+     * atomic frontmatter write. `viewedDay` is accepted for call-shape parity
+     * with rescheduleTomorrow and is not otherwise used.
+     */
+    static async reschedule(row, task, newDue, viewedDay, TDref) {
+        try {
+            if (!row || !task || task.status !== 'open' || !task.path) return { ok: false, no_op: true };
+            const TD = TDref
+                || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog)
+                || null;
+            if (!TD || typeof TD.open !== 'function') return { ok: false, no_op: true };
+
+            const appRef = (typeof window !== 'undefined' && window.app)
+                || (typeof globalThis !== 'undefined' && globalThis.app)
+                || null;
+            if (!appRef || !appRef.vault || typeof appRef.vault.getAbstractFileByPath !== 'function'
+                || !appRef.fileManager || typeof appRef.fileManager.processFrontMatter !== 'function') {
+                return { ok: false, no_op: true };
+            }
+
+            const target = newDue == null ? '' : String(newDue);
+            if (target !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(target)) return { ok: false, no_op: true };
+            const file = appRef.vault.getAbstractFileByPath(task.path);
+            if (!file) return { ok: false, no_op: true };
+
+            const taskPath = String(task.path);
+            const inFlight = TaskTodayList._rescheduleInFlight
+                || (TaskTodayList._rescheduleInFlight = new Set());
+            // Claim synchronously before the row is detached or the first await
+            // yields. This makes double-clicks and duplicate dispatch from a
+            // rerendered row harmless while preserving concurrency by task path.
+            if (inFlight.has(taskPath)) {
+                return { ok: false, no_op: true, in_flight: true };
+            }
+            inFlight.add(taskPath);
+            try {
+                try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                TaskTodayList.markTaskRow(row, task);
+                const parent = row.parentNode;
+                const childList = (node) => {
+                    try { return Array.from((node && (node.childNodes || node.children)) || []); }
+                    catch (_e) { return []; }
+                };
+                const originalChildren = childList(parent);
+                const originalIndex = originalChildren.indexOf(row);
+                const following = originalIndex >= 0 ? originalChildren.slice(originalIndex + 1) : [];
+                const preceding = originalIndex >= 0 ? originalChildren.slice(0, originalIndex).reverse() : [];
+                const rowOrder = Number(row.dataset && row.dataset.sauceTaskOrder);
+                const restore = () => {
+                    if (!parent || row.parentNode) return false;
+                    // A detached old render tree must not receive stale DOM after
+                    // Dataview has replaced it with a new connected tree.
+                    if (typeof parent.isConnected === 'boolean' && !parent.isConnected) return false;
+
+                    const current = childList(parent);
+                    const replacementExists = current.some((node) =>
+                        node !== row && node && node.dataset
+                        && String(node.dataset.sauceTaskPath || '') === taskPath);
+                    if (replacementExists) return true;
+
+                    const insert = (anchor) => {
+                        if (anchor != null && anchor.parentNode !== parent) return false;
+                        try {
+                            parent.insertBefore(row, anchor || null);
+                            return row.parentNode === parent;
+                        } catch (_e) {
+                            return false;
+                        }
+                    };
+
+                    // Prefer the nearest surviving original anchor. Saving the full
+                    // suffix (not only nextSibling) handles adjacent removals.
+                    const next = following.find((node) => node && node.parentNode === parent);
+                    if (next && insert(next)) return true;
+
+                    // If every original following sibling is detached, stable render
+                    // order still locates this row relative to concurrently restored
+                    // task rows (including when these were the final two rows).
+                    if (Number.isFinite(rowOrder)) {
+                        const orderedRows = childList(parent).filter((node) =>
+                            node && node.dataset && Number.isFinite(Number(node.dataset.sauceTaskOrder)));
+                        const later = orderedRows.find((node) =>
+                            Number(node.dataset.sauceTaskOrder) > rowOrder);
+                        if (later && insert(later)) return true;
+                        const earlier = orderedRows.filter((node) =>
+                            Number(node.dataset.sauceTaskOrder) < rowOrder).pop();
+                        if (earlier) {
+                            const afterEarlier = earlier.nextSibling;
+                            if ((afterEarlier == null || afterEarlier.parentNode === parent)
+                                && insert(afterEarlier)) return true;
+                        }
+                    }
+
+                    const previous = preceding.find((node) => node && node.parentNode === parent);
+                    if (previous) {
+                        const afterPrevious = previous.nextSibling;
+                        if ((afterPrevious == null || afterPrevious.parentNode === parent)
+                            && insert(afterPrevious)) return true;
+                    }
+
+                    // Final deterministic fallback for a still-live container. Clamp
+                    // the original ordinal to its current child count, then append if
+                    // a host-specific insertBefore implementation still rejects it.
+                    const now = childList(parent);
+                    const ordinal = Math.max(0, Math.min(
+                        originalIndex >= 0 ? originalIndex : now.length,
+                        now.length
+                    ));
+                    if (insert(now[ordinal] || null)) return true;
+                    if (!row.parentNode && typeof parent.appendChild === 'function') {
+                        try { parent.appendChild(row); } catch (_e) {}
+                    }
+                    return row.parentNode === parent;
+                };
+                try { row.remove(); } catch (_e) {}
+                let liveStatus = null;
+                let liveStatusChecked = false;
+                let mutationApplied = false;
+                const staleOpenNoOp = () => ({
+                    ok: false,
+                    no_op: true,
+                    reason: 'task is no longer open',
+                    live_status: liveStatus || 'missing'
+                });
+                try {
+                    await appRef.fileManager.processFrontMatter(file, (fm) => {
+                        liveStatusChecked = true;
+                        liveStatus = fm && typeof fm.status === 'string' ? fm.status : null;
+                        // The rendered task object can be stale by the time the
+                        // optimistic action reaches the file. Revalidate and
+                        // mutate within the same atomic frontmatter callback.
+                        if (!fm || fm.status !== 'open') return;
+                        fm.due = target;
+                        fm.rank = '';
+                        mutationApplied = true;
+                    });
+                    if (!mutationApplied) {
+                        restore();
+                        return staleOpenNoOp();
+                    }
+                    return { ok: true, due: target };
+                } catch (e) {
+                    restore();
+                    if (liveStatusChecked && !mutationApplied) return staleOpenNoOp();
+                    try { new Notice('Could not reschedule task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+                    return { ok: false, reason: String(e && (e.message || e) || 'write failed') };
+                }
+            } finally {
+                inFlight.delete(taskPath);
+            }
+        } catch (_e) {
+            return { ok: false, no_op: true };
+        }
+    }
 
     /**
      * Partition a list of ALREADY-PARSED task objects (parseNote output, or any
      * object with `{ due, status, project_slug, source }`) relative to
      * `todayStr` (YYYY-MM-DD). Open-only, and PERSONAL-daily-only — a task that
      * belongs to another daily section is EXCLUDED so it doesn't render twice:
-     *   today   — status "open", due === todayStr, NO project, NOT meeting
-     *   overdue — status "open", due < todayStr, NO project, NOT meeting
+     *   today    — status "open", due === todayStr, NO project, NOT meeting
+     *   overdue  — status "open", due < todayStr, NO project, NOT meeting
+     *   upcoming — status "open", due > todayStr, NO project, NOT meeting
      * (string compare of zero-padded ISO dates is chronologically correct.)
      * A task WITH a project_slug renders in its "Project Tasks" section
      * (ToDoDailyProjectGroups); a task with source "meeting" renders in "Meeting
      * Tasks" (ToDoDailyUnassignedMeetings) — both surface ALL open matching
      * task-notes, so excluding them here loses nothing. A task WITH a
      * parent_task is a subtask and renders in its parent's "Subtasks" section
-     * instead, so it is excluded here too. Future-scheduled +
-     * unscheduled open tasks land in NEITHER band. Tolerates a null/non-array
-     * input (→ empty bands); never throws.
+     * instead, so it is excluded here too. Unscheduled open tasks land in
+     * Today. Tolerates a null/non-array input (→ empty bands); never throws.
      */
     static buildBands(parsedTasks, todayStr) {
+        const PRIO_RANK = { highest: 4, high: 3, medium: 2, low: 1 };
+        const prioOf = (t) => PRIO_RANK[String(t.priority || '').toLowerCase()] || 0;
+
         const today = [];
         const overdue = [];
+        const upcoming = [];
         const list = Array.isArray(parsedTasks) ? parsedTasks : [];
         for (const t of list) {
             if (!t || t.status !== 'open') continue;
-            // Tasks that belong to another daily section are EXCLUDED here so they
-            // don't show TWICE (once in Today/Overdue, once below). A project task
-            // renders under its own "Project Tasks" section (ToDoDailyProjectGroups);
-            // a meeting-sourced task renders under "Meeting Tasks"
-            // (ToDoDailyUnassignedMeetings) — both of which surface ALL open matching
-            // task-notes, so nothing vanishes. Today/Overdue bands are therefore the
-            // PERSONAL daily tasks only: open, scheduled, NO project, NOT meeting.
-            if (t.project_slug && String(t.project_slug).trim() !== '') continue; // shown in its Project section
-            if (t.source === 'meeting') continue;                                 // shown in Meeting Tasks
-            if (t.parent_task && String(t.parent_task).trim() !== '') continue;   // shown in its parent's Subtasks section
+            if (t.project_slug && String(t.project_slug).trim() !== '') continue;
+            if (t.source === 'meeting') continue;
+            if (t.parent_task && String(t.parent_task).trim() !== '') continue;
+            if (t.trip_slug && String(t.trip_slug).trim() !== '') continue;
             const due = t.due;
-            if (!due) continue;
+            if (!due) { today.push(t); continue; }
             if (due === todayStr) today.push(t);
             else if (due < todayStr) overdue.push(t);
-            // due > todayStr (future) → excluded from both bands.
+            else upcoming.push(t);
         }
-        // Overdue: oldest/most-overdue due date first — the task that's been
-        // sitting longest surfaces at the top. Tie-broken by title (case-insensitive).
-        overdue.sort((a, b) => {
-            const as = a.due || '';
-            const bs = b.due || '';
-            if (as !== bs) return as < bs ? -1 : 1;
+        const sortBand = (arr) => {
+            arr.sort((a, b) => {
+                const pa = prioOf(a), pb = prioOf(b);
+                if (pa !== pb) return pb - pa;
+                const ad = a.due || '', bd = b.due || '';
+                if (ad !== bd) {
+                    if (ad === '') return 1;
+                    if (bd === '') return -1;
+                    return ad < bd ? -1 : 1;
+                }
+                return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
+            });
+        };
+        sortBand(overdue);
+        sortBand(today);
+        // Upcoming is sorted purely soonest-first (chronological), not by
+        // priority — its whole purpose is "what's coming next," so date order
+        // is the useful order here (unlike Today/Overdue, which are same-day
+        // buckets where priority is the more useful tiebreak).
+        upcoming.sort((a, b) => {
+            const ad = a.due || '', bd = b.due || '';
+            if (ad !== bd) return ad < bd ? -1 : 1;
             return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
         });
-        // Today: earliest due deadline first; tasks with no due date sort LAST
-        // (empty string treated as "after" any real date). Tie-broken by title.
-        today.sort((a, b) => {
-            const ad = a.due || '';
-            const bd = b.due || '';
-            if (ad !== bd) {
-                if (ad === '') return 1;
-                if (bd === '') return -1;
-                return ad < bd ? -1 : 1;
-            }
-            return String(a.title || '').toLowerCase().localeCompare(String(b.title || '').toLowerCase());
-        });
-        return { today: today, overdue: overdue };
+        return { today: today, overdue: overdue, upcoming: upcoming };
     }
 
     // ---------- Instance / browser render ----------
 
     /**
      * Entry point invoked by customjs-guard: `render(dv)`. Live-queries the task
-     * notes, partitions them, and draws the two bands. Fully guarded — returns
+     * notes, partitions them, and draws the three bands. Fully guarded — returns
      * quietly on cold-load (no throw), and each row is wrapped in try/catch so
      * one bad task note can't break the whole list.
      */
@@ -203,6 +815,12 @@ class TaskTodayList {
         if (bands.overdue.length) {
             this._renderBand(wrap, 'Overdue / Carryover', bands.overdue, null);
         }
+
+        // Upcoming band LAST — future-due personal tasks with no other home
+        // on this daily (only when non-empty).
+        if (bands.upcoming.length) {
+            this._renderBand(wrap, 'Upcoming', bands.upcoming, null);
+        }
     }
 
     /**
@@ -248,20 +866,108 @@ class TaskTodayList {
         return TaskTodayList.renderTaskRow(band, task);
     }
 
+    static get _ROW_ACTIONS_CSS() {
+        return '.sauce-task-today-row .sauce-task-actions { opacity: 0; transition: opacity 120ms ease; }'
+            + ' .sauce-task-today-row:hover .sauce-task-actions, .sauce-task-today-row:focus-within .sauce-task-actions { opacity: 1; }'
+            + ' .is-mobile .sauce-task-today-row .sauce-task-actions { opacity: 1; }'
+            + ' @media (hover: none) { .sauce-task-today-row .sauce-task-actions { opacity: 1; } }';
+    }
+
+    static get _PRIO_BAR_COLOR() {
+        return {
+            highest: 'var(--color-red, #dc2626)',
+            high: 'var(--color-red, #dc2626)',
+            medium: 'var(--color-orange, #ea580c)',
+            low: 'var(--text-muted, #666)',
+            none: 'transparent',
+        };
+    }
+
+    static _priorityLevel(task) {
+        const raw = String(task && task.priority || '').trim().toLowerCase();
+        return ['highest', 'high', 'medium', 'low'].includes(raw) ? raw : 'none';
+    }
+
+    static _rowTaskEntity() {
+        try { return (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null; }
+        catch (_e) { return null; }
+    }
+
+    /** Render entry: options.todayStr wins, else the wall clock (moment). */
+    static _rowTodayStr(opts) {
+        const given = opts && opts.todayStr;
+        if (typeof given === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(given)) return given;
+        try {
+            const momentRef = typeof window !== 'undefined' ? window.moment : null;
+            return typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
+        } catch (_e) { return ''; }
+    }
+
+    /**
+     * `notes` when the user's own notes below the chrome exceed 200 bytes, or
+     * `N KB notes` once they reach 1024 bytes;
+     * computed from file stat + frontmatter end offset (no file read). Any
+     * missing piece yields '' (no chip).
+     */
+    static _notesChipText(path, TE) {
+        try {
+            if (!path || !TE || typeof TE.notesBytes !== 'function') return '';
+            const appRef = (typeof window !== 'undefined' && window.app)
+                || (typeof globalThis !== 'undefined' && globalThis.app)
+                || null;
+            if (!appRef || !appRef.vault || !appRef.metadataCache) return '';
+            const file = appRef.vault.getAbstractFileByPath(path);
+            const size = file && file.stat && file.stat.size;
+            if (!(size > 0)) return '';
+            const cache = appRef.metadataCache.getFileCache(file);
+            const fmEnd = cache && cache.frontmatterPosition && cache.frontmatterPosition.end
+                && cache.frontmatterPosition.end.offset;
+            if (typeof fmEnd !== 'number') return '';
+            const bytes = TE.notesBytes(size, fmEnd);
+            if (!(bytes > 200)) return '';
+            if (bytes < 1024) return 'notes';
+            return Math.round(bytes / 1024) + ' KB notes';
+        } catch (_e) { return ''; }
+    }
+
+    /** Age chip for open rows: overdue -> 'N days', stale -> 'since Mon D'. */
+    static _ageChip(task, todayStr, TE) {
+        try {
+            if (!task || !todayStr || !TE || typeof TE.bucketOf !== 'function') return null;
+            const bucket = TE.bucketOf(task, todayStr);
+            if (bucket === 'overdue') {
+                const n = TE.daysLate(task, todayStr);
+                return { text: n + (n === 1 ? ' day' : ' days'), cls: 'is-overdue' };
+            }
+            if (bucket === 'stale') {
+                const due = typeof TE._toDateStr === 'function' ? TE._toDateStr(task.due) : String(task.due || '').slice(0, 10);
+                const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(due || ''));
+                if (!m) return null;
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return { text: 'since ' + months[Number(m[2]) - 1] + ' ' + Number(m[3]), cls: 'is-stale' };
+            }
+        } catch (_e) {}
+        return null;
+    }
+
     /**
      * Render one task row into `container` — SELF-CONTAINED (no dependence on
      * instance `this`), so any widget can draw a uniform task row by calling
      * `window.customJS.TaskTodayList.renderTaskRow(container, task)` cross-class.
      * Draws:
-     *   - a functional done-checkbox → TaskDialog.markDone(path) (revert on fail)
+     *   - a functional done-checkbox → TaskDialog.markDone(path) (revert on fail;
+     *     options.onDone(task) after a successful completion)
      *   - a title (title click → opens the task NOTE via app.workspace.openLinkText(path))
      *   - metadata chips for project(name) / priority / due when present.
      * `TDref` is an OPTIONAL TaskDialog reference; when omitted the method reads
      * `window.customJS.TaskDialog` at click-time (both markDone + open are lazily
      * resolved so a cold-load TDZ never throws out of the row build). Never throws.
      */
-    static renderTaskRow(container, task, TDref) {
+    static renderTaskRow(container, task, TDref, options) {
         if (!container || typeof container.createEl !== 'function') return null;
+        const opts = options || {};
+        const todayStr = TaskTodayList._rowTodayStr(opts);
+        const TE = TaskTodayList._rowTaskEntity();
         // Resolve TaskDialog lazily at click-time so a passed ref OR the global
         // both work; a cold-load (customJS not ready) just no-ops the gesture.
         const getTD = () => {
@@ -273,6 +979,7 @@ class TaskTodayList {
         };
         const path = task && task.path;
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
+        TaskTodayList.markTaskRow(row, task);
         // The right cluster (chips + action icons) sits beside the title when the
         // row is wide enough, and WRAPS to its own right-aligned line when the title
         // is long — flex-wrap + a title min-width floor. Without the floor a long
@@ -281,7 +988,19 @@ class TaskTodayList {
         // readable and forces the cluster to wrap instead. align-items:flex-start
         // pins the cluster to the top of the first title line while a long title
         // wraps within its own column.
-        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border-hover); width: 100%; box-sizing: border-box;';
+        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border); width: 100%; box-sizing: border-box; position: relative;';
+        if (!TaskTodayList._rowActionsStyleInjected && typeof document !== 'undefined' && document.head) {
+            const s = document.createElement('style');
+            s.textContent = TaskTodayList._ROW_ACTIONS_CSS;
+            document.head.appendChild(s);
+            TaskTodayList._rowActionsStyleInjected = true;
+        }
+        if (!TaskTodayList._rowDividerStyleInjected && typeof document !== 'undefined' && document.head) {
+            const s = document.createElement('style');
+            s.textContent = '.sauce-task-today-row:last-child { border-bottom: none !important; }';
+            document.head.appendChild(s);
+            TaskTodayList._rowDividerStyleInjected = true;
+        }
         row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
         row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
@@ -294,6 +1013,27 @@ class TaskTodayList {
         // still allowing the title's own text to wrap internally.
         const titleGroup = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
         titleGroup.style.cssText = 'display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0;';
+
+        if (opts.dragHandle) {
+            const drag = titleGroup.createEl('span', { cls: 'sauce-task-drag' });
+            drag.style.cssText = 'display: inline-flex; align-items: center; height: 1.5em; flex-shrink: 0; cursor: grab; color: var(--text-faint, #999); user-select: none; touch-action: none;';
+            drag.draggable = true;
+            const dragLabel = typeof opts.dragHandle === 'string' ? opts.dragHandle : 'Drag to reorder';
+            try { drag.setAttribute('draggable', 'true'); drag.setAttribute('aria-label', dragLabel); } catch (_e) {}
+            if (path) drag.dataset.path = String(path);
+            drag.textContent = '\u22EE\u22EE';
+        }
+        if (opts.selectable) {
+            const sel = titleGroup.createEl('input', { cls: 'sauce-task-select', type: 'checkbox' });
+            sel.type = 'checkbox';
+            sel.checked = !!opts.selected;
+            sel.style.cssText = 'margin: 0; height: 1.5em; cursor: pointer; flex-shrink: 0;';
+            try { sel.setAttribute('aria-label', 'Select task'); } catch (_e) {}
+            sel.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            sel.addEventListener('change', () => {
+                try { if (typeof opts.onSelect === 'function') opts.onSelect(task, !!sel.checked); } catch (_e) {}
+            });
+        }
 
         // Functional done-checkbox — starts UNCHECKED (open tasks only). On
         // change → delegate the write to TaskDialog.markDone(path); revert +
@@ -334,13 +1074,21 @@ class TaskTodayList {
                 if (res && res.ok === false) {
                     revert();
                     try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
+                } else {
+                    // On success the file moves to _done/; the row is already
+                    // gone. options.onDone lets the host repaint its counts.
+                    try { if (typeof opts.onDone === 'function') opts.onDone(task); } catch (_e) {}
                 }
-                // On success the file moves to _done/; the row is already gone.
             } catch (e) {
                 revert();
                 try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
         });
+
+        const prioLevel = TaskTodayList._priorityLevel(task);
+        const prioBar = titleGroup.createEl('span', { cls: 'sauce-task-prio-bar is-' + prioLevel });
+        prioBar.style.cssText = 'width: 3px; align-self: stretch; min-height: 1.5em; border-radius: 2px; flex-shrink: 0; background: ' + TaskTodayList._PRIO_BAR_COLOR[prioLevel] + ';';
+        try { prioBar.setAttribute('aria-hidden', 'true'); } catch (_e) {}
 
         // Title — clicking the title (not the checkbox) opens the task NOTE. The
         // text is rendered via renderInlineLinks so `[label](url)`, `[[wikilink]]`,
@@ -404,6 +1152,8 @@ class TaskTodayList {
             const chip = chips.createEl('span', { text: label, cls: cls });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
         };
+        const notesText = TaskTodayList._notesChipText(path, TE);
+        if (notesText) addChip(notesText, 'sauce-task-notes');
         if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
@@ -414,14 +1164,18 @@ class TaskTodayList {
         if (task && task.subtask_count && task.subtask_count.total > 0) {
             addChip(task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
         }
+        if (opts.showAge !== false) {
+            const age = TaskTodayList._ageChip(task, todayStr, TE);
+            if (age) {
+                const ageChip = chips.createEl('span', { text: age.text, cls: 'sauce-task-age ' + age.cls });
+                ageChip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: ' + (age.cls === 'is-stale' ? 'var(--color-orange, #ea580c)' : 'var(--text-error, #e05561)') + ';';
+            }
+        }
 
-        // Row actions at the FAR-RIGHT end of the cluster. When the shared
-        // MenuPopover primitive is available we collapse the row's three controls
-        // (checkbox stays; Open-note + Edit + Delete) into ONE subtle `⋯` button
-        // that opens an anchored popover — Open note / Edit / Delete (danger). When
-        // it is NOT available (cold load, customJS not ready) we fall back to the
-        // LEGACY two inline icons (pencil = edit, trash = delete) so nothing
-        // regresses. Either way the controls live in a fixed 1.5em-tall flex box
+        // Row actions at the FAR-RIGHT end of the cluster. Open rows render
+        // tomorrow + next-Monday + edit + a "more" (⋯) button whose menu holds
+        // backlog / pick date / move up-down / delete; completed/archive rows
+        // render edit + a standalone delete only. The controls live in a fixed 1.5em-tall flex box
         // that vertically centers them against the FIRST line of the
         // (line-height:1.5) title — the same trick the checkbox wrapper uses — so
         // the row stays aligned even when a long title wraps, and every button is
@@ -429,18 +1183,20 @@ class TaskTodayList {
         //   - Open note → app.workspace.openLinkText(path) (same as the title click)
         //   - Edit      → TaskDialog.open({ edit: path })   (the edit dialog, NOT
         //                 the note — the note opens via the title click)
-        //   - Delete    → TaskDialog.confirmDelete(path)     (yes/no modal; on
+        //   - Tomorrow  → rescheduleTomorrow(row, task, viewedDay)
+        //   - Delete    → TaskDialog.confirmDelete(path)     (via the ⋯ menu for
+        //                 open rows; yes/no modal; on
         //                 confirm the row is removed optimistically)
         // Every gesture is lazily resolved (getTD() / window at click-time) + fully
         // guarded, so a cold-load just no-ops the tap. Never throws.
         const svg = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const ICON = {
-            edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>'),
+            tomorrow: svg('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m12 14 2 2-2 2"/><path d="M9 16h5"/>'),
+            wrench: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
+            more: svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>'),
             trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
-            open: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
-            dots: svg('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
         };
-        const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions' });
+        const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions sauce-task-actions' });
         actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
         const ACTION_BASE = 'display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 100%; min-height: 24px; padding: 0; border: none; border-radius: var(--radius-s, 4px); background: transparent; color: var(--text-faint, #999); cursor: pointer; flex-shrink: 0; transition: background 120ms ease, color 120ms ease;';
         const mkActionBtn = (cls, aria, icon, danger) => {
@@ -456,10 +1212,84 @@ class TaskTodayList {
             return b;
         };
 
-        // The two row gestures, factored out so BOTH the `⋯` popover entries and the
-        // legacy inline icons share one wiring (edit dialog / confirm-delete +
-        // optimistic row removal). Each is lazily resolved via getTD() + fully
-        // guarded → a cold-load tap is a silent no-op.
+        // Row gestures share lazy dependency resolution. A cold-load tap is a
+        // silent no-op; only status:open rows receive the tomorrow control.
+        const doTomorrow = async () => {
+            const viewedDay = options && typeof options.viewedDay === 'string'
+                ? options.viewedDay
+                : '';
+            const res = await TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref);
+            notifyRescheduled(res);
+            return res;
+        };
+        const notifyRescheduled = (res) => {
+            try { if (res && res.ok && typeof opts.onRescheduled === 'function') opts.onRescheduled(task, res.due); } catch (_e) {}
+        };
+        const doReschedule = async (newDue) => {
+            const viewedDay = typeof opts.viewedDay === 'string' ? opts.viewedDay : '';
+            const res = await TaskTodayList.reschedule(row, task, newDue, viewedDay, TDref);
+            notifyRescheduled(res);
+            return res;
+        };
+        const doPickDate = () => {
+            if (!path) return;
+            try {
+                const existing = typeof row.querySelector === 'function' ? row.querySelector('.sauce-task-datepick') : null;
+                if (existing) { existing.remove(); return; }
+            } catch (_e) {}
+            const input = row.createEl('input', { cls: 'sauce-task-datepick', type: 'date' });
+            input.type = 'date';
+            input.style.cssText = 'position: absolute; right: 8px; top: 100%; z-index: 20; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 4px); padding: 2px 6px;';
+            let outside = null;
+            const close = () => {
+                try { input.remove(); } catch (_e) {}
+                if (outside) {
+                    try { document.removeEventListener('pointerdown', outside, true); } catch (_e) {}
+                    outside = null;
+                }
+            };
+            input.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            try {
+                if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+                    outside = (ev) => {
+                        const t = ev && ev.target;
+                        if (t && (t === input || (typeof input.contains === 'function' && input.contains(t)))) return;
+                        close();
+                    };
+                    setTimeout(() => {
+                        if (outside && input.parentNode) document.addEventListener('pointerdown', outside, true);
+                    }, 0);
+                }
+            } catch (_e) {}
+            input.addEventListener('change', async () => {
+                const value = String(input.value || '');
+                close();
+                if (value) await doReschedule(value);
+            });
+            input.addEventListener('keydown', (ev) => { if (ev && ev.key === 'Escape') close(); });
+            let picked = false;
+            try { if (typeof input.showPicker === 'function') { input.showPicker(); picked = true; } } catch (_e) {}
+            if (!picked) { try { if (typeof input.focus === 'function') input.focus(); } catch (_e) {} }
+        };
+        const doMore = (ev) => {
+            let MP = null;
+            try { MP = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || null; } catch (_e) { MP = null; }
+            if (!MP || typeof MP.open !== 'function') return;
+            try {
+                const entries = [
+                    { label: TaskTodayList.clearDateLabel(task), onSelect: () => doReschedule('') },
+                    { label: 'Pick date\u2026', onSelect: () => doPickDate() },
+                ];
+                if (typeof opts.onMove === 'function') {
+                    entries.push({ label: 'Move up', onSelect: () => { try { opts.onMove(task, -1); } catch (_e) {} } });
+                    entries.push({ label: 'Move down', onSelect: () => { try { opts.onMove(task, 1); } catch (_e) {} } });
+                }
+                entries.push({ label: 'Delete', danger: true, onSelect: () => doDelete() });
+                MP.open(entries, { anchor: moreBtn || (ev && ev.currentTarget) || undefined });
+            } catch (e) {
+                try { new Notice('Could not open menu: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+            }
+        };
         const doEdit = () => {
             const TD = getTD();
             if (!path || !TD || typeof TD.open !== 'function') return;
@@ -470,43 +1300,81 @@ class TaskTodayList {
             const TD = getTD();
             if (!path || !TD || typeof TD.confirmDelete !== 'function') return;
             try {
-                const res = await TD.confirmDelete(path);
-                if (res && res.ok) {
+                // markDeleted predates deferred confirmation, so its presence
+                // cannot prove that confirmDelete understands deferWrite. Bind
+                // the two-call protocol to an explicit capability owned by the
+                // same TaskDialog version; legacy dialogs keep their atomic
+                // confirm-and-write behavior and are never written twice.
+                let deferred = false;
+                try {
+                    deferred = typeof TD.markDeleted === 'function'
+                        && typeof TD.supportsDeferredDelete === 'function'
+                        && TD.supportsDeferredDelete() === true;
+                } catch (_e) { deferred = false; }
+                const res = await TD.confirmDelete(path, deferred ? { deferWrite: true } : undefined);
+                if (!res || !res.ok) return;
+                const RS = window.customJS && window.customJS.RenderSafe;
+                if (RS && typeof RS.mutateStructure === 'function') {
+                    await RS.mutateStructure({
+                        path,
+                        failureMessage: 'Could not delete task',
+                        apply: () => TaskTodayList._removeRowReceipt(row, task, delBtn || moreBtn),
+                        write: async () => {
+                            if (!deferred) return res;
+                            const deleted = await TD.markDeleted(path);
+                            if (!deleted || deleted.ok !== true) {
+                                throw new Error((deleted && deleted.reason) || 'delete failed');
+                            }
+                            return deleted;
+                        },
+                        rollback: (receipt) => { TaskTodayList._restoreRowReceipt(receipt); },
+                    });
+                } else if (!deferred) {
                     try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
                     try { row.remove(); } catch (_e) {}
+                } else {
+                    const deleted = await TD.markDeleted(path);
+                    if (deleted && deleted.ok) {
+                        try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                        try { row.remove(); } catch (_e) {}
+                    } else {
+                        try { new Notice('Could not delete task: ' + ((deleted && deleted.reason) || 'delete failed'), 6000); } catch (_e) {}
+                    }
                 }
             } catch (e) {
                 try { new Notice('Could not delete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
         };
 
-        // Decide at RENDER time which affordance to draw: the single `⋯` popover
-        // menu when MenuPopover is available, else the legacy pencil + trash icons.
-        // This keeps the cold-load path on the exact prior behavior (nothing
-        // regresses when customJS isn't ready yet).
-        const MP = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || null;
-        const hasPopover = !!(MP && typeof MP.open === 'function');
-
-        if (hasPopover) {
-            // Single `⋯` button → anchored MenuPopover (Open note / Edit / Delete).
-            const dotsBtn = mkActionBtn('sauce-task-action-more', 'More actions', ICON.dots, false);
-            dotsBtn.addEventListener('click', (ev) => {
+        const isOpen = !!(task && task.status === 'open');
+        let delBtn = null;
+        let moreBtn = null;
+        if (isOpen) {
+            const tomorrowBtn = mkActionBtn('sauce-task-action-tomorrow', 'Move to tomorrow', ICON.tomorrow, false);
+            tomorrowBtn.addEventListener('click', async (ev) => {
                 try { ev.stopPropagation(); } catch (_e) {}
-                const entries = [
-                    { label: 'Open note', icon: ICON.open, onSelect: () => openNote() },
-                    { label: 'Edit', icon: ICON.edit, onSelect: () => doEdit() },
-                    { label: 'Delete', icon: ICON.trash, danger: true, onSelect: () => { doDelete(); } },
-                ];
-                try {
-                    const popover = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || MP;
-                    if (popover && typeof popover.open === 'function') popover.open(entries, { anchor: dotsBtn });
-                } catch (_e) { /* never throw */ }
+                await doTomorrow();
             });
+            const monday = TE && typeof TE.nextMonday === 'function' ? TE.nextMonday(todayStr) : null;
+            if (monday) {
+                const monBtn = mkActionBtn('sauce-task-action-nextmon', 'Move to next Monday', '', false);
+                monBtn.style.width = 'auto';
+                monBtn.style.padding = '0 6px';
+                monBtn.style.fontSize = '0.78em';
+                monBtn.textContent = '\u2192 Mon ' + Number(monday.slice(8, 10));
+                monBtn.addEventListener('click', async (ev) => {
+                    try { ev.stopPropagation(); } catch (_e) {}
+                    await doReschedule(monday);
+                });
+            }
+        }
+        const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.wrench, false);
+        editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
+        if (isOpen) {
+            moreBtn = mkActionBtn('sauce-task-action-more', 'More actions', ICON.more, false);
+            moreBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doMore(ev); });
         } else {
-            // LEGACY fallback — two inline icons (pencil = edit, trash = delete).
-            const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.edit, false);
-            editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
-            const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
+            delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
             delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
         }
 

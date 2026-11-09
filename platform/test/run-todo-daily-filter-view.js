@@ -189,6 +189,11 @@ function makeRenderHarness(overrides = {}) {
       renderTaskRow(container, task, TDref, options) {
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
         row.dataset.sauceTaskPath = String(task.path || '');
+        if (options && options.dragHandle) {
+          const handle = row.createEl('span', { cls: 'sauce-task-drag' });
+          handle.draggable = true;
+          handle.setAttribute('aria-label', typeof options.dragHandle === 'string' ? options.dragHandle : 'Drag to reorder');
+        }
         row.createEl('span', { cls: 'sauce-task-today-title', text: task.title });
         rows.push({ title: task.title, task, options, row, container });
         return row;
@@ -255,6 +260,10 @@ async function mount(env, pages = PAGES, ViewClass) {
 const listTitles = (root) => byClass(root, 'sauce-task-today-title')
   .filter((node) => !String(node.parentNode.className).includes('sauce-today-done'))
   .map((node) => node.textContent);
+
+// Fail closed: a test promise that never settles would otherwise let the
+// event loop drain and exit 0 before the summary prints.
+process.exitCode = 1;
 
 (async () => {
   ok('TV3-LOAD bare class is loader-safe with no trailing statements', () => {
@@ -1034,17 +1043,18 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     assert.strictEqual(lastRow(env, 'Today high').options.dragHandle, true, 'My order keeps the handle');
     await findButton(root, 'Sort ▾').fire('click');
     await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'Priority').onSelect();
-    assert(!lastRow(env, 'Today high').options.dragHandle && !lastRow(env, 'Today high').options.onMove,
+    assert(lastRow(env, 'Today high').options.dragHandle !== true && !lastRow(env, 'Today high').options.onMove,
       'Priority sort: no manual order');
     await findButton(root, 'Sort ▾').fire('click');
     await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'Smart').onSelect();
     await findButton(root, 'Group ▾').fire('click');
     await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'Project').onSelect();
-    assert(!lastRow(env, 'Today high').options.dragHandle, 'grouped: no manual order');
+    assert(lastRow(env, 'Today high').options.dragHandle !== true && !lastRow(env, 'Today high').options.onMove,
+      'grouped: no manual order');
     await findButton(root, 'Group ▾').fire('click');
     await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'None').onSelect();
     await findButton(controlsOf(root), 'All open').fire('click');
-    assert(!lastRow(env, 'Friday item').options.dragHandle && !lastRow(env, 'Friday item').options.onMove,
+    assert(lastRow(env, 'Friday item').options.dragHandle !== true && !lastRow(env, 'Friday item').options.onMove,
       'other tabs: no manual order');
   });
 
@@ -1066,10 +1076,11 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     const env = makeRenderHarness();
     const { root } = await mount(env);
     const dt = { setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    const handleOf = (row) => byClass(row, 'sauce-task-drag')[0];
     const lowRow = lastRow(env, 'Today low').row;
     const highRow = lastRow(env, 'Today high').row;
-    assert.strictEqual(lowRow.draggable, true);
-    await lowRow.fire('dragstart', { dataTransfer: dt });
+    assert.strictEqual(handleOf(lowRow).draggable, true);
+    await handleOf(lowRow).fire('dragstart', { dataTransfer: dt });
     let prevented = false;
     await highRow.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
     assert(prevented, 'a Today row accepts the drag');
@@ -1082,8 +1093,10 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
 
     await findButton(controlsOf(root), 'All open').fire('click');
     const backlogRow = lastRow(env, 'Backlog item').row;
-    assert.strictEqual(backlogRow.draggable, true, 'rows on any tab can be dragged to the strip');
-    await backlogRow.fire('dragstart', { dataTransfer: dt });
+    assert.strictEqual(handleOf(backlogRow).draggable, true, 'rows on any tab can be dragged to the strip');
+    assert.strictEqual(handleOf(backlogRow).attributes['aria-label'], 'Drag to a day', 'a non-reorder handle says what it does');
+    assert(!backlogRow._listeners.drop && !backlogRow._listeners.dragover, 'a row outside manual order is no drop target');
+    await handleOf(backlogRow).fire('dragstart', { dataTransfer: dt });
     const friday = byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === '2026-11-13');
     prevented = false;
     await friday.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
@@ -1167,15 +1180,15 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     assert.deepStrictEqual(env.calls.setFields.map((c) => c.path),
       ['spice/tasks/Today low.md', 'spice/tasks/Today high.md'], 'Move up still renumbers on mobile');
 
-    const View = loadClass({});
-    assert.strictEqual(View._isMobile({ isMobile: true }), true);
-    assert.strictEqual(View._isMobile({ isMobile: false }), false);
-    assert.strictEqual(View._isMobile(null), false);
+    assert.strictEqual(TTL_REAL._isMobile({ isMobile: true }), true);
+    assert.strictEqual(TTL_REAL._isMobile({ isMobile: false }), false);
+    assert.strictEqual(TTL_REAL._isMobile(null), false);
+    assert.strictEqual(typeof loadClass({})._isMobile, 'undefined', 'the view has no local copy');
     const hadPlatform = Object.prototype.hasOwnProperty.call(global, 'Platform');
     const prevPlatform = global.Platform;
     global.Platform = { isMobile: true };
     try {
-      assert.strictEqual(View._isMobile({}), true, 'Platform.isMobile also counts');
+      assert.strictEqual(TTL_REAL._isMobile({}), true, 'Platform.isMobile also counts');
     } finally {
       if (hadPlatform) global.Platform = prevPlatform; else delete global.Platform;
     }
@@ -1186,9 +1199,10 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     const { root } = await mount(env);
     const dt = { setData() { throw new Error('drag data must not be set'); }, effectAllowed: '', dropEffect: '' };
     const row = lastRow(env, 'Today low').row;
+    const handle = byClass(row, 'sauce-task-drag')[0];
     let cancelled = false;
     const field = { closest: (sel) => (/input/.test(sel) && /textarea/.test(sel) && /select/.test(sel) ? field : null) };
-    await row.fire('dragstart', { target: field, dataTransfer: dt, preventDefault() { cancelled = true; } });
+    await handle.fire('dragstart', { target: field, dataTransfer: dt, preventDefault() { cancelled = true; } });
     assert(cancelled, 'dragstart from the date picker is cancelled');
     const friday = byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === '2026-11-13');
     let accepted = false;
@@ -1199,12 +1213,52 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
 
     let started = false;
     const plain = { closest: () => null };
-    await row.fire('dragstart', {
+    await handle.fire('dragstart', {
       target: plain,
       dataTransfer: { setData() { started = true; }, effectAllowed: '', dropEffect: '' },
-      preventDefault() { throw new Error('a normal row drag is not cancelled'); },
+      preventDefault() { throw new Error('a normal handle drag is not cancelled'); },
     });
-    assert(started, 'a drag from the row body still starts');
+    assert(started, 'a drag from the handle still starts');
+  });
+
+  await okAsync('RD-DV-HANDLE-ONLY desktop: only the handle drags (titles stay selectable); payload uses the custom type', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    let checked = 0;
+    for (const tab of ['Today', 'This week', 'Overdue', 'Backlog', 'All open']) {
+      await buttonsOf(controlsOf(root)).find((b) => b.textContent === tab || b.textContent.startsWith(`${tab} · `)).fire('click');
+      for (const r of env.rows.filter((x) => x.row.parentNode && descendants(root).includes(x.row))) {
+        assert.notStrictEqual(r.row.draggable, true, `${tab}: the row itself is not draggable`);
+        assert(!r.row._listeners.dragstart, `${tab}: no dragstart on the row`);
+        const handle = byClass(r.row, 'sauce-task-drag')[0];
+        assert(handle && handle.draggable === true, `${tab}: ${r.title} has a draggable handle`);
+        checked += 1;
+      }
+    }
+    assert(checked >= 15, `rows checked across the tabs: ${checked}`);
+    await findButton(controlsOf(root), 'Today').fire('click');
+    const types = [];
+    const dt = { setData(type, value) { types.push([type, value]); }, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    const low = lastRow(env, 'Today low').row;
+    await byClass(low, 'sauce-task-drag')[0].fire('dragstart', { dataTransfer: dt });
+    assert.deepStrictEqual(types, [['application/x-sauce-task-path', 'spice/tasks/Today low.md']],
+      'only the custom type is set, never text/plain');
+    const high = lastRow(env, 'Today high').row;
+    await high.fire('drop', { dataTransfer: { getData: (type) => (type === 'application/x-sauce-task-path' ? 'spice/tasks/Today low.md' : '') } });
+    await flush();
+    assert.deepStrictEqual(env.calls.setFields.map((c) => c.path), ['spice/tasks/Today low.md', 'spice/tasks/Today high.md'],
+      'the drop reads the custom type');
+  });
+
+  await okAsync('RD-DV-BULK-BACKLOG-LABEL bulk Backlog explains that only personal tasks land in Backlog', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    await findButton(root, 'Select').fire('click');
+    await lastRow(env, 'Today low').options.onSelect(lastRow(env, 'Today low').task, true);
+    const button = byClass(root, 'sauce-todo-bulk-action').find((b) => b.textContent === 'Backlog');
+    assert(button, 'bulk Backlog present');
+    assert.strictEqual(button.attributes.title, 'Remove date (personal tasks go to Backlog)');
+    assert.strictEqual(button.attributes['aria-label'], 'Remove date (personal tasks go to Backlog)');
   });
 
   await okAsync('RD-DV-REMOUNT a re-render mid-bulk keeps Select mode, the selection and the lock', async () => {
@@ -1303,4 +1357,4 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
 
   console.log(`\nrun-todo-daily-filter-view: ${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;
-})();
+})().catch((e) => { console.error('run-todo-daily-filter-view threw:', e); process.exitCode = 1; });

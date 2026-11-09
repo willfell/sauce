@@ -946,6 +946,14 @@ function reloadWithDom() {
     ok('RD-DH-CAPTION tomorrow', TD.whenCaption('tomorrow', '2026-11-10') === 'Due Tue Nov 10');
     ok('RD-DH-CAPTION pick with date', TD.whenCaption('pick', '2026-11-20') === 'Due Fri Nov 20');
     ok('RD-DH-CAPTION none', TD.whenCaption('none', '') === 'No date: goes to the backlog');
+    ok('RD-DH-CAPTION none owned', TD.whenCaption('none', '', true) === 'No date');
+    ok('RD-DH-CAPTION owned ignored when dated', TD.whenCaption('today', '2026-12-03', true) === 'Due Thu Dec 3');
+    ok('RD-DH-CAPTION owned instance delegate', TDI.whenCaption('none', '', true) === 'No date');
+    ok('RD-DH-CAPTION owner detection', TD._ownedForCaption({ projectName: 'Alpha' }) === true
+        && TD._ownedForCaption({ tripSlug: 'lisbon' }) === true
+        && TD._ownedForCaption({ parentTask: '[[P]]' }) === true
+        && TD._ownedForCaption({ source: 'meeting' }) === true
+        && TD._ownedForCaption({ projectName: '', source: 'manual' }) === false);
     ok('RD-DH-CAPTION pick empty', TD.whenCaption('pick', null) === 'Pick a date');
     ok('RD-DH-CAPTION instance delegate', TDI.whenCaption('nextmon', '2026-11-16') === 'Due Mon Nov 16');
 
@@ -1189,7 +1197,7 @@ function reloadWithDom() {
         }
         const env = rdEnv().open({ surface: 'project', project: { name: 'Alpha', slug: 'alpha' } });
         must(selected(env.when('none')), 'project: none selected');
-        must(byCls(env.doc.body, 'sauce-task-when-caption').textContent === 'No date: goes to the backlog', 'none caption');
+        must(byCls(env.doc.body, 'sauce-task-when-caption').textContent === 'No date', 'project task: none caption is just No date');
         must(selected(env.chip('Alpha')), 'project surface seeds the Alpha chip');
         const daily = rdEnv().open({ surface: 'daily' });
         must(selected(daily.when('today')), 'daily without opts.today derives today from moment');
@@ -1517,6 +1525,60 @@ function reloadWithDom() {
         must(JSON.stringify(env.fmWrites[0]) === JSON.stringify(input),
             'fm round-trip:\n  got  ' + JSON.stringify(env.fmWrites[0]) + '\n  want ' + JSON.stringify(input));
         must(env.bodyWrites.length === 1 && env.bodyWrites[0] === fileText, 'body round-trip: ' + JSON.stringify(env.bodyWrites[0]));
+    });
+
+    rdCase('RD-D-CAPTION-OWNER the No date caption follows the chosen project live', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        click(env.when('none'));
+        const cap = () => byCls(env.doc.body, 'sauce-task-when-caption').textContent;
+        must(cap() === 'No date: goes to the backlog', 'personal: ' + cap());
+        const search = byCls(env.doc.body, 'sauce-task-project-search');
+        search.value = 'Alpha';
+        search.oninput();
+        click(env.chip('Alpha'));
+        must(cap() === 'No date', 'with a project: ' + cap());
+        click(env.chip('Alpha'));
+        must(cap() === 'No date: goes to the backlog', 'project cleared: ' + cap());
+    });
+
+    rdCase('RD-D-NOTES-GUARD an edit saved before the notes read resolves leaves the body untouched', async () => {
+        const fileText = '---\ntitle: Edit me\n---\n\n<!-- TASK_NOTES -->\nPrecious notes\n';
+        const env = rdEnv({ editFm: { title: 'Edit me', due: '2026-11-20', status: 'open', links: [] }, fileText });
+        let release = null;
+        env.app.vault.read = () => new Promise((r) => { release = r; });
+        env.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        const notes = env.notes();
+        must(notes.disabled === true && notes.placeholder === 'Loading notes\u2026', 'loading state: ' + notes.placeholder);
+        notes.value = 'typed over the top';
+        notes.oninput();
+        env.typeTitle('Edit me renamed');
+        await click(env.save());
+        await tick();
+        must(env.fmWrites.length === 1 && env.fmWrites[0].title === 'Edit me renamed', 'frontmatter still saved');
+        must(env.bodyWrites.length === 0, 'no body write before the read resolved: ' + JSON.stringify(env.bodyWrites));
+        release(fileText);
+        await tick();
+        must(env.bodyWrites.length === 0, 'a late read never writes either');
+
+        const failing = rdEnv({ editFm: { title: 'Edit me', due: '', status: 'open', links: [] }, fileText });
+        failing.app.vault.read = () => Promise.reject(new Error('EIO'));
+        failing.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        await tick();
+        const n2 = failing.notes();
+        must(n2.disabled === true && n2.placeholder === 'Notes could not be loaded', 'failed state: ' + n2.placeholder);
+        failing.typeTitle('Still saves');
+        await click(failing.save());
+        await tick();
+        must(failing.fmWrites.length === 1 && failing.fmWrites[0].title === 'Still saves', 'frontmatter saves after a failed read');
+        must(failing.bodyWrites.length === 0, 'no body write after a failed read');
+
+        const loaded = rdEnv({ editFm: { title: 'Edit me', due: '', status: 'open', links: [] }, fileText });
+        loaded.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        await tick();
+        must(loaded.notes().disabled === false && loaded.notes().value === 'Precious notes', 'loaded: ' + loaded.notes().value);
+        await click(loaded.save());
+        await tick();
+        must(loaded.bodyWrites.length === 1 && loaded.bodyWrites[0] === fileText, 'loaded save round-trips the body byte-identical');
     });
 
     rdCase('RD-D-RECENT-TRASH trashed tasks never feed the recent-project chips', async () => {
