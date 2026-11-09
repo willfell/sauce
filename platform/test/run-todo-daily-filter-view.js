@@ -1111,7 +1111,7 @@ process.exitCode = 1;
     assert(!prevented, 'no drag in progress: the cell refuses');
   });
 
-  await okAsync('RD-DV-STRIP-RENDER strip sits above the tabs; today highlighted; click opens This week', async () => {
+  await okAsync('RD-DV-STRIP-RENDER strip sits above the tabs; today highlighted; no day selected', async () => {
     const env = makeRenderHarness();
     const { View, root } = await mount(env);
     const host = byClass(root, 'sauce-todo-above-tabs')[0];
@@ -1127,10 +1127,98 @@ process.exitCode = 1;
       && /width:\s*100%/.test(strip.style.cssText), 'seven equal columns across the full width: ' + strip.style.cssText);
     for (const cell of cells) assert(/width:\s*100%/.test(cell.style.cssText), 'each cell fills its column');
     assert.strictEqual(cells[0].attributes['aria-current'], 'date');
-    await cells[4].fire('click');
-    assert.strictEqual(View.readPrefs(env.storage).tab, 'week');
-    assert(String(findButton(controlsOf(root), 'This week').className).includes('is-active'));
-    assert.deepStrictEqual(listTitles(root), ['Friday item', 'Today high', 'Today low']);
+    assert.strictEqual(cells[4].attributes['aria-pressed'], 'false');
+  });
+
+  ok('RD-DV-DAY selectDay lists the open tasks due on exactly that date', () => {
+    const View = loadClass({ customJS: { TaskEntity: TE } });
+    assert.deepStrictEqual(titles(View.selectDay(PARSED, '2026-11-13')), ['Friday item']);
+    assert.deepStrictEqual(titles(View.selectDay(PARSED, TODAY)), ['Today low', 'Today high'],
+      'done tasks due that day are not listed');
+    assert.deepStrictEqual(titles(View.selectDay(PARSED, '2026-11-05')), ['Overdue mid'], 'a past day lists its late tasks');
+    assert.deepStrictEqual(View.selectDay(PARSED, '2026-11-10'), []);
+    assert.deepStrictEqual(View.selectDay(PARSED, ''), [], 'no date selects nothing (never the undated backlog)');
+    assert.deepStrictEqual(View.selectDay(null, TODAY), []);
+  });
+
+  await okAsync('RD-DV-DAY clicking a day shows only that day, marks the cell and puts a day pill first in the tabs', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    const cell = () => byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === '2026-11-13');
+    await cell().fire('click');
+    assert.deepStrictEqual(listTitles(root), ['Friday item']);
+    assert(String(cell().className).split(/\s+/).includes('is-selected'));
+    assert.strictEqual(cell().attributes['aria-pressed'], 'true');
+    assert(/color-mix\(in srgb, var\(--interactive-accent\) 14%, transparent\)/.test(cell().style.cssText),
+      'the selected cell takes the active pill tint: ' + cell().style.cssText);
+
+    const tabs = byClass(root, 'sauce-todo-filter-tabs')[0];
+    const pill = tabs.children[0];
+    assert(String(pill.className).includes('sauce-todo-day-pill') && String(pill.className).includes('is-active'));
+    assert.strictEqual(byClass(pill, 'sauce-todo-day-pill-label')[0].textContent, 'Fri Nov 13');
+    assert.strictEqual(byClass(pill, 'sauce-todo-day-pill-x')[0].textContent, '×');
+    assert.strictEqual(pill.attributes['aria-label'], 'Showing Fri Nov 13. Show all tasks');
+    for (const name of ['Today', 'This week', 'All open']) {
+      const button = findButton(controlsOf(root), name);
+      assert(!String(button.className).includes('is-active'), `${name} is not active while a day is shown`);
+      assert.strictEqual(button.attributes['aria-selected'], 'false');
+    }
+    assert.strictEqual(View.readPrefs(env.storage).tab, 'today', 'a day focus is never persisted as a tab');
+    assert.deepStrictEqual(byClass(root, 'sauce-todo-filter-done-host')[0].children, [], 'nothing done on a future day');
+  });
+
+  await okAsync('RD-DV-DAY the pill, the same cell or any tab leaves the day view', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    const cell = (date) => byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === date);
+    const pill = () => byClass(root, 'sauce-todo-day-pill')[0];
+
+    await cell('2026-11-13').fire('click');
+    await pill().fire('click');
+    assert.strictEqual(pill(), undefined, 'the pill is gone');
+    assert.deepStrictEqual(listTitles(root), ['Today high', 'Today low'], 'back to the tab that was open');
+    assert(String(findButton(controlsOf(root), 'Today').className).includes('is-active'));
+    assert(!String(cell('2026-11-13').className).includes('is-selected'));
+
+    await cell('2026-11-13').fire('click');
+    await cell('2026-11-13').fire('click');
+    assert.strictEqual(pill(), undefined, 'clicking the selected day again leaves it');
+    assert.deepStrictEqual(listTitles(root), ['Today high', 'Today low']);
+
+    await cell('2026-11-13').fire('click');
+    await cell(TODAY).fire('click');
+    assert.strictEqual(byClass(pill(), 'sauce-todo-day-pill-label')[0].textContent, 'Mon Nov 9', 'another day switches the focus');
+
+    await findButton(controlsOf(root), 'All open').fire('click');
+    assert.strictEqual(pill(), undefined);
+    assert.strictEqual(listTitles(root).length, 8);
+    assert(String(findButton(controlsOf(root), 'All open').className).includes('is-active'));
+  });
+
+  await okAsync('RD-DV-DAY a day view keeps that day\'s done list, empty copy, no reorder, and survives a re-render', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    const cell = (r, date) => byClass(r, 'sauce-todo-week-cell').find((c) => c.dataset.date === date);
+
+    const before = env.rows.length;
+    await cell(root, TODAY).fire('click');
+    assert.deepStrictEqual(listTitles(root), ['Today high', 'Today low']);
+    const doneHost = byClass(root, 'sauce-todo-filter-done-host')[0];
+    assert.strictEqual(byClass(doneHost, 'sauce-section-label')[0].textContent, 'Done today · 2');
+    const dayRows = env.rows.slice(before).filter((x) => x.title.startsWith('Today'));
+    assert.strictEqual(dayRows.length, 2);
+    for (const r of dayRows) {
+      assert.strictEqual(r.options.onMove, undefined, 'no manual reorder inside a day view');
+    }
+
+    await cell(root, '2026-11-10').fire('click');
+    const empty = byClass(root, 'sauce-todo-filter-empty')[0];
+    assert.strictEqual(empty.textContent, 'Nothing due Tue Nov 10.');
+
+    const again = await mount(env, PAGES, View);
+    assert.strictEqual(byClass(byClass(again.root, 'sauce-todo-day-pill')[0], 'sauce-todo-day-pill-label')[0].textContent,
+      'Tue Nov 10', 'the day view survives the Dataview re-render a write causes');
+    assert(String(cell(again.root, '2026-11-10').className).includes('is-selected'));
   });
 
   await okAsync('RD-DV-ONDONE a checkbox completion repaints counts and Done today', async () => {
