@@ -760,13 +760,14 @@ function makeEnv(initialFiles, opts) {
   await ok('RD-DL-RENDER default last-week: header, pills, bars, project panel, grouped Reopen rows', async () => {
     const env = doneEnv();
     const c = await mountDone(env);
-    assert(headerOf(c) === '3 done Nov 2 – 8, across 3 projects', 'header: ' + headerOf(c));
+    assert(headerOf(c) === '3 done Nov 2 – 8, across 2 projects', 'header: ' + headerOf(c));
     const pills = allByCls(c, 'sauce-done-pill');
     assert(pills.map((b) => b.textContent).join('|') === 'Today|Yesterday|This week|Last week|This month|Pick range…', 'pills ' + pills.map((b) => b.textContent));
     assert(pill(c, 'Last week').attributes['aria-pressed'] === 'true' && pill(c, 'Today').attributes['aria-pressed'] === 'false', 'pressed state');
     const bars = allByCls(c, 'sauce-done-bar');
     assert(bars.length === 7 && bars.map((b) => b.attributes['aria-label']).join(',') === '0 done,1 done,0 done,0 done,2 done,0 done,0 done', 'bar labels ' + bars.map((b) => b.attributes['aria-label']));
-    assert(allByCls(c, 'sauce-done-project-row').length === 3, 'project panel rows');
+    const projRows = allByCls(c, 'sauce-done-project-row');
+    assert(projRows.length === 3 && textOf(projRows[2]).startsWith('No project'), 'project panel keeps a No project row, last: ' + projRows.map(textOf));
     const days = allByCls(c, 'sauce-done-day').map((d) => textOf(d));
     assert(days.length === 2 && /Fri Nov 6/.test(days[0]) && /Tue Nov 3/.test(days[1]), 'day headings ' + days);
     const rows = allByCls(c, 'sauce-today-done-row');
@@ -789,7 +790,7 @@ function makeEnv(initialFiles, opts) {
     assert(pill(c, 'Today').attributes['aria-pressed'] === 'true', 'pressed follows');
     fireClick(pill(c, 'This month'));
     await settle();
-    assert(headerOf(c) === '3 done in November, across 3 projects', 'month header ' + headerOf(c));
+    assert(headerOf(c) === '3 done in November, across 2 projects', 'month header ' + headerOf(c));
     env = doneEnv({ store: { 'sauce-done-log:range': 'this-month' } });
     c = await mountDone(env);
     assert(pill(c, 'This month').attributes['aria-pressed'] === 'true', 'stored preset restored');
@@ -929,6 +930,38 @@ function makeEnv(initialFiles, opts) {
     fireEvent(i2, 'input');
     await settle();
     assert(allByCls(c, 'sauce-today-done-row').length === 0, 'failed read has no body match, no throw');
+  });
+
+  await ok('RD-DL-HEADER-PROJECTS counts named projects only; unprojected-only range says 0 projects; one says "1 project"', async () => {
+    const only = DONE_PAGES.filter((p) => p.title === 'Water plants');
+    let c = await mountDone(doneEnv({ pages: only }));
+    assert(headerOf(c) === '1 done Nov 2 – 8, across 0 projects', 'unprojected only: ' + headerOf(c));
+    assert(allByCls(c, 'sauce-done-project-row').length === 1, 'the No project row is still listed');
+    const one = DONE_PAGES.filter((p) => p.title !== 'Call vendor');
+    c = await mountDone(doneEnv({ pages: one }));
+    assert(headerOf(c) === '2 done Nov 2 – 8, across 1 project', 'singular: ' + headerOf(c));
+  });
+
+  await ok('RD-DL-SEARCH overlapping queries: the list follows the latest query and the indicator clears', async () => {
+    clearBodyCache();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const env = doneEnv({ readGate: gate });
+    const c = await mountDone(env);
+    const input = allByCls(c, 'sauce-done-search')[0];
+    input.value = 'renewal';
+    fireEvent(input, 'input');
+    await settle();
+    assert(allByCls(c, 'sauce-done-loading').length === 1, 'first query is loading');
+    input.value = 'ferns';
+    fireEvent(input, 'input');
+    await settle();
+    release();
+    await settle();
+    const rows = allByCls(c, 'sauce-today-done-row');
+    assert(rows.length === 1 && /Water plants/.test(textOf(rows[0])), 'list matches the latest query: ' + rows.map(textOf));
+    assert(!allByCls(c, 'sauce-done-loading').length, 'indicator cleared');
+    assert(/1 of 3/.test(textOf(findByCls(c, 'sauce-done-showing'))), 'showing line follows the latest query');
   });
 
   await ok('RD-DL-FILTERS Project and Source menus filter the list; header keeps the range total', async () => {

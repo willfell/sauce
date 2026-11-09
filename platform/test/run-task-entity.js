@@ -4313,29 +4313,27 @@ function runTaskDoneArchiveTests() {
     assert(TDARCH.groupByDate([]).size === 0, 'empty array');
   });
 
-  ok('TDARCH-4 filterByText returns tasks whose title includes text (case-insensitive)', () => {
-    const tasks = [
-      { title: 'Fix Dev CDC' },
-      { title: 'Deploy staging' },
-      { title: 'fix login bug' },
+  ok('RD-DL-DAYOF the cold fallback and TaskEntity.completedDay agree on ISO strings and Luxon-like values', () => {
+    const mkTaskForDay = (v) => ({ completed_at: v });
+    const samples = [
+      mkTaskForDay('2026-11-06T23:30:00-07:00'),
+      mkTaskForDay({ toISODate: () => '2026-11-06' }),
+      mkTaskForDay({ toFormat: (f) => (f === 'yyyy-MM-dd' ? '2026-11-06' : '') }),
+      mkTaskForDay('2026-11-06'),
+      mkTaskForDay(null),
+      mkTaskForDay('garbage'),
     ];
-    const result = TDARCH.filterByText(tasks, 'fix');
-    assert(result.length === 2, 'expected 2, got ' + result.length);
-    assert(result[0].title === 'Fix Dev CDC', 'first match');
-    assert(result[1].title === 'fix login bug', 'second match');
-  });
-
-  ok('TDARCH-5 filterByText returns all tasks when text is empty/blank', () => {
-    const tasks = [{ title: 'A' }, { title: 'B' }];
-    assert(TDARCH.filterByText(tasks, '').length === 2, 'empty string returns all');
-    assert(TDARCH.filterByText(tasks, '   ').length === 2, 'blank string returns all');
-    assert(TDARCH.filterByText(tasks, null).length === 2, 'null returns all');
-  });
-
-  ok('TDARCH-6 filterByText returns [] when no titles match', () => {
-    const tasks = [{ title: 'Foo' }, { title: 'Bar' }];
-    const result = TDARCH.filterByText(tasks, 'zzz-no-match');
-    assert(result.length === 0, 'no matches');
+    const win = global.window;
+    try {
+      for (const t of samples) {
+        global.window = { customJS: { TaskEntity } };
+        const withTE = TaskDoneArchiveClass._dayOf(t);
+        global.window = {};
+        const cold = TaskDoneArchiveClass._dayOf(t);
+        assert(withTE === cold, 'drift for ' + JSON.stringify(t.completed_at) + ': ' + withTE + ' vs ' + cold);
+        assert(withTE === TaskEntity.completedDay(t), 'delegates to completedDay');
+      }
+    } finally { global.window = win; }
   });
 
   const DAY = (d, hm, offset) => d + 'T' + hm + ':00' + (offset || '-07:00');

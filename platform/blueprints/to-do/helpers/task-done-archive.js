@@ -1,7 +1,6 @@
 class TaskDoneArchive {
 
     groupByDate(parsedTasks) { return TaskDoneArchive.groupByDate(parsedTasks); }
-    filterByText(parsedTasks, text) { return TaskDoneArchive.filterByText(parsedTasks, text); }
     filterTasks(parsedTasks, opts) { return TaskDoneArchive.filterTasks(parsedTasks, opts); }
     rangeFor(preset, todayStr) { return TaskDoneArchive.rangeFor(preset, todayStr); }
     rangeLabel(preset, range) { return TaskDoneArchive.rangeLabel(preset, range); }
@@ -156,8 +155,9 @@ class TaskDoneArchive {
         const paintHeader = () => {
             const sum = Self.summarize(allTasks, state.range.from, state.range.to);
             clear(headerHost);
+            const named = sum.projects.filter(p => p.name !== Self.NO_PROJECT).length;
             headerHost.textContent = sum.total + ' done ' + Self.rangeLabel(state.preset, state.range)
-                + ', across ' + plural(sum.projects.length, 'project');
+                + ', across ' + plural(named, 'project');
             return sum;
         };
 
@@ -569,13 +569,6 @@ class TaskDoneArchive {
             map.get(item.day).push(item.t);
         }
         return map;
-    }
-
-    static filterByText(parsedTasks, text) {
-        if (!Array.isArray(parsedTasks)) return [];
-        if (!text || !text.trim()) return parsedTasks;
-        const lower = text.toLowerCase();
-        return parsedTasks.filter(t => t && t.title && t.title.toLowerCase().includes(lower));
     }
 
     /**
