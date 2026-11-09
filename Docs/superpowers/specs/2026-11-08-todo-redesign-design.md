@@ -84,7 +84,7 @@ the clock.
 | `daysLate(task, todayStr)` | integer ≥ 0. |
 | `compareSmart(a, b, todayStr)` | tasks with a numeric `rank` first (ascending); then priority (highest → none); then days late (desc); then `created_at` (asc); then title. |
 | `compareBy(mode)` | `smart` · `manual` (rank asc, unranked last by created) · `priority` · `due` (soonest, blank last) · `oldest` (created asc) · `touched` (file mtime desc). |
-| `parseTitleShortcuts(text, todayStr, projects)` | Pulls trailing/inline tokens: `today`, `tomorrow`, `next mon` / `mon`…`sun` (next occurrence), `!low` `!medium` `!high` `!highest`, `#Project` (case-insensitive match against project names, spaces allowed via `#"Two Words"` or nearest prefix match). Returns `{ title, due?, priority?, project? }` with tokens removed. Unmatched `#x` stays in the title. |
+| `parseTitleShortcuts(text, todayStr, projects)` | Pulls only a trailing run of tokens (so "Prep Monday standup" keeps its title): `today`, `tomorrow`, `next mon` / `mon`…`sun` (next occurrence), `!low` `!medium` `!high` `!highest`, `#Project` (case-insensitive match against project names, spaces allowed via `#"Two Words"` or nearest prefix match). Returns `{ title, due?, priority?, project? }` with tokens removed. Unmatched `#x` stays in the title. |
 
 **Backlog = personal undated open tasks.** A task is in Backlog when it is open, has no `due`, and
 has no `project_slug`, no `trip_slug`, no `parent_task`, and `source !== 'meeting'` (undated
