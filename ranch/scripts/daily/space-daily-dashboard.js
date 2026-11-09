@@ -111,6 +111,13 @@
  *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
+  // Instance delegates. CustomJS stores this class as an INSTANCE, so
+  // cross-class callers (SpaceHome's glance counts) reach these through
+  // `customJS.SpaceDailyDashboard.x(...)`; a static alone is undefined there.
+  computeCounts(dv, todayStr, TE) { return SpaceDailyDashboard.computeCounts(dv, todayStr, TE); }
+  selectTasks(dv, todayStr, TE) { return SpaceDailyDashboard.selectTasks(dv, todayStr, TE); }
+  selectMeetings(dv, todayStr) { return SpaceDailyDashboard.selectMeetings(dv, todayStr); }
+
   /**
    * Daily task sort policy. These comparators intentionally return zero for
    * equal values; sortTasks decorates with the source index so ties stay stable
@@ -296,6 +303,41 @@ class SpaceDailyDashboard {
       const m = /T(\d{2}):(\d{2})/.exec(String(v));
       return m ? m[1] + ":" + m[2] : "";
     } catch (_e) { return ""; }
+  }
+
+  /**
+   * Today-panel failure policy. Every write the panel starts goes through a rail
+   * that already shows a Notice when the write itself throws (RenderSafe.mutate,
+   * TaskTodayList.reschedule). The panel adds its own Notice only for refusals
+   * that rail returns silently, before any write. Returns:
+   *   'ok'      — succeeded
+   *   'skipped' — a no_op refusal (cold load, in flight, task no longer open)
+   *   'silent'  — refused before writing with no Notice (reason in the list), or
+   *               the call itself threw past its own guard
+   *   'noticed' — the write failed and its rail already told the user
+   */
+  static classifyTodayOutcome(res) {
+    if (res && res.ok === true) return "ok";
+    if (res && res.no_op) return "skipped";
+    if (!res) return "silent";
+    const reason = String(res.reason || "");
+    return SpaceDailyDashboard.TODAY_SILENT_REASONS.includes(reason) ? "silent" : "noticed";
+  }
+
+  static get TODAY_SILENT_REASONS() {
+    return [
+      "in-flight", "render-safe-unavailable", "not-done", "task file not found",
+      "app unavailable", "no-fields", "task-entity-unavailable",
+    ];
+  }
+
+  /**
+   * In-progress bulk / reorder operations for a day's panel, held on the class
+   * rather than the per-render state so a panel that Dataview re-renders mid
+   * operation still sees the lock.
+   */
+  static _todayLocks() {
+    return SpaceDailyDashboard._todayLockSet || (SpaceDailyDashboard._todayLockSet = new Set());
   }
 
   static get TODAY_PREFS_KEY() { return "sauce-todo-filter:prefs:v2"; }
@@ -1730,9 +1772,12 @@ class SpaceDailyDashboard {
       const up = mkSection("upnext", "Up next");
       up.list.className += " is-upnext";
 
+      const locks = SpaceDailyDashboard._todayLocks();
+      const reorderKey = todayStr + ":reorder";
+      const bulkKey = todayStr + ":bulk";
       const applyOrder = async (next) => {
-        if (st.reordering) return;
-        st.reordering = true;
+        if (locks.has(reorderKey)) return;
+        locks.add(reorderKey);
         try {
           const rankByPath = {};
           for (const t of next) rankByPath[t.path] = t.rank;
@@ -1743,21 +1788,22 @@ class SpaceDailyDashboard {
           next.forEach((t, i) => { t.rank = i + 1; });
           rerender();
           let failed = 0;
+          let silent = 0;
           for (const c of changes) {
             let res = null;
             try { res = await TD.setFields(c.path, { rank: c.rank }); } catch (_e) { res = null; }
-            if (!res || res.ok !== true) {
+            const outcome = SpaceDailyDashboard.classifyTodayOutcome(res);
+            if (outcome !== "ok") {
               failed++;
+              if (outcome === "silent") silent++;
               const t = byPath.get(c.path);
               if (t) t.rank = prior.get(c.path);
             }
           }
-          if (failed > 0) {
-            rerender();
-            notice("Could not save the new task order");
-          }
+          if (failed > 0) rerender();
+          if (silent > 0) notice("Could not save the new task order");
         } finally {
-          st.reordering = false;
+          locks.delete(reorderKey);
         }
       };
       // Only rows still on screen take part: a row completed or rescheduled by
@@ -1862,22 +1908,31 @@ class SpaceDailyDashboard {
         const rows = new Map();
         for (const t of overdue) rows.set(t.path, TTL.renderTaskRow(od.list, t, TD, rowOpts()));
         const moveAll = mkButton(od.tools, "sauce-today-moveall", "Move all to today");
+        const setBusy = (busy) => {
+          moveAll.disabled = !!busy;
+          moveAll.textContent = busy ? "Moving…" : "Move all to today";
+          try { moveAll.setAttribute("aria-busy", busy ? "true" : "false"); } catch (_e) {}
+        };
+        if (locks.has(bulkKey)) setBusy(true);
         moveAll.addEventListener("click", async (ev) => {
           stop(ev);
-          if (st.bulk || typeof TTL.reschedule !== "function") return;
-          st.bulk = true;
-          let failed = 0;
+          if (locks.has(bulkKey) || typeof TTL.reschedule !== "function") return;
+          locks.add(bulkKey);
+          setBusy(true);
+          let silent = 0;
           try {
             for (const t of overdue) {
               let res = null;
               try { res = await TTL.reschedule(rows.get(t.path), t, todayStr, todayStr, TD); } catch (_e) { res = null; }
-              if (res && res.ok) applyMoved(t, todayStr); else failed++;
+              const outcome = SpaceDailyDashboard.classifyTodayOutcome(res);
+              if (outcome === "ok") applyMoved(t, todayStr);
+              else if (outcome === "silent") silent++;
             }
           } finally {
-            st.bulk = false;
+            locks.delete(bulkKey);
           }
           rerender();
-          if (failed > 0) notice("Could not move " + failed + (failed === 1 ? " task" : " tasks") + " to today");
+          if (silent > 0) notice("Could not move " + silent + (silent === 1 ? " task" : " tasks") + " to today");
         });
       }
 
@@ -1947,7 +2002,8 @@ class SpaceDailyDashboard {
           if (typeof TTL.renderInlineLinks === "function") TTL.renderInlineLinks(title, text, t.path);
           else title.textContent = text;
           title.addEventListener("click", () => {
-            try { if (t.path && appRef && appRef.workspace) appRef.workspace.openLinkText(t.path, ""); } catch (_e) {}
+            try { if (t.path && appRef && appRef.workspace) appRef.workspace.openLinkText(t.path, ""); }
+            catch (e) { notice("Could not open task: " + (e && (e.message || e))); }
           });
           const time = SpaceDailyDashboard.doneTimeLabel(t.completed_at);
           if (time) {
@@ -1959,13 +2015,15 @@ class SpaceDailyDashboard {
             && !!TD && typeof TD.reopen === "function";
           if (canUndo) {
             const undo = mkButton(row, "sauce-today-undo", "Undo", linkCss);
+            try { undo.setAttribute("aria-label", "Undo: " + text); } catch (_e) {}
             undo.addEventListener("click", async (ev) => {
               stop(ev);
               if (undo.disabled) return;
               undo.disabled = true;
               let res = null;
-              try { res = await TD.reopen(t.path); } catch (e) { res = { ok: false, reason: e && (e.message || String(e)) }; }
-              if (res && res.ok) {
+              try { res = await TD.reopen(t.path); } catch (_e) { res = null; }
+              const outcome = SpaceDailyDashboard.classifyTodayOutcome(res);
+              if (outcome === "ok") {
                 model.doneToday = model.doneToday.filter((d) => d !== t);
                 const reopened = Object.assign({}, t, { status: "open", completed_at: null, path: res.path || t.path });
                 let bucket = null;
@@ -1976,7 +2034,7 @@ class SpaceDailyDashboard {
                 rerender();
               } else {
                 undo.disabled = false;
-                notice("Could not reopen task: " + ((res && res.reason) || "unknown"));
+                if (outcome === "silent") notice("Could not reopen task: " + ((res && res.reason) || "unknown"));
               }
             });
           }
@@ -1991,7 +2049,10 @@ class SpaceDailyDashboard {
           } catch (e) { notice("Could not open Completed Tasks: " + (e && (e.message || e))); }
         });
       }
-    } catch (_e) { /* never throw out of a render or gesture */ }
+    } catch (e) {
+      // Never throw out of a render or gesture; leave a trace for debugging.
+      try { console.warn("[SpaceDailyDashboard] today panel render failed", e); } catch (_e) {}
+    }
   }
 
   /**

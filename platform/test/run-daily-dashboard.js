@@ -24,6 +24,8 @@ const DAILY_MANIFEST = JSON.parse(fs.readFileSync(path.join(WORKSHOP, 'platform/
 const AF_SRC  = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/activity-feed/activity-feed.js'), 'utf8');
 const TTL_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-today-list.js'), 'utf8');
 const TE_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-entity.js'), 'utf8');
+const TD_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/task-entity/task-dialog.js'), 'utf8');
+const RS_SRC = fs.readFileSync(path.join(WORKSHOP, 'platform/mechanisms/render-safe/render-safe.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function assert(cond, msg) { if (cond) { pass++; } else { fail++; console.log('  FAIL ' + msg); } }
@@ -1131,14 +1133,20 @@ async function renderDailyTaskFixture(today, options) {
       calls.reschedule.push({ row, path: task && task.path, newDue, viewedDay, TDref });
       await new Promise((r) => setTimeout(r, 1));
       inFlight--;
+      if (o.rescheduleResult) return o.rescheduleResult(task, newDue);
       try { row.remove(); } catch (_e) {}
       return { ok: true, due: newDue };
     };
     const storage = memoryStorage(o.prefs ? { [P_PREFS_KEY]: JSON.stringify(o.prefs) } : {});
+    const knownPaths = new Set([...(o.taskPages || []), ...(o.donePages || [])].map((p) => p.file.path));
     const app = {
       vault: {
-        getAbstractFileByPath: (p) => ({ path: p }),
+        getAbstractFileByPath: (p) => (knownPaths.has(p) ? { path: p } : null),
         adapter: { read: async () => { throw new Error('ENOENT'); }, write: async () => {}, mkdir: async () => {} },
+      },
+      fileManager: {
+        processFrontMatter: async () => { calls.writes = (calls.writes || 0) + 1; throw new Error('disk on fire'); },
+        renameFile: async () => { throw new Error('rename should not run'); },
       },
       workspace: { openLinkText(p) { calls.opened.push(p); }, getLeavesOfType() { return []; } },
     };
@@ -1151,11 +1159,22 @@ async function renderDailyTaskFixture(today, options) {
       localStorage: storage,
       app,
     };
+    const realTD = o.realTD ? new (new Function(`${TD_SRC}; return TaskDialog;`)())() : null;
+    const realRS = o.realTD ? new (new Function(`${RS_SRC}; return RenderSafe;`)())() : null;
+    if (realTD) {
+      for (const name of ['setFields', 'reopen']) {
+        const orig = realTD[name].bind(realTD);
+        realTD[name] = async (...args) => {
+          (name === 'setFields' ? calls.setFields : calls.reopen).push(name === 'setFields' ? { path: args[0], fields: Object.assign({}, args[1]) } : args[0]);
+          return orig(...args);
+        };
+      }
+    }
     const customJS = {
       TaskEntity: TE,
       TaskTodayList: o.noTTL ? null : TTL,
-      TaskDialog: TD,
-      RenderSafe: { captureScroll() {} },
+      TaskDialog: realTD || TD,
+      RenderSafe: realRS || { captureScroll() {} },
       MenuPopover: { open: (entries, opts) => { calls.menus.push({ entries, opts }); } },
       ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
       BeaconCards: { render: async () => {} },
@@ -1325,12 +1344,21 @@ async function renderDailyTaskFixture(today, options) {
       assert(f.labels().includes('Done today · 1'), 'Done today count updates: ' + f.labels());
     } finally { f.cleanup(); }
 
-    const bad = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, reopenResult: () => ({ ok: false, reason: 'nope' }) });
+    const bad = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, reopenResult: () => ({ ok: false, reason: 'not-done' }) });
     try {
-      await bad.section('done').querySelectorAll('.sauce-today-undo')[0]._fire('click');
+      const undo = bad.section('done').querySelectorAll('.sauce-today-undo')[0];
+      assert(undo.getAttribute('aria-label') === 'Undo: Done late', 'Undo aria-label names the task: ' + undo.getAttribute('aria-label'));
+      await undo._fire('click');
       assert(bad.section('done').querySelectorAll('.sauce-today-done-row').length === 2, 'failed reopen keeps the row');
-      assert(bad.notices.length === 1, 'failed reopen shows one Notice: ' + JSON.stringify(bad.notices));
+      assert(bad.notices.length === 1, 'silent pre-write refusal gets exactly one panel Notice: ' + JSON.stringify(bad.notices));
+      assert(undo.disabled === false, 'Undo re-enabled after failure');
     } finally { bad.cleanup(); }
+
+    const noticed = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, reopenResult: () => ({ ok: false, reason: 'disk on fire' }) });
+    try {
+      await noticed.section('done').querySelectorAll('.sauce-today-undo')[0]._fire('click');
+      assert(noticed.notices.length === 0, 'a failed write (already noticed by RenderSafe) adds no panel Notice: ' + JSON.stringify(noticed.notices));
+    } finally { noticed.cleanup(); }
   });
 
   await ok('RD-P-MOVEALL Move all to today reschedules each overdue task sequentially to today', async () => {
@@ -1437,17 +1465,17 @@ async function renderDailyTaskFixture(today, options) {
     } finally { f.cleanup(); }
   });
 
-  await ok('RD-P-RANK-FAIL a failed rank write re-renders the panel and shows one Notice', async () => {
+  await ok('RD-P-RANK-FAIL a silently refused rank write re-renders the panel and shows one Notice', async () => {
     const f = await renderLivePanel({
       taskPages: rankedPages,
-      setFieldsResult: (p) => (p === 'spice/tasks/alpha.md' ? { ok: false, reason: 'x' } : { ok: true }),
+      setFieldsResult: (p) => (p === 'spice/tasks/alpha.md' ? { ok: false, reason: 'task file not found' } : { ok: true }),
     });
     try {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       const dt = { setData() {}, setDragImage() {} };
       await rows[3]._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
-      assert(f.notices.length === 1, 'exactly one notice: ' + JSON.stringify(f.notices));
+      assert(f.notices.length === 1, 'exactly one panel notice for the silent refusal: ' + JSON.stringify(f.notices));
       assert(f.calls.setFields.length === 4, 'remaining writes still attempted sequentially');
       const order = f.rowPaths('upnext');
       assert(JSON.stringify(order) === JSON.stringify([
@@ -1478,6 +1506,111 @@ async function renderDailyTaskFixture(today, options) {
       assert(rows.every((r) => !r.querySelector('.sauce-task-drag')), 'no drag handles outside smart/manual sort');
       assert(/Sort: Priority/.test(g.root.querySelector('.sauce-today-sort').textContent), 'sort label reflects prefs');
     } finally { g.cleanup(); }
+  });
+
+  await ok('RD-P-REAL-RANK-FAIL real TaskDialog + RenderSafe: one RenderSafe Notice per failed row, none from the panel', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages, realTD: true });
+    try {
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      const dt = { setData() {}, setDragImage() {} };
+      await rows[3]._fire('dragstart', { dataTransfer: dt });
+      await rows[0]._fire('drop', { dataTransfer: dt });
+      assert(f.calls.setFields.length === 4, 'four rank writes attempted: ' + f.calls.setFields.length);
+      assert(f.calls.writes === 4, 'each reached processFrontMatter (which threw): ' + f.calls.writes);
+      assert(f.notices.length === 4 && f.notices.every((n) => n === 'Could not update task'),
+        'exactly one RenderSafe Notice per failed row and no panel Notice: ' + JSON.stringify(f.notices));
+      assert(JSON.stringify(f.rowPaths('upnext')) === JSON.stringify(rankedPages.map((p) => p.file.path)),
+        'panel re-rendered back to the persisted order: ' + f.rowPaths('upnext'));
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-REAL-UNDO-FAIL real TaskDialog + RenderSafe: failed Undo shows only RenderSafe\'s Notice', async () => {
+    const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, realTD: true });
+    try {
+      await f.section('done').querySelectorAll('.sauce-today-undo')[0]._fire('click');
+      assert(JSON.stringify(f.calls.reopen) === JSON.stringify(['spice/tasks/_done/done-late.md']), 'real reopen called');
+      assert(f.calls.writes === 1, 'reopen reached processFrontMatter: ' + f.calls.writes);
+      assert(JSON.stringify(f.notices) === JSON.stringify(['Could not reopen task']),
+        'exactly RenderSafe\'s Notice, nothing on top: ' + JSON.stringify(f.notices));
+      assert(f.section('done').querySelectorAll('.sauce-today-done-row').length === 2, 'row kept after failure');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-MOVEALL-POLICY no_op results are skipped silently; a throwing call gets one panel Notice', async () => {
+    const f = await renderLivePanel({
+      taskPages: sectionPages, donePages: sectionDone,
+      rescheduleResult: () => ({ ok: false, no_op: true, in_flight: true }),
+    });
+    try {
+      await f.section('overdue').querySelector('.sauce-today-moveall')._fire('click');
+      assert(f.calls.reschedule.length === 2, 'both attempted');
+      assert(f.notices.length === 0, 'skipped no_op results add no Notice: ' + JSON.stringify(f.notices));
+      assert(f.rowPaths('overdue').length === 2, 'skipped tasks stay in Overdue');
+    } finally { f.cleanup(); }
+
+    const g = await renderLivePanel({
+      taskPages: sectionPages, donePages: sectionDone,
+      rescheduleResult: () => ({ ok: false, reason: 'disk on fire' }),
+    });
+    try {
+      await g.section('overdue').querySelector('.sauce-today-moveall')._fire('click');
+      assert(g.notices.length === 0, 'reschedule write failures were already noticed by reschedule: ' + JSON.stringify(g.notices));
+    } finally { g.cleanup(); }
+
+    const h = await renderLivePanel({
+      taskPages: sectionPages, donePages: sectionDone,
+      rescheduleResult: () => { throw new Error('boom'); },
+    });
+    try {
+      await h.section('overdue').querySelector('.sauce-today-moveall')._fire('click');
+      assert(h.notices.length === 1 && /Could not move 2 tasks/.test(h.notices[0]),
+        'a call that threw past its own guard gets one panel Notice: ' + JSON.stringify(h.notices));
+    } finally { h.cleanup(); }
+  });
+
+  await ok('RD-P-LOCKS Move all lock survives a re-render and disables the button while running', async () => {
+    let release = null;
+    const gate = new Promise((r) => { release = r; });
+    const f = await renderLivePanel({
+      taskPages: sectionPages, donePages: sectionDone,
+      rescheduleResult: async () => { await gate; return { ok: true }; },
+    });
+    try {
+      const btn = f.section('overdue').querySelector('.sauce-today-moveall');
+      const running = btn._fire('click');
+      await new Promise((r) => setTimeout(r, 5));
+      assert(btn.disabled === true && /Moving/.test(btn.textContent), 'button disabled while running');
+      const host = f.root.querySelector('.sauce-today-panel-host');
+      f.dash._renderTodayPanel(host, {
+        dv: {}, todayStr: P_TODAY, TTL: f.TTL,
+        model: { today: [], overdue: [f.TE.parseNote(sectionPages[2])], stale: [], doneToday: [] },
+      });
+      const fresh = f.section('overdue').querySelector('.sauce-today-moveall');
+      assert(fresh !== btn && fresh.disabled === true, 'a re-rendered panel sees the in-progress Move all');
+      const second = fresh._fire('click');
+      release();
+      await running;
+      await second;
+      assert(f.calls.reschedule.length === 2, 'the re-rendered button did not start a second run: ' + f.calls.reschedule.length);
+      const after = f.root.querySelectorAll('.sauce-today-moveall');
+      assert(after.every((b) => b.disabled !== true), 'lock released after the run');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-INSTANCE-DELEGATES computeCounts/selectTasks/selectMeetings reachable on the stored instance', async () => {
+    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+    const TE = new TaskEntityClass();
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const inst = new Dash();
+    const fakeDv = { pages: (q) => (q === '"spice/tasks"' ? sectionPages : q === '"spice/tasks/_done"' ? sectionDone
+      : q === '"spice/meetings/notes"' ? [{ file: { name: 'Standup-' + P_TODAY, path: 'spice/meetings/notes/Standup-' + P_TODAY + '.md' } }] : []) };
+    assert(typeof inst.computeCounts === 'function', 'instance computeCounts exists');
+    const c = inst.computeCounts(fakeDv, P_TODAY, TE);
+    assert(c.today === 2 && c.overdue === 3 && c.stale === 1 && c.done === 2 && c.backlog === 1 && c.meetings === 1,
+      'non-zero counts through the instance: ' + JSON.stringify(c));
+    assert(inst.selectTasks(fakeDv, P_TODAY, TE).open.length === 2, 'instance selectTasks');
+    assert(inst.selectMeetings(fakeDv, P_TODAY).length === 1, 'instance selectMeetings');
+    assert(typeof inst._openTodayToDo === 'function', '_openTodayToDo is already an instance method');
   });
 
   await ok('RD-P-GROUP-SORT controls write prefs and regroup Up next', async () => {
