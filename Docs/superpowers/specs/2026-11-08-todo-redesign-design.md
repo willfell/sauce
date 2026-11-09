@@ -243,6 +243,10 @@ layout and the new controls change. Saves clear `rank` when `due` changed.
 11. Existing task write paths are not moved onto RenderSafe (see Anti-goals); only new writes are.
 12. The sectioned Home/daily panel renders only for today's date; past/future daily notes keep
     the current panel.
+13. Title shortcuts apply in create mode only. In edit mode an existing title such as "Prep for
+    Friday" would otherwise lose its last word and move its date on the first keystroke.
+14. The task row's ⋯ menu uses the shared `MenuPopover` primitive rather
+    than Obsidian's `Menu` global, which is not reliably reachable from CustomJS.
 
 ## Left to the builder
 
