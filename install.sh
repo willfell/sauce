@@ -7,7 +7,7 @@
 #     brew install willfell/sauce/sauce
 #     sauce bootstrap --vault <path-to-vault>
 #
-# See: https://github.com/willfell/sauce#install
+# See: https://github.com/wacwini/sauce#install
 set -euo pipefail
 cat >&2 <<'MSG'
 
@@ -19,7 +19,7 @@ cat >&2 <<'MSG'
       brew install willfell/sauce/sauce
       sauce bootstrap --vault <path-to-vault>
 
-  See: https://github.com/willfell/sauce#install
+  See: https://github.com/wacwini/sauce#install
   Migration from legacy <vault>/pantry/ layout:
       sauce migrate-layout --vault <path>
 

@@ -154,7 +154,7 @@ The `seed-vault-prev/` snapshot is the one-cycle-back safety net referenced in l
 Branch protection on `main` is **enabled** (required `preflight (linux)` + `preflight (macos)` CI checks, strict; `enforce_admins=false` so the owner / `RELEASE_PAT` can bypass for the automated tag + seed pushes). The auto-merge pipeline depends on it — required checks are what the release PR's auto-merge waits for. It was set via the call below (changes to the rule still require user approval per `asking-before-acting.md` § Git):
 
 ```
-gh api -X PUT repos/willfell/sauce/branches/main/protection \
+gh api -X PUT repos/wacwini/sauce/branches/main/protection \
   --field required_status_checks[strict]=true \
   --field 'required_status_checks[contexts][]=preflight (linux)' \
   --field 'required_status_checks[contexts][]=preflight (macos)' \
@@ -187,7 +187,7 @@ One job type is outside the workflow files and still runs GitHub-hosted: **Depen
 
 CodeQL is on Pool B by necessity, not preference: GitHub publishes no linux-arm64 CodeQL bundle (`codeql-bundle-v2.26.2` ships `linux64` / `osx64` / `win64` only), and the Colima VM registers `qemu-x86_64` binfmt rather than Rosetta, so emulating it would be the slow path. Everything touching Homebrew is on B for the same reason it needs macOS.
 
-Two pools back `willfell/sauce` CI, both fed by the same GitHub App (`arc-github-app`). The source of truth for its credentials is 1Password, vault `Lab`, item `arc-github-app`, fields `app-id` / `installation-id` / `private-key` — read them with `op read "op://Lab/arc-github-app/private-key"` (swap the field name for the others). The `arc-github-app` Kubernetes Secret in namespace `arc-runners` is *materialized from* those references by the `lab` repo's `k8s/secrets/registry.yaml`; it is a derivative, not the source. Recover from 1Password rather than from the cluster — a machine rebuild is precisely the moment the cluster does not exist yet. Don't hardcode any of these values here: this file is public.
+Two pools back `wacwini/sauce` CI, both fed by the runner GitHub App. Pool A registers through its `wacwini` installation (Kubernetes Secret `arc-wacwini-app`, which reuses the `arc-github-app` App ID and key). The source of truth for the App's credentials is 1Password, vault `Lab`, item `arc-github-app`, fields `app-id` / `installation-id` / `private-key` — read them with `op read "op://Lab/arc-github-app/private-key"` (swap the field name for the others). The `arc-github-app` Kubernetes Secret in namespace `arc-runners` is *materialized from* those references by the `lab` repo's `k8s/secrets/registry.yaml`; it is a derivative, not the source. Recover from 1Password rather than from the cluster — a machine rebuild is precisely the moment the cluster does not exist yet. Don't hardcode any of these values here: this file is public.
 
 **Pool A — `sauce` ARC scale set.** Linux runners, label `runs-on: sauce`. Declared as an Argo CD `Application` in the `lab` repo at `k8s/argocd-apps/arc-runner-sauce.yaml` (chart `gha-runner-scale-set` 0.14.2, `minRunners: 0`, `maxRunners: 3`, no `containerMode: dind` since nothing in sauce builds an image, runner image `localhost:30500/sauce-runner:2.336.0`, built from `ghcr.io/actions/actions-runner:2.336.0` with Chromium, `gh` and Node 20 baked in, resources `requests: cpu 1 / memory 2Gi`, `limits: cpu 4 / memory 8Gi`). Fully reconciled by Argo CD (`selfHeal`, `prune`) — a machine rebuild just needs the `lab` repo re-synced; no manual steps here.
 
@@ -206,7 +206,7 @@ lab host runner enroll
 ```
 
 `lab host runner enroll` mints a registration token from the `arc-github-app` GitHub App via 1Password — no human `gh` session required — then runs `config.sh`, `svc.sh install`, restores the committed plist, and starts the service. Verify with `lab host doctor`, or directly:
-`gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'`; expect `status: online`.
+`gh api repos/wacwini/sauce/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'`; expect `status: online`.
 
 **Do not run `./svc.sh install` by hand.** See *Surviving a reboot* — it silently drops `KeepAlive`, and `enroll` exists to make that unreachable.
 
@@ -244,7 +244,7 @@ It checks both LaunchAgents (installed, loaded, matching git), the power setting
 ```bash
 colima status
 kubectl get autoscalingrunnerset sauce -n arc-runners
-gh api repos/willfell/sauce/actions/runners --jq '.runners[] | {name, status}'
+gh api repos/wacwini/sauce/actions/runners --jq '.runners[] | {name, status}'
 ```
 
 Expect Colima running, the `sauce` scale set present with `0`/`3`, and `sauce-macos` `online`. Pool A reports zero registered runners when idle — that is scale-to-zero, not a fault; pods appear per assigned job. If the scale set is missing after Colima returns, force a reconcile with `kubectl annotate application root -n argocd argocd.argoproj.io/refresh=hard --overwrite`.

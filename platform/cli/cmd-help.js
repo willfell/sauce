@@ -49,7 +49,7 @@ async function run(ctx, args) {
         "  or override via $SAUCE_VAULT.",
         "",
         "Docs:",
-        "  https://github.com/willfell/sauce  (Docs/install.md, Docs/use.md, Docs/how.md)"
+        "  https://github.com/wacwini/sauce  (Docs/install.md, Docs/use.md, Docs/how.md)"
     ];
     if (!process.env.SAUCE_TEST_MODE) {
         for (const l of lines) console.log(l);

@@ -16,7 +16,7 @@ Sauce's own automation never depends on the installed plugin: `scripts/autoloop/
 ## Install (Claude, once per machine)
 
 ```text
-/plugin marketplace add willfell/sauce
+/plugin marketplace add wacwini/sauce
 /plugin install sauce@sauce
 ```
 
@@ -88,7 +88,7 @@ The legacy aliases (`/delivery-status`, `/delivery-review`, `$card-intake`, `$sl
 
 Run in a fresh Claude session in the sauce workshop repo:
 
-1. `/plugin marketplace add willfell/sauce` → `/plugin install sauce@sauce` → restart session. (Workshop is already bound — `.loop/config.json` is committed.)
+1. `/plugin marketplace add wacwini/sauce` → `/plugin install sauce@sauce` → restart session. (Workshop is already bound — `.loop/config.json` is committed.)
 2. `/sauce:status` — expect the real board digest, byte-for-byte the same content `/delivery-status` used to give.
 3. `/sauce:propose` a TOY epic — e.g. "a `docs/toys/loop-plugin-smoke.md` note describing the plugin smoke test". Expect: one-question-at-a-time dialogue, proposal written under `spice/projects/sauce/docs/proposals/`.
 4. `/sauce:plan` against the proposal — expect prompts for **id prefix** (answer `TOY`) and **board priority position** (answer `bottom`), a dry-run receipt to approve, then mint via the intake rail, then the "execute now or leave for the loop?" question — answer **leave for the loop**.

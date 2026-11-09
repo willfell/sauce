@@ -8,7 +8,7 @@ Sauce is solo-developed and ships from `main`. Security fixes are applied to the
 
 Please report security issues privately via GitHub Security Advisories:
 
-<https://github.com/willfell/sauce/security/advisories/new>
+<https://github.com/wacwini/sauce/security/advisories/new>
 
 If you cannot use Security Advisories, email: <willfellhoelter@gmail.com>
 

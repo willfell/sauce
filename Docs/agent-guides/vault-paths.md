@@ -15,7 +15,7 @@ load_when: Touching any vault path — workshop, consumer, legacy source, or pre
 
 Canonical platform source-of-truth. Also self-installs as the workshop dogfood vault. All `cd` / harness invocations in docs assume this path.
 
-GitHub remote: `git@github.com:willfell/sauce.git` (HTTPS: `https://github.com/willfell/sauce`) — personal account `willfellhoelter@gmail.com`.
+GitHub remote: `git@github.com:wacwini/sauce.git` (HTTPS: `https://github.com/wacwini/sauce`) — the `wacwini` organization.
 
 ## Consumer vaults
 
