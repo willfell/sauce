@@ -55,7 +55,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.17.0"
+      "version": "0.18.0"
     },
     {
       "name": "modal",
@@ -137,7 +137,7 @@
     },
     {
       "name": "daily",
-      "version": "0.28.0"
+      "version": "0.29.0"
     },
     {
       "name": "meetings",
@@ -157,7 +157,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.30.0"
+      "version": "0.31.0"
     },
     {
       "name": "journal",
