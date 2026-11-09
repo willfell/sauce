@@ -1002,6 +1002,505 @@ async function renderDailyTaskFixture(today, options) {
     }
   });
 
+  // ── RD-P-* sectioned Today panel (to-do redesign Task 7) ────────────────────
+
+  // Richer DOM stub for the live panel: multi-listener events, child reordering
+  // (appendChild/insertBefore), childNodes and class-only querySelector, so the
+  // REAL TaskTodayList.renderTaskRow and the dashboard's drag/drop wiring run.
+  function makeRichEl(tag) {
+    const el = {
+      _tag: tag || 'div',
+      _children: [],
+      className: '',
+      dataset: {},
+      style: {},
+      attributes: {},
+      _text: '',
+      _html: '',
+      open: false,
+      parentNode: null,
+      _listeners: {},
+      createEl(t, opts) {
+        const c = makeRichEl(t);
+        if (opts && opts.cls) c.className = opts.cls;
+        if (opts && opts.text != null) c.textContent = opts.text;
+        if (opts && opts.type) c.type = opts.type;
+        this.appendChild(c);
+        return c;
+      },
+      appendChild(c) {
+        if (c.parentNode) c.remove();
+        c.parentNode = this;
+        this._children.push(c);
+        return c;
+      },
+      insertBefore(c, ref) {
+        if (c.parentNode) c.remove();
+        const i = ref ? this._children.indexOf(ref) : -1;
+        c.parentNode = this;
+        if (i < 0) this._children.push(c); else this._children.splice(i, 0, c);
+        return c;
+      },
+      remove() {
+        if (!this.parentNode) return;
+        const i = this.parentNode._children.indexOf(this);
+        if (i >= 0) this.parentNode._children.splice(i, 1);
+        this.parentNode = null;
+      },
+      get childNodes() { return this._children.slice(); },
+      get children() { return this._children.slice(); },
+      get nextSibling() {
+        if (!this.parentNode) return null;
+        const sib = this.parentNode._children;
+        return sib[sib.indexOf(this) + 1] || null;
+      },
+      _matches(sel) {
+        const classes = String(sel).split('.').filter(Boolean);
+        const mine = String(this.className || '').split(/\s+/);
+        return classes.length > 0 && classes.every((c) => mine.includes(c));
+      },
+      querySelectorAll(sel) {
+        const out = [];
+        const walk = (n) => { for (const c of n._children) { if (c._matches(sel)) out.push(c); walk(c); } };
+        walk(this);
+        return out;
+      },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+      contains(n) { let x = n; while (x) { if (x === this) return true; x = x.parentNode; } return false; },
+      addEventListener(type, fn) { (this._listeners[type] || (this._listeners[type] = [])).push(fn); },
+      removeEventListener(type, fn) { const l = this._listeners[type] || []; const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); },
+      _fire(type, event) {
+        const ev = Object.assign({ target: this, currentTarget: this, stopPropagation() {}, preventDefault() {} }, event || {});
+        return Promise.all((this._listeners[type] || []).slice().map((fn) => fn(ev)));
+      },
+      setAttribute(k, v) { this.attributes[k] = String(v); },
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null; },
+      focus() {},
+      get textContent() { return this._text + this._children.map((c) => c.textContent).join(''); },
+      set textContent(v) { this._text = String(v == null ? '' : v); for (const c of this._children) c.parentNode = null; this._children = []; },
+      get innerHTML() { return this._html; },
+      set innerHTML(v) { this._html = String(v == null ? '' : v); },
+    };
+    Object.defineProperty(el.style, 'cssText', { value: '', writable: true, configurable: true });
+    return el;
+  }
+
+  const P_TODAY = '2026-07-03';
+  const P_PREFS_KEY = 'sauce-todo-filter:prefs:v2';
+
+  function memoryStorage(seed) {
+    const data = Object.assign({}, seed || {});
+    return {
+      data,
+      getItem: (k) => (Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null),
+      setItem: (k, v) => { data[k] = String(v); },
+      removeItem: (k) => { delete data[k]; },
+    };
+  }
+
+  // Render the REAL dashboard (real TaskEntity + real TaskTodayList) against the
+  // rich DOM stub. `viewedDay` is the note's filename date; `asOf` (optional)
+  // mimics Home. The wall clock (window.moment()) reads P_TODAY.
+  async function renderLivePanel(options) {
+    const o = options || {};
+    const prev = { window: global.window, app: global.app, Notice: global.Notice, customJS: global.customJS };
+    const notices = [];
+    global.Notice = function (msg) { notices.push(String(msg)); };
+    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+    const TaskTodayListClass = new Function(`${TTL_SRC}; return TaskTodayList;`)();
+    const TE = new TaskEntityClass();
+    const TTL = new TaskTodayListClass();
+    const calls = { setFields: [], reopen: [], reschedule: [], opened: [], menus: [] };
+    const TD = {
+      open() {},
+      setFields: async (p, f) => {
+        calls.setFields.push({ path: p, fields: Object.assign({}, f) });
+        if (o.setFieldsResult) return o.setFieldsResult(p, f);
+        return { ok: true };
+      },
+      reopen: async (p) => {
+        calls.reopen.push(p);
+        if (o.reopenResult) return o.reopenResult(p);
+        return { ok: true, path: p.replace('/_done/', '/') };
+      },
+    };
+    let inFlight = 0;
+    let maxInFlight = 0;
+    TTL.reschedule = async (row, task, newDue, viewedDay, TDref) => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      calls.reschedule.push({ row, path: task && task.path, newDue, viewedDay, TDref });
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      try { row.remove(); } catch (_e) {}
+      return { ok: true, due: newDue };
+    };
+    const storage = memoryStorage(o.prefs ? { [P_PREFS_KEY]: JSON.stringify(o.prefs) } : {});
+    const app = {
+      vault: {
+        getAbstractFileByPath: (p) => ({ path: p }),
+        adapter: { read: async () => { throw new Error('ENOENT'); }, write: async () => {}, mkdir: async () => {} },
+      },
+      workspace: { openLinkText(p) { calls.opened.push(p); }, getLeavesOfType() { return []; } },
+    };
+    const windowShim = {
+      moment: (d) => ({ format: (fmt) => {
+        const day = d == null ? P_TODAY : String(d).slice(0, 10);
+        if (fmt === 'YYYY/MM-MMMM') return day.slice(0, 4) + '/' + day.slice(5, 7) + '-July';
+        return day;
+      } }),
+      localStorage: storage,
+      app,
+    };
+    const customJS = {
+      TaskEntity: TE,
+      TaskTodayList: o.noTTL ? null : TTL,
+      TaskDialog: TD,
+      RenderSafe: { captureScroll() {} },
+      MenuPopover: { open: (entries, opts) => { calls.menus.push({ entries, opts }); } },
+      ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
+      BeaconCards: { render: async () => {} },
+    };
+    windowShim.customJS = customJS;
+    global.window = windowShim;
+    global.app = app;
+    global.customJS = customJS;
+    const pagesByQuery = { '"spice/tasks"': o.taskPages || [], '"spice/tasks/_done"': o.donePages || [] };
+    const root = makeRichEl('div');
+    const dv = {
+      container: root,
+      current: () => ({ file: { name: 'Journal-' + (o.viewedDay || P_TODAY) } }),
+      pages: (q) => {
+        const items = (pagesByQuery[q] || []).slice();
+        items.array = () => items.slice();
+        items.where = (fn) => items.filter(fn);
+        items.sort = () => items;
+        return items;
+      },
+      page: () => null,
+      el(t, _text, opts) { return root.createEl(t, opts || {}); },
+    };
+    const Dash = loadDashboard(windowShim, customJS);
+    const dash = new Dash();
+    await dash.render(dv, o.asOf ? { asOf: o.asOf, live: true } : undefined);
+    const sections = () => root.querySelectorAll('.sauce-today-section');
+    const section = (name) => sections().find((s) => s.dataset.section === name) || null;
+    const labels = () => sections().map((s) => {
+      const l = s.querySelector('.sauce-today-section-label');
+      return l ? l.textContent : '';
+    });
+    const rowPaths = (name) => {
+      const s = section(name);
+      return s ? s.querySelectorAll('.sauce-task-today-row').map((r) => r.dataset.sauceTaskPath) : [];
+    };
+    const rowFor = (name, p) => {
+      const s = section(name);
+      return s ? s.querySelectorAll('.sauce-task-today-row').find((r) => r.dataset.sauceTaskPath === p) || null : null;
+    };
+    return {
+      root, dash, Dash, calls, notices, storage, TE, TTL, sections, section, labels, rowPaths, rowFor,
+      maxInFlight: () => maxInFlight,
+      cleanup() {
+        for (const k of Object.keys(prev)) { if (prev[k] === undefined) delete global[k]; else global[k] = prev[k]; }
+      },
+    };
+  }
+
+  const pTask = (slug, title, due, extra) => Object.assign(
+    { type: 'task', status: 'open', title, due, file: { path: 'spice/tasks/' + slug + '.md' } }, extra || {});
+
+  const sectionPages = [
+    pTask('today-a', 'Today alpha', P_TODAY, { created_at: '2026-07-01T08:00:00' }),
+    pTask('today-proj', 'Today project', P_TODAY, { source: 'project', project_slug: 'harbor', project: '[[Harbor]]', created_at: '2026-07-02T08:00:00' }),
+    pTask('late-7', 'Late seven', '2026-06-26'),
+    pTask('late-3', 'Late three', '2026-06-30'),
+    pTask('stale-40', 'Stale forty', '2026-05-24'),
+    pTask('future', 'Future one', '2026-07-09'),
+    pTask('backlog', 'Someday', ''),
+  ];
+  const sectionDone = [
+    { type: 'task', status: 'done', title: 'Done early', completed_at: '2026-07-03T08:05:00-06:00', file: { path: 'spice/tasks/_done/done-early.md' } },
+    { type: 'task', status: 'done', title: 'Done late', completed_at: '2026-07-03T16:40:00-06:00', file: { path: 'spice/tasks/_done/done-late.md' } },
+    { type: 'task', status: 'done', title: 'Done yesterday', completed_at: '2026-07-02T23:00:00-06:00', file: { path: 'spice/tasks/_done/done-y.md' } },
+  ];
+
+  await ok('RD-P-SELECT selectTasks keeps legacy keys and adds stale/doneToday/backlog', async () => {
+    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+    const TE = new TaskEntityClass();
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const fakeDv = { pages: (q) => (q === '"spice/tasks"' ? sectionPages : q === '"spice/tasks/_done"' ? sectionDone : []) };
+    const r = Dash.selectTasks(fakeDv, P_TODAY, TE);
+    assert(r.open.length === 2, 'open = today tasks: ' + r.open.length);
+    assert(JSON.stringify(r.overdue.map((t) => t.title).sort()) === JSON.stringify(['Late seven', 'Late three']),
+      'overdue holds only the 1-29 day bucket: ' + r.overdue.map((t) => t.title));
+    assert(r.stale.length === 1 && r.stale[0].title === 'Stale forty', 'stale holds >= 30 days late');
+    assert(r.done === 2, 'done count unchanged (2 today): ' + r.done);
+    assert(JSON.stringify(r.doneToday.map((t) => t.title)) === JSON.stringify(['Done late', 'Done early']),
+      'doneToday newest first: ' + r.doneToday.map((t) => t.title));
+    assert(r.backlog === 1, 'backlog counts personal undated open tasks: ' + r.backlog);
+    const counts = Dash.computeCounts(fakeDv, P_TODAY, TE);
+    assert(counts.overdue === 3, 'glance overdue counts overdue + stale (anything late): ' + counts.overdue);
+    const cold = Dash.selectTasks(fakeDv, P_TODAY, null);
+    assert(Array.isArray(cold.stale) && cold.stale.length === 0 && Array.isArray(cold.doneToday)
+      && cold.doneToday.length === 0 && cold.backlog === 0, 'cold load returns empty new keys');
+  });
+
+  await ok('RD-P-LIVE-GATE past date keeps the old panel; today and Home asOf render sections', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    assert(Dash.isLivePanel(P_TODAY, P_TODAY) === true, 'equal days are live');
+    assert(Dash.isLivePanel('2026-07-02', P_TODAY) === false, 'past day is not live');
+    assert(Dash.isLivePanel('2026-07-04', P_TODAY) === false, 'future day is not live');
+    assert(Dash.isLivePanel('', '') === false && Dash.isLivePanel(null, undefined) === false, 'blank is not live');
+
+    const past = await renderLivePanel({ viewedDay: '2026-06-01', taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(past.sections().length === 0, 'past daily note renders no sectioned panel');
+      assert(past.root.querySelectorAll('.sauce-section-overdue-list').length === 1,
+        'past daily note keeps the legacy overdue bullet list');
+      assert(past.root.querySelectorAll('.sauce-task-today-row').length === 0, 'past note uses legacy bullet rows');
+    } finally { past.cleanup(); }
+
+    const today = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(today.sections().length === 4, 'today renders four sections: ' + today.labels());
+      assert(today.root.querySelectorAll('.sauce-daily-task-today-list').length === 0, 'no legacy list when live');
+    } finally { today.cleanup(); }
+
+    const home = await renderLivePanel({ viewedDay: 'Home', asOf: P_TODAY, taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(home.sections().length === 4, 'Home with asOf today renders sections');
+    } finally { home.cleanup(); }
+
+    const cold = await renderLivePanel({ noTTL: true, taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(cold.sections().length === 0 && cold.root.querySelectorAll('.sauce-daily-task-today-list').length === 1,
+        'missing TaskTodayList falls back to the legacy bullet panel');
+    } finally { cold.cleanup(); }
+  });
+
+  await ok('RD-P-SECTIONS labels, counts, order and per-section sorting', async () => {
+    const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(JSON.stringify(f.labels()) === JSON.stringify(['Up next', 'Overdue · 2', 'Stale · 1', 'Done today · 2']),
+        'section labels in order: ' + JSON.stringify(f.labels()));
+      assert(JSON.stringify(f.rowPaths('overdue')) === JSON.stringify(['spice/tasks/late-7.md', 'spice/tasks/late-3.md']),
+        'overdue sorted by days late desc: ' + f.rowPaths('overdue'));
+      const staleRow = f.rowFor('stale', 'spice/tasks/stale-40.md');
+      assert(staleRow && /\bis-stale\b/.test(staleRow.className), 'stale rows are dimmed with .is-stale');
+      assert(staleRow.querySelector('.sauce-today-stale-backlog') && staleRow.querySelector('.sauce-today-stale-pick'),
+        'stale rows carry inline Backlog and Pick a date');
+      const done = f.section('done');
+      const doneRows = done.querySelectorAll('.sauce-today-done-row');
+      assert(doneRows.length === 2, 'two done-today rows');
+      assert(doneRows[0].querySelector('.sauce-today-done-time').textContent === '16:40'
+        && doneRows[1].querySelector('.sauce-today-done-time').textContent === '08:05',
+        'done rows newest first with local HH:mm');
+      assert(done.querySelector('.sauce-today-done-log'), 'Open done log footer link present');
+      assert(!f.rowPaths('upnext').includes('spice/tasks/future.md') && !f.rowPaths('upnext').includes('spice/tasks/backlog.md'),
+        'future and backlog tasks are not in Up next');
+      assert(f.root.querySelector('.sauce-today-sort') && f.root.querySelector('.sauce-today-group'), 'Sort and Group controls render');
+      assert(/Sort: Smart/.test(f.root.querySelector('.sauce-today-sort').textContent), 'default sort label is Smart');
+
+      await f.root.querySelector('.sauce-today-done-log')._fire('click');
+      assert(f.calls.opened.includes('spice/to-do/Completed Tasks.md'), 'Open done log opens the Completed Tasks hub');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-ALL-SOURCES a project task due today appears in Up next', async () => {
+    const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(f.rowPaths('upnext').includes('spice/tasks/today-proj.md'), 'project task listed: ' + f.rowPaths('upnext'));
+      assert(f.rowPaths('upnext').includes('spice/tasks/today-a.md'), 'personal task listed');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-DONE-UNDO Undo reopens the _done/ path and removes the row', async () => {
+    const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try {
+      const undo = f.section('done').querySelectorAll('.sauce-today-undo')[0];
+      assert(undo, 'Undo button present');
+      await undo._fire('click');
+      assert(JSON.stringify(f.calls.reopen) === JSON.stringify(['spice/tasks/_done/done-late.md']),
+        'reopen called with the _done/ path: ' + JSON.stringify(f.calls.reopen));
+      assert(f.section('done').querySelectorAll('.sauce-today-done-row').length === 1, 'reopened row leaves Done today');
+      assert(f.labels().includes('Done today · 1'), 'Done today count updates: ' + f.labels());
+    } finally { f.cleanup(); }
+
+    const bad = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, reopenResult: () => ({ ok: false, reason: 'nope' }) });
+    try {
+      await bad.section('done').querySelectorAll('.sauce-today-undo')[0]._fire('click');
+      assert(bad.section('done').querySelectorAll('.sauce-today-done-row').length === 2, 'failed reopen keeps the row');
+      assert(bad.notices.length === 1, 'failed reopen shows one Notice: ' + JSON.stringify(bad.notices));
+    } finally { bad.cleanup(); }
+  });
+
+  await ok('RD-P-MOVEALL Move all to today reschedules each overdue task sequentially to today', async () => {
+    const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try {
+      const btn = f.section('overdue').querySelector('.sauce-today-moveall');
+      assert(btn, 'Move all to today button present');
+      await btn._fire('click');
+      assert(f.calls.reschedule.length === 2, 'two reschedule calls: ' + f.calls.reschedule.length);
+      assert(f.calls.reschedule.every((c) => c.newDue === P_TODAY && c.viewedDay === P_TODAY), 'each to todayStr');
+      assert(JSON.stringify(f.calls.reschedule.map((c) => c.path)) === JSON.stringify(['spice/tasks/late-7.md', 'spice/tasks/late-3.md']),
+        'in overdue order');
+      assert(f.calls.reschedule.every((c) => c.row && c.TDref), 'each call carries its row and TaskDialog');
+      assert(f.maxInFlight() === 1, 'sequential, never concurrent: ' + f.maxInFlight());
+      assert(!f.section('overdue'), 'Overdue section disappears once empty');
+      assert(f.rowPaths('upnext').includes('spice/tasks/late-7.md') && f.rowPaths('upnext').includes('spice/tasks/late-3.md'),
+        'moved tasks re-render under Up next');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-STALE Backlog/Pick a date inline actions and Triage prefs', async () => {
+    const f = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, prefs: { tab: 'today', sort: 'priority', group: 'none' } });
+    try {
+      const row = f.rowFor('stale', 'spice/tasks/stale-40.md');
+      await row.querySelector('.sauce-today-stale-backlog')._fire('click');
+      assert(f.calls.reschedule.length === 1 && f.calls.reschedule[0].newDue === '' && f.calls.reschedule[0].viewedDay === P_TODAY,
+        'Backlog reschedules to blank due');
+      assert(!f.section('stale'), 'Stale section empties after the move');
+    } finally { f.cleanup(); }
+
+    const g = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, prefs: { tab: 'today', sort: 'priority', group: 'none' } });
+    try {
+      const row = g.rowFor('stale', 'spice/tasks/stale-40.md');
+      await row.querySelector('.sauce-today-stale-pick')._fire('click');
+      const input = row.querySelector('.sauce-today-stale-date');
+      assert(input && input.type === 'date', 'Pick a date opens a native date input');
+      input.value = '2026-07-20';
+      await input._fire('change');
+      assert(g.calls.reschedule.length === 1 && g.calls.reschedule[0].newDue === '2026-07-20', 'picked date reschedules');
+    } finally { g.cleanup(); }
+
+    const h = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, prefs: { tab: 'today', sort: 'priority', group: 'project' } });
+    try {
+      const triage = h.section('stale').querySelector('.sauce-today-triage');
+      assert(triage, 'Triage link in the Stale header');
+      await triage._fire('click');
+      const saved = JSON.parse(h.storage.getItem(P_PREFS_KEY));
+      assert(saved.tab === 'overdue' && saved.sort === 'priority' && saved.group === 'project',
+        'Triage read-merge-writes tab overdue: ' + JSON.stringify(saved));
+    } finally { h.cleanup(); }
+  });
+
+  await ok('RD-P-RENUMBER pure renumber returns only changed ranks', async () => {
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const out = Dash.renumber(['d', 'a', 'b', 'c', 'e'], { a: 1, b: 2, c: 3, d: 4, e: 5 });
+    assert(JSON.stringify(out) === JSON.stringify([
+      { path: 'd', rank: 1 }, { path: 'a', rank: 2 }, { path: 'b', rank: 3 }, { path: 'c', rank: 4 },
+    ]), 'only moved rows renumbered: ' + JSON.stringify(out));
+    const fresh = Dash.renumber(['x', 'y'], {});
+    assert(JSON.stringify(fresh) === JSON.stringify([{ path: 'x', rank: 1 }, { path: 'y', rank: 2 }]), 'unranked rows get ranks');
+    assert(Dash.renumber(null, null).length === 0, 'null-safe');
+  });
+
+  const rankedPages = ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map((s, i) =>
+    pTask(s, s[0].toUpperCase() + s.slice(1), P_TODAY, { rank: i + 1 }));
+
+  await ok('RD-P-RANK-DROP drop of row 3 to index 0 writes ranks only for moved rows', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages });
+    try {
+      const before = f.rowPaths('upnext');
+      assert(JSON.stringify(before) === JSON.stringify(rankedPages.map((p) => p.file.path)), 'smart sort honours rank: ' + before);
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      assert(rows.every((r) => r.querySelector('.sauce-task-drag')), 'Up next rows carry drag handles');
+      const dt = { setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+      await rows[3]._fire('dragstart', { dataTransfer: dt });
+      await rows[0]._fire('dragover', { dataTransfer: dt });
+      await rows[0]._fire('drop', { dataTransfer: dt });
+      assert(JSON.stringify(f.calls.setFields) === JSON.stringify([
+        { path: 'spice/tasks/delta.md', fields: { rank: 1 } },
+        { path: 'spice/tasks/alpha.md', fields: { rank: 2 } },
+        { path: 'spice/tasks/bravo.md', fields: { rank: 3 } },
+        { path: 'spice/tasks/charlie.md', fields: { rank: 4 } },
+      ]), 'setFields sequence: ' + JSON.stringify(f.calls.setFields));
+      assert(JSON.stringify(f.rowPaths('upnext')) === JSON.stringify([
+        'spice/tasks/delta.md', 'spice/tasks/alpha.md', 'spice/tasks/bravo.md', 'spice/tasks/charlie.md', 'spice/tasks/echo.md',
+      ]), 'DOM reordered: ' + f.rowPaths('upnext'));
+      assert(f.notices.length === 0, 'no notice on success');
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-RANK-GONE rows already removed (completed in place) are left out of the renumber', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages });
+    try {
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      rows[1].remove();
+      const dt = { setData() {}, setDragImage() {} };
+      await rows[4]._fire('dragstart', { dataTransfer: dt });
+      await rows[0]._fire('drop', { dataTransfer: dt });
+      assert(!f.calls.setFields.some((c) => c.path === 'spice/tasks/bravo.md'), 'detached row never written');
+      assert(JSON.stringify(f.calls.setFields) === JSON.stringify([
+        { path: 'spice/tasks/echo.md', fields: { rank: 1 } },
+        { path: 'spice/tasks/alpha.md', fields: { rank: 2 } },
+      ]), 'visible order [echo, alpha, charlie, delta]: charlie 3 and delta 4 already match: ' + JSON.stringify(f.calls.setFields));
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-RANK-FAIL a failed rank write re-renders the panel and shows one Notice', async () => {
+    const f = await renderLivePanel({
+      taskPages: rankedPages,
+      setFieldsResult: (p) => (p === 'spice/tasks/alpha.md' ? { ok: false, reason: 'x' } : { ok: true }),
+    });
+    try {
+      const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
+      const dt = { setData() {}, setDragImage() {} };
+      await rows[3]._fire('dragstart', { dataTransfer: dt });
+      await rows[0]._fire('drop', { dataTransfer: dt });
+      assert(f.notices.length === 1, 'exactly one notice: ' + JSON.stringify(f.notices));
+      assert(f.calls.setFields.length === 4, 'remaining writes still attempted sequentially');
+      const order = f.rowPaths('upnext');
+      assert(JSON.stringify(order) === JSON.stringify([
+        'spice/tasks/alpha.md', 'spice/tasks/delta.md', 'spice/tasks/bravo.md', 'spice/tasks/charlie.md', 'spice/tasks/echo.md',
+      ]), 'panel re-rendered with the ranks that persisted (alpha kept rank 1): ' + order);
+    } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-MOVE-MENU onMove (no-drag fallback) via the row menu renumbers', async () => {
+    const f = await renderLivePanel({ taskPages: rankedPages });
+    try {
+      const row = f.rowFor('upnext', 'spice/tasks/bravo.md');
+      await row.querySelector('.sauce-task-action-more')._fire('click');
+      const menu = f.calls.menus[f.calls.menus.length - 1];
+      const up = menu && menu.entries.find((e) => e.label === 'Move up');
+      assert(up, 'Move up offered in the row menu');
+      await up.onSelect();
+      await new Promise((r) => setTimeout(r, 5));
+      assert(JSON.stringify(f.calls.setFields) === JSON.stringify([
+        { path: 'spice/tasks/bravo.md', fields: { rank: 1 } },
+        { path: 'spice/tasks/alpha.md', fields: { rank: 2 } },
+      ]), 'move up swaps two ranks: ' + JSON.stringify(f.calls.setFields));
+    } finally { f.cleanup(); }
+
+    const g = await renderLivePanel({ taskPages: rankedPages, prefs: { tab: 'today', sort: 'priority', group: 'none' } });
+    try {
+      const rows = g.section('upnext').querySelectorAll('.sauce-task-today-row');
+      assert(rows.every((r) => !r.querySelector('.sauce-task-drag')), 'no drag handles outside smart/manual sort');
+      assert(/Sort: Priority/.test(g.root.querySelector('.sauce-today-sort').textContent), 'sort label reflects prefs');
+    } finally { g.cleanup(); }
+  });
+
+  await ok('RD-P-GROUP-SORT controls write prefs and regroup Up next', async () => {
+    const pages = [
+      pTask('g1', 'Gamma', P_TODAY, { priority: 'low', project_slug: 'harbor', project: '[[Harbor]]', source: 'project' }),
+      pTask('g2', 'Beta', P_TODAY, { priority: 'high' }),
+      pTask('g3', 'Alpha', P_TODAY, { priority: 'high', project_slug: 'harbor', project: '[[Harbor]]', source: 'project' }),
+    ];
+    const f = await renderLivePanel({ taskPages: pages, prefs: { tab: 'backlog', sort: 'smart', group: 'project' } });
+    try {
+      const groups = f.section('upnext').querySelectorAll('.sauce-today-group-label').map((n) => n.textContent);
+      assert(JSON.stringify(groups) === JSON.stringify(['Harbor', 'No project']), 'project groups: ' + JSON.stringify(groups));
+      await f.root.querySelector('.sauce-today-sort')._fire('click');
+      const menu = f.calls.menus[f.calls.menus.length - 1];
+      const due = menu && menu.entries.find((e) => e.label === 'Due');
+      assert(due, 'sort menu offers Due');
+      await due.onSelect();
+      const saved = JSON.parse(f.storage.getItem(P_PREFS_KEY));
+      assert(saved.sort === 'due' && saved.tab === 'backlog' && saved.group === 'project', 'sort read-merge-written: ' + JSON.stringify(saved));
+      assert(/Sort: Due/.test(f.root.querySelector('.sauce-today-sort').textContent), 'panel re-rendered with new sort');
+    } finally { f.cleanup(); }
+  });
+
   console.log(`\nrun-daily-dashboard: ${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error('run-daily-dashboard threw:', e); process.exit(1); });

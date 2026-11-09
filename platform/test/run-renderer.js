@@ -4252,7 +4252,7 @@ async function testRendHasNotes() {
     const sddSrc = fs.readFileSync(SDD_PATH, "utf8");
 
     assertTrue("HC-V0843-A1 selectTasks is the note-per-task data seam returning { open, done, overdue }",
-      /static\s+selectTasks\s*\(/.test(sddSrc) && /return\s*\{\s*open\s*,\s*done\s*,\s*overdue\s*\}/.test(sddSrc),
+      /static\s+selectTasks\s*\(/.test(sddSrc) && /return\s*\{\s*open\s*,\s*done\s*,\s*overdue\s*[,}]/.test(sddSrc),
       "selectTasks must select task-notes and return a today-only open list + a done count + an overdue count (pills read openTasks.length + overdueCount + doneCount)");
 
     assertTrue("HC-V0843-A1b selectTasks queries spice/tasks (open) + _done (done-today) via queryToday",

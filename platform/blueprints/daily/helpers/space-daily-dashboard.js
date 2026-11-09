@@ -154,27 +154,31 @@ class SpaceDailyDashboard {
    * Note-per-task migration: SELECT the task-notes for the dashboard's at-a-glance
    * task panel. Pure + Node-testable (dv-stub + a real TaskEntity ref) — the
    * render() `getTasks` closure is just the adapter passing the live dv +
-   * customJS.TaskEntity. Returns { open, overdue, done }:
-   *   open    — parsed task objects (TaskEntity.parseNote) for tasks made for TODAY
-   *             (scheduled == today). This is the ONLY set the panel LISTS — the
-   *             tasks on today's plate. Partitioned by TaskEntity.queryToday, which
-   *             is SOURCE-AGNOSTIC (scheduled==today | scheduled<today; future +
-   *             unscheduled excluded). We use queryToday, NOT TaskTodayList.buildBands,
-   *             because buildBands drops project_slug/source==meeting tasks (they
-   *             render in the TO-DO note's own sections) — the dashboard mirror wants
-   *             ALL sources.
-   *   overdue — open task-notes scheduled BEFORE today (all sources), as a LIST
-   *             (same shape as `open`). Rendered as a visually-distinguished tail
-   *             after the open tasks, so the red "N Overdue" pill has matching rows.
-   *   done    — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
-   *             only; all-done would grow unbounded with vault history).
+   * customJS.TaskEntity. Returns { open, overdue, stale, done, doneToday, backlog }:
+   *   open      — parsed task objects (TaskEntity.parseNote) for tasks made for TODAY
+   *               (due == today). Partitioned by TaskEntity.queryToday, which is
+   *               SOURCE-AGNOSTIC. We use queryToday, NOT TaskTodayList.buildBands,
+   *               because buildBands drops project_slug/source==meeting tasks (they
+   *               render in the TO-DO note's own sections) — the dashboard mirror
+   *               wants ALL sources.
+   *   overdue   — open task-notes 1..STALE_DAYS-1 days late (TaskEntity.bucketOf
+   *               'overdue'), all sources, same shape as `open`.
+   *   stale     — open task-notes >= STALE_DAYS late (bucketOf 'stale'). overdue +
+   *               stale is exactly queryToday's "due before today" band, so callers
+   *               that mean "anything late" concatenate the two.
+   *   done      — count of _done/ task-notes whose completed_at DATE == today (done-TODAY
+   *               only; all-done would grow unbounded with vault history).
+   *   doneToday — those done-today notes parsed (TaskEntity.completedDay == today),
+   *               newest completion first.
+   *   backlog   — count of open personal undated tasks (TaskEntity.isBacklog).
    * Filtering is done in plain JS AFTER dv.pages() (not via DataArray .where) so a
    * plain-array dv-stub exercises the real path. No TE (cold load / mechanism not
-   * registered) → { open: [], overdue: [], done: 0 }; the panel simply hides. Never throws.
+   * registered) → empties; the panel simply hides. A TaskEntity without bucketOf
+   * keeps every late task in `overdue`. Never throws.
    */
   static selectTasks(dv, todayStr, TE) {
     if (!TE || typeof TE.parseNote !== "function" || typeof TE.queryToday !== "function") {
-      return { open: [], done: 0, overdue: [] };
+      return { open: [], done: 0, overdue: [], stale: [], doneToday: [], backlog: 0 };
     }
     const toArr = (q) => {
       try {
@@ -193,15 +197,29 @@ class SpaceDailyDashboard {
       if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
       openParsed.push(TE.parseNote(p));
     }
-    // LIST = today only (scheduled == today) + overdue (scheduled before today,
-    // rendered as its own visually-distinguished tail so the red "N Overdue"
-    // pill always has rows underneath it, not just a bare count).
+    // LIST = today only (due == today) + the late band (due before today), which
+    // splits into overdue (1..29 days late) and stale (>= 30 days late).
     const bands = TE.queryToday(openParsed, todayStr);
     const open = Array.isArray(bands.today) ? bands.today : [];
-    const overdue = Array.isArray(bands.overdue) ? bands.overdue : [];
+    const late = Array.isArray(bands.overdue) ? bands.overdue : [];
+    const overdue = [];
+    const stale = [];
+    for (const t of late) {
+      let bucket = null;
+      try { bucket = typeof TE.bucketOf === "function" ? TE.bucketOf(t, todayStr) : null; } catch (_e) { bucket = null; }
+      if (bucket === "stale") stale.push(t); else overdue.push(t);
+    }
+
+    let backlog = 0;
+    if (typeof TE.isBacklog === "function") {
+      for (const t of openParsed) {
+        try { if (TE.isBacklog(t)) backlog++; } catch (_e) {}
+      }
+    }
 
     // Done today — _done/ notes with completed_at date == today.
     let done = 0;
+    const doneToday = [];
     for (const p of toArr('"spice/tasks/_done"')) {
       if (!p || p.type !== "task") continue;
       const path = p.file && p.file.path;
@@ -210,9 +228,120 @@ class SpaceDailyDashboard {
       // (it blankToNulls it but keeps the raw string/Luxon), so route it through
       // _toDateStr here (handles string / datetime-with-offset / Luxon → YYYY-MM-DD).
       if (TE._toDateStr(p.completed_at) === todayStr) done++;
+      try {
+        const parsed = TE.parseNote(p);
+        const day = typeof TE.completedDay === "function"
+          ? TE.completedDay(parsed)
+          : TE._toDateStr(parsed.completed_at);
+        if (day === todayStr) doneToday.push(parsed);
+      } catch (_e) {}
     }
+    const msOf = (v) => {
+      try {
+        if (typeof TE._msOf === "function") return TE._msOf(v);
+        const n = Date.parse(String(v));
+        return isNaN(n) ? null : n;
+      } catch (_e) { return null; }
+    };
+    const doneSorted = doneToday
+      .map((task, index) => ({ task, index, ms: msOf(task.completed_at) }))
+      .sort((a, b) => {
+        if (a.ms == null && b.ms == null) return a.index - b.index;
+        if (a.ms == null) return 1;
+        if (b.ms == null) return -1;
+        return (b.ms - a.ms) || (a.index - b.index);
+      })
+      .map((entry) => entry.task);
 
-    return { open, done, overdue };
+    return { open, done, overdue, stale, doneToday: doneSorted, backlog };
+  }
+
+  /**
+   * Sectioned Today panel gate (to-do redesign): the panel renders only when the
+   * VIEWED day is the real today, so no write action ever acts relative to a past
+   * or future daily note. Strict string equality on a YYYY-MM-DD viewed day.
+   */
+  static isLivePanel(viewedDay, todayStr) {
+    const v = typeof viewedDay === "string" ? viewedDay : "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) && v === todayStr;
+  }
+
+  /**
+   * Manual-order renumber: given the new top-to-bottom order of task paths and
+   * their current ranks, return the { path, rank } writes that make rank equal
+   * position + 1, skipping rows whose rank already matches. Pure.
+   */
+  static renumber(orderedPaths, rankByPath) {
+    const ranks = rankByPath && typeof rankByPath === "object" ? rankByPath : {};
+    const list = Array.isArray(orderedPaths) ? orderedPaths : [];
+    const out = [];
+    list.forEach((p, i) => {
+      if (!p) return;
+      const cur = Object.prototype.hasOwnProperty.call(ranks, p) ? ranks[p] : null;
+      const ranked = cur !== null && cur !== undefined && cur !== "";
+      if (!ranked || Number(cur) !== i + 1) out.push({ path: p, rank: i + 1 });
+    });
+    return out;
+  }
+
+  /**
+   * Local HH:mm of a completed_at value: Luxon via toFormat, else the time part
+   * of an ISO string (written with its own offset, so it is the local wall time).
+   * Missing / unparseable → "".
+   */
+  static doneTimeLabel(v) {
+    try {
+      if (v == null || v === "") return "";
+      if (typeof v === "object" && typeof v.toFormat === "function") return String(v.toFormat("HH:mm") || "");
+      const m = /T(\d{2}):(\d{2})/.exec(String(v));
+      return m ? m[1] + ":" + m[2] : "";
+    } catch (_e) { return ""; }
+  }
+
+  static get TODAY_PREFS_KEY() { return "sauce-todo-filter:prefs:v2"; }
+  static get TODAY_SORT_MODES() { return ["smart", "manual", "priority", "due", "oldest", "touched"]; }
+  static get TODAY_GROUP_MODES() { return ["none", "project", "priority", "due"]; }
+
+  static _todayStorage(storage) {
+    if (storage) return storage;
+    try { return (typeof window !== "undefined" && window.localStorage) || null; } catch (_e) { return null; }
+  }
+
+  /**
+   * Shared to-do view prefs ({ tab, sort, group }) under the key the daily To-Do
+   * view persists. Unknown / malformed values fall back to the defaults
+   * { tab: 'today', sort: 'smart', group: 'none' }. Never throws.
+   */
+  static readTodayPrefs(storage) {
+    const out = { tab: "today", sort: "smart", group: "none" };
+    try {
+      const ls = SpaceDailyDashboard._todayStorage(storage);
+      const raw = ls && typeof ls.getItem === "function" ? ls.getItem(SpaceDailyDashboard.TODAY_PREFS_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (typeof parsed.tab === "string" && parsed.tab) out.tab = parsed.tab;
+        if (SpaceDailyDashboard.TODAY_SORT_MODES.includes(parsed.sort)) out.sort = parsed.sort;
+        if (SpaceDailyDashboard.TODAY_GROUP_MODES.includes(parsed.group)) out.group = parsed.group;
+      }
+    } catch (_e) {}
+    return out;
+  }
+
+  /** Read-merge-write `patch` into the shared prefs; other keys survive. Never throws. */
+  static writeTodayPrefs(patch, storage) {
+    try {
+      const ls = SpaceDailyDashboard._todayStorage(storage);
+      if (!ls || typeof ls.setItem !== "function") return false;
+      let prefs = {};
+      try {
+        const raw = typeof ls.getItem === "function" ? ls.getItem(SpaceDailyDashboard.TODAY_PREFS_KEY) : null;
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prefs = parsed;
+      } catch (_e) { prefs = {}; }
+      Object.assign(prefs, patch || {});
+      ls.setItem(SpaceDailyDashboard.TODAY_PREFS_KEY, JSON.stringify(prefs));
+      return true;
+    } catch (_e) { return false; }
   }
 
   /**
@@ -388,18 +517,24 @@ class SpaceDailyDashboard {
 
   /**
    * Home command center count API (DRY): roll up the day's counts for the glance
-   * line. Composes selectTasks (→ { open[], overdue[], done }) with selectMeetings
-   * (→ page[]) and returns integers only: { today, overdue, done, meetings }.
+   * line. Composes selectTasks (→ { open[], overdue[], stale[], done, backlog })
+   * with selectMeetings (→ page[]) and returns integers only: { today, overdue,
+   * stale, done, backlog, meetings }. `overdue` means "anything late" (overdue +
+   * stale) so the glance chip keeps counting every late task.
    * Cold-load safe — no TE → tasks zeroed (selectTasks returns empties) but
    * meetings are still counted. Never throws.
    */
   static computeCounts(dv, todayStr, TE) {
     const t = SpaceDailyDashboard.selectTasks(dv, todayStr, TE);
     const m = SpaceDailyDashboard.selectMeetings(dv, todayStr);
+    const overdue = Array.isArray(t.overdue) ? t.overdue.length : (t.overdue || 0);
+    const stale = Array.isArray(t.stale) ? t.stale.length : 0;
     return {
       today: Array.isArray(t.open) ? t.open.length : 0,
-      overdue: Array.isArray(t.overdue) ? t.overdue.length : (t.overdue || 0),
+      overdue: overdue + stale,
+      stale,
       done: t.done || 0,
+      backlog: t.backlog || 0,
       meetings: Array.isArray(m) ? m.length : 0,
     };
   }
@@ -482,8 +617,33 @@ class SpaceDailyDashboard {
     };
 
     const meetings = getMeetings();
-    const { open: openTasks, overdue: overdueTasks, done: doneCount } = getTasks();
-    const overdueCount = Array.isArray(overdueTasks) ? overdueTasks.length : 0;
+    const taskSel = getTasks();
+    const openTasks = Array.isArray(taskSel.open) ? taskSel.open : [];
+    const lateTasks = Array.isArray(taskSel.overdue) ? taskSel.overdue : [];
+    const staleTasks = Array.isArray(taskSel.stale) ? taskSel.stale : [];
+    const doneTodayTasks = Array.isArray(taskSel.doneToday) ? taskSel.doneToday : [];
+    const doneCount = taskSel.done || 0;
+    // The legacy panel lists everything late in one tail; overdue + stale is
+    // exactly the band it always rendered.
+    const overdueTasks = lateTasks.concat(staleTasks);
+    const overdueCount = overdueTasks.length;
+
+    // Sectioned Today panel (to-do redesign): only when the viewed day is the real
+    // today and the shared row renderer is registered. Every other day keeps the
+    // legacy bullet panel below, unchanged.
+    let wallToday = "";
+    try {
+      const M = (typeof window !== "undefined" && window.moment)
+        || (typeof moment !== "undefined" && moment)
+        || null;
+      wallToday = typeof M === "function" ? String(M().format("YYYY-MM-DD") || "") : "";
+    } catch (_e) { wallToday = ""; }
+    const liveCjs = (typeof window !== "undefined" && window.customJS)
+      || (typeof customJS !== "undefined" && customJS)
+      || null;
+    const liveTTL = liveCjs && liveCjs.TaskTodayList;
+    const livePanel = SpaceDailyDashboard.isLivePanel(today, wallToday)
+      && !!liveTTL && typeof liveTTL.renderTaskRow === "function";
 
     // 2→1 sweep reduction: the dashboard used to sweep the whole vault TWICE —
     // once in _getActivityCount (gate pre-count + segmented-accent byBlueprint)
@@ -529,7 +689,7 @@ class SpaceDailyDashboard {
     // Never throws (selectUpcomingTrips returns [] on any error / missing folder).
     const upcomingTripCount = SpaceDailyDashboard.selectUpcomingTrips(dv, today, 14).length;
 
-    const hasContent = meetings.length > 0 || openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || activityCount > 0 || upcomingTripCount > 0;
+    const hasContent = meetings.length > 0 || openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || (livePanel && doneTodayTasks.length > 0) || activityCount > 0 || upcomingTripCount > 0;
 
     // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
     // render so the 3 _renderSection calls don't each hit the adapter.
@@ -572,7 +732,7 @@ class SpaceDailyDashboard {
       return;
     }
 
-    if (openTasks.length > 0 || overdueCount > 0 || doneCount > 0) {
+    if (openTasks.length > 0 || overdueCount > 0 || doneCount > 0 || (livePanel && doneTodayTasks.length > 0)) {
       // v0.13.3 (sauce v0.84.3): pills move out of the title text and into a
       // right-aligned sauce-section-counts container. Up to three pills, each
       // shown only when its count > 0, in a fixed left→right order:
@@ -607,12 +767,28 @@ class SpaceDailyDashboard {
         });
       }
 
+      if (livePanel) {
+        const panelHost = tasksBody.createEl("div");
+        panelHost.className = "sauce-today-panel-host";
+        this._renderTodayPanel(panelHost, {
+          dv,
+          todayStr: today,
+          TTL: liveTTL,
+          model: {
+            today: openTasks.slice(),
+            overdue: lateTasks.slice(),
+            stale: staleTasks.slice(),
+            doneToday: doneTodayTasks.slice(),
+          },
+        });
+      }
+
       // Body iterates open tasks, then overdue tasks (also open, scheduled
       // before today) in the same list style — one continuous list with overdue
       // at the bottom, each overdue row carrying its own red "Overdue" pill.
       // Done tasks stay surfaced via header count only; their notes stay in
       // spice/tasks/_done/.
-      {
+      if (!livePanel) {
         const taskLists = tasksBody.createEl("div");
         taskLists.className = "sauce-daily-task-lists";
 
@@ -1425,6 +1601,397 @@ class SpaceDailyDashboard {
         drillIn.hidden = expanded;
       });
     }
+  }
+
+  /**
+   * Sectioned Today panel (to-do redesign §3). Draws Up next / Overdue · N /
+   * Stale · N / Done today · N into `host` from `st.model`, the in-memory copy of
+   * selectTasks' bands. Every action updates the model on success and redraws
+   * this panel only (never a global refresh): Dataview's own re-render after the
+   * vault write reconciles authoritatively, and the model bridges the index lag.
+   *
+   * Writes all go through existing rails: TaskTodayList.reschedule (Move all,
+   * Backlog, Pick a date, and the row's own actions), TaskDialog.setFields
+   * (manual rank), TaskDialog.reopen (Undo). Preferences are the shared to-do
+   * view prefs in localStorage. Never throws.
+   *
+   * st: { dv, todayStr, TTL, model: { today, overdue, stale, doneToday } }
+   */
+  _renderTodayPanel(host, st) {
+    try {
+      if (!host || typeof host.createEl !== "function" || !st || !st.model) return;
+      host.textContent = "";
+      const todayStr = st.todayStr;
+      const model = st.model;
+      const cjs = (typeof window !== "undefined" && window.customJS)
+        || (typeof customJS !== "undefined" && customJS)
+        || null;
+      const TTL = st.TTL || (cjs && cjs.TaskTodayList) || null;
+      const TE = (cjs && cjs.TaskEntity) || null;
+      const TD = (cjs && cjs.TaskDialog) || null;
+      if (!TTL || typeof TTL.renderTaskRow !== "function") return;
+      const prefs = SpaceDailyDashboard.readTodayPrefs();
+      const rerender = () => this._renderTodayPanel(host, st);
+      const notice = (msg) => { try { if (typeof Notice === "function") new Notice(msg, 6000); } catch (_e) {} };
+      const stop = (ev) => { try { ev && ev.stopPropagation && ev.stopPropagation(); } catch (_e) {} };
+      const appRef = (typeof window !== "undefined" && window.app)
+        || (typeof app !== "undefined" && app)
+        || null;
+      const stableSort = (arr, cmp) => arr
+        .map((t, i) => ({ t, i }))
+        .sort((a, b) => {
+          let r = 0;
+          try { r = cmp ? cmp(a.t, b.t) : 0; } catch (_e) { r = 0; }
+          return r || a.i - b.i;
+        })
+        .map((x) => x.t);
+      const daysLate = (t) => {
+        try { return TE && typeof TE.daysLate === "function" ? TE.daysLate(t, todayStr) : 0; } catch (_e) { return 0; }
+      };
+      const titleOf = (t) => String((t && t.title) || "").toLowerCase();
+      const byTitle = (a, b) => (titleOf(a) < titleOf(b) ? -1 : titleOf(a) > titleOf(b) ? 1 : 0);
+      const dropFromModel = (path) => {
+        for (const key of ["today", "overdue", "stale"]) {
+          model[key] = model[key].filter((t) => t && t.path !== path);
+        }
+      };
+      // A successful reschedule: the task leaves its section; a move to today
+      // lands it in Up next with its manual rank cleared (reschedule clears rank).
+      const applyMoved = (task, due) => {
+        if (!task || !task.path) return;
+        dropFromModel(task.path);
+        if (due === todayStr) model.today.push(Object.assign(task, { due: todayStr, rank: null }));
+      };
+      const onRescheduled = (task, due) => { applyMoved(task, due); rerender(); };
+      const btnCss = "padding: 1px 8px; font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; border-radius: var(--radius-s, 4px); border: 1px solid var(--background-modifier-border); background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto;";
+      const linkCss = "font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-accent); cursor: pointer; background: none; border: none; padding: 0; box-shadow: none; height: auto;";
+      const mkButton = (parent, cls, label, css) => {
+        const b = parent.createEl("button", { cls });
+        b.textContent = label;
+        b.style.cssText = css || btnCss;
+        try { b.setAttribute("type", "button"); } catch (_e) {}
+        return b;
+      };
+
+      const panel = host.createEl("div", { cls: "sauce-today-panel" });
+
+      // Sort / Group controls (Up next only) share the to-do view's prefs.
+      const SORT_LABELS = { smart: "Smart", manual: "Manual", priority: "Priority", due: "Due", oldest: "Oldest", touched: "Touched" };
+      const GROUP_LABELS = { none: "None", project: "Project", priority: "Priority", due: "Due" };
+      const controls = panel.createEl("div", { cls: "sauce-today-controls" });
+      controls.style.cssText = "display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin: 0 0 6px 0;";
+      const choose = (btn, labels, current, pick) => {
+        const keys = Object.keys(labels);
+        const MP = cjs && cjs.MenuPopover;
+        if (MP && typeof MP.open === "function") {
+          try {
+            MP.open(keys.map((k) => ({
+              label: labels[k] + (k === current ? " ✓" : ""),
+              onSelect: () => pick(k),
+            })), { anchor: btn });
+            return;
+          } catch (_e) {}
+        }
+        pick(keys[(keys.indexOf(current) + 1) % keys.length]);
+      };
+      const sortBtn = mkButton(controls, "sauce-today-sort", "Sort: " + (SORT_LABELS[prefs.sort] || "Smart") + " ▾");
+      sortBtn.addEventListener("click", (ev) => {
+        stop(ev);
+        choose(sortBtn, SORT_LABELS, prefs.sort, (k) => { SpaceDailyDashboard.writeTodayPrefs({ sort: k }); rerender(); });
+      });
+      const groupBtn = mkButton(controls, "sauce-today-group", "Group: " + (GROUP_LABELS[prefs.group] || "None") + " ▾");
+      groupBtn.addEventListener("click", (ev) => {
+        stop(ev);
+        choose(groupBtn, GROUP_LABELS, prefs.group, (k) => { SpaceDailyDashboard.writeTodayPrefs({ group: k }); rerender(); });
+      });
+
+      const mkSection = (name, label) => {
+        const s = panel.createEl("div", { cls: "sauce-today-section" });
+        s.dataset.section = name;
+        s.style.cssText = "margin: 10px 0 4px 0;";
+        const head = s.createEl("div", { cls: "sauce-today-section-head" });
+        head.style.cssText = "display: flex; align-items: center; gap: 10px; margin: 0 0 4px 0;";
+        const l = head.createEl("span", { cls: "sauce-today-section-label" });
+        l.textContent = label;
+        l.style.cssText = "font-size: 0.78em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);";
+        const tools = head.createEl("span", { cls: "sauce-today-section-tools" });
+        tools.style.cssText = "margin-left: auto; display: inline-flex; gap: 8px; align-items: center;";
+        const list = s.createEl("div", { cls: "sauce-today-list" });
+        return { s, head, tools, list };
+      };
+      const rowOpts = (extra) => Object.assign({ viewedDay: todayStr, todayStr, onRescheduled }, extra || {});
+
+      // 1. Up next — today's tasks (all sources), shared sort, optional group.
+      const groupMode = prefs.group === "project" || prefs.group === "priority" ? prefs.group : "none";
+      const cmp = TE && typeof TE.compareBy === "function" ? TE.compareBy(prefs.sort, todayStr) : null;
+      const upNext = stableSort(model.today.slice(), cmp);
+      const canReorder = (prefs.sort === "smart" || prefs.sort === "manual") && groupMode === "none"
+        && !!TD && typeof TD.setFields === "function";
+      const up = mkSection("upnext", "Up next");
+      up.list.className += " is-upnext";
+
+      const applyOrder = async (next) => {
+        if (st.reordering) return;
+        st.reordering = true;
+        try {
+          const rankByPath = {};
+          for (const t of next) rankByPath[t.path] = t.rank;
+          const changes = SpaceDailyDashboard.renumber(next.map((t) => t.path), rankByPath);
+          if (changes.length === 0) return;
+          const prior = new Map(next.map((t) => [t.path, t.rank]));
+          const byPath = new Map(next.map((t) => [t.path, t]));
+          next.forEach((t, i) => { t.rank = i + 1; });
+          rerender();
+          let failed = 0;
+          for (const c of changes) {
+            let res = null;
+            try { res = await TD.setFields(c.path, { rank: c.rank }); } catch (_e) { res = null; }
+            if (!res || res.ok !== true) {
+              failed++;
+              const t = byPath.get(c.path);
+              if (t) t.rank = prior.get(c.path);
+            }
+          }
+          if (failed > 0) {
+            rerender();
+            notice("Could not save the new task order");
+          }
+        } finally {
+          st.reordering = false;
+        }
+      };
+      // Only rows still on screen take part: a row completed or rescheduled by
+      // its own controls has already left the DOM (and possibly the folder).
+      const upRows = new Map();
+      const visibleUpNext = () => upNext.filter((t) => {
+        const r = upRows.get(t.path);
+        return !!(r && r.parentNode);
+      });
+      const reorder = (fromPath, toPath) => {
+        const current = visibleUpNext();
+        const paths = current.map((t) => t.path);
+        const from = paths.indexOf(fromPath);
+        const to = paths.indexOf(toPath);
+        if (from < 0 || to < 0 || from === to) return undefined;
+        const next = current.slice();
+        const moved = next.splice(from, 1)[0];
+        next.splice(to, 0, moved);
+        return applyOrder(next);
+      };
+      const onMove = (task, dir) => {
+        const current = visibleUpNext();
+        const i = current.findIndex((t) => t && task && t.path === task.path);
+        const j = i + (dir < 0 ? -1 : 1);
+        if (i < 0 || j < 0 || j >= current.length) return undefined;
+        const next = current.slice();
+        next[i] = current[j];
+        next[j] = current[i];
+        return applyOrder(next);
+      };
+
+      let dragPath = null;
+      const wireDrag = (row, task) => {
+        if (!row || typeof row.addEventListener !== "function") return;
+        row.addEventListener("dragstart", (ev) => {
+          dragPath = task.path;
+          try {
+            if (ev && ev.dataTransfer) {
+              ev.dataTransfer.effectAllowed = "move";
+              ev.dataTransfer.setData("text/plain", String(task.path));
+              if (typeof ev.dataTransfer.setDragImage === "function") ev.dataTransfer.setDragImage(row, 12, 12);
+            }
+          } catch (_e) {}
+        });
+        row.addEventListener("dragover", (ev) => {
+          if (!dragPath) return;
+          try { ev.preventDefault(); if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move"; } catch (_e) {}
+        });
+        row.addEventListener("drop", (ev) => {
+          try { ev.preventDefault(); } catch (_e) {}
+          const from = dragPath;
+          dragPath = null;
+          if (!from) return undefined;
+          return reorder(from, task.path);
+        });
+        row.addEventListener("dragend", () => { dragPath = null; });
+      };
+
+      if (upNext.length === 0) {
+        const hint = up.list.createEl("div", { cls: "sauce-today-empty" });
+        hint.textContent = "Nothing left for today";
+        hint.style.cssText = "font-size: 0.85em; color: var(--text-faint); padding: 4px 6px;";
+      } else if (groupMode === "none") {
+        for (const t of upNext) {
+          const row = TTL.renderTaskRow(up.list, t, TD, rowOpts(canReorder ? { dragHandle: true, onMove } : null));
+          if (row) upRows.set(t.path, row);
+          if (canReorder) wireDrag(row, t);
+        }
+      } else {
+        const groups = new Map();
+        const PRIO = ["highest", "high", "medium", "low", ""];
+        const PRIO_LABEL = { highest: "Highest", high: "High", medium: "Medium", low: "Low", "": "No priority" };
+        for (const t of upNext) {
+          let key = "";
+          if (groupMode === "project") {
+            try { key = t.project ? String(TTL._projectChipText(t.project) || "") : ""; } catch (_e) { key = ""; }
+          } else {
+            key = String(t.priority || "").trim().toLowerCase();
+            if (!PRIO.includes(key)) key = "";
+          }
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(t);
+        }
+        const keys = Array.from(groups.keys()).sort((a, b) => {
+          if (groupMode === "priority") return PRIO.indexOf(a) - PRIO.indexOf(b);
+          if (!a) return 1;
+          if (!b) return -1;
+          return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0;
+        });
+        for (const key of keys) {
+          const g = up.list.createEl("div", { cls: "sauce-today-group-label" });
+          g.textContent = groupMode === "priority" ? PRIO_LABEL[key] : (key || "No project");
+          g.style.cssText = "font-size: 0.8em; color: var(--text-faint); margin: 6px 0 2px 6px;";
+          for (const t of groups.get(key)) TTL.renderTaskRow(up.list, t, TD, rowOpts());
+        }
+      }
+
+      // 2. Overdue · N — 1..29 days late, most late first, bulk Move all to today.
+      const overdue = stableSort(model.overdue.slice(), (a, b) => (daysLate(b) - daysLate(a)) || byTitle(a, b));
+      if (overdue.length > 0) {
+        const od = mkSection("overdue", "Overdue · " + overdue.length);
+        const rows = new Map();
+        for (const t of overdue) rows.set(t.path, TTL.renderTaskRow(od.list, t, TD, rowOpts()));
+        const moveAll = mkButton(od.tools, "sauce-today-moveall", "Move all to today");
+        moveAll.addEventListener("click", async (ev) => {
+          stop(ev);
+          if (st.bulk || typeof TTL.reschedule !== "function") return;
+          st.bulk = true;
+          let failed = 0;
+          try {
+            for (const t of overdue) {
+              let res = null;
+              try { res = await TTL.reschedule(rows.get(t.path), t, todayStr, todayStr, TD); } catch (_e) { res = null; }
+              if (res && res.ok) applyMoved(t, todayStr); else failed++;
+            }
+          } finally {
+            st.bulk = false;
+          }
+          rerender();
+          if (failed > 0) notice("Could not move " + failed + (failed === 1 ? " task" : " tasks") + " to today");
+        });
+      }
+
+      // 3. Stale · N — 30+ days late, dimmed, inline Backlog / Pick a date.
+      const stale = stableSort(model.stale.slice(), (a, b) => {
+        const ad = String((a && a.due) || "");
+        const bd = String((b && b.due) || "");
+        return (ad < bd ? -1 : ad > bd ? 1 : 0) || byTitle(a, b);
+      });
+      if (stale.length > 0) {
+        const sc = mkSection("stale", "Stale · " + stale.length);
+        const triage = mkButton(sc.tools, "sauce-today-triage", "Triage", linkCss);
+        triage.addEventListener("click", (ev) => {
+          stop(ev);
+          SpaceDailyDashboard.writeTodayPrefs({ tab: "overdue" });
+          return this._openTodayToDo(todayStr, { dv: st.dv, host: panel, trigger: triage });
+        });
+        for (const t of stale) {
+          const row = TTL.renderTaskRow(sc.list, t, TD, rowOpts());
+          if (!row) continue;
+          row.className = String(row.className || "") + " is-stale";
+          try { row.style.opacity = "0.72"; } catch (_e) {}
+          const inline = row.createEl("div", { cls: "sauce-today-stale-actions" });
+          inline.style.cssText = "display: flex; gap: 6px; align-items: center; flex-basis: 100%; justify-content: flex-end;";
+          const move = async (due) => {
+            if (typeof TTL.reschedule !== "function") return;
+            let res = null;
+            try { res = await TTL.reschedule(row, t, due, todayStr, TD); } catch (_e) { res = null; }
+            if (res && res.ok) { applyMoved(t, due); rerender(); }
+          };
+          const backlogBtn = mkButton(inline, "sauce-today-stale-backlog", "Backlog");
+          backlogBtn.addEventListener("click", (ev) => { stop(ev); return move(""); });
+          const pickBtn = mkButton(inline, "sauce-today-stale-pick", "Pick a date");
+          pickBtn.addEventListener("click", (ev) => {
+            stop(ev);
+            const existing = typeof inline.querySelector === "function" ? inline.querySelector(".sauce-today-stale-date") : null;
+            if (existing) { try { existing.remove(); } catch (_e) {} return; }
+            const input = inline.createEl("input", { cls: "sauce-today-stale-date", type: "date" });
+            input.type = "date";
+            input.style.cssText = "font-size: 0.85em; padding: 1px 4px;";
+            input.addEventListener("click", stop);
+            input.addEventListener("keydown", (kev) => { if (kev && kev.key === "Escape") { try { input.remove(); } catch (_e) {} } });
+            input.addEventListener("change", () => {
+              const value = String(input.value || "");
+              try { input.remove(); } catch (_e) {}
+              if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return move(value);
+              return undefined;
+            });
+            let picked = false;
+            try { if (typeof input.showPicker === "function") { input.showPicker(); picked = true; } } catch (_e) {}
+            if (!picked) { try { if (typeof input.focus === "function") input.focus(); } catch (_e) {} }
+          });
+        }
+      }
+
+      // 4. Done today · N — struck rows, completion time, Undo, done-log link.
+      const doneToday = model.doneToday;
+      if (doneToday.length > 0) {
+        const dn = mkSection("done", "Done today · " + doneToday.length);
+        for (const t of doneToday) {
+          const row = dn.list.createEl("div", { cls: "sauce-today-done-row" });
+          row.dataset.sauceTaskPath = String(t.path || "");
+          row.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 3px 6px; font-size: 0.9em;";
+          const title = row.createEl("span", { cls: "sauce-today-done-title" });
+          title.style.cssText = "flex: 1 1 auto; min-width: 0; text-decoration: line-through; color: var(--text-muted); overflow-wrap: anywhere; cursor: pointer;";
+          const text = (t && t.title) || "(untitled)";
+          if (typeof TTL.renderInlineLinks === "function") TTL.renderInlineLinks(title, text, t.path);
+          else title.textContent = text;
+          title.addEventListener("click", () => {
+            try { if (t.path && appRef && appRef.workspace) appRef.workspace.openLinkText(t.path, ""); } catch (_e) {}
+          });
+          const time = SpaceDailyDashboard.doneTimeLabel(t.completed_at);
+          if (time) {
+            const tm = row.createEl("span", { cls: "sauce-today-done-time" });
+            tm.textContent = time;
+            tm.style.cssText = "font-size: 0.8em; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0;";
+          }
+          const canUndo = String(t.path || "").indexOf("spice/tasks/_done/") === 0
+            && !!TD && typeof TD.reopen === "function";
+          if (canUndo) {
+            const undo = mkButton(row, "sauce-today-undo", "Undo", linkCss);
+            undo.addEventListener("click", async (ev) => {
+              stop(ev);
+              if (undo.disabled) return;
+              undo.disabled = true;
+              let res = null;
+              try { res = await TD.reopen(t.path); } catch (e) { res = { ok: false, reason: e && (e.message || String(e)) }; }
+              if (res && res.ok) {
+                model.doneToday = model.doneToday.filter((d) => d !== t);
+                const reopened = Object.assign({}, t, { status: "open", completed_at: null, path: res.path || t.path });
+                let bucket = null;
+                try { bucket = TE && typeof TE.bucketOf === "function" ? TE.bucketOf(reopened, todayStr) : null; } catch (_e) { bucket = null; }
+                if (bucket === "today") model.today.push(reopened);
+                else if (bucket === "overdue") model.overdue.push(reopened);
+                else if (bucket === "stale") model.stale.push(reopened);
+                rerender();
+              } else {
+                undo.disabled = false;
+                notice("Could not reopen task: " + ((res && res.reason) || "unknown"));
+              }
+            });
+          }
+        }
+        const foot = dn.s.createEl("div", { cls: "sauce-today-done-foot" });
+        foot.style.cssText = "margin: 4px 6px 0 6px;";
+        const log = mkButton(foot, "sauce-today-done-log", "Open done log", linkCss);
+        log.addEventListener("click", (ev) => {
+          stop(ev);
+          try {
+            if (appRef && appRef.workspace) appRef.workspace.openLinkText("spice/to-do/Completed Tasks.md", "");
+          } catch (e) { notice("Could not open Completed Tasks: " + (e && (e.message || e))); }
+        });
+      }
+    } catch (_e) { /* never throw out of a render or gesture */ }
   }
 
   /**
