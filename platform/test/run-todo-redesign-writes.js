@@ -577,6 +577,105 @@ function makeEnv(initialFiles, opts) {
     assert(!threw, 'a throwing onDone never escapes the gesture');
   });
 
+  await ok('RD-DIALOG-SLUGIFY _slugify is reachable through the stored instance', async () => {
+    assert(TaskDialog._slugify('Zeta Works') === 'zeta-works', 'instance delegate: ' + TaskDialog._slugify('Zeta Works'));
+    assert(TaskDialog._slugify('  Q3 / Launch!! ') === 'q3-launch');
+  });
+
+  await ok('RD-ORDER-PURE moveInOrder / reorderInOrder return new lists and never mutate', async () => {
+    const list = ['a', 'b', 'c'].map((p) => ({ path: p }));
+    const paths = (l) => (l ? l.map((t) => t.path) : null);
+    eq(paths(TaskTodayList.moveInOrder(list, 'b', -1)), ['b', 'a', 'c']);
+    eq(paths(TaskTodayList.moveInOrder(list, 'b', 1)), ['a', 'c', 'b']);
+    eq(TaskTodayList.moveInOrder(list, 'a', -1), null, 'top edge');
+    eq(TaskTodayList.moveInOrder(list, 'c', 1), null, 'bottom edge');
+    eq(TaskTodayList.moveInOrder(list, 'zz', 1), null, 'unknown path');
+    eq(paths(TaskTodayList.reorderInOrder(list, 'c', 'a')), ['c', 'a', 'b']);
+    eq(paths(TaskTodayList.reorderInOrder(list, 'a', 'c')), ['b', 'c', 'a']);
+    eq(TaskTodayList.reorderInOrder(list, 'a', 'a'), null);
+    eq(TaskTodayList.reorderInOrder(null, 'a', 'b'), null);
+    eq(paths(list), ['a', 'b', 'c'], 'input untouched');
+  });
+
+  await ok('RD-ORDER-APPLY applyManualOrder: optimistic ranks, sequential writes, restore + one Notice on silent failure, lock', async () => {
+    const tasks = [{ path: 'b', rank: 2 }, { path: 'a', rank: 1 }, { path: 'c', rank: null }];
+    const writes = [];
+    const notices = [];
+    const lockSet = new Set();
+    let repaints = 0;
+    let lockedDuringWrite = false;
+    const res = await TaskTodayList.applyManualOrder(tasks, {
+      async setFields(p, fields) {
+        lockedDuringWrite = lockedDuringWrite || lockSet.has('k');
+        writes.push([p, fields.rank]);
+        return p === 'a' ? { ok: false, reason: 'task file not found' } : { ok: true };
+      },
+      renumber: (p, r) => TaskEntity.renumber(p, r),
+      repaint() { repaints += 1; },
+      notice: (m) => notices.push(m),
+      lock: { set: lockSet, key: 'k' },
+    });
+    eq(writes, [['b', 1], ['a', 2], ['c', 3]], 'only changed ranks, in order');
+    eq(res, { written: ['b', 'c'], failed: ['a'] });
+    eq(tasks.map((t) => t.rank), [1, 1, 3], 'failed task keeps its prior rank');
+    assert(repaints === 2, 'optimistic repaint + one after failure: ' + repaints);
+    eq(notices, ['Could not save the new task order']);
+    assert(lockedDuringWrite && !lockSet.has('k'), 'lock held while writing, released after');
+
+    lockSet.add('k');
+    const refused = await TaskTodayList.applyManualOrder([{ path: 'x', rank: null }], {
+      setFields: async () => { throw new Error('must not write'); },
+      renumber: (p, r) => TaskEntity.renumber(p, r),
+      lock: { set: lockSet, key: 'k' },
+    });
+    assert(refused === null && lockSet.has('k'), 'refused while locked; foreign lock untouched');
+
+    const quiet = [];
+    const same = await TaskTodayList.applyManualOrder([{ path: 'a', rank: 1 }], {
+      setFields: async () => { throw new Error('must not write'); },
+      renumber: (p, r) => TaskEntity.renumber(p, r),
+      notice: (m) => quiet.push(m),
+    });
+    assert(same === null && quiet.length === 0, 'nothing changed: no write, no notice');
+
+    const noticed = [];
+    await TaskTodayList.applyManualOrder([{ path: 'q', rank: null }], {
+      setFields: async () => ({ ok: false, reason: 'disk full' }),
+      renumber: (p, r) => TaskEntity.renumber(p, r),
+      notice: (m) => noticed.push(m),
+    });
+    eq(noticed, [], 'a noticed failure already told the user');
+
+    const thrown = new Set();
+    let threw = false;
+    try {
+      await TaskTodayList.applyManualOrder([{ path: 'q', rank: null }], {
+        setFields: async () => ({ ok: true }),
+        renumber: () => { throw new Error('boom'); },
+        lock: { set: thrown, key: 'k' },
+      });
+    } catch (_e) { threw = true; }
+    assert(!threw && !thrown.has('k'), 'a throwing renumber never escapes and releases the lock');
+  });
+
+  await ok('RD-ORDER-CONTROLLER manualOrder only moves rows still attached', async () => {
+    const tasks = ['a', 'b', 'c'].map((p) => ({ path: p, rank: null }));
+    const rows = new Map(tasks.map((t) => [t.path, { parentNode: {} }]));
+    rows.get('b').parentNode = null;
+    const writes = [];
+    const order = TaskTodayList.manualOrder({
+      order: () => tasks,
+      rows,
+      setFields: async (p, f) => { writes.push([p, f.rank]); return { ok: true }; },
+      renumber: (p, r) => TaskEntity.renumber(p, r),
+    });
+    await order.move(tasks[2], -1);
+    eq(writes, [['c', 1], ['a', 2]], 'detached b is left out');
+    writes.length = 0;
+    assert(order.reorder('a', 'b') === undefined && writes.length === 0, 'a detached target is not a move');
+    assert(order.move({ path: 'c' }, -1) !== undefined, 'returns the apply promise for a real move');
+  });
+
   await ok('RD-ROW-COMPAT', async () => {
     rowEnv();
     const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), { title: 'x', path: 'p.md' }, null);

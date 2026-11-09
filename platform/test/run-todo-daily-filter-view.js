@@ -45,6 +45,8 @@ const TE = new TaskEntityClass();
 const TaskTodayListClass = new Function(`${fs.readFileSync(
   path.join(ROOT, 'platform/mechanisms/task-entity/task-today-list.js'), 'utf8')}\nreturn TaskTodayList;`)();
 const TTL_REAL = new TaskTodayListClass();
+const TaskDialogClass = new Function(`${fs.readFileSync(
+  path.join(ROOT, 'platform/mechanisms/task-entity/task-dialog.js'), 'utf8')}\nreturn TaskDialog;`)();
 
 function makeStorage(seed) {
   const data = new Map(Object.entries(seed || {}));
@@ -218,6 +220,7 @@ function makeRenderHarness(overrides = {}) {
         calls.projectApp = appRef;
         return [{ name: 'Atlas', slug: 'atlas' }, { name: 'Zeta Works', slug: 'zeta' }];
       },
+      _slugify(name) { return TaskDialogClass._slugify(name); },
     },
     SectionLabel: {
       render(dvLike, opts) {
@@ -239,8 +242,8 @@ function makeRenderHarness(overrides = {}) {
   return { storage, rows, notices, reopened, menus, calls, appStub, windowShim, clock, customJS };
 }
 
-async function mount(env, pages = PAGES) {
-  const View = loadClass(env.windowShim);
+async function mount(env, pages = PAGES, ViewClass) {
+  const View = ViewClass || loadClass(env.windowShim);
   const root = makeElement();
   await new View().render({
     container: root,
@@ -965,8 +968,8 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     assert.deepStrictEqual(projMenu.entries.map((e) => e.label), ['No project', 'Atlas', 'Zeta Works']);
     await projMenu.entries.find((e) => e.label === 'Zeta Works').onSelect();
     assert.deepStrictEqual(env.calls.setFields, [
-      { path: 'spice/tasks/Overdue mid.md', fields: { project: '[[Zeta Works]]', project_slug: 'zeta' } },
-      { path: 'spice/tasks/Today high.md', fields: { project: '[[Zeta Works]]', project_slug: 'zeta' } },
+      { path: 'spice/tasks/Overdue mid.md', fields: { project: '[[Zeta Works]]', project_slug: 'zeta-works' } },
+      { path: 'spice/tasks/Today high.md', fields: { project: '[[Zeta Works]]', project_slug: 'zeta-works' } },
     ]);
 
     select(env, 'Today low');
@@ -1138,6 +1141,136 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     const recDone = byClass(mounted.root, 'sauce-todo-filter-done-host')[0];
     assert.strictEqual(byClass(recDone, 'sauce-section-label')[0].textContent, 'Done today · 2',
       'a recurring completion never reaches Done today');
+  });
+
+  await okAsync('RD-DV-MOBILE mobile: no drag at all; manual rows keep Move up / down without a handle', async () => {
+    const env = makeRenderHarness();
+    env.appStub.isMobile = true;
+    const { root } = await mount(env);
+    for (const name of ['Today high', 'Today low']) {
+      const r = lastRow(env, name);
+      assert.strictEqual(typeof r.options.onMove, 'function', `${name} keeps onMove`);
+      assert(!r.options.dragHandle, `${name} has no drag handle on mobile`);
+      assert.notStrictEqual(r.row.draggable, true, 'rows are not draggable');
+      for (const type of ['dragstart', 'dragover', 'drop', 'dragend']) {
+        assert(!r.row._listeners[type], `no ${type} listener on a mobile row`);
+      }
+    }
+    const cells = byClass(root, 'sauce-todo-week-cell');
+    assert.strictEqual(cells.length, 5);
+    for (const cell of cells) {
+      assert(!cell._listeners.dragover && !cell._listeners.drop, 'mobile strip cells take no drops');
+      assert.strictEqual(typeof cell._listeners.click, 'function', 'strip cells stay clickable');
+    }
+    const second = lastRow(env, 'Today low');
+    await second.options.onMove(second.task, -1);
+    assert.deepStrictEqual(env.calls.setFields.map((c) => c.path),
+      ['spice/tasks/Today low.md', 'spice/tasks/Today high.md'], 'Move up still renumbers on mobile');
+
+    const View = loadClass({});
+    assert.strictEqual(View._isMobile({ isMobile: true }), true);
+    assert.strictEqual(View._isMobile({ isMobile: false }), false);
+    assert.strictEqual(View._isMobile(null), false);
+    const hadPlatform = Object.prototype.hasOwnProperty.call(global, 'Platform');
+    const prevPlatform = global.Platform;
+    global.Platform = { isMobile: true };
+    try {
+      assert.strictEqual(View._isMobile({}), true, 'Platform.isMobile also counts');
+    } finally {
+      if (hadPlatform) global.Platform = prevPlatform; else delete global.Platform;
+    }
+  });
+
+  await okAsync('RD-DV-DRAG-FIELD desktop: a drag that starts inside a form field is cancelled', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    const dt = { setData() { throw new Error('drag data must not be set'); }, effectAllowed: '', dropEffect: '' };
+    const row = lastRow(env, 'Today low').row;
+    let cancelled = false;
+    const field = { closest: (sel) => (/input/.test(sel) && /textarea/.test(sel) && /select/.test(sel) ? field : null) };
+    await row.fire('dragstart', { target: field, dataTransfer: dt, preventDefault() { cancelled = true; } });
+    assert(cancelled, 'dragstart from the date picker is cancelled');
+    const friday = byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === '2026-11-13');
+    let accepted = false;
+    await friday.fire('dragover', { dataTransfer: dt, preventDefault() { accepted = true; } });
+    assert(!accepted, 'no drag is in progress after the cancel');
+    await friday.fire('drop', { dataTransfer: dt });
+    assert.deepStrictEqual(env.calls.reschedule, [], 'nothing rescheduled');
+
+    let started = false;
+    const plain = { closest: () => null };
+    await row.fire('dragstart', {
+      target: plain,
+      dataTransfer: { setData() { started = true; }, effectAllowed: '', dropEffect: '' },
+      preventDefault() { throw new Error('a normal row drag is not cancelled'); },
+    });
+    assert(started, 'a drag from the row body still starts');
+  });
+
+  await okAsync('RD-DV-REMOUNT a re-render mid-bulk keeps Select mode, the selection and the lock', async () => {
+    const pending = [];
+    const env = makeRenderHarness({
+      reschedule(taskPath, newDue) {
+        return new Promise((resolve) => pending.push({ taskPath, resolve, newDue }));
+      },
+    });
+    const first = await mount(env);
+    const View = first.View;
+    await findButton(controlsOf(first.root), 'All open').fire('click');
+    await findButton(controlsOf(first.root), 'Select').fire('click');
+    select(env, 'Today low', 'Friday item');
+    const running = bulkButton(first.root, '→ Next Mon').fire('click');
+    await flush();
+    assert.strictEqual(pending.length, 1, 'first write in flight');
+
+    const second = await mount(env, PAGES, View);
+    const selectBtn = findButton(controlsOf(second.root), 'Select');
+    assert.strictEqual(selectBtn.attributes['aria-pressed'], 'true', 'Select mode survives the re-render');
+    assert.strictEqual(byClass(bulkBar(second.root), 'sauce-todo-bulk-count')[0].textContent, '2 selected');
+    assert.strictEqual(lastRow(env, 'Friday item').options.selected, true, 'selection restored on the new rows');
+    assert(buttonsOf(bulkBar(second.root)).every((b) => b.disabled === true), 'bulk buttons drawn disabled');
+    await bulkButton(second.root, '→ Tomorrow').fire('click');
+    await flush();
+    assert.strictEqual(env.calls.reschedule.length, 1, 'a second bulk is refused while the first runs');
+
+    pending[0].resolve({ ok: true, due: pending[0].newDue });
+    await flush();
+    assert.strictEqual(pending.length, 2);
+    pending[1].resolve({ ok: false, reason: 'write failed' });
+    await running;
+    assert.strictEqual(byClass(bulkBar(second.root), 'sauce-todo-bulk-count')[0].textContent, '1 selected',
+      'the live render repaints when the bulk ends; the failed task stays selected');
+    assert(buttonsOf(bulkBar(second.root)).every((b) => !b.disabled), 'lock released');
+    assert.strictEqual(lastRow(env, 'Today low').task.due, '2026-11-16',
+      'the live render\'s cache carries the moved due date');
+    assert.strictEqual(lastRow(env, 'Today low').container.parentNode.parentNode.parentNode, second.root,
+      'that repaint landed in the live render');
+
+    const next = bulkButton(second.root, '→ Tomorrow').fire('click');
+    await flush();
+    assert.strictEqual(env.calls.reschedule.length, 3, 'a new bulk runs once the lock is released');
+    pending[2].resolve({ ok: true, due: pending[2].newDue });
+    await next;
+    assert.strictEqual(bulkBar(second.root), null, 'everything moved; nothing left selected');
+  });
+
+  await okAsync('RD-DV-REMOUNT a reorder lock held by one render refuses a reorder from the next', async () => {
+    let release = null;
+    const env = makeRenderHarness({
+      setFields: () => new Promise((resolve) => { release = release || resolve; if (release !== resolve) resolve({ ok: true }); }),
+    });
+    const first = await mount(env);
+    const r = lastRow(env, 'Today low');
+    const moving = r.options.onMove(r.task, -1);
+    await flush();
+    assert.strictEqual(env.calls.setFields.length, 1);
+    await mount(env, PAGES, first.View);
+    const again = lastRow(env, 'Today low');
+    const refused = await again.options.onMove(again.task, -1);
+    assert.strictEqual(refused, null, 'second reorder refused while the first holds the lock');
+    release({ ok: true });
+    await moving;
+    assert.strictEqual(env.calls.setFields.length, 2, 'the first reorder finished its writes');
   });
 
   await okAsync('RD-DV-GUARD a throwing TaskEntity during paint warns and never throws out of render', async () => {

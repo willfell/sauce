@@ -50,6 +50,7 @@ class TaskDialog {
     trashPath(path) { return TaskDialog.trashPath(path); }
     donePath(path) { return TaskDialog.donePath(path); }
     _loadProjectList(app) { return TaskDialog._loadProjectList(app); }
+    _slugify(name) { return TaskDialog._slugify(name); }
     _bodyNotesBelowMarker(fileText) { return TaskDialog._bodyNotesBelowMarker(fileText); }
     _replaceBody(fileText, newNotes) { return TaskDialog._replaceBody(fileText, newNotes); }
     _wikilink(name) { return TaskDialog._wikilink(name); }

@@ -62,6 +62,10 @@ class TaskTodayList {
     _projectChipText(v) { return TaskTodayList._projectChipText(v); }
     get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
     classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
+    moveInOrder(list, path, dir) { return TaskTodayList.moveInOrder(list, path, dir); }
+    reorderInOrder(list, fromPath, toPath) { return TaskTodayList.reorderInOrder(list, fromPath, toPath); }
+    applyManualOrder(next, deps) { return TaskTodayList.applyManualOrder(next, deps); }
+    manualOrder(deps) { return TaskTodayList.manualOrder(deps); }
     doneTimeLabel(task) { return TaskTodayList.doneTimeLabel(task); }
     renderDoneRow(container, task, options) { return TaskTodayList.renderDoneRow(container, task, options); }
 
@@ -92,6 +96,126 @@ class TaskTodayList {
         if (!res) return 'silent';
         const reason = String(res.reason || '');
         return TaskTodayList.SILENT_REASONS.includes(reason) ? 'silent' : 'noticed';
+    }
+
+    // ---------- Manual order (shared by the daily panel and the To-Do view) ----------
+
+    /**
+     * `list` (tasks with a `path`, top to bottom) with the task at `path`
+     * swapped one step up (dir < 0) or down; null when it is not in the list
+     * or already at that edge. Pure; the input is not changed.
+     */
+    static moveInOrder(list, path, dir) {
+        const current = Array.isArray(list) ? list : [];
+        const i = current.findIndex((t) => t && path && t.path === path);
+        const j = i + (dir < 0 ? -1 : 1);
+        if (i < 0 || j < 0 || j >= current.length) return null;
+        const next = current.slice();
+        next[i] = current[j];
+        next[j] = current[i];
+        return next;
+    }
+
+    /**
+     * `list` with the task at `fromPath` taken out and inserted at the index
+     * `toPath` held; null when either is missing or they are the same. Pure.
+     */
+    static reorderInOrder(list, fromPath, toPath) {
+        const current = Array.isArray(list) ? list : [];
+        const paths = current.map((t) => t && t.path);
+        const from = paths.indexOf(fromPath);
+        const to = paths.indexOf(toPath);
+        if (from < 0 || to < 0 || from === to) return null;
+        const next = current.slice();
+        next.splice(to, 0, next.splice(from, 1)[0]);
+        return next;
+    }
+
+    /**
+     * Persist a manual order. `next` is the new top-to-bottom task list (each
+     * `{ path, rank }`, mutated in place). deps:
+     *   setFields(path, fields) -> result   the rank write (one task at a time)
+     *   renumber(paths, rankByPath) -> [{ path, rank }]   only changed ranks
+     *   repaint()                           redraw from the task objects
+     *   notice(message)                     one Notice for silent failures
+     *   lock: { set, key }                  refuses while `set` holds `key`
+     *   classify(res)                       default TaskTodayList.classifyOutcome
+     * Ranks apply optimistically (one repaint); a failed write restores that
+     * task's prior rank and repaints once more. The lock is released in
+     * `finally`. Resolves { written, failed } or null when refused / unchanged.
+     */
+    static async applyManualOrder(next, deps) {
+        const d = deps || {};
+        const list = Array.isArray(next) ? next.filter((t) => t && t.path) : [];
+        const lockSet = d.lock && d.lock.set && typeof d.lock.set.has === 'function' ? d.lock.set : null;
+        const lockKey = d.lock ? d.lock.key : undefined;
+        if (lockSet && lockSet.has(lockKey)) return null;
+        if (typeof d.setFields !== 'function' || typeof d.renumber !== 'function') return null;
+        const classify = typeof d.classify === 'function' ? d.classify : (res) => TaskTodayList.classifyOutcome(res);
+        const repaint = () => { try { if (typeof d.repaint === 'function') d.repaint(); } catch (_e) {} };
+        if (lockSet) lockSet.add(lockKey);
+        try {
+            const rankByPath = {};
+            for (const t of list) rankByPath[t.path] = t.rank;
+            let changes = [];
+            try { changes = d.renumber(list.map((t) => t.path), rankByPath) || []; } catch (_e) { changes = []; }
+            if (!changes.length) return null;
+            const prior = new Map(list.map((t) => [t.path, t.rank]));
+            const byPath = new Map(list.map((t) => [t.path, t]));
+            list.forEach((t, i) => { t.rank = i + 1; });
+            repaint();
+            const written = [];
+            const failed = [];
+            let silent = 0;
+            for (const change of changes) {
+                let res = null;
+                try { res = await d.setFields(change.path, { rank: change.rank }); } catch (_e) { res = null; }
+                let outcome = 'silent';
+                try { outcome = classify(res); } catch (_e) { outcome = 'silent'; }
+                if (outcome === 'ok') { written.push(change.path); continue; }
+                failed.push(change.path);
+                if (outcome === 'silent') silent += 1;
+                const t = byPath.get(change.path);
+                if (t) t.rank = prior.get(change.path);
+            }
+            if (failed.length) repaint();
+            if (silent > 0 && typeof d.notice === 'function') {
+                try { d.notice('Could not save the new task order'); } catch (_e) {}
+            }
+            return { written, failed };
+        } finally {
+            if (lockSet) lockSet.delete(lockKey);
+        }
+    }
+
+    /**
+     * Manual-order controller over a painted list. deps as applyManualOrder,
+     * plus order() -> the painted tasks top to bottom and rows: Map(path ->
+     * row). Only rows still attached take part: a row completed or rescheduled
+     * by its own controls has already left the list. Returns
+     * { move(task, dir), reorder(fromPath, toPath) }, each resolving like
+     * applyManualOrder (undefined when the gesture is not a move).
+     */
+    static manualOrder(deps) {
+        const d = deps || {};
+        const visible = () => {
+            let list = [];
+            try { list = typeof d.order === 'function' ? (d.order() || []) : []; } catch (_e) { list = []; }
+            return list.filter((t) => {
+                const row = t && d.rows && typeof d.rows.get === 'function' ? d.rows.get(t.path) : null;
+                return !!(row && row.parentNode);
+            });
+        };
+        return {
+            move: (task, dir) => {
+                const next = TaskTodayList.moveInOrder(visible(), task && task.path, dir);
+                return next ? TaskTodayList.applyManualOrder(next, d) : undefined;
+            },
+            reorder: (fromPath, toPath) => {
+                const next = TaskTodayList.reorderInOrder(visible(), fromPath, toPath);
+                return next ? TaskTodayList.applyManualOrder(next, d) : undefined;
+            },
+        };
     }
 
     /**

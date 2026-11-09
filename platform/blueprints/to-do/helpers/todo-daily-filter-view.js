@@ -416,6 +416,38 @@ class ToDoDailyFilterView {
         return { done, failed };
     }
 
+    /**
+     * Per-day gesture state shared by every render of the view: Select mode,
+     * the selection, in-flight locks ('bulk', 'reorder') and the live render.
+     * Other days' entries are dropped once they hold no lock.
+     */
+    static _dayState(todayStr) {
+        const key = String(todayStr || '');
+        const all = ToDoDailyFilterView._dayStates || (ToDoDailyFilterView._dayStates = new Map());
+        for (const [day, entry] of all) {
+            if (day !== key && !entry.locks.size) all.delete(day);
+        }
+        if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null });
+        return all.get(key);
+    }
+
+    /** Obsidian mobile (app.isMobile or Platform.isMobile); false when unknown. */
+    static _isMobile(appRef) {
+        try {
+            if (appRef && appRef.isMobile) return true;
+            if (typeof Platform !== 'undefined' && Platform && Platform.isMobile) return true;
+        } catch (_e) { /* treat as desktop */ }
+        return false;
+    }
+
+    /** True when a drag starts inside a form field (e.g. the inline date picker). */
+    static _fromFormField(event) {
+        try {
+            const target = event && event.target;
+            return !!(target && typeof target.closest === 'function' && target.closest('input,textarea,select'));
+        } catch (_e) { return false; }
+    }
+
     /** Stand-in row for a selected task that is not painted on the current tab. */
     static _detachedRow() {
         return { dataset: {}, parentNode: null, remove() {} };
@@ -516,23 +548,38 @@ class ToDoDailyFilterView {
             }
             setPill(sortButton, prefs.sort !== 'smart');
             setPill(groupButton, prefs.group !== 'none');
-            setPill(selectButton, selecting);
-            selectButton.setAttribute('aria-pressed', selecting ? 'true' : 'false');
+            setPill(selectButton, state.selecting);
+            selectButton.setAttribute('aria-pressed', state.selecting ? 'true' : 'false');
         };
 
-        // Gesture state that lives only as long as this render: selection is
-        // in memory (never persisted) and survives tab switches; leaving Select
-        // mode clears it.
-        let selecting = false;
-        const selected = new Set();
-        let bulkBusy = false;
-        let reordering = false;
+        // Selection and in-flight locks live on the class, keyed by todayStr,
+        // so they survive the Dataview re-render the view's own writes cause.
+        // Selection is in memory only (never persisted) and survives tab
+        // switches; leaving Select mode clears it.
+        const state = View._dayState(todayStr);
+        const selected = state.selected;
+        const isMobile = View._isMobile(typeof window !== 'undefined' ? window.app : null);
         let dragPath = null;
         let focusDay = null;
         let manualOrder = [];
         const rowByPath = new Map();
 
         const taskByPath = (taskPath) => tasks.find((t) => t && t.path && t.path === taskPath) || null;
+        // A write started by an earlier render patches that render's cache and
+        // the live render's, then repaints the live one.
+        const patchTask = (taskPath, fn) => {
+            const mine = taskByPath(taskPath);
+            if (mine) fn(mine);
+            const live = state.live;
+            if (!live || live.taskByPath === taskByPath) return;
+            const theirs = live.taskByPath(taskPath);
+            if (theirs && theirs !== mine) fn(theirs);
+        };
+        const repaintLive = () => {
+            const live = state.live;
+            if (live && typeof live.paint === 'function') live.paint();
+            else paint();
+        };
         const applyMoved = (task, due) => {
             if (!task) return;
             task.due = due || null;
@@ -553,64 +600,21 @@ class ToDoDailyFilterView {
         const canReorder = () => prefs.tab === 'today'
             && (prefs.sort === 'smart' || prefs.sort === 'manual')
             && prefs.group === 'none'
-            && !!TD && typeof TD.setFields === 'function';
+            && !!TD && typeof TD.setFields === 'function'
+            && typeof TTL.manualOrder === 'function';
 
-        const applyOrder = async (next) => {
-            if (reordering) return;
-            reordering = true;
-            try {
-                const rankByPath = {};
-                for (const t of next) rankByPath[t.path] = t.rank;
-                const changes = View.renumber(next.map((t) => t.path), rankByPath, TE);
-                if (!changes.length) return;
-                const prior = new Map(next.map((t) => [t.path, t.rank]));
-                const byPath = new Map(next.map((t) => [t.path, t]));
-                next.forEach((t, i) => { t.rank = i + 1; });
-                paint();
-                let failed = 0;
-                let silent = 0;
-                for (const change of changes) {
-                    let res = null;
-                    try { res = await TD.setFields(change.path, { rank: change.rank }); } catch (_e) { res = null; }
-                    const outcome = TTL.classifyOutcome(res);
-                    if (outcome === 'ok') continue;
-                    failed += 1;
-                    if (outcome === 'silent') silent += 1;
-                    const t = byPath.get(change.path);
-                    if (t) t.rank = prior.get(change.path);
-                }
-                if (failed > 0) paint();
-                if (silent > 0) View._notice('Could not save the new task order');
-            } finally {
-                reordering = false;
-            }
-        };
-        // Only rows still on screen take part: a row completed or rescheduled
-        // by its own controls has already left the list.
-        const visibleManual = () => manualOrder.filter((t) => {
-            const row = rowByPath.get(t.path);
-            return !!(row && row.parentNode);
-        });
-        const reorder = (fromPath, toPath) => {
-            const current = visibleManual();
-            const paths = current.map((t) => t.path);
-            const from = paths.indexOf(fromPath);
-            const to = paths.indexOf(toPath);
-            if (from < 0 || to < 0 || from === to) return undefined;
-            const next = current.slice();
-            next.splice(to, 0, next.splice(from, 1)[0]);
-            return applyOrder(next);
-        };
-        const onMove = (task, dir) => {
-            const current = visibleManual();
-            const i = current.findIndex((t) => task && t.path === task.path);
-            const j = i + (dir < 0 ? -1 : 1);
-            if (i < 0 || j < 0 || j >= current.length) return undefined;
-            const next = current.slice();
-            next[i] = current[j];
-            next[j] = current[i];
-            return applyOrder(next);
-        };
+        const order = typeof TTL.manualOrder === 'function' ? TTL.manualOrder({
+            order: () => manualOrder,
+            rows: rowByPath,
+            setFields: (taskPath, fields) => TD.setFields(taskPath, fields),
+            renumber: (paths, rankByPath) => View.renumber(paths, rankByPath, TE),
+            classify: (res) => TTL.classifyOutcome(res),
+            repaint: () => repaintLive(),
+            notice: (message) => View._notice(message),
+            lock: { set: state.locks, key: 'reorder' },
+        }) : null;
+        const reorder = (fromPath, toPath) => (order ? order.reorder(fromPath, toPath) : undefined);
+        const onMove = (task, dir) => (order ? order.move(task, dir) : undefined);
 
         const dropOnDay = async (taskPath, date) => {
             const task = taskByPath(taskPath);
@@ -621,17 +625,24 @@ class ToDoDailyFilterView {
             } catch (_e) { res = null; }
             const outcome = TTL.classifyOutcome(res);
             if (outcome === 'ok') {
-                applyMoved(task, res.due != null ? res.due : date);
-                paint();
+                patchTask(taskPath, (t) => applyMoved(t, res.due != null ? res.due : date));
+                repaintLive();
             } else if (outcome === 'silent') {
                 View._notice('Could not move task');
             }
         };
+        // Desktop only: HTML5 drag-and-drop does not run on Obsidian mobile,
+        // where the row menu's Move up / Move down is the equivalent.
         const wireDrag = (row, task, manual) => {
-            if (!row || typeof row.addEventListener !== 'function') return;
+            if (isMobile || !row || typeof row.addEventListener !== 'function') return;
             row.draggable = true;
             try { row.setAttribute('draggable', 'true'); } catch (_e) { /* property already set */ }
             row.addEventListener('dragstart', (event) => {
+                if (View._fromFormField(event)) {
+                    try { event.preventDefault(); } catch (_e) { /* the drag is cancelled either way */ }
+                    dragPath = null;
+                    return;
+                }
                 dragPath = task.path;
                 try {
                     if (event && event.dataTransfer) {
@@ -671,7 +682,7 @@ class ToDoDailyFilterView {
                     paint();
                 },
             };
-            if (selecting) {
+            if (state.selecting) {
                 options.selectable = true;
                 options.selected = selected.has(task.path);
                 options.onSelect = (picked, checked) => {
@@ -682,7 +693,7 @@ class ToDoDailyFilterView {
                 };
             }
             if (manual) {
-                options.dragHandle = true;
+                if (!isMobile) options.dragHandle = true;
                 options.onMove = onMove;
             }
             let row = null;
@@ -792,6 +803,7 @@ class ToDoDailyFilterView {
                     focusDay = cell.date;
                     commit({ tab: 'week' });
                 }));
+                if (isMobile) continue;
                 button.addEventListener('dragover', (event) => {
                     if (!dragPath) return;
                     try {
@@ -813,7 +825,7 @@ class ToDoDailyFilterView {
         };
 
         const bulk = async (verb, action, onOk, noticeAll) => {
-            if (bulkBusy) return undefined;
+            if (state.locks.has('bulk')) return undefined;
             const paths = [];
             for (const p of Array.from(selected)) {
                 const task = taskByPath(p);
@@ -821,10 +833,10 @@ class ToDoDailyFilterView {
                 else selected.delete(p);
             }
             if (!paths.length) { paint(); return undefined; }
-            bulkBusy = true;
-            paintBulk();
+            state.locks.add('bulk');
             let out = { done: [], failed: [] };
             try {
+                paintBulk();
                 out = await View.runBulk(paths, action, {
                     classify: (res) => TTL.classifyOutcome(res),
                     notice: (message) => View._notice(message),
@@ -834,25 +846,25 @@ class ToDoDailyFilterView {
                 });
                 for (const p of out.done) selected.delete(p);
             } finally {
-                bulkBusy = false;
+                state.locks.delete('bulk');
             }
-            paint();
+            repaintLive();
             return out;
         };
         const bulkReschedule = (due) => {
             if (due == null || typeof TTL.reschedule !== 'function') return undefined;
             return bulk('move', (p) => TTL.reschedule(
                 rowByPath.get(p) || View._detachedRow(), taskByPath(p), due, viewedDay, TD),
-            (p, res) => applyMoved(taskByPath(p), res && res.due != null ? res.due : due));
+            (p, res) => patchTask(p, (t) => applyMoved(t, res && res.due != null ? res.due : due)));
         };
         const bulkFields = (fields) => {
             if (!TD || typeof TD.setFields !== 'function') return undefined;
             return bulk('update', (p) => TD.setFields(p, fields),
-                (p) => { const task = taskByPath(p); if (task) Object.assign(task, fields); });
+                (p) => patchTask(p, (t) => Object.assign(t, fields)));
         };
         const bulkDone = () => {
             if (!TD || typeof TD.markDone !== 'function') return undefined;
-            return bulk('complete', (p) => TD.markDone(p), (p) => applyDone(taskByPath(p)), true);
+            return bulk('complete', (p) => TD.markDone(p), (p) => patchTask(p, applyDone), true);
         };
         const openPicker = (anchor, entries) => {
             const MP = CJS.MenuPopover;
@@ -873,14 +885,19 @@ class ToDoDailyFilterView {
             for (const project of (Array.isArray(projects) ? projects : [])) {
                 const name = project && project.name ? String(project.name) : '';
                 if (!name) continue;
-                const slug = project.slug ? String(project.slug) : '';
+                // The dialog's save writes _slugify(name); match it. An older
+                // TaskDialog without the delegate falls back to the list's slug.
+                const slug = typeof TD._slugify === 'function'
+                    ? String(TD._slugify(name) || '')
+                    : String(project.slug || '');
+                if (!slug) continue;
                 entries.push({ label: name, onSelect: () => bulkFields({ project: `[[${name}]]`, project_slug: slug }) });
             }
             return entries;
         };
         const paintBulk = () => {
             clear(bulkHost);
-            if (!selecting || selected.size === 0) return;
+            if (!state.selecting || selected.size === 0) return;
             const bar = bulkHost.createEl('div', { cls: 'sauce-todo-bulkbar' });
             bar.setAttribute('role', 'toolbar');
             bar.setAttribute('aria-label', 'Selected tasks');
@@ -888,7 +905,7 @@ class ToDoDailyFilterView {
             const action = (text, handler) => {
                 const button = bar.createEl('button', { cls: 'sauce-todo-bulk-action', text });
                 button.setAttribute('type', 'button');
-                if (bulkBusy) button.disabled = true;
+                if (state.locks.has('bulk')) button.disabled = true;
                 button.addEventListener('click', onClick(() => handler(button)));
                 return button;
             };
@@ -972,11 +989,12 @@ class ToDoDailyFilterView {
         groupButton.setAttribute('aria-haspopup', 'menu');
         groupButton.addEventListener('click', onClick(
             () => openMenu(groupButton, View.GROUP_OPTIONS, 'group', prefs.group)));
+        state.live = { paint, taskByPath };
         const selectButton = rightSide.createEl('button', { text: 'Select' });
         selectButton.setAttribute('type', 'button');
         selectButton.addEventListener('click', onClick(() => {
-            selecting = !selecting;
-            if (!selecting) selected.clear();
+            state.selecting = !state.selecting;
+            if (!state.selecting) selected.clear();
             paint();
         }));
 

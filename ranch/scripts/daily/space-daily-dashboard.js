@@ -1728,72 +1728,26 @@ class SpaceDailyDashboard {
       const cmp = TE && typeof TE.compareBy === "function" ? TE.compareBy(prefs.sort, todayStr) : null;
       const upNext = stableSort(model.today.slice(), cmp);
       const canReorder = (prefs.sort === "smart" || prefs.sort === "manual") && groupMode === "none"
-        && !!TD && typeof TD.setFields === "function";
+        && !!TD && typeof TD.setFields === "function" && typeof TTL.manualOrder === "function";
       const up = mkSection("upnext", "Up next");
       up.list.className += " is-upnext";
 
       const locks = SpaceDailyDashboard._todayLocks();
       const reorderKey = todayStr + ":reorder";
       const bulkKey = todayStr + ":bulk";
-      const applyOrder = async (next) => {
-        if (locks.has(reorderKey)) return;
-        locks.add(reorderKey);
-        try {
-          const rankByPath = {};
-          for (const t of next) rankByPath[t.path] = t.rank;
-          const changes = SpaceDailyDashboard.renumber(next.map((t) => t.path), rankByPath);
-          if (changes.length === 0) return;
-          const prior = new Map(next.map((t) => [t.path, t.rank]));
-          const byPath = new Map(next.map((t) => [t.path, t]));
-          next.forEach((t, i) => { t.rank = i + 1; });
-          rerender();
-          let failed = 0;
-          let silent = 0;
-          for (const c of changes) {
-            let res = null;
-            try { res = await TD.setFields(c.path, { rank: c.rank }); } catch (_e) { res = null; }
-            const outcome = TTL.classifyOutcome(res);
-            if (outcome !== "ok") {
-              failed++;
-              if (outcome === "silent") silent++;
-              const t = byPath.get(c.path);
-              if (t) t.rank = prior.get(c.path);
-            }
-          }
-          if (failed > 0) rerender();
-          if (silent > 0) notice("Could not save the new task order");
-        } finally {
-          locks.delete(reorderKey);
-        }
-      };
-      // Only rows still on screen take part: a row completed or rescheduled by
-      // its own controls has already left the DOM (and possibly the folder).
       const upRows = new Map();
-      const visibleUpNext = () => upNext.filter((t) => {
-        const r = upRows.get(t.path);
-        return !!(r && r.parentNode);
-      });
-      const reorder = (fromPath, toPath) => {
-        const current = visibleUpNext();
-        const paths = current.map((t) => t.path);
-        const from = paths.indexOf(fromPath);
-        const to = paths.indexOf(toPath);
-        if (from < 0 || to < 0 || from === to) return undefined;
-        const next = current.slice();
-        const moved = next.splice(from, 1)[0];
-        next.splice(to, 0, moved);
-        return applyOrder(next);
-      };
-      const onMove = (task, dir) => {
-        const current = visibleUpNext();
-        const i = current.findIndex((t) => t && task && t.path === task.path);
-        const j = i + (dir < 0 ? -1 : 1);
-        if (i < 0 || j < 0 || j >= current.length) return undefined;
-        const next = current.slice();
-        next[i] = current[j];
-        next[j] = current[i];
-        return applyOrder(next);
-      };
+      const order = canReorder ? TTL.manualOrder({
+        order: () => upNext,
+        rows: upRows,
+        setFields: (p, fields) => TD.setFields(p, fields),
+        renumber: SpaceDailyDashboard.renumber,
+        classify: (res) => TTL.classifyOutcome(res),
+        repaint: rerender,
+        notice,
+        lock: { set: locks, key: reorderKey },
+      }) : null;
+      const reorder = (fromPath, toPath) => (order ? order.reorder(fromPath, toPath) : undefined);
+      const onMove = (task, dir) => (order ? order.move(task, dir) : undefined);
 
       let dragPath = null;
       const wireDrag = (row, task) => {
