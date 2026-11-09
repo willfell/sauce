@@ -746,7 +746,8 @@ class TaskTodayList {
      * instance `this`), so any widget can draw a uniform task row by calling
      * `window.customJS.TaskTodayList.renderTaskRow(container, task)` cross-class.
      * Draws:
-     *   - a functional done-checkbox → TaskDialog.markDone(path) (revert on fail)
+     *   - a functional done-checkbox → TaskDialog.markDone(path) (revert on fail;
+     *     options.onDone(task) after a successful completion)
      *   - a title (title click → opens the task NOTE via app.workspace.openLinkText(path))
      *   - metadata chips for project(name) / priority / due when present.
      * `TDref` is an OPTIONAL TaskDialog reference; when omitted the method reads
@@ -863,8 +864,11 @@ class TaskTodayList {
                 if (res && res.ok === false) {
                     revert();
                     try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
+                } else {
+                    // On success the file moves to _done/; the row is already
+                    // gone. options.onDone lets the host repaint its counts.
+                    try { if (typeof opts.onDone === 'function') opts.onDone(task); } catch (_e) {}
                 }
-                // On success the file moves to _done/; the row is already gone.
             } catch (e) {
                 revert();
                 try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}

@@ -1412,7 +1412,8 @@ async function renderDailyTaskFixture(today, options) {
   });
 
   await ok('RD-P-RENUMBER pure renumber returns only changed ranks', async () => {
-    const Dash = loadDashboard(makeMomentWindow(), {});
+    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+    const Dash = loadDashboard(makeMomentWindow(), { TaskEntity: new TaskEntityClass() });
     const out = Dash.renumber(['d', 'a', 'b', 'c', 'e'], { a: 1, b: 2, c: 3, d: 4, e: 5 });
     assert(JSON.stringify(out) === JSON.stringify([
       { path: 'd', rank: 1 }, { path: 'a', rank: 2 }, { path: 'b', rank: 3 }, { path: 'c', rank: 4 },
@@ -1420,6 +1421,8 @@ async function renderDailyTaskFixture(today, options) {
     const fresh = Dash.renumber(['x', 'y'], {});
     assert(JSON.stringify(fresh) === JSON.stringify([{ path: 'x', rank: 1 }, { path: 'y', rank: 2 }]), 'unranked rows get ranks');
     assert(Dash.renumber(null, null).length === 0, 'null-safe');
+    const Cold = loadDashboard(makeMomentWindow(), {});
+    assert(Cold.renumber(['x'], {}).length === 0, 'before TaskEntity loads nothing is renumbered');
   });
 
   const rankedPages = ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map((s, i) =>

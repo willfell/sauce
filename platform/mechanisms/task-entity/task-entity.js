@@ -70,6 +70,7 @@ class TaskEntity {
     bucketOf(task, todayStr) { return TaskEntity.bucketOf(task, todayStr); }
     completedDay(task) { return TaskEntity.completedDay(task); }
     compareBy(mode, todayStr) { return TaskEntity.compareBy(mode, todayStr); }
+    renumber(orderedPaths, rankByPath) { return TaskEntity.renumber(orderedPaths, rankByPath); }
     parseTitleShortcuts(text, todayStr, projectNames) { return TaskEntity.parseTitleShortcuts(text, todayStr, projectNames); }
     notesBytes(statSize, frontmatterEndOffset) { return TaskEntity.notesBytes(statSize, frontmatterEndOffset); }
 
@@ -243,6 +244,25 @@ class TaskEntity {
                 title);
             default: return chain(rank, priority, late, created, title);
         }
+    }
+
+    /**
+     * Manual-order renumber: given the new top-to-bottom order of task paths
+     * and their current ranks, return the { path, rank } writes that make rank
+     * equal position + 1, skipping rows whose rank already matches. Blank paths
+     * keep their position but are never written. Pure.
+     */
+    static renumber(orderedPaths, rankByPath) {
+        const ranks = rankByPath && typeof rankByPath === 'object' ? rankByPath : {};
+        const list = Array.isArray(orderedPaths) ? orderedPaths : [];
+        const out = [];
+        list.forEach((p, i) => {
+            if (!p) return;
+            const cur = Object.prototype.hasOwnProperty.call(ranks, p) ? ranks[p] : null;
+            const ranked = cur !== null && cur !== undefined && cur !== '';
+            if (!ranked || Number(cur) !== i + 1) out.push({ path: p, rank: i + 1 });
+        });
+        return out;
     }
 
     /**

@@ -131,6 +131,9 @@ function buttonsOf(root) {
 function findButton(root, label) {
   return buttonsOf(root).find((b) => b.textContent === label);
 }
+function controlsOf(root) {
+  return byClass(root, 'sauce-todo-filter-controls')[0];
+}
 
 function dataArray(items) {
   const list = items.slice();
@@ -174,6 +177,7 @@ function makeRenderHarness(overrides = {}) {
   const notices = [];
   const reopened = [];
   const menus = [];
+  const calls = { reschedule: [], setFields: [], markDone: [] };
   const clock = { reads: 0 };
   class NoticeStub { constructor(message) { notices.push(message); } }
   const customJS = {
@@ -184,8 +188,14 @@ function makeRenderHarness(overrides = {}) {
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
         row.dataset.sauceTaskPath = String(task.path || '');
         row.createEl('span', { cls: 'sauce-task-today-title', text: task.title });
-        rows.push({ title: task.title, options, row, container });
+        rows.push({ title: task.title, task, options, row, container });
         return row;
+      },
+      async reschedule(row, task, newDue, viewedDay, TDref) {
+        calls.reschedule.push({ path: task.path, newDue, viewedDay, hasRow: !!row, TD: TDref });
+        if (overrides.reschedule) return overrides.reschedule(task.path, newDue);
+        if (row && row.parentNode) row.parentNode.removeChild(row);
+        return { ok: true, due: newDue };
       },
     }),
     TaskDialog: {
@@ -194,6 +204,19 @@ function makeRenderHarness(overrides = {}) {
         return overrides.reopenResult
           ? overrides.reopenResult(taskPath)
           : { ok: true, path: taskPath.replace('/_done/', '/') };
+      },
+      async setFields(taskPath, fields) {
+        calls.setFields.push({ path: taskPath, fields });
+        return overrides.setFields ? overrides.setFields(taskPath, fields) : { ok: true };
+      },
+      async markDone(taskPath) {
+        calls.markDone.push(taskPath);
+        return overrides.markDone ? overrides.markDone(taskPath) : { ok: true };
+      },
+      donePath(taskPath) { return String(taskPath).replace('spice/tasks/', 'spice/tasks/_done/'); },
+      _loadProjectList(appRef) {
+        calls.projectApp = appRef;
+        return [{ name: 'Atlas', slug: 'atlas' }, { name: 'Zeta Works', slug: 'zeta' }];
       },
     },
     SectionLabel: {
@@ -205,13 +228,15 @@ function makeRenderHarness(overrides = {}) {
       open(entries, opts) { menus.push({ entries, anchor: opts && opts.anchor }); return {}; },
     },
   };
+  const appStub = { vault: {}, workspace: {} };
   const windowShim = {
     localStorage: storage,
     moment: () => { clock.reads += 1; return { format: () => TODAY }; },
     Notice: NoticeStub,
+    app: appStub,
     customJS,
   };
-  return { storage, rows, notices, reopened, menus, windowShim, clock, customJS };
+  return { storage, rows, notices, reopened, menus, calls, appStub, windowShim, clock, customJS };
 }
 
 async function mount(env, pages = PAGES) {
@@ -445,8 +470,8 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     assert.strictEqual(byClass(root, 'sauce-todo-filter-done-host').length, 1, 'done host');
     assert.strictEqual(byClass(root, 'sauce-todo-filter-controls').length, 1);
 
-    assert.deepStrictEqual(buttonsOf(root).slice(0, 7).map((b) => b.textContent),
-      ['Today', 'This week', 'Overdue · 2', 'Backlog · 1', 'All open', 'Sort ▾', 'Group ▾']);
+    assert.deepStrictEqual(buttonsOf(controlsOf(root)).map((b) => b.textContent),
+      ['Today', 'This week', 'Overdue · 2', 'Backlog · 1', 'All open', 'Sort ▾', 'Group ▾', 'Select']);
     assert(String(findButton(root, 'Today').className).includes('is-active'));
     assert.strictEqual(findButton(root, 'Today').attributes['aria-selected'], 'true');
     assert.strictEqual(findButton(root, 'This week').attributes['aria-selected'], 'false');
@@ -465,7 +490,7 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
   await okAsync('RD-DV-RENDER tab labels omit the count when it is zero', async () => {
     const env = makeRenderHarness();
     const { root } = await mount(env, PAGES.filter((p) => p.title.startsWith('Today')));
-    assert.deepStrictEqual(buttonsOf(root).slice(0, 5).map((b) => b.textContent),
+    assert.deepStrictEqual(buttonsOf(controlsOf(root)).slice(0, 5).map((b) => b.textContent),
       ['Today', 'This week', 'Overdue', 'Backlog', 'All open']);
   });
 
@@ -704,6 +729,415 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     assert.deepStrictEqual(View.readPrefs(storage), { tab: 'backlog', sort: 'due', group: 'priority' });
     assert.strictEqual(JSON.parse(storage.data.get(View.PREFS_KEY)).note, 'kept');
     assert.deepStrictEqual(Dashboard.readTodayPrefs(storage), { tab: 'backlog', sort: 'due', group: 'priority' });
+  });
+
+  const lastRow = (env, title) => env.rows.filter((r) => r.title === title).pop();
+  const bulkBar = (root) => byClass(root, 'sauce-todo-bulkbar')[0] || null;
+  const bulkButton = (root, label) => findButton(bulkBar(root), label);
+  const select = (env, ...names) => {
+    for (const name of names) {
+      const r = lastRow(env, name);
+      r.options.onSelect(r.task, true);
+    }
+  };
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+  ok('RD-DV-RENUMBER renumber is pure, returns only changed ranks, and delegates to TaskEntity', () => {
+    const View = loadClass({ customJS: { TaskEntity: TE } });
+    assert.deepStrictEqual(View.renumber(['a', 'b', 'c'], { a: 1, c: 2 }),
+      [{ path: 'b', rank: 2 }, { path: 'c', rank: 3 }]);
+    assert.deepStrictEqual(View.renumber(['a', 'b'], { a: 1, b: 2 }), [], 'nothing changes, nothing written');
+    const spy = Object.create(TE);
+    const seen = [];
+    spy.renumber = (...args) => { seen.push(args); return TE.renumber(...args); };
+    loadClass({ customJS: { TaskEntity: spy } }).renumber(['x'], {});
+    assert.deepStrictEqual(seen, [[['x'], {}]], 'one implementation: TaskEntity.renumber');
+    assert.deepStrictEqual(loadClass({}).renumber(['a'], {}), [], 'cold load renumbers nothing');
+  });
+
+  ok('RD-DV-STRIP week strip: Mon-Fri always, weekend only when populated, counts open tasks, flags today', () => {
+    const View = loadClass({ customJS: { TaskEntity: TE } });
+    const cells = (list, todayStr) => View.weekStrip(list, todayStr).map((c) => [c.date, c.label, c.count, c.isToday]);
+    assert.deepStrictEqual(cells(PARSED, TODAY), [
+      ['2026-11-09', 'Mon 9', 2, true],
+      ['2026-11-10', 'Tue 10', 0, false],
+      ['2026-11-11', 'Wed 11', 0, false],
+      ['2026-11-12', 'Thu 12', 0, false],
+      ['2026-11-13', 'Fri 13', 1, false],
+    ]);
+    const sunday = TE.parseNote(page('Sunday item', { due: '2026-11-15' }));
+    const doneSaturday = TE.parseNote(page('Done Saturday', {
+      status: 'done', due: '2026-11-14', file: { path: 'spice/tasks/_done/Done Saturday.md' },
+    }));
+    const withWeekend = cells([...PARSED, sunday, doneSaturday], TODAY);
+    assert.deepStrictEqual(withWeekend.map((c) => c[0]),
+      ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-15'],
+      'Sunday holds an open task; Saturday holds only a done one');
+    assert.deepStrictEqual(withWeekend[5], ['2026-11-15', 'Sun 15', 1, false]);
+    const midweek = cells(PARSED, '2026-11-11');
+    assert.deepStrictEqual(midweek.map((c) => c[3]), [false, false, true, false, false], 'Wednesday is today');
+    assert.strictEqual(midweek[0][2], 2, 'a past day of this week still counts its open tasks');
+    assert.deepStrictEqual(View.weekStrip(PARSED, 'garbage'), []);
+    assert.deepStrictEqual(loadClass({}).weekStrip(PARSED, TODAY), [], 'cold load: no strip');
+  });
+
+  ok('RD-DV-BULK-WRAP bulk bar CSS wraps and goes full width below 720px', () => {
+    const css = loadClass({}).BULKBAR_CSS;
+    assert(/\.sauce-todo-bulkbar\s*\{[^}]*flex-wrap:\s*wrap/.test(css), 'flex-wrap: wrap on the bar');
+    assert(/@media\s*\(max-width:\s*720px\)\s*\{[^@]*\.sauce-todo-bulkbar\s*\{[^}]*width:\s*100%/.test(css),
+      'full width below 720px');
+  });
+
+  await okAsync('RD-DV-BULK-WRAP the rendered view carries the bulk bar stylesheet', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    const styles = descendants(root).filter((n) => n.tagName === 'STYLE');
+    assert.strictEqual(styles.length, 1);
+    assert.strictEqual(styles[0].textContent, View.BULKBAR_CSS);
+  });
+
+  await okAsync('RD-DV-SEL Select toggles selection mode; selection survives tab switches; exit clears it', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    assert(!lastRow(env, 'Today high').options.selectable, 'not selectable before Select');
+    assert.strictEqual(bulkBar(root), null, 'no bar before anything is selected');
+    const selectBtn = findButton(controlsOf(root), 'Select');
+    assert(byClass(root, 'sauce-todo-filter-right')[0].children.includes(selectBtn), 'Select lives in the right cluster');
+    assert.strictEqual(selectBtn.attributes['aria-pressed'], 'false');
+
+    await selectBtn.fire('click');
+    assert.strictEqual(selectBtn.attributes['aria-pressed'], 'true');
+    assert(String(selectBtn.className).includes('is-active'));
+    assert.strictEqual(lastRow(env, 'Today high').options.selectable, true);
+    assert.strictEqual(lastRow(env, 'Today high').options.selected, false);
+    assert.strictEqual(bulkBar(root), null, 'bar stays hidden with 0 selected');
+
+    select(env, 'Today high');
+    assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '1 selected');
+    assert.deepStrictEqual(buttonsOf(bulkBar(root)).map((b) => b.textContent),
+      ['→ Tomorrow', '→ Next Mon', 'Priority ▾', 'Project ▾', 'Backlog', 'Mark done']);
+
+    await findButton(controlsOf(root), 'All open').fire('click');
+    assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '1 selected');
+    assert.strictEqual(lastRow(env, 'Today high').options.selected, true, 'selected row repaints checked');
+    assert.strictEqual(lastRow(env, 'Friday item').options.selected, false);
+    assert(!String(env.storage.data.get('sauce-todo-filter:prefs:v2')).includes('spice/tasks'),
+      'selection is never persisted');
+
+    const r = lastRow(env, 'Today high');
+    r.options.onSelect(r.task, false);
+    assert.strictEqual(bulkBar(root), null, 'deselecting the last row hides the bar');
+
+    select(env, 'Friday item', 'Backlog item');
+    assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '2 selected');
+    await selectBtn.fire('click');
+    assert.strictEqual(bulkBar(root), null);
+    assert(!lastRow(env, 'Friday item').options.selectable, 'leaving Select mode drops the squares');
+    await selectBtn.fire('click');
+    assert.strictEqual(lastRow(env, 'Friday item').options.selected, false, 'exiting Select cleared the set');
+    assert.strictEqual(bulkBar(root), null);
+  });
+
+  await okAsync('RD-DV-SEL-BULK 3 selected -> Next Mon: 3 sequential reschedules; the rejected one stays selected', async () => {
+    let active = 0;
+    let overlapped = false;
+    const env = makeRenderHarness({
+      async reschedule(taskPath, newDue) {
+        active += 1;
+        if (active > 1) overlapped = true;
+        await flush();
+        active -= 1;
+        if (taskPath.endsWith('Friday item.md')) throw new Error('disk gone');
+        return { ok: true, due: newDue };
+      },
+    });
+    const { root } = await mount(env);
+    await findButton(controlsOf(root), 'All open').fire('click');
+    await findButton(controlsOf(root), 'Select').fire('click');
+    select(env, 'Today low', 'Friday item', 'Backlog item');
+    assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '3 selected');
+
+    await bulkButton(root, '→ Next Mon').fire('click');
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue, c.viewedDay, c.hasRow]), [
+      ['spice/tasks/Today low.md', '2026-11-16', TODAY, true],
+      ['spice/tasks/Friday item.md', '2026-11-16', TODAY, true],
+      ['spice/tasks/Backlog item.md', '2026-11-16', TODAY, true],
+    ]);
+    assert(env.calls.reschedule.every((c) => c.TD === env.customJS.TaskDialog), 'TaskDialog passed through');
+    assert.strictEqual(overlapped, false, 'one task at a time');
+    assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '1 selected');
+    assert.strictEqual(lastRow(env, 'Friday item').options.selected, true, 'the failed row stays selected');
+    assert.strictEqual(lastRow(env, 'Today low').options.selected, false);
+    assert.deepStrictEqual(env.notices, ['Could not move 1 task'], 'one summary Notice');
+    assert.deepStrictEqual(buttonsOf(controlsOf(root)).slice(0, 4).map((b) => b.textContent),
+      ['Today', 'This week', 'Overdue · 2', 'Backlog'], 'counts repaint from the moved due dates');
+  });
+
+  await okAsync('RD-DV-SEL-NOTICE runBulk: sequential; only silent failures reach the one summary Notice', async () => {
+    const View = loadClass({});
+    const results = {
+      a: { ok: true, due: '2026-11-10' },
+      b: { ok: false, reason: 'write failed' },
+      c: { ok: false, no_op: true },
+      d: { ok: false, reason: 'task file not found' },
+    };
+    const order = [];
+    const notices = [];
+    const okPaths = [];
+    const out = await View.runBulk(['a', 'b', 'c', 'd', 'e'], async (p) => {
+      order.push(`start ${p}`);
+      await flush();
+      order.push(`end ${p}`);
+      if (p === 'e') throw new Error('boom');
+      return results[p];
+    }, {
+      classify: (res) => TTL_REAL.classifyOutcome(res),
+      notice: (m) => notices.push(m),
+      onOk: (p) => okPaths.push(p),
+      verb: 'move',
+    });
+    assert.deepStrictEqual(out, { done: ['a'], failed: ['b', 'd', 'e'] }, 'skipped is neither done nor failed');
+    assert.deepStrictEqual(order, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c',
+      'start d', 'end d', 'start e', 'end e']);
+    assert.deepStrictEqual(okPaths, ['a']);
+    assert.deepStrictEqual(notices, ['Could not move 2 tasks'], 'noticed failure b already told the user');
+
+    const quiet = [];
+    const clean = await View.runBulk(['a', 'c'], async (p) => results[p], {
+      classify: (res) => TTL_REAL.classifyOutcome(res), notice: (m) => quiet.push(m), verb: 'move',
+    });
+    assert.deepStrictEqual(clean, { done: ['a'], failed: [] });
+    assert.deepStrictEqual(quiet, [], 'no failures, no Notice');
+
+    const all = [];
+    await View.runBulk(['b', 'd'], async (p) => results[p], {
+      classify: (res) => TTL_REAL.classifyOutcome(res), notice: (m) => all.push(m), verb: 'complete', noticeAll: true,
+    });
+    assert.deepStrictEqual(all, ['Could not complete 2 tasks'], 'a rail with no Notice of its own counts every failure');
+    assert.deepStrictEqual(await View.runBulk(null, null, null), { done: [], failed: [] });
+  });
+
+  await okAsync('RD-DV-SEL-ACTIONS Tomorrow / Backlog reschedule; Priority and Project menus write fields', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    await findButton(controlsOf(root), 'Select').fire('click');
+    select(env, 'Today high', 'Today low');
+    await bulkButton(root, '→ Tomorrow').fire('click');
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue]), [
+      ['spice/tasks/Today high.md', '2026-11-10'], ['spice/tasks/Today low.md', '2026-11-10']]);
+    assert.deepStrictEqual(listTitles(root), [], 'both left Today');
+    assert.strictEqual(bulkBar(root), null, 'everything succeeded, nothing left selected');
+
+    await findButton(controlsOf(root), 'All open').fire('click');
+    select(env, 'Backlog item', 'Friday item');
+    env.calls.reschedule.length = 0;
+    await bulkButton(root, 'Backlog').fire('click');
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue]), [
+      ['spice/tasks/Backlog item.md', ''], ['spice/tasks/Friday item.md', '']]);
+
+    select(env, 'Overdue mid', 'Stale old');
+    env.menus.length = 0;
+    const prioBtn = bulkButton(root, 'Priority ▾');
+    await prioBtn.fire('click');
+    assert.strictEqual(env.menus[0].anchor, prioBtn);
+    assert.deepStrictEqual(env.menus[0].entries.map((e) => e.label), ['None', 'Low', 'Medium', 'High', 'Highest']);
+    await env.menus[0].entries.find((e) => e.label === 'High').onSelect();
+    assert.deepStrictEqual(env.calls.setFields, [
+      { path: 'spice/tasks/Overdue mid.md', fields: { priority: 'high' } },
+      { path: 'spice/tasks/Stale old.md', fields: { priority: 'high' } },
+    ]);
+    assert.strictEqual(bulkBar(root), null);
+
+    select(env, 'Overdue mid');
+    env.calls.setFields.length = 0;
+    await bulkButton(root, 'Priority ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'None').onSelect();
+    assert.deepStrictEqual(env.calls.setFields, [{ path: 'spice/tasks/Overdue mid.md', fields: { priority: '' } }]);
+    assert.strictEqual(lastRow(env, 'Overdue mid').task.priority, '', 'the cache repaints the new priority');
+
+    select(env, 'Overdue mid', 'Today high');
+    env.calls.setFields.length = 0;
+    const projBtn = bulkButton(root, 'Project ▾');
+    await projBtn.fire('click');
+    const projMenu = env.menus[env.menus.length - 1];
+    assert.strictEqual(projMenu.anchor, projBtn);
+    assert.strictEqual(env.calls.projectApp, env.appStub, 'project list read through the live app');
+    assert.deepStrictEqual(projMenu.entries.map((e) => e.label), ['No project', 'Atlas', 'Zeta Works']);
+    await projMenu.entries.find((e) => e.label === 'Zeta Works').onSelect();
+    assert.deepStrictEqual(env.calls.setFields, [
+      { path: 'spice/tasks/Overdue mid.md', fields: { project: '[[Zeta Works]]', project_slug: 'zeta' } },
+      { path: 'spice/tasks/Today high.md', fields: { project: '[[Zeta Works]]', project_slug: 'zeta' } },
+    ]);
+
+    select(env, 'Today low');
+    env.calls.setFields.length = 0;
+    await bulkButton(root, 'Project ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'No project').onSelect();
+    assert.deepStrictEqual(env.calls.setFields,
+      [{ path: 'spice/tasks/Today low.md', fields: { project: '', project_slug: '' } }]);
+  });
+
+  await okAsync('RD-DV-SEL-DONE Mark done completes each through TaskDialog.markDone and lands in Done today', async () => {
+    const env = makeRenderHarness({
+      markDone: (p) => (p.endsWith('Today low.md') ? { ok: false, reason: 'rename failed' } : { ok: true }),
+    });
+    const { root } = await mount(env);
+    await findButton(controlsOf(root), 'Select').fire('click');
+    select(env, 'Today high', 'Today low');
+    await bulkButton(root, 'Mark done').fire('click');
+    assert.deepStrictEqual(env.calls.markDone, ['spice/tasks/Today high.md', 'spice/tasks/Today low.md']);
+    assert.deepStrictEqual(listTitles(root), ['Today low']);
+    const doneHost = byClass(root, 'sauce-todo-filter-done-host')[0];
+    assert.strictEqual(byClass(doneHost, 'sauce-section-label')[0].textContent, 'Done today · 3');
+    assert(byClass(doneHost, 'sauce-today-done-row').some((r) => r.textContent.includes('Today high')));
+    assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '1 selected');
+    assert.deepStrictEqual(env.notices, ['Could not complete 1 task'],
+      'markDone has no Notice of its own, so its failures are summarised');
+  });
+
+  await okAsync('RD-DV-MOVE manual order: onMove(task, -1) on the second Today row renumbers', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    assert.deepStrictEqual(listTitles(root), ['Today high', 'Today low']);
+    for (const name of ['Today high', 'Today low']) {
+      assert.strictEqual(lastRow(env, name).options.dragHandle, true, `${name} has a handle`);
+      assert.strictEqual(typeof lastRow(env, name).options.onMove, 'function');
+    }
+    const second = lastRow(env, 'Today low');
+    await second.options.onMove(second.task, -1);
+    assert.deepStrictEqual(env.calls.setFields, [
+      { path: 'spice/tasks/Today low.md', fields: { rank: 1 } },
+      { path: 'spice/tasks/Today high.md', fields: { rank: 2 } },
+    ]);
+    assert.deepStrictEqual(listTitles(root), ['Today low', 'Today high']);
+
+    env.calls.setFields.length = 0;
+    const top = lastRow(env, 'Today low');
+    await top.options.onMove(top.task, -1);
+    assert.deepStrictEqual(env.calls.setFields, [], 'moving the top row up writes nothing');
+    const again = lastRow(env, 'Today high');
+    await again.options.onMove(again.task, -1);
+    assert.deepStrictEqual(env.calls.setFields, [
+      { path: 'spice/tasks/Today high.md', fields: { rank: 1 } },
+      { path: 'spice/tasks/Today low.md', fields: { rank: 2 } },
+    ], 'ranks already 1..n: only the swapped pair is written');
+  });
+
+  await okAsync('RD-DV-MOVE manual order only on Today with Smart / My order and no grouping', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    await findButton(root, 'Sort ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'My order').onSelect();
+    assert.strictEqual(lastRow(env, 'Today high').options.dragHandle, true, 'My order keeps the handle');
+    await findButton(root, 'Sort ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'Priority').onSelect();
+    assert(!lastRow(env, 'Today high').options.dragHandle && !lastRow(env, 'Today high').options.onMove,
+      'Priority sort: no manual order');
+    await findButton(root, 'Sort ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'Smart').onSelect();
+    await findButton(root, 'Group ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'Project').onSelect();
+    assert(!lastRow(env, 'Today high').options.dragHandle, 'grouped: no manual order');
+    await findButton(root, 'Group ▾').fire('click');
+    await env.menus[env.menus.length - 1].entries.find((e) => e.label === 'None').onSelect();
+    await findButton(controlsOf(root), 'All open').fire('click');
+    assert(!lastRow(env, 'Friday item').options.dragHandle && !lastRow(env, 'Friday item').options.onMove,
+      'other tabs: no manual order');
+  });
+
+  await okAsync('RD-DV-MOVE a silently refused rank write restores the order with one Notice', async () => {
+    const env = makeRenderHarness({
+      setFields: (p) => (p.endsWith('Today high.md') ? { ok: false, reason: 'render-safe-unavailable' } : { ok: true }),
+    });
+    const { root } = await mount(env);
+    const second = lastRow(env, 'Today low');
+    await second.options.onMove(second.task, -1);
+    assert.strictEqual(env.calls.setFields.length, 2, 'both writes attempted');
+    assert.deepStrictEqual(env.notices, ['Could not save the new task order']);
+    assert.strictEqual(lastRow(env, 'Today high').task.rank, null, 'failed row keeps its old rank');
+    assert.strictEqual(lastRow(env, 'Today low').task.rank, 1, 'saved row keeps its new rank');
+    assert.deepStrictEqual(listTitles(root), ['Today low', 'Today high']);
+  });
+
+  await okAsync('RD-DV-DRAG dropping a Today row on another renumbers; any row dropped on a strip cell reschedules', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    const dt = { setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    const lowRow = lastRow(env, 'Today low').row;
+    const highRow = lastRow(env, 'Today high').row;
+    assert.strictEqual(lowRow.draggable, true);
+    await lowRow.fire('dragstart', { dataTransfer: dt });
+    let prevented = false;
+    await highRow.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(prevented, 'a Today row accepts the drag');
+    await highRow.fire('drop', { dataTransfer: dt });
+    await flush();
+    assert.deepStrictEqual(env.calls.setFields, [
+      { path: 'spice/tasks/Today low.md', fields: { rank: 1 } },
+      { path: 'spice/tasks/Today high.md', fields: { rank: 2 } },
+    ]);
+
+    await findButton(controlsOf(root), 'All open').fire('click');
+    const backlogRow = lastRow(env, 'Backlog item').row;
+    assert.strictEqual(backlogRow.draggable, true, 'rows on any tab can be dragged to the strip');
+    await backlogRow.fire('dragstart', { dataTransfer: dt });
+    const friday = byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === '2026-11-13');
+    prevented = false;
+    await friday.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(prevented, 'strip cell accepts the drag');
+    await friday.fire('drop', { dataTransfer: dt });
+    await flush();
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue, c.viewedDay]),
+      [['spice/tasks/Backlog item.md', '2026-11-13', TODAY]]);
+    const fridayNow = byClass(root, 'sauce-todo-week-cell').find((c) => c.dataset.date === '2026-11-13');
+    assert.strictEqual(byClass(fridayNow, 'sauce-todo-week-count')[0].textContent, '2', 'strip count repaints');
+
+    prevented = false;
+    await fridayNow.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(!prevented, 'no drag in progress: the cell refuses');
+  });
+
+  await okAsync('RD-DV-STRIP-RENDER strip sits above the tabs; today highlighted; click opens This week', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    const host = byClass(root, 'sauce-todo-above-tabs')[0];
+    const cells = byClass(host, 'sauce-todo-week-cell');
+    assert.deepStrictEqual(cells.map((c) => byClass(c, 'sauce-todo-week-label')[0].textContent),
+      ['Mon 9', 'Tue 10', 'Wed 11', 'Thu 12', 'Fri 13']);
+    assert.deepStrictEqual(cells.map((c) => byClass(c, 'sauce-todo-week-count')[0].textContent),
+      ['2', '0', '0', '0', '1']);
+    assert.deepStrictEqual(cells.map((c) => String(c.className).split(/\s+/).includes('is-today')),
+      [true, false, false, false, false]);
+    assert.strictEqual(cells[0].attributes['aria-current'], 'date');
+    await cells[4].fire('click');
+    assert.strictEqual(View.readPrefs(env.storage).tab, 'week');
+    assert(String(findButton(controlsOf(root), 'This week').className).includes('is-active'));
+    assert.deepStrictEqual(listTitles(root), ['Friday item', 'Today high', 'Today low']);
+  });
+
+  await okAsync('RD-DV-ONDONE a checkbox completion repaints counts and Done today', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    const r = lastRow(env, 'Today low');
+    assert.strictEqual(typeof r.options.onDone, 'function');
+    r.options.onDone(r.task);
+    assert.deepStrictEqual(listTitles(root), ['Today high']);
+    const doneHost = byClass(root, 'sauce-todo-filter-done-host')[0];
+    assert.strictEqual(byClass(doneHost, 'sauce-section-label')[0].textContent, 'Done today · 3');
+    const todayCell = byClass(root, 'sauce-todo-week-cell')[0];
+    assert.strictEqual(byClass(todayCell, 'sauce-todo-week-count')[0].textContent, '1');
+    const undo = byClass(doneHost, 'sauce-today-undo').find((b) => b.attributes['aria-label'] === 'Undo: Today low');
+    assert(undo, 'the completed row is undoable from its _done path');
+
+    const rec = makeRenderHarness();
+    const recurring = page('Water plants', { due: TODAY, recurrence: 'every day' });
+    const mounted = await mount(rec, [...PAGES, recurring]);
+    const rr = lastRow(rec, 'Water plants');
+    rr.options.onDone(rr.task);
+    assert(!listTitles(mounted.root).includes('Water plants'), 'a rolled recurring task leaves the list');
+    const recDone = byClass(mounted.root, 'sauce-todo-filter-done-host')[0];
+    assert.strictEqual(byClass(recDone, 'sauce-section-label')[0].textContent, 'Done today · 2',
+      'a recurring completion never reaches Done today');
   });
 
   await okAsync('RD-DV-GUARD a throwing TaskEntity during paint warns and never throws out of render', async () => {

@@ -161,5 +161,16 @@ ok('RD-E-NOTESBYTES', () => {
   assert(TE.notesBytes(100, 400) === 0);
 });
 
+ok('RD-E-RENUMBER renumber returns only the ranks that change, through the instance', () => {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const out = TE.renumber(['a', 'b', 'c'], { a: 1, c: 2 });
+  assert(same(out, [{ path: 'b', rank: 2 }, { path: 'c', rank: 3 }]), JSON.stringify(out));
+  assert(same(TE.renumber(['x', 'y'], {}), [{ path: 'x', rank: 1 }, { path: 'y', rank: 2 }]), 'unranked rows get ranks');
+  assert(same(TE.renumber(['p', 'q'], { p: '1', q: '' }), [{ path: 'q', rank: 2 }]), 'string rank 1 matches; empty rank is unranked');
+  assert(same(TE.renumber(['', 'z'], { z: 2 }), []), 'blank paths are skipped but keep their position');
+  assert(TE.renumber(null, null).length === 0, 'null-safe');
+  assert(same(TaskEntityClass.renumber(['a'], {}), [{ path: 'a', rank: 1 }]), 'static is the same function');
+});
+
 console.log(passes + ' passed, ' + fails + ' failed');
 process.exit(fails ? 1 : 0);

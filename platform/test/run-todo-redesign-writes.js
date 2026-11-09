@@ -538,6 +538,45 @@ function makeEnv(initialFiles, opts) {
     assert(drag && drag.draggable === true && drag.dataset.path === task.path, 'drag handle');
   });
 
+  await ok('RD-ROW-ONDONE onDone fires once after a successful checkbox completion, never on failure', async () => {
+    rowEnv();
+    const run = async (markDone, withHook) => {
+      const seen = [];
+      const marked = [];
+      const td = { open() {}, async markDone(p) { marked.push(p); return markDone(p); } };
+      const list = makeTreeNode('div');
+      const task = openTask();
+      const row = TaskTodayList.renderTaskRow(list, task, td, withHook ? { onDone: (t) => seen.push(t) } : {});
+      const cb = findByCls(row, 'sauce-task-today-cbwrap').children[0];
+      cb.checked = true;
+      let threw = false;
+      try { await fireEvent(cb, 'change'); } catch (_e) { threw = true; }
+      return { seen, marked, task, row, list, threw };
+    };
+    const okRun = await run(async () => ({ ok: true }), true);
+    assert(okRun.marked.length === 1 && okRun.marked[0] === 'spice/tasks/row.md', 'markDone called with the path');
+    assert(okRun.seen.length === 1 && okRun.seen[0] === okRun.task, 'onDone(task) once on success');
+    assert(!okRun.list.children.includes(okRun.row), 'row stays removed on success');
+
+    const refused = await run(async () => ({ ok: false, reason: 'write failed' }), true);
+    assert(refused.seen.length === 0, 'no onDone when markDone refuses');
+    assert(refused.list.children.includes(refused.row), 'row restored on refusal');
+
+    const thrown = await run(async () => { throw new Error('boom'); }, true);
+    assert(thrown.seen.length === 0 && !thrown.threw, 'no onDone and no throw when markDone throws');
+
+    const bare = await run(async () => ({ ok: true }), false);
+    assert(!bare.threw && bare.marked.length === 1, 'callers without onDone are unaffected');
+
+    rowEnv();
+    const td = { open() {}, async markDone() { return { ok: true }; } };
+    const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), td, { onDone: () => { throw new Error('hook'); } });
+    const cb = findByCls(row, 'sauce-task-today-cbwrap').children[0];
+    let threw = false;
+    try { await fireEvent(cb, 'change'); } catch (_e) { threw = true; }
+    assert(!threw, 'a throwing onDone never escapes the gesture');
+  });
+
   await ok('RD-ROW-COMPAT', async () => {
     rowEnv();
     const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), { title: 'x', path: 'p.md' }, null);

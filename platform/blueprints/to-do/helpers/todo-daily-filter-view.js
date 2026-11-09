@@ -7,8 +7,15 @@
  * renderable for behavioral coverage.
  *
  * Render layout (hosts are stable so later features slot in without touching
- * the paint code): above-tabs host, controls row (tabs left, `right` cluster
- * for Sort / Group), rule, list host, done host.
+ * the paint code): above-tabs host (week strip), controls row (tabs left,
+ * `right` cluster for Sort / Group / Select), rule, list host, done host, bulk
+ * host (floating bar while tasks are selected).
+ *
+ * Gestures: Select mode adds selection squares and a bulk bar whose actions
+ * run one task at a time through the row write paths (reschedule, setFields,
+ * markDone). On the Today tab with Smart / My order and no grouping, rows can
+ * be reordered (drag, or ⋯ Move up / down), which renumbers `rank`. Any row
+ * can be dropped on a week-strip day to reschedule it there.
  *
  * BARE CLASS ONLY. CustomJS evaluates this file as one expression.
  */
@@ -313,6 +320,107 @@ class ToDoDailyFilterView {
         } catch (_e) { /* a Notice must never break a gesture */ }
     }
 
+    static get BULK_PRIORITY_OPTIONS() {
+        return [
+            { label: 'None', value: '' },
+            { label: 'Low', value: 'low' },
+            { label: 'Medium', value: 'medium' },
+            { label: 'High', value: 'high' },
+            { label: 'Highest', value: 'highest' },
+        ];
+    }
+
+    /**
+     * Stylesheet for the floating bulk bar. It lives in a stylesheet (not
+     * inline styles) because the narrow-width rule needs a media query.
+     */
+    static get BULKBAR_CSS() {
+        return [
+            '.sauce-todo-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; align-self: center; max-width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m, 8px); background: var(--background-primary); box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.15)); }',
+            '.sauce-todo-bulkbar .sauce-todo-bulk-count { font-size: 0.85em; font-weight: 600; color: var(--text-muted); margin-right: 4px; }',
+            '.sauce-todo-bulkbar button { font-size: 0.85em; }',
+            '@media (max-width: 720px) { .sauce-todo-bulkbar { width: 100%; align-self: stretch; } }',
+        ].join('\n');
+    }
+
+    /**
+     * Pure manual-order renumber: the { path, rank } writes that make rank equal
+     * position + 1, only for rows whose rank changes. One implementation lives
+     * in TaskEntity.renumber; before TaskEntity loads nothing is renumbered.
+     */
+    static renumber(orderedPaths, rankByPath, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        return TE && typeof TE.renumber === 'function' ? TE.renumber(orderedPaths, rankByPath) : [];
+    }
+
+    /**
+     * Cells for the week strip above the tabs: Monday..Friday of the week
+     * holding `todayStr` always, Saturday / Sunday only when they hold open
+     * tasks. `count` is the open tasks due that day.
+     */
+    static weekStrip(tasks, todayStr, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        const range = ToDoDailyFilterView.weekRange(todayStr, TE);
+        if (!range) return [];
+        const counts = new Map();
+        for (const task of ToDoDailyFilterView._openTasks(tasks)) {
+            const due = ToDoDailyFilterView._dueOf(task);
+            if (due) counts.set(due, (counts.get(due) || 0) + 1);
+        }
+        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const out = [];
+        for (let i = 0; i < 7; i += 1) {
+            const date = TE.addDays(range.from, i);
+            if (!date) return [];
+            const count = counts.get(date) || 0;
+            if (i >= 5 && count === 0) continue;
+            out.push({ date, label: `${days[i]} ${Number(date.slice(8))}`, count, isToday: date === todayStr });
+        }
+        return out;
+    }
+
+    /**
+     * Run one bulk action over `paths`, one task at a time. `action(path)`
+     * resolves the write result; deps.classify maps it to ok / skipped /
+     * silent / noticed. Skipped results are neither done nor failed. One Notice
+     * (deps.notice) summarises the failures the write rail did not already
+     * announce: 'silent' ones, or every failure when deps.noticeAll is set.
+     */
+    static async runBulk(paths, action, deps) {
+        const d = deps || {};
+        const list = Array.isArray(paths) ? paths.filter(Boolean) : [];
+        const classify = typeof d.classify === 'function'
+            ? d.classify
+            : (res) => (res && res.ok === true ? 'ok' : res && res.no_op ? 'skipped' : 'silent');
+        const done = [];
+        const failed = [];
+        let unannounced = 0;
+        for (const p of list) {
+            let res = null;
+            try { res = typeof action === 'function' ? await action(p) : null; } catch (_e) { res = null; }
+            let outcome = 'silent';
+            try { outcome = classify(res); } catch (_e) { outcome = 'silent'; }
+            if (outcome === 'ok') {
+                done.push(p);
+                try { if (typeof d.onOk === 'function') d.onOk(p, res); } catch (_e) { /* cache patch is best-effort */ }
+            } else if (outcome !== 'skipped') {
+                failed.push(p);
+                if (outcome === 'silent' || d.noticeAll) unannounced += 1;
+            }
+        }
+        if (unannounced > 0 && typeof d.notice === 'function') {
+            try {
+                d.notice(`Could not ${d.verb || 'update'} ${unannounced} ${unannounced === 1 ? 'task' : 'tasks'}`);
+            } catch (_e) { /* a Notice must never break a gesture */ }
+        }
+        return { done, failed };
+    }
+
+    /** Stand-in row for a selected task that is not painted on the current tab. */
+    static _detachedRow() {
+        return { dataset: {}, parentNode: null, remove() {} };
+    }
+
     async render(dv) {
         if (!dv || !dv.container) return;
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
@@ -357,7 +465,8 @@ class ToDoDailyFilterView {
         const root = dv.container.createEl('div', { cls: 'sauce-todo-daily-filter-view' });
         root.style.cssText = 'display:flex; flex-direction:column; gap:10px; width:100%;';
 
-        root.createEl('div', { cls: 'sauce-todo-above-tabs' });
+        root.createEl('style').textContent = View.BULKBAR_CSS;
+        const aboveTabs = root.createEl('div', { cls: 'sauce-todo-above-tabs' });
         const controls = root.createEl('div', { cls: 'sauce-todo-filter-controls' });
         const tabGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-tabs' });
         tabGroup.setAttribute('role', 'tablist');
@@ -368,6 +477,8 @@ class ToDoDailyFilterView {
         listHost.style.cssText = 'display:flex; flex-direction:column; gap:8px; width:100%;';
         const doneHost = root.createEl('div', { cls: 'sauce-todo-filter-done-host' });
         doneHost.style.cssText = 'display:flex; flex-direction:column; gap:4px; width:100%;';
+        const bulkHost = root.createEl('div', { cls: 'sauce-todo-bulk-host' });
+        bulkHost.style.cssText = 'display:flex; flex-direction:column; position:sticky; bottom:12px; z-index:5; width:100%;';
 
         const clear = (host) => { while (host.firstChild) host.removeChild(host.firstChild); };
         const label = (parent, text) => {
@@ -405,23 +516,183 @@ class ToDoDailyFilterView {
             }
             setPill(sortButton, prefs.sort !== 'smart');
             setPill(groupButton, prefs.group !== 'none');
+            setPill(selectButton, selecting);
+            selectButton.setAttribute('aria-pressed', selecting ? 'true' : 'false');
         };
 
-        const renderRow = (list, task, stale) => {
+        // Gesture state that lives only as long as this render: selection is
+        // in memory (never persisted) and survives tab switches; leaving Select
+        // mode clears it.
+        let selecting = false;
+        const selected = new Set();
+        let bulkBusy = false;
+        let reordering = false;
+        let dragPath = null;
+        let focusDay = null;
+        let manualOrder = [];
+        const rowByPath = new Map();
+
+        const taskByPath = (taskPath) => tasks.find((t) => t && t.path && t.path === taskPath) || null;
+        const applyMoved = (task, due) => {
+            if (!task) return;
+            task.due = due || null;
+            task.rank = null;
+        };
+        const applyDone = (task) => {
+            if (!task) return;
+            selected.delete(task.path);
+            // A recurring completion rolls `due` forward in place and never
+            // reaches _done/. The new date is unknown here, so the task leaves
+            // the open lists until Dataview's own refresh brings it back.
+            if (task.recurrence) { task.status = 'rolled'; return; }
+            task.status = 'done';
+            task.completed_at = todayStr;
+            try { if (TD && typeof TD.donePath === 'function') task.path = TD.donePath(task.path) || task.path; }
+            catch (_e) { /* keep the open path */ }
+        };
+        const canReorder = () => prefs.tab === 'today'
+            && (prefs.sort === 'smart' || prefs.sort === 'manual')
+            && prefs.group === 'none'
+            && !!TD && typeof TD.setFields === 'function';
+
+        const applyOrder = async (next) => {
+            if (reordering) return;
+            reordering = true;
+            try {
+                const rankByPath = {};
+                for (const t of next) rankByPath[t.path] = t.rank;
+                const changes = View.renumber(next.map((t) => t.path), rankByPath, TE);
+                if (!changes.length) return;
+                const prior = new Map(next.map((t) => [t.path, t.rank]));
+                const byPath = new Map(next.map((t) => [t.path, t]));
+                next.forEach((t, i) => { t.rank = i + 1; });
+                paint();
+                let failed = 0;
+                let silent = 0;
+                for (const change of changes) {
+                    let res = null;
+                    try { res = await TD.setFields(change.path, { rank: change.rank }); } catch (_e) { res = null; }
+                    const outcome = TTL.classifyOutcome(res);
+                    if (outcome === 'ok') continue;
+                    failed += 1;
+                    if (outcome === 'silent') silent += 1;
+                    const t = byPath.get(change.path);
+                    if (t) t.rank = prior.get(change.path);
+                }
+                if (failed > 0) paint();
+                if (silent > 0) View._notice('Could not save the new task order');
+            } finally {
+                reordering = false;
+            }
+        };
+        // Only rows still on screen take part: a row completed or rescheduled
+        // by its own controls has already left the list.
+        const visibleManual = () => manualOrder.filter((t) => {
+            const row = rowByPath.get(t.path);
+            return !!(row && row.parentNode);
+        });
+        const reorder = (fromPath, toPath) => {
+            const current = visibleManual();
+            const paths = current.map((t) => t.path);
+            const from = paths.indexOf(fromPath);
+            const to = paths.indexOf(toPath);
+            if (from < 0 || to < 0 || from === to) return undefined;
+            const next = current.slice();
+            next.splice(to, 0, next.splice(from, 1)[0]);
+            return applyOrder(next);
+        };
+        const onMove = (task, dir) => {
+            const current = visibleManual();
+            const i = current.findIndex((t) => task && t.path === task.path);
+            const j = i + (dir < 0 ? -1 : 1);
+            if (i < 0 || j < 0 || j >= current.length) return undefined;
+            const next = current.slice();
+            next[i] = current[j];
+            next[j] = current[i];
+            return applyOrder(next);
+        };
+
+        const dropOnDay = async (taskPath, date) => {
+            const task = taskByPath(taskPath);
+            if (!task || typeof TTL.reschedule !== 'function') return;
+            let res = null;
+            try {
+                res = await TTL.reschedule(rowByPath.get(taskPath) || View._detachedRow(), task, date, viewedDay, TD);
+            } catch (_e) { res = null; }
+            const outcome = TTL.classifyOutcome(res);
+            if (outcome === 'ok') {
+                applyMoved(task, res.due != null ? res.due : date);
+                paint();
+            } else if (outcome === 'silent') {
+                View._notice('Could not move task');
+            }
+        };
+        const wireDrag = (row, task, manual) => {
+            if (!row || typeof row.addEventListener !== 'function') return;
+            row.draggable = true;
+            try { row.setAttribute('draggable', 'true'); } catch (_e) { /* property already set */ }
+            row.addEventListener('dragstart', (event) => {
+                dragPath = task.path;
+                try {
+                    if (event && event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', String(task.path));
+                    }
+                } catch (_e) { /* drag data is advisory */ }
+            });
+            row.addEventListener('dragend', () => { dragPath = null; });
+            if (!manual) return;
+            row.addEventListener('dragover', (event) => {
+                if (!dragPath || !manualOrder.some((t) => t.path === dragPath)) return;
+                try {
+                    event.preventDefault();
+                    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                } catch (_e) { /* the drop still works without dropEffect */ }
+            });
+            row.addEventListener('drop', (event) => {
+                try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
+                const from = dragPath;
+                dragPath = null;
+                if (!from) return undefined;
+                return reorder(from, task.path);
+            });
+        };
+
+        const renderRow = (list, task, stale, manual) => {
+            const options = {
+                viewedDay,
+                todayStr,
+                onRescheduled: (moved, due) => {
+                    applyMoved(taskByPath(moved.path) || moved, due);
+                    paint();
+                },
+                onDone: (doneTask) => {
+                    applyDone(taskByPath(doneTask && doneTask.path) || doneTask);
+                    paint();
+                },
+            };
+            if (selecting) {
+                options.selectable = true;
+                options.selected = selected.has(task.path);
+                options.onSelect = (picked, checked) => {
+                    if (!picked || !picked.path) return;
+                    if (checked) selected.add(picked.path);
+                    else selected.delete(picked.path);
+                    paintBulk();
+                };
+            }
+            if (manual) {
+                options.dragHandle = true;
+                options.onMove = onMove;
+            }
             let row = null;
             try {
-                row = TTL.renderTaskRow(list, task, TD, {
-                    viewedDay,
-                    todayStr,
-                    onRescheduled: (moved, due) => {
-                        const live = tasks.find((t) => t.path && t.path === moved.path) || moved;
-                        live.due = due || null;
-                        live.rank = null;
-                        paint();
-                    },
-                });
+                row = TTL.renderTaskRow(list, task, TD, options);
             } catch (_e) { return; }
-            if (stale && row) {
+            if (!row) return;
+            if (task.path) rowByPath.set(task.path, row);
+            wireDrag(row, task, manual);
+            if (stale) {
                 View._addClass(row, 'is-stale');
                 if (row.style) row.style.opacity = '0.6';
             }
@@ -429,8 +700,10 @@ class ToDoDailyFilterView {
         const paintRows = (host, rows, stale) => {
             const sorted = View.sortTasks(rows, prefs.sort, todayStr, TE);
             if (prefs.group === 'none') {
+                const manual = !stale && canReorder();
+                if (manual) manualOrder = sorted;
                 const list = makeList(host);
-                for (const task of sorted) renderRow(list, task, stale);
+                for (const task of sorted) renderRow(list, task, stale, manual);
                 return;
             }
             for (const group of View.groupTasks(sorted, prefs.group, todayStr)) {
@@ -493,11 +766,163 @@ class ToDoDailyFilterView {
                 TTL.renderDoneRow(doneHost, task, { TD, notice: View._notice, onUndo: reopen });
             }
         };
+        const paintStrip = () => {
+            clear(aboveTabs);
+            const cells = View.weekStrip(tasks, todayStr, TE);
+            if (!cells.length) return;
+            const strip = aboveTabs.createEl('div', { cls: 'sauce-todo-week-strip' });
+            strip.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; width:100%;';
+            strip.setAttribute('role', 'group');
+            strip.setAttribute('aria-label', 'This week');
+            for (const cell of cells) {
+                const button = strip.createEl('button', {
+                    cls: `sauce-todo-week-cell${cell.isToday ? ' is-today' : ''}`,
+                });
+                button.setAttribute('type', 'button');
+                button.setAttribute('aria-label', `${cell.label}: ${cell.count} open`);
+                if (cell.isToday) button.setAttribute('aria-current', 'date');
+                button.dataset.date = cell.date;
+                const idle = `display:inline-flex; flex-direction:column; align-items:center; gap:1px; min-width:52px; height:auto; padding:4px 10px; border-radius:var(--radius-s, 4px); border:1px solid ${cell.isToday ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}; color:${cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)'}; background:transparent; cursor:pointer;`;
+                button.style.cssText = idle;
+                const name = button.createEl('span', { cls: 'sauce-todo-week-label', text: cell.label });
+                name.style.cssText = 'font-size:0.8em; font-weight:600;';
+                const count = button.createEl('span', { cls: 'sauce-todo-week-count', text: String(cell.count) });
+                count.style.cssText = `font-size:0.75em; color:${cell.count ? 'var(--text-muted)' : 'var(--text-faint)'}; font-variant-numeric:tabular-nums;`;
+                button.addEventListener('click', onClick(() => {
+                    focusDay = cell.date;
+                    commit({ tab: 'week' });
+                }));
+                button.addEventListener('dragover', (event) => {
+                    if (!dragPath) return;
+                    try {
+                        event.preventDefault();
+                        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                    } catch (_e) { /* the drop still works without dropEffect */ }
+                    button.style.background = 'var(--background-modifier-hover)';
+                });
+                button.addEventListener('dragleave', () => { button.style.background = 'transparent'; });
+                button.addEventListener('drop', (event) => {
+                    try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
+                    button.style.background = 'transparent';
+                    const from = dragPath;
+                    dragPath = null;
+                    if (!from) return undefined;
+                    return dropOnDay(from, cell.date);
+                });
+            }
+        };
+
+        const bulk = async (verb, action, onOk, noticeAll) => {
+            if (bulkBusy) return undefined;
+            const paths = [];
+            for (const p of Array.from(selected)) {
+                const task = taskByPath(p);
+                if (task && String(task.status || 'open') === 'open') paths.push(p);
+                else selected.delete(p);
+            }
+            if (!paths.length) { paint(); return undefined; }
+            bulkBusy = true;
+            paintBulk();
+            let out = { done: [], failed: [] };
+            try {
+                out = await View.runBulk(paths, action, {
+                    classify: (res) => TTL.classifyOutcome(res),
+                    notice: (message) => View._notice(message),
+                    onOk,
+                    verb,
+                    noticeAll,
+                });
+                for (const p of out.done) selected.delete(p);
+            } finally {
+                bulkBusy = false;
+            }
+            paint();
+            return out;
+        };
+        const bulkReschedule = (due) => {
+            if (due == null || typeof TTL.reschedule !== 'function') return undefined;
+            return bulk('move', (p) => TTL.reschedule(
+                rowByPath.get(p) || View._detachedRow(), taskByPath(p), due, viewedDay, TD),
+            (p, res) => applyMoved(taskByPath(p), res && res.due != null ? res.due : due));
+        };
+        const bulkFields = (fields) => {
+            if (!TD || typeof TD.setFields !== 'function') return undefined;
+            return bulk('update', (p) => TD.setFields(p, fields),
+                (p) => { const task = taskByPath(p); if (task) Object.assign(task, fields); });
+        };
+        const bulkDone = () => {
+            if (!TD || typeof TD.markDone !== 'function') return undefined;
+            return bulk('complete', (p) => TD.markDone(p), (p) => applyDone(taskByPath(p)), true);
+        };
+        const openPicker = (anchor, entries) => {
+            const MP = CJS.MenuPopover;
+            if (!MP || typeof MP.open !== 'function' || !entries.length) return;
+            try { MP.open(entries, { anchor }); } catch (_e) { View._notice('Could not open menu'); }
+        };
+        const priorityEntries = () => View.BULK_PRIORITY_OPTIONS.map((option) => ({
+            label: option.label,
+            onSelect: () => bulkFields({ priority: option.value }),
+        }));
+        const projectEntries = () => {
+            let projects = [];
+            try {
+                const appRef = typeof window !== 'undefined' ? window.app : null;
+                projects = TD && typeof TD._loadProjectList === 'function' ? TD._loadProjectList(appRef) : [];
+            } catch (_e) { projects = []; }
+            const entries = [{ label: 'No project', onSelect: () => bulkFields({ project: '', project_slug: '' }) }];
+            for (const project of (Array.isArray(projects) ? projects : [])) {
+                const name = project && project.name ? String(project.name) : '';
+                if (!name) continue;
+                const slug = project.slug ? String(project.slug) : '';
+                entries.push({ label: name, onSelect: () => bulkFields({ project: `[[${name}]]`, project_slug: slug }) });
+            }
+            return entries;
+        };
+        const paintBulk = () => {
+            clear(bulkHost);
+            if (!selecting || selected.size === 0) return;
+            const bar = bulkHost.createEl('div', { cls: 'sauce-todo-bulkbar' });
+            bar.setAttribute('role', 'toolbar');
+            bar.setAttribute('aria-label', 'Selected tasks');
+            bar.createEl('span', { cls: 'sauce-todo-bulk-count', text: `${selected.size} selected` });
+            const action = (text, handler) => {
+                const button = bar.createEl('button', { cls: 'sauce-todo-bulk-action', text });
+                button.setAttribute('type', 'button');
+                if (bulkBusy) button.disabled = true;
+                button.addEventListener('click', onClick(() => handler(button)));
+                return button;
+            };
+            action('→ Tomorrow', () => bulkReschedule(TE.tomorrow(todayStr)));
+            action('→ Next Mon', () => bulkReschedule(TE.nextMonday(todayStr)));
+            action('Priority ▾', (button) => openPicker(button, priorityEntries())).setAttribute('aria-haspopup', 'menu');
+            action('Project ▾', (button) => openPicker(button, projectEntries())).setAttribute('aria-haspopup', 'menu');
+            action('Backlog', () => bulkReschedule(''));
+            action('Mark done', () => bulkDone());
+        };
+
+        const scrollToFocusDay = () => {
+            if (!focusDay) return;
+            const day = focusDay;
+            focusDay = null;
+            for (const [taskPath, row] of rowByPath) {
+                const task = taskByPath(taskPath);
+                if (!task || View._dueOf(task) !== day) continue;
+                try { if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' }); }
+                catch (_e) { /* scrolling is a convenience */ }
+                return;
+            }
+        };
+
         const paint = () => {
             try {
+                rowByPath.clear();
+                manualOrder = [];
                 updateControls();
+                paintStrip();
                 paintList();
                 paintDone();
+                paintBulk();
+                scrollToFocusDay();
             } catch (e) {
                 try { console.warn('[ToDoDailyFilterView] render failed', e); } catch (_e) { /* no console */ }
             }
@@ -547,6 +972,13 @@ class ToDoDailyFilterView {
         groupButton.setAttribute('aria-haspopup', 'menu');
         groupButton.addEventListener('click', onClick(
             () => openMenu(groupButton, View.GROUP_OPTIONS, 'group', prefs.group)));
+        const selectButton = rightSide.createEl('button', { text: 'Select' });
+        selectButton.setAttribute('type', 'button');
+        selectButton.addEventListener('click', onClick(() => {
+            selecting = !selecting;
+            if (!selecting) selected.clear();
+            paint();
+        }));
 
         paint();
     }

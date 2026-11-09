@@ -276,19 +276,19 @@ class SpaceDailyDashboard {
   /**
    * Manual-order renumber: given the new top-to-bottom order of task paths and
    * their current ranks, return the { path, rank } writes that make rank equal
-   * position + 1, skipping rows whose rank already matches. Pure.
+   * position + 1, skipping rows whose rank already matches. Pure. The one
+   * implementation is TaskEntity.renumber; before TaskEntity loads this
+   * renumbers nothing.
    */
   static renumber(orderedPaths, rankByPath) {
-    const ranks = rankByPath && typeof rankByPath === "object" ? rankByPath : {};
-    const list = Array.isArray(orderedPaths) ? orderedPaths : [];
-    const out = [];
-    list.forEach((p, i) => {
-      if (!p) return;
-      const cur = Object.prototype.hasOwnProperty.call(ranks, p) ? ranks[p] : null;
-      const ranked = cur !== null && cur !== undefined && cur !== "";
-      if (!ranked || Number(cur) !== i + 1) out.push({ path: p, rank: i + 1 });
-    });
-    return out;
+    let TE = null;
+    try {
+      const cjs = (typeof window !== "undefined" && window.customJS)
+        || (typeof customJS !== "undefined" && customJS)
+        || null;
+      TE = (cjs && cjs.TaskEntity) || null;
+    } catch (_e) { TE = null; }
+    return TE && typeof TE.renumber === "function" ? TE.renumber(orderedPaths, rankByPath) : [];
   }
 
   /**
