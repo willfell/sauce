@@ -1520,12 +1520,14 @@ class TaskDialog {
                 && app.vault.getAbstractFileByPath(p));
             const target = 'spice/tasks/' + TE._uniqueName(src.slice(DONE.length), exists);
             let reopened = false;
+            let prior = null;
             const result = await RS.mutate({
                 app,
                 path: src,
                 failureMessage: 'Could not reopen task',
                 write: async () => {
                     await app.fileManager.processFrontMatter(file, (fm) => {
+                        prior = { status: fm.status, completed_at: fm.completed_at };
                         fm.status = 'open';
                         fm.completed_at = '';
                     });
@@ -1534,9 +1536,10 @@ class TaskDialog {
                     return target;
                 },
                 revert: async () => {
-                    if (!reopened || file.path === target) return;
+                    if (!reopened || !prior || file.path === target) return;
                     await app.fileManager.processFrontMatter(file, (fm) => {
-                        fm.status = 'done';
+                        fm.status = prior.status;
+                        fm.completed_at = prior.completed_at;
                     });
                 },
             });

@@ -138,7 +138,9 @@ function makeEnv(initialFiles, opts) {
     const env = makeEnv({ [src]: { status: 'done', completed_at: 'x' } }, { failRename: true });
     const r = await TaskDialog.reopen(src);
     assert(r.ok === false, 'failure reported');
-    assert(env.files.get(src)._fm.status === 'done', 'status restored to done after failed rename');
+    const fm = env.files.get(src)._fm;
+    assert(fm.status === 'done', 'status restored to done after failed rename');
+    assert(fm.completed_at === 'x', 'completed_at restored after failed rename: ' + JSON.stringify(fm.completed_at));
   });
 
   await ok('RD-W-SETFIELDS', async () => {
