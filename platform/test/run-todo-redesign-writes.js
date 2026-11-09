@@ -683,6 +683,322 @@ function makeEnv(initialFiles, opts) {
     assert(findByCls(row, 'sauce-task-actions') && findByCls(row, 'sauce-task-today-actions'), 'actions container carries both classes');
   });
 
+  const TaskDoneArchive = new (loadClass('blueprints/to-do/helpers/task-done-archive.js', 'TaskDoneArchive'))();
+  const allByCls = (node, cls, out) => {
+    out = out || [];
+    for (const c of (node && node.children) || []) {
+      if (String((c && (c.className || c.cls)) || '').split(/\s+/).includes(cls)) out.push(c);
+      allByCls(c, cls, out);
+    }
+    return out;
+  };
+  const textOf = (node) => {
+    if (!node) return '';
+    let t = node.tagName === '#text' ? node.textContent : (node.children && node.children.length ? '' : (node._textContent || ''));
+    for (const c of node.children || []) t += textOf(c);
+    return t;
+  };
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0)); };
+  const DONE_PAGES = [
+    { title: 'Ship invoices', completed_at: '2026-11-06T09:00:00-07:00', project: '[[Alpha]]', source: 'daily', body: 'Sent the quarterly invoices' },
+    { title: 'Call vendor', completed_at: '2026-11-06T15:00:00-07:00', project: '[[Beta]]', source: 'meeting', body: 'Discussed the renewal pricing' },
+    { title: 'Water plants', completed_at: '2026-11-03T10:00:00-07:00', project: null, source: 'manual', body: 'Front office ferns' },
+    { title: 'Old thing', completed_at: '2026-10-20T10:00:00-07:00', project: '[[Alpha]]', source: 'daily', body: 'Archive cleanup' },
+  ].map((t, i) => ({
+    type: 'task', status: 'done', title: t.title, completed_at: t.completed_at, project: t.project, source: t.source, _body: t.body,
+    file: { path: 'spice/tasks/_done/' + t.title + '.md', mtime: 1000 + i },
+  }));
+  const doneEnv = (o) => {
+    o = o || {};
+    const store = Object.assign({}, o.store || {});
+    const log = { notices: [], reopen: [], menus: [], reads: [], clip: [] };
+    const pages = o.pages || DONE_PAGES;
+    const reopenImpl = o.reopen || (async (p) => ({ ok: true, path: 'spice/tasks/' + p.split('/').pop() }));
+    const files = new Map(pages.map((p) => [p.file.path, { path: p.file.path, stat: { mtime: p.file.mtime }, _body: p._body }]));
+    global.Notice = function (msg) { log.notices.push(String(msg)); };
+    global.window = {
+      customJS: {
+        TaskEntity, TaskTodayList,
+        TaskDialog: { reopen: async (p) => { log.reopen.push(p); return reopenImpl(p); } },
+        RenderSafe: { page: () => ({}) },
+        MenuPopover: { open(entries, opts) { log.menus.push({ entries, opts }); } },
+      },
+      moment: () => ({ format: () => '2026-11-09' }),
+      localStorage: o.noStorage ? undefined : {
+        getItem(k) { if (o.throwStorage) throw new Error('blocked'); return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+        setItem(k, v) { if (o.throwStorage) throw new Error('blocked'); store[k] = String(v); },
+      },
+      app: {
+        vault: {
+          getAbstractFileByPath: (p) => files.get(p) || null,
+          async cachedRead(f) {
+            log.reads.push(f.path);
+            if (o.failRead && o.failRead.includes(f.path)) throw new Error('read failed');
+            if (o.readGate) await o.readGate;
+            return '---\ntitle: x\n---\n' + f._body;
+          },
+        },
+        workspace: { openLinkText() {} },
+      },
+    };
+    Object.defineProperty(global, 'navigator', {
+      configurable: true,
+      value: o.noClipboard ? {} : { clipboard: { async writeText(t) { if (o.clipFail) throw new Error('denied'); log.clip.push(t); } } },
+    });
+    const container = makeTreeNode('div');
+    const dv = {
+      container,
+      pages: () => ({ where: (fn) => { const arr = pages.filter(fn); return { array: () => arr }; } }),
+    };
+    return { dv, container, log, store, files };
+  };
+  const mountDone = async (env) => { await TaskDoneArchive.render(env.dv); await settle(); return env.container; };
+  const headerOf = (c) => textOf(findByCls(c, 'sauce-done-header'));
+  const pill = (c, label) => allByCls(c, 'sauce-done-pill').find((b) => b.textContent === label);
+  const clearBodyCache = () => { const k = TaskDoneArchive.constructor; if (k._bodyCache) k._bodyCache.clear(); };
+
+  await ok('RD-DL-RENDER default last-week: header, pills, bars, project panel, grouped Reopen rows', async () => {
+    const env = doneEnv();
+    const c = await mountDone(env);
+    assert(headerOf(c) === '3 done Nov 2 – 8, across 3 projects', 'header: ' + headerOf(c));
+    const pills = allByCls(c, 'sauce-done-pill');
+    assert(pills.map((b) => b.textContent).join('|') === 'Today|Yesterday|This week|Last week|This month|Pick range…', 'pills ' + pills.map((b) => b.textContent));
+    assert(pill(c, 'Last week').attributes['aria-pressed'] === 'true' && pill(c, 'Today').attributes['aria-pressed'] === 'false', 'pressed state');
+    const bars = allByCls(c, 'sauce-done-bar');
+    assert(bars.length === 7 && bars.map((b) => b.attributes['aria-label']).join(',') === '0 done,1 done,0 done,0 done,2 done,0 done,0 done', 'bar labels ' + bars.map((b) => b.attributes['aria-label']));
+    assert(allByCls(c, 'sauce-done-project-row').length === 3, 'project panel rows');
+    const days = allByCls(c, 'sauce-done-day').map((d) => textOf(d));
+    assert(days.length === 2 && /Fri Nov 6/.test(days[0]) && /Tue Nov 3/.test(days[1]), 'day headings ' + days);
+    const rows = allByCls(c, 'sauce-today-done-row');
+    assert(rows.length === 3, 'three rows ' + rows.length);
+    assert(textOf(rows[0]).includes('Call vendor') && textOf(rows[1]).includes('Ship invoices'), 'newest first within the day');
+    const btns = allByCls(c, 'sauce-today-undo');
+    assert(btns.length === 3 && btns.every((b) => b.textContent === 'Reopen'), 'Reopen buttons');
+    assert(allByCls(c, 'sauce-today-done-project').map((x) => x.textContent).join(',') === 'Beta,Alpha', 'project chips');
+    assert(allByCls(c, 'sauce-done-search').length === 1, 'exactly one search box');
+  });
+
+  await ok('RD-DL-PRESET picking a preset repaints and persists it; stored/invalid/blocked storage are tolerated', async () => {
+    let env = doneEnv();
+    let c = await mountDone(env);
+    fireClick(pill(c, 'Today'));
+    await settle();
+    assert(headerOf(c) === '0 done today, across 0 projects', 'today header ' + headerOf(c));
+    assert(env.store['sauce-done-log:range'] === 'today', 'persisted ' + JSON.stringify(env.store));
+    assert(allByCls(c, 'sauce-today-done-row').length === 0 && allByCls(c, 'sauce-done-empty').length === 1, 'empty state');
+    assert(pill(c, 'Today').attributes['aria-pressed'] === 'true', 'pressed follows');
+    fireClick(pill(c, 'This month'));
+    await settle();
+    assert(headerOf(c) === '3 done in November, across 3 projects', 'month header ' + headerOf(c));
+    env = doneEnv({ store: { 'sauce-done-log:range': 'this-month' } });
+    c = await mountDone(env);
+    assert(pill(c, 'This month').attributes['aria-pressed'] === 'true', 'stored preset restored');
+    env = doneEnv({ store: { 'sauce-done-log:range': 'bogus' } });
+    c = await mountDone(env);
+    assert(pill(c, 'Last week').attributes['aria-pressed'] === 'true', 'invalid stored falls back to last-week');
+    env = doneEnv({ throwStorage: true });
+    c = await mountDone(env);
+    fireClick(pill(c, 'Yesterday'));
+    await settle();
+    assert(/yesterday/.test(headerOf(c)), 'blocked storage still works');
+    env = doneEnv({ noStorage: true });
+    c = await mountDone(env);
+    assert(headerOf(c).startsWith('3 done'), 'no storage at all');
+  });
+
+  await ok('RD-DL-CUSTOM Pick range uses two date inputs; invalid or empty input keeps the previous range', async () => {
+    const env = doneEnv();
+    const c = await mountDone(env);
+    assert(!allByCls(c, 'sauce-done-range-from').length, 'inputs hidden until Pick range');
+    fireClick(pill(c, 'Pick range…'));
+    await settle();
+    const from = allByCls(c, 'sauce-done-range-from')[0];
+    const to = allByCls(c, 'sauce-done-range-to')[0];
+    assert(from && to && from.type === 'date' && to.type === 'date', 'two native date inputs');
+    assert(from.value === '2026-11-02' && to.value === '2026-11-08', 'seeded with the current range: ' + from.value + ' ' + to.value);
+    from.value = '2026-10-19'; to.value = '2026-10-21';
+    fireEvent(to, 'change');
+    await settle();
+    assert(headerOf(c) === '1 done Oct 19 – 21, across 1 project', 'custom header ' + headerOf(c));
+    assert(pill(c, 'Pick range…').attributes['aria-pressed'] === 'true', 'custom pill pressed');
+    assert(!('sauce-done-log:range' in env.store), 'custom range is not persisted');
+    const to2 = allByCls(c, 'sauce-done-range-to')[0];
+    to2.value = '2026-10-01';
+    fireEvent(to2, 'change');
+    await settle();
+    assert(headerOf(c).includes('Oct 19 – 21'), 'to before from keeps the previous range: ' + headerOf(c));
+    assert(allByCls(c, 'sauce-done-range-to')[0].value === '2026-10-21', 'input reverts');
+    const from3 = allByCls(c, 'sauce-done-range-from')[0];
+    from3.value = '';
+    fireEvent(from3, 'change');
+    await settle();
+    assert(headerOf(c).includes('Oct 19 – 21') && allByCls(c, 'sauce-done-range-from')[0].value === '2026-10-19', 'empty keeps the previous range');
+  });
+
+  await ok('RD-DL-REOPEN Reopen hands the path to TaskDialog.reopen, drops the row on success, Notice only when silent', async () => {
+    let env = doneEnv();
+    let c = await mountDone(env);
+    const rowBtn = allByCls(c, 'sauce-today-undo').find((b) => b.attributes['aria-label'] === 'Reopen: Ship invoices');
+    await fireClick(rowBtn);
+    await settle();
+    assert(env.log.reopen.join() === 'spice/tasks/_done/Ship invoices.md', 'reopen path ' + env.log.reopen);
+    assert(allByCls(c, 'sauce-today-done-row').length === 2 && headerOf(c).startsWith('2 done'), 'row gone, header recounted: ' + headerOf(c));
+    assert(env.log.notices.length === 0, 'success is quiet');
+
+    env = doneEnv({ reopen: async () => ({ ok: false, reason: 'not-done' }) });
+    c = await mountDone(env);
+    const btn = allByCls(c, 'sauce-today-undo')[0];
+    await fireClick(btn);
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 3, 'failed reopen keeps the row');
+    assert(env.log.notices.length === 1 && /Could not reopen task: not-done/.test(env.log.notices[0]), 'silent -> Notice: ' + env.log.notices);
+    assert(!btn.disabled, 'button usable again');
+
+    env = doneEnv({ reopen: async () => ({ ok: false, reason: 'write failed' }) });
+    c = await mountDone(env);
+    await fireClick(allByCls(c, 'sauce-today-undo')[0]);
+    await settle();
+    assert(env.log.notices.length === 0, 'noticed outcomes are not double-reported');
+
+    env = doneEnv({ reopen: async () => ({ ok: false, no_op: true, reason: 'in-flight' }) });
+    c = await mountDone(env);
+    await fireClick(allByCls(c, 'sauce-today-undo')[0]);
+    await settle();
+    assert(env.log.notices.length === 0 && allByCls(c, 'sauce-today-done-row').length === 3, 'skipped is quiet');
+  });
+
+  await ok('RD-DL-SEARCH title filters at once; notes bodies load lazily (>=3 chars, range files only), cached per path+mtime', async () => {
+    clearBodyCache();
+    const env = doneEnv();
+    const c = await mountDone(env);
+    const input = allByCls(c, 'sauce-done-search')[0];
+    input.value = 'wa';
+    fireEvent(input, 'input');
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 1 && /Water plants/.test(textOf(allByCls(c, 'sauce-today-done-row')[0])), 'two chars match titles only');
+    assert(env.log.reads.length === 0, 'no body reads below 3 characters');
+    input.value = 'renewal';
+    fireEvent(input, 'input');
+    await settle();
+    const rows = allByCls(c, 'sauce-today-done-row');
+    assert(rows.length === 1 && /Call vendor/.test(textOf(rows[0])), 'body-only match found: ' + rows.length);
+    const want = ['Call vendor', 'Ship invoices', 'Water plants'].map((t) => 'spice/tasks/_done/' + t + '.md').sort().join('|');
+    assert(env.log.reads.slice().sort().join('|') === want, 'reads only range files: ' + env.log.reads);
+    assert(!allByCls(c, 'sauce-done-loading').length, 'loading indicator cleared');
+    const readsBefore = env.log.reads.length;
+    input.value = 'renewals';
+    fireEvent(input, 'input');
+    await settle();
+    input.value = 'renewal';
+    fireEvent(input, 'input');
+    await settle();
+    assert(env.log.reads.length === readsBefore, 'cache hit per path+mtime: ' + env.log.reads.length + ' vs ' + readsBefore);
+    env.files.get('spice/tasks/_done/Call vendor.md').stat.mtime = 9999;
+    const c2 = await mountDone(env);
+    const input2 = allByCls(c2, 'sauce-done-search')[0];
+    input2.value = 'renewal';
+    fireEvent(input2, 'input');
+    await settle();
+    assert(env.log.reads.length === readsBefore + 1, 'mtime change re-reads only that file: ' + env.log.reads.length);
+  });
+
+  await ok('RD-DL-SEARCH shows Searching notes… while loading and falls back to title-only when a read fails', async () => {
+    clearBodyCache();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let env = doneEnv({ readGate: gate });
+    let c = await mountDone(env);
+    const input = allByCls(c, 'sauce-done-search')[0];
+    input.value = 'renewal';
+    fireEvent(input, 'input');
+    await settle();
+    assert(allByCls(c, 'sauce-done-loading').length === 1 && textOf(allByCls(c, 'sauce-done-loading')[0]) === 'Searching notes…', 'loading shown');
+    release();
+    await settle();
+    assert(!allByCls(c, 'sauce-done-loading').length && allByCls(c, 'sauce-today-done-row').length === 1, 'resolved');
+
+    clearBodyCache();
+    env = doneEnv({ failRead: ['spice/tasks/_done/Call vendor.md'] });
+    c = await mountDone(env);
+    const i2 = allByCls(c, 'sauce-done-search')[0];
+    i2.value = 'vendor';
+    fireEvent(i2, 'input');
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 1, 'failed read still matches by title');
+    i2.value = 'renewal';
+    fireEvent(i2, 'input');
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 0, 'failed read has no body match, no throw');
+  });
+
+  await ok('RD-DL-FILTERS Project and Source menus filter the list; header keeps the range total', async () => {
+    const env = doneEnv();
+    const c = await mountDone(env);
+    fireClick(allByCls(c, 'sauce-done-project-filter')[0]);
+    const pm = env.log.menus[0];
+    assert(pm.entries.map((e) => e.label).join('|') === 'All projects|Alpha|Beta|No project', 'project entries ' + pm.entries.map((e) => e.label));
+    pm.entries[2].onSelect();
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 1 && /Call vendor/.test(textOf(allByCls(c, 'sauce-today-done-row')[0])), 'project filter applied');
+    assert(headerOf(c).startsWith('3 done'), 'header is the range total');
+    assert(/Beta/.test(allByCls(c, 'sauce-done-project-filter')[0].textContent), 'button shows selection');
+    assert(/1 of 3/.test(textOf(findByCls(c, 'sauce-done-showing'))), 'showing line');
+    fireClick(allByCls(c, 'sauce-done-source-filter')[0]);
+    const sm = env.log.menus[1];
+    assert(sm.entries.map((e) => e.label).join('|') === 'All sources|daily|meeting|project|trip|manual', 'source entries ' + sm.entries.map((e) => e.label));
+    sm.entries[1].onSelect();
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 0 && allByCls(c, 'sauce-done-empty').length === 1, 'AND of both filters');
+  });
+
+  await ok('RD-DL-COPY Copy as standup writes the visible list as markdown and reports with a Notice', async () => {
+    let env = doneEnv();
+    let c = await mountDone(env);
+    await fireClick(allByCls(c, 'sauce-done-copy')[0]);
+    await settle();
+    assert(env.log.clip.length === 1, 'one write');
+    assert(env.log.clip[0] === '**Fri Nov 6**\n- Call vendor (Beta)\n- Ship invoices (Alpha)\n\n**Tue Nov 3**\n- Water plants', JSON.stringify(env.log.clip[0]));
+    assert(env.log.notices.join() === 'Copied 3 tasks', 'notice ' + env.log.notices);
+
+    env = doneEnv();
+    c = await mountDone(env);
+    const input = allByCls(c, 'sauce-done-search')[0];
+    input.value = 'plants';
+    fireEvent(input, 'input');
+    await settle();
+    await fireClick(allByCls(c, 'sauce-done-copy')[0]);
+    await settle();
+    assert(env.log.clip[0] === '**Tue Nov 3**\n- Water plants' && env.log.notices.join() === 'Copied 1 task', 'filters apply: ' + JSON.stringify(env.log));
+
+    env = doneEnv({ clipFail: true });
+    c = await mountDone(env);
+    await fireClick(allByCls(c, 'sauce-done-copy')[0]);
+    await settle();
+    assert(env.log.notices.join() === 'Could not copy', 'failure notice ' + env.log.notices);
+
+    env = doneEnv({ noClipboard: true });
+    c = await mountDone(env);
+    await fireClick(allByCls(c, 'sauce-done-copy')[0]);
+    await settle();
+    assert(env.log.notices.join() === 'Could not copy', 'missing clipboard notice ' + env.log.notices);
+    try { delete global.navigator; } catch (_e) { /* test-only restore */ }
+  });
+
+  await ok('RD-DL-COLD render is quiet without dependencies, inside an embed, and does not stack on dual fire', async () => {
+    const env = doneEnv();
+    global.window.customJS.TaskTodayList = undefined;
+    await TaskDoneArchive.render(env.dv);
+    assert(!allByCls(env.container, 'sauce-done-log').length, 'no UI without TaskTodayList');
+    const env2 = doneEnv();
+    env2.container.closest = () => ({});
+    await TaskDoneArchive.render(env2.dv);
+    assert(env2.container.children.length === 0, 'embed returns early');
+    const env3 = doneEnv();
+    await Promise.all([TaskDoneArchive.render(env3.dv), TaskDoneArchive.render(env3.dv)]);
+    await settle();
+    assert(allByCls(env3.container, 'sauce-done-log').length === 1, 'dual fire renders once');
+  });
+
   global.Notice = prevNotice;
 
   console.log(passes + ' passed, ' + fails + ' failed');

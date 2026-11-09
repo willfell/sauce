@@ -240,7 +240,9 @@ class TaskTodayList {
      * One Done-today row: struck title (click opens the note), completion HH:mm
      * and, for a task archived under spice/tasks/_done/, an Undo button
      * (aria-label "Undo: <title>") that hands the reopen flow to
-     * options.onUndo(task, button). options.notice(msg) reports an open failure
+     * options.onUndo(task, button). options.undoLabel renames the button and
+     * its aria-label prefix (default "Undo"); options.showProject adds the
+     * project chip before the time. options.notice(msg) reports an open failure
      * (default: an Obsidian Notice). Never throws; returns the row or null.
      */
     static renderDoneRow(container, task, options) {
@@ -263,6 +265,14 @@ class TaskTodayList {
                 if (task.path && appRef && appRef.workspace) appRef.workspace.openLinkText(task.path, '');
             } catch (e) { notice('Could not open task: ' + (e && (e.message || e))); }
         });
+        if (opts.showProject && task.project) {
+            const projectText = TaskTodayList._projectChipText(task.project);
+            if (projectText) {
+                const chip = row.createEl('span', { cls: 'sauce-today-done-project' });
+                chip.textContent = projectText;
+                chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted); flex-shrink: 0;';
+            }
+        }
         const time = TaskTodayList.doneTimeLabel(task);
         if (time) {
             const stamp = row.createEl('span', { cls: 'sauce-today-done-time' });
@@ -277,9 +287,10 @@ class TaskTodayList {
             && !!TD && typeof TD.reopen === 'function' && typeof opts.onUndo === 'function';
         if (canUndo) {
             const undo = row.createEl('button', { cls: 'sauce-today-undo' });
-            undo.textContent = 'Undo';
+            const undoLabel = opts.undoLabel ? String(opts.undoLabel) : 'Undo';
+            undo.textContent = undoLabel;
             undo.style.cssText = 'font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-accent); cursor: pointer; background: none; border: none; padding: 0; box-shadow: none; height: auto;';
-            try { undo.setAttribute('type', 'button'); undo.setAttribute('aria-label', 'Undo: ' + text); } catch (_e) {}
+            try { undo.setAttribute('type', 'button'); undo.setAttribute('aria-label', undoLabel + ': ' + text); } catch (_e) {}
             undo.addEventListener('click', (ev) => {
                 try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
                 try { return opts.onUndo(task, undo); } catch (_e) { return undefined; }
