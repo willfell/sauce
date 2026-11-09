@@ -61,8 +61,278 @@ class TaskEntity {
     _chromeBody() { return TaskEntity._chromeBody(); }
     _groupSubtaskCounts(parsedTasks) { return TaskEntity._groupSubtaskCounts(parsedTasks); }
     subtaskCountsByParent(dv) { return TaskEntity.subtaskCountsByParent(dv); }
+    get STALE_DAYS() { return TaskEntity.STALE_DAYS; }
+    addDays(dateStr, n) { return TaskEntity.addDays(dateStr, n); }
+    tomorrow(todayStr) { return TaskEntity.tomorrow(todayStr); }
+    nextMonday(todayStr) { return TaskEntity.nextMonday(todayStr); }
+    daysLate(task, todayStr) { return TaskEntity.daysLate(task, todayStr); }
+    isBacklog(task) { return TaskEntity.isBacklog(task); }
+    bucketOf(task, todayStr) { return TaskEntity.bucketOf(task, todayStr); }
+    completedDay(task) { return TaskEntity.completedDay(task); }
+    compareBy(mode, todayStr) { return TaskEntity.compareBy(mode, todayStr); }
+    renumber(orderedPaths, rankByPath) { return TaskEntity.renumber(orderedPaths, rankByPath); }
+    parseTitleShortcuts(text, todayStr, projectNames) { return TaskEntity.parseTitleShortcuts(text, todayStr, projectNames); }
+    notesBytes(statSize, frontmatterEndOffset) { return TaskEntity.notesBytes(statSize, frontmatterEndOffset); }
 
     // ---------- Static pure helpers ----------
+
+    static get STALE_DAYS() { return 30; }
+
+    /**
+     * Calendar-date math on plain `YYYY-MM-DD` strings via Date.UTC /
+     * getUTC* only — no wall-clock or local-zone reads. Unparseable input
+     * returns null.
+     */
+    static addDays(dateStr, n) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr == null ? '' : dateStr));
+        if (!m) return null;
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + (Number(n) || 0)));
+        const p = (x) => String(x).padStart(2, '0');
+        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+    }
+
+    static tomorrow(todayStr) { return TaskEntity.addDays(todayStr, 1); }
+
+    /** Next Monday strictly after `todayStr` (a Monday yields +7 days). */
+    static nextMonday(todayStr) {
+        return TaskEntity._nextWeekday(todayStr, 1);
+    }
+
+    /** Next occurrence of weekday `dow` (0=Sun..6=Sat) strictly after `todayStr`. */
+    static _nextWeekday(todayStr, dow) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(todayStr == null ? '' : todayStr));
+        if (!m) return null;
+        const cur = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+        const delta = ((dow - cur + 7) % 7) || 7;
+        return TaskEntity.addDays(todayStr, delta);
+    }
+
+    /** Whole days `task.due` is before `todayStr`; 0 when not overdue or no due. */
+    static daysLate(task, todayStr) {
+        const due = TaskEntity._toDateStr(task && task.due);
+        const m1 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(due == null ? '' : due));
+        const m2 = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(todayStr == null ? '' : todayStr));
+        if (!m1 || !m2) return 0;
+        const diff = Math.round((Date.UTC(+m2[1], +m2[2] - 1, +m2[3]) - Date.UTC(+m1[1], +m1[2] - 1, +m1[3])) / 86400000);
+        return diff > 0 ? diff : 0;
+    }
+
+    /**
+     * Personal undated open task: open, no due, no project_slug / trip_slug /
+     * parent_task, and not sourced from a meeting. A missing status counts as
+     * open (parseNote's own default).
+     */
+    static isBacklog(task) {
+        const t = task || {};
+        if ((t.status || 'open') !== 'open') return false;
+        if (TaskEntity._toDateStr(t.due)) return false;
+        if (t.project_slug || t.trip_slug || t.parent_task) return false;
+        if (t.source === 'meeting') return false;
+        return true;
+    }
+
+    /**
+     * Surface bucket for a task. 'done' only for status done. Open tasks:
+     * 'backlog' (see isBacklog) / 'undated' (no due but owned by a
+     * project/trip/meeting/parent) / 'today' / 'overdue' (1..STALE_DAYS-1 late) /
+     * 'stale' (>= STALE_DAYS late) / 'upcoming'. Any other status (e.g.
+     * 'deleted') is not an open task and also reports 'undated' so it never
+     * lands in a due-date band.
+     */
+    static bucketOf(task, todayStr) {
+        const t = task || {};
+        const status = t.status || 'open';
+        if (status === 'done') return 'done';
+        if (status !== 'open') return 'undated';
+        const due = TaskEntity._toDateStr(t.due);
+        if (!due) return TaskEntity.isBacklog(t) ? 'backlog' : 'undated';
+        if (due === todayStr) return 'today';
+        const late = TaskEntity.daysLate(t, todayStr);
+        if (late >= TaskEntity.STALE_DAYS) return 'stale';
+        if (late >= 1) return 'overdue';
+        return 'upcoming';
+    }
+
+    /**
+     * Calendar day (`YYYY-MM-DD`) of `task.completed_at`, read in the zone the
+     * value was written in (an ISO string keeps its own offset, so the leading
+     * date IS the local day). Luxon-ish objects use toISODate / toFormat
+     * directly (no UTC shift). Empty / unparseable -> null.
+     */
+    static completedDay(task) {
+        const v = task && task.completed_at;
+        if (v == null || v === '') return null;
+        if (typeof v === 'string') {
+            const m = /^\s*(\d{4}-\d{2}-\d{2})/.exec(v);
+            return m ? m[1] : null;
+        }
+        try {
+            if (typeof v.toISODate === 'function') return v.toISODate() || null;
+            if (typeof v.toFormat === 'function') return v.toFormat('yyyy-MM-dd') || null;
+        } catch (_e) { return null; }
+        return TaskEntity._toDateStr(v);
+    }
+
+    static _priorityRank(p) {
+        switch (String(p == null ? '' : p).trim().toLowerCase()) {
+            case 'highest': return 4;
+            case 'high': return 3;
+            case 'medium': return 2;
+            case 'low': return 1;
+            default: return 0;
+        }
+    }
+
+    /** Finite numeric rank or null ('' / junk -> null; Number('') is 0, so guard it). */
+    static _rankOf(v) {
+        if (typeof v === 'number') return isFinite(v) ? v : null;
+        if (typeof v !== 'string' || v.trim() === '') return null;
+        const n = Number(v);
+        return isFinite(n) ? n : null;
+    }
+
+    /** Epoch ms from number / Luxon (toMillis, ts) / ISO string; else null. */
+    static _msOf(v) {
+        if (v == null || v === '') return null;
+        if (typeof v === 'number') return isFinite(v) ? v : null;
+        if (typeof v === 'string') {
+            const n = Date.parse(v);
+            return isNaN(n) ? null : n;
+        }
+        try {
+            if (typeof v.toMillis === 'function') {
+                const n = v.toMillis();
+                return typeof n === 'number' && isFinite(n) ? n : null;
+            }
+        } catch (_e) { return null; }
+        if (typeof v.ts === 'number' && isFinite(v.ts)) return v.ts;
+        return null;
+    }
+
+    /**
+     * Comparator factory. Modes: smart | manual | priority | due | oldest |
+     * touched; anything else behaves as smart. Every comparator is total and
+     * tolerant of missing / junk fields (never throws), ending on title so
+     * the order is deterministic.
+     */
+    static compareBy(mode, todayStr) {
+        const asc = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+        const nullsLast = (x, y, cmp) => {
+            if (x == null && y == null) return 0;
+            if (x == null) return 1;
+            if (y == null) return -1;
+            return cmp(x, y);
+        };
+        const title = (a, b) => asc(String((a && a.title) || '').toLowerCase(), String((b && b.title) || '').toLowerCase());
+        const created = (a, b) => nullsLast(TaskEntity._msOf(a && a.created_at), TaskEntity._msOf(b && b.created_at), asc);
+        const priority = (a, b) => TaskEntity._priorityRank(b && b.priority) - TaskEntity._priorityRank(a && a.priority);
+        const late = (a, b) => TaskEntity.daysLate(b, todayStr) - TaskEntity.daysLate(a, todayStr);
+        const rank = (a, b) => nullsLast(TaskEntity._rankOf(a && a.rank), TaskEntity._rankOf(b && b.rank), asc);
+        const chain = (...fns) => (a, b) => {
+            for (const f of fns) { const r = f(a, b); if (r) return r; }
+            return 0;
+        };
+        switch (mode) {
+            case 'manual': return chain(rank, created, title);
+            case 'priority': return chain(priority, late, created, title);
+            case 'due': return chain(
+                (a, b) => nullsLast(TaskEntity._toDateStr(a && a.due), TaskEntity._toDateStr(b && b.due), asc),
+                priority, created, title);
+            case 'oldest': return chain(created, title);
+            case 'touched': return chain(
+                (a, b) => nullsLast(TaskEntity._msOf(a && a.mtime), TaskEntity._msOf(b && b.mtime), (x, y) => y - x),
+                title);
+            default: return chain(rank, priority, late, created, title);
+        }
+    }
+
+    /**
+     * Manual-order renumber: given the new top-to-bottom order of task paths
+     * and their current ranks, return the { path, rank } writes that make rank
+     * equal position + 1, skipping rows whose rank already matches. Blank paths
+     * keep their position but are never written. Pure.
+     */
+    static renumber(orderedPaths, rankByPath) {
+        const ranks = rankByPath && typeof rankByPath === 'object' ? rankByPath : {};
+        const list = Array.isArray(orderedPaths) ? orderedPaths : [];
+        const out = [];
+        list.forEach((p, i) => {
+            if (!p) return;
+            const cur = Object.prototype.hasOwnProperty.call(ranks, p) ? ranks[p] : null;
+            const ranked = cur !== null && cur !== undefined && cur !== '';
+            if (!ranked || Number(cur) !== i + 1) out.push({ path: p, rank: i + 1 });
+        });
+        return out;
+    }
+
+    /**
+     * Pull a trailing run of shortcut tokens off a task title. Scans from the
+     * END only and stops at the first word that is not a token, so
+     * "Prep Monday standup notes" is untouched. Tokens: today, tomorrow,
+     * next <weekday>, <weekday> (next occurrence strictly after today),
+     * !low|!medium|!high|!highest, #Project / #"Two Words" (case-insensitive:
+     * exact name first, then a unique prefix; no match stops the scan and the
+     * text stays in the title). Each field is taken once (the rightmost wins;
+     * a second token of the same field stops the scan), and a token is never
+     * consumed if that would leave an empty title.
+     * Returns { title, due?, priority?, project? }.
+     */
+    static parseTitleShortcuts(text, todayStr, projectNames) {
+        const names = Array.isArray(projectNames) ? projectNames.map(String) : [];
+        const DAYS = {
+            sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2,
+            wed: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4,
+            fri: 5, friday: 5, sat: 6, saturday: 6,
+        };
+        const findProject = (raw) => {
+            const q = String(raw).trim().toLowerCase();
+            if (!q) return null;
+            const exact = names.filter((n) => n.toLowerCase() === q);
+            if (exact.length) return exact[0];
+            const pre = names.filter((n) => n.toLowerCase().startsWith(q));
+            return pre.length === 1 ? pre[0] : null;
+        };
+        let rest = String(text == null ? '' : text).replace(/\s+$/, '');
+        const out = {};
+        for (;;) {
+            let m;
+            let consumed = null;
+            let field = null;
+            let value = null;
+            if ((m = /^(.*?)\s*#"([^"]+)"$/.exec(rest))) {
+                const proj = findProject(m[2]);
+                if (proj) { consumed = m[1]; field = 'project'; value = proj; }
+            } else if ((m = /^(.*?)(?:^|\s)#([^\s"#]+)$/.exec(rest))) {
+                const proj = findProject(m[2]);
+                if (proj) { consumed = m[1]; field = 'project'; value = proj; }
+            } else if ((m = /^(.*?)(?:^|\s)!(low|medium|high|highest)$/i.exec(rest))) {
+                consumed = m[1]; field = 'priority'; value = m[2].toLowerCase();
+            } else if ((m = /^(.*?)(?:^|\s)next\s+([A-Za-z]+)$/i.exec(rest)) && DAYS[m[2].toLowerCase()] != null) {
+                consumed = m[1]; field = 'due'; value = TaskEntity._nextWeekday(todayStr, DAYS[m[2].toLowerCase()]);
+            } else if ((m = /^(.*?)(?:^|\s)([A-Za-z]+)$/.exec(rest))) {
+                const w = m[2].toLowerCase();
+                if (w === 'today') { consumed = m[1]; field = 'due'; value = todayStr; }
+                else if (w === 'tomorrow') { consumed = m[1]; field = 'due'; value = TaskEntity.tomorrow(todayStr); }
+                else if (DAYS[w] != null) { consumed = m[1]; field = 'due'; value = TaskEntity._nextWeekday(todayStr, DAYS[w]); }
+            }
+            if (field == null || out[field] !== undefined) break;
+            const remaining = consumed.replace(/\s+$/, '');
+            if (!remaining) break;
+            out[field] = value;
+            rest = remaining;
+        }
+        out.title = rest;
+        return out;
+    }
+
+    /**
+     * Size in bytes of the user's own notes: file size minus the frontmatter
+     * and the canonical chrome body. Never negative.
+     */
+    static notesBytes(statSize, frontmatterEndOffset) {
+        const n = (Number(statSize) || 0) - (Number(frontmatterEndOffset) || 0) - TaskEntity._chromeBody().length;
+        return n > 0 ? n : 0;
+    }
 
     /**
      * Turn a task title into a safe, HUMAN-READABLE filename base (no `.md`).
@@ -384,7 +654,9 @@ class TaskEntity {
             // array of strings and/or Link objects; _normLinks coerces both.
             links: TaskEntity._normLinks(p.links),
             created_at: p.created_at != null ? p.created_at : null,
-            completed_at: blankToNull(p.completed_at),
+            completed_at: (p.status || 'open') === 'open' ? null : blankToNull(p.completed_at),
+            rank: TaskEntity._rankOf(p.rank),
+            mtime: TaskEntity._msOf(p.file && p.file.mtime),
             path: path,
         };
     }

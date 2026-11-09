@@ -107,11 +107,15 @@ const HOME = os.homedir();
   ok('LB-5 batch intakeRoots follow the binding', JSON.stringify(out2.ir) === JSON.stringify(['/v/demo/spice/projects/demo', '/v/demo/spice/projects/demo/tasks']));
 }
 
-// LB-6: SAUCE_LOOP_REPO retargets record-pr/advance PR lookups; default is the
-// historical sauce repo.
+// LB-6: SAUCE_LOOP_REPO retargets record-pr/advance PR lookups; with no env the
+// default is this sauce checkout's own origin. The owner is whatever the
+// checkout's remote names: wacwini/sauce on CI since the 2026-11-09 transfer,
+// willfell/sauce on a clone still riding the redirect.
 {
+  const { parseRepoSlug } = require(path.join(REPO, 'scripts', 'autoloop', 'loop-config.js'));
+  const ownSlug = parseRepoSlug(execFileSync('git', ['-C', REPO, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim());
   const def = nodeEvalClean(`console.log(require(${JSON.stringify(COORD)}).REPO);`);
-  ok('LB-6 default REPO unchanged', def === 'willfell/sauce');
+  ok('LB-6 default REPO is this sauce checkout', /\/sauce$/.test(ownSlug || '') && def === ownSlug);
   const bound = nodeEvalClean(`console.log(require(${JSON.stringify(COORD)}).REPO);`, { SAUCE_LOOP_REPO: 'willfell/ero-copilot-iac' });
   ok('LB-6 REPO override honored', bound === 'willfell/ero-copilot-iac');
 }

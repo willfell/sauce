@@ -915,6 +915,736 @@ function reloadWithDom() {
     }));
 })();
 
+// --- RD-DH-*: pure helpers for the redesigned task dialog ---
+(function () {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'mechanisms', 'task-entity', 'task-dialog.js'), 'utf8');
+    // eslint-disable-next-line no-new-func
+    const TD = new Function('window', src + '; return TaskDialog;')({});
+    const TDI = new TD();
+    const TODAY = '2026-11-09';
+
+    const opts = TD.whenOptions(TODAY);
+    ok('RD-DH-WHEN keys',
+        JSON.stringify(opts.map(o => o.key)) === JSON.stringify(['today', 'tomorrow', 'nextmon', 'pick', 'none']));
+    ok('RD-DH-WHEN labels',
+        JSON.stringify(opts.map(o => o.label)) === JSON.stringify(['Today', 'Tomorrow', 'Next Mon', 'Pick date…', 'No date']));
+    ok('RD-DH-WHEN dues',
+        JSON.stringify(opts.map(o => o.due)) === JSON.stringify(['2026-11-09', '2026-11-10', '2026-11-16', null, '']));
+    ok('RD-DH-WHEN instance delegate',
+        JSON.stringify(TDI.whenOptions(TODAY)) === JSON.stringify(opts));
+
+    ok('RD-DH-KEY none', TD.whenKeyForDue('', TODAY) === 'none');
+    ok('RD-DH-KEY null', TD.whenKeyForDue(null, TODAY) === 'none');
+    ok('RD-DH-KEY today', TD.whenKeyForDue('2026-11-09', TODAY) === 'today');
+    ok('RD-DH-KEY tomorrow', TD.whenKeyForDue('2026-11-10', TODAY) === 'tomorrow');
+    ok('RD-DH-KEY nextmon', TD.whenKeyForDue('2026-11-16', TODAY) === 'nextmon');
+    ok('RD-DH-KEY pick', TD.whenKeyForDue('2026-11-20', TODAY) === 'pick');
+    ok('RD-DH-KEY instance delegate', TDI.whenKeyForDue('2026-11-20', TODAY) === 'pick');
+
+    ok('RD-DH-CAPTION nextmon', TD.whenCaption('nextmon', '2026-11-16') === 'Due Mon Nov 16');
+    ok('RD-DH-CAPTION no zero pad', TD.whenCaption('today', '2026-12-03') === 'Due Thu Dec 3');
+    ok('RD-DH-CAPTION tomorrow', TD.whenCaption('tomorrow', '2026-11-10') === 'Due Tue Nov 10');
+    ok('RD-DH-CAPTION pick with date', TD.whenCaption('pick', '2026-11-20') === 'Due Fri Nov 20');
+    ok('RD-DH-CAPTION none', TD.whenCaption('none', '') === 'No date: goes to the backlog');
+    ok('RD-DH-CAPTION none owned', TD.whenCaption('none', '', true) === 'No date');
+    ok('RD-DH-CAPTION owned ignored when dated', TD.whenCaption('today', '2026-12-03', true) === 'Due Thu Dec 3');
+    ok('RD-DH-CAPTION owned instance delegate', TDI.whenCaption('none', '', true) === 'No date');
+    ok('RD-DH-CAPTION owner detection', TD._ownedForCaption({ projectName: 'Alpha' }) === true
+        && TD._ownedForCaption({ tripSlug: 'lisbon' }) === true
+        && TD._ownedForCaption({ parentTask: '[[P]]' }) === true
+        && TD._ownedForCaption({ source: 'meeting' }) === true
+        && TD._ownedForCaption({ projectName: '', source: 'manual' }) === false);
+    ok('RD-DH-CAPTION pick empty', TD.whenCaption('pick', null) === 'Pick a date');
+    ok('RD-DH-CAPTION instance delegate', TDI.whenCaption('nextmon', '2026-11-16') === 'Due Mon Nov 16');
+
+    const mk = (project, created) => ({ project, created_at: created });
+    const fixture = [
+        mk('[[Alpha]]', '2026-11-08T10:00:00Z'),
+        mk('[[Alpha]]', '2026-11-01'),
+        mk('[[Beta]]', '2026-11-07'),
+        mk('[[Beta]]', '2026-10-20'),
+        mk('[[Gamma]]', '2026-11-09'),
+        mk('[[Delta|The Delta]]', '2026-11-05'),
+        mk('[[Old]]', '2026-09-29'),
+        mk('[[Old]]', '2026-09-30'),
+        mk('[[Edge]]', '2026-10-11'),
+        mk('[[TooOld]]', '2026-10-10'),
+        mk(null, '2026-11-08'),
+        mk('[[Bad]]', 'not-a-date'),
+        mk('[[Missing]]', null),
+    ];
+    ok('RD-DH-RECENT order and window',
+        JSON.stringify(TD.recentProjects(fixture, TODAY)) === JSON.stringify(['Alpha', 'Beta', 'Gamma', 'Delta', 'Edge']),
+        JSON.stringify(TD.recentProjects(fixture, TODAY)));
+    ok('RD-DH-RECENT limit', JSON.stringify(TD.recentProjects(fixture, TODAY, 2)) === JSON.stringify(['Alpha', 'Beta']));
+    ok('RD-DH-RECENT empty', TD.recentProjects([], TODAY).length === 0 && TD.recentProjects(null, TODAY).length === 0);
+    ok('RD-DH-RECENT instance delegate',
+        JSON.stringify(TDI.recentProjects(fixture, TODAY, 1)) === JSON.stringify(['Alpha']));
+
+    ok('RD-DH-HOME same as daily',
+        JSON.stringify(TD.defaultsForSurface({ surface: 'home', today: TODAY }))
+        === JSON.stringify({ due: TODAY, source: 'daily' })
+        && JSON.stringify(TD.defaultsForSurface({ surface: 'home', today: TODAY }))
+        === JSON.stringify(TD.defaultsForSurface({ surface: 'daily', today: TODAY })));
+})();
+
+// --- RD-D-*: two-column task dialog (TaskDialog._render, create + edit) ---
+// Drives the REAL TaskDialog renderer against the REAL SauceModal and the REAL
+// TaskEntity, on a small tree DOM stub. Each case gets its own class instance
+// (fresh `new Function` load) so window/document/localStorage never leak.
+(function () {
+    const read = (rel) => fs.readFileSync(path.resolve(__dirname, '..', rel), 'utf8');
+    const tdSrc = read('mechanisms/task-entity/task-dialog.js');
+    // eslint-disable-next-line no-new-func
+    const SauceModalCls = new Function(read('mechanisms/modal/sauce-modal.js') + '; return SauceModal;')();
+    // eslint-disable-next-line no-new-func
+    const TaskEntityCls = new Function(read('mechanisms/task-entity/task-entity.js') + '; return TaskEntity;')();
+    const TODAY = '2026-11-09';
+    const DAY = 86400000;
+    const TODAY_MS = Date.UTC(2026, 10, 9);
+
+    function rdNode(tag) {
+        const n = {
+            tagName: String(tag || 'div').toUpperCase(),
+            style: {}, attributes: {}, children: [], parentNode: null, _listeners: {},
+            className: '', id: '', type: '', value: '', checked: false, disabled: false, placeholder: '',
+            _text: '', _focus: 0,
+            get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); },
+            set textContent(v) { this._text = String(v == null ? '' : v); this.children = []; },
+            set innerHTML(v) { this._html = String(v); },
+            get innerHTML() { return this._html || ''; },
+            createEl(t, o) {
+                const c = rdNode(t);
+                if (o && o.cls) c.className = String(o.cls);
+                if (o && o.text != null) c.textContent = o.text;
+                if (o && o.type) c.type = String(o.type);
+                return this.appendChild(c);
+            },
+            createDiv(o) { return this.createEl('div', o); },
+            createSpan(o) { return this.createEl('span', o); },
+            appendChild(c) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; this.children.push(c); return c; },
+            insertBefore(c, ref) {
+                c.parentNode = this;
+                const i = this.children.indexOf(ref);
+                if (i < 0) this.children.push(c); else this.children.splice(i, 0, c);
+                return c;
+            },
+            removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); c.parentNode = null; return c; },
+            remove() { if (this.parentNode) this.parentNode.removeChild(this); },
+            empty() { this.children = []; },
+            setAttribute(k, v) { this.attributes[k] = String(v); if (k === 'class') this.className = String(v); },
+            getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null; },
+            addEventListener(t, fn) { (this._listeners[t] = this._listeners[t] || []).push(fn); },
+            removeEventListener(t, fn) { const l = this._listeners[t] || []; const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); },
+            contains(x) { if (x === this) return true; return this.children.some((c) => c.contains(x)); },
+            focus() { this._focus++; },
+            querySelector() { return null; },
+        };
+        n.classList = {
+            add(...names) {
+                const cur = String(n.className || '').split(/\s+/).filter(Boolean);
+                for (const nm of names) if (!cur.includes(nm)) cur.push(nm);
+                n.className = cur.join(' ');
+            },
+            contains(nm) { return String(n.className || '').split(/\s+/).includes(nm); },
+        };
+        return n;
+    }
+    function rdDoc() {
+        const listeners = [];
+        return {
+            body: rdNode('body'),
+            head: rdNode('head'),
+            createElement: (t) => rdNode(t),
+            addEventListener(type, fn, capture) { listeners.push({ type, fn, capture }); },
+            removeEventListener(type, fn, capture) {
+                const i = listeners.findIndex((l) => l.type === type && l.fn === fn && l.capture === capture);
+                if (i >= 0) listeners.splice(i, 1);
+            },
+            dispatch(type, ev) { for (const l of listeners.slice()) if (l.type === type) l.fn(ev); },
+            listenerCount(type) { return listeners.filter((l) => l.type === type).length; },
+        };
+    }
+    const hasCls = (node, cls) => String((node && node.className) || '').split(/\s+/).includes(cls);
+    const all = (root, pred, acc) => {
+        acc = acc || [];
+        for (const c of (root && root.children) || []) { if (pred(c)) acc.push(c); all(c, pred, acc); }
+        return acc;
+    };
+    const byCls = (root, cls) => all(root, (n) => hasCls(n, cls))[0] || null;
+    const allByCls = (root, cls) => all(root, (n) => hasCls(n, cls));
+    const selected = (n) => !!n && n.getAttribute('aria-pressed') === 'true' && hasCls(n, 'is-selected');
+    const tick = () => new Promise((r) => setImmediate(r));
+    const click = (el) => el.onclick({ target: el, currentTarget: el, preventDefault() {}, stopPropagation() {} });
+
+    function rdEnv(o) {
+        o = o || {};
+        const doc = rdDoc();
+        const store = Object.assign({}, o.storage || {});
+        const localStorage = o.storageThrows ? {
+            getItem: () => { throw new Error('denied'); },
+            setItem: () => { throw new Error('denied'); },
+        } : {
+            getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+            setItem: (k, v) => { store[k] = String(v); },
+        };
+        const fmByPath = {};
+        const files = [];
+        const addFile = (p, fm, ctime) => {
+            const f = { path: p, basename: p.replace(/^.*\//, '').replace(/\.md$/, ''), stat: { ctime: ctime == null ? TODAY_MS : ctime, mtime: ctime == null ? TODAY_MS : ctime } };
+            fmByPath[p] = fm;
+            files.push(f);
+            return f;
+        };
+        for (const name of (o.projects || ['Alpha', 'Beta', 'Gamma'])) {
+            addFile('spice/projects/' + name.toLowerCase() + '/' + name + '.md', { type: 'project', name });
+        }
+        for (const t of (o.tasks || [])) addFile(t.path, Object.assign({ type: 'task' }, t.fm), t.ctime);
+        const editFile = o.editFm ? addFile('spice/tasks/Edit me.md', Object.assign({ type: 'task' }, o.editFm)) : null;
+        const opened = [];
+        const fmWrites = [];
+        const bodyWrites = [];
+        const fileText = o.fileText || '---\n---\n<!-- TASK_NOTES -->\n';
+        const app = {
+            isMobile: !!o.isMobile,
+            vault: {
+                getAbstractFileByPath: (p) => files.find((f) => f.path === p) || null,
+                getMarkdownFiles: () => files.slice(),
+                read: async () => fileText,
+                process: async (_f, fn) => { const out = fn(fileText); bodyWrites.push(out); return out; },
+            },
+            metadataCache: { getFileCache: (f) => (f && fmByPath[f.path] ? { frontmatter: fmByPath[f.path] } : null) },
+            workspace: { getLeaf: () => ({ openFile: async (f) => { opened.push(f); } }) },
+            fileManager: {
+                processFrontMatter: async (f, fn) => {
+                    const fm = Object.assign({}, fmByPath[f.path]);
+                    fn(fm);
+                    fmWrites.push(fm);
+                },
+            },
+        };
+        const customJS = {
+            SauceModal: new SauceModalCls(),
+            TaskEntity: new TaskEntityCls(),
+            RecurrenceParser: { describe: o.describe || (() => null) },
+        };
+        const win = { app, customJS, localStorage, moment: () => ({ format: () => TODAY }) };
+        const glob = { app, customJS };
+        // eslint-disable-next-line no-new-func
+        const TD = new Function('window', 'document', 'globalThis', 'Notice', 'setTimeout', 'navigator',
+            tdSrc + '; return TaskDialog;')(win, doc, glob, function () {}, (fn) => { fn(); return 0; }, { platform: 'MacIntel' });
+        const dlg = new TD();
+        const creates = [];
+        dlg._create = async (_app, payload, notes) => {
+            creates.push({ payload, notes });
+            if (o.createFails) return undefined;
+            const p = 'spice/tasks/' + payload.title + '.md';
+            return { ok: true, path: p, file: { path: p } };
+        };
+        const env = {
+            TD, dlg, doc, app, store, creates, opened, fmWrites, bodyWrites, fileText, editFile,
+            open(opts) { dlg.open(opts); return env; },
+            modal: () => byCls(doc.body, 'sauce-modal'),
+            body: () => byCls(doc.body, 'sauce-modal-body'),
+            footer: () => byCls(doc.body, 'sauce-modal-footer'),
+            title: () => byCls(doc.body, 'sauce-task-title'),
+            notes: () => byCls(doc.body, 'sauce-task-notes'),
+            when: (k) => allByCls(doc.body, 'sauce-task-when').find((b) => b.getAttribute('data-key') === k) || null,
+            prio: (v) => allByCls(doc.body, 'sauce-task-prio').find((b) => b.getAttribute('data-prio') === v) || null,
+            chip: (name) => allByCls(doc.body, 'sauce-task-project-chip').find((b) => b.textContent === name) || null,
+            save: () => byCls(doc.body, 'sauce-task-save'),
+            typeTitle(v) { const t = env.title(); t.value = v; t.oninput(); },
+            key(ev) { doc.dispatch('keydown', Object.assign({ preventDefault() {}, isComposing: false }, ev)); },
+        };
+        return env;
+    }
+
+    const cases = [];
+    const rdCase = (name, fn) => cases.push(async () => {
+        try { await fn(); ok(name, true); }
+        catch (e) { ok(name, false, e && e.message); }
+    });
+    const must = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+    rdCase('RD-D-COLS two columns in the body, footer outside the scrolling body', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        const cols = byCls(env.body(), 'sauce-task-dialog-cols');
+        must(cols, 'no .sauce-task-dialog-cols');
+        must(cols.children.length === 2, 'cols children: ' + cols.children.length);
+        must(hasCls(cols.children[0], 'sauce-task-dialog-left') && hasCls(cols.children[1], 'sauce-task-dialog-right'), 'left/right order');
+        must(env.title() && cols.children[0].contains(env.title()), 'title in left column');
+        must(env.notes() && cols.children[0].contains(env.notes()), 'notes in left column');
+        for (const c of ['sauce-task-when', 'sauce-task-prio', 'sauce-task-project-search', 'sauce-task-repeat-toggle']) {
+            must(byCls(cols.children[1], c), c + ' in right column');
+        }
+        must(!byCls(env.body(), 'sauce-task-save') && byCls(env.footer(), 'sauce-task-save'), 'save lives in the footer, not the body');
+        must(byCls(env.footer(), 'sauce-task-open-after') && byCls(env.footer(), 'sauce-task-add-another'), 'footer controls');
+        must(hasCls(env.modal(), 'sauce-task-dialog'), 'modal tagged sauce-task-dialog');
+        const heading = byCls(env.modal(), 'sauce-modal-title');
+        must(heading && heading.textContent === 'New task', 'heading: ' + (heading && heading.textContent));
+        must(byCls(env.modal(), 'sauce-task-dialog-close'), 'header close button');
+        const quiet = all(cols.children[0], (n) => n.tagName === 'BUTTON').map((b) => b.textContent);
+        must(quiet.includes('＋ Link note') && quiet.includes('＋ Web link') && quiet.includes('Subtask of…'), 'quiet buttons: ' + JSON.stringify(quiet));
+    });
+
+    rdCase('RD-D-WHEN-DEFAULT daily/home/manual-with-today select Today; project selects No date', async () => {
+        for (const opts of [{ surface: 'daily', today: TODAY }, { surface: 'home', today: TODAY }, { surface: 'manual', today: TODAY }]) {
+            const env = rdEnv().open(opts);
+            must(selected(env.when('today')), opts.surface + ': today selected');
+            must(allByCls(env.doc.body, 'sauce-task-when').filter(selected).length === 1, opts.surface + ': exactly one selected');
+            const cap = byCls(env.doc.body, 'sauce-task-when-caption');
+            must(cap && cap.textContent === 'Due Mon Nov 9', 'caption: ' + (cap && cap.textContent));
+        }
+        const env = rdEnv().open({ surface: 'project', project: { name: 'Alpha', slug: 'alpha' } });
+        must(selected(env.when('none')), 'project: none selected');
+        must(byCls(env.doc.body, 'sauce-task-when-caption').textContent === 'No date', 'project task: none caption is just No date');
+        must(selected(env.chip('Alpha')), 'project surface seeds the Alpha chip');
+        const daily = rdEnv().open({ surface: 'daily' });
+        must(selected(daily.when('today')), 'daily without opts.today derives today from moment');
+    });
+
+    rdCase('RD-D-WHEN-PICK quick dates and Pick date… set the payload due', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        click(env.when('nextmon'));
+        must(selected(env.when('nextmon')) && !selected(env.when('today')), 'nextmon selected');
+        env.typeTitle('Plan');
+        await click(env.save());
+        await tick();
+        must(env.creates.length === 1 && env.creates[0].payload.due === '2026-11-16', 'due: ' + JSON.stringify(env.creates[0] && env.creates[0].payload.due));
+
+        const env2 = rdEnv().open({ surface: 'daily', today: TODAY });
+        const date = byCls(env2.doc.body, 'sauce-task-when-date');
+        must(date && date.type === 'date' && date.style.display === 'none', 'date input hidden until Pick');
+        click(env2.when('pick'));
+        must(date.style.display !== 'none' && selected(env2.when('pick')), 'Pick reveals the inline date input');
+        date.value = '2026-11-20';
+        date.onchange();
+        must(byCls(env2.doc.body, 'sauce-task-when-caption').textContent === 'Due Fri Nov 20', 'pick caption');
+        click(env2.when('none'));
+        must(date.style.display === 'none', 'leaving Pick hides the date input');
+        click(env2.when('pick'));
+        date.value = '2026-11-20';
+        date.onchange();
+        env2.typeTitle('Picked');
+        await click(env2.save());
+        await tick();
+        must(env2.creates[0].payload.due === '2026-11-20', 'picked due: ' + env2.creates[0].payload.due);
+    });
+
+    rdCase('RD-D-PRIO-KEY keys 0-4 set priority outside text fields only', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        must(selected(env.prio('none')), 'none selected by default');
+        env.key({ key: '3', target: env.body() });
+        must(selected(env.prio('high')) && !selected(env.prio('none')), '3 → high');
+        env.key({ key: '1', target: env.title() });
+        must(selected(env.prio('high')), 'digit typed in the title does not change priority');
+        env.key({ key: '2', target: env.notes() });
+        must(selected(env.prio('high')), 'digit typed in the notes does not change priority');
+        env.key({ key: '4', target: env.prio('low') });
+        must(selected(env.prio('highest')), '4 on a focused button → highest');
+        env.key({ key: '0', target: env.body() });
+        must(selected(env.prio('none')), '0 → none');
+        env.key({ key: '3', target: env.body() });
+        env.typeTitle('Prio');
+        await click(env.save());
+        await tick();
+        must(env.creates[0].payload.priority === 'high', 'payload priority: ' + env.creates[0].payload.priority);
+        must(env.doc.listenerCount('keydown') === 0, 'dialog key listeners detached on close');
+    });
+
+    rdCase('RD-D-SHORTCUT title shortcuts fill the right column and are stripped on submit', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        env.typeTitle('X next mon !high #Alpha');
+        must(selected(env.when('nextmon')), 'when → nextmon');
+        must(selected(env.prio('high')), 'priority → high');
+        must(selected(env.chip('Alpha')), 'project chip Alpha selected');
+        click(env.prio('low'));
+        env.typeTitle('X next mon !high #Alpha ');
+        must(selected(env.prio('low')), 'a later click overrides the unchanged shortcut');
+        await click(env.save());
+        await tick();
+        const p = env.creates[0].payload;
+        must(p.title === 'X', 'stripped title: ' + JSON.stringify(p.title));
+        must(p.due === '2026-11-16' && p.priority === 'low' && p.project && p.project.name === 'Alpha', 'payload: ' + JSON.stringify(p));
+
+        const env2 = rdEnv().open({ surface: 'daily', today: TODAY });
+        env2.typeTitle('Y tomorrow');
+        must(selected(env2.when('tomorrow')), 'tomorrow token applied');
+        env2.typeTitle('Y tomorro');
+        must(selected(env2.when('today')), 'removing the token restores the prior When');
+    });
+
+    rdCase('RD-D-ADD-ANOTHER saves, clears title + notes, keeps When/Priority/Project', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        const search = byCls(env.doc.body, 'sauce-task-project-search');
+        search.value = 'alp';
+        search.oninput();
+        must(env.chip('Alpha'), 'search shows Alpha');
+        click(env.chip('Alpha'));
+        click(env.when('tomorrow'));
+        click(env.prio('medium'));
+        env.typeTitle('First');
+        env.notes().value = 'first notes';
+        env.notes().oninput();
+        const another = byCls(env.footer(), 'sauce-task-add-another');
+        const focusBefore = env.title()._focus;
+        await click(another);
+        await tick();
+        must(env.creates.length === 1 && env.creates[0].payload.title === 'First' && env.creates[0].notes === 'first notes', 'first create');
+        must(env.title().value === '' && env.notes().value === '', 'title + notes cleared');
+        must(env.title()._focus > focusBefore, 'title refocused');
+        must(env.doc.body.children.length === 1, 'dialog stays open');
+        must(env.save().disabled && another.disabled, 'buttons disabled until a new title');
+        env.typeTitle('Second');
+        await click(another);
+        await tick();
+        const p = env.creates[1] && env.creates[1].payload;
+        must(p && p.title === 'Second' && p.project && p.project.name === 'Alpha' && p.due === '2026-11-10' && p.priority === 'medium',
+            'second keeps fields: ' + JSON.stringify(p));
+        must(env.creates[1].notes === '', 'second notes empty');
+        must(env.opened.length === 0, 'add-another never opens the note');
+    });
+
+    rdCase('RD-D-OPEN-AFTER preference gates opening the created note', async () => {
+        const on = rdEnv().open({ surface: 'daily', today: TODAY });
+        const cb = byCls(on.footer(), 'sauce-task-open-after');
+        must(cb && cb.type === 'checkbox' && cb.checked === true, 'default on');
+        on.typeTitle('Open me');
+        await click(on.save());
+        await tick();
+        must(on.opened.length === 1 && on.opened[0].path === 'spice/tasks/Open me.md', 'opened: ' + JSON.stringify(on.opened));
+        must(on.doc.body.children.length === 0, 'dialog closed');
+
+        const off = rdEnv({ storage: { 'sauce-task-dialog:open-after': '0' } }).open({ surface: 'daily', today: TODAY });
+        must(byCls(off.footer(), 'sauce-task-open-after').checked === false, 'pref 0 → unchecked');
+        off.typeTitle('Stay here');
+        await click(off.save());
+        await tick();
+        must(off.creates.length === 1 && off.opened.length === 0, 'no open call');
+
+        const toggle = rdEnv().open({ surface: 'daily', today: TODAY });
+        const tcb = byCls(toggle.footer(), 'sauce-task-open-after');
+        tcb.checked = false;
+        tcb.onchange();
+        must(toggle.store['sauce-task-dialog:open-after'] === '0', 'unchecking persists 0');
+        tcb.checked = true;
+        tcb.onchange();
+        must(toggle.store['sauce-task-dialog:open-after'] === '1', 'checking persists 1');
+
+        const broken = rdEnv({ storageThrows: true }).open({ surface: 'daily', today: TODAY });
+        const bcb = byCls(broken.footer(), 'sauce-task-open-after');
+        must(bcb && bcb.checked === true, 'throwing storage → on');
+        bcb.checked = false;
+        bcb.onchange();
+    });
+
+    rdCase('RD-D-CMDENTER ⌘↵ / Ctrl↵ submit from anywhere, plain Enter in notes does not', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        env.typeTitle('Cmd');
+        env.key({ key: 'Enter', target: env.notes() });
+        await tick();
+        must(env.creates.length === 0, 'plain Enter in notes does not submit');
+        env.key({ key: 'Enter', metaKey: true, target: env.notes() });
+        await tick();
+        must(env.creates.length === 1 && env.creates[0].payload.title === 'Cmd', '⌘↵ in notes submits');
+
+        const env2 = rdEnv().open({ surface: 'daily', today: TODAY });
+        env2.typeTitle('Ctrl');
+        env2.key({ key: 'Enter', ctrlKey: true, target: env2.prio('high') });
+        await tick();
+        must(env2.creates.length === 1, 'Ctrl↵ on a right-column button submits');
+
+        const env3 = rdEnv().open({ surface: 'daily', today: TODAY });
+        const kbd = byCls(env3.footer(), 'sauce-task-kbd');
+        must(kbd && kbd.textContent === '⌘↵' && env3.save().contains(kbd), 'primary carries the ⌘↵ hint');
+        env3.typeTitle('Plain');
+        env3.key({ key: 'Enter', target: env3.title() });
+        await tick();
+        must(env3.creates.length === 1 && env3.creates[0].payload.title === 'Plain', 'plain Enter in the title still submits');
+    });
+
+    rdCase('RD-D-EDIT-HYDRATE edit selects Pick with the date, keeps Open/Done/Delete, due change clears rank', async () => {
+        const env = rdEnv({ editFm: { title: 'Edit me', due: '2026-11-20', status: 'open', priority: 'high', rank: 3, links: [] } });
+        env.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        must(selected(env.when('pick')), 'pick selected');
+        const date = byCls(env.doc.body, 'sauce-task-when-date');
+        must(date.value === '2026-11-20' && date.style.display !== 'none', 'date input shows the due');
+        must(selected(env.prio('high')), 'priority hydrated');
+        must(env.title().value === 'Edit me' && env.title()._focus === 0, 'title hydrated, not focused');
+        must(byCls(env.modal(), 'sauce-modal-title').textContent === 'Edit task', 'edit heading');
+        const labels = all(env.footer(), (n) => n.tagName === 'BUTTON').map((b) => b.textContent);
+        for (const l of ['Open', 'Done', 'Delete']) must(labels.includes(l), 'footer has ' + l + ': ' + JSON.stringify(labels));
+        must(!byCls(env.footer(), 'sauce-task-add-another') && !byCls(env.footer(), 'sauce-task-open-after'), 'no create-only controls');
+        click(env.when('tomorrow'));
+        await click(env.save());
+        await tick();
+        const fm = env.fmWrites[0];
+        must(fm && fm.due === '2026-11-10' && fm.rank === '', 'fm write: ' + JSON.stringify(fm));
+        must(env.doc.body.children.length === 0, 'edit save closes');
+
+        const same = rdEnv({ editFm: { title: 'Edit me', due: '2026-11-20', status: 'open', rank: 3, links: [] } });
+        same.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        same.typeTitle('Edit me next mon');
+        await click(same.save());
+        await tick();
+        must(same.fmWrites[0].title === 'Edit me next mon' && same.fmWrites[0].rank === 3, 'edit mode keeps the typed title and rank: ' + JSON.stringify(same.fmWrites[0]));
+        must(!Object.prototype.hasOwnProperty.call(same.fmWrites[0], 'parent_task'), 'unchanged empty parent adds no key');
+    });
+
+    rdCase('RD-D-REPEAT Repeats collapses to one button; edit with a recurrence starts expanded', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        const toggle = byCls(env.doc.body, 'sauce-task-repeat-toggle');
+        must(toggle && toggle.textContent === "Doesn't repeat ▾", 'toggle text: ' + (toggle && toggle.textContent));
+        const box = byCls(env.doc.body, 'sauce-task-repeat-box');
+        must(box && box.style.display === 'none' && toggle.getAttribute('aria-expanded') === 'false', 'create starts collapsed');
+        click(toggle);
+        must(box.style.display !== 'none' && toggle.getAttribute('aria-expanded') === 'true', 'expands in place');
+
+        const edit = rdEnv({
+            editFm: { title: 'Edit me', due: '', status: 'open', recurrence: 'every day', links: [] },
+            describe: (g) => (g === 'every day' ? { kind: 'daily' } : null),
+        }).open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        must(byCls(edit.doc.body, 'sauce-task-repeat-box').style.display !== 'none', 'edit with recurrence starts expanded');
+        must(/^Every day/.test(byCls(edit.doc.body, 'sauce-task-repeat-toggle').textContent), 'toggle shows the rule');
+    });
+
+    rdCase('RD-D-PROJECT recent chips, search filter (max 8), chip toggle', async () => {
+        const many = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Area One', 'Area Two', 'Area Three', 'Area Four', 'Area Five', 'Area Six', 'Zed'];
+        const env = rdEnv({
+            projects: many,
+            tasks: [
+                { path: 'spice/tasks/a.md', fm: { project: '[[Beta]]', created_at: '2026-11-08T10:00:00Z' } },
+                { path: 'spice/tasks/b.md', fm: { project: '[[Beta]]', created_at: '2026-11-07' } },
+                { path: 'spice/tasks/_done/c.md', fm: { project: '[[Gamma]]', created_at: '2026-11-06', status: 'done' } },
+                { path: 'spice/tasks/old.md', fm: { project: '[[Zed]]', created_at: '2026-11-08' }, ctime: TODAY_MS - 60 * DAY },
+                { path: 'spice/other/x.md', fm: { project: '[[Zed]]', created_at: '2026-11-08' } },
+            ],
+        }).open({ surface: 'daily', today: TODAY });
+        const names = () => allByCls(env.doc.body, 'sauce-task-project-chip').map((c) => c.textContent);
+        must(JSON.stringify(names()) === JSON.stringify(['Beta', 'Gamma']), 'recent chips: ' + JSON.stringify(names()));
+        must(all(env.doc.body, (n) => n.textContent === 'Your most-used projects, most recent first').length > 0, 'recent caption');
+        const search = byCls(env.doc.body, 'sauce-task-project-search');
+        search.value = 'A';
+        search.oninput();
+        const hits = names();
+        must(hits.length === 8 && hits.every((n) => n.toLowerCase().includes('a')), 'search hits: ' + JSON.stringify(hits));
+        search.value = 'zE';
+        search.oninput();
+        must(JSON.stringify(names()) === JSON.stringify(['Zed']), 'case-insensitive: ' + JSON.stringify(names()));
+        click(env.chip('Zed'));
+        must(search.value === '' && selected(env.chip('Zed')), 'picking clears search and shows the selected chip');
+        click(env.chip('Zed'));
+        must(!env.chip('Zed') || !selected(env.chip('Zed')), 'clicking the selected chip clears it');
+        env.typeTitle('No project');
+        await click(env.save());
+        await tick();
+        must(env.creates[0].payload.project === undefined, 'cleared project not in payload');
+        must(JSON.stringify(env.dlg.projectMatches(['Ab', 'b', 'xAB'], 'ab', 1)) === '["Ab"]'
+            && env.dlg.projectMatches(['Ab'], '  ').length === 0, 'projectMatches delegate, limit, blank query');
+        must(env.dlg._recentTaskRows(null, TODAY).length === 0 && env.dlg._recentTaskRows(env.app, 'junk').length === 0,
+            'recent rows empty on failure');
+    });
+
+    rdCase('RD-D-NARROW injected CSS stacks the columns below 720px', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        const css = env.TD._DIALOG_CSS;
+        must(typeof css === 'string', 'static _DIALOG_CSS');
+        const at = css.indexOf('@media (max-width: 720px)');
+        must(at >= 0, 'has the 720px media query');
+        const block = css.slice(at, css.indexOf('}\n}', at) + 3);
+        must(/\.sauce-task-dialog-cols\s*\{[^}]*grid-template-columns:\s*1fr\s*;/.test(block), 'stacks the columns: ' + block);
+        const style = env.doc.head.children.find((c) => c.id === 'sauce-task-dialog-css');
+        must(style && style.textContent === css, 'style injected into head');
+        must(env.dlg._DIALOG_CSS === css, 'instance getter delegates');
+        rdEnv().open({ surface: 'daily', today: TODAY });
+        env.dlg.open({ surface: 'daily', today: TODAY });
+        must(env.doc.head.children.filter((c) => c.id === 'sauce-task-dialog-css').length === 1, 'injected once per document');
+    });
+
+    rdCase('RD-D-SUBTASK Subtask of… picks an open task as parent_task', async () => {
+        const env = rdEnv({
+            tasks: [
+                { path: 'spice/tasks/Parent one.md', fm: { title: 'Parent one', status: 'open' } },
+                { path: 'spice/tasks/_done/Finished.md', fm: { title: 'Finished', status: 'done' } },
+            ],
+        }).open({ surface: 'daily', today: TODAY });
+        const btn = all(env.doc.body, (n) => n.tagName === 'BUTTON' && n.textContent === 'Subtask of…')[0];
+        click(btn);
+        const rows = allByCls(env.doc.body, 'sauce-task-parent-option');
+        must(rows.length === 1 && rows[0].textContent === 'Parent one', 'candidates: ' + rows.map((r) => r.textContent));
+        rows[0].onclick();
+        must(byCls(env.doc.body, 'sauce-task-parent').textContent.includes('Parent one'), 'parent chip shown');
+        env.typeTitle('Child');
+        await click(env.save());
+        await tick();
+        must(env.creates[0].payload.parent_task === '[[Parent one]]', 'parent_task: ' + env.creates[0].payload.parent_task);
+    });
+
+    rdCase('RD-D-CREATE-FAIL a create that yields nothing keeps the dialog and its contents', async () => {
+        for (const which of ['sauce-task-add-another', 'sauce-task-save']) {
+            const env = rdEnv({ createFails: true }).open({ surface: 'daily', today: TODAY });
+            env.typeTitle('Keep me');
+            env.notes().value = 'kept notes';
+            env.notes().oninput();
+            click(all(env.doc.body, (n) => n.tagName === 'BUTTON' && n.textContent === '＋ Web link')[0]);
+            const url = all(env.doc.body, (n) => n.tagName === 'INPUT' && n.placeholder === 'https://…')[0];
+            url.value = 'https://example.test/a';
+            click(all(env.doc.body, (n) => n.tagName === 'BUTTON' && n.textContent === 'Add link')[0]);
+            await click(byCls(env.footer(), which));
+            await tick();
+            must(env.creates.length === 1, which + ': create attempted');
+            must(env.doc.body.children.length === 1, which + ': dialog still open');
+            must(env.title().value === 'Keep me' && env.notes().value === 'kept notes', which + ': title + notes intact');
+            const chips = allByCls(env.doc.body, 'sauce-task-link-chip').map((c) => c.textContent);
+            must(chips.length === 1 && chips[0].includes('<https://example.test/a>'), which + ': links intact ' + JSON.stringify(chips));
+            must(env.opened.length === 0, which + ': nothing opened');
+            await click(env.save());
+            await tick();
+            must(env.creates.length === 2 && env.creates[1].payload.links[0] === '<https://example.test/a>', which + ': retry carries the same link');
+        }
+    });
+
+    rdCase('RD-D-EDIT-ROUNDTRIP saving an unchanged edit writes the frontmatter back unchanged', async () => {
+        const input = {
+            type: 'task', title: 'Edit me', status: 'open', due: '2026-11-20', recurrence: 'every day',
+            priority: 'high', project: '[[Alpha]]', project_slug: 'alpha', trip: '', trip_slug: '',
+            source: 'manual', source_note: '', parent_task: '[[P]]', links: ['[[A]]', '[b](https://example.test/b)'],
+            rank: 3, created_at: '2026-11-01T09:00:00Z', completed_at: '',
+        };
+        const fileText = '---\ntitle: Edit me\n---\n\n<!-- TASK_NOTES -->\nSome notes\nline two\n';
+        const env = rdEnv({
+            editFm: Object.assign({}, input),
+            fileText,
+            describe: (g) => (g === 'every day' ? { kind: 'daily' } : null),
+        }).open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        await tick();
+        must(env.notes().value === 'Some notes\nline two', 'notes hydrated: ' + JSON.stringify(env.notes().value));
+        must(byCls(env.doc.body, 'sauce-task-parent').textContent.includes('P'), 'parent shown');
+        await click(env.save());
+        await tick();
+        must(JSON.stringify(env.fmWrites[0]) === JSON.stringify(input),
+            'fm round-trip:\n  got  ' + JSON.stringify(env.fmWrites[0]) + '\n  want ' + JSON.stringify(input));
+        must(env.bodyWrites.length === 1 && env.bodyWrites[0] === fileText, 'body round-trip: ' + JSON.stringify(env.bodyWrites[0]));
+    });
+
+    rdCase('RD-D-CAPTION-OWNER the No date caption follows the chosen project live', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        click(env.when('none'));
+        const cap = () => byCls(env.doc.body, 'sauce-task-when-caption').textContent;
+        must(cap() === 'No date: goes to the backlog', 'personal: ' + cap());
+        const search = byCls(env.doc.body, 'sauce-task-project-search');
+        search.value = 'Alpha';
+        search.oninput();
+        click(env.chip('Alpha'));
+        must(cap() === 'No date', 'with a project: ' + cap());
+        click(env.chip('Alpha'));
+        must(cap() === 'No date: goes to the backlog', 'project cleared: ' + cap());
+    });
+
+    rdCase('RD-D-NOTES-GUARD an edit saved before the notes read resolves leaves the body untouched', async () => {
+        const fileText = '---\ntitle: Edit me\n---\n\n<!-- TASK_NOTES -->\nPrecious notes\n';
+        const env = rdEnv({ editFm: { title: 'Edit me', due: '2026-11-20', status: 'open', links: [] }, fileText });
+        let release = null;
+        env.app.vault.read = () => new Promise((r) => { release = r; });
+        env.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        const notes = env.notes();
+        must(notes.disabled === true && notes.placeholder === 'Loading notes\u2026', 'loading state: ' + notes.placeholder);
+        notes.value = 'typed over the top';
+        notes.oninput();
+        env.typeTitle('Edit me renamed');
+        await click(env.save());
+        await tick();
+        must(env.fmWrites.length === 1 && env.fmWrites[0].title === 'Edit me renamed', 'frontmatter still saved');
+        must(env.bodyWrites.length === 0, 'no body write before the read resolved: ' + JSON.stringify(env.bodyWrites));
+        release(fileText);
+        await tick();
+        must(env.bodyWrites.length === 0, 'a late read never writes either');
+
+        const failing = rdEnv({ editFm: { title: 'Edit me', due: '', status: 'open', links: [] }, fileText });
+        failing.app.vault.read = () => Promise.reject(new Error('EIO'));
+        failing.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        await tick();
+        const n2 = failing.notes();
+        must(n2.disabled === true && n2.placeholder === 'Notes could not be loaded', 'failed state: ' + n2.placeholder);
+        failing.typeTitle('Still saves');
+        await click(failing.save());
+        await tick();
+        must(failing.fmWrites.length === 1 && failing.fmWrites[0].title === 'Still saves', 'frontmatter saves after a failed read');
+        must(failing.bodyWrites.length === 0, 'no body write after a failed read');
+
+        const loaded = rdEnv({ editFm: { title: 'Edit me', due: '', status: 'open', links: [] }, fileText });
+        loaded.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        await tick();
+        must(loaded.notes().disabled === false && loaded.notes().value === 'Precious notes', 'loaded: ' + loaded.notes().value);
+        await click(loaded.save());
+        await tick();
+        must(loaded.bodyWrites.length === 1 && loaded.bodyWrites[0] === fileText, 'loaded save round-trips the body byte-identical');
+    });
+
+    rdCase('RD-D-RECENT-TRASH trashed tasks never feed the recent-project chips', async () => {
+        const env = rdEnv({
+            tasks: [
+                { path: 'spice/tasks/a.md', fm: { project: '[[Beta]]', created_at: '2026-11-08' } },
+                { path: 'spice/tasks/_trash/t1.md', fm: { project: '[[Gamma]]', created_at: '2026-11-08', status: 'deleted' } },
+                { path: 'spice/tasks/_trash/t2.md', fm: { project: '[[Gamma]]', created_at: '2026-11-07', status: 'deleted' } },
+            ],
+        });
+        const rows = env.dlg._recentTaskRows(env.app, TODAY);
+        must(rows.length === 1 && rows[0].project === '[[Beta]]', 'rows: ' + JSON.stringify(rows));
+        env.open({ surface: 'daily', today: TODAY });
+        const names = allByCls(env.doc.body, 'sauce-task-project-chip').map((c) => c.textContent);
+        must(JSON.stringify(names) === '["Beta"]', 'chips: ' + JSON.stringify(names));
+    });
+
+    rdCase('RD-D-PARENT-CYCLE editing excludes the task itself and its descendants from Subtask of…', async () => {
+        const env = rdEnv({
+            editFm: { title: 'Edit me', status: 'open', links: [] },
+            tasks: [
+                { path: 'spice/tasks/Child.md', fm: { title: 'Child', status: 'open', parent_task: '[[Edit me]]' } },
+                { path: 'spice/tasks/Grandchild.md', fm: { title: 'Grandchild', status: 'open', parent_task: '[[spice/tasks/Child|kid]]' } },
+                { path: 'spice/tasks/Loop A.md', fm: { title: 'Loop A', status: 'open', parent_task: '[[Loop B]]' } },
+                { path: 'spice/tasks/Loop B.md', fm: { title: 'Loop B', status: 'open', parent_task: '[[Loop A]]' } },
+                { path: 'spice/tasks/Sibling.md', fm: { title: 'Sibling', status: 'open', parent_task: '[[Other]]' } },
+                { path: 'spice/tasks/_done/Done kid.md', fm: { title: 'Done kid', status: 'done', parent_task: '[[Edit me]]' } },
+            ],
+        });
+        const names = env.dlg._parentCandidates(env.app, 'spice/tasks/Edit me.md').sort();
+        must(JSON.stringify(names) === JSON.stringify(['Loop A', 'Loop B', 'Sibling']), 'candidates: ' + JSON.stringify(names));
+        const createNames = env.dlg._parentCandidates(env.app, null).sort();
+        must(JSON.stringify(createNames) === JSON.stringify(['Child', 'Edit me', 'Grandchild', 'Loop A', 'Loop B', 'Sibling']),
+            'create mode lists every open task: ' + JSON.stringify(createNames));
+        env.open({ edit: 'spice/tasks/Edit me.md', today: TODAY });
+        click(all(env.doc.body, (n) => n.tagName === 'BUTTON' && n.textContent === 'Subtask of…')[0]);
+        const rows = allByCls(env.doc.body, 'sauce-task-parent-option').map((r) => r.textContent).sort();
+        must(JSON.stringify(rows) === JSON.stringify(['Loop A', 'Loop B', 'Sibling']), 'picker rows: ' + JSON.stringify(rows));
+    });
+
+    rdCase('RD-D-A11Y labelled title/notes; header close precedes the body', async () => {
+        const env = rdEnv().open({ surface: 'daily', today: TODAY });
+        must(env.title().getAttribute('aria-label') === 'Task title', 'title aria-label');
+        must(env.notes().getAttribute('aria-label') === 'Notes', 'notes aria-label');
+        const kids = env.modal().children;
+        const closeAt = kids.findIndex((c) => hasCls(c, 'sauce-task-dialog-close'));
+        const bodyAt = kids.findIndex((c) => hasCls(c, 'sauce-modal-body'));
+        const titleAt = kids.findIndex((c) => hasCls(c, 'sauce-modal-title'));
+        must(closeAt >= 0 && titleAt < closeAt && closeAt < bodyAt, 'order title/close/body: ' + [titleAt, closeAt, bodyAt]);
+        must(kids[closeAt].getAttribute('aria-label') === 'Close', 'close labelled');
+    });
+
+    rdCase('RD-D-MOBILE-KBD no ⌘↵ hint on mobile; ⌘↵ still submits', async () => {
+        const env = rdEnv({ isMobile: true }).open({ surface: 'daily', today: TODAY });
+        must(!byCls(env.footer(), 'sauce-task-kbd'), 'no kbd hint on mobile');
+        must(env.save().textContent === 'Create task', 'primary label: ' + env.save().textContent);
+        env.typeTitle('Phone');
+        env.key({ key: 'Enter', metaKey: true, target: env.notes() });
+        await tick();
+        must(env.creates.length === 1, 'hardware ⌘↵ on a tablet still works');
+        must(env.dlg._submitKeyHint({ isMobile: true }) === '' && env.dlg._submitKeyHint({}) === '⌘↵', 'hint helper');
+    });
+
+    pendingAsync.push(cases.reduce((p, run) => p.then(run), Promise.resolve()));
+})();
+
 // Allow all async EDIT-* cases to settle before final tally.
 Promise.all(pendingAsync).then(() => {
     console.log('');

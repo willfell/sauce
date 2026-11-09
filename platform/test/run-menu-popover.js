@@ -385,6 +385,19 @@ const gridEntries = [
     parts[0] && parts[0].layout === undefined);
 }
 
+// MP-14 — label / sublabel are escaped (a project named `R&D <beta>` renders
+// literally), while a trusted icon string stays markup.
+{
+  const inst = new MP();
+  const row = inst._buildRow(makeDoc(), {
+    label: 'R&D <beta>', sublabel: 'a < b & "c"', icon: '<svg class="ic"></svg>', onSelect() {},
+  }, () => {}, false, false);
+  const html = row.innerHTML || '';
+  ok('MP-14 _buildRow escapes label + sublabel, keeps icon markup',
+    html.includes('R&amp;D &lt;beta&gt;') && html.includes('a &lt; b &amp; &quot;c&quot;')
+      && !html.includes('<beta>') && html.includes('<svg class="ic"></svg>'), html);
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

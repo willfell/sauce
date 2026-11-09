@@ -1487,6 +1487,22 @@
         "platform/test/run-engine-delivery-graph.js"
       ],
       "lane": "parallel"
+    },
+    {
+      "id": "todo-redesign-entity",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-redesign-entity.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-redesign-writes",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-redesign-writes.js"
+      ],
+      "lane": "parallel"
     }
   ]
 }

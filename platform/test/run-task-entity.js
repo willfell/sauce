@@ -175,6 +175,17 @@ ok('TE-3b renderNote emits links as a YAML flow array (round-trips)', () => {
   assert(/\nlinks: \[\]\n/.test(empty), 'empty links → `links: []`: ' + empty.split('\n').filter((l) => l.indexOf('links') === 0)[0]);
 });
 
+// 3c. A quoted scalar escapes backslashes as well as quotes. Without that, a
+// title like `Fix C:\temp "x"` is written as `"Fix C:\temp \"x\""`, which
+// YAML reads with `\t` as a tab (or rejects an unknown escape outright).
+ok('TE-3c renderNote escapes backslashes inside a quoted scalar', () => {
+  const title = 'Fix C:\\temp "x" \\\\share';
+  const text = TaskDialog.renderNote({ title }, '');
+  const m = /\ntitle: (".*")\n/.exec(text);
+  assert(m, 'title is double-quoted: ' + JSON.stringify(text));
+  assert(JSON.parse(m[1]) === title, 'title round-trips: ' + m[1]);
+});
+
 ok('TE-recur-1 composeNote emits recurrence (set + empty)', () => {
   const withRecur = TaskEntity.composeNote({ title: 'Feed the dogs', recurrence: 'every day', moment: fixedMoment });
   assert(withRecur.frontmatter.recurrence === 'every day', 'recurrence set: ' + withRecur.frontmatter.recurrence);
@@ -535,10 +546,9 @@ ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching g
 
 // ---------- TaskDialog _moreOptionsShouldStartExpanded (pure) ----------
 //
-// Decides whether the dialog's "More options" section (Repeats/Priority/
-// Project/Notes/Links) should start expanded: true iff ANY of those fields
-// already has a value (so existing edit-mode data is never hidden by
-// default); create mode's all-blank state naturally collapses.
+// True iff ANY of Repeats/Priority/Project/Notes/Links already has a value
+// (so existing edit-mode data is never hidden by default); an all-blank state
+// collapses. The two-column dialog uses it for the Repeats disclosure.
 
 ok('TD-polish-1 _moreOptionsShouldStartExpanded: false when no optional field is set', () => {
   const state = { priority: '', projectName: '', recurrence: '', notes: '', links: [] };
@@ -755,6 +765,85 @@ ok('TD1A-NEXT-DAY advances normalized dates across month + year boundaries', () 
     'year boundary: ' + TaskTodayList.nextDay('2026-12-31'));
   assert(TaskTodayList.nextDay('2026-02-29') === '',
     'invalid calendar dates fail closed');
+});
+
+ok('RD-DONE-POLICY classifyOutcome / SILENT_REASONS / doneTimeLabel are reachable through the instance', () => {
+  assert(JSON.stringify(TaskTodayList.SILENT_REASONS) === JSON.stringify([
+    'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
+    'app unavailable', 'no-fields', 'task-entity-unavailable']));
+  assert(TaskTodayList.classifyOutcome({ ok: true }) === 'ok');
+  assert(TaskTodayList.classifyOutcome({ ok: false, no_op: true }) === 'skipped');
+  assert(TaskTodayList.classifyOutcome(null) === 'silent');
+  for (const reason of TaskTodayList.SILENT_REASONS) {
+    assert(TaskTodayList.classifyOutcome({ ok: false, reason }) === 'silent', reason);
+  }
+  assert(TaskTodayList.classifyOutcome({ ok: false, reason: 'write failed' }) === 'noticed');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: '2026-11-09T09:15:00-06:00' }) === '09:15');
+  assert(TaskTodayList.doneTimeLabel('2026-11-09T21:40:00-06:00') === '21:40');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: { toFormat: (f) => (f === 'HH:mm' ? '07:05' : '') } }) === '07:05');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: null }) === '');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: 'garbage' }) === '');
+});
+
+ok('RD-DONE-ROW renderDoneRow draws struck title, HH:mm and an Undo only for archived tasks', () => {
+  const mk = (cls) => {
+    const el = {
+      className: cls || '', children: [], style: { cssText: '' }, dataset: {}, attributes: {}, listeners: {}, _text: '',
+      createEl(tag, o) { const c = mk((o && o.cls) || ''); c.tag = tag; if (o && o.text != null) c.textContent = o.text; this.children.push(c); return c; },
+      setAttribute(k, v) { this.attributes[k] = v; },
+      addEventListener(t, f) { this.listeners[t] = f; },
+      get textContent() { return this._text; },
+      set textContent(v) { this._text = String(v); },
+    };
+    return el;
+  };
+  const find = (el, cls) => el.children.find((c) => c.className.split(' ').includes(cls));
+  const calls = [];
+  const win = global.window;
+  global.window = { customJS: { TaskDialog: { reopen() {} } } };
+  try {
+    const archived = { title: 'Ship it', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00' };
+    const row = TaskTodayList.renderDoneRow(mk(''), archived, { onUndo: (t, b) => calls.push([t.title, b.attributes['aria-label']]) });
+    assert(row.className === 'sauce-today-done-row' && row.dataset.sauceTaskPath === archived.path);
+    assert(/line-through/.test(find(row, 'sauce-today-done-title').style.cssText));
+    assert(find(row, 'sauce-today-done-time').textContent === '09:15');
+    const undo = find(row, 'sauce-today-undo');
+    assert(undo && undo.attributes['aria-label'] === 'Undo: Ship it');
+    undo.listeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert(JSON.stringify(calls) === JSON.stringify([['Ship it', 'Undo: Ship it']]));
+
+    const live = TaskTodayList.renderDoneRow(mk(''), { title: 'Open', path: 'spice/tasks/Open.md' }, { onUndo() {} });
+    assert(!find(live, 'sauce-today-undo'), 'no Undo outside _done/');
+    assert(!find(live, 'sauce-today-done-time'), 'no time without completed_at');
+    assert(TaskTodayList.renderDoneRow(null, archived, {}) === null);
+  } finally { global.window = win; }
+});
+
+ok('RD-DONE-ROW-OPTS undoLabel renames the button and aria-label; showProject adds the project chip', () => {
+  const mk = (cls) => ({
+    className: cls || '', children: [], style: { cssText: '' }, dataset: {}, attributes: {}, listeners: {}, _text: '',
+    createEl(tag, o) { const c = mk((o && o.cls) || ''); c.tag = tag; if (o && o.text != null) c.textContent = o.text; this.children.push(c); return c; },
+    setAttribute(k, v) { this.attributes[k] = v; },
+    addEventListener(t, f) { this.listeners[t] = f; },
+    get textContent() { return this._text; },
+    set textContent(v) { this._text = String(v); },
+  });
+  const find = (el, cls) => el.children.find((c) => c.className.split(' ').includes(cls));
+  const win = global.window;
+  global.window = { customJS: { TaskDialog: { reopen() {} } } };
+  try {
+    const task = { title: 'Ship it', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00', project: '[[Alpha Project]]' };
+    const row = TaskTodayList.renderDoneRow(mk(''), task, { onUndo() {}, undoLabel: 'Reopen', showProject: true });
+    const btn = find(row, 'sauce-today-undo');
+    assert(btn.textContent === 'Reopen' && btn.attributes['aria-label'] === 'Reopen: Ship it', 'label ' + btn.textContent + ' / ' + btn.attributes['aria-label']);
+    const chip = find(row, 'sauce-today-done-project');
+    assert(chip && chip.textContent === 'Alpha Project', 'project chip text');
+    const plain = TaskTodayList.renderDoneRow(mk(''), task, { onUndo() {} });
+    assert(find(plain, 'sauce-today-undo').textContent === 'Undo' && find(plain, 'sauce-today-undo').attributes['aria-label'] === 'Undo: Ship it', 'default label unchanged');
+    assert(!find(plain, 'sauce-today-done-project'), 'no chip by default');
+    const noProject = TaskTodayList.renderDoneRow(mk(''), { title: 'T', path: 'spice/tasks/_done/T.md' }, { onUndo() {}, showProject: true });
+    assert(!find(noProject, 'sauce-today-done-project'), 'no chip without a project');
+  } finally { global.window = win; }
 });
 
 // ---------- TaskNoteView static helper (pure) ----------
@@ -2791,15 +2880,15 @@ async function runPerf1StructuralTests() {
     const before = container.createEl('div');
     const row = TaskTodayList.renderTaskRow(container, { title: 'child', path: 'spice/tasks/child.md', status: 'open' }, TD);
     const after = container.createEl('div');
-    const deleteButton = findByCls(row, 'sauce-task-action-delete');
-    const pending = fireClick(deleteButton);
+    const deleteButton = findByCls(row, 'sauce-task-action-more');
+    const pending = clickMenuDelete(row);
     await Promise.resolve(); await Promise.resolve();
     assert(childIndex(container, row) === -1, 'row detaches before markDeleted settles');
     settleDelete({ ok: false, reason: 'write rejected' });
     await pending;
     assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
       'rollback restores the exact row identity at its exact ordinal');
-    assert(deleteButton._focusCount === 1, 'rollback restores focus to the delete control');
+    assert(deleteButton._focusCount === 1, 'rollback restores focus to the more-actions control (Delete lives in its menu)');
     assert(seamCalls === 1, 'delete uses mutateStructure exactly once');
   });
 
@@ -2829,7 +2918,7 @@ async function runPerf1StructuralTests() {
     const row = TaskTodayList.renderTaskRow(container,
       { title: 'legacy child', path: 'spice/tasks/legacy child.md', status: 'open' }, legacyTD);
     const after = container.createEl('div');
-    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    await clickMenuDelete(row);
     assert(confirmWrites === 1 && duplicateWrites === 0,
       'legacy confirmation owns exactly one write and markDeleted is not called again');
     assert(seamCalls === 1 && childIndex(container, row) === -1,
@@ -2857,7 +2946,7 @@ async function runPerf1StructuralTests() {
     const row = TaskTodayList.renderTaskRow(container,
       { title: 'current child', path: 'spice/tasks/current child.md', status: 'open' }, currentTD);
     const after = container.createEl('div');
-    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    await clickMenuDelete(row);
     assert(markCalls === 1, 'no-RenderSafe fallback calls markDeleted exactly once');
     assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
       'result-level delete failure leaves the exact row and sibling order intact');
@@ -2868,7 +2957,7 @@ async function runPerf1StructuralTests() {
     const successRow = TaskTodayList.renderTaskRow(container,
       { title: 'successful child', path: 'spice/tasks/successful child.md', status: 'open' }, currentTD);
     const successAfter = container.createEl('div');
-    await fireClick(findByCls(successRow, 'sauce-task-action-delete'));
+    await clickMenuDelete(successRow);
     assert(markCalls === 2 && childIndex(container, successRow) === -1,
       'no-RenderSafe ok:true calls markDeleted once and removes its exact row');
     assert(childIndex(container, row) >= 0 && childIndex(container, successAfter) >= 0 && notices.length === 1,
@@ -2879,7 +2968,7 @@ async function runPerf1StructuralTests() {
     const throwRow = TaskTodayList.renderTaskRow(container,
       { title: 'throwing child', path: 'spice/tasks/throwing child.md', status: 'open' }, currentTD);
     const throwAfter = container.createEl('div');
-    await fireClick(findByCls(throwRow, 'sauce-task-action-delete'));
+    await clickMenuDelete(throwRow);
     assert(markCalls === 3 && childIndex(container, throwRow) >= 0,
       'no-RenderSafe throw calls markDeleted once and leaves its exact row intact');
     assert(childIndex(container, throwBefore) < childIndex(container, throwRow)
@@ -2994,6 +3083,18 @@ function fireClick(el) {
   return el && typeof el.onclick === 'function' ? el.onclick(event) : undefined;
 }
 function childIndex(parent, node) { return (parent && parent.children) ? parent.children.indexOf(node) : -1; }
+// Open rows keep Delete inside the "more actions" menu (no standalone trash
+// button): stub customJS.MenuPopover.open, open it from the row, and run the
+// Delete entry's onSelect.
+function clickMenuDelete(row) {
+  const cj = global.window.customJS = global.window.customJS || {};
+  const prevMP = cj.MenuPopover;
+  let deleteEntry = null;
+  cj.MenuPopover = { open(entries) { deleteEntry = entries.find((e) => e.label === 'Delete') || null; return {}; } };
+  try { fireClick(findByCls(row, 'sauce-task-action-more')); }
+  finally { if (prevMP === undefined) delete cj.MenuPopover; else cj.MenuPopover = prevMP; }
+  return deleteEntry ? deleteEntry.onSelect() : undefined;
+}
 
 async function runRowActionTests() {
   const prevWindow = global.window;
@@ -3874,11 +3975,12 @@ async function runTaskDialogSauceModalTests() {
     const backdrop = findByCls(doc.body, 'sauce-modal-backdrop');
     const modal = findByCls(doc.body, 'sauce-modal');
     const title = findByCls(doc.body, 'sauce-modal-title');
-    const cancel = [...(findByCls(doc.body, 'sauce-modal-footer').children || [])]
-      .flatMap((group) => group.children || []).find((button) => treeText(button) === 'Cancel');
+    const close = findByCls(modal, 'sauce-task-dialog-close');
+    const another = findByCls(findByCls(doc.body, 'sauce-modal-footer'), 'sauce-task-add-another');
     const save = findByCls(doc.body, 'sauce-btn-accent');
-    assert(backdrop && modal && title && treeText(title) === 'New Task', 'real shared modal skeleton and title');
-    assert(cancel && String(cancel.className).includes('sauce-btn'), 'Cancel uses sauce-btn');
+    assert(backdrop && modal && title && treeText(title) === 'New task', 'real shared modal skeleton and title');
+    assert(close && typeof close.onclick === 'function', 'header close button replaces the footer Cancel');
+    assert(another && String(another.className).includes('sauce-btn'), 'Create & add another uses sauce-btn');
     assert(save && String(save.className).includes('sauce-btn-accent'), 'Save uses sauce-btn-accent');
     assert(!findByCls(doc.body, 'sauce-todo-create-overlay'), 'no legacy create overlay');
   });
@@ -3909,7 +4011,7 @@ async function runTaskDialogSauceModalTests() {
     global.window = { app, customJS };
     const dialog = new TaskDialogClass();
     const creates = [];
-    dialog._create = async (_app, payload) => { creates.push(payload); };
+    dialog._create = async (_app, payload) => { creates.push(payload); return { ok: true, path: 'spice/tasks/x.md' }; };
     dialog.open({ surface: 'daily', today: '2026-07-20' });
     const body = findByCls(doc.body, 'sauce-modal-body');
     const titleInput = findInput(body);
@@ -3919,8 +4021,6 @@ async function runTaskDialogSauceModalTests() {
     await Promise.resolve();
     assert(creates.length === 0, 'IME composition must not submit');
 
-    const more = findByTagText(body, 'button', 'More options ▾');
-    await fireClick(more);
     const webButton = findByTagText(body, 'button', '＋ Web link');
     await fireClick(webButton);
     const urlInput = findInputByPlaceholder(body, 'https://…');
@@ -3965,7 +4065,7 @@ async function runTaskDialogSauceModalTests() {
       let releaseCreate;
       const createPending = new Promise((resolve) => { releaseCreate = resolve; });
       const dialog = new TaskDialogClass();
-      dialog._create = async () => { createCalls += 1; await createPending; };
+      dialog._create = async () => { createCalls += 1; await createPending; return { ok: true, path: 'spice/tasks/x.md' }; };
       dialog.open({ surface: 'daily', today: '2026-07-20' });
       const body = findByCls(doc.body, 'sauce-modal-body');
       const titleInput = findInput(body);
@@ -4224,29 +4324,163 @@ function runTaskDoneArchiveTests() {
     assert(TDARCH.groupByDate([]).size === 0, 'empty array');
   });
 
-  ok('TDARCH-4 filterByText returns tasks whose title includes text (case-insensitive)', () => {
-    const tasks = [
-      { title: 'Fix Dev CDC' },
-      { title: 'Deploy staging' },
-      { title: 'fix login bug' },
+  ok('RD-DL-DAYOF the cold fallback and TaskEntity.completedDay agree on ISO strings and Luxon-like values', () => {
+    const mkTaskForDay = (v) => ({ completed_at: v });
+    const samples = [
+      mkTaskForDay('2026-11-06T23:30:00-07:00'),
+      mkTaskForDay({ toISODate: () => '2026-11-06' }),
+      mkTaskForDay({ toFormat: (f) => (f === 'yyyy-MM-dd' ? '2026-11-06' : '') }),
+      mkTaskForDay('2026-11-06'),
+      mkTaskForDay(null),
+      mkTaskForDay('garbage'),
     ];
-    const result = TDARCH.filterByText(tasks, 'fix');
-    assert(result.length === 2, 'expected 2, got ' + result.length);
-    assert(result[0].title === 'Fix Dev CDC', 'first match');
-    assert(result[1].title === 'fix login bug', 'second match');
+    const win = global.window;
+    try {
+      for (const t of samples) {
+        global.window = { customJS: { TaskEntity } };
+        const withTE = TaskDoneArchiveClass._dayOf(t);
+        global.window = {};
+        const cold = TaskDoneArchiveClass._dayOf(t);
+        assert(withTE === cold, 'drift for ' + JSON.stringify(t.completed_at) + ': ' + withTE + ' vs ' + cold);
+        assert(withTE === TaskEntity.completedDay(t), 'delegates to completedDay');
+      }
+    } finally { global.window = win; }
   });
 
-  ok('TDARCH-5 filterByText returns all tasks when text is empty/blank', () => {
-    const tasks = [{ title: 'A' }, { title: 'B' }];
-    assert(TDARCH.filterByText(tasks, '').length === 2, 'empty string returns all');
-    assert(TDARCH.filterByText(tasks, '   ').length === 2, 'blank string returns all');
-    assert(TDARCH.filterByText(tasks, null).length === 2, 'null returns all');
+  const DAY = (d, hm, offset) => d + 'T' + hm + ':00' + (offset || '-07:00');
+  const mkTask = (title, completed, extra) => Object.assign({ title, completed_at: completed, path: 'spice/tasks/_done/' + title + '.md' }, extra || {});
+
+  ok('RD-DL-GROUP three completions at different times on one day are ONE group, newest first', () => {
+    const tasks = [
+      mkTask('Early', DAY('2026-11-06', '08:05')),
+      mkTask('Late', DAY('2026-11-06', '17:45')),
+      mkTask('Mid', DAY('2026-11-06', '12:30')),
+      mkTask('Other', DAY('2026-11-05', '09:00')),
+    ];
+    const map = TDARCH.groupByDate(tasks);
+    assert(JSON.stringify([...map.keys()]) === JSON.stringify(['2026-11-06', '2026-11-05']), 'keys ' + [...map.keys()]);
+    assert(map.get('2026-11-06').map((t) => t.title).join(',') === 'Late,Mid,Early', 'newest first within the day: ' + map.get('2026-11-06').map((t) => t.title));
   });
 
-  ok('TDARCH-6 filterByText returns [] when no titles match', () => {
-    const tasks = [{ title: 'Foo' }, { title: 'Bar' }];
-    const result = TDARCH.filterByText(tasks, 'zzz-no-match');
-    assert(result.length === 0, 'no matches');
+  ok('RD-DL-GROUP Luxon-like completed_at values group by calendar day', () => {
+    const lux = (iso, hm) => ({ toISODate: () => iso, toMillis: () => Date.parse(iso + 'T' + hm + ':00Z') });
+    const map = TDARCH.groupByDate([mkTask('A', lux('2026-11-06', '10:00')), mkTask('B', lux('2026-11-06', '11:00'))]);
+    assert(map.size === 1 && map.get('2026-11-06').length === 2, 'one group of two, got size ' + map.size);
+  });
+
+  ok('RD-DL-TZ a late-evening local completion keeps its local calendar day', () => {
+    const map = TDARCH.groupByDate([mkTask('Night', '2026-11-06T23:30:00-07:00')]);
+    assert(JSON.stringify([...map.keys()]) === JSON.stringify(['2026-11-06']), 'key ' + [...map.keys()]);
+  });
+
+  ok('RD-DL-RANGE presets from Monday 2026-11-09 (weeks Mon-Sun)', () => {
+    const r = (p, t) => JSON.stringify(TDARCH.rangeFor(p, t || '2026-11-09'));
+    assert(r('today') === '{"from":"2026-11-09","to":"2026-11-09"}', r('today'));
+    assert(r('yesterday') === '{"from":"2026-11-08","to":"2026-11-08"}', r('yesterday'));
+    assert(r('this-week') === '{"from":"2026-11-09","to":"2026-11-15"}', r('this-week'));
+    assert(r('last-week') === '{"from":"2026-11-02","to":"2026-11-08"}', r('last-week'));
+    assert(r('this-month') === '{"from":"2026-11-01","to":"2026-11-30"}', r('this-month'));
+    assert(r('this-week', '2026-11-15') === '{"from":"2026-11-09","to":"2026-11-15"}', 'Sunday stays in its Mon-Sun week');
+    assert(r('last-week', '2026-11-15') === '{"from":"2026-11-02","to":"2026-11-08"}', 'last-week from Sunday');
+    assert(r('yesterday', '2026-11-01') === '{"from":"2026-10-31","to":"2026-10-31"}', 'yesterday crosses months');
+    assert(r('this-month', '2028-02-10') === '{"from":"2028-02-01","to":"2028-02-29"}', 'leap February');
+    assert(TDARCH.rangeFor('nonsense', '2026-11-09') === null, 'unknown preset');
+    assert(TDARCH.rangeFor('today', 'bad') === null, 'bad today');
+  });
+
+  ok('RD-DL-LABEL range labels for the header', () => {
+    const L = (p, range) => TDARCH.rangeLabel(p, range);
+    assert(L('today') === 'today' && L('yesterday') === 'yesterday' && L('this-week') === 'this week', 'fixed labels');
+    assert(L('last-week', { from: '2026-11-02', to: '2026-11-08' }) === 'Nov 2 – 8', L('last-week', { from: '2026-11-02', to: '2026-11-08' }));
+    assert(L('last-week', { from: '2026-10-27', to: '2026-11-02' }) === 'Oct 27 – Nov 2', 'cross-month');
+    assert(L('this-month', { from: '2026-11-01', to: '2026-11-30' }) === 'in November', L('this-month', { from: '2026-11-01', to: '2026-11-30' }));
+    assert(L('custom', { from: '2026-11-03', to: '2026-11-05' }) === 'Nov 3 – 5', 'custom uses the date style');
+    assert(L('custom', { from: '2026-11-03', to: '2026-11-03' }) === 'Nov 3', 'single-day custom');
+  });
+
+  ok('RD-DL-SUM daily bars, project totals (desc, No project last) and range clipping', () => {
+    const proj = (n) => '[[' + n + ']]';
+    const tasks = [
+      mkTask('a', DAY('2026-11-02', '09:00'), { project: proj('Alpha') }),
+      mkTask('b', DAY('2026-11-02', '10:00'), { project: proj('Alpha') }),
+      mkTask('c', DAY('2026-11-04', '10:00'), { project: proj('Beta') }),
+      mkTask('d', DAY('2026-11-04', '11:00'), { project: null }),
+      mkTask('e', DAY('2026-11-04', '12:00'), { project: proj('Beta') }),
+      mkTask('f', DAY('2026-11-04', '13:00'), { project: proj('Gamma') }),
+      mkTask('out', DAY('2026-11-09', '09:00'), { project: proj('Alpha') }),
+      mkTask('nodate', null),
+    ];
+    const s = TDARCH.summarize(tasks, '2026-11-02', '2026-11-08');
+    assert(s.total === 6, 'total ' + s.total);
+    assert(JSON.stringify(s.projects) === JSON.stringify([
+      { name: 'Alpha', n: 2 }, { name: 'Beta', n: 2 }, { name: 'Gamma', n: 1 }, { name: 'No project', n: 1 }]), JSON.stringify(s.projects));
+    assert(s.bars.length === 7, '7 daily bars: ' + s.bars.length);
+    assert(JSON.stringify(s.bars.map((b) => b.label)) === JSON.stringify(['Mon 2', 'Tue 3', 'Wed 4', 'Thu 5', 'Fri 6', 'Sat 7', 'Sun 8']), JSON.stringify(s.bars.map((b) => b.label)));
+    assert(JSON.stringify(s.bars.map((b) => b.n)) === JSON.stringify([2, 0, 4, 0, 0, 0, 0]), JSON.stringify(s.bars.map((b) => b.n)));
+  });
+
+  ok('RD-DL-SUM No project sorts last even when it is the largest', () => {
+    const tasks = [1, 2, 3].map((i) => mkTask('n' + i, DAY('2026-11-03', '0' + i + ':00'), { project: '' }));
+    tasks.push(mkTask('p', DAY('2026-11-03', '09:00'), { project: '[[Zed]]' }));
+    const s = TDARCH.summarize(tasks, '2026-11-03', '2026-11-03');
+    assert(s.projects[0].name === 'Zed' && s.projects[1].name === 'No project' && s.projects[1].n === 3, JSON.stringify(s.projects));
+  });
+
+  ok('RD-DL-SUM bars are weekly (labelled by Monday) once the span passes 31 days', () => {
+    const tasks = [mkTask('a', DAY('2026-10-06', '09:00')), mkTask('b', DAY('2026-10-30', '09:00')), mkTask('c', DAY('2026-11-02', '09:00'))];
+    const s31 = TDARCH.summarize(tasks, '2026-10-05', '2026-11-04');
+    assert(s31.bars.length === 31, 'span of 31 days stays daily: ' + s31.bars.length);
+    const s = TDARCH.summarize(tasks, '2026-10-01', '2026-11-04');
+    assert(JSON.stringify(s.bars.map((b) => b.label)) === JSON.stringify(['Sep 28', 'Oct 5', 'Oct 12', 'Oct 19', 'Oct 26', 'Nov 2']), JSON.stringify(s.bars.map((b) => b.label)));
+    assert(JSON.stringify(s.bars.map((b) => b.n)) === JSON.stringify([0, 1, 0, 0, 1, 1]), JSON.stringify(s.bars.map((b) => b.n)));
+  });
+
+  ok('RD-DL-SUM tolerates null input and an inverted range', () => {
+    assert(TDARCH.summarize(null, '2026-11-02', '2026-11-08').total === 0, 'null tasks');
+    const s = TDARCH.summarize([mkTask('a', DAY('2026-11-03', '09:00'))], '2026-11-08', '2026-11-02');
+    assert(s.total === 0 && s.bars.length === 0, 'inverted range is empty');
+  });
+
+  ok('RD-DL-FILTER title always matches; body text only from 3 characters; project/source filters', () => {
+    const tasks = [
+      mkTask('Ship invoices', DAY('2026-11-03', '09:00'), { project: '[[Alpha]]', source: 'daily' }),
+      mkTask('Call vendor', DAY('2026-11-03', '10:00'), { project: '[[Beta]]', source: 'meeting' }),
+      mkTask('Water plants', DAY('2026-11-03', '11:00'), { project: null, source: null }),
+    ];
+    const bodies = { [tasks[1].path]: 'Discussed the renewal pricing with Ana' };
+    const names = (list) => list.map((t) => t.title).join(',');
+    assert(names(TDARCH.filterTasks(tasks, { text: 'RENEWAL', bodies })) === 'Call vendor', 'body match, case-insensitive');
+    assert(names(TDARCH.filterTasks(tasks, { text: 're', bodies })) === '', 'two characters never read the body');
+    assert(names(TDARCH.filterTasks(tasks, { text: 'sh', bodies })) === 'Ship invoices', 'two characters still match titles');
+    assert(names(TDARCH.filterTasks(tasks, { text: 'invoices', bodies })) === 'Ship invoices', 'title match');
+    assert(names(TDARCH.filterTasks(tasks, { text: '  ', bodies })) === 'Ship invoices,Call vendor,Water plants', 'blank text is no filter');
+    assert(names(TDARCH.filterTasks(tasks, { text: 'renewal' })) === '', 'no bodies supplied');
+    assert(names(TDARCH.filterTasks(tasks, { project: 'Beta' })) === 'Call vendor', 'project filter');
+    assert(names(TDARCH.filterTasks(tasks, { project: 'No project' })) === 'Water plants', 'No project filter');
+    assert(names(TDARCH.filterTasks(tasks, { source: 'meeting' })) === 'Call vendor', 'source filter');
+    assert(names(TDARCH.filterTasks(tasks, { source: 'manual' })) === 'Water plants', 'empty source counts as manual');
+    assert(names(TDARCH.filterTasks(tasks, { project: 'Alpha', source: 'meeting' })) === '', 'filters AND together');
+    assert(TDARCH.filterTasks(null, {}).length === 0, 'null input');
+  });
+
+  ok('RD-DL-BODY searchableBody drops frontmatter and fenced code blocks', () => {
+    const raw = '---\ntitle: X\nstatus: done\n---\n\n```dataviewjs\nawait dv.view("x")\n```\n\nReal notes about renewal\n';
+    const out = TDARCH.searchableBody(raw);
+    assert(/renewal/.test(out), 'keeps prose');
+    assert(!/status|dataviewjs|dv\.view/.test(out), 'strips frontmatter and fences: ' + JSON.stringify(out));
+    assert(TDARCH.searchableBody(null) === '', 'null -> empty');
+  });
+
+  ok('RD-DL-STANDUP exact markdown: day headings, bullets, blank line between days, no parens without a project', () => {
+    const tasks = [
+      mkTask('Ship invoices', DAY('2026-11-06', '09:00'), { project: '[[Alpha]]' }),
+      mkTask('Water plants', DAY('2026-11-06', '10:00'), { project: null }),
+      mkTask('Call vendor', DAY('2026-11-05', '10:00'), { project: '[[Beta]]' }),
+    ];
+    const out = TDARCH.standupMarkdown(TDARCH.groupByDate(tasks));
+    assert(out === '**Fri Nov 6**\n- Water plants\n- Ship invoices (Alpha)\n\n**Thu Nov 5**\n- Call vendor (Beta)', JSON.stringify(out));
+    assert(TDARCH.standupMarkdown(new Map()) === '', 'empty map');
+    assert(TDARCH.standupMarkdown(null) === '', 'null');
   });
 }
 

@@ -26,6 +26,12 @@
  *   TaskDialog.defaultsForSurface({surface, today, project, sourceNote}) → {...}
  *   TaskDialog.trashPath(path) → path under spice/tasks/_trash/
  *   TaskDialog.donePath(path)  → path under spice/tasks/_done/
+ *   TaskDialog.whenOptions / whenKeyForDue / whenCaption / recentProjects /
+ *     projectMatches → the two-column dialog's When and Project helpers
+ *
+ * Dialog layout (`_render`): header + close; body = `.sauce-task-dialog-cols`
+ * (left: title, notes, links/parent; right: When, Priority, Project, Repeats),
+ * stacked below 720px by the injected `_DIALOG_CSS`; footer outside the body.
  *
  * Instance API (browser-side):
  *   TaskDialog.open({ edit?, surface?, today?, project?, sourceNote? })
@@ -44,6 +50,7 @@ class TaskDialog {
     trashPath(path) { return TaskDialog.trashPath(path); }
     donePath(path) { return TaskDialog.donePath(path); }
     _loadProjectList(app) { return TaskDialog._loadProjectList(app); }
+    _slugify(name) { return TaskDialog._slugify(name); }
     _bodyNotesBelowMarker(fileText) { return TaskDialog._bodyNotesBelowMarker(fileText); }
     _replaceBody(fileText, newNotes) { return TaskDialog._replaceBody(fileText, newNotes); }
     _wikilink(name) { return TaskDialog._wikilink(name); }
@@ -60,6 +67,24 @@ class TaskDialog {
     _recurrencePickerValid(state) { return TaskDialog._recurrencePickerValid(state); }
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
     _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
+    _renderSafe() { return TaskDialog._renderSafe(); }
+    whenOptions(todayStr) { return TaskDialog.whenOptions(todayStr); }
+    whenKeyForDue(due, todayStr) { return TaskDialog.whenKeyForDue(due, todayStr); }
+    whenCaption(key, due, owned) { return TaskDialog.whenCaption(key, due, owned); }
+    recentProjects(parsedTasks, todayStr, limit) { return TaskDialog.recentProjects(parsedTasks, todayStr, limit); }
+    _utcDatePlus(dateStr, n) { return TaskDialog._utcDatePlus(dateStr, n); }
+    _utcNextMonday(dateStr) { return TaskDialog._utcNextMonday(dateStr); }
+    _projectDisplay(v) { return TaskDialog._projectDisplay(v); }
+    projectMatches(names, query, limit) { return TaskDialog.projectMatches(names, query, limit); }
+    _recentTaskRows(app, todayStr) { return TaskDialog._recentTaskRows(app, todayStr); }
+    _parentCandidates(app, editPath) { return TaskDialog._parentCandidates(app, editPath); }
+    _linkBasename(v) { return TaskDialog._linkBasename(v); }
+    _submitKeyHint(app) { return TaskDialog._submitKeyHint(app); }
+    _todayStr(given) { return TaskDialog._todayStr(given); }
+    _readOpenAfterPref() { return TaskDialog._readOpenAfterPref(); }
+    _writeOpenAfterPref(on) { return TaskDialog._writeOpenAfterPref(on); }
+    _injectDialogCss(doc) { return TaskDialog._injectDialogCss(doc); }
+    get _DIALOG_CSS() { return TaskDialog._DIALOG_CSS; }
 
     // ---------- Static pure helpers ----------
 
@@ -76,6 +101,7 @@ class TaskDialog {
         const o = opts || {};
         switch (o.surface) {
             case 'daily':
+            case 'home':
                 return { due: o.today || '', source: 'daily' };
             case 'project':
                 return { project: o.project, source: 'project' };
@@ -91,6 +117,137 @@ class TaskDialog {
             default:
                 return { source: 'manual' };
         }
+    }
+
+    // ---------- When picker / recent-project helpers (pure) ----------
+
+    /** YYYY-MM-DD plus n days via Date.UTC only; null on unparseable input. */
+    static _utcDatePlus(dateStr, n) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr == null ? '' : dateStr));
+        if (!m) return null;
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + (Number(n) || 0)));
+        const p = (x) => String(x).padStart(2, '0');
+        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+    }
+
+    /** Next Monday strictly after dateStr (a Monday yields +7); null on unparseable input. */
+    static _utcNextMonday(dateStr) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr == null ? '' : dateStr));
+        if (!m) return null;
+        const cur = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+        return TaskDialog._utcDatePlus(dateStr, ((1 - cur + 7) % 7) || 7);
+    }
+
+    /**
+     * The quick "when" choices, in display order. `due` is the resolved date:
+     * '' for No date, null for Pick date (the user chooses). Prefers the stored
+     * TaskEntity for tomorrow/next-Monday, falling back to a local UTC helper.
+     */
+    static whenOptions(todayStr) {
+        let tomorrow = null, nextMon = null;
+        const TE = TaskDialog._taskEntity();
+        try {
+            if (TE && typeof TE.tomorrow === 'function') tomorrow = TE.tomorrow(todayStr);
+            if (TE && typeof TE.nextMonday === 'function') nextMon = TE.nextMonday(todayStr);
+        } catch (_e) { /* fall through to the local helper */ }
+        if (!tomorrow) tomorrow = TaskDialog._utcDatePlus(todayStr, 1);
+        if (!nextMon) nextMon = TaskDialog._utcNextMonday(todayStr);
+        return [
+            { key: 'today', label: 'Today', due: todayStr },
+            { key: 'tomorrow', label: 'Tomorrow', due: tomorrow },
+            { key: 'nextmon', label: 'Next Mon', due: nextMon },
+            { key: 'pick', label: 'Pick date…', due: null },
+            { key: 'none', label: 'No date', due: '' },
+        ];
+    }
+
+    /** Which quick choice a due date corresponds to: '' -> none; today/tomorrow/next Monday -> their key; else pick. */
+    static whenKeyForDue(due, todayStr) {
+        const d = due == null ? '' : String(due).trim();
+        if (!d) return 'none';
+        const hit = TaskDialog.whenOptions(todayStr).find(o => o.due && o.due === d);
+        return hit ? hit.key : 'pick';
+    }
+
+    /**
+     * Caption under the when picker: `Due Mon Nov 16`, `No date: goes to the
+     * backlog`, `Pick a date`. `owned` (the task has a project, trip, parent
+     * or meeting) means an undated task stays with its owner instead of going
+     * to the backlog, so the No date caption is just `No date`.
+     */
+    static whenCaption(key, due, owned) {
+        if (key === 'none') return owned ? 'No date' : 'No date: goes to the backlog';
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(due == null ? '' : due));
+        if (!m) return 'Pick a date';
+        const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+        return 'Due ' + WD[d.getUTCDay()] + ' ' + MO[d.getUTCMonth()] + ' ' + (+m[3]);
+    }
+
+    /**
+     * Whether the dialog's task has an owner (project, trip, parent task or a
+     * meeting source), in which case clearing its date does not send it to
+     * the backlog (TaskEntity.isBacklog).
+     */
+    static _ownedForCaption(state) {
+        const s = state || {};
+        return !!(String(s.projectName || '').trim() || String(s.tripName || '').trim()
+            || String(s.tripSlug || '').trim() || String(s.parentTask || '').trim()
+            || s.source === 'meeting');
+    }
+
+    /** Display name of a project value: `[[Name]]` / `[[Name|alias]]` -> Name; Dataview Link -> display or path basename. */
+    static _projectDisplay(v) {
+        if (v == null) return '';
+        if (typeof v === 'object') {
+            if (v.display != null && String(v.display).trim()) return String(v.display).trim();
+            if (v.path != null) return String(v.path).trim().replace(/^.*\//, '').replace(/\.md$/i, '');
+            return '';
+        }
+        let s = TaskDialog._stripWikilink(v);
+        const pipe = s.indexOf('|');
+        if (pipe >= 0) s = s.slice(0, pipe);
+        return s.trim();
+    }
+
+    /**
+     * Project display names among tasks created in the 30 days ending todayStr
+     * (inclusive), ranked by count desc then most recent created_at, capped at
+     * `limit` (default 6). Tasks with no project or an unparseable created_at
+     * are ignored.
+     */
+    static recentProjects(parsedTasks, todayStr, limit) {
+        const max = limit == null ? 6 : limit;
+        const lo = TaskDialog._utcDatePlus(todayStr, -29);
+        const hi = TaskDialog._utcDatePlus(todayStr, 0);
+        if (!lo || !hi || !Array.isArray(parsedTasks)) return [];
+        const stats = new Map();
+        for (const t of parsedTasks) {
+            if (!t) continue;
+            const name = TaskDialog._projectDisplay(t.project);
+            if (!name) continue;
+            let c = t.created_at;
+            if (c != null && typeof c === 'object') {
+                if (typeof c.toISO === 'function') c = c.toISO();
+                else if (typeof c.toISOString === 'function') c = c.toISOString();
+            }
+            c = c == null ? '' : String(c).trim();
+            const dm = /^(\d{4}-\d{2}-\d{2})/.exec(c);
+            if (!dm) continue;
+            const day = dm[1];
+            if (day < lo || day > hi) continue;
+            let ms = Date.parse(c);
+            if (isNaN(ms)) ms = Date.parse(day + 'T00:00:00Z');
+            const cur = stats.get(name) || { name: name, count: 0, last: -Infinity };
+            cur.count++;
+            if (ms > cur.last) cur.last = ms;
+            stats.set(name, cur);
+        }
+        return Array.from(stats.values())
+            .sort((a, b) => (b.count - a.count) || (b.last - a.last) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+            .slice(0, max)
+            .map(x => x.name);
     }
 
     /**
@@ -227,10 +384,11 @@ class TaskDialog {
     }
 
     /**
-     * Decide whether the dialog's "More options" section should start
-     * EXPANDED: true iff any of Priority/Project/Repeats/Notes/Links already
-     * has a value. Create mode always passes an all-blank state (nothing to
-     * show yet) so this naturally returns false there. Pure, never throws.
+     * True iff any of Priority/Project/Repeats/Notes/Links already has a
+     * value, so a disclosure holding them starts EXPANDED and existing data is
+     * never hidden. The two-column dialog shows everything except Repeats, so
+     * it passes only `{ recurrence }` to decide whether Repeats starts open.
+     * Pure, never throws.
      */
     static _moreOptionsShouldStartExpanded(state) {
         const s = state || {};
@@ -335,7 +493,7 @@ class TaskDialog {
     static _yamlScalar(val) {
         const s = String(val);
         if (/[[\]:#"]|^\s/.test(s)) {
-            return '"' + s.replace(/"/g, '\\"') + '"';
+            return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
         }
         return s;
     }
@@ -640,10 +798,19 @@ class TaskDialog {
             }
         }
 
-        const defaults = editPath ? {} : TaskDialog.defaultsForSurface(opts);
+        // The render entry is the only place that reads the clock: every helper
+        // below takes todayStr.
+        const todayStr = TaskDialog._todayStr(opts.today);
+        const surface = opts.surface;
+        const datedSurface = surface === 'daily' || surface === 'home';
+        const defaults = editPath ? {} : TaskDialog.defaultsForSurface(
+            datedSurface ? Object.assign({}, opts, { today: opts.today || todayStr }) : opts);
+        let createDue = defaults.due || '';
+        if (!editPath && !createDue && opts.today && (!surface || surface === 'manual')) createDue = String(opts.today);
+
         const state = {
             title: fm ? (fm.title || '') : '',
-            due: fm ? (fm.due || '') : (defaults.due || ''),
+            due: fm ? (fm.due || '') : createDue,
             priority: fm ? (fm.priority || '') : (defaults.priority || ''),
             // project as a display name (strip [[ ]] if present)
             projectName: fm ? TaskDialog._stripWikilink(fm.project) : (defaults.project && defaults.project.name) || '',
@@ -652,6 +819,9 @@ class TaskDialog {
             tripName: fm ? TaskDialog._stripWikilink(fm.trip) : (defaults.trip && defaults.trip.name) || '',
             tripSlug: fm ? (fm.trip_slug || '') : (defaults.trip && defaults.trip.slug) || '',
             notes: '',
+            // Edit mode: true only once the task body has been read, so a save
+            // never rewrites notes it has not seen. Create mode starts loaded.
+            notesLoaded: !editPath,
             // Structured card links (FIX 5) — load the edit file's `links[]` (via
             // TaskEntity._normLinks so a Dataview-array-of-Link-objects coerces to
             // clean strings); create mode starts empty. Rendered as removable chips.
@@ -660,7 +830,9 @@ class TaskDialog {
             source: fm ? (fm.source || '') : (defaults.source || 'manual'),
             source_note: fm ? (fm.source_note || '') : (defaults.source_note || ''),
             recurrence: fm ? (fm.recurrence || '') : '',
+            parentTask: fm ? String(fm.parent_task == null ? '' : fm.parent_task) : '',
         };
+        state.whenKey = TaskDialog.whenKeyForDue(state.due, todayStr);
 
         // ----- Shared SauceModal shell; TaskDialog owns only field internals. -----
         const doc = (typeof document !== 'undefined' && document) ? document : null;
@@ -671,22 +843,33 @@ class TaskDialog {
             return;
         }
         let submitTask = async () => false;
+        let updateSubmit = () => {};
         let saveBtn = null;
+        let addAnotherBtn = null;
+        let titleInput = null;
+        let detachKeys = () => {};
+        const isCmdEnter = (event) => !!(event && event.key === 'Enter' && !event.isComposing
+            && (event.metaKey || event.ctrlKey));
         const modalHandle = sauceModal.open({
             doc,
-            title: editPath ? 'Edit Task' : 'New Task',
+            title: editPath ? 'Edit task' : 'New task',
             buttons: [],
             // SauceModal listens in capture phase, so only the title field may
-            // use Enter as the dialog-level Save gesture. Nested controls such
-            // as the note filter and web-link mini-form own their own Enter
+            // use plain Enter as the dialog-level Save gesture. Nested controls
+            // such as the note filter and web-link mini-form own their own Enter
             // behavior and must not race a task save before target handlers run.
-            // Save itself contains icon/label spans, so its bubbling click is
-            // identified by currentTarget rather than the clicked child target.
-            onSubmit: (_handle, event) => event
-                && (event.target === titleInput || event.currentTarget === saveBtn)
-                ? submitTask()
-                : false,
+            // Save / Create & add another contain label spans, so their bubbling
+            // clicks are identified by currentTarget. ⌘↵ / Ctrl↵ arrive from the
+            // dialog's own key listener (SauceModal never forwards a modified Enter).
+            onSubmit: (_handle, event) => {
+                if (!event) return false;
+                if (addAnotherBtn && event.currentTarget === addAnotherBtn) return submitTask('another');
+                if ((titleInput && event.target === titleInput) || (saveBtn && event.currentTarget === saveBtn)
+                    || isCmdEnter(event)) return submitTask('save');
+                return false;
+            },
             closeOnSubmit: false,
+            onClose: () => { try { detachKeys(); } catch (_e) {} },
         });
         if (!modalHandle) {
             try { new Notice('TaskDialog: could not open SauceModal'); } catch (_e) {}
@@ -694,77 +877,377 @@ class TaskDialog {
         }
         const closeOverlay = () => modalHandle.close('task-dialog');
         const host = modalHandle.body;
-        const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
+        const modalEl = modalHandle.modal || null;
+        TaskDialog._injectDialogCss(doc);
+        try { if (modalEl && modalEl.classList) modalEl.classList.add('sauce-task-dialog'); } catch (_e) {}
+        try {
+            if (modalEl && typeof doc.createElement === 'function') {
+                const closeX = doc.createElement('button');
+                closeX.className = 'sauce-task-dialog-close';
+                closeX.textContent = '✕';
+                closeX.setAttribute('type', 'button');
+                closeX.setAttribute('aria-label', 'Close');
+                closeX.onclick = () => closeOverlay();
+                // Before the body so it follows the heading in DOM and tab order.
+                if (host && typeof modalEl.insertBefore === 'function') modalEl.insertBefore(closeX, host);
+                else modalEl.appendChild(closeX);
+            }
+        } catch (_e) { /* the header close is a convenience; Escape still closes */ }
+
+        const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-primary,#1e1e1e); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
         // Native iOS <input type="date"> has an intrinsic min-width and ignores
         // width:100% even with box-sizing+min-width:0 — the boxes overflow the
         // modal. `-webkit-appearance:none; appearance:none` strips the intrinsic
         // control chrome/sizing (the native date picker still opens on tap), so
         // the input finally respects the container width like the text fields.
         const dateCss = fieldCss + ' -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;';
-        const label = (text, container) => {
-            const el = (container || host).createEl('div', { text });
-            el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; color:var(--text-muted, #999); margin-top:16px; margin-bottom:6px;';
-            return el;
+        const sectionLabel = (parent, text) => parent.createDiv({ cls: 'sauce-task-section-label', text });
+        // Selection state for every pill group: class + aria-pressed together.
+        const setPressed = (el, base, on) => {
+            el.className = base + (on ? ' is-selected' : '');
+            try { el.setAttribute('aria-pressed', on ? 'true' : 'false'); } catch (_e) {}
+        };
+        const mkPill = (parent, base, text) => {
+            const b = parent.createEl('button', { cls: base, text });
+            try { b.setAttribute('type', 'button'); } catch (_e) {}
+            return b;
         };
 
-        // Title
-        label('Title');
-        const titleInput = host.createEl('input', { type: 'text' });
-        titleInput.style.cssText = fieldCss;
+        // ----- Two columns: left = what (title / notes / links), right = when / how. -----
+        const cols = host.createDiv({ cls: 'sauce-task-dialog-cols' });
+        const left = cols.createDiv({ cls: 'sauce-task-dialog-left' });
+        const right = cols.createDiv({ cls: 'sauce-task-dialog-right' });
+
+        // Title (large). Live shortcut parsing runs in create mode only: an
+        // existing title is never rewritten by a trailing word that happens to
+        // look like a token.
+        titleInput = left.createEl('input', { type: 'text', cls: 'sauce-task-title' });
+        titleInput.placeholder = 'Task title';
+        try { titleInput.setAttribute('aria-label', 'Task title'); } catch (_e) {}
         titleInput.value = state.title;
-        titleInput.oninput = () => { state.title = titleInput.value; updateSubmit(); };
+        titleInput.oninput = () => { state.title = titleInput.value; applyShortcuts(); updateSubmit(); };
         // Autofocus the title ONLY in create mode (FIX 4) — opening the dialog on an
         // existing task shouldn't grab focus (the title is already filled in).
-        if (!editPath) setTimeout(() => titleInput.focus(), 50);
+        if (!editPath) {
+            left.createDiv({
+                cls: 'sauce-task-hint',
+                text: 'Shortcuts work while typing: next mon, !high, #Project. Each fills the matching field on the right.',
+            });
+            setTimeout(() => titleInput.focus(), 50);
+        }
 
-        // Due
-        label('Due (optional)');
-        const dueInput = host.createEl('input', { type: 'date' });
-        dueInput.style.cssText = dateCss;
-        dueInput.value = state.due;
-        dueInput.onchange = () => { state.due = dueInput.value; updateSubmit(); };
-
-        // ----- More options toggle (progressive disclosure) -----
-        // Everything below (Repeats, Priority, Project, Notes, Links) lives
-        // inside moreBox, which starts collapsed in create mode and starts
-        // EXPANDED in edit mode when the task already has any of those fields
-        // set (so existing data is never hidden by default).
-        const moreToggleRow = host.createDiv();
-        moreToggleRow.style.cssText = 'margin-top:14px;';
-        const moreToggle = moreToggleRow.createEl('button', { text: 'More options ▾' });
-        moreToggle.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:2px 0; border:none; background:transparent; color:var(--text-muted,#999); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; cursor:pointer;';
-        try { moreToggle.setAttribute('type', 'button'); } catch (_e) {}
-
-        const moreBox = host.createDiv();
-        moreBox.style.cssText = 'overflow:hidden; max-height:0; opacity:0; transition:max-height 180ms ease, opacity 140ms ease; border-top:1px solid var(--background-modifier-border,#333); margin-top:0;';
-
-        let moreExpanded = false;
-        const setMoreExpanded = (expanded) => {
-            moreExpanded = expanded;
-            if (expanded) {
-                moreBox.style.maxHeight = '2000px';
-                moreBox.style.opacity = '1';
-                moreBox.style.borderTopWidth = '1px';
-                moreBox.style.marginTop = '10px';
-                moreToggle.textContent = 'Less options ▴';
-            } else {
-                moreBox.style.maxHeight = '0';
-                moreBox.style.opacity = '0';
-                moreBox.style.borderTopWidth = '0';
-                moreBox.style.marginTop = '0';
-                moreToggle.textContent = 'More options ▾';
-            }
+        // Notes → note body (both modes). In edit mode we load the task file's
+        // existing body (minus its frontmatter) just-in-time so notes/hyperlinks
+        // can be added or edited on an existing task; the save path writes them
+        // back into the task's OWN file only (single-file invariant intact).
+        //
+        // Edit mode never writes the body until the read has succeeded: until
+        // then the textarea is disabled ("Loading notes…") and a save touches
+        // only the frontmatter, so a slow or failed read can never blank the
+        // task's existing notes.
+        const notesInput = left.createEl('textarea', { cls: 'sauce-task-notes' });
+        notesInput.placeholder = 'Notes';
+        try { notesInput.setAttribute('aria-label', 'Notes'); } catch (_e) {}
+        notesInput.value = state.notes;
+        notesInput.oninput = () => { if (state.notesLoaded) state.notes = notesInput.value; };
+        const setNotesState = (placeholder, disabled, busy) => {
+            notesInput.placeholder = placeholder;
+            notesInput.disabled = !!disabled;
+            try { notesInput.setAttribute('aria-busy', busy ? 'true' : 'false'); } catch (_e) {}
         };
-        moreToggle.onclick = () => setMoreExpanded(!moreExpanded);
+        if (editPath) {
+            const failed = () => { state.notesLoaded = false; setNotesState('Notes could not be loaded', true, false); };
+            if (editFile && app.vault && typeof app.vault.read === 'function') {
+                setNotesState('Loading notes\u2026', true, true);
+                let pending = null;
+                try { pending = Promise.resolve(app.vault.read(editFile)); } catch (_e) { pending = null; }
+                if (!pending) failed();
+                else {
+                    pending.then((txt) => {
+                        // Load ONLY the user-notes portion (below <!-- TASK_NOTES -->), not
+                        // the regenerable chrome. A legacy note with no marker falls back
+                        // to the whole body (minus frontmatter) so nothing is lost.
+                        if (typeof txt !== 'string') { failed(); return; }
+                        const body = TaskDialog._bodyNotesBelowMarker(txt);
+                        notesInput.value = body;
+                        state.notes = body;
+                        state.notesLoaded = true;
+                        setNotesState('Notes', false, false);
+                    }).catch(failed);
+                }
+            } else {
+                failed();
+            }
+        }
 
-        // Repeats — structured picker (dropdown + contextual day-of-week /
-        // day-of-month controls). Composes the SAME RecurrenceParser grammar
-        // string the backend already understands (TaskEntity.nextOccurrence,
-        // _markDone's roll-forward) — no schema change, this is purely a
-        // front-end grammar builder. state.recurrence stays the source of
-        // truth written to frontmatter; state.recurrenceFreq/Days/Weeks/
-        // DayOfMonth are picker-only UI state, recomposed on every change.
-        label('Repeats (optional)', moreBox);
+        // ----- Structured LINKS + parent (both modes) — FIX 5 -----
+        // ＋Link note / ＋Web link PUSH a markdown link STRING onto state.links
+        // (via the pure _addLink), which TaskNoteView renders INSIDE the card;
+        // the current links show as removable chips. Subtask of… sets
+        // parent_task to `[[<open task>]]`. Only ONE inserter is open at a time.
+        // Everything is guarded — a bad DOM/vault call never throws out of _render.
+        let renderChips = () => {};
+        try {
+            const chipsBox = left.createDiv({ cls: 'sauce-task-link-chips' });
+            renderChips = () => {
+                chipsBox.empty();
+                chipsBox.style.display = state.links.length ? '' : 'none';
+                state.links.forEach((entry, i) => {
+                    const chip = chipsBox.createDiv({ cls: 'sauce-task-link-chip' });
+                    const txt = chip.createEl('span', { text: entry });
+                    txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px;';
+                    const x = chip.createEl('button', { cls: 'sauce-task-chip-x', text: '✕' });
+                    x.setAttribute('aria-label', 'Remove link');
+                    x.onclick = () => { state.links = TaskDialog._removeLink(state.links, i); renderChips(); };
+                });
+            };
+            renderChips();
+
+            const parentBox = left.createDiv({ cls: 'sauce-task-parent' });
+            const renderParent = () => {
+                parentBox.empty();
+                const pt = String(state.parentTask || '').trim();
+                parentBox.style.display = pt ? '' : 'none';
+                if (!pt) return;
+                parentBox.createSpan({ cls: 'sauce-task-parent-label', text: 'Subtask of ' });
+                parentBox.createSpan({ text: TaskDialog._stripWikilink(pt) });
+                const x = parentBox.createEl('button', { cls: 'sauce-task-chip-x', text: '✕' });
+                x.setAttribute('aria-label', 'Remove parent task');
+                x.onclick = () => { state.parentTask = ''; renderParent(); renderWhen(); };
+            };
+            renderParent();
+
+            const linkRow = left.createDiv({ cls: 'sauce-task-quiet-row' });
+            const mkQuiet = (text) => mkPill(linkRow, 'sauce-task-quiet', text);
+            const noteBtn = mkQuiet('＋ Link note');
+            const webBtn = mkQuiet('＋ Web link');
+            const parentBtn = mkQuiet('Subtask of…');
+
+            // A single host div below the row that holds whichever inserter is open.
+            const inserterBox = left.createDiv({ cls: 'sauce-task-inserter' });
+            let openKind = null;   // null | 'note' | 'web' | 'parent'
+            const closeInserter = () => { inserterBox.empty(); openKind = null; };
+
+            // Add `entry` to state.links (pure _addLink → new array), re-render the
+            // chips, close the inserter. Deduped + trimmed by _addLink.
+            const addLinkEntry = (entry) => {
+                if (!entry) return;
+                state.links = TaskDialog._addLink(state.links, entry);
+                renderChips();
+                closeInserter();
+            };
+
+            // Filterable list shared by the note picker and the parent picker:
+            // the candidate list is built ONCE, then filtered on each keystroke
+            // (order preserved: filter, then slice — no re-sort).
+            const openPicker = (kind, placeholder, names, rowCls, onPick) => {
+                if (openKind === kind) { closeInserter(); return; }
+                closeInserter();
+                openKind = kind;
+                const filterInput = inserterBox.createEl('input', { type: 'text' });
+                filterInput.placeholder = placeholder;
+                filterInput.style.cssText = fieldCss;
+                const results = inserterBox.createDiv({ cls: 'sauce-task-picker-results' });
+                const renderResults = () => {
+                    results.empty();
+                    const q = (filterInput.value || '').trim().toLowerCase();
+                    const hits = (q ? names.filter((n) => n.toLowerCase().indexOf(q) >= 0) : names).slice(0, 30);
+                    if (!hits.length) {
+                        results.createDiv({ cls: 'sauce-task-picker-empty', text: q ? 'No matches' : 'Nothing to pick' });
+                        return;
+                    }
+                    for (const n of hits) {
+                        const row = results.createDiv({ cls: 'sauce-task-picker-row ' + rowCls, text: n });
+                        row.onclick = () => onPick(n);
+                    }
+                };
+                filterInput.oninput = renderResults;
+                renderResults();
+                setTimeout(() => { try { filterInput.focus(); } catch (_e) {} }, 30);
+            };
+
+            // ----- Note picker (FIX 6 — sorted MOST-RECENTLY-EDITED first) -----
+            const openNotePicker = () => {
+                let names = [];
+                try {
+                    const files = (app.vault && typeof app.vault.getMarkdownFiles === 'function')
+                        ? app.vault.getMarkdownFiles() : [];
+                    names = TaskDialog._buildNoteLinkCandidates(files, editPath);
+                } catch (_e) { names = []; }
+                openPicker('note', 'Filter notes (recent first)…', names, 'sauce-task-note-option',
+                    (n) => addLinkEntry(TaskDialog._wikilink(n)));
+            };
+
+            // ----- Parent picker (open top-level tasks, recent first) -----
+            const openParentPicker = () => {
+                openPicker('parent', 'Find a parent task…', TaskDialog._parentCandidates(app, editPath),
+                    'sauce-task-parent-option', (n) => {
+                        state.parentTask = TaskDialog._wikilink(n);
+                        renderParent();
+                        renderWhen();
+                        closeInserter();
+                    });
+            };
+
+            // ----- Web-link mini-form -----
+            const openWebForm = () => {
+                if (openKind === 'web') { closeInserter(); return; }
+                closeInserter();
+                openKind = 'web';
+                const urlInput = inserterBox.createEl('input', { type: 'url' });
+                urlInput.placeholder = 'https://…';
+                urlInput.style.cssText = fieldCss;
+                const labelInput = inserterBox.createEl('input', { type: 'text' });
+                labelInput.placeholder = 'Link text (optional)';
+                labelInput.style.cssText = fieldCss + ' margin-top:6px;';
+                const insertBtn = mkPill(inserterBox, 'sauce-task-quiet', 'Add link');
+                insertBtn.style.marginTop = '8px';
+                const doInsert = () => {
+                    const ins = TaskDialog._mdLink(labelInput.value, urlInput.value);
+                    if (!ins) { try { new Notice('Enter a URL first'); } catch (_e) {} return; }
+                    addLinkEntry(ins);
+                };
+                insertBtn.onclick = doInsert;
+                // Enter in either field adds.
+                const onKey = (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doInsert(); } };
+                urlInput.addEventListener('keydown', onKey);
+                labelInput.addEventListener('keydown', onKey);
+                setTimeout(() => { try { urlInput.focus(); } catch (_e) {} }, 30);
+            };
+
+            noteBtn.onclick = openNotePicker;
+            webBtn.onclick = openWebForm;
+            parentBtn.onclick = openParentPicker;
+        } catch (_e) { /* link chips are best-effort; never abort the render */ }
+
+        // ----- Right column: When -----
+        const whenSec = right.createDiv({ cls: 'sauce-task-section' });
+        sectionLabel(whenSec, 'When');
+        const whenRow = whenSec.createDiv({ cls: 'sauce-task-pill-row' });
+        const whenOpts = TaskDialog.whenOptions(todayStr);
+        const whenBtns = whenOpts.map((o) => {
+            const b = mkPill(whenRow, 'sauce-task-pill sauce-task-when', o.label);
+            b.setAttribute('data-key', o.key);
+            b.onclick = () => setWhen(o.key);
+            return { el: b, key: o.key };
+        });
+        const whenDate = whenSec.createEl('input', { type: 'date', cls: 'sauce-task-when-date' });
+        whenDate.style.cssText = dateCss + ' margin-top:8px;';
+        whenDate.onchange = () => { state.due = whenDate.value || ''; state.whenKey = 'pick'; renderWhen(); updateSubmit(); };
+        whenDate.oninput = whenDate.onchange;
+        const whenCaption = whenSec.createDiv({ cls: 'sauce-task-caption sauce-task-when-caption' });
+        const renderWhen = () => {
+            for (const w of whenBtns) setPressed(w.el, 'sauce-task-pill sauce-task-when', w.key === state.whenKey);
+            whenDate.style.display = state.whenKey === 'pick' ? '' : 'none';
+            if (state.whenKey === 'pick' && whenDate.value !== (state.due || '')) whenDate.value = state.due || '';
+            whenCaption.textContent = TaskDialog.whenCaption(state.whenKey, state.due, TaskDialog._ownedForCaption(state));
+        };
+        // Pick keeps the current date and reveals the native input to change it.
+        const setWhen = (key) => {
+            state.whenKey = key;
+            if (key !== 'pick') {
+                const o = whenOpts.find((x) => x.key === key);
+                state.due = (o && o.due) || '';
+            }
+            renderWhen();
+            updateSubmit();
+            if (key === 'pick') setTimeout(() => { try { whenDate.focus(); } catch (_e) {} }, 0);
+        };
+        const setDue = (due) => {
+            state.due = due || '';
+            state.whenKey = TaskDialog.whenKeyForDue(state.due, todayStr);
+            renderWhen();
+            updateSubmit();
+        };
+        renderWhen();
+
+        // ----- Right column: Priority (keys 0–4 when focus is outside a text field) -----
+        const prioSec = right.createDiv({ cls: 'sauce-task-section' });
+        sectionLabel(prioSec, 'Priority');
+        const prioRow = prioSec.createDiv({ cls: 'sauce-task-pill-row' });
+        const PRIOS = [
+            { v: '', l: 'None' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' },
+            { v: 'high', l: 'High' }, { v: 'highest', l: 'Highest' },
+        ];
+        const prioBtns = PRIOS.map((p, i) => {
+            const b = prioRow.createEl('button', { cls: 'sauce-task-pill sauce-task-prio' });
+            try { b.setAttribute('type', 'button'); } catch (_e) {}
+            b.setAttribute('data-prio', p.v || 'none');
+            b.setAttribute('title', p.l + ' (' + i + ')');
+            b.createSpan({ cls: 'sauce-task-prio-swatch' });
+            b.createSpan({ text: p.l });
+            b.onclick = () => setPriority(p.v);
+            return { el: b, v: p.v };
+        });
+        const renderPrio = () => {
+            for (const p of prioBtns) setPressed(p.el, 'sauce-task-pill sauce-task-prio', p.v === (state.priority || ''));
+        };
+        const setPriority = (v) => { state.priority = v || ''; renderPrio(); };
+        renderPrio();
+
+        // ----- Right column: Project (recent chips + type-to-filter) -----
+        // Enumerated dependency-free via metadataCache (no `dv` in a
+        // button-invoked dialog). A seeded/edited project that is not among the
+        // recent chips is shown as its own selected chip, so it is never hidden.
+        const projects = TaskDialog._loadProjectList(app);
+        const projectNames = projects.map((p) => p.name);
+        let recentNames = [];
+        try { recentNames = TaskDialog.recentProjects(TaskDialog._recentTaskRows(app, todayStr), todayStr, 6); }
+        catch (_e) { recentNames = []; }
+        const shortcutProjectNames = Array.from(new Set(projectNames.concat(recentNames)));
+        const projSec = right.createDiv({ cls: 'sauce-task-section' });
+        sectionLabel(projSec, 'Project');
+        const projSearch = projSec.createEl('input', { type: 'text', cls: 'sauce-task-project-search' });
+        projSearch.placeholder = 'Search projects…';
+        projSearch.style.cssText = fieldCss;
+        const projChips = projSec.createDiv({ cls: 'sauce-task-pill-row sauce-task-project-chips' });
+        const projCaption = projSec.createDiv({ cls: 'sauce-task-caption' });
+        let projHits = [];
+        const renderProjects = () => {
+            projChips.empty();
+            const q = (projSearch.value || '').trim();
+            const cur = (state.projectName || '').trim();
+            let caption;
+            if (q) {
+                projHits = TaskDialog.projectMatches(projectNames, q, 8);
+                caption = projHits.length ? '' : 'No matching projects';
+            } else {
+                projHits = recentNames.slice();
+                if (cur && projHits.indexOf(cur) < 0) projHits.unshift(cur);
+                caption = recentNames.length ? 'Your most-used projects, most recent first'
+                    : (projectNames.length ? 'Type to search your projects' : 'No projects yet');
+            }
+            for (const n of projHits) {
+                const c = mkPill(projChips, 'sauce-task-pill sauce-task-project-chip', n);
+                setPressed(c, 'sauce-task-pill sauce-task-project-chip', n === cur);
+                c.onclick = () => setProject(state.projectName === n ? '' : n);
+            }
+            projCaption.textContent = caption;
+            projCaption.style.display = caption ? '' : 'none';
+        };
+        const setProject = (name) => { state.projectName = name || ''; projSearch.value = ''; renderProjects(); renderWhen(); };
+        projSearch.oninput = renderProjects;
+        // Enter in the search picks the first match instead of saving the task
+        // (SauceModal only treats Enter in the title as Save).
+        projSearch.addEventListener('keydown', (ev) => {
+            if (ev && ev.key === 'Enter' && !ev.isComposing && !ev.metaKey && !ev.ctrlKey
+                && (projSearch.value || '').trim() && projHits.length) {
+                if (ev.preventDefault) ev.preventDefault();
+                setProject(projHits[0]);
+            }
+        });
+        renderProjects();
+
+        // ----- Right column: Repeats — one button that expands in place -----
+        // The structured picker composes the SAME RecurrenceParser grammar the
+        // backend already understands (TaskEntity.nextOccurrence, _markDone's
+        // roll-forward). state.recurrence stays the source of truth written to
+        // frontmatter; state.recurrenceFreq/Days/Weeks/DayOfMonth are picker-only
+        // UI state, recomposed on every change.
+        const repSec = right.createDiv({ cls: 'sauce-task-section' });
+        sectionLabel(repSec, 'Repeats');
+        const repToggle = mkPill(repSec, 'sauce-task-pill sauce-task-repeat-toggle', '');
+        const repBox = repSec.createDiv({ cls: 'sauce-task-repeat-box' });
         {
             const described = (() => {
                 try {
@@ -778,8 +1261,19 @@ class TaskDialog {
             state.recurrenceWeeks = initial.weeks;
             state.recurrenceDayOfMonth = initial.dayOfMonth;
         }
+        // Notes and links are always visible now, so only an existing
+        // recurrence decides whether Repeats starts open.
+        let repExpanded = TaskDialog._moreOptionsShouldStartExpanded({ recurrence: state.recurrence });
+        const renderRepeatToggle = () => {
+            const r = String(state.recurrence || '').trim();
+            const text = r ? r.charAt(0).toUpperCase() + r.slice(1) : "Doesn't repeat";
+            repToggle.textContent = text + (repExpanded ? ' ▴' : ' ▾');
+            repToggle.setAttribute('aria-expanded', repExpanded ? 'true' : 'false');
+            repBox.style.display = repExpanded ? '' : 'none';
+        };
+        repToggle.onclick = () => { repExpanded = !repExpanded; renderRepeatToggle(); };
 
-        const recurSelect = moreBox.createEl('select');
+        const recurSelect = repBox.createEl('select');
         recurSelect.style.cssText = fieldCss;
         const RECUR_OPTIONS = [
             { value: 'none', text: "Doesn't repeat" },
@@ -794,9 +1288,9 @@ class TaskDialog {
             if (ro.value === state.recurrenceFreq) opt.selected = true;
         }
 
-        const recurSubBox = moreBox.createDiv();
+        const recurSubBox = repBox.createDiv();
         recurSubBox.style.cssText = 'margin-top:8px;';
-        const recurError = moreBox.createEl('div');
+        const recurError = repBox.createEl('div');
         recurError.style.cssText = 'font-size:11px; color:var(--text-error,#e05561); margin-top:4px; display:none;';
 
         const recomposeRecurrence = () => {
@@ -808,6 +1302,7 @@ class TaskDialog {
             const valid = TaskDialog._recurrencePickerValid(state);
             recurError.style.display = valid ? 'none' : 'block';
             recurError.textContent = valid ? '' : 'Pick at least one day for a weekly repeat.';
+            renderRepeatToggle();
             updateSubmit();
         };
 
@@ -818,6 +1313,8 @@ class TaskDialog {
             { n: 0, l: 'S' }, { n: 1, l: 'M' }, { n: 2, l: 'T' }, { n: 3, l: 'W' },
             { n: 4, l: 'T' }, { n: 5, l: 'F' }, { n: 6, l: 'S' },
         ];
+        const smallNumCss = 'box-sizing:border-box; padding:5px 6px; background:var(--background-primary,#1e1e1e); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:12px;';
+        const mutedCss = 'font-size:12px; color:var(--text-muted,#999);';
 
         const renderRecurSubBox = () => {
             recurSubBox.empty();
@@ -838,10 +1335,9 @@ class TaskDialog {
                 }
                 const weeksRow = recurSubBox.createDiv();
                 weeksRow.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:8px;';
-                const weeksLabel = weeksRow.createEl('span', { text: 'Every' });
-                weeksLabel.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+                weeksRow.createEl('span', { text: 'Every' }).style.cssText = mutedCss;
                 const weeksInput = weeksRow.createEl('input', { type: 'number' });
-                weeksInput.style.cssText = 'width:52px; box-sizing:border-box; padding:5px 6px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:12px;';
+                weeksInput.style.cssText = 'width:52px; ' + smallNumCss;
                 weeksInput.min = '1';
                 weeksInput.max = '12';
                 weeksInput.value = String(state.recurrenceWeeks || 1);
@@ -851,15 +1347,13 @@ class TaskDialog {
                     weeksInput.value = String(state.recurrenceWeeks);
                     recomposeRecurrence();
                 };
-                const weeksLabel2 = weeksRow.createEl('span', { text: 'week(s)' });
-                weeksLabel2.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+                weeksRow.createEl('span', { text: 'week(s)' }).style.cssText = mutedCss;
             } else if (state.recurrenceFreq === 'monthly') {
                 const domRow = recurSubBox.createDiv();
                 domRow.style.cssText = 'display:flex; align-items:center; gap:8px;';
-                const domLabel = domRow.createEl('span', { text: 'On day' });
-                domLabel.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+                domRow.createEl('span', { text: 'On day' }).style.cssText = mutedCss;
                 const domInput = domRow.createEl('input', { type: 'number' });
-                domInput.style.cssText = 'width:60px; box-sizing:border-box; padding:5px 6px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:12px;';
+                domInput.style.cssText = 'width:60px; ' + smallNumCss;
                 domInput.min = '1';
                 domInput.max = '31';
                 if (state.recurrenceDayOfMonth) domInput.value = String(state.recurrenceDayOfMonth);
@@ -868,11 +1362,11 @@ class TaskDialog {
                     state.recurrenceDayOfMonth = (Number.isInteger(n) && n >= 1 && n <= 31) ? n : null;
                     recomposeRecurrence();
                 };
-                const domLabel2 = domRow.createEl('span', { text: 'of the month' });
-                domLabel2.style.cssText = 'font-size:12px; color:var(--text-muted,#999);';
+                domRow.createEl('span', { text: 'of the month' }).style.cssText = mutedCss;
             }
         };
         renderRecurSubBox();
+        renderRepeatToggle();
 
         recurSelect.onchange = () => {
             const opt = recurSelect.options[recurSelect.selectedIndex];
@@ -881,228 +1375,54 @@ class TaskDialog {
             recomposeRecurrence();
         };
 
-        // Priority chip row
-        label('Priority', moreBox);
-        const chipRow = moreBox.createDiv();
-        chipRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
-        const chipOff = 'flex:1; min-width:52px; box-sizing:border-box; text-align:center; padding:7px 8px; border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; background:transparent; color:var(--text-muted,#999); transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
-        const chipOn = 'flex:1; min-width:52px; box-sizing:border-box; text-align:center; padding:7px 8px; border:1px solid var(--interactive-accent,#6a6abf); border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; background:var(--interactive-accent,#6a6abf); color:var(--text-on-accent,#fff); font-weight:600; transition:background 120ms ease, color 120ms ease, border-color 120ms ease;';
-        const chips = [];
-        for (const p of ['', 'low', 'medium', 'high', 'highest']) {
-            const c = chipRow.createEl('div', { text: p || 'none' });
-            c.style.cssText = state.priority === p ? chipOn : chipOff;
-            chips.push({ el: c, val: p });
-            c.onclick = () => {
-                state.priority = p;
-                for (const cc of chips) cc.el.style.cssText = cc.val === p ? chipOn : chipOff;
-            };
-        }
-
-        // Project — dropdown of the vault's projects (restored parity with the old
-        // ToDoCreateTask picker). Enumerated dependency-free via metadataCache
-        // (no `dv` in a button-invoked dialog). First option is "— none —"; a
-        // seeded/edited project not in the list is preserved via a temp option so
-        // it's never silently lost.
-        label('Project (optional)', moreBox);
-        const projSelect = moreBox.createEl('select');
-        projSelect.style.cssText = fieldCss;
-        const projects = TaskDialog._loadProjectList(app);
-        const noneOpt = projSelect.createEl('option', { text: '— none —' });
-        noneOpt.value = '';
-        const curName = (state.projectName || '').trim();
-        let matched = !curName; // "none" pre-selected when there's no current project
-        for (const p of projects) {
-            const opt = projSelect.createEl('option', { text: p.name });
-            opt.value = p.slug;
-            if (curName && p.name === curName) { opt.selected = true; matched = true; }
-        }
-        // Preserve a seeded/edited project that isn't in the enumerated list.
-        if (!matched && curName) {
-            const tmp = projSelect.createEl('option', { text: curName });
-            tmp.value = TaskDialog._slugify(curName);
-            tmp.selected = true;
-        }
-        projSelect.onchange = () => {
-            const opt = projSelect.options[projSelect.selectedIndex];
-            state.projectName = (opt && opt.value) ? opt.text : '';
+        // ----- Title shortcuts (create mode) -----
+        // Each input event re-parses the title. A token that appears (or
+        // changes) sets its field; a later explicit click wins until the token
+        // itself changes; a token that disappears restores the field's prior
+        // value unless the user has changed it since. The stripped title is
+        // what gets saved.
+        const parseShortcuts = () => {
+            if (editPath) return null;
+            const TE = TaskDialog._taskEntity();
+            if (!TE || typeof TE.parseTitleShortcuts !== 'function') return null;
+            try { return TE.parseTitleShortcuts(state.title, todayStr, shortcutProjectNames); } catch (_e) { return null; }
+        };
+        const SHORTCUT_FIELDS = {
+            due: { get: () => state.due || '', set: setDue },
+            priority: { get: () => state.priority || '', set: setPriority },
+            project: { get: () => state.projectName || '', set: setProject },
+        };
+        let shortcutApplied = { due: null, priority: null, project: null };
+        const applyShortcuts = () => {
+            const parsed = parseShortcuts();
+            if (!parsed) return;
+            for (const field of Object.keys(SHORTCUT_FIELDS)) {
+                const acc = SHORTCUT_FIELDS[field];
+                const tok = parsed[field];
+                const rec = shortcutApplied[field];
+                if (tok != null && tok !== '') {
+                    if (rec && rec.value === tok) continue;
+                    const prev = rec ? rec.prev : acc.get();
+                    acc.set(tok);
+                    shortcutApplied[field] = { value: tok, prev };
+                } else if (rec) {
+                    if (acc.get() === rec.value) acc.set(rec.prev);
+                    shortcutApplied[field] = null;
+                }
+            }
+        };
+        const effectiveTitle = () => {
+            const parsed = parseShortcuts();
+            return parsed && typeof parsed.title === 'string' ? parsed.title : state.title;
         };
 
-        // Notes → note body (both modes). In edit mode we load the task file's
-        // existing body (minus its frontmatter) just-in-time so notes/hyperlinks
-        // can be added or edited on an existing task; the save path writes them
-        // back into the task's OWN file only (single-file invariant intact).
-        label('Notes (optional)', moreBox);
-        const notesInput = moreBox.createEl('textarea');
-        notesInput.style.cssText = fieldCss + ' min-height:60px; resize:vertical;';
-        notesInput.value = state.notes;
-        notesInput.oninput = () => { state.notes = notesInput.value; };
-        if (editPath && editFile && app.vault && typeof app.vault.read === 'function') {
-            app.vault.read(editFile).then((txt) => {
-                // Load ONLY the user-notes portion (below <!-- TASK_NOTES -->), not
-                // the regenerable chrome. A legacy note with no marker falls back
-                // to the whole body (minus frontmatter) so nothing is lost.
-                const body = TaskDialog._bodyNotesBelowMarker(txt);
-                notesInput.value = body;
-                state.notes = body;
-            }).catch(() => { /* leave notes blank on read failure */ });
-        }
-
-        // ----- Structured LINKS (both modes) — FIX 5 -----
-        // The ＋Link note / ＋Web link buttons no longer splice into the Notes
-        // textarea; they PUSH a markdown link STRING onto state.links (via the pure
-        // _addLink), which TaskNoteView renders INSIDE the card. The current links
-        // show as small removable CHIPS (link text + an ✕). Insertion routes
-        // through the PURE statics (_wikilink / _mdLink / _addLink / _removeLink)
-        // so the browser shell stays thin. Everything is guarded — a bad DOM/vault
-        // call never throws out of _render. Only ONE inserter is open at a time.
-        try {
-            label('Links (optional)', moreBox);
-
-            // Chip list — one removable chip per entry in state.links, re-rendered
-            // in place whenever the list changes.
-            const chipsBox = moreBox.createDiv();
-            chipsBox.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:2px;';
-            const renderChips = () => {
-                chipsBox.empty();
-                if (!state.links.length) {
-                    const empty = chipsBox.createDiv({ text: 'No links yet' });
-                    empty.style.cssText = 'font-size:12px; color:var(--text-muted,#999); padding:2px 0;';
-                    return;
-                }
-                state.links.forEach((entry, i) => {
-                    const chip = chipsBox.createDiv();
-                    chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; max-width:100%; box-sizing:border-box; padding:3px 6px 3px 10px; border:1px solid var(--background-modifier-border,#444); border-radius:999px; background:var(--background-secondary,#2a2a2a); font-size:12px; line-height:1.3; color:var(--text-normal,#ddd);';
-                    const txt = chip.createEl('span', { text: entry });
-                    txt.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px;';
-                    const x = chip.createEl('button', { text: '✕' });
-                    x.setAttribute('aria-label', 'Remove link');
-                    x.style.cssText = 'flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; border:none; border-radius:999px; background:transparent; color:var(--text-muted,#999); font-size:11px; line-height:1; cursor:pointer;';
-                    x.onmouseenter = () => { x.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.08))'; x.style.color = 'var(--text-error,#e05561)'; };
-                    x.onmouseleave = () => { x.style.background = 'transparent'; x.style.color = 'var(--text-muted,#999)'; };
-                    x.onclick = () => { state.links = TaskDialog._removeLink(state.links, i); renderChips(); };
-                });
-            };
-            renderChips();
-
-            const linkRow = moreBox.createDiv();
-            linkRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;';
-            // Small ghost buttons that match the footer button grammar (quiet,
-            // native tokens, comfortable tap height).
-            const GHOST_LINK = 'display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:30px; padding:5px 11px; border-radius:var(--radius-s,6px); font-size:12px; line-height:1; cursor:pointer; white-space:nowrap; border:1px solid var(--background-modifier-border,#444); background:transparent; color:var(--text-normal,#ddd); transition:background 120ms ease;';
-            const mkGhost = (parent, text) => {
-                const b = parent.createEl('button', { text });
-                b.style.cssText = GHOST_LINK;
-                b.onmouseenter = () => { b.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; };
-                b.onmouseleave = () => { b.style.background = 'transparent'; };
-                b.onfocus = () => { b.style.outline = '2px solid var(--interactive-accent,#6a6abf)'; b.style.outlineOffset = '1px'; };
-                b.onblur = () => { b.style.outline = 'none'; };
-                return b;
-            };
-            const noteBtn = mkGhost(linkRow, '＋ Link note');
-            const webBtn = mkGhost(linkRow, '＋ Web link');
-
-            // A single host div below the row that holds whichever inserter is open.
-            const inserterBox = moreBox.createDiv();
-            inserterBox.style.cssText = 'margin-top:8px;';
-            let openKind = null;   // null | 'note' | 'web'
-            const closeInserter = () => { inserterBox.empty(); openKind = null; };
-
-            // Add `entry` to state.links (pure _addLink → new array), re-render the
-            // chips, close the inserter. Deduped + trimmed by _addLink.
-            const addLinkEntry = (entry) => {
-                if (!entry) return;
-                state.links = TaskDialog._addLink(state.links, entry);
-                renderChips();
-                closeInserter();
-            };
-
-            // ----- Note picker (FIX 6 — sorted MOST-RECENTLY-EDITED first) -----
-            const openNotePicker = () => {
-                if (openKind === 'note') { closeInserter(); return; }
-                closeInserter();
-                openKind = 'note';
-                // Build the candidate list ONCE (basename + mtime), then filter in JS
-                // on each keystroke. Sorted by f.stat.mtime DESCENDING so the notes
-                // the user most recently touched surface at the top of the picker.
-                let names = [];
-                try {
-                    const files = (app.vault && typeof app.vault.getMarkdownFiles === 'function')
-                        ? app.vault.getMarkdownFiles() : [];
-                    names = TaskDialog._buildNoteLinkCandidates(files, editPath);
-                } catch (_e) { names = []; }
-
-                const filterInput = inserterBox.createEl('input', { type: 'text' });
-                filterInput.placeholder = 'Filter notes (recent first)…';
-                filterInput.style.cssText = fieldCss;
-                const results = inserterBox.createDiv();
-                results.style.cssText = 'margin-top:6px; max-height:160px; overflow-y:auto; border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px);';
-                const renderResults = () => {
-                    results.empty();
-                    const q = (filterInput.value || '').trim().toLowerCase();
-                    // Filter preserves the mtime order (filter, then slice — no re-sort).
-                    const hits = (q ? names.filter((n) => n.toLowerCase().indexOf(q) >= 0) : names).slice(0, 30);
-                    if (!hits.length) {
-                        const none = results.createDiv({ text: q ? 'No matches' : 'No notes' });
-                        none.style.cssText = 'padding:6px 8px; font-size:12px; color:var(--text-muted,#999);';
-                        return;
-                    }
-                    for (const n of hits) {
-                        const row = results.createDiv({ text: n });
-                        row.style.cssText = 'padding:6px 8px; font-size:13px; cursor:pointer; color:var(--text-normal,#ddd);';
-                        row.onmouseenter = () => { row.style.background = 'var(--background-modifier-hover,rgba(255,255,255,0.06))'; };
-                        row.onmouseleave = () => { row.style.background = 'transparent'; };
-                        row.onclick = () => { addLinkEntry(TaskDialog._wikilink(n)); };
-                    }
-                };
-                filterInput.oninput = renderResults;
-                renderResults();
-                setTimeout(() => { try { filterInput.focus(); } catch (_e) {} }, 30);
-            };
-
-            // ----- Web-link mini-form -----
-            const openWebForm = () => {
-                if (openKind === 'web') { closeInserter(); return; }
-                closeInserter();
-                openKind = 'web';
-                const urlInput = inserterBox.createEl('input', { type: 'url' });
-                urlInput.placeholder = 'https://…';
-                urlInput.style.cssText = fieldCss;
-                const labelInput = inserterBox.createEl('input', { type: 'text' });
-                labelInput.placeholder = 'Link text (optional)';
-                labelInput.style.cssText = fieldCss + ' margin-top:6px;';
-                const insertBtn = mkGhost(inserterBox, 'Add link');
-                insertBtn.style.cssText = GHOST_LINK + ' margin-top:8px;';
-                const doInsert = () => {
-                    const ins = TaskDialog._mdLink(labelInput.value, urlInput.value);
-                    if (!ins) { try { new Notice('Enter a URL first'); } catch (_e) {} return; }
-                    addLinkEntry(ins);
-                };
-                insertBtn.onclick = doInsert;
-                // Enter in either field adds.
-                const onKey = (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doInsert(); } };
-                urlInput.addEventListener('keydown', onKey);
-                labelInput.addEventListener('keydown', onKey);
-                setTimeout(() => { try { urlInput.focus(); } catch (_e) {} }, 30);
-            };
-
-            noteBtn.onclick = openNotePicker;
-            webBtn.onclick = openWebForm;
-        } catch (_e) { /* link chips are best-effort; never abort the render */ }
-
-        setMoreExpanded(TaskDialog._moreOptionsShouldStartExpanded(state));
-
-        // ----- Footer -----
-        // A two-group flex row: item actions (Open / Done / Delete) grouped on the
-        // LEFT as quiet ghost buttons, then Cancel + Save (the accent anchor) on the
-        // RIGHT. `justify-content: space-between` pushes the groups apart; each group
-        // wraps as a unit on a narrow phone so nothing overflows at 360px.
+        // ----- Footer (outside the scrolling body) -----
+        // Left: create → "Open the note after creating"; edit → Open / Done /
+        // Delete as quiet actions. Right: Create & add another (create only)
+        // and the primary Create task / Save with its ⌘↵ hint.
         const footer = modalHandle.footer;
-
-        const leftGroup = editPath ? footer.createDiv() : null;
-        if (leftGroup) leftGroup.style.cssText = 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;';
-        const rightGroup = footer.createDiv();
-        rightGroup.style.cssText = 'display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-left:auto;'
-            + (!editPath ? ' width:100%;' : '');
+        const leftGroup = footer.createDiv({ cls: 'sauce-task-footer-left' });
+        const rightGroup = footer.createDiv({ cls: 'sauce-task-footer-right' });
 
         // Icons: crisp inline Lucide SVGs at 16px, currentColor so they theme with
         // the button's text (matches ToDoLeafActions' icon convention).
@@ -1114,20 +1434,23 @@ class TaskDialog {
         };
 
         // Sauce-core owns button geometry, state, focus, and tone presentation.
-        const mkBtn = (parent, opts) => {
-            const variant = opts.variant || 'ghost';
+        const mkBtn = (parent, o) => {
+            const variant = o.variant || 'ghost';
             const cls = 'sauce-btn'
                 + (variant === 'accent' ? ' sauce-btn-accent' : '')
-                + (variant === 'danger' ? ' sauce-btn-danger' : '');
+                + (variant === 'danger' ? ' sauce-btn-danger' : '')
+                + (o.cls ? ' ' + o.cls : '');
             const b = parent.createEl('button', { cls });
             try { b.setAttribute('type', 'button'); } catch (_e) {}
-            if (opts.icon) { const ic = b.createSpan(); ic.style.cssText = 'display:inline-flex; align-items:center;'; ic.innerHTML = opts.icon; }
-            if (opts.label) b.createSpan({ text: opts.label });
+            if (o.icon) { const ic = b.createSpan(); ic.style.cssText = 'display:inline-flex; align-items:center;'; ic.innerHTML = o.icon; }
+            if (o.label) b.createSpan({ text: o.label });
+            if (o.kbd) b.createSpan({ cls: 'sauce-task-kbd', text: o.kbd });
             return b;
         };
 
-        // Open note + Done + Delete (edit mode only) sit on the LEFT as quiet actions.
+        let openAfterCb = null;
         if (editPath) {
+            // Open note + Done + Delete (edit mode only) sit on the LEFT as quiet actions.
             const openBtn = mkBtn(leftGroup, { label: 'Open', icon: ICON.open, variant: 'ghost' });
             openBtn.onclick = async () => {
                 try {
@@ -1149,35 +1472,321 @@ class TaskDialog {
                 try { await this._markDeleted(app, editFile); closeOverlay(); }
                 catch (e) { try { new Notice('Delete failed: ' + (e.message || e), 6000); } catch (_e) {} }
             };
+        } else {
+            const lab = leftGroup.createEl('label', { cls: 'sauce-task-open-after-label' });
+            openAfterCb = lab.createEl('input', { type: 'checkbox', cls: 'sauce-task-open-after' });
+            openAfterCb.checked = TaskDialog._readOpenAfterPref();
+            lab.createSpan({ text: 'Open the note after creating' });
+            openAfterCb.onchange = () => TaskDialog._writeOpenAfterPref(!!openAfterCb.checked);
         }
 
-        const cancelBtn = mkBtn(rightGroup, { label: 'Cancel', variant: 'ghost' });
-        cancelBtn.onclick = () => closeOverlay();
-
-        saveBtn = mkBtn(rightGroup, { label: 'Save', icon: ICON.check, variant: 'accent' });
+        const kbd = TaskDialog._submitKeyHint(app);
+        if (!editPath) {
+            addAnotherBtn = mkBtn(rightGroup, { label: 'Create & add another', variant: 'ghost', cls: 'sauce-task-add-another' });
+            addAnotherBtn.onclick = (event) => modalHandle.submit(event);
+        }
+        saveBtn = mkBtn(rightGroup, { label: editPath ? 'Save' : 'Create task', kbd, variant: 'accent', cls: 'sauce-task-save' });
         saveBtn.classList.add('mod-cta');
-        const buildPayload = () => this._payloadFromState(state);
-        const updateSubmit = () => {
+        saveBtn.onclick = (event) => modalHandle.submit(event);
+
+        const buildPayload = () => this._payloadFromState(Object.assign({}, state, { title: effectiveTitle() }));
+        updateSubmit = () => {
             const TE = TaskDialog._taskEntity();
-            const v = TE ? TE.validatePayload(buildPayload()) : { valid: !!(state.title && state.title.trim()) };
+            const p = buildPayload();
+            const v = TE ? TE.validatePayload(p) : { valid: !!(p.title && String(p.title).trim()) };
             const valid = v.valid && TaskDialog._recurrencePickerValid(state);
             saveBtn.disabled = !valid;
+            if (addAnotherBtn) addAnotherBtn.disabled = !valid;
         };
-        submitTask = async () => {
+        // Create & add another keeps When / Priority / Project / Repeats / parent
+        // and starts the next task from a blank title, notes and links.
+        const resetForAnother = () => {
+            state.title = '';
+            titleInput.value = '';
+            state.notes = '';
+            notesInput.value = '';
+            state.links = [];
+            renderChips();
+            shortcutApplied = { due: null, priority: null, project: null };
+            updateSubmit();
+            setTimeout(() => { try { titleInput.focus(); } catch (_e) {} }, 0);
+        };
+        submitTask = async (mode) => {
             if (saveBtn.disabled) return false;
             try {
-                if (editPath) await this._saveEdit(app, editFile, buildPayload(), state.notes);
-                else await this._create(app, buildPayload(), state.notes);
+                if (editPath) {
+                    await this._saveEdit(app, editFile, buildPayload(), state.notesLoaded ? state.notes : null);
+                    closeOverlay();
+                    return true;
+                }
+                const res = await this._create(app, buildPayload(), state.notes);
+                // _create resolves without a result when it bails (TaskEntity
+                // missing, payload rejected): keep the dialog and its contents.
+                if (!res || !res.ok) return false;
+                if (mode === 'another') { resetForAnother(); return true; }
                 closeOverlay();
+                if (openAfterCb && openAfterCb.checked && res && (res.file || res.path)) await this._openCreated(app, res);
                 return true;
             } catch (e) {
                 try { new Notice('Save failed: ' + (e.message || e), 6000); } catch (_e) {}
                 return false;
             }
         };
-        saveBtn.onclick = (event) => modalHandle.submit(event);
+
+        // Dialog-level keys: ⌘↵ / Ctrl↵ submit from anywhere in the dialog
+        // (textarea included); 0–4 set priority when focus is not in a text
+        // field. Capture phase, detached when the modal closes.
+        const PRIO_KEYS = { '0': '', '1': 'low', '2': 'medium', '3': 'high', '4': 'highest' };
+        const isTextTarget = (t) => {
+            if (!t) return false;
+            if (t.isContentEditable) return true;
+            const tag = String(t.tagName || '').toLowerCase();
+            return tag === 'input' || tag === 'textarea' || tag === 'select';
+        };
+        const inDialog = (t) => !t || t === doc.body
+            || (modalEl && typeof modalEl.contains === 'function' && modalEl.contains(t));
+        const onKey = (ev) => {
+            try {
+                if (!ev || !modalHandle.isOpen) return;
+                if (isCmdEnter(ev)) {
+                    if (!inDialog(ev.target)) return;
+                    if (ev.preventDefault) ev.preventDefault();
+                    modalHandle.submit(ev);
+                    return;
+                }
+                if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+                if (!Object.prototype.hasOwnProperty.call(PRIO_KEYS, ev.key)) return;
+                if (isTextTarget(ev.target) || !inDialog(ev.target)) return;
+                if (ev.preventDefault) ev.preventDefault();
+                setPriority(PRIO_KEYS[ev.key]);
+            } catch (_e) { /* a key handler must never throw */ }
+        };
+        try {
+            if (typeof doc.addEventListener === 'function') {
+                doc.addEventListener('keydown', onKey, true);
+                detachKeys = () => { if (typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', onKey, true); };
+            }
+        } catch (_e) {}
 
         updateSubmit();
+    }
+
+    /** Today as YYYY-MM-DD: the caller's value, else moment(), else the local date. */
+    static _todayStr(given) {
+        if (given) return String(given);
+        try {
+            if (typeof window !== 'undefined' && window.moment) return window.moment().format('YYYY-MM-DD');
+        } catch (_e) { /* fall through */ }
+        const d = new Date();
+        const p = (x) => String(x).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+
+    /** "⌘↵" on Apple platforms, "Ctrl↵" elsewhere, "" on mobile (no hardware keyboard to hint at). */
+    static _submitKeyHint(app) {
+        try {
+            if (app && app.isMobile) return '';
+            if (typeof Platform !== 'undefined' && Platform && Platform.isMobile) return '';
+        } catch (_e) { /* fall through to the desktop hint */ }
+        try {
+            const nav = typeof navigator !== 'undefined' ? navigator : null;
+            const plat = String((nav && (nav.platform || nav.userAgent)) || '');
+            return /Mac|iPhone|iPad|iPod/i.test(plat) ? '⌘↵' : 'Ctrl↵';
+        } catch (_e) { return 'Ctrl↵'; }
+    }
+
+    /** Project names containing `query` (case-insensitive), list order kept, at most `limit` (default 8). */
+    static projectMatches(names, query, limit) {
+        const q = String(query == null ? '' : query).trim().toLowerCase();
+        if (!q || !Array.isArray(names)) return [];
+        const max = limit == null ? 8 : limit;
+        return names.filter((n) => String(n).toLowerCase().indexOf(q) >= 0).slice(0, max);
+    }
+
+    /**
+     * `{ project, created_at }` rows for recentProjects: task notes under
+     * spice/tasks/ (any status, `type: task`, not _trash/) whose file was created within 45
+     * days of todayStr, read from metadataCache (no Dataview in a
+     * button-invoked dialog). Empty on any failure.
+     */
+    static _recentTaskRows(app, todayStr) {
+        try {
+            const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(todayStr == null ? '' : todayStr));
+            if (!m || !app || !app.vault || typeof app.vault.getMarkdownFiles !== 'function') return [];
+            const cutoff = Date.UTC(+m[1], +m[2] - 1, +m[3]) - 45 * 86400000;
+            const out = [];
+            for (const f of app.vault.getMarkdownFiles() || []) {
+                try {
+                    const fp = String((f && f.path) || '');
+                    if (fp.indexOf('spice/tasks/') !== 0 || fp.indexOf('spice/tasks/_trash/') === 0) continue;
+                    const ctime = Number(f.stat && f.stat.ctime);
+                    if (!(ctime >= cutoff)) continue;
+                    const cache = app.metadataCache.getFileCache(f);
+                    const fmx = cache && cache.frontmatter;
+                    if (!fmx || fmx.type !== 'task') continue;
+                    out.push({ project: fmx.project, created_at: fmx.created_at });
+                } catch (_e) { /* skip one unreadable file */ }
+            }
+            return out;
+        } catch (_e) {
+            return [];
+        }
+    }
+
+    /** Basename a parent_task value points at: `[[X]]`, `[[path/X|alias]]`, a Link, or plain text. */
+    static _linkBasename(v) {
+        return TaskDialog._projectDisplay(v).replace(/^.*\//, '').replace(/\.md$/i, '').trim();
+    }
+
+    /**
+     * Basenames of open top-level task notes (not _done/ or _trash/), most
+     * recently modified first — the Subtask of… picker's candidates. When
+     * editing, the task itself and every task whose parent chain reaches it
+     * are excluded, so a pick can never make a cycle (the walk is loop-guarded).
+     * Empty on any failure.
+     */
+    static _parentCandidates(app, editPath) {
+        try {
+            const PREFIX = 'spice/tasks/';
+            const parentOf = new Map();
+            const cand = [];
+            for (const f of app.vault.getMarkdownFiles() || []) {
+                const p = String((f && f.path) || '');
+                if (p.indexOf(PREFIX) !== 0) continue;
+                const cache = app.metadataCache.getFileCache(f);
+                const fmx = cache && cache.frontmatter;
+                if (!fmx || fmx.type !== 'task') continue;
+                const name = String(f.basename || '');
+                const parent = TaskDialog._linkBasename(fmx.parent_task);
+                if (name && parent && !parentOf.has(name)) parentOf.set(name, parent);
+                if (p.slice(PREFIX.length).indexOf('/') >= 0) continue;
+                if (fmx.status && fmx.status !== 'open') continue;
+                cand.push({ name, path: p, mtime: (f.stat && Number(f.stat.mtime)) || 0 });
+            }
+            const self = editPath ? String(editPath).replace(/^.*\//, '').replace(/\.md$/i, '') : '';
+            const reachesSelf = (name) => {
+                const seen = new Set();
+                let cur = name;
+                while (cur && !seen.has(cur)) {
+                    if (cur === self) return true;
+                    seen.add(cur);
+                    cur = parentOf.get(cur) || '';
+                }
+                return false;
+            };
+            cand.sort((a, b) => (b.mtime - a.mtime) || a.name.localeCompare(b.name));
+            return cand
+                .filter((c) => c.name && !(editPath && (c.path === editPath || reachesSelf(c.name))))
+                .map((c) => c.name);
+        } catch (_e) {
+            return [];
+        }
+    }
+
+    /** localStorage key for the per-device "open the note after creating" preference. */
+    static get OPEN_AFTER_KEY() { return 'sauce-task-dialog:open-after'; }
+
+    /** Per-device preference, default on ('1'); any storage failure reads as on. */
+    static _readOpenAfterPref() {
+        try {
+            const ls = (typeof window !== 'undefined' && window.localStorage) || null;
+            const v = ls ? ls.getItem(TaskDialog.OPEN_AFTER_KEY) : null;
+            return v == null ? true : String(v) !== '0';
+        } catch (_e) {
+            return true;
+        }
+    }
+
+    static _writeOpenAfterPref(on) {
+        try {
+            const ls = (typeof window !== 'undefined' && window.localStorage) || null;
+            if (ls) ls.setItem(TaskDialog.OPEN_AFTER_KEY, on ? '1' : '0');
+        } catch (_e) { /* private window / blocked storage: keep the in-dialog state only */ }
+    }
+
+    /** Open a just-created task note (`{ file?, path }` from _create). Never throws. */
+    async _openCreated(app, res) {
+        try {
+            const file = (res && res.file) || (app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                ? app.vault.getAbstractFileByPath(res.path) : null);
+            if (file && app.workspace && typeof app.workspace.getLeaf === 'function') {
+                await app.workspace.getLeaf(false).openFile(file);
+            } else if (res && res.path && app.workspace && typeof app.workspace.openLinkText === 'function') {
+                await app.workspace.openLinkText(res.path, '', false);
+            }
+        } catch (_e) { /* the task is saved; opening it is best-effort */ }
+    }
+
+    /** Inject (or refresh) the dialog stylesheet once per document head. */
+    static _injectDialogCss(doc) {
+        try {
+            const head = doc && doc.head;
+            if (!head || typeof doc.createElement !== 'function') return;
+            const ID = 'sauce-task-dialog-css';
+            let el = Array.from(head.children || []).find((c) => c && c.id === ID) || null;
+            if (!el) {
+                el = doc.createElement('style');
+                el.id = ID;
+                head.appendChild(el);
+            }
+            if (el.textContent !== TaskDialog._DIALOG_CSS) el.textContent = TaskDialog._DIALOG_CSS;
+        } catch (_e) { /* unstyled is still usable */ }
+    }
+
+    /**
+     * Two-column dialog stylesheet. Columns ≥ 720px, stacked below; the body
+     * scrolls inside the modal while the header and footer stay put. Obsidian
+     * CSS variables only, so it follows the active theme.
+     */
+    static get _DIALOG_CSS() {
+        return [
+            '.sauce-modal.sauce-task-dialog { position: relative; width: min(100%, 900px); max-height: min(92vh, 720px); padding: 0; display: flex; flex-direction: column; overflow: hidden; }',
+            '.sauce-task-dialog > .sauce-modal-title { margin: 0; padding: 16px 56px 14px 20px; border-bottom: 1px solid var(--background-modifier-border); }',
+            '.sauce-task-dialog > .sauce-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }',
+            '.sauce-task-dialog > .sauce-modal-footer { flex: 0 0 auto; margin: 0; padding: 12px 20px; border-top: 1px solid var(--background-modifier-border); justify-content: space-between; align-items: center; }',
+            '.sauce-task-dialog button.sauce-task-dialog-close { position: absolute; top: 10px; right: 12px; width: 32px; height: 32px; padding: 0; border: none; border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-muted); font-size: 14px; cursor: pointer; }',
+            '.sauce-task-dialog button.sauce-task-dialog-close:hover { background: var(--background-modifier-hover); color: var(--text-normal); }',
+            '.sauce-task-dialog-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); min-height: 100%; }',
+            '.sauce-task-dialog-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px 20px; }',
+            '.sauce-task-dialog-right { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding: 18px 20px; background: var(--background-secondary); border-left: 1px solid var(--background-modifier-border); }',
+            '.sauce-task-dialog input.sauce-task-title { width: 100%; box-sizing: border-box; padding: 6px 0; border: none; border-bottom: 1px solid var(--background-modifier-border); border-radius: 0; background: transparent; box-shadow: none; color: var(--text-normal); font-size: 1.4em; font-weight: 600; }',
+            '.sauce-task-dialog input.sauce-task-title:focus { border-bottom-color: var(--interactive-accent); box-shadow: none; }',
+            '.sauce-task-hint { font-size: var(--font-ui-smaller, 12px); color: var(--text-faint); }',
+            '.sauce-task-dialog textarea.sauce-task-notes { flex: 1 1 auto; width: 100%; min-height: 160px; box-sizing: border-box; padding: 8px 10px; resize: vertical; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 6px); color: var(--text-normal); font-size: 13px; line-height: 1.5; }',
+            '.sauce-task-link-chips, .sauce-task-quiet-row, .sauce-task-pill-row { display: flex; flex-wrap: wrap; gap: 6px; }',
+            '.sauce-task-link-chip, .sauce-task-parent { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; box-sizing: border-box; padding: 3px 6px 3px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: var(--background-secondary); color: var(--text-normal); font-size: 12px; line-height: 1.3; align-self: flex-start; }',
+            '.sauce-task-parent-label { color: var(--text-muted); }',
+            '.sauce-task-dialog button.sauce-task-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 999px; background: transparent; box-shadow: none; color: var(--text-muted); font-size: 11px; cursor: pointer; }',
+            '.sauce-task-dialog button.sauce-task-chip-x:hover { background: var(--background-modifier-hover); color: var(--text-error); }',
+            '.sauce-task-dialog button.sauce-task-quiet { min-height: 28px; padding: 4px 10px; border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-muted); font-size: 12px; cursor: pointer; }',
+            '.sauce-task-dialog button.sauce-task-quiet:hover { background: var(--background-modifier-hover); color: var(--text-normal); }',
+            '.sauce-task-picker-results { margin-top: 6px; max-height: 160px; overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 6px); }',
+            '.sauce-task-picker-row { padding: 6px 8px; font-size: 13px; cursor: pointer; color: var(--text-normal); }',
+            '.sauce-task-picker-row:hover { background: var(--background-modifier-hover); }',
+            '.sauce-task-picker-empty { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }',
+            '.sauce-task-section-label { margin-bottom: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }',
+            '.sauce-task-dialog button.sauce-task-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: var(--background-primary); box-shadow: none; color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer; }',
+            '.sauce-task-dialog button.sauce-task-pill:hover { color: var(--text-normal); border-color: var(--interactive-accent); }',
+            '.sauce-task-dialog button.sauce-task-pill.is-selected { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); font-weight: 600; }',
+            '.sauce-task-prio-swatch { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }',
+            '.sauce-task-prio[data-prio="low"] .sauce-task-prio-swatch { background: var(--color-blue); }',
+            '.sauce-task-prio[data-prio="medium"] .sauce-task-prio-swatch { background: var(--color-yellow); }',
+            '.sauce-task-prio[data-prio="high"] .sauce-task-prio-swatch { background: var(--color-orange); }',
+            '.sauce-task-prio[data-prio="highest"] .sauce-task-prio-swatch { background: var(--color-red); }',
+            '.sauce-task-project-chips { margin-top: 8px; }',
+            '.sauce-task-caption { margin-top: 6px; font-size: 11px; color: var(--text-faint); }',
+            '.sauce-task-repeat-box { margin-top: 8px; }',
+            '.sauce-task-footer-left, .sauce-task-footer-right { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }',
+            '.sauce-task-footer-right { margin-left: auto; justify-content: flex-end; }',
+            '.sauce-task-open-after-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }',
+            '.sauce-task-kbd { margin-left: 6px; opacity: 0.75; font-size: 11px; }',
+            '@media (max-width: 720px) {',
+            '  .sauce-task-dialog-cols { grid-template-columns: 1fr; }',
+            '  .sauce-task-dialog-right { border-left: none; border-top: 1px solid var(--background-modifier-border); }',
+            '  .sauce-modal.sauce-task-dialog { max-height: calc(100vh - 32px); }',
+            '}',
+            '',
+        ].join('\n');
     }
 
     // Build a TaskEntity-shaped payload from the current form state.
@@ -1197,6 +1806,7 @@ class TaskDialog {
         };
         const name = (s.projectName || '').trim();
         if (name) payload.project = { name, slug: TaskDialog._slugify(name) };
+        if (s.parentTask != null) payload.parent_task = String(s.parentTask).trim();
         const tripName = (s.tripName || '').trim();
         const tripSlug = (s.tripSlug || '').trim();
         if (tripName || tripSlug) payload.trip = { name: tripName || tripSlug, slug: tripSlug || TaskDialog._slugify(tripName) };
@@ -1390,7 +2000,9 @@ class TaskDialog {
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.title = payload.title;
+            const prevDue = fm.due == null ? '' : String(fm.due);
             fm.due = payload.due || '';
+            if (prevDue !== String(fm.due)) fm.rank = '';
             fm.priority = payload.priority || '';
             fm.recurrence = payload.recurrence || '';
             if (payload.project && payload.project.name) {
@@ -1414,6 +2026,12 @@ class TaskDialog {
             // preserving the one-file-write invariant. Always set (even to []) so
             // removing every chip persists as an empty list, not a stale value.
             fm.links = Array.isArray(payload.links) ? payload.links.slice() : [];
+            // Subtask of… — written only when the dialog carried a parent and
+            // it differs, so a save never adds an empty key to an older note.
+            if (Object.prototype.hasOwnProperty.call(payload, 'parent_task')
+                && String(fm.parent_task == null ? '' : fm.parent_task) !== String(payload.parent_task || '')) {
+                fm.parent_task = payload.parent_task || '';
+            }
         });
         // Persist the Notes body back into THIS file only. Prefer vault.process
         // (atomic read-modify-write of the single file); fall back to read+modify.
@@ -1491,6 +2109,105 @@ class TaskDialog {
     }
 
     /**
+     * REOPEN — bring a done task back: status=open, completed_at cleared, then
+     * move spice/tasks/_done/<f> back to spice/tasks/<unique f>. Both steps run
+     * inside ONE RenderSafe.mutate write. Refuses a path that is not under
+     * _done/. At most one reopen per path is in flight; a duplicate resolves
+     * { ok: false, reason: 'in-flight' } without writing. Never throws.
+     * Resolves { ok: true, path } | { ok: false, reason }.
+     */
+    async reopen(path) {
+        const src = String(path == null ? '' : path);
+        const DONE = 'spice/tasks/_done/';
+        if (src.indexOf(DONE) !== 0 || src.length === DONE.length) return { ok: false, reason: 'not-done' };
+        const RS = TaskDialog._renderSafe();
+        if (!RS || typeof RS.mutate !== 'function') return { ok: false, reason: 'render-safe-unavailable' };
+        const inFlight = TaskDialog._reopenInFlight || (TaskDialog._reopenInFlight = new Set());
+        if (inFlight.has(src)) return { ok: false, reason: 'in-flight' };
+        inFlight.add(src);
+        try {
+            const { app, file } = this._resolveFile(src);
+            if (!app) return { ok: false, reason: 'app unavailable' };
+            if (!file) return { ok: false, reason: 'task file not found' };
+            const TE = TaskDialog._taskEntity();
+            if (!TE || typeof TE._uniqueName !== 'function') return { ok: false, reason: 'task-entity-unavailable' };
+            const exists = (p) => !!(app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                && app.vault.getAbstractFileByPath(p));
+            const target = 'spice/tasks/' + TE._uniqueName(src.slice(DONE.length), exists);
+            let reopened = false;
+            let prior = null;
+            const result = await RS.mutate({
+                app,
+                path: src,
+                failureMessage: 'Could not reopen task',
+                write: async () => {
+                    await app.fileManager.processFrontMatter(file, (fm) => {
+                        prior = { status: fm.status, completed_at: fm.completed_at };
+                        fm.status = 'open';
+                        fm.completed_at = '';
+                    });
+                    reopened = true;
+                    await app.fileManager.renameFile(file, target);
+                    return target;
+                },
+                revert: async () => {
+                    if (!reopened || !prior || file.path === target) return;
+                    await app.fileManager.processFrontMatter(file, (fm) => {
+                        fm.status = prior.status;
+                        fm.completed_at = prior.completed_at;
+                    });
+                },
+            });
+            if (!result.ok) {
+                return { ok: false, reason: (result.error && (result.error.message || String(result.error))) || 'write failed' };
+            }
+            return { ok: true, path: target };
+        } catch (e) {
+            return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
+        } finally {
+            inFlight.delete(src);
+        }
+    }
+
+    /**
+     * SET FIELDS — write exactly `fields` into one task's frontmatter through a
+     * RenderSafe.mutate write (rank / priority / project from bulk and drag
+     * gestures). When `fields` carries `due` and not `rank`, `rank` is cleared in
+     * the same write: a date move invalidates a manual position. Never throws.
+     * Resolves { ok: true } | { ok: false, reason }.
+     */
+    async setFields(path, fields) {
+        try {
+            if (!fields || typeof fields !== 'object' || Array.isArray(fields)
+                || Object.keys(fields).length === 0) return { ok: false, reason: 'no-fields' };
+            const RS = TaskDialog._renderSafe();
+            if (!RS || typeof RS.mutate !== 'function') return { ok: false, reason: 'render-safe-unavailable' };
+            const { app, file } = this._resolveFile(path);
+            if (!app) return { ok: false, reason: 'app unavailable' };
+            if (!file) return { ok: false, reason: 'task file not found' };
+            const patch = Object.assign({}, fields);
+            if (Object.prototype.hasOwnProperty.call(patch, 'due')
+                && !Object.prototype.hasOwnProperty.call(patch, 'rank')) patch.rank = '';
+            const result = await RS.mutate({
+                app,
+                path: String(path),
+                failureMessage: 'Could not update task',
+                write: async () => {
+                    await app.fileManager.processFrontMatter(file, (fm) => {
+                        for (const key of Object.keys(patch)) fm[key] = patch[key];
+                    });
+                },
+            });
+            if (!result.ok) {
+                return { ok: false, reason: (result.error && (result.error.message || String(result.error))) || 'write failed' };
+            }
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
+        }
+    }
+
+    /**
      * DELETE (recoverable) — set status=deleted (processFrontMatter, this file
      * only), then move into spice/tasks/_trash/ (renameFile). No hard delete; the
      * note is recoverable. No other note read.
@@ -1515,6 +2232,15 @@ class TaskDialog {
                 && app.vault.getAbstractFileByPath(folder)) return;
             await app.vault.createFolder(folder);
         } catch (_e) { /* already exists — createFolder throws in that case */ }
+    }
+
+    /** Reach the stored RenderSafe instance (customJS), or null on cold-load. */
+    static _renderSafe() {
+        try {
+            return (typeof window !== 'undefined' && window.customJS && window.customJS.RenderSafe) || null;
+        } catch (_e) {
+            return null;
+        }
     }
 
     /** Reach the stored TaskEntity instance (customJS), or null on cold-load. */
