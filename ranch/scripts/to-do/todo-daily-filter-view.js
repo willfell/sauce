@@ -15,7 +15,11 @@
  * run one task at a time through the row write paths (reschedule, setFields,
  * markDone). On the Today tab with Smart / My order and no grouping, rows can
  * be reordered (drag, or ⋯ Move up / down), which renumbers `rank`. Any row
- * can be dropped on a week-strip day to reschedule it there.
+ * can be dropped on a week-strip day to reschedule it there. Clicking a
+ * week-strip day shows only the open tasks due that day (plus what was done
+ * that day); a day pill leads the tab row while it is shown, and its ×, the
+ * same day again or any tab goes back. The day is held in memory, never in
+ * the persisted prefs.
  *
  * BARE CLASS ONLY. CustomJS evaluates this file as one expression.
  */
@@ -147,6 +151,13 @@ class ToDoDailyFilterView {
             default:
                 return open.filter((task) => TE.bucketOf(task, todayStr) === 'today');
         }
+    }
+
+    /** Open tasks due on exactly `date`, in input order. No date selects nothing. */
+    static selectDay(tasks, date) {
+        const day = String(date == null ? '' : date);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+        return ToDoDailyFilterView._openTasks(tasks).filter((task) => ToDoDailyFilterView._dueOf(task) === day);
     }
 
     /** Done tasks completed on `todayStr`, latest completion first. */
@@ -397,8 +408,9 @@ class ToDoDailyFilterView {
 
     /**
      * Per-day gesture state shared by every render of the view: Select mode,
-     * the selection, in-flight locks ('bulk', 'reorder') and the live render.
-     * Other days' entries are dropped once they hold no lock.
+     * the selection, the week-strip day being shown (`day`, a YYYY-MM-DD or
+     * null), in-flight locks ('bulk', 'reorder') and the live render. Other
+     * days' entries are dropped once they hold no lock.
      */
     static _dayState(todayStr) {
         const key = String(todayStr || '');
@@ -406,7 +418,7 @@ class ToDoDailyFilterView {
         for (const [day, entry] of all) {
             if (day !== key && !entry.locks.size) all.delete(day);
         }
-        if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null });
+        if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null, day: null });
         return all.get(key);
     }
 
@@ -501,12 +513,41 @@ class ToDoDailyFilterView {
         const setPill = (button, active) => {
             button.className = `sauce-pill-toggle${active ? ' is-active' : ''}`;
         };
+        // The day pill leads the tab row while a week-strip day is shown: the
+        // active pill names the day, and its × goes back to the tab underneath.
+        let dayPill = null;
+        let dayPillName = null;
+        const leaveDay = () => { state.day = null; paint(); };
+        const updateDayPill = () => {
+            if (!state.day) {
+                if (dayPill) dayPill.remove();
+                dayPill = null;
+                dayPillName = null;
+                return;
+            }
+            if (!dayPill) {
+                dayPill = tabGroup.createEl('button', { cls: 'sauce-pill-toggle is-active sauce-todo-day-pill' });
+                dayPill.setAttribute('type', 'button');
+                dayPill.setAttribute('title', 'Show all tasks');
+                dayPillName = dayPill.createEl('span', { cls: 'sauce-todo-day-pill-label' });
+                const x = dayPill.createEl('span', { cls: 'sauce-todo-day-pill-x', text: '×' });
+                x.setAttribute('aria-hidden', 'true');
+                x.style.cssText = 'margin-left:6px; font-size:1.15em; line-height:1; opacity:0.8;';
+                dayPill.addEventListener('click', onClick(leaveDay));
+                tabGroup.insertBefore(dayPill, tabGroup.firstChild);
+            }
+            const text = View._dayLabel(state.day);
+            dayPillName.textContent = text;
+            dayPill.setAttribute('aria-label', `Showing ${text}. Show all tasks`);
+        };
         const updateControls = () => {
+            updateDayPill();
             for (const key of View.TABS) {
                 const button = tabButtons[key];
+                const active = !state.day && prefs.tab === key;
                 button.textContent = tabText(key);
-                setPill(button, prefs.tab === key);
-                button.setAttribute('aria-selected', prefs.tab === key ? 'true' : 'false');
+                setPill(button, active);
+                button.setAttribute('aria-selected', active ? 'true' : 'false');
             }
             setPill(sortButton, prefs.sort !== 'smart');
             setPill(groupButton, prefs.group !== 'none');
@@ -533,7 +574,6 @@ class ToDoDailyFilterView {
             return carried || dragPath;
         };
         let dragPath = null;
-        let focusDay = null;
         let manualOrder = [];
         const rowByPath = new Map();
 
@@ -570,7 +610,7 @@ class ToDoDailyFilterView {
             try { if (TD && typeof TD.donePath === 'function') task.path = TD.donePath(task.path) || task.path; }
             catch (_e) { /* keep the open path */ }
         };
-        const canReorder = () => prefs.tab === 'today'
+        const canReorder = () => !state.day && prefs.tab === 'today'
             && (prefs.sort === 'smart' || prefs.sort === 'manual')
             && prefs.group === 'none'
             && !!TD && typeof TD.setFields === 'function'
@@ -703,6 +743,12 @@ class ToDoDailyFilterView {
         };
         const paintList = () => {
             clear(listHost);
+            if (state.day) {
+                const rows = View.selectDay(tasks, state.day);
+                if (!rows.length) { paintEmpty(`Nothing due ${View._dayLabel(state.day)}.`); return; }
+                paintRows(listHost, rows, false);
+                return;
+            }
             if (prefs.tab === 'overdue') {
                 const split = View.splitOverdue(tasks, todayStr, TE);
                 if (!split.overdue.length && !split.stale.length) { paintEmpty(); return; }
@@ -720,9 +766,9 @@ class ToDoDailyFilterView {
             if (!rows.length) { paintEmpty(); return; }
             paintRows(listHost, rows, false);
         };
-        const paintEmpty = () => {
+        const paintEmpty = (text) => {
             const list = makeList(listHost);
-            const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: 'No tasks in this view.' });
+            const empty = list.createEl('li', { cls: 'sauce-todo-filter-empty', text: text || 'No tasks in this view.' });
             empty.style.cssText = 'color:var(--text-muted); font-size:0.85em; font-style:italic; padding:6px 0;';
         };
 
@@ -746,10 +792,12 @@ class ToDoDailyFilterView {
         };
         const paintDone = () => {
             clear(doneHost);
-            if (prefs.tab !== 'today' || typeof TTL.renderDoneRow !== 'function') return;
-            const done = View.doneToday(tasks, todayStr, TE, TTL);
+            if (typeof TTL.renderDoneRow !== 'function') return;
+            if (!state.day && prefs.tab !== 'today') return;
+            const day = state.day || todayStr;
+            const done = View.doneToday(tasks, day, TE, TTL);
             if (!done.length) return;
-            label(doneHost, `Done today · ${done.length}`);
+            label(doneHost, `Done ${day === todayStr ? 'today' : View._dayLabel(day)} · ${done.length}`);
             for (const task of done) {
                 TTL.renderDoneRow(doneHost, task, { TD, notice: View._notice, onUndo: reopen });
             }
@@ -763,22 +811,29 @@ class ToDoDailyFilterView {
             strip.setAttribute('role', 'group');
             strip.setAttribute('aria-label', 'This week');
             for (const cell of cells) {
+                const picked = state.day === cell.date;
                 const button = strip.createEl('button', {
-                    cls: `sauce-todo-week-cell${cell.isToday ? ' is-today' : ''}`,
+                    cls: `sauce-todo-week-cell${cell.isToday ? ' is-today' : ''}${picked ? ' is-selected' : ''}`,
                 });
                 button.setAttribute('type', 'button');
                 button.setAttribute('aria-label', `${cell.label}: ${cell.count} open`);
+                button.setAttribute('aria-pressed', picked ? 'true' : 'false');
                 if (cell.isToday) button.setAttribute('aria-current', 'date');
                 button.dataset.date = cell.date;
-                const idle = `display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:100%; min-width:0; height:auto; padding:6px 4px; box-sizing:border-box; border-radius:var(--radius-m, 6px); border:1px solid ${cell.isToday ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}; color:${cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)'}; background:transparent; cursor:pointer;`;
-                button.style.cssText = idle;
+                // A picked day wears the active pill's tint, border and glow,
+                // so it reads as the same "selected" as the day pill it pairs with.
+                const rest = picked ? 'color-mix(in srgb, var(--interactive-accent) 14%, transparent)' : 'transparent';
+                const border = picked || cell.isToday ? 'var(--interactive-accent)' : 'var(--background-modifier-border)';
+                const ink = picked || cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)';
+                const glow = picked ? ' box-shadow:0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent);' : '';
+                button.style.cssText = `display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:100%; min-width:0; height:auto; padding:6px 4px; box-sizing:border-box; border-radius:var(--radius-m, 6px); border:1px solid ${border}; color:${ink}; background:${rest};${glow} cursor:pointer;`;
                 const name = button.createEl('span', { cls: 'sauce-todo-week-label', text: cell.label });
                 name.style.cssText = 'font-size:0.8em; font-weight:600; max-width:100%; white-space:normal; text-align:center; line-height:1.2;';
                 const count = button.createEl('span', { cls: 'sauce-todo-week-count', text: String(cell.count) });
-                count.style.cssText = `font-size:0.75em; color:${cell.count ? 'var(--text-muted)' : 'var(--text-faint)'}; font-variant-numeric:tabular-nums;`;
+                count.style.cssText = `font-size:0.75em; color:${picked ? 'var(--text-accent)' : cell.count ? 'var(--text-muted)' : 'var(--text-faint)'}; font-variant-numeric:tabular-nums;`;
                 button.addEventListener('click', onClick(() => {
-                    focusDay = cell.date;
-                    commit({ tab: 'week' });
+                    state.day = picked ? null : cell.date;
+                    paint();
                 }));
                 if (isMobile) continue;
                 button.addEventListener('dragover', (event) => {
@@ -789,10 +844,10 @@ class ToDoDailyFilterView {
                     } catch (_e) { /* the drop still works without dropEffect */ }
                     button.style.background = 'var(--background-modifier-hover)';
                 });
-                button.addEventListener('dragleave', () => { button.style.background = 'transparent'; });
+                button.addEventListener('dragleave', () => { button.style.background = rest; });
                 button.addEventListener('drop', (event) => {
                     try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
-                    button.style.background = 'transparent';
+                    button.style.background = rest;
                     const from = droppedPath(event);
                     dragPath = null;
                     if (!from) return undefined;
@@ -896,19 +951,6 @@ class ToDoDailyFilterView {
             action('Mark done', () => bulkDone());
         };
 
-        const scrollToFocusDay = () => {
-            if (!focusDay) return;
-            const day = focusDay;
-            focusDay = null;
-            for (const [taskPath, row] of rowByPath) {
-                const task = taskByPath(taskPath);
-                if (!task || View._dueOf(task) !== day) continue;
-                try { if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' }); }
-                catch (_e) { /* scrolling is a convenience */ }
-                return;
-            }
-        };
-
         const paint = () => {
             try {
                 rowByPath.clear();
@@ -918,7 +960,6 @@ class ToDoDailyFilterView {
                 paintList();
                 paintDone();
                 paintBulk();
-                scrollToFocusDay();
             } catch (e) {
                 try { console.warn('[ToDoDailyFilterView] render failed', e); } catch (_e) { /* no console */ }
             }
@@ -955,7 +996,9 @@ class ToDoDailyFilterView {
             button.setAttribute('type', 'button');
             button.setAttribute('role', 'tab');
             button.addEventListener('click', onClick(() => {
-                if (prefs.tab === key) return;
+                const wasDay = !!state.day;
+                state.day = null;
+                if (prefs.tab === key) { if (wasDay) paint(); return; }
                 commit({ tab: key });
             }));
         }
