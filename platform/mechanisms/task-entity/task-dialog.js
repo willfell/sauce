@@ -90,7 +90,7 @@ class TaskDialog {
 
     /**
      * Seed a create form from the surface that opened the dialog.
-     *   daily   → { due: today, source: "daily" }
+     *   daily / home → { source: "daily" }              (NO due: When starts on No date)
      *   project → { project, source: "project" }        (NO due)
      *   meeting → { source_note, project, source: "meeting" }
      *   manual / absent → { source: "manual" }
@@ -102,7 +102,7 @@ class TaskDialog {
         switch (o.surface) {
             case 'daily':
             case 'home':
-                return { due: o.today || '', source: 'daily' };
+                return { source: 'daily' };
             case 'project':
                 return { project: o.project, source: 'project' };
             case 'trip':
@@ -802,9 +802,7 @@ class TaskDialog {
         // below takes todayStr.
         const todayStr = TaskDialog._todayStr(opts.today);
         const surface = opts.surface;
-        const datedSurface = surface === 'daily' || surface === 'home';
-        const defaults = editPath ? {} : TaskDialog.defaultsForSurface(
-            datedSurface ? Object.assign({}, opts, { today: opts.today || todayStr }) : opts);
+        const defaults = editPath ? {} : TaskDialog.defaultsForSurface(opts);
         let createDue = defaults.due || '';
         if (!editPath && !createDue && opts.today && (!surface || surface === 'manual')) createDue = String(opts.today);
 

@@ -155,12 +155,6 @@ ok('RD-E-SC-SAFE', () => {
   }
 });
 
-ok('RD-E-NOTESBYTES', () => {
-  const chrome = TE._chromeBody().length;
-  assert(TE.notesBytes(400 + chrome + 5000, 400) === 5000);
-  assert(TE.notesBytes(100, 400) === 0);
-});
-
 ok('RD-E-RENUMBER renumber returns only the ranks that change, through the instance', () => {
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const out = TE.renumber(['a', 'b', 'c'], { a: 1, c: 2 });

@@ -4,13 +4,10 @@
  * Renders the persistent `spice/home/Home.md` page in Reading view:
  *   1. a GREETING header  — "Good morning" / "afternoon" / "evening" (by hour)
  *                            + a human date ("Thursday, Jul 2, 2026 · Today"),
- *   2. a GLANCE line      — a rolled-up count line ("N today · M overdue ·
- *                            K meetings · J done"; zeros hidden; all-zero →
- *                            "Clear day — nothing scheduled"),
- *   3. header ACTIONS      — a "New task" button (opens the full task dialog)
- *                            and a "Capture" dropdown: Meeting, Sticky Note,
- *                            Article, Journal, Trip,
- *   4. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
+ *   2. a quick-add "+"     — a dropdown whose first entry, "New task", opens
+ *                            the full task dialog, followed by Meeting, Sticky
+ *                            Note, Article, Journal, Trip,
+ *   3. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
  *                            date, unchanged).
@@ -39,7 +36,6 @@
  *   SpaceHome._greeting(hour)          → "Good morning" | "Good afternoon" | "Good evening"
  *   SpaceHome._humanDate(iso, todayIso)→ "Thursday, Jul 2, 2026 · Today" (pure day-math)
  *   SpaceHome._captureSpec()           → [{ key, label, icon }, …] (the capture buttons)
- *   SpaceHome._glanceChips(counts)     → { empty, text } | { empty:false, chips:[{n,label,cls}] }
  */
 class SpaceHome {
 
@@ -198,9 +194,9 @@ class SpaceHome {
    * The dispatch per key is wired in render() (kept out of the spec so the spec
    * stays pure + Node-testable).
    *
-   * NOTE: there is no `todo` entry — task creation is the header's separate
-   * "New task" button (full task dialog). This spec is the Capture dropdown:
-   * Meeting, Sticky Note, Article, Journal, Trip.
+   * NOTE: there is no `todo` entry — "New task" is built separately in render()
+   * as the dropdown's first item (it opens the full task dialog). This spec is
+   * the rest of the "+" dropdown: Meeting, Sticky Note, Article, Journal, Trip.
    */
   static _captureSpec() {
     const svg = (inner) =>
@@ -212,101 +208,6 @@ class SpaceHome {
       { key: "journal", label: "Journal", icon: svg(`<path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M16 2v20"/>`) },
       { key: "trip", label: "Trip", icon: svg(`<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>`) },
     ];
-  }
-
-  /**
-   * Pure chip descriptor for the glance line. Input: the { today, overdue, done,
-   * meetings } roll-up (each coerced to a non-negative int, default 0). Output:
-   *   - every count 0 → { empty: true, text: "Clear day — nothing scheduled" }
-   *   - else → { empty: false, chips: [{ n, label, cls }, …] } holding ONLY the
-   *     counts > 0, in fixed order today / overdue / meetings / done:
-   *       today    → label "today"                     (no cls)
-   *       overdue  → label "overdue", cls "sauce-section-overdue-pill" (red)
-   *       meetings → label "meeting" (n===1) | "meetings"
-   *       done     → label "done"
-   * PURE + Node-testable — render() builds the DOM from this descriptor. `cls` is
-   * "" when there's no special class so the caller can append unconditionally.
-   */
-  static _glanceChips(counts) {
-    const c = counts || {};
-    const toInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
-    const today = toInt(c.today);
-    const overdue = toInt(c.overdue);
-    const meetings = toInt(c.meetings);
-    const done = toInt(c.done);
-    const backlog = toInt(c.backlog);
-    if (!today && !overdue && !meetings && !done && !backlog) {
-      return { empty: true };
-    }
-    const chips = [];
-    if (today > 0)    chips.push({ n: today,    label: "today",                              cls: "" });
-    if (overdue > 0)  chips.push({ n: overdue,  label: "overdue",                            cls: "sauce-section-overdue-pill" });
-    if (meetings > 0) chips.push({ n: meetings, label: meetings === 1 ? "meeting" : "meetings", cls: "" });
-    if (done > 0)     chips.push({ n: done,     label: "done",                               cls: "" });
-    if (backlog > 0)  chips.push({ n: backlog,  label: "backlog",                            cls: "sauce-home-glance-link sauce-home-glance-backlog", action: "backlog" });
-    return { empty: false, chips };
-  }
-
-  /**
-   * Count of open backlog task notes (TaskEntity.isBacklog) from ONE
-   * dv.pages('"spice/tasks"') pass; _done/ and _trash/ archives and non-task
-   * notes are skipped. Cold load (no TaskEntity) or a throwing dv → 0.
-   */
-  static _countBacklog(dv, TE) {
-    try {
-      if (!dv || typeof dv.pages !== "function") return 0;
-      if (!TE || typeof TE.parseNote !== "function" || typeof TE.isBacklog !== "function") return 0;
-      const r = dv.pages('"spice/tasks"');
-      if (!r) return 0;
-      const pages = typeof r.array === "function" ? r.array() : Array.from(r);
-      let n = 0;
-      for (const p of pages) {
-        if (!p || p.type !== "task" || p.status !== "open") continue;
-        const path = p.file && p.file.path;
-        if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
-        if (TE.isBacklog(TE.parseNote(p))) n += 1;
-      }
-      return n;
-    } catch (_e) {
-      return 0;
-    }
-  }
-
-  /**
-   * Backlog chip click: persist tab:'backlog' into the shared to-do filter
-   * prefs (read-merge-write, so sort/group survive), then open today's To-Do
-   * note via SpaceDailyDashboard._openTodayToDo (the daily dashboard's own
-   * open-or-create helper). Every step is guarded; storage failure never
-   * blocks navigation.
-   */
-  static async _openBacklog(dv, today) {
-    const KEY = "sauce-todo-filter:prefs:v2";
-    try {
-      const ls = (typeof window !== "undefined" && window.localStorage)
-        || (typeof localStorage !== "undefined" && localStorage)
-        || null;
-      if (ls) {
-        let prefs = {};
-        try {
-          const raw = ls.getItem(KEY);
-          const parsed = raw ? JSON.parse(raw) : null;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prefs = parsed;
-        } catch (_e) { prefs = {}; }
-        prefs.tab = "backlog";
-        try { ls.setItem(KEY, JSON.stringify(prefs)); } catch (_e) {}
-      }
-    } catch (_e) { /* storage unavailable — navigate anyway */ }
-    try {
-      const cjs = (typeof customJS !== "undefined" && customJS)
-        || (typeof window !== "undefined" && window.customJS)
-        || null;
-      const sdd = cjs && cjs.SpaceDailyDashboard;
-      if (sdd && typeof sdd._openTodayToDo === "function") {
-        await sdd._openTodayToDo(today, { dv });
-      } else {
-        try { new Notice("Could not open today's To-Do."); } catch (_e) {}
-      }
-    } catch (_e) { /* never throw out of a click handler */ }
   }
 
   /**
@@ -404,8 +305,9 @@ class SpaceHome {
       }
     } catch (_e) { /* never throw */ }
 
-    // Glance counts — computed EARLY (before any DOM work) so the no-op-if-
-    // unchanged check below can short-circuit the whole rebuild. Counts route
+    // Task counts — not painted (the Tasks card already shows them); computed
+    // EARLY (before any DOM work) only as the no-op-if-unchanged signature so
+    // the check below can short-circuit the whole rebuild. Counts route
     // through SpaceDailyDashboard.computeCounts (the DRY seam), guarded so a
     // not-yet-registered dashboard/task-entity (cold load) yields zeros
     // instead of throwing.
@@ -420,7 +322,6 @@ class SpaceHome {
         counts = SDD.computeCounts(dv, today, TE) || counts;
       }
     } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
-    counts = Object.assign({}, counts, { backlog: SpaceHome._countBacklog(dv, TE) });
 
     // Surface-owned state survives CustomJS helper replacement and Dataview
     // re-execution because the container, rather than this render closure or
@@ -474,7 +375,7 @@ class SpaceHome {
           await dv.view("ranch/views/customjs-guard", {
             class: "SpaceDailyDashboard",
             guardReceipt: token.guardReceipt,
-            args: [{ asOf: today, live: true, mountReceipt: token.receipt }],
+            args: [{ asOf: today, live: true, compact: true, mountReceipt: token.receipt }],
           });
           if (dashboard.token === token) {
             const mountedNode = token.receipt.ok === true && children().includes(token.receipt.node)
@@ -511,9 +412,9 @@ class SpaceHome {
     // No-op-if-unchanged: a full teardown + rebuild is visually disruptive
     // (the reported "reloading every time" feel) and is wasted work whenever
     // NOTHING actually changed since the last render in THIS render() call —
-    // e.g. a re-invocation firing while the glance counts happen to be
+    // e.g. a re-invocation firing while the task counts happen to be
     // identical. Skipping also PRESERVES any in-progress state a rebuild would
-    // otherwise wipe (an open Capture menu). This does NOT (and cannot) cover
+    // otherwise wipe (an open "+" menu). This does NOT (and cannot) cover
     // Dataview's OWN periodic re-execution of the whole block, which clears
     // dv.container itself before calling render() again — this guard only
     // short-circuits redundant work WE would otherwise do within one still-
@@ -544,9 +445,9 @@ class SpaceHome {
 
     const home = dv.el("div", "", { cls: "sauce-home" });
 
-    // 1) Header row — the date (left) + "New task" / "Capture ▾" (right) ──────
+    // 1) Header row — the date (left) + the "+" quick-add (right) ────────────
     // Just the date now (no greeting): a clean, sharp header line with the accent
-    // tick. Captures live behind the quiet Capture button's dropdown.
+    // tick. New task and the other captures live behind the "+" dropdown.
     const head = home.createEl("div", { cls: "sauce-home-head" });
     const greeting = head.createEl("div", { cls: "sauce-home-greeting" });
     const sub = greeting.createEl("div", { cls: "sauce-home-greeting-date" });
@@ -586,35 +487,19 @@ class SpaceHome {
       } catch (_e) { /* never throw out of a click handler */ }
     };
 
-    // 1b) Header actions (right): "New task" (accent) opens the FULL task dialog
-    // in create mode, defaulting to Today; "Capture ▾" opens a compact dropdown
-    // of the other captures (Meeting / Sticky Note / Article / Journal / Trip).
-    // The menu is built now (hidden via CSS) and toggled by the Capture button.
+    // 1b) Quick-add "+" (right) → a compact dropdown. Its first entry, "New
+    // task", opens the FULL task dialog in create mode; the rest are the other
+    // captures (Meeting / Sticky Note / Article / Journal / Trip). The menu is
+    // built now (hidden via CSS) and toggled by the "+" (which rotates to "×").
     // Outside-click + Escape close it (guarded — no-op on a cold/stub document so
     // this never throws out of render).
     const actions = head.createEl("div", { cls: "sauce-home-actions" });
-    const newBtn = actions.createEl("button", { cls: "sauce-home-new-task" });
-    newBtn.setAttribute("type", "button");
-    newBtn.textContent = "New task";
-    newBtn.onclick = () => {
-      try {
-        const cjsNow = (typeof customJS !== "undefined" && customJS)
-          || (typeof window !== "undefined" && window.customJS)
-          || null;
-        const td = cjsNow && cjsNow.TaskDialog;
-        if (!td || typeof td.open !== "function") {
-          try { new Notice("Tasks are still loading — try again in a moment"); } catch (_e) {}
-          return;
-        }
-        td.open({ surface: "home", today });
-      } catch (_e) { /* never throw out of a click handler */ }
-    };
-
     const addWrap = actions.createEl("div", { cls: "sauce-home-add-wrap" });
-    const addBtn = addWrap.createEl("button", { cls: "sauce-home-capture-toggle" });
+    const addBtn = addWrap.createEl("button", { cls: "sauce-home-add" });
     addBtn.setAttribute("type", "button");
-    addBtn.setAttribute("aria-label", "Capture");
-    addBtn.textContent = "Capture";
+    addBtn.setAttribute("aria-label", "Quick add");
+    addBtn.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`;
     const menu = addWrap.createEl("div", { cls: "sauce-home-add-menu" });
 
     let menuOpen = false;
@@ -645,7 +530,33 @@ class SpaceHome {
       setMenu(!menuOpen);
     };
 
-    // Menu — the secondary capture actions: Meeting, Sticky Note, Article,
+    // Menu, first entry — "New task": a single button (the old title-only
+    // "Jot a task…" input is gone) that closes the menu and opens the full
+    // task dialog. The dialog's When defaults to No date.
+    const newTaskBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-task" });
+    newTaskBtn.setAttribute("type", "button");
+    newTaskBtn.dataset.captureKey = "task";
+    const newTaskIcon = newTaskBtn.createEl("span", { cls: "sauce-home-capture-icon" });
+    newTaskIcon.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`;
+    const newTaskLabel = newTaskBtn.createEl("span", { cls: "sauce-home-capture-label" });
+    newTaskLabel.textContent = "New task";
+    newTaskBtn.onclick = () => {
+      setMenu(false);
+      try {
+        const cjsNow = (typeof customJS !== "undefined" && customJS)
+          || (typeof window !== "undefined" && window.customJS)
+          || null;
+        const td = cjsNow && cjsNow.TaskDialog;
+        if (!td || typeof td.open !== "function") {
+          try { new Notice("Tasks are still loading — try again in a moment"); } catch (_e) {}
+          return;
+        }
+        td.open({ surface: "home", today });
+      } catch (_e) { /* never throw out of a click handler */ }
+    };
+
+    // Menu, remaining entries — the other capture actions: Meeting, Sticky Note, Article,
     // Journal, Trip. Article and Journal are gated on their entity-create
     // registry entry actually existing (reader-article / journal-entry) so the
     // button never appears for a vault that hasn't installed that blueprint.
@@ -699,39 +610,6 @@ class SpaceHome {
       mi.onclick = () => { SpaceHome._dispatch(item.key, dv, today); setMenu(false); };
     }
 
-    // 2) Glance counts ───────────────────────────────────────────────────────
-    // A rolled-up count line ("N today · M overdue · K meetings · J done").
-    // `counts` was already computed above (before the no-op-if-unchanged
-    // check); _glanceChips is the PURE descriptor, this block just paints it.
-    // Glance count line — rendered ONLY when there's something to show. An empty
-    // day shows NOTHING (no "Clear day" message, no empty element).
-    const g = SpaceHome._glanceChips(counts);
-    if (!g.empty) {
-      const glance = home.createEl("div", { cls: "sauce-home-glance" });
-      g.chips.forEach((chip, i) => {
-        if (i > 0) {
-          const sep = glance.createEl("span", { cls: "sauce-home-glance-sep" });
-          sep.textContent = "·";
-        }
-        const chipEl = glance.createEl("span", { cls: "sauce-home-glance-chip" + (chip.cls ? " " + chip.cls : "") });
-        if (chip.action === "backlog") {
-          chipEl.setAttribute("role", "button");
-          chipEl.setAttribute("tabindex", "0");
-          chipEl.onclick = () => SpaceHome._openBacklog(dv, today);
-          chipEl.addEventListener("keydown", (ev) => {
-            if (ev && (ev.key === "Enter" || ev.key === " ")) {
-              if (typeof ev.preventDefault === "function") ev.preventDefault();
-              SpaceHome._openBacklog(dv, today);
-            }
-          });
-        }
-        const nEl = chipEl.createEl("span", { cls: "sauce-home-glance-n" });
-        nEl.textContent = String(chip.n);
-        const lEl = chipEl.createEl("span", { cls: "sauce-home-glance-label" });
-        lEl.textContent = " " + chip.label;
-      });
-    }
-
     // 3) Daily dashboard (asOf = today) ───────────────────────────────────────
     // Injected via the DRY seam so Home always shows THIS calendar day's agenda,
     // independent of any note's filename date. Mounts AFTER greeting + capture so
@@ -751,7 +629,7 @@ class SpaceHome {
    *               — the exact same flow as the "New Trip" button on
    *               spice/trips/Trips.md (TripsChromeBar's "new-trip" dispatch)
    *   openDaily → app.commands.executeCommandById("daily-notes")
-   * (There is no `todo` key — task creation is the header's "New task" button,
+   * (There is no `todo` key — task creation is the "+" menu's "New task" item,
    * wired directly to TaskDialog.open in render.)
    */
   static _dispatch(key, dv, today) {

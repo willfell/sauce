@@ -359,34 +359,70 @@ process.exitCode = 1;
     assert(!findByCls(doneRow, 'sauce-task-action-nextmon') && !findByCls(doneRow, 'sauce-task-action-more'), 'done rows get no reschedule actions');
   });
 
-  await ok('RD-ROW-NOTES', async () => {
+  await ok('RD-ROW-NO-NOTES-SIZE a task with a large notes body shows no notes-size chip', async () => {
     const chromeLen = TaskEntity._chromeBody().length;
-    const mk = (stat, fmEnd) => ({
-      vault: { getAbstractFileByPath: (p) => (p === 'spice/tasks/row.md' ? (stat == null ? { path: p } : { path: p, stat: { size: stat } }) : null) },
-      metadataCache: { getFileCache: () => (fmEnd == null ? {} : { frontmatterPosition: { end: { offset: fmEnd } } }) },
+    rowEnv({ app: {
+      vault: { getAbstractFileByPath: (p) => ({ path: p, stat: { size: 400 + chromeLen + 48000 } }) },
+      metadataCache: { getFileCache: () => ({ frontmatterPosition: { end: { offset: 400 } } }) },
       workspace: { openLinkText() {} },
-    });
-    rowEnv({ app: mk(400 + chromeLen + 5600, 400) });
-    let row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    const chip = findByCls(row, 'sauce-task-notes');
-    assert(chip && chip.textContent === '5 KB notes', 'chip ' + (chip && chip.textContent));
-    rowEnv({ app: mk(400 + chromeLen + 300, 400) });
-    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    assert(findByCls(row, 'sauce-task-notes').textContent === 'notes', 'under 1 KB -> notes');
-    rowEnv({ app: mk(400 + chromeLen + 1023, 400) });
-    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    assert(findByCls(row, 'sauce-task-notes').textContent === 'notes', '1023 bytes -> notes');
-    rowEnv({ app: mk(400 + chromeLen + 1024, 400) });
-    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    assert(findByCls(row, 'sauce-task-notes').textContent === '1 KB notes', '1024 bytes -> 1 KB notes');
-    rowEnv({ app: mk(400 + chromeLen + 150, 400) });
-    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    assert(!findByCls(row, 'sauce-task-notes'), 'at or under 200 bytes -> no chip');
-    for (const [stat, fmEnd, label] of [[null, 400, 'stat missing'], [6000, null, 'cache missing'], [6000, 400, 'file missing']]) {
-      rowEnv({ app: label === 'file missing' ? { vault: { getAbstractFileByPath: () => null }, metadataCache: {}, workspace: {} } : mk(stat, fmEnd) });
-      row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-      assert(!findByCls(row, 'sauce-task-notes'), label + ' -> no chip');
+    } });
+    const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ project: '[[Finance]]', priority: 'high' }), null);
+    assert(!findByCls(row, 'sauce-task-notes'), 'no sauce-task-notes chip');
+    const texts = [];
+    const walk = (n) => { if (!n) return; if (n.textContent && !(n.children && n.children.length)) texts.push(String(n.textContent)); for (const c of (n.children || [])) walk(c); };
+    walk(findByCls(row, 'sauce-task-today-chips'));
+    assert(!texts.some((t) => /\bKB\b|\bnotes\b/.test(t)), 'no chip mentions notes size: ' + JSON.stringify(texts));
+  });
+
+  await ok('RD-ROW-META-SLOTS project / priority / due sit in fixed-width right-aligned slots, empty or not', async () => {
+    rowEnv();
+    const W = TaskTodayList.constructor.META_SLOT_WIDTH;
+    const slotsOf = (row) => findByCls(row, 'sauce-task-today-chips').children;
+    const kindOf = (slot) => (String(slot.className).match(/\bis-(\w+)/) || [])[1];
+    const full = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ project: '[[Finance]]', priority: 'high' }), null);
+    const bare = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due: '' }), null);
+    for (const [label, row] of [['full', full], ['bare', bare]]) {
+      const slots = slotsOf(row);
+      assert(JSON.stringify(slots.map(kindOf)) === JSON.stringify(['extras', 'project', 'priority', 'due']), label + ' slot order: ' + JSON.stringify(slots.map(kindOf)));
+      for (const kind of ['project', 'priority', 'due']) {
+        const css = slots.find((s) => kindOf(s) === kind).style.cssText;
+        assert(css.includes('width: ' + W[kind] + ';'), label + ' ' + kind + ' slot fixed width: ' + css);
+        assert(/justify-content:\s*flex-end/.test(css), label + ' ' + kind + ' slot right-aligns its chip');
+      }
     }
+    const slot = (row, kind) => slotsOf(row).find((s) => kindOf(s) === kind);
+    assert(slot(full, 'project').children[0].textContent === 'Finance', 'project chip in project slot');
+    assert(slot(full, 'priority').children[0].textContent === 'high', 'priority chip in priority slot');
+    assert(slot(full, 'due').children[0].textContent === 'due: 2026-11-09', 'due chip in due slot');
+    assert(/text-overflow:\s*ellipsis/.test(slot(full, 'project').children[0].style.cssText), 'long project names ellipsize');
+    assert(slot(bare, 'project').children.length === 0 && slot(bare, 'due').children.length === 0, 'empty slots still render, holding the columns');
+  });
+
+  await ok('RD-ROW-LAYOUT a long title wraps in its own column; metadata stays on line one', async () => {
+    rowEnv();
+    const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ title: 'A very long task title that would once have pushed its metadata onto a second line', project: '[[Finance]]' }), null);
+    const group = findByCls(row, 'sauce-task-today-titlegroup');
+    assert(/flex:\s*1 1 0%/.test(group.style.cssText), 'title group has a zero flex basis: ' + group.style.cssText);
+    const title = findByCls(row, 'sauce-task-today-title');
+    assert(!/min-width:\s*8em/.test(title.style.cssText) && /min-width:\s*0/.test(title.style.cssText), 'no 8em title floor: ' + title.style.cssText);
+    const cluster = findByCls(row, 'sauce-task-today-right');
+    assert(/margin-left:\s*auto/.test(cluster.style.cssText) && /flex:\s*0 0 auto/.test(cluster.style.cssText), 'cluster hugs the right edge: ' + cluster.style.cssText);
+    assert(/flex-wrap:\s*nowrap/.test(findByCls(row, 'sauce-task-today-chips').style.cssText), 'chips never wrap among themselves');
+  });
+
+  await ok('RD-ROW-ACTIONS-CSS desktop actions overlay the right edge on hover; touch and narrow layouts stack', async () => {
+    const css = TaskTodayList.constructor._ROW_ACTIONS_CSS;
+    assert(/^\.sauce-task-today-row \.sauce-task-actions \{ position: absolute;[^}]*opacity: 0;/.test(css), 'desktop: absolute + hidden until hover');
+    assert(css.includes('.sauce-task-today-row:hover .sauce-task-actions, .sauce-task-today-row:focus-within .sauce-task-actions { opacity: 1; }'), 'hover / focus reveal');
+    assert(css.includes('.sauce-task-today-row:hover .sauce-task-meta-slot.is-priority, .sauce-task-today-row:focus-within .sauce-task-meta-slot.is-priority, .sauce-task-today-row:hover .sauce-task-meta-slot.is-due, .sauce-task-today-row:focus-within .sauce-task-meta-slot.is-due { visibility: hidden; }'),
+      'hover: the priority + due columns step aside for the overlaid actions');
+    assert(css.includes('.is-mobile .sauce-task-today-row .sauce-task-today-right { flex: 1 1 100% !important; flex-wrap: wrap; justify-content: flex-end;'), 'mobile: metadata + actions wrap, right-aligned');
+    assert(css.includes('.is-mobile .sauce-task-today-row .sauce-task-meta-slot { width: auto !important; visibility: visible !important; }'), 'mobile: slots never hide');
+    for (const scope of ['.is-mobile .sauce-task-today-row', '@media (hover: none) {', '@media (max-width: 560px) {']) {
+      assert(css.includes(scope), 'touch scope present: ' + scope);
+    }
+    assert(css.includes('.is-mobile .sauce-task-today-row .sauce-task-actions { position: static; opacity: 1;'), 'mobile: actions inline + visible');
+    assert(css.includes('.is-mobile .sauce-task-today-row .sauce-task-today-titlegroup { flex-basis: 100% !important; }'), 'mobile: title takes its own line');
   });
 
   await ok('RD-ROW-PRIO', async () => {

@@ -983,7 +983,7 @@ function reloadWithDom() {
 
     ok('RD-DH-HOME same as daily',
         JSON.stringify(TD.defaultsForSurface({ surface: 'home', today: TODAY }))
-        === JSON.stringify({ due: TODAY, source: 'daily' })
+        === JSON.stringify({ source: 'daily' })
         && JSON.stringify(TD.defaultsForSurface({ surface: 'home', today: TODAY }))
         === JSON.stringify(TD.defaultsForSurface({ surface: 'daily', today: TODAY })));
 })();
@@ -1187,20 +1187,32 @@ function reloadWithDom() {
         must(quiet.includes('＋ Link note') && quiet.includes('＋ Web link') && quiet.includes('Subtask of…'), 'quiet buttons: ' + JSON.stringify(quiet));
     });
 
-    rdCase('RD-D-WHEN-DEFAULT daily/home/manual-with-today select Today; project selects No date', async () => {
-        for (const opts of [{ surface: 'daily', today: TODAY }, { surface: 'home', today: TODAY }, { surface: 'manual', today: TODAY }]) {
+    rdCase('RD-D-WHEN-DEFAULT daily/home select No date; manual-with-today selects Today; project selects No date', async () => {
+        for (const opts of [{ surface: 'daily', today: TODAY }, { surface: 'home', today: TODAY }, { surface: 'daily' }]) {
             const env = rdEnv().open(opts);
-            must(selected(env.when('today')), opts.surface + ': today selected');
+            must(selected(env.when('none')), opts.surface + ': No date selected');
             must(allByCls(env.doc.body, 'sauce-task-when').filter(selected).length === 1, opts.surface + ': exactly one selected');
             const cap = byCls(env.doc.body, 'sauce-task-when-caption');
-            must(cap && cap.textContent === 'Due Mon Nov 9', 'caption: ' + (cap && cap.textContent));
+            must(cap && cap.textContent === 'No date: goes to the backlog', 'caption: ' + (cap && cap.textContent));
         }
+        const manual = rdEnv().open({ surface: 'manual', today: TODAY });
+        must(selected(manual.when('today')), 'manual with an explicit today: today selected');
+        must(byCls(manual.doc.body, 'sauce-task-when-caption').textContent === 'Due Mon Nov 9', 'manual caption');
         const env = rdEnv().open({ surface: 'project', project: { name: 'Alpha', slug: 'alpha' } });
         must(selected(env.when('none')), 'project: none selected');
         must(byCls(env.doc.body, 'sauce-task-when-caption').textContent === 'No date', 'project task: none caption is just No date');
         must(selected(env.chip('Alpha')), 'project surface seeds the Alpha chip');
-        const daily = rdEnv().open({ surface: 'daily' });
-        must(selected(daily.when('today')), 'daily without opts.today derives today from moment');
+    });
+
+    rdCase('RD-D-WHEN-DEFAULT-CREATE a daily/home task created without touching When has no due', async () => {
+        for (const surface of ['daily', 'home']) {
+            const env = rdEnv().open({ surface, today: TODAY });
+            env.typeTitle('Undated');
+            await click(env.save());
+            await tick();
+            must(env.creates.length === 1, surface + ': one create');
+            must(!env.creates[0].payload.due, surface + ': payload due empty: ' + JSON.stringify(env.creates[0].payload.due));
+        }
     });
 
     rdCase('RD-D-WHEN-PICK quick dates and Pick date… set the payload due', async () => {
@@ -1271,7 +1283,7 @@ function reloadWithDom() {
         env2.typeTitle('Y tomorrow');
         must(selected(env2.when('tomorrow')), 'tomorrow token applied');
         env2.typeTitle('Y tomorro');
-        must(selected(env2.when('today')), 'removing the token restores the prior When');
+        must(selected(env2.when('none')), 'removing the token restores the prior When (No date)');
     });
 
     rdCase('RD-D-ADD-ANOTHER saves, clears title + notes, keeps When/Priority/Project', async () => {

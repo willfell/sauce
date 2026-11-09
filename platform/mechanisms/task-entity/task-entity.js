@@ -72,7 +72,6 @@ class TaskEntity {
     compareBy(mode, todayStr) { return TaskEntity.compareBy(mode, todayStr); }
     renumber(orderedPaths, rankByPath) { return TaskEntity.renumber(orderedPaths, rankByPath); }
     parseTitleShortcuts(text, todayStr, projectNames) { return TaskEntity.parseTitleShortcuts(text, todayStr, projectNames); }
-    notesBytes(statSize, frontmatterEndOffset) { return TaskEntity.notesBytes(statSize, frontmatterEndOffset); }
 
     // ---------- Static pure helpers ----------
 
@@ -323,15 +322,6 @@ class TaskEntity {
         }
         out.title = rest;
         return out;
-    }
-
-    /**
-     * Size in bytes of the user's own notes: file size minus the frontmatter
-     * and the canonical chrome body. Never negative.
-     */
-    static notesBytes(statSize, frontmatterEndOffset) {
-        const n = (Number(statSize) || 0) - (Number(frontmatterEndOffset) || 0) - TaskEntity._chromeBody().length;
-        return n > 0 ? n : 0;
     }
 
     /**
