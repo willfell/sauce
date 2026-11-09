@@ -535,10 +535,9 @@ ok('TD-recur-7 _rollForwardDate returns null for an unsupported/never-matching g
 
 // ---------- TaskDialog _moreOptionsShouldStartExpanded (pure) ----------
 //
-// Decides whether the dialog's "More options" section (Repeats/Priority/
-// Project/Notes/Links) should start expanded: true iff ANY of those fields
-// already has a value (so existing edit-mode data is never hidden by
-// default); create mode's all-blank state naturally collapses.
+// True iff ANY of Repeats/Priority/Project/Notes/Links already has a value
+// (so existing edit-mode data is never hidden by default); an all-blank state
+// collapses. The two-column dialog uses it for the Repeats disclosure.
 
 ok('TD-polish-1 _moreOptionsShouldStartExpanded: false when no optional field is set', () => {
   const state = { priority: '', projectName: '', recurrence: '', notes: '', links: [] };
@@ -3886,11 +3885,12 @@ async function runTaskDialogSauceModalTests() {
     const backdrop = findByCls(doc.body, 'sauce-modal-backdrop');
     const modal = findByCls(doc.body, 'sauce-modal');
     const title = findByCls(doc.body, 'sauce-modal-title');
-    const cancel = [...(findByCls(doc.body, 'sauce-modal-footer').children || [])]
-      .flatMap((group) => group.children || []).find((button) => treeText(button) === 'Cancel');
+    const close = findByCls(modal, 'sauce-task-dialog-close');
+    const another = findByCls(findByCls(doc.body, 'sauce-modal-footer'), 'sauce-task-add-another');
     const save = findByCls(doc.body, 'sauce-btn-accent');
-    assert(backdrop && modal && title && treeText(title) === 'New Task', 'real shared modal skeleton and title');
-    assert(cancel && String(cancel.className).includes('sauce-btn'), 'Cancel uses sauce-btn');
+    assert(backdrop && modal && title && treeText(title) === 'New task', 'real shared modal skeleton and title');
+    assert(close && typeof close.onclick === 'function', 'header close button replaces the footer Cancel');
+    assert(another && String(another.className).includes('sauce-btn'), 'Create & add another uses sauce-btn');
     assert(save && String(save.className).includes('sauce-btn-accent'), 'Save uses sauce-btn-accent');
     assert(!findByCls(doc.body, 'sauce-todo-create-overlay'), 'no legacy create overlay');
   });
@@ -3931,8 +3931,6 @@ async function runTaskDialogSauceModalTests() {
     await Promise.resolve();
     assert(creates.length === 0, 'IME composition must not submit');
 
-    const more = findByTagText(body, 'button', 'More options ▾');
-    await fireClick(more);
     const webButton = findByTagText(body, 'button', '＋ Web link');
     await fireClick(webButton);
     const urlInput = findInputByPlaceholder(body, 'https://…');
