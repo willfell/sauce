@@ -13,14 +13,16 @@
  *   HOME-GLANCE — SpaceHome._glanceChips(counts) pure chip descriptor / empty sentinel
  *   HOME-RENDER — SpaceHome.render(dv, {}) mounts the dashboard via customjs-guard
  *                 with args:[{ asOf:<today>, live:true }] and emits, in DOM order,
- *                 greeting → glance → capture band (1 input + 3 buttons) → dashboard
+ *                 greeting + New task / Capture toggle (head) → glance → dashboard
  *                 mount, under .sauce-home
  *   HOME-CAP    — SpaceHome._captureSpec() shape (meeting/sticky-note/article/
  *                 journal/trip) + per-button dispatch wiring (meeting/sticky-note/
  *                 journal → EntityCreate.create, article → ReaderArticlePaste.open,
  *                 trip → TripNavButtons._promptForTripDetails/._createTrip, gated
- *                 on TripNavButtons existing) + the inline "Jot a task…" capture
- *                 wired to TaskDialog.createQuick
+ *                 on TripNavButtons existing)
+ *   HOME-NEWTASK / HOME-CAPTURE-MENU / HOME-NO-JOT / HOME-GLANCE-BACKLOG — the
+ *                 New task button (full TaskDialog), the Capture menu, the removed
+ *                 inline jot input, and the backlog glance chip
  *
  * Usage: node platform/test/run-home.js   (exit 0 = all pass, 1 = any fail)
  */
@@ -425,20 +427,18 @@ function descendants(el) {
       const hasD = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
       assertTrue("HOME-RENDER-7c head holds the greeting", dsc.some((n) => hasD(n, "sauce-home-greeting")),
         "head should contain .sauce-home-greeting");
-      const addBtns = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add"));
-      assertEq("HOME-RENDER-8 head holds exactly one '+' quick-add button", addBtns.length, 1);
+      const newBtns = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-new-task"));
+      assertEq("HOME-RENDER-8 head holds exactly one New task button", newBtns.length, 1);
+      const toggles = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-toggle"));
+      assertEq("HOME-RENDER-8a head holds exactly one Capture toggle", toggles.length, 1);
       const menu = dsc.find((n) => hasD(n, "sauce-home-add-menu")) || null;
-      assertTrue("HOME-RENDER-8b the '+' owns a .sauce-home-add-menu dropdown", !!menu,
+      assertTrue("HOME-RENDER-8b the Capture toggle owns a .sauce-home-add-menu dropdown", !!menu,
         "there should be a .sauce-home-add-menu");
 
-      // The menu holds all capture UI: 1 jot input + 1 Add button + 3 action items.
       const md = menu ? descendants(menu) : [];
-      const inputs = md.filter((n) => n.tag === "input");
       const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
-      const capAdd = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-add"));
-      assertEq("HOME-RENDER-10 menu holds exactly 1 jot input", inputs.length, 1);
+      assertEq("HOME-RENDER-10 menu holds no inputs", md.filter((n) => n.tag === "input").length, 0);
       assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/sticky-note; article/journal ungated)", items.length, 2);
-      assertEq("HOME-RENDER-12 menu holds exactly 1 Add button", capAdd.length, 1);
     }
 
     // Container-level order: .sauce-home first, guard mount after it.
@@ -556,36 +556,20 @@ function descendants(el) {
     delete global.Notice;
   }
 
-  // ── HOME-CAP: "+" toggle + per-item dispatch + inline capture ───────────────
+  // ── HOME-NEWTASK / HOME-CAPTURE-MENU / HOME-NO-JOT ──────────────────────────
   installMoment("2026-07-02", 6);
   {
     const dv = makeDv();
-    const priorActiveElement = global.document.activeElement;
-    let rollbackActiveElement = null;
-
-    const calls = { entityCreate: [], commandIds: [], createQuick: [], computeCounts: [], structure: [] };
+    const calls = { entityCreate: [], commandIds: [], createQuick: [], dialogOpen: [], computeCounts: [], notices: [] };
+    global.Notice = function (msg) { calls.notices.push(msg); };
     global.customJS = {
       SpaceDailyDashboard: {
         computeCounts: (d, t, te) => { calls.computeCounts.push({ d, t, te }); return { today: 2, overdue: 1, done: 0, meetings: 1 }; },
       },
       TaskEntity: {},
-      TaskDialog: { createQuick: (opts) => {
-        calls.createQuick.push(opts);
-        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
-        return Promise.resolve({ ok: true });
-      } },
-      RenderSafe: {
-        mutateStructure: async (opts) => {
-          calls.structure.push("apply");
-          const receipt = await opts.apply();
-          try { calls.structure.push("write"); return { ok: true, value: await opts.write() }; }
-          catch (error) {
-            calls.structure.push("rollback");
-            if (rollbackActiveElement) global.document.activeElement = rollbackActiveElement;
-            await opts.rollback(receipt, error);
-            return { ok: false, error };
-          }
-        },
+      TaskDialog: {
+        createQuick: (opts) => { calls.createQuick.push(opts); return Promise.resolve({ ok: true }); },
+        open: (opts) => { calls.dialogOpen.push(opts); },
       },
       EntityCreate: {
         create: (opts) => { calls.entityCreate.push(opts); return Promise.resolve(); },
@@ -601,32 +585,45 @@ function descendants(el) {
     const home = dv.container.querySelector(".sauce-home");
     const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
     const all = home ? descendants(home) : [];
-    const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add")) || null;
-    const menu = all.find((n) => hasCls(n, "sauce-home-add-menu")) || null;
-    const md = menu ? descendants(menu) : [];
-    const items = md.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item"));
-    const inputs = md.filter((n) => n.tag === "input");
-    assertEq("HOME-CAP-7 wired 2 action items (article/journal ungated)", items.length, 2);
-    assertEq("HOME-CAP-7b render wired 1 jot input", inputs.length, 1);
-    assertTrue("HOME-CAP-7c render derived glance via computeCounts(dv, today, TE)",
+    const head = all.find((n) => hasCls(n, "sauce-home-head")) || null;
+    const headDsc = head ? descendants(head) : [];
+    const isOpen = (n) => (n.cls || "").split(/\s+/).indexOf("is-open") >= 0;
+    const fire = (btn, e) => (btn && typeof btn.onclick === "function") ? btn.onclick(e || {}) : undefined;
+
+    assertTrue("HOME-RENDER-7c2 render derived glance via computeCounts(dv, today, TE)",
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
       `expected one computeCounts(dv,'2026-07-02',…) call; got count=${calls.computeCounts.length}`);
 
-    const fire = (btn, e) => (btn && typeof btn.onclick === "function") ? btn.onclick(e || {}) : undefined;
+    const newBtns = headDsc.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-new-task"));
+    assertEq("HOME-NEWTASK-1 header holds exactly one .sauce-home-new-task button", newBtns.length, 1);
+    assertEq("HOME-NEWTASK-2 label is 'New task'", ((newBtns[0] && (newBtns[0].text || newBtns[0].textContent)) || "").trim(), "New task");
+    assertTrue("HOME-NEWTASK-3 no '+' quick-add button remains in the header",
+      !headDsc.some((n) => n.tag === "button" && hasCls(n, "sauce-home-add")));
+    await fire(newBtns[0]);
+    assertEq("HOME-NEWTASK-4 click calls TaskDialog.open once", calls.dialogOpen.length, 1);
+    assertTrue("HOME-NEWTASK-5 open() receives { surface:'home', today }",
+      deepEq(calls.dialogOpen[0], { surface: "home", today: "2026-07-02" }),
+      `got ${JSON.stringify(calls.dialogOpen[0])}`);
+    assertEq("HOME-NEWTASK-6 New task never uses createQuick", calls.createQuick.length, 0);
 
-    // ── "+" toggles the dropdown open/closed (via _setClass). ──
-    const isOpen = (n) => (n.cls || "").split(/\s+/).indexOf("is-open") >= 0;
-    assertTrue("HOME-CAP-8a menu starts closed", menu && !isOpen(menu),
-      "menu should not carry is-open before the + is clicked");
-    fire(addBtn);
-    assertTrue("HOME-CAP-8b clicking + opens the menu", menu && isOpen(menu) && addBtn && isOpen(addBtn),
-      "clicking + should add is-open to the menu AND the + button");
-    fire(addBtn);
-    assertTrue("HOME-CAP-8c clicking + again closes the menu", menu && !isOpen(menu),
-      "clicking + again should remove is-open");
+    const toggles = headDsc.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-toggle"));
+    assertEq("HOME-CAPTURE-MENU-1 header holds exactly one .sauce-home-capture-toggle", toggles.length, 1);
+    assertTrue("HOME-CAPTURE-MENU-2 toggle label starts with 'Capture'",
+      /^Capture/.test(((toggles[0] && (toggles[0].text || toggles[0].textContent)) || "").trim()));
+    const menu = headDsc.find((n) => hasCls(n, "sauce-home-add-menu")) || null;
+    assertTrue("HOME-CAPTURE-MENU-3 header owns the dropdown", !!menu);
+    assertTrue("HOME-CAPTURE-MENU-4 menu starts closed", menu && !isOpen(menu));
+    fire(toggles[0]);
+    assertTrue("HOME-CAPTURE-MENU-5 toggle opens the menu", menu && isOpen(menu) && isOpen(toggles[0]));
+    fire(toggles[0]);
+    assertTrue("HOME-CAPTURE-MENU-6 toggle again closes it", menu && !isOpen(menu));
+    const items = menu ? descendants(menu).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-CAPTURE-MENU-7 ungated items render (meeting, sticky-note)",
+      items.map((n) => n.dataset && n.dataset.captureKey).join(","), "meeting,sticky-note");
 
-    // ── Item dispatch: order is [meeting, sticky-note] (Open-daily removed). ──
+    fire(toggles[0]);
     await fire(items[0]);
+    assertTrue("HOME-CAPTURE-MENU-8 picking an item closes the menu", !isOpen(menu));
     await fire(items[1]);
     assertEq("HOME-CAP-11 meeting+sticky-note → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
     assertEq("HOME-CAP-12 meeting → instance 'meeting'", calls.entityCreate[0] && calls.entityCreate[0].instance, "meeting");
@@ -634,218 +631,121 @@ function descendants(el) {
     assertTrue("HOME-CAP-14 EntityCreate.create receives dv", calls.entityCreate[0] && calls.entityCreate[0].dv === dv,
       "EntityCreate.create must receive the live dv");
 
-    // ── Inline capture: Add click with typed text → createQuick. ──
+    assertTrue("HOME-NO-JOT-1 no .sauce-home-capture-input anywhere",
+      !all.some((n) => hasCls(n, "sauce-home-capture-input")));
+    assertTrue("HOME-NO-JOT-2 no <input> element anywhere in Home", !all.some((n) => n.tag === "input"));
+    assertTrue("HOME-NO-JOT-3 no capture Add button / optimistic preview",
+      !all.some((n) => hasCls(n, "sauce-home-capture-add") || hasCls(n, "sauce-home-capture-preview")));
+    assertEq("HOME-NO-JOT-4 createQuick was never called", calls.createQuick.length, 0);
+    assertTrue("HOME-NO-JOT-5 SpaceHome source no longer references createQuick or the capture pending state",
+      !/createQuick|captureState|surface\.capture|mutateStructure/.test(SPACE_HOME_SRC.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")),
+      "createQuick / pending-state code must be removed from SpaceHome");
+
     {
-      inputs[0].value = "buy milk";
-      const capAdd = md.find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"));
-      const captureRow = capAdd && capAdd.parent;
-      await fire(capAdd);
-      assertEq("HOME-CAP-18 Add click → createQuick called once", calls.createQuick.length, 1);
-      assertTrue("HOME-CAP-19 Add → createQuick carries title + source + reconcile:false, no today (no default due date)",
-        calls.createQuick[0] && calls.createQuick[0].title === "buy milk"
-          && calls.createQuick[0].today === undefined && calls.createQuick[0].source === "daily"
-          && calls.createQuick[0].reconcile === false,
-        `expected createQuick({title:'buy milk',source:'daily',reconcile:false}) with no today; got ${JSON.stringify(calls.createQuick[0])}`);
-      assertTrue("HOME-CAP-19a quick capture dispatch never invokes structural global refresh",
-        !calls.commandIds.includes("dataview:dataview-force-refresh-views"));
-      assertEq("HOME-CAP-19b structural apply precedes persistence", calls.structure.slice(0, 2).join(","), "apply,write");
-      assertTrue("HOME-CAP-19c capture success does not recursively self-render",
-        !/self\.render\(dv,\s*params\)/.test(SPACE_HOME_SRC), "structural success must reconcile naturally");
-      assertTrue("HOME-CAP-19d success removes its exact optimistic preview",
-        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
-      assertEq("HOME-CAP-19e success re-enables Add without waiting for a rerender", capAdd.disabled, false);
-      assertEq("HOME-CAP-19f success keeps the committed input cleared", inputs[0].value, "");
-
-      fire(addBtn);
-      inputs[0].value = "second task";
-      await fire(capAdd);
-      assertEq("HOME-CAP-19g an immediate second capture commits before any rerender", calls.createQuick.length, 2);
-      assertEq("HOME-CAP-19h the immediate second capture carries its own title", calls.createQuick[1] && calls.createQuick[1].title, "second task");
-      assertEq("HOME-CAP-19i consecutive success settles Add again", capAdd.disabled, false);
-      assertTrue("HOME-CAP-19j consecutive success leaves no stale optimistic preview",
-        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
-
-      let resolvePending;
-      const deferredCreate = new Promise((resolve) => { resolvePending = resolve; });
-      global.customJS.TaskDialog.createQuick = (opts) => {
-        calls.createQuick.push(opts);
-        return deferredCreate;
-      };
-      fire(addBtn);
-      inputs[0].value = "slow task";
-      const pendingCapture = fire(capAdd);
-      await Promise.resolve();
-      await Promise.resolve();
-      const callsWhilePending = calls.createQuick.length;
-      // Dataview can clear and execute the block again while persistence is
-      // still pending. The container-owned authority must bind this replacement
-      // render even though every closure and DOM node above is now obsolete.
-      dv.container.children = [];
-      await home_.render(dv, {});
-      const replacementHome = dv.container.querySelector(".sauce-home");
-      const replacementNodes = replacementHome ? descendants(replacementHome) : [];
-      const replacementToggle = replacementNodes.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
-      const replacementMenu = replacementNodes.find((n) => hasCls(n, "sauce-home-add-menu"));
-      const replacementInput = replacementMenu ? descendants(replacementMenu).find((n) => n.tag === "input") : null;
-      const replacementAdd = replacementMenu
-        ? descendants(replacementMenu).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"))
-        : null;
-      fire(replacementToggle);
-      replacementInput.value = "next draft";
-      const overlapAttempt = replacementInput.dispatch("keydown", { key: "Enter", stopPropagation: () => {} });
-      await Promise.resolve();
-      await Promise.resolve();
-      assertEq("HOME-CAP-19k deferred Enter after container rerender cannot overlap persistence",
-        calls.createQuick.length, callsWhilePending);
-      assertEq("HOME-CAP-19l shared pending authority disables replacement Add", replacementAdd.disabled, true);
-      assertEq("HOME-CAP-19l2 obsolete Add remains settlement-ineligible", capAdd.disabled, true);
-      assertTrue("HOME-CAP-19l3 obsolete menu remains open before settlement", isOpen(menu));
-      resolvePending({ ok: true });
-      await withWatchdog(Promise.all([pendingCapture, overlapAttempt]), "deferred capture and guarded overlap");
-      assertEq("HOME-CAP-19m authoritative deferred success releases replacement Add", replacementAdd.disabled, false);
-      assertTrue("HOME-CAP-19n obsolete settlement leaves the replacement menu open", isOpen(replacementMenu));
-      assertEq("HOME-CAP-19n2 obsolete settlement preserves the replacement draft", replacementInput.value, "next draft");
-      assertEq("HOME-CAP-19n3 stale success cannot re-enable its obsolete Add", capAdd.disabled, true);
-      assertTrue("HOME-CAP-19n4 stale success cannot close its obsolete menu", isOpen(menu));
-      assertTrue("HOME-CAP-19o authoritative deferred success leaves no stale preview",
-        !descendants(captureRow).some((n) => hasCls(n, "sauce-home-capture-preview")));
-      assertEq("HOME-CAP-19p overlap draft was not submitted by the guarded Enter",
-        calls.createQuick.filter((entry) => entry && entry.title === "next draft").length, 0);
-
-      // A stale rejection has the same ownership rule as stale success. Keep a
-      // real watchdog alive so a missing pending/surface guard cannot let Node
-      // silently exit with an unresolved awaited Promise and zero assertions.
-      let rejectStale;
-      const deferredReject = new Promise((_resolve, reject) => { rejectStale = reject; });
-      global.customJS.TaskDialog.createQuick = (opts) => {
-        calls.createQuick.push(opts);
-        return deferredReject;
-      };
-      const staleInput = replacementInput;
-      const staleMenu = replacementMenu;
-      const staleAdd = replacementAdd;
-      const staleOriginalValue = staleInput.value;
-      const staleCapture = fire(staleAdd);
-      await Promise.resolve();
-      await Promise.resolve();
-      assertEq("HOME-CAP-19q pending stale-rejection input is optimistically cleared", staleInput.value, "");
-      assertEq("HOME-CAP-19r pending stale-rejection Add is disabled", staleAdd.disabled, true);
-      dv.container.children = [];
-      await home_.render(dv, {});
-      const newestHome = dv.container.querySelector(".sauce-home");
-      const newestNodes = newestHome ? descendants(newestHome) : [];
-      const newestToggle = newestNodes.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
-      const newestMenu = newestNodes.find((n) => hasCls(n, "sauce-home-add-menu"));
-      const newestInput = newestMenu ? descendants(newestMenu).find((n) => n.tag === "input") : null;
-      const newestAdd = newestMenu
-        ? descendants(newestMenu).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add"))
-        : null;
-      fire(newestToggle);
-      newestInput.value = "replacement rejection draft";
-      rejectStale(new Error("stale persistence rejected"));
-      await withWatchdog(staleCapture, "stale rejected capture");
-      assertEq("HOME-CAP-19s stale rejection cannot restore its obsolete input", staleInput.value, "");
-      assertEq("HOME-CAP-19t stale rejection cannot re-enable its obsolete Add", staleAdd.disabled, true);
-      assertTrue("HOME-CAP-19u stale rejection cannot close its obsolete menu", isOpen(staleMenu));
-      assertEq("HOME-CAP-19v stale rejection preserves the replacement draft", newestInput.value, "replacement rejection draft");
-      assertTrue("HOME-CAP-19w stale rejection leaves the replacement menu open", isOpen(newestMenu));
-      assertEq("HOME-CAP-19x stale rejection releases the replacement Add", newestAdd.disabled, false);
-      assertEq("HOME-CAP-19y stale rejection retained the captured obsolete value only as receipt data",
-        staleOriginalValue, "next draft");
-      global.customJS.TaskDialog.createQuick = (opts) => {
-        calls.createQuick.push(opts);
-        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
-        return Promise.resolve({ ok: true });
-      };
-    }
-
-    // ── Inline capture: Enter → createQuick (re-locate after the Add re-render). ──
-    {
-      calls.createQuick.length = 0;
-      const home2 = dv.container.querySelector(".sauce-home");
-      const menu2 = home2 ? descendants(home2).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-      const input2 = menu2 ? descendants(menu2).filter((n) => n.tag === "input")[0] : null;
-      input2.value = "call mom";
-      let stopped = false;
-      if (input2 && typeof input2.dispatch === "function") {
-        await input2.dispatch("keydown", { key: "Enter", stopPropagation: () => { stopped = true; } });
-      }
-      assertEq("HOME-CAP-20 Enter → createQuick called once", calls.createQuick.length, 1);
-      assertEq("HOME-CAP-21 Enter → createQuick carries the typed title", calls.createQuick[0] && calls.createQuick[0].title, "call mom");
-      assertTrue("HOME-CAP-21b Enter → keydown handler calls stopPropagation", stopped,
-        "the Enter handler must stopPropagation so a higher-level (Obsidian/document) keydown listener can't swallow or redirect the same event");
-    }
-
-    // Rejected persistence restores the exact live input/menu receipt.
-    {
-      const homeRetry = dv.container.querySelector(".sauce-home");
-      const menuRetry = homeRetry ? descendants(homeRetry).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-      const inputRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "input") : null;
-      const addRetry = menuRetry ? descendants(menuRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
-      const toggleRetry = homeRetry
-        ? descendants(homeRetry).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"))
-        : null;
-      if (menuRetry && !isOpen(menuRetry)) fire(toggleRetry);
-      let restoredFocus = 0;
-      const originFocus = { isConnected: true, focus: () => { restoredFocus++; } };
-      global.document.activeElement = originFocus;
-      inputRetry.value = "retry me";
-      global.customJS.TaskDialog.createQuick = () => Promise.reject(new Error("persist failed"));
-      await fire(addRetry);
-      assertEq("HOME-CAP-21c rejection restores the exact input value", inputRetry.value, "retry me");
-      assertTrue("HOME-CAP-21d rejection keeps the originating menu open", isOpen(menuRetry));
-      assertTrue("HOME-CAP-21e rejected capture ran rollback after apply/write",
-        calls.structure.slice(-3).join(",") === "apply,write,rollback");
-      assertEq("HOME-CAP-21f rejection restores originating focus when the user has not moved", restoredFocus, 1);
-      const newerFocus = { isConnected: true };
-      global.document.activeElement = originFocus;
-      rollbackActiveElement = newerFocus;
-      inputRetry.value = "retry without stealing focus";
-      await fire(addRetry);
-      assertEq("HOME-CAP-21g late rejection preserves newer connected focus", restoredFocus, 1);
-      assertTrue("HOME-CAP-21h newer focus remains authoritative", global.document.activeElement === newerFocus);
-      rollbackActiveElement = null;
-
-      global.document.activeElement = originFocus;
-      inputRetry.value = "missing dependency result";
-      global.customJS.TaskDialog.createQuick = () => Promise.resolve(undefined);
-      await fire(addRetry);
-      assertEq("HOME-CAP-21i undefined create result rolls back the exact input", inputRetry.value, "missing dependency result");
-      assertTrue("HOME-CAP-21j undefined create result keeps the originating menu open", isOpen(menuRetry));
-      assertTrue("HOME-CAP-21k undefined create result is not accepted as persistence success",
-        calls.structure.slice(-3).join(",") === "apply,write,rollback");
-
-      inputRetry.value = "negative create result";
-      global.customJS.TaskDialog.createQuick = () => Promise.resolve({ ok: false, reason: "invalid plan" });
-      await fire(addRetry);
-      assertEq("HOME-CAP-21l explicit negative create result rolls back the exact input", inputRetry.value, "negative create result");
-      assertTrue("HOME-CAP-21m explicit negative create result keeps the originating menu open", isOpen(menuRetry));
-      assertTrue("HOME-CAP-21n explicit negative create result is not accepted as persistence success",
-        calls.structure.slice(-3).join(",") === "apply,write,rollback");
-
-      global.customJS.TaskDialog.createQuick = (opts) => {
-        calls.createQuick.push(opts);
-        if (opts.reconcile !== false) calls.commandIds.push("dataview:dataview-force-refresh-views");
-        return Promise.resolve({ ok: true });
-      };
-    }
-
-    // ── Inline capture: blank / whitespace input → NO createQuick. ──
-    {
-      calls.createQuick.length = 0;
-      const home3 = dv.container.querySelector(".sauce-home");
-      const menu3 = home3 ? descendants(home3).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-      const input3 = menu3 ? descendants(menu3).filter((n) => n.tag === "input")[0] : null;
-      const capAdd3 = menu3 ? descendants(menu3).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-add")) : null;
-      input3.value = "   ";
-      await fire(capAdd3);
-      if (input3 && typeof input3.dispatch === "function") await input3.dispatch("keydown", { key: "Enter" });
-      assertEq("HOME-CAP-22 blank/whitespace input → createQuick NOT called", calls.createQuick.length, 0);
+      const dvB = makeDv();
+      global.customJS.TaskDialog = undefined;
+      calls.notices.length = 0;
+      await home_.render(dvB, {});
+      const homeB = dvB.container.querySelector(".sauce-home");
+      const nb = homeB ? descendants(homeB).find((n) => n.tag === "button" && hasCls(n, "sauce-home-new-task")) : null;
+      let threw = false;
+      try { await fire(nb); } catch (_e) { threw = true; }
+      assertTrue("HOME-NEWTASK-7 TaskDialog not registered → no throw", !threw);
+      assertTrue("HOME-NEWTASK-8 TaskDialog not registered → loading Notice",
+        calls.notices.some((m) => /still loading/.test(String(m))), JSON.stringify(calls.notices));
+      assertEq("HOME-NEWTASK-9 TaskDialog not registered → nothing opened", calls.dialogOpen.length, 1);
     }
 
     delete global.customJS;
     delete global.app;
-    global.document.activeElement = priorActiveElement;
+    delete global.Notice;
+    delete global.window.customJS;
+    delete global.window.app;
+  }
+
+  // ── HOME-GLANCE-BACKLOG: the backlog chip (pure descriptor + count + click) ──
+  {
+    const bl = SpaceHome._glanceChips({ today: 1, done: 2, backlog: 4 });
+    assertEq("HOME-GLANCE-BACKLOG-1 backlog chip comes after done", bl.chips.map((c) => c.label).join(","), "today,done,backlog");
+    assertEq("HOME-GLANCE-BACKLOG-2 backlog chip n", bl.chips[2].n, 4);
+    assertTrue("HOME-GLANCE-BACKLOG-3 backlog chip is flagged clickable",
+      bl.chips[2].action === "backlog" && /sauce-home-glance-link/.test(bl.chips[2].cls), JSON.stringify(bl.chips[2]));
+    assertTrue("HOME-GLANCE-BACKLOG-4 zero/absent backlog adds no chip",
+      SpaceHome._glanceChips({ today: 1, backlog: 0 }).chips.length === 1
+        && SpaceHome._glanceChips({ today: 1 }).chips.length === 1);
+    const only = SpaceHome._glanceChips({ backlog: 3 });
+    assertTrue("HOME-GLANCE-BACKLOG-5 backlog alone is not an empty day", only.empty === false && only.chips.length === 1);
+    assertTrue("HOME-GLANCE-BACKLOG-6 non-link chips still carry no action",
+      bl.chips[0].action === undefined && bl.chips[1].action === undefined);
+
+    const TE = new (new Function(fs.readFileSync(path.join(WORKSHOP, "platform", "mechanisms", "task-entity", "task-entity.js"), "utf8") + "; return TaskEntity;")())();
+    const pages = [
+      { type: "task", status: "open", title: "bl1", source: "daily", file: { path: "spice/tasks/bl1.md" } },
+      { type: "task", status: "open", title: "bl2", source: "daily", file: { path: "spice/tasks/bl2.md" } },
+      { type: "task", status: "open", title: "dated", due: "2026-07-02", file: { path: "spice/tasks/dated.md" } },
+      { type: "task", status: "open", title: "proj", project_slug: "x", file: { path: "spice/tasks/proj.md" } },
+      { type: "task", status: "open", title: "mtg", source: "meeting", file: { path: "spice/tasks/mtg.md" } },
+      { type: "task", status: "done", title: "done", file: { path: "spice/tasks/done.md" } },
+      { type: "task", status: "open", title: "arch", file: { path: "spice/tasks/_done/arch.md" } },
+      { type: "task", status: "open", title: "trash", file: { path: "spice/tasks/_trash/trash.md" } },
+      { type: "note", status: "open", title: "notatask", file: { path: "spice/tasks/n.md" } },
+    ];
+    let pageQueries = 0;
+    const cdv = { pages: (q) => { pageQueries += 1; return q === '"spice/tasks"' ? pages : []; } };
+    assertEq("HOME-GLANCE-BACKLOG-7 _countBacklog counts only open backlog task notes", SpaceHome._countBacklog(cdv, TE), 2);
+    assertEq("HOME-GLANCE-BACKLOG-8 one dv.pages query, no per-row queries", pageQueries, 1);
+    assertEq("HOME-GLANCE-BACKLOG-9 no TaskEntity (cold load) → 0", SpaceHome._countBacklog(cdv, null), 0);
+    assertEq("HOME-GLANCE-BACKLOG-10 throwing dv → 0", SpaceHome._countBacklog({ pages: () => { throw new Error("boom"); } }, TE), 0);
+
+    installMoment("2026-07-02", 6);
+    const PREFS = "sauce-todo-filter:prefs:v2";
+    const store = { [PREFS]: JSON.stringify({ sort: "smart", group: "none", tab: "today" }) };
+    global.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+    global.window.localStorage = global.localStorage;
+    const opened = [];
+    global.customJS = {
+      SpaceDailyDashboard: {
+        computeCounts: () => ({ today: 1, overdue: 0, done: 0, meetings: 0 }),
+        _openTodayToDo: (d, o) => {
+          let tab = null;
+          try { tab = JSON.parse(store[PREFS]).tab; } catch (_e) {}
+          opened.push({ d, o, tab });
+          return Promise.resolve({ ok: true });
+        },
+      },
+      TaskEntity: TE,
+    };
+    global.window.customJS = global.customJS;
+    const dv = makeDv();
+    dv.pages = cdv.pages;
+    await home_.render(dv, {});
+    const home = dv.container.querySelector(".sauce-home");
+    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
+    const all = home ? descendants(home) : [];
+    const chip = all.find((n) => hasCls(n, "sauce-home-glance-backlog")) || null;
+    assertTrue("HOME-GLANCE-BACKLOG-11 render paints a '2 backlog' chip",
+      !!chip && descendants(chip).map((n) => n.text || n.textContent || "").join("").replace(/\s+/g, " ").trim() === "2 backlog");
+    if (chip && typeof chip.onclick === "function") await chip.onclick({});
+    const saved = JSON.parse(store[PREFS]);
+    assertEq("HOME-GLANCE-BACKLOG-12 click sets tab:'backlog'", saved.tab, "backlog");
+    assertTrue("HOME-GLANCE-BACKLOG-13 click keeps existing sort/group", saved.sort === "smart" && saved.group === "none", JSON.stringify(saved));
+    assertEq("HOME-GLANCE-BACKLOG-14 click opens today's To-Do once", opened.length, 1);
+    assertTrue("HOME-GLANCE-BACKLOG-15 opens for the render's today, tab written before navigation",
+      opened[0] && opened[0].d === "2026-07-02" && opened[0].tab === "backlog", String(opened[0] && opened[0].tab));
+
+    store[PREFS] = "{not json";
+    opened.length = 0;
+    if (chip && typeof chip.onclick === "function") await chip.onclick({});
+    assertEq("HOME-GLANCE-BACKLOG-16 corrupt prefs are replaced; still navigates", opened.length, 1);
+    delete global.localStorage;
+    delete global.window.localStorage;
+    opened.length = 0;
+    let threwNoLs = false;
+    try { if (chip && typeof chip.onclick === "function") await chip.onclick({}); } catch (_e) { threwNoLs = true; }
+    assertTrue("HOME-GLANCE-BACKLOG-17 no localStorage → no throw, still navigates", !threwNoLs && opened.length === 1);
+
+    delete global.customJS;
+    delete global.window.customJS;
   }
 
   // ── HOME-CAP-REG: article/journal gated on EntityCreate._loadSpec(instance) ─
@@ -980,24 +880,21 @@ function descendants(el) {
       const home = dv.container.querySelector(".sauce-home");
       const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
       const all = home ? descendants(home) : [];
-      // Clicking the "+" (toggle) and every menu item must no-op, not throw.
-      const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
-      if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
+      // Clicking New task, the Capture toggle and every menu item must no-op, not throw.
+      for (const cls of ["sauce-home-new-task", "sauce-home-capture-toggle"]) {
+        const b = all.find((n) => n.tag === "button" && hasCls(n, cls));
+        if (b && typeof b.onclick === "function") await b.onclick({});
+      }
       const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
       const md = menu ? descendants(menu) : [];
       for (const b of md.filter((n) => n.tag === "button")) {
         if (b && typeof b.onclick === "function") await b.onclick({});
       }
-      const input = md.filter((n) => n.tag === "input")[0];
-      if (input) {
-        input.value = "orphan task";
-        if (typeof input.dispatch === "function") await input.dispatch("keydown", { key: "Enter" });
-      }
     } catch (_e) {
       threw = true;
     }
-    assertTrue("HOME-CAP-17 + toggle + items + inline capture no-op gracefully when APIs absent", !threw,
-      "a missing customJS/app must make the + toggle, items, and inline jot no-op, never throw");
+    assertTrue("HOME-CAP-17 New task + Capture toggle + items no-op gracefully when APIs absent", !threw,
+      "a missing customJS/app must make New task, the Capture toggle and its items no-op, never throw");
   }
 
   // ── HOME-DAY: the home no longer freezes on a stale day ────────────────────
@@ -1270,22 +1167,18 @@ function descendants(el) {
     const first = dv.container.querySelector(".sauce-home");
     assertTrue("HOME-NOOP-1 first render paints .sauce-home", !!first);
 
-    // Simulate an in-progress draft: open the menu + type, WITHOUT submitting.
+    // Simulate in-progress state: open the Capture menu.
     const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
     const descendantsOf = (n) => descendants(n);
-    const addBtn = descendantsOf(first).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    const addBtn = descendantsOf(first).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-toggle"));
     if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
     const menu = descendantsOf(first).find((n) => hasCls(n, "sauce-home-add-menu"));
-    const input = menu ? descendantsOf(menu).filter((n) => n.tag === "input")[0] : null;
-    if (input) input.value = "unsent draft";
 
     // Same counts → render() again should be a complete no-op.
     await home_.render(dv, {});
     const second = dv.container.querySelector(".sauce-home");
     assertTrue("HOME-NOOP-2 identical-signature re-render reuses the SAME node (no rebuild)",
       second === first, "expected the exact same .sauce-home DOM node after a no-op render");
-    assertTrue("HOME-NOOP-3 in-progress draft survives the no-op re-render",
-      input && input.value === "unsent draft", `expected draft preserved; got ${input && input.value}`);
     const isOpenNoop = (n) => (n && (n.cls || "").split(/\s+/).indexOf("is-open") >= 0);
     assertTrue("HOME-NOOP-4 the menu stays open across the no-op re-render",
       isOpenNoop(menu), "the open menu state must survive a skipped render");
@@ -1469,39 +1362,6 @@ function descendants(el) {
 
     delete global.customJS;
     delete global.window.customJS;
-  }
-
-  // ── HOME-FOCUS: clicking "+" must NOT focus the "Jot a task…" input — an
-  // autofocus pops the mobile on-screen keyboard on every menu open. The user
-  // taps the input themselves to type.
-  {
-    installMoment("2026-07-02", 9);
-    const dv = makeDv();
-    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 0, overdue: 0, done: 0, meetings: 0 }) } };
-    delete global.app;
-    delete global.window.app;
-
-    await home_.render(dv, {});
-    const home = dv.container.querySelector(".sauce-home");
-    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
-    const all = descendants(home);
-    const addBtn = all.find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
-    const menu = all.find((n) => hasCls(n, "sauce-home-add-menu"));
-    const input = menu ? descendants(menu).filter((n) => n.tag === "input")[0] : null;
-    let focused = false;
-    if (input) input.focus = () => { focused = true; };
-
-    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
-    assertTrue("HOME-FOCUS-1 opening the menu does NOT focus the jot-a-task input", !focused);
-
-    // Closing the menu again must also not focus it.
-    focused = false;
-    if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
-    assertTrue("HOME-FOCUS-2 closing the menu does not focus the input", !focused);
-
-    delete global.customJS;
-    delete global.window.customJS;
-    if (typeof global.window !== "undefined") delete global.window.__sauceHomeLastSig;
   }
 
   // ── HOME-CMD: HomeCommandsInit registers sauce-home:open, mirroring
