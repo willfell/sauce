@@ -334,9 +334,9 @@ class ToDoDailyFilterView {
     }
 
     /**
-     * Cells for the week strip above the tabs: Monday..Friday of the week
-     * holding `todayStr` always, Saturday / Sunday only when they hold open
-     * tasks. `count` is the open tasks due that day.
+     * Cells for the week strip above the tabs: Monday..Sunday of the week
+     * holding `todayStr`, always all seven. `count` is the open tasks due that
+     * day.
      */
     static weekStrip(tasks, todayStr, TEref) {
         const TE = ToDoDailyFilterView._te(TEref);
@@ -353,7 +353,6 @@ class ToDoDailyFilterView {
             const date = TE.addDays(range.from, i);
             if (!date) return [];
             const count = counts.get(date) || 0;
-            if (i >= 5 && count === 0) continue;
             out.push({ date, label: `${days[i]} ${Number(date.slice(8))}`, count, isToday: date === todayStr });
         }
         return out;
@@ -760,7 +759,7 @@ class ToDoDailyFilterView {
             const cells = View.weekStrip(tasks, todayStr, TE);
             if (!cells.length) return;
             const strip = aboveTabs.createEl('div', { cls: 'sauce-todo-week-strip' });
-            strip.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; width:100%;';
+            strip.style.cssText = `display:grid; grid-template-columns:repeat(${cells.length}, minmax(0, 1fr)); gap:8px; width:100%; box-sizing:border-box;`;
             strip.setAttribute('role', 'group');
             strip.setAttribute('aria-label', 'This week');
             for (const cell of cells) {
@@ -771,10 +770,10 @@ class ToDoDailyFilterView {
                 button.setAttribute('aria-label', `${cell.label}: ${cell.count} open`);
                 if (cell.isToday) button.setAttribute('aria-current', 'date');
                 button.dataset.date = cell.date;
-                const idle = `display:inline-flex; flex-direction:column; align-items:center; gap:1px; min-width:52px; height:auto; padding:4px 10px; border-radius:var(--radius-s, 4px); border:1px solid ${cell.isToday ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}; color:${cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)'}; background:transparent; cursor:pointer;`;
+                const idle = `display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:100%; min-width:0; height:auto; padding:6px 4px; box-sizing:border-box; border-radius:var(--radius-m, 6px); border:1px solid ${cell.isToday ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}; color:${cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)'}; background:transparent; cursor:pointer;`;
                 button.style.cssText = idle;
                 const name = button.createEl('span', { cls: 'sauce-todo-week-label', text: cell.label });
-                name.style.cssText = 'font-size:0.8em; font-weight:600;';
+                name.style.cssText = 'font-size:0.8em; font-weight:600; max-width:100%; white-space:normal; text-align:center; line-height:1.2;';
                 const count = button.createEl('span', { cls: 'sauce-todo-week-count', text: String(cell.count) });
                 count.style.cssText = `font-size:0.75em; color:${cell.count ? 'var(--text-muted)' : 'var(--text-faint)'}; font-variant-numeric:tabular-nums;`;
                 button.addEventListener('click', onClick(() => {

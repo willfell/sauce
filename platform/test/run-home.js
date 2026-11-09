@@ -10,19 +10,17 @@
  * Groups:
  *   HOME-GREET  — SpaceHome._greeting(hour) time-of-day bands (pure, injected hour)
  *   HOME-DATE   — SpaceHome._humanDate(iso, todayIso) → contains Thursday / Jul 2 / Today
- *   HOME-GLANCE — SpaceHome._glanceChips(counts) pure chip descriptor / empty sentinel
  *   HOME-RENDER — SpaceHome.render(dv, {}) mounts the dashboard via customjs-guard
- *                 with args:[{ asOf:<today>, live:true }] and emits, in DOM order,
- *                 greeting + New task / Capture toggle (head) → glance → dashboard
- *                 mount, under .sauce-home
+ *                 with args:[{ asOf:<today>, live:true, compact:true }] and emits,
+ *                 in DOM order, greeting + "+" quick-add (head) → dashboard mount,
+ *                 under .sauce-home (no glance count line)
  *   HOME-CAP    — SpaceHome._captureSpec() shape (meeting/sticky-note/article/
  *                 journal/trip) + per-button dispatch wiring (meeting/sticky-note/
  *                 journal → EntityCreate.create, article → ReaderArticlePaste.open,
  *                 trip → TripNavButtons._promptForTripDetails/._createTrip, gated
  *                 on TripNavButtons existing)
- *   HOME-NEWTASK / HOME-CAPTURE-MENU / HOME-NO-JOT / HOME-GLANCE-BACKLOG — the
- *                 New task button (full TaskDialog), the Capture menu, the removed
- *                 inline jot input, and the backlog glance chip
+ *   HOME-PLUS / HOME-NEWTASK / HOME-NO-JOT — the "+" dropdown, its leading
+ *                 New task item (full TaskDialog), and the removed inline jot input
  *
  * Usage: node platform/test/run-home.js   (exit 0 = all pass, 1 = any fail)
  */
@@ -228,52 +226,6 @@ function descendants(el) {
   assertTrue("HOME-DATE-5 different day weekday is 'Wednesday'", typeof hd2 === "string" && hd2.includes("Wednesday"),
     `2026-07-01 is a Wednesday; got ${JSON.stringify(hd2)}`);
 
-  // ── HOME-GLANCE: _glanceChips() pure descriptor ────────────────────────────
-  // All-zero → empty sentinel with NO message (the "Clear day" text was removed).
-  {
-    const z = SpaceHome._glanceChips({ today: 0, overdue: 0, done: 0, meetings: 0 });
-    assertTrue("HOME-GLANCE-1 all-zero → empty sentinel", z && z.empty === true,
-      `all-zero counts should yield { empty:true }; got ${JSON.stringify(z)}`);
-    assertTrue("HOME-GLANCE-2 empty sentinel carries NO text/chips (silent empty day)",
-      z && z.text === undefined && z.chips === undefined,
-      `empty sentinel should be a bare { empty:true } with no message; got ${JSON.stringify(z)}`);
-    // Missing / undefined counts also → empty.
-    const z2 = SpaceHome._glanceChips(undefined);
-    assertTrue("HOME-GLANCE-3 undefined counts → empty sentinel", z2 && z2.empty === true,
-      `undefined counts should yield the empty sentinel; got ${JSON.stringify(z2)}`);
-  }
-  // Single non-zero → exactly one chip, correct label.
-  {
-    const one = SpaceHome._glanceChips({ today: 3, overdue: 0, done: 0, meetings: 0 });
-    assertTrue("HOME-GLANCE-4 single non-zero → not empty", one && one.empty === false, JSON.stringify(one));
-    assertEq("HOME-GLANCE-5 single non-zero → exactly 1 chip", one && one.chips ? one.chips.length : -1, 1);
-    assertEq("HOME-GLANCE-6 chip.n is the count", one.chips[0].n, 3);
-    assertEq("HOME-GLANCE-7 chip.label is 'today'", one.chips[0].label, "today");
-  }
-  // Full → 4 chips in order today/overdue/meetings/done, overdue carries the red cls.
-  {
-    const full = SpaceHome._glanceChips({ today: 3, overdue: 1, meetings: 2, done: 5 });
-    assertEq("HOME-GLANCE-8 full → 4 chips", full.chips.length, 4);
-    assertEq("HOME-GLANCE-9 order[0] today", full.chips[0].label, "today");
-    assertEq("HOME-GLANCE-10 order[1] overdue", full.chips[1].label, "overdue");
-    assertEq("HOME-GLANCE-11 order[2] meetings", full.chips[2].label, "meetings");
-    assertEq("HOME-GLANCE-12 order[3] done", full.chips[3].label, "done");
-    assertEq("HOME-GLANCE-13 overdue chip carries the red pill class",
-      full.chips[1].cls, "sauce-section-overdue-pill");
-    assertTrue("HOME-GLANCE-14 non-overdue chips have no special class",
-      full.chips[0].cls === "" && full.chips[2].cls === "" && full.chips[3].cls === "",
-      `only overdue should carry a cls; got ${JSON.stringify(full.chips.map((c) => c.cls))}`);
-  }
-  // Zeros hidden mid-list; pluralization of meeting/meetings.
-  {
-    const hid = SpaceHome._glanceChips({ today: 0, overdue: 2, done: 0, meetings: 1 });
-    assertEq("HOME-GLANCE-15 zeros hidden → only 2 chips", hid.chips.length, 2);
-    assertEq("HOME-GLANCE-16 first shown chip is overdue", hid.chips[0].label, "overdue");
-    assertEq("HOME-GLANCE-17 meetings===1 → singular 'meeting'", hid.chips[1].label, "meeting");
-    const plural = SpaceHome._glanceChips({ meetings: 2 });
-    assertEq("HOME-GLANCE-18 meetings===2 → plural 'meetings'", plural.chips[0].label, "meetings");
-  }
-
   // ── HOME-CAP: _captureSpec() shape ─────────────────────────────────────────
   const spec = SpaceHome._captureSpec();
   {
@@ -402,43 +354,45 @@ function descendants(el) {
     const a0 = args[0] || {};
     assertEq("HOME-RENDER-4 args[0].asOf == today", a0.asOf, "2026-07-02");
     assertEq("HOME-RENDER-5 args[0].live === true", a0.live, true);
+    assertEq("HOME-RENDER-5b args[0].compact === true (Home shows only Up next + Overdue)", a0.compact, true);
 
     // (b) .sauce-home wrapper exists.
     const home = dv.container.querySelector(".sauce-home");
     assertTrue("HOME-RENDER-6 a .sauce-home wrapper is emitted", !!home,
       "render must build a .sauce-home wrapper div");
 
-    // (c) DOM order + structure. New shape: a HEAD row (.sauce-home-head) is the
-    // first child (greeting on the left + the "+" quick-add on the right), then
-    // the glance line, then the dashboard mount. ALL capture lives inside the
-    // head's dropdown (.sauce-home-add-menu) — there is NO always-on band.
+    // (c) DOM order + structure: a HEAD row (.sauce-home-head) is the only
+    // child (greeting on the left + the "+" quick-add on the right); the
+    // dashboard mount follows .sauce-home. No count line: the Tasks card
+    // already shows the counts.
     if (home) {
       const kids = home.children;
       const hasCls = (k, cls) => (k.cls || "").split(/\s+/).indexOf(cls) >= 0;
       const headIdx = kids.findIndex((k) => hasCls(k, "sauce-home-head"));
-      const glanceIdx = kids.findIndex((k) => hasCls(k, "sauce-home-glance"));
       assertTrue("HOME-RENDER-7 head row is the first child of .sauce-home", headIdx === 0,
         `head (.sauce-home-head) should be first; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
-      assertTrue("HOME-RENDER-7b glance line follows the head row", glanceIdx > headIdx && glanceIdx >= 0,
-        `glance (.sauce-home-glance) should follow the head; children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
+      assertTrue("HOME-RENDER-7b no glance count line, even with non-zero counts",
+        !descendants(home).some((n) => /\bsauce-home-glance/.test(n.cls || "")),
+        `children cls = ${JSON.stringify(kids.map((k) => k.cls))}`);
 
       const head = headIdx >= 0 ? kids[headIdx] : null;
       const dsc = head ? descendants(head) : [];
       const hasD = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
       assertTrue("HOME-RENDER-7c head holds the greeting", dsc.some((n) => hasD(n, "sauce-home-greeting")),
         "head should contain .sauce-home-greeting");
-      const newBtns = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-new-task"));
-      assertEq("HOME-RENDER-8 head holds exactly one New task button", newBtns.length, 1);
-      const toggles = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-capture-toggle"));
-      assertEq("HOME-RENDER-8a head holds exactly one Capture toggle", toggles.length, 1);
+      const plus = dsc.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add"));
+      assertEq("HOME-RENDER-8 head holds exactly one '+' quick-add button", plus.length, 1);
+      assertTrue("HOME-RENDER-8a no separate New task / Capture header buttons",
+        !dsc.some((n) => n.tag === "button" && (hasD(n, "sauce-home-capture-toggle") || (hasD(n, "sauce-home-new-task") && !hasD(n, "sauce-home-add-item")))));
       const menu = dsc.find((n) => hasD(n, "sauce-home-add-menu")) || null;
-      assertTrue("HOME-RENDER-8b the Capture toggle owns a .sauce-home-add-menu dropdown", !!menu,
+      assertTrue("HOME-RENDER-8b the '+' owns a .sauce-home-add-menu dropdown", !!menu,
         "there should be a .sauce-home-add-menu");
 
       const md = menu ? descendants(menu) : [];
       const items = md.filter((n) => n.tag === "button" && hasD(n, "sauce-home-add-item"));
       assertEq("HOME-RENDER-10 menu holds no inputs", md.filter((n) => n.tag === "input").length, 0);
-      assertEq("HOME-RENDER-11 menu holds exactly 2 action items (meeting/sticky-note; article/journal ungated)", items.length, 2);
+      assertEq("HOME-RENDER-11 menu holds New task + 2 capture items (meeting/sticky-note; article/journal ungated)",
+        items.map((n) => n.dataset && n.dataset.captureKey).join(","), "task,meeting,sticky-note");
     }
 
     // Container-level order: .sauce-home first, guard mount after it.
@@ -594,37 +548,38 @@ function descendants(el) {
       calls.computeCounts.length === 1 && calls.computeCounts[0].d === dv && calls.computeCounts[0].t === "2026-07-02",
       `expected one computeCounts(dv,'2026-07-02',…) call; got count=${calls.computeCounts.length}`);
 
-    const newBtns = headDsc.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-new-task"));
-    assertEq("HOME-NEWTASK-1 header holds exactly one .sauce-home-new-task button", newBtns.length, 1);
-    assertEq("HOME-NEWTASK-2 label is 'New task'", ((newBtns[0] && (newBtns[0].text || newBtns[0].textContent)) || "").trim(), "New task");
-    assertTrue("HOME-NEWTASK-3 no '+' quick-add button remains in the header",
-      !headDsc.some((n) => n.tag === "button" && hasCls(n, "sauce-home-add")));
-    await fire(newBtns[0]);
+    const plusBtns = headDsc.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
+    assertEq("HOME-PLUS-1 header holds exactly one '+' (.sauce-home-add) button", plusBtns.length, 1);
+    const plus = plusBtns[0];
+    assertEq("HOME-PLUS-2 '+' is labelled Quick add", plus && plus["aria-label"], "Quick add");
+    const menu = headDsc.find((n) => hasCls(n, "sauce-home-add-menu")) || null;
+    assertTrue("HOME-PLUS-3 header owns the dropdown", !!menu);
+    assertTrue("HOME-PLUS-4 menu starts closed", menu && !isOpen(menu));
+    fire(plus);
+    assertTrue("HOME-PLUS-5 '+' opens the menu", menu && isOpen(menu) && isOpen(plus));
+    fire(plus);
+    assertTrue("HOME-PLUS-6 '+' again closes it", menu && !isOpen(menu));
+    const items = menu ? descendants(menu).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    assertEq("HOME-PLUS-7 menu items: New task first, then the ungated captures",
+      items.map((n) => n.dataset && n.dataset.captureKey).join(","), "task,meeting,sticky-note");
+
+    const newTask = items[0];
+    assertTrue("HOME-NEWTASK-1 the New task item carries .sauce-home-new-task", newTask && hasCls(newTask, "sauce-home-new-task"));
+    const label = newTask ? descendants(newTask).find((n) => hasCls(n, "sauce-home-capture-label")) : null;
+    assertEq("HOME-NEWTASK-2 label is 'New task'", ((label && (label.text || label.textContent)) || "").trim(), "New task");
+    fire(plus);
+    await fire(newTask);
+    assertTrue("HOME-NEWTASK-3 choosing New task closes the menu", !isOpen(menu));
     assertEq("HOME-NEWTASK-4 click calls TaskDialog.open once", calls.dialogOpen.length, 1);
     assertTrue("HOME-NEWTASK-5 open() receives { surface:'home', today }",
       deepEq(calls.dialogOpen[0], { surface: "home", today: "2026-07-02" }),
       `got ${JSON.stringify(calls.dialogOpen[0])}`);
     assertEq("HOME-NEWTASK-6 New task never uses createQuick", calls.createQuick.length, 0);
 
-    const toggles = headDsc.filter((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-toggle"));
-    assertEq("HOME-CAPTURE-MENU-1 header holds exactly one .sauce-home-capture-toggle", toggles.length, 1);
-    assertTrue("HOME-CAPTURE-MENU-2 toggle label starts with 'Capture'",
-      /^Capture/.test(((toggles[0] && (toggles[0].text || toggles[0].textContent)) || "").trim()));
-    const menu = headDsc.find((n) => hasCls(n, "sauce-home-add-menu")) || null;
-    assertTrue("HOME-CAPTURE-MENU-3 header owns the dropdown", !!menu);
-    assertTrue("HOME-CAPTURE-MENU-4 menu starts closed", menu && !isOpen(menu));
-    fire(toggles[0]);
-    assertTrue("HOME-CAPTURE-MENU-5 toggle opens the menu", menu && isOpen(menu) && isOpen(toggles[0]));
-    fire(toggles[0]);
-    assertTrue("HOME-CAPTURE-MENU-6 toggle again closes it", menu && !isOpen(menu));
-    const items = menu ? descendants(menu).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
-    assertEq("HOME-CAPTURE-MENU-7 ungated items render (meeting, sticky-note)",
-      items.map((n) => n.dataset && n.dataset.captureKey).join(","), "meeting,sticky-note");
-
-    fire(toggles[0]);
-    await fire(items[0]);
-    assertTrue("HOME-CAPTURE-MENU-8 picking an item closes the menu", !isOpen(menu));
+    fire(plus);
     await fire(items[1]);
+    assertTrue("HOME-PLUS-8 picking a capture item closes the menu", !isOpen(menu));
+    await fire(items[2]);
     assertEq("HOME-CAP-11 meeting+sticky-note → 2 EntityCreate.create calls", calls.entityCreate.length, 2);
     assertEq("HOME-CAP-12 meeting → instance 'meeting'", calls.entityCreate[0] && calls.entityCreate[0].instance, "meeting");
     assertEq("HOME-CAP-13 sticky-note → instance 'sticky-note'", calls.entityCreate[1] && calls.entityCreate[1].instance, "sticky-note");
@@ -648,6 +603,7 @@ function descendants(el) {
       await home_.render(dvB, {});
       const homeB = dvB.container.querySelector(".sauce-home");
       const nb = homeB ? descendants(homeB).find((n) => n.tag === "button" && hasCls(n, "sauce-home-new-task")) : null;
+      assertTrue("HOME-NEWTASK-6b New task item still renders before TaskDialog registers", !!nb);
       let threw = false;
       try { await fire(nb); } catch (_e) { threw = true; }
       assertTrue("HOME-NEWTASK-7 TaskDialog not registered → no throw", !threw);
@@ -661,91 +617,6 @@ function descendants(el) {
     delete global.Notice;
     delete global.window.customJS;
     delete global.window.app;
-  }
-
-  // ── HOME-GLANCE-BACKLOG: the backlog chip (pure descriptor + count + click) ──
-  {
-    const bl = SpaceHome._glanceChips({ today: 1, done: 2, backlog: 4 });
-    assertEq("HOME-GLANCE-BACKLOG-1 backlog chip comes after done", bl.chips.map((c) => c.label).join(","), "today,done,backlog");
-    assertEq("HOME-GLANCE-BACKLOG-2 backlog chip n", bl.chips[2].n, 4);
-    assertTrue("HOME-GLANCE-BACKLOG-3 backlog chip is flagged clickable",
-      bl.chips[2].action === "backlog" && /sauce-home-glance-link/.test(bl.chips[2].cls), JSON.stringify(bl.chips[2]));
-    assertTrue("HOME-GLANCE-BACKLOG-4 zero/absent backlog adds no chip",
-      SpaceHome._glanceChips({ today: 1, backlog: 0 }).chips.length === 1
-        && SpaceHome._glanceChips({ today: 1 }).chips.length === 1);
-    const only = SpaceHome._glanceChips({ backlog: 3 });
-    assertTrue("HOME-GLANCE-BACKLOG-5 backlog alone is not an empty day", only.empty === false && only.chips.length === 1);
-    assertTrue("HOME-GLANCE-BACKLOG-6 non-link chips still carry no action",
-      bl.chips[0].action === undefined && bl.chips[1].action === undefined);
-
-    const TE = new (new Function(fs.readFileSync(path.join(WORKSHOP, "platform", "mechanisms", "task-entity", "task-entity.js"), "utf8") + "; return TaskEntity;")())();
-    const pages = [
-      { type: "task", status: "open", title: "bl1", source: "daily", file: { path: "spice/tasks/bl1.md" } },
-      { type: "task", status: "open", title: "bl2", source: "daily", file: { path: "spice/tasks/bl2.md" } },
-      { type: "task", status: "open", title: "dated", due: "2026-07-02", file: { path: "spice/tasks/dated.md" } },
-      { type: "task", status: "open", title: "proj", project_slug: "x", file: { path: "spice/tasks/proj.md" } },
-      { type: "task", status: "open", title: "mtg", source: "meeting", file: { path: "spice/tasks/mtg.md" } },
-      { type: "task", status: "done", title: "done", file: { path: "spice/tasks/done.md" } },
-      { type: "task", status: "open", title: "arch", file: { path: "spice/tasks/_done/arch.md" } },
-      { type: "task", status: "open", title: "trash", file: { path: "spice/tasks/_trash/trash.md" } },
-      { type: "note", status: "open", title: "notatask", file: { path: "spice/tasks/n.md" } },
-    ];
-    let pageQueries = 0;
-    const cdv = { pages: (q) => { pageQueries += 1; return q === '"spice/tasks"' ? pages : []; } };
-    assertEq("HOME-GLANCE-BACKLOG-7 _countBacklog counts only open backlog task notes", SpaceHome._countBacklog(cdv, TE), 2);
-    assertEq("HOME-GLANCE-BACKLOG-8 one dv.pages query, no per-row queries", pageQueries, 1);
-    assertEq("HOME-GLANCE-BACKLOG-9 no TaskEntity (cold load) → 0", SpaceHome._countBacklog(cdv, null), 0);
-    assertEq("HOME-GLANCE-BACKLOG-10 throwing dv → 0", SpaceHome._countBacklog({ pages: () => { throw new Error("boom"); } }, TE), 0);
-
-    installMoment("2026-07-02", 6);
-    const PREFS = "sauce-todo-filter:prefs:v2";
-    const store = { [PREFS]: JSON.stringify({ sort: "smart", group: "none", tab: "today" }) };
-    global.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
-    global.window.localStorage = global.localStorage;
-    const opened = [];
-    global.customJS = {
-      SpaceDailyDashboard: {
-        computeCounts: () => ({ today: 1, overdue: 0, done: 0, meetings: 0 }),
-        _openTodayToDo: (d, o) => {
-          let tab = null;
-          try { tab = JSON.parse(store[PREFS]).tab; } catch (_e) {}
-          opened.push({ d, o, tab });
-          return Promise.resolve({ ok: true });
-        },
-      },
-      TaskEntity: TE,
-    };
-    global.window.customJS = global.customJS;
-    const dv = makeDv();
-    dv.pages = cdv.pages;
-    await home_.render(dv, {});
-    const home = dv.container.querySelector(".sauce-home");
-    const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
-    const all = home ? descendants(home) : [];
-    const chip = all.find((n) => hasCls(n, "sauce-home-glance-backlog")) || null;
-    assertTrue("HOME-GLANCE-BACKLOG-11 render paints a '2 backlog' chip",
-      !!chip && descendants(chip).map((n) => n.text || n.textContent || "").join("").replace(/\s+/g, " ").trim() === "2 backlog");
-    if (chip && typeof chip.onclick === "function") await chip.onclick({});
-    const saved = JSON.parse(store[PREFS]);
-    assertEq("HOME-GLANCE-BACKLOG-12 click sets tab:'backlog'", saved.tab, "backlog");
-    assertTrue("HOME-GLANCE-BACKLOG-13 click keeps existing sort/group", saved.sort === "smart" && saved.group === "none", JSON.stringify(saved));
-    assertEq("HOME-GLANCE-BACKLOG-14 click opens today's To-Do once", opened.length, 1);
-    assertTrue("HOME-GLANCE-BACKLOG-15 opens for the render's today, tab written before navigation",
-      opened[0] && opened[0].d === "2026-07-02" && opened[0].tab === "backlog", String(opened[0] && opened[0].tab));
-
-    store[PREFS] = "{not json";
-    opened.length = 0;
-    if (chip && typeof chip.onclick === "function") await chip.onclick({});
-    assertEq("HOME-GLANCE-BACKLOG-16 corrupt prefs are replaced; still navigates", opened.length, 1);
-    delete global.localStorage;
-    delete global.window.localStorage;
-    opened.length = 0;
-    let threwNoLs = false;
-    try { if (chip && typeof chip.onclick === "function") await chip.onclick({}); } catch (_e) { threwNoLs = true; }
-    assertTrue("HOME-GLANCE-BACKLOG-17 no localStorage → no throw, still navigates", !threwNoLs && opened.length === 1);
-
-    delete global.customJS;
-    delete global.window.customJS;
   }
 
   // ── HOME-CAP-REG: article/journal gated on EntityCreate._loadSpec(instance) ─
@@ -778,7 +649,7 @@ function descendants(el) {
     const home = dv.container.querySelector(".sauce-home");
     const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
     const menu = home ? descendants(home).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-    const items = menu ? descendants(menu).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    const items = menu ? descendants(menu).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item") && !hasCls(n, "sauce-home-new-task")) : [];
     assertEq("HOME-CAP-REG-1 neither registered → 2 items (meeting, sticky-note)", items.length, 2);
     assertTrue("HOME-CAP-REG-2 _loadSpec checked reader-article", loadSpecCalls.indexOf("reader-article") >= 0,
       `expected a _loadSpec('reader-article') call; got ${JSON.stringify(loadSpecCalls)}`);
@@ -800,7 +671,7 @@ function descendants(el) {
     await home_.render(dv2, {});
     const home2 = dv2.container.querySelector(".sauce-home");
     const menu2 = home2 ? descendants(home2).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-    const items2 = menu2 ? descendants(menu2).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    const items2 = menu2 ? descendants(menu2).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item") && !hasCls(n, "sauce-home-new-task")) : [];
     assertEq("HOME-CAP-REG-4 both registered → 4 items", items2.length, 4);
     assertEq("HOME-CAP-REG-5 order meeting, sticky-note, article, journal",
       items2.map((n) => n.dataset && n.dataset.captureKey).join(","),
@@ -817,7 +688,7 @@ function descendants(el) {
     await home_.render(dv3, {});
     const home3 = dv3.container.querySelector(".sauce-home");
     const menu3 = home3 ? descendants(home3).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-    const items3 = menu3 ? descendants(menu3).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    const items3 = menu3 ? descendants(menu3).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item") && !hasCls(n, "sauce-home-new-task")) : [];
     assertEq("HOME-CAP-REG-6 registry lists trips contribution → 5 items", items3.length, 5);
     assertEq("HOME-CAP-REG-7 order includes trip last",
       items3.map((n) => n.dataset && n.dataset.captureKey).join(","),
@@ -841,7 +712,7 @@ function descendants(el) {
     await home_.render(dv4, {});
     const home4 = dv4.container.querySelector(".sauce-home");
     const menu4 = home4 ? descendants(home4).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-    const items4 = menu4 ? descendants(menu4).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    const items4 = menu4 ? descendants(menu4).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item") && !hasCls(n, "sauce-home-new-task")) : [];
     assertEq("HOME-CAP-REG-8 orphaned TripNavButtons class but unsubscribed in registry → trip stays gated out (4 items)", items4.length, 4);
 
     // Case E: registry read throws (missing file / malformed JSON) → trip
@@ -857,7 +728,7 @@ function descendants(el) {
     assertTrue("HOME-CAP-REG-9 registry read failure does not throw", !threw5, "render() threw on registry read failure");
     const home5 = dv5.container.querySelector(".sauce-home");
     const menu5 = home5 ? descendants(home5).find((n) => hasCls(n, "sauce-home-add-menu")) : null;
-    const items5 = menu5 ? descendants(menu5).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item")) : [];
+    const items5 = menu5 ? descendants(menu5).filter((n) => n.tag === "button" && hasCls(n, "sauce-home-add-item") && !hasCls(n, "sauce-home-new-task")) : [];
     assertEq("HOME-CAP-REG-10 registry read failure → trip stays gated out (4 items)", items5.length, 4);
 
     delete global.customJS;
@@ -880,8 +751,8 @@ function descendants(el) {
       const home = dv.container.querySelector(".sauce-home");
       const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
       const all = home ? descendants(home) : [];
-      // Clicking New task, the Capture toggle and every menu item must no-op, not throw.
-      for (const cls of ["sauce-home-new-task", "sauce-home-capture-toggle"]) {
+      // Clicking the "+", New task and every menu item must no-op, not throw.
+      for (const cls of ["sauce-home-add", "sauce-home-new-task"]) {
         const b = all.find((n) => n.tag === "button" && hasCls(n, cls));
         if (b && typeof b.onclick === "function") await b.onclick({});
       }
@@ -893,8 +764,8 @@ function descendants(el) {
     } catch (_e) {
       threw = true;
     }
-    assertTrue("HOME-CAP-17 New task + Capture toggle + items no-op gracefully when APIs absent", !threw,
-      "a missing customJS/app must make New task, the Capture toggle and its items no-op, never throw");
+    assertTrue("HOME-CAP-17 "+" + New task + capture items no-op gracefully when APIs absent", !threw,
+      "a missing customJS/app must make the "+", New task and the capture items no-op, never throw");
   }
 
   // ── HOME-DAY: the home no longer freezes on a stale day ────────────────────
@@ -1170,7 +1041,7 @@ function descendants(el) {
     // Simulate in-progress state: open the Capture menu.
     const hasCls = (n, cls) => (n.cls || "").split(/\s+/).indexOf(cls) >= 0;
     const descendantsOf = (n) => descendants(n);
-    const addBtn = descendantsOf(first).find((n) => n.tag === "button" && hasCls(n, "sauce-home-capture-toggle"));
+    const addBtn = descendantsOf(first).find((n) => n.tag === "button" && hasCls(n, "sauce-home-add"));
     if (addBtn && typeof addBtn.onclick === "function") addBtn.onclick({});
     const menu = descendantsOf(first).find((n) => hasCls(n, "sauce-home-add-menu"));
 

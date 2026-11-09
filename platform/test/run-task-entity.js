@@ -290,10 +290,11 @@ function deepEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
 // ---------- TaskDialog static helpers (pure) ----------
 
-// TD-1. defaultsForSurface daily → { due: today, source: "daily" }.
-ok('TD-1 defaultsForSurface daily seeds due + source', () => {
+// TD-1. defaultsForSurface daily → { source: "daily" }: no due, so the When
+// picker starts on No date even though today is known.
+ok('TD-1 defaultsForSurface daily seeds source only (no due)', () => {
   const d = TaskDialog.defaultsForSurface({ surface: 'daily', today: '2026-07-01' });
-  assert(deepEq(d, { due: '2026-07-01', source: 'daily' }), 'got ' + JSON.stringify(d));
+  assert(deepEq(d, { source: 'daily' }), 'got ' + JSON.stringify(d));
 });
 
 // TD-2. defaultsForSurface project → { project, source: "project" }, no due.

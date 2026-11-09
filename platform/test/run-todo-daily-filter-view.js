@@ -719,7 +719,7 @@ process.exitCode = 1;
     assert(listTitles(root).includes('Today high'));
   });
 
-  await okAsync('RD-DV-INTEROP prefs written by SpaceDailyDashboard and SpaceHome are read back with other keys intact', async () => {
+  await okAsync('RD-DV-INTEROP prefs written by SpaceDailyDashboard are read back with other keys intact', async () => {
     const View = loadClass({});
     const storage = makeStorage({
       [View.PREFS_KEY]: JSON.stringify({ tab: 'week', sort: 'due', group: 'priority', note: 'kept' }),
@@ -731,13 +731,7 @@ process.exitCode = 1;
     assert.deepStrictEqual(View.readPrefs(storage), { tab: 'overdue', sort: 'due', group: 'priority' });
     assert.strictEqual(JSON.parse(storage.data.get(View.PREFS_KEY)).note, 'kept');
 
-    const homeWindow = {
-      localStorage: storage,
-      customJS: { SpaceDailyDashboard: { async _openTodayToDo() { return true; } } },
-    };
-    const Home = new Function('window', 'customJS',
-      `${fs.readFileSync(path.join(ROOT, 'platform/blueprints/home/helpers/space-home.js'), 'utf8')}\nreturn SpaceHome;`)(homeWindow, undefined);
-    await Home._openBacklog({}, TODAY);
+    assert.strictEqual(Dashboard.writeTodayPrefs({ tab: 'backlog' }, storage), true);
     assert.deepStrictEqual(View.readPrefs(storage), { tab: 'backlog', sort: 'due', group: 'priority' });
     assert.strictEqual(JSON.parse(storage.data.get(View.PREFS_KEY)).note, 'kept');
     assert.deepStrictEqual(Dashboard.readTodayPrefs(storage), { tab: 'backlog', sort: 'due', group: 'priority' });
@@ -767,7 +761,7 @@ process.exitCode = 1;
     assert.deepStrictEqual(loadClass({}).renumber(['a'], {}), [], 'cold load renumbers nothing');
   });
 
-  ok('RD-DV-STRIP week strip: Mon-Fri always, weekend only when populated, counts open tasks, flags today', () => {
+  ok('RD-DV-STRIP week strip: all seven days Mon-Sun, counts open tasks, flags today', () => {
     const View = loadClass({ customJS: { TaskEntity: TE } });
     const cells = (list, todayStr) => View.weekStrip(list, todayStr).map((c) => [c.date, c.label, c.count, c.isToday]);
     assert.deepStrictEqual(cells(PARSED, TODAY), [
@@ -776,19 +770,23 @@ process.exitCode = 1;
       ['2026-11-11', 'Wed 11', 0, false],
       ['2026-11-12', 'Thu 12', 0, false],
       ['2026-11-13', 'Fri 13', 1, false],
-    ]);
+      ['2026-11-14', 'Sat 14', 0, false],
+      ['2026-11-15', 'Sun 15', 0, false],
+    ], 'an empty weekend still shows Saturday and Sunday');
     const sunday = TE.parseNote(page('Sunday item', { due: '2026-11-15' }));
     const doneSaturday = TE.parseNote(page('Done Saturday', {
       status: 'done', due: '2026-11-14', file: { path: 'spice/tasks/_done/Done Saturday.md' },
     }));
     const withWeekend = cells([...PARSED, sunday, doneSaturday], TODAY);
-    assert.deepStrictEqual(withWeekend.map((c) => c[0]),
-      ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-15'],
-      'Sunday holds an open task; Saturday holds only a done one');
-    assert.deepStrictEqual(withWeekend[5], ['2026-11-15', 'Sun 15', 1, false]);
+    assert.strictEqual(withWeekend.length, 7, 'always seven cells');
+    assert.deepStrictEqual(withWeekend[5], ['2026-11-14', 'Sat 14', 0, false], 'a done task does not count');
+    assert.deepStrictEqual(withWeekend[6], ['2026-11-15', 'Sun 15', 1, false], 'an open Sunday task counts');
     const midweek = cells(PARSED, '2026-11-11');
-    assert.deepStrictEqual(midweek.map((c) => c[3]), [false, false, true, false, false], 'Wednesday is today');
+    assert.deepStrictEqual(midweek.map((c) => c[3]), [false, false, true, false, false, false, false], 'Wednesday is today');
     assert.strictEqual(midweek[0][2], 2, 'a past day of this week still counts its open tasks');
+    const sundayToday = cells(PARSED, '2026-11-15');
+    assert.deepStrictEqual(sundayToday.map((c) => c[0])[0], '2026-11-09', 'Sunday belongs to the Monday-started week');
+    assert.strictEqual(sundayToday[6][3], true, 'Sunday flagged as today');
     assert.deepStrictEqual(View.weekStrip(PARSED, 'garbage'), []);
     assert.deepStrictEqual(loadClass({}).weekStrip(PARSED, TODAY), [], 'cold load: no strip');
   });
@@ -1119,11 +1117,15 @@ process.exitCode = 1;
     const host = byClass(root, 'sauce-todo-above-tabs')[0];
     const cells = byClass(host, 'sauce-todo-week-cell');
     assert.deepStrictEqual(cells.map((c) => byClass(c, 'sauce-todo-week-label')[0].textContent),
-      ['Mon 9', 'Tue 10', 'Wed 11', 'Thu 12', 'Fri 13']);
+      ['Mon 9', 'Tue 10', 'Wed 11', 'Thu 12', 'Fri 13', 'Sat 14', 'Sun 15']);
     assert.deepStrictEqual(cells.map((c) => byClass(c, 'sauce-todo-week-count')[0].textContent),
-      ['2', '0', '0', '0', '1']);
+      ['2', '0', '0', '0', '1', '0', '0']);
     assert.deepStrictEqual(cells.map((c) => String(c.className).split(/\s+/).includes('is-today')),
-      [true, false, false, false, false]);
+      [true, false, false, false, false, false, false]);
+    const strip = byClass(host, 'sauce-todo-week-strip')[0];
+    assert(/display:\s*grid/.test(strip.style.cssText) && /grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\)/.test(strip.style.cssText)
+      && /width:\s*100%/.test(strip.style.cssText), 'seven equal columns across the full width: ' + strip.style.cssText);
+    for (const cell of cells) assert(/width:\s*100%/.test(cell.style.cssText), 'each cell fills its column');
     assert.strictEqual(cells[0].attributes['aria-current'], 'date');
     await cells[4].fire('click');
     assert.strictEqual(View.readPrefs(env.storage).tab, 'week');
@@ -1170,7 +1172,7 @@ process.exitCode = 1;
       }
     }
     const cells = byClass(root, 'sauce-todo-week-cell');
-    assert.strictEqual(cells.length, 5);
+    assert.strictEqual(cells.length, 7);
     for (const cell of cells) {
       assert(!cell._listeners.dragover && !cell._listeners.drop, 'mobile strip cells take no drops');
       assert.strictEqual(typeof cell._listeners.click, 'function', 'strip cells stay clickable');

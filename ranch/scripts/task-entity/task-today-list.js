@@ -866,11 +866,41 @@ class TaskTodayList {
         return TaskTodayList.renderTaskRow(band, task);
     }
 
+    /**
+     * Fixed widths (in the slot's own 0.8em font) for the metadata columns, so
+     * project / priority / due line up down a list. Sized for "due: YYYY-MM-DD",
+     * "highest", and a typical project name (longer names ellipsize).
+     */
+    static get META_SLOT_WIDTH() {
+        return { project: '11em', priority: '5.6em', due: '9.8em' };
+    }
+
+    /**
+     * Row-action and layout rules that inline styles cannot express (hover,
+     * touch, narrow widths). Desktop: actions overlay the row's right edge on
+     * hover/focus, and the priority + due columns they sit over step aside
+     * (visibility, so nothing reflows), so the metadata columns stay flush
+     * right at rest. Touch or a narrow pane: actions sit inline and always
+     * visible, the title takes the full first line, and the metadata + actions
+     * wrap below it, right-aligned, with natural (unfixed) widths.
+     */
     static get _ROW_ACTIONS_CSS() {
-        return '.sauce-task-today-row .sauce-task-actions { opacity: 0; transition: opacity 120ms ease; }'
-            + ' .sauce-task-today-row:hover .sauce-task-actions, .sauce-task-today-row:focus-within .sauce-task-actions { opacity: 1; }'
-            + ' .is-mobile .sauce-task-today-row .sauce-task-actions { opacity: 1; }'
-            + ' @media (hover: none) { .sauce-task-today-row .sauce-task-actions { opacity: 1; } }';
+        const touch = '.sauce-task-today-row .sauce-task-actions { position: static; opacity: 1; padding-left: 0; background: none; }'
+            + ' .sauce-task-today-row .sauce-task-today-titlegroup { flex-basis: 100% !important; }'
+            + ' .sauce-task-today-row .sauce-task-today-right { flex: 1 1 100% !important; flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }'
+            + ' .sauce-task-today-row .sauce-task-today-chips { flex-wrap: wrap !important; flex-shrink: 1 !important; }'
+            + ' .sauce-task-today-row .sauce-task-meta-slot { width: auto !important; visibility: visible !important; }'
+            + ' .sauce-task-today-row .sauce-task-meta-slot:empty { display: none !important; }';
+        const scoped = (prefix) => touch.split(' .sauce-task-today-row').join(' ' + prefix + ' .sauce-task-today-row')
+            .replace(/^\.sauce-task-today-row/, prefix + ' .sauce-task-today-row');
+        const hover = (sel) => '.sauce-task-today-row:hover ' + sel + ', .sauce-task-today-row:focus-within ' + sel;
+        return '.sauce-task-today-row .sauce-task-actions { position: absolute; top: 8px; right: 6px; padding-left: 8px;'
+            + ' background: var(--background-secondary); border-radius: var(--radius-s, 4px); opacity: 0; transition: opacity 120ms ease; }'
+            + ' ' + hover('.sauce-task-actions') + ' { opacity: 1; }'
+            + ' ' + hover('.sauce-task-meta-slot.is-priority') + ', ' + hover('.sauce-task-meta-slot.is-due') + ' { visibility: hidden; }'
+            + ' ' + scoped('.is-mobile')
+            + ' @media (hover: none) { ' + touch + ' }'
+            + ' @media (max-width: 560px) { ' + touch + ' }';
     }
 
     static get _PRIO_BAR_COLOR() {
@@ -900,33 +930,6 @@ class TaskTodayList {
         try {
             const momentRef = typeof window !== 'undefined' ? window.moment : null;
             return typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
-        } catch (_e) { return ''; }
-    }
-
-    /**
-     * `notes` when the user's own notes below the chrome exceed 200 bytes, or
-     * `N KB notes` once they reach 1024 bytes;
-     * computed from file stat + frontmatter end offset (no file read). Any
-     * missing piece yields '' (no chip).
-     */
-    static _notesChipText(path, TE) {
-        try {
-            if (!path || !TE || typeof TE.notesBytes !== 'function') return '';
-            const appRef = (typeof window !== 'undefined' && window.app)
-                || (typeof globalThis !== 'undefined' && globalThis.app)
-                || null;
-            if (!appRef || !appRef.vault || !appRef.metadataCache) return '';
-            const file = appRef.vault.getAbstractFileByPath(path);
-            const size = file && file.stat && file.stat.size;
-            if (!(size > 0)) return '';
-            const cache = appRef.metadataCache.getFileCache(file);
-            const fmEnd = cache && cache.frontmatterPosition && cache.frontmatterPosition.end
-                && cache.frontmatterPosition.end.offset;
-            if (typeof fmEnd !== 'number') return '';
-            const bytes = TE.notesBytes(size, fmEnd);
-            if (!(bytes > 200)) return '';
-            if (bytes < 1024) return 'notes';
-            return Math.round(bytes / 1024) + ' KB notes';
         } catch (_e) { return ''; }
     }
 
@@ -980,15 +983,15 @@ class TaskTodayList {
         const path = task && task.path;
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
         TaskTodayList.markTaskRow(row, task);
-        // The right cluster (chips + action icons) sits beside the title when the
-        // row is wide enough, and WRAPS to its own right-aligned line when the title
-        // is long — flex-wrap + a title min-width floor. Without the floor a long
-        // title would collapse to one character per line to make room for the wide
-        // cluster (project + due chips + two icons); the floor keeps the title
-        // readable and forces the cluster to wrap instead. align-items:flex-start
-        // pins the cluster to the top of the first title line while a long title
-        // wraps within its own column.
-        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border); width: 100%; box-sizing: border-box; position: relative;';
+        // Layout: [title group | metadata columns]. The title group has a ZERO
+        // flex basis, so a long title wraps inside its own column instead of
+        // pushing the metadata onto a second line; the metadata stays on line 1,
+        // flush right, in fixed-width slots so project / priority / due line up
+        // down the list. Row actions overlay the right edge on hover (desktop) and
+        // sit inline on touch / narrow layouts (see _ROW_ACTIONS_CSS), where the
+        // metadata also drops below the title. flex-wrap stays on so the inline
+        // date picker can take its own line.
+        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 14px; padding: 10px 10px; border-radius: 6px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border); width: 100%; box-sizing: border-box; position: relative;';
         if (!TaskTodayList._rowActionsStyleInjected && typeof document !== 'undefined' && document.head) {
             const s = document.createElement('style');
             s.textContent = TaskTodayList._ROW_ACTIONS_CSS;
@@ -1012,7 +1015,7 @@ class TaskTodayList {
         // auto; min-width: 0` lets the group take the remaining row width while
         // still allowing the title's own text to wrap internally.
         const titleGroup = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
-        titleGroup.style.cssText = 'display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0;';
+        titleGroup.style.cssText = 'display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 10px; flex: 1 1 0%; min-width: 0;';
 
         if (opts.dragHandle) {
             const drag = titleGroup.createEl('span', { cls: 'sauce-task-drag' });
@@ -1098,14 +1101,11 @@ class TaskTodayList {
         // the old MarkdownRenderer path always fell back to raw text).
         const titleText = (task && task.title) || '(untitled)';
         const title = titleGroup.createEl('span', { cls: 'sauce-task-today-title' });
-        // Title takes the remaining space (flex:1 1 auto) and wraps WITHIN its
-        // column (break-word wraps long words). The min-width:8em FLOOR keeps a long
-        // title readable and forces the right cluster (chips + icons) to wrap to its
-        // own line rather than crushing the title to one character per line. The
-        // EXPLICIT line-height:1.5 must match the checkbox wrapper's 1.5em height so
-        // the checkbox centers on the first line of the title (see cbWrap above)
-        // regardless of theme defaults.
-        title.style.cssText = 'flex: 1 1 auto; min-width: 8em; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
+        // Title takes the remaining space and wraps WITHIN its column (break-word
+        // wraps long words). The EXPLICIT line-height:1.5 must match the checkbox
+        // wrapper's 1.5em height so the checkbox centers on the first line of the
+        // title (see cbWrap above) regardless of theme defaults.
+        title.style.cssText = 'flex: 1 1 auto; min-width: 0; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
         TaskTodayList.renderInlineLinks(title, titleText, path);
 
         // Title click → OPEN THE TASK NOTE (its TaskNoteView carries an Edit button
@@ -1128,11 +1128,11 @@ class TaskTodayList {
         };
         title.addEventListener('click', openNote);
 
-        // Right cluster — chips + action icons grouped so they wrap together (below
-        // the title, right-aligned) when the row is tight, instead of each squeezing
-        // the title independently. margin-left:auto hugs it to the right on line 1.
+        // Right cluster — metadata slots + action icons. margin-left:auto hugs it
+        // to the right edge on line 1; min-height matches the title's first line
+        // so the chips sit level with it.
         const rightCluster = row.createEl('div', { cls: 'sauce-task-today-right' });
-        rightCluster.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto;';
+        rightCluster.style.cssText = 'display: flex; align-items: center; gap: 10px; flex: 0 0 auto; margin-left: auto; min-height: 1.5em;';
 
         // Metadata chips (only when set): project / priority / due. flex-shrink:0
         // so the chips never shrink or clip — DUE stays intact.
@@ -1146,31 +1146,46 @@ class TaskTodayList {
             badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
         }
 
+        // Metadata as right-aligned columns. Every row draws the same fixed-width
+        // slots (extras / project / priority / due), empty or not, so each kind of
+        // chip lines up vertically down a list; a chip right-aligns inside its
+        // slot and an over-long project name ellipsizes (full name in title=).
+        // Extras (subtask progress, age) sit in an auto-width slot on the left.
         const chips = rightCluster.createEl('div', { cls: 'sauce-task-today-chips' });
-        chips.style.cssText = 'display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-shrink: 0;';
-        const addChip = (label, cls) => {
-            const chip = chips.createEl('span', { text: label, cls: cls });
-            chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
+        chips.style.cssText = 'display: flex; gap: 8px; flex-wrap: nowrap; align-items: center; justify-content: flex-end; flex-shrink: 0;';
+        const CHIP_CSS = 'display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box; padding: 2px 8px; border-radius: 5px; background: var(--background-modifier-border); color: var(--text-muted); line-height: 1.4;';
+        const mkSlot = (kind, width) => {
+            const slot = chips.createEl('span', { cls: 'sauce-task-meta-slot is-' + kind });
+            slot.style.cssText = 'display: inline-flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: 0.8em; flex: 0 0 auto;' + (width ? ' width: ' + width + ';' : '');
+            return slot;
         };
-        const notesText = TaskTodayList._notesChipText(path, TE);
-        if (notesText) addChip(notesText, 'sauce-task-notes');
-        if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
-        if (task && task.priority) addChip(String(task.priority));
-        if (task && task.due) addChip('due: ' + task.due);
+        const addChip = (slot, label, cls, color) => {
+            const chip = slot.createEl('span', { text: label, cls: cls });
+            chip.style.cssText = CHIP_CSS + (color ? ' color: ' + color + ';' : '');
+            try { chip.setAttribute('title', label); } catch (_e) {}
+            return chip;
+        };
+        const extras = mkSlot('extras', '');
         // Subtask-progress chip — OPTIONAL, attached by the caller (daily /
         // project / meeting render() via TaskEntity.subtaskCountsByParent), NOT
         // queried here (renderTaskRow stays dv-free by design). Shown only when
         // the task actually has ≥1 subtask.
         if (task && task.subtask_count && task.subtask_count.total > 0) {
-            addChip(task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
+            addChip(extras, task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
         }
         if (opts.showAge !== false) {
             const age = TaskTodayList._ageChip(task, todayStr, TE);
             if (age) {
-                const ageChip = chips.createEl('span', { text: age.text, cls: 'sauce-task-age ' + age.cls });
-                ageChip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: ' + (age.cls === 'is-stale' ? 'var(--color-orange, #ea580c)' : 'var(--text-error, #e05561)') + ';';
+                addChip(extras, age.text, 'sauce-task-age ' + age.cls,
+                    age.cls === 'is-stale' ? 'var(--color-orange, #ea580c)' : 'var(--text-error, #e05561)');
             }
         }
+        const projectSlot = mkSlot('project', TaskTodayList.META_SLOT_WIDTH.project);
+        if (task && task.project) addChip(projectSlot, TaskTodayList._projectChipText(task.project), 'sauce-task-project');
+        const prioritySlot = mkSlot('priority', TaskTodayList.META_SLOT_WIDTH.priority);
+        if (task && task.priority) addChip(prioritySlot, String(task.priority), 'sauce-task-priority');
+        const dueSlot = mkSlot('due', TaskTodayList.META_SLOT_WIDTH.due);
+        if (task && task.due) addChip(dueSlot, 'due: ' + task.due, 'sauce-task-due');
 
         // Row actions at the FAR-RIGHT end of the cluster. Open rows render
         // tomorrow + next-Monday + edit + a "more" (⋯) button whose menu holds

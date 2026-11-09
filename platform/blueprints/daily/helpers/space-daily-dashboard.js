@@ -112,7 +112,7 @@
  */
 class SpaceDailyDashboard {
   // Instance delegates. CustomJS stores this class as an INSTANCE, so
-  // cross-class callers (SpaceHome's glance counts) reach these through the
+  // cross-class callers (SpaceHome's no-op signature counts) reach these through the
   // stored customJS instance; a static alone is undefined there.
   computeCounts(dv, todayStr, TE) { return SpaceDailyDashboard.computeCounts(dv, todayStr, TE); }
   selectTasks(dv, todayStr, TE) { return SpaceDailyDashboard.selectTasks(dv, todayStr, TE); }
@@ -541,11 +541,11 @@ class SpaceDailyDashboard {
   }
 
   /**
-   * Home command center count API (DRY): roll up the day's counts for the glance
-   * line. Composes selectTasks (→ { open[], overdue[], stale[], done, backlog })
+   * Home command center count API (DRY): roll up the day's counts (Home uses
+   * them as its re-render signature). Composes selectTasks (→ { open[], overdue[], stale[], done, backlog })
    * with selectMeetings (→ page[]) and returns integers only: { today, overdue,
    * stale, done, backlog, meetings }. `overdue` means "anything late" (overdue +
-   * stale) so the glance chip keeps counting every late task.
+   * stale) so the count keeps every late task.
    * Cold-load safe — no TE → tasks zeroed (selectTasks returns empties) but
    * meetings are still counted. Never throws.
    */
@@ -627,7 +627,7 @@ class SpaceDailyDashboard {
     // v0.2.6: match meetings whose filename CONTAINS today's date (covers both
     // leading-date "2026-05-12 Foo.md" and trailing-date "Foo-2026-05-12.md"
     // conventions). Selection lives in the pure static selectMeetings (Node-tested
-    // via HC-SELMTG + shared with computeCounts for the Home glance line); this
+    // via HC-SELMTG + shared with computeCounts for Home's re-render signature); this
     // closure is just the dv adapter.
     const getMeetings = () => SpaceDailyDashboard.selectMeetings(dv, today);
 
@@ -799,6 +799,7 @@ class SpaceDailyDashboard {
           dv,
           todayStr: today,
           TTL: liveTTL,
+          compact: !!(params && params.compact === true),
           model: {
             today: openTasks.slice(),
             overdue: lateTasks.slice(),
@@ -1640,7 +1641,11 @@ class SpaceDailyDashboard {
    * (manual rank), TaskDialog.reopen (Undo). Preferences are the shared to-do
    * view prefs in localStorage. Never throws.
    *
-   * st: { dv, todayStr, TTL, model: { today, overdue, stale, doneToday } }
+   * Compact mode (st.compact, Home): only Up next and Overdue, with stale tasks
+   * folded into Overdue; no Sort / Group controls (Smart sort, no grouping), no
+   * Stale or Done today sections.
+   *
+   * st: { dv, todayStr, TTL, compact, model: { today, overdue, stale, doneToday } }
    */
   _renderTodayPanel(host, st) {
     try {
@@ -1655,7 +1660,10 @@ class SpaceDailyDashboard {
       const TE = (cjs && cjs.TaskEntity) || null;
       const TD = (cjs && cjs.TaskDialog) || null;
       if (!SpaceDailyDashboard.hasLivePanelApi(TTL)) return;
-      const prefs = SpaceDailyDashboard.readTodayPrefs();
+      const compact = st.compact === true;
+      const prefs = compact
+        ? Object.assign({}, SpaceDailyDashboard.readTodayPrefs(), { sort: "smart", group: "none" })
+        : SpaceDailyDashboard.readTodayPrefs();
       const rerender = () => this._renderTodayPanel(host, st);
       const notice = (msg) => { try { if (typeof Notice === "function") new Notice(msg, 6000); } catch (_e) {} };
       const stop = (ev) => { try { ev && ev.stopPropagation && ev.stopPropagation(); } catch (_e) {} };
@@ -1720,18 +1728,17 @@ class SpaceDailyDashboard {
         return b;
       };
 
-      const panel = host.createEl("div", { cls: "sauce-today-panel" });
+      const panel = host.createEl("div", { cls: "sauce-today-panel" + (compact ? " is-compact" : "") });
 
-      // Sort / Group controls (Up next only) share the to-do view's prefs and
-      // its menu wording (TaskTodayList.SORT_OPTIONS / GROUP_OPTIONS).
+      // Sort / Group controls (Up next only, never in compact mode) share the
+      // to-do view's prefs and its menu wording (TaskTodayList.SORT_OPTIONS /
+      // GROUP_OPTIONS).
       const sortOptions = TTL.SORT_OPTIONS;
       const groupOptions = TTL.GROUP_OPTIONS;
       const labelOf = (options, key, fallback) => {
         const hit = options.find((o) => o && o.key === key);
         return hit ? hit.label : fallback;
       };
-      const controls = panel.createEl("div", { cls: "sauce-today-controls" });
-      controls.style.cssText = "display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin: 0 0 6px 0;";
       const choose = (btn, options, current, pick) => {
         if (!options.length) return;
         const MP = cjs && cjs.MenuPopover;
@@ -1748,23 +1755,27 @@ class SpaceDailyDashboard {
         const i = options.findIndex((o) => o.key === current);
         pick(options[(i + 1) % options.length].key);
       };
-      const sortBtn = mkButton(controls, "sauce-today-sort", "Sort: " + labelOf(sortOptions, prefs.sort, "Smart") + " ▾");
-      sortBtn.addEventListener("click", (ev) => {
-        stop(ev);
-        choose(sortBtn, sortOptions, prefs.sort, (k) => { SpaceDailyDashboard.writeTodayPrefs({ sort: k }); rerender(); });
-      });
-      const groupBtn = mkButton(controls, "sauce-today-group", "Group: " + labelOf(groupOptions, prefs.group, "None") + " ▾");
-      groupBtn.addEventListener("click", (ev) => {
-        stop(ev);
-        choose(groupBtn, groupOptions, prefs.group, (k) => { SpaceDailyDashboard.writeTodayPrefs({ group: k }); rerender(); });
-      });
+      if (!compact) {
+        const controls = panel.createEl("div", { cls: "sauce-today-controls" });
+        controls.style.cssText = "display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin: 0 0 8px 0;";
+        const sortBtn = mkButton(controls, "sauce-today-sort", "Sort: " + labelOf(sortOptions, prefs.sort, "Smart") + " ▾");
+        sortBtn.addEventListener("click", (ev) => {
+          stop(ev);
+          choose(sortBtn, sortOptions, prefs.sort, (k) => { SpaceDailyDashboard.writeTodayPrefs({ sort: k }); rerender(); });
+        });
+        const groupBtn = mkButton(controls, "sauce-today-group", "Group: " + labelOf(groupOptions, prefs.group, "None") + " ▾");
+        groupBtn.addEventListener("click", (ev) => {
+          stop(ev);
+          choose(groupBtn, groupOptions, prefs.group, (k) => { SpaceDailyDashboard.writeTodayPrefs({ group: k }); rerender(); });
+        });
+      }
 
       const mkSection = (name, label) => {
         const s = panel.createEl("div", { cls: "sauce-today-section" });
         s.dataset.section = name;
-        s.style.cssText = "margin: 10px 0 4px 0;";
+        s.style.cssText = "margin: 18px 0 6px 0;";
         const head = s.createEl("div", { cls: "sauce-today-section-head" });
-        head.style.cssText = "display: flex; align-items: center; gap: 10px; margin: 0 0 4px 0;";
+        head.style.cssText = "display: flex; align-items: center; gap: 10px; margin: 0 0 6px 0; padding: 0 8px;";
         const l = head.createEl("span", { cls: "sauce-today-section-label" });
         l.textContent = label;
         l.style.cssText = "font-size: 0.78em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);";
@@ -1905,7 +1916,9 @@ class SpaceDailyDashboard {
       }
 
       // 2. Overdue · N — 1..29 days late, most late first, bulk Move all to today.
-      const overdue = stableSort(model.overdue.slice(), (a, b) => (daysLate(b) - daysLate(a)) || byTitle(a, b));
+      // Compact mode folds the stale (30+ days) band in here.
+      const overdueSource = compact ? model.overdue.concat(model.stale) : model.overdue;
+      const overdue = stableSort(overdueSource.slice(), (a, b) => (daysLate(b) - daysLate(a)) || byTitle(a, b));
       if (overdue.length > 0) {
         const od = mkSection("overdue", "Overdue · " + overdue.length);
         const rows = new Map();
@@ -1945,7 +1958,7 @@ class SpaceDailyDashboard {
         const bd = String((b && b.due) || "");
         return (ad < bd ? -1 : ad > bd ? 1 : 0) || byTitle(a, b);
       });
-      if (stale.length > 0) {
+      if (!compact && stale.length > 0) {
         const sc = mkSection("stale", "Stale · " + stale.length);
         const triage = mkButton(sc.tools, "sauce-today-triage", "Triage", linkCss);
         triage.addEventListener("click", (ev) => {
@@ -1994,7 +2007,7 @@ class SpaceDailyDashboard {
 
       // 4. Done today · N — struck rows, completion time, Undo, done-log link.
       const doneToday = model.doneToday;
-      if (doneToday.length > 0) {
+      if (!compact && doneToday.length > 0) {
         const dn = mkSection("done", "Done today · " + doneToday.length);
         for (const t of doneToday) {
           TTL.renderDoneRow(dn.list, t, {

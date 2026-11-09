@@ -1211,7 +1211,7 @@ process.exitCode = 1;
     };
     const Dash = loadDashboard(windowShim, customJS);
     const dash = new Dash();
-    await dash.render(dv, o.asOf ? { asOf: o.asOf, live: true } : undefined);
+    await dash.render(dv, o.asOf ? Object.assign({ asOf: o.asOf, live: true }, o.compact ? { compact: true } : {}) : undefined);
     const sections = () => root.querySelectorAll('.sauce-today-section');
     const section = (name) => sections().find((s) => s.dataset.section === name) || null;
     const labels = () => sections().map((s) => {
@@ -1333,6 +1333,31 @@ process.exitCode = 1;
       await f.root.querySelector('.sauce-today-done-log')._fire('click');
       assert(f.calls.opened.includes('spice/to-do/Completed Tasks.md'), 'Open done log opens the Completed Tasks hub');
     } finally { f.cleanup(); }
+  });
+
+  await ok('RD-P-COMPACT Home (compact) shows only Up next and Overdue, stale folded in, no Sort / Group', async () => {
+    const f = await renderLivePanel({ viewedDay: 'Home', asOf: P_TODAY, compact: true, taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(JSON.stringify(f.labels()) === JSON.stringify(['Up next', 'Overdue · 3']),
+        'compact section labels: ' + JSON.stringify(f.labels()));
+      assert(JSON.stringify(f.rowPaths('overdue')) === JSON.stringify(['spice/tasks/stale-40.md', 'spice/tasks/late-7.md', 'spice/tasks/late-3.md']),
+        'stale folded into Overdue, most late first: ' + f.rowPaths('overdue'));
+      assert(!f.section('stale') && !f.section('done'), 'no Stale or Done today section');
+      assert(!f.root.querySelector('.sauce-today-sort') && !f.root.querySelector('.sauce-today-group')
+        && !f.root.querySelector('.sauce-today-controls'), 'no Sort / Group controls');
+      assert(f.root.querySelector('.sauce-today-panel.is-compact'), 'panel carries .is-compact');
+      assert(f.section('overdue').querySelector('.sauce-today-moveall'), 'Move all to today stays on Overdue');
+    } finally { f.cleanup(); }
+
+    const stored = await renderLivePanel({ viewedDay: 'Home', asOf: P_TODAY, compact: true, prefs: { sort: 'priority', group: 'project' }, taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(!stored.root.querySelector('.sauce-today-group-label'), 'stored To-Do grouping is ignored on Home');
+    } finally { stored.cleanup(); }
+
+    const daily = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try {
+      assert(daily.labels().length === 4 && daily.root.querySelector('.sauce-today-sort'), 'the daily note keeps all four sections and the controls');
+    } finally { daily.cleanup(); }
   });
 
   await ok('RD-P-ALL-SOURCES a project task due today appears in Up next', async () => {
