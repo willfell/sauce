@@ -21,6 +21,116 @@ const TaskTodayList = new (loadClass('mechanisms/task-entity/task-today-list.js'
 const TaskDialog = new (loadClass('mechanisms/task-entity/task-dialog.js', 'TaskDialog'))();
 
 global.Notice = function () {};
+const prevNotice = global.Notice;
+
+function makeTreeNode(tag) {
+  const n = {
+    tagName: String(tag || 'div').toUpperCase(),
+    style: {}, dataset: {}, attributes: {}, type: '', checked: false, cls: '', className: '',
+    _textContent: '', children: [], parentNode: null, _listeners: {},
+    get textContent() { return this._textContent; },
+    set textContent(v) { this._textContent = String(v == null ? '' : v); this.children = []; },
+    createEl(t, opts) {
+      const c = makeTreeNode(t);
+      if (opts) {
+        if (opts.cls) { c.cls = opts.cls; c.className = opts.cls; }
+        if (opts.text != null) c.textContent = opts.text;
+        if (opts.type) c.type = opts.type;
+      }
+      this.appendChild(c);
+      return c;
+    },
+    createSpan(opts) { return this.createEl('span', opts); },
+    createDiv(opts) { return this.createEl('div', opts); },
+    appendText(v) { this.children.push({ tagName: '#text', textContent: String(v == null ? '' : v), parentNode: this }); },
+    setText(v) { this.textContent = v; this.children = []; },
+    empty() { this.children = []; },
+    setAttribute(k, v) { this.attributes[k] = v; if (k === 'class') { this.cls = String(v); this.className = String(v); } },
+    getAttribute(k) { return this.attributes[k]; },
+    addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+    removeEventListener(ev, fn) { const list = this._listeners[ev] || []; const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); },
+    appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
+    insertBefore(node, ref) {
+      node.parentNode = this;
+      if (ref == null) { this.children.push(node); return node; }
+      const i = this.children.indexOf(ref);
+      if (i < 0) this.children.push(node); else this.children.splice(i, 0, node);
+      return node;
+    },
+    removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); if (c) c.parentNode = null; return c; },
+    remove() { if (this.parentNode) this.parentNode.removeChild(this); },
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const i = this.parentNode.children.indexOf(this);
+      return (i >= 0 && i + 1 < this.parentNode.children.length) ? this.parentNode.children[i + 1] : null;
+    },
+    get firstChild() { return this.children[0] || null; },
+    get options() { return this.children.filter((child) => child.tagName === 'OPTION'); },
+    classList: { add() {} },
+    focus() { this._focusCount = (this._focusCount || 0) + 1; },
+    click() {
+      const event = { target: this, currentTarget: this, preventDefault() {}, stopPropagation() {} };
+      if (typeof this.onclick === 'function') return this.onclick(event);
+      const listeners = this._listeners.click || [];
+      return listeners[0] ? listeners[0](event) : undefined;
+    },
+    contains(candidate) {
+      if (candidate === this) return true;
+      return this.children.some((child) => child && typeof child.contains === 'function' && child.contains(candidate));
+    },
+    querySelector(selector) {
+      const selectors = String(selector || '').split(',').map((value) => value.trim());
+      const match = (node, part) => {
+        if (part.startsWith('.')) return (` ${node.className || node.cls || ''} `).includes(` ${part.slice(1)} `);
+        if (/^(input|select|textarea|button)/.test(part)) return node.tagName === part.match(/^\w+/)[0].toUpperCase() && !node.disabled;
+        return node.tagName === part.toUpperCase();
+      };
+      const stack = this.children.slice();
+      while (stack.length) {
+        const node = stack.shift();
+        if (selectors.some((part) => match(node, part))) return node;
+        if (node && node.children) stack.unshift(...node.children);
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      const out = [];
+      const stack = this.children.slice();
+      while (stack.length) {
+        const node = stack.shift();
+        if (selector.startsWith('.') && (` ${node.className || node.cls || ''} `).includes(` ${selector.slice(1)} `)) out.push(node);
+        if (node && node.children) stack.unshift(...node.children);
+      }
+      return out;
+    },
+    closest() { return null; },
+  };
+  n.classList = {
+    add(...names) {
+      const current = String(n.className || n.cls || '').split(/\s+/).filter(Boolean);
+      for (const name of names) if (!current.includes(name)) current.push(name);
+      n.className = current.join(' ');
+      n.cls = n.className;
+    },
+  };
+  return n;
+}
+
+function findByCls(node, cls) {
+  if (!node || !node.children) return null;
+  for (const c of node.children) {
+    const classes = String((c && (c.className || c.cls)) || '').split(/\s+/);
+    if (c && classes.includes(cls)) return c;
+    const d = findByCls(c, cls); if (d) return d;
+  }
+  return null;
+}
+function fireEvent(el, name, extra) {
+  const fns = (el && el._listeners && el._listeners[name]) || [];
+  const event = Object.assign({ target: el, currentTarget: el, preventDefault() {}, stopPropagation() {} }, extra || {});
+  return fns[0] ? fns[0](event) : undefined;
+}
+function fireClick(el) { return fireEvent(el, 'click'); }
 
 function makeRow() {
   return { dataset: {}, parentNode: null, remove() {} };
@@ -198,6 +308,208 @@ function makeEnv(initialFiles, opts) {
     await TaskDialog._saveEdit(global.window.app, file, payload('2026-11-12'), null);
     assert(file._fm.due === '2026-11-12' && file._fm.rank === '', 'changed due clears rank: ' + JSON.stringify(file._fm));
   });
+
+
+  const rowEnv = (over) => {
+    const o = over || {};
+    global.window = {
+      app: o.app || { workspace: { openLinkText() {} } },
+      customJS: Object.assign({ TaskEntity, TaskDialog: { open() {}, confirmDelete: async () => ({ ok: false }) }, RenderSafe: { captureScroll() {} } }, o.customJS || {}),
+      moment: () => ({ format: () => o.today || '2026-11-09' }),
+    };
+    global.app = null;
+  };
+  const openTask = (extra) => Object.assign({ title: 'Row task', path: 'spice/tasks/row.md', status: 'open', due: '2026-11-09' }, extra || {});
+  const withReschedule = (spy, fn) => {
+    const Cls = TaskTodayList.constructor;
+    const orig = Cls.reschedule;
+    Cls.reschedule = spy;
+    return Promise.resolve().then(fn).finally(() => { Cls.reschedule = orig; });
+  };
+  const stubMenu = (menus) => {
+    global.Menu = class {
+      constructor() { this.items = []; menus.push(this); }
+      addItem(cb) {
+        const item = { title: '', handler: null, setTitle(t) { this.title = t; return this; }, setIcon() { return this; }, onClick(fn) { this.handler = fn; return this; } };
+        cb(item); this.items.push(item); return this;
+      }
+      addSeparator() { return this; }
+      showAtMouseEvent() { this.shown = true; }
+      showAtPosition() { this.shown = true; }
+    };
+  };
+
+  await ok('RD-ROW-NEXTMON', async () => {
+    rowEnv();
+    const calls = [];
+    await withReschedule(async (...a) => { calls.push(a); return { ok: true, due: a[2] }; }, async () => {
+      const done = [];
+      const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null, { viewedDay: '2026-11-09', onRescheduled: (t, d) => done.push(d) });
+      const btn = findByCls(row, 'sauce-task-action-nextmon');
+      assert(btn, 'nextmon button rendered');
+      assert(btn.attributes['aria-label'] === 'Move to next Monday', 'aria-label ' + btn.attributes['aria-label']);
+      assert(btn.textContent === '→ Mon 16', 'label ' + JSON.stringify(btn.textContent));
+      await fireClick(btn);
+      assert(calls.length === 1 && calls[0][2] === '2026-11-16' && calls[0][3] === '2026-11-09', 'reschedule args ' + JSON.stringify(calls.map((c) => c.slice(2, 4))));
+      assert(done.length === 1 && done[0] === '2026-11-16', 'onRescheduled ' + JSON.stringify(done));
+    });
+    const row2 = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null, { todayStr: '2026-11-15' });
+    assert(findByCls(row2, 'sauce-task-action-nextmon').textContent === '→ Mon 16', 'options.todayStr wins over the clock (Sunday -> next day)');
+    const doneRow = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ status: 'done' }), null);
+    assert(!findByCls(doneRow, 'sauce-task-action-nextmon') && !findByCls(doneRow, 'sauce-task-action-more'), 'done rows get no reschedule actions');
+  });
+
+  await ok('RD-ROW-NOTES', async () => {
+    const chromeLen = TaskEntity._chromeBody().length;
+    const mk = (stat, fmEnd) => ({
+      vault: { getAbstractFileByPath: (p) => (p === 'spice/tasks/row.md' ? (stat == null ? { path: p } : { path: p, stat: { size: stat } }) : null) },
+      metadataCache: { getFileCache: () => (fmEnd == null ? {} : { frontmatterPosition: { end: { offset: fmEnd } } }) },
+      workspace: { openLinkText() {} },
+    });
+    rowEnv({ app: mk(400 + chromeLen + 5600, 400) });
+    let row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    const chip = findByCls(row, 'sauce-task-notes');
+    assert(chip && chip.textContent === '5 KB notes', 'chip ' + (chip && chip.textContent));
+    rowEnv({ app: mk(400 + chromeLen + 300, 400) });
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    assert(findByCls(row, 'sauce-task-notes').textContent === '1 KB notes', 'min 1 KB');
+    rowEnv({ app: mk(400 + chromeLen + 150, 400) });
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    assert(!findByCls(row, 'sauce-task-notes'), 'at or under 200 bytes -> no chip');
+    for (const [stat, fmEnd, label] of [[null, 400, 'stat missing'], [6000, null, 'cache missing'], [6000, 400, 'file missing']]) {
+      rowEnv({ app: label === 'file missing' ? { vault: { getAbstractFileByPath: () => null }, metadataCache: {}, workspace: {} } : mk(stat, fmEnd) });
+      row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+      assert(!findByCls(row, 'sauce-task-notes'), label + ' -> no chip');
+    }
+  });
+
+  await ok('RD-ROW-PRIO', async () => {
+    rowEnv();
+    for (const [prio, level] of [['highest', 'highest'], ['high', 'high'], ['medium', 'medium'], ['low', 'low'], ['', 'none'], ['urgent', 'none'], [undefined, 'none']]) {
+      const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ priority: prio }), null);
+      const bar = findByCls(row, 'sauce-task-prio-bar');
+      assert(bar, 'bar rendered for ' + prio);
+      assert(String(bar.className).split(/\s+/).includes('is-' + level), 'bar class ' + bar.className + ' for ' + prio);
+    }
+    const done = TaskTodayList.renderTaskRow(makeTreeNode('div'), { title: 'd', path: 'p.md', status: 'done' }, null);
+    assert(findByCls(done, 'sauce-task-prio-bar'), 'bar renders on every row');
+  });
+
+  await ok('RD-ROW-AGE', async () => {
+    rowEnv();
+    let row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due: '2026-11-02' }), null);
+    let age = findByCls(row, 'sauce-task-age');
+    assert(age && age.textContent === '7 days' && String(age.className).includes('is-overdue'), 'overdue ' + (age && age.textContent + '|' + age.className));
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due: '2026-11-08' }), null);
+    assert(findByCls(row, 'sauce-task-age').textContent === '1 day', 'singular');
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due: '2026-10-10' }), null);
+    age = findByCls(row, 'sauce-task-age');
+    assert(age && age.textContent === 'since Oct 10' && String(age.className).includes('is-stale'), 'stale ' + (age && age.textContent + '|' + age.className));
+    for (const due of ['2026-11-09', '2026-11-12', '']) {
+      row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due }), null);
+      assert(!findByCls(row, 'sauce-task-age'), 'no age chip for due=' + due);
+    }
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due: '2026-11-02' }), null, { showAge: false });
+    assert(!findByCls(row, 'sauce-task-age'), 'showAge:false hides it');
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask({ due: '2026-11-02', status: 'done' }), null);
+    assert(!findByCls(row, 'sauce-task-age'), 'done rows never show age');
+  });
+
+  await ok('RD-ROW-MENU', async () => {
+    rowEnv();
+    const menus = [];
+    stubMenu(menus);
+    try {
+      const calls = [];
+      const moves = [];
+      const deleted = [];
+      await withReschedule(async (...a) => { calls.push(a); return { ok: true, due: a[2] }; }, async () => {
+        const TD = { open() {}, confirmDelete: async (p) => { deleted.push(p); return { ok: false }; } };
+        let row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), TD, { viewedDay: '2026-11-09' });
+        const more = findByCls(row, 'sauce-task-action-more');
+        assert(more && more.attributes['aria-label'] === 'More actions', 'more button');
+        assert(!findByCls(row, 'sauce-task-action-delete'), 'standalone trash button is gone from open rows');
+        await fireClick(more);
+        assert(menus.length === 1 && menus[0].shown, 'menu opened');
+        eq(menus[0].items.map((i) => i.title), ['Move to backlog', 'Pick date…', 'Delete'], 'items without onMove');
+        await menus[0].items[0].handler();
+        assert(calls.length === 1 && calls[0][2] === '', 'backlog -> reschedule(..., "")');
+        await menus[0].items[2].handler();
+        assert(deleted.length === 1 && deleted[0] === 'spice/tasks/row.md', 'Delete reuses confirmDelete flow');
+
+        row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), TD, { onMove: (t, d) => moves.push(d) });
+        await fireClick(findByCls(row, 'sauce-task-action-more'));
+        const m = menus[1];
+        eq(m.items.map((i) => i.title), ['Move to backlog', 'Pick date…', 'Move up', 'Move down', 'Delete'], 'items with onMove');
+        await m.items[2].handler();
+        await m.items[3].handler();
+        eq(moves, [-1, 1], 'onMove directions');
+      });
+    } finally { delete global.Menu; }
+  });
+
+  await ok('RD-ROW-PICKDATE', async () => {
+    rowEnv();
+    const menus = [];
+    stubMenu(menus);
+    try {
+      const calls = [];
+      const done = [];
+      await withReschedule(async (...a) => { calls.push(a); return { ok: true, due: a[2] }; }, async () => {
+        const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null, { viewedDay: '2026-11-09', onRescheduled: (t, d) => done.push(d) });
+        await fireClick(findByCls(row, 'sauce-task-action-more'));
+        await menus[0].items.find((i) => i.title === 'Pick date…').handler();
+        const input = findByCls(row, 'sauce-task-datepick');
+        assert(input && input.type === 'date', 'date input anchored in the row');
+        input.value = '2026-12-01';
+        await fireEvent(input, 'change');
+        assert(calls.length === 1 && calls[0][2] === '2026-12-01' && calls[0][3] === '2026-11-09', 'reschedule args');
+        assert(done.length === 1 && done[0] === '2026-12-01', 'onRescheduled');
+        assert(!findByCls(row, 'sauce-task-datepick'), 'popover removed after pick');
+      });
+    } finally { delete global.Menu; }
+  });
+
+  await ok('RD-ROW-MENU-COLD', async () => {
+    rowEnv();
+    delete global.Menu;
+    const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    const more = findByCls(row, 'sauce-task-action-more');
+    assert(more, 'more button renders without Menu');
+    let threw = false;
+    try { await fireClick(more); } catch (_e) { threw = true; }
+    assert(!threw, 'click is a no-op');
+  });
+
+  await ok('RD-ROW-SELECT', async () => {
+    rowEnv();
+    let row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+    assert(!findByCls(row, 'sauce-task-select') && !findByCls(row, 'sauce-task-drag'), 'no select/drag by default');
+    const seen = [];
+    const task = openTask();
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), task, null, { selectable: true, selected: true, onSelect: (t, c) => seen.push([t, c]) });
+    const sel = findByCls(row, 'sauce-task-select');
+    assert(sel && sel.type === 'checkbox' && sel.attributes['aria-label'] === 'Select task', 'checkbox rendered');
+    assert(sel.checked === true, 'selected option pre-checks');
+    sel.checked = false;
+    fireEvent(sel, 'change');
+    assert(seen.length === 1 && seen[0][0] === task && seen[0][1] === false, 'onSelect(task, checked)');
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), task, null, { selectable: true });
+    assert(findByCls(row, 'sauce-task-select').checked === false, 'unselected by default');
+
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), task, null, { dragHandle: true });
+    const drag = findByCls(row, 'sauce-task-drag');
+    assert(drag && drag.draggable === true && drag.dataset.path === task.path, 'drag handle');
+  });
+
+  await ok('RD-ROW-COMPAT', async () => {
+    rowEnv();
+    const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), { title: 'x', path: 'p.md' }, null);
+    assert(findByCls(row, 'sauce-task-action-delete') && findByCls(row, 'sauce-task-action-edit'), 'non-open rows keep edit + delete buttons');
+    assert(findByCls(row, 'sauce-task-actions') && findByCls(row, 'sauce-task-today-actions'), 'actions container carries both classes');
+  });
+
+  global.Notice = prevNotice;
 
   console.log(passes + ' passed, ' + fails + ' failed');
   process.exit(fails ? 1 : 0);

@@ -424,7 +424,7 @@ const TASKS = [
 
     // Default is Today alone — not Today + Overdue.
     assert.deepStrictEqual(rendered, ['Today low']);
-    assert.strictEqual(byClass(root, 'sauce-task-priority-dot').length, 1);
+    assert.strictEqual(byClass(root, 'sauce-task-priority-dot').length, 0, 'the row owns the priority bar; no separate dot');
 
     const find = (label) => buttons.find((b) => b.textContent === label);
 

@@ -137,11 +137,9 @@ class ToDoDailyFilterView {
 
     /**
      * Decorate a row produced by TaskTodayList.renderTaskRow with a priority
-     * dot. Deliberately NOT done inside renderTaskRow: that method is shared by
-     * the Home, project, meeting and trip lists, and only this surface offers a
-     * Priority sort that the dot exists to explain. Every guard degrades to no
-     * dot rather than throwing, so a future change to the row's internals
-     * cannot break the list.
+     * dot. No longer called by the filter view: renderTaskRow now draws its own
+     * `.sauce-task-prio-bar` on every row, so adding the dot too would double
+     * the marker. Retained as a standalone, guarded helper.
      */
     static decorateRow(row, task) {
         if (!row || typeof row.querySelector !== 'function') return null;
@@ -301,7 +299,6 @@ class ToDoDailyFilterView {
             for (const task of rows) {
                 try {
                     const row = TTL.renderTaskRow(list, task, TD);
-                    ToDoDailyFilterView.decorateRow(row, task);
                     if (task.status === 'done' && row && typeof row.querySelector === 'function') {
                         const checkbox = row.querySelector('input[type="checkbox"]');
                         if (checkbox) checkbox.checked = true;

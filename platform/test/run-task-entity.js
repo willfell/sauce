@@ -2791,15 +2791,15 @@ async function runPerf1StructuralTests() {
     const before = container.createEl('div');
     const row = TaskTodayList.renderTaskRow(container, { title: 'child', path: 'spice/tasks/child.md', status: 'open' }, TD);
     const after = container.createEl('div');
-    const deleteButton = findByCls(row, 'sauce-task-action-delete');
-    const pending = fireClick(deleteButton);
+    const deleteButton = findByCls(row, 'sauce-task-action-more');
+    const pending = clickMenuDelete(row);
     await Promise.resolve(); await Promise.resolve();
     assert(childIndex(container, row) === -1, 'row detaches before markDeleted settles');
     settleDelete({ ok: false, reason: 'write rejected' });
     await pending;
     assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
       'rollback restores the exact row identity at its exact ordinal');
-    assert(deleteButton._focusCount === 1, 'rollback restores focus to the delete control');
+    assert(deleteButton._focusCount === 1, 'rollback restores focus to the more-actions control (Delete lives in its menu)');
     assert(seamCalls === 1, 'delete uses mutateStructure exactly once');
   });
 
@@ -2829,7 +2829,7 @@ async function runPerf1StructuralTests() {
     const row = TaskTodayList.renderTaskRow(container,
       { title: 'legacy child', path: 'spice/tasks/legacy child.md', status: 'open' }, legacyTD);
     const after = container.createEl('div');
-    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    await clickMenuDelete(row);
     assert(confirmWrites === 1 && duplicateWrites === 0,
       'legacy confirmation owns exactly one write and markDeleted is not called again');
     assert(seamCalls === 1 && childIndex(container, row) === -1,
@@ -2857,7 +2857,7 @@ async function runPerf1StructuralTests() {
     const row = TaskTodayList.renderTaskRow(container,
       { title: 'current child', path: 'spice/tasks/current child.md', status: 'open' }, currentTD);
     const after = container.createEl('div');
-    await fireClick(findByCls(row, 'sauce-task-action-delete'));
+    await clickMenuDelete(row);
     assert(markCalls === 1, 'no-RenderSafe fallback calls markDeleted exactly once');
     assert(container.children[0] === before && container.children[1] === row && container.children[2] === after,
       'result-level delete failure leaves the exact row and sibling order intact');
@@ -2868,7 +2868,7 @@ async function runPerf1StructuralTests() {
     const successRow = TaskTodayList.renderTaskRow(container,
       { title: 'successful child', path: 'spice/tasks/successful child.md', status: 'open' }, currentTD);
     const successAfter = container.createEl('div');
-    await fireClick(findByCls(successRow, 'sauce-task-action-delete'));
+    await clickMenuDelete(successRow);
     assert(markCalls === 2 && childIndex(container, successRow) === -1,
       'no-RenderSafe ok:true calls markDeleted once and removes its exact row');
     assert(childIndex(container, row) >= 0 && childIndex(container, successAfter) >= 0 && notices.length === 1,
@@ -2879,7 +2879,7 @@ async function runPerf1StructuralTests() {
     const throwRow = TaskTodayList.renderTaskRow(container,
       { title: 'throwing child', path: 'spice/tasks/throwing child.md', status: 'open' }, currentTD);
     const throwAfter = container.createEl('div');
-    await fireClick(findByCls(throwRow, 'sauce-task-action-delete'));
+    await clickMenuDelete(throwRow);
     assert(markCalls === 3 && childIndex(container, throwRow) >= 0,
       'no-RenderSafe throw calls markDeleted once and leaves its exact row intact');
     assert(childIndex(container, throwBefore) < childIndex(container, throwRow)
@@ -2994,6 +2994,26 @@ function fireClick(el) {
   return el && typeof el.onclick === 'function' ? el.onclick(event) : undefined;
 }
 function childIndex(parent, node) { return (parent && parent.children) ? parent.children.indexOf(node) : -1; }
+// Open rows keep Delete inside the "more actions" menu (no standalone trash
+// button): stub Obsidian's Menu, open it from the row, and run its Delete item.
+function clickMenuDelete(row) {
+  const prevMenu = global.Menu;
+  let deleteItem = null;
+  global.Menu = class {
+    addItem(cb) {
+      const item = { title: '', setTitle(t) { this.title = t; return this; }, setIcon() { return this; }, onClick(fn) { this.handler = fn; return this; } };
+      cb(item);
+      if (item.title === 'Delete') deleteItem = item;
+      return this;
+    }
+    addSeparator() { return this; }
+    showAtMouseEvent() {}
+    showAtPosition() {}
+  };
+  try { fireClick(findByCls(row, 'sauce-task-action-more')); }
+  finally { if (prevMenu === undefined) delete global.Menu; else global.Menu = prevMenu; }
+  return deleteItem ? deleteItem.handler() : undefined;
+}
 
 async function runRowActionTests() {
   const prevWindow = global.window;

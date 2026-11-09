@@ -558,6 +558,88 @@ class TaskTodayList {
         return TaskTodayList.renderTaskRow(band, task);
     }
 
+    static get _ROW_ACTIONS_CSS() {
+        return '.sauce-task-today-row .sauce-task-actions { opacity: 0; transition: opacity 120ms ease; }'
+            + ' .sauce-task-today-row:hover .sauce-task-actions, .sauce-task-today-row:focus-within .sauce-task-actions { opacity: 1; }'
+            + ' .is-mobile .sauce-task-today-row .sauce-task-actions { opacity: 1; }'
+            + ' @media (hover: none) { .sauce-task-today-row .sauce-task-actions { opacity: 1; } }';
+    }
+
+    static get _PRIO_BAR_COLOR() {
+        return {
+            highest: 'var(--color-red, #dc2626)',
+            high: 'var(--color-red, #dc2626)',
+            medium: 'var(--color-orange, #ea580c)',
+            low: 'var(--text-muted, #666)',
+            none: 'transparent',
+        };
+    }
+
+    static _priorityLevel(task) {
+        const raw = String(task && task.priority || '').trim().toLowerCase();
+        return ['highest', 'high', 'medium', 'low'].includes(raw) ? raw : 'none';
+    }
+
+    static _rowTaskEntity() {
+        try { return (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null; }
+        catch (_e) { return null; }
+    }
+
+    /** Render entry: options.todayStr wins, else the wall clock (moment). */
+    static _rowTodayStr(opts) {
+        const given = opts && opts.todayStr;
+        if (typeof given === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(given)) return given;
+        try {
+            const momentRef = typeof window !== 'undefined' ? window.moment : null;
+            return typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
+        } catch (_e) { return ''; }
+    }
+
+    /**
+     * `N KB notes` when the user's own notes below the chrome exceed ~200 bytes;
+     * computed from file stat + frontmatter end offset (no file read). Any
+     * missing piece yields '' (no chip).
+     */
+    static _notesChipText(path, TE) {
+        try {
+            if (!path || !TE || typeof TE.notesBytes !== 'function') return '';
+            const appRef = (typeof window !== 'undefined' && window.app)
+                || (typeof globalThis !== 'undefined' && globalThis.app)
+                || null;
+            if (!appRef || !appRef.vault || !appRef.metadataCache) return '';
+            const file = appRef.vault.getAbstractFileByPath(path);
+            const size = file && file.stat && file.stat.size;
+            if (!(size > 0)) return '';
+            const cache = appRef.metadataCache.getFileCache(file);
+            const fmEnd = cache && cache.frontmatterPosition && cache.frontmatterPosition.end
+                && cache.frontmatterPosition.end.offset;
+            if (typeof fmEnd !== 'number') return '';
+            const bytes = TE.notesBytes(size, fmEnd);
+            if (!(bytes > 200)) return '';
+            return Math.max(1, Math.round(bytes / 1024)) + ' KB notes';
+        } catch (_e) { return ''; }
+    }
+
+    /** Age chip for open rows: overdue -> 'N days', stale -> 'since Mon D'. */
+    static _ageChip(task, todayStr, TE) {
+        try {
+            if (!task || !todayStr || !TE || typeof TE.bucketOf !== 'function') return null;
+            const bucket = TE.bucketOf(task, todayStr);
+            if (bucket === 'overdue') {
+                const n = TE.daysLate(task, todayStr);
+                return { text: n + (n === 1 ? ' day' : ' days'), cls: 'is-overdue' };
+            }
+            if (bucket === 'stale') {
+                const due = typeof TE._toDateStr === 'function' ? TE._toDateStr(task.due) : String(task.due || '').slice(0, 10);
+                const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(due || ''));
+                if (!m) return null;
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return { text: 'since ' + months[Number(m[2]) - 1] + ' ' + Number(m[3]), cls: 'is-stale' };
+            }
+        } catch (_e) {}
+        return null;
+    }
+
     /**
      * Render one task row into `container` — SELF-CONTAINED (no dependence on
      * instance `this`), so any widget can draw a uniform task row by calling
@@ -572,6 +654,9 @@ class TaskTodayList {
      */
     static renderTaskRow(container, task, TDref, options) {
         if (!container || typeof container.createEl !== 'function') return null;
+        const opts = options || {};
+        const todayStr = TaskTodayList._rowTodayStr(opts);
+        const TE = TaskTodayList._rowTaskEntity();
         // Resolve TaskDialog lazily at click-time so a passed ref OR the global
         // both work; a cold-load (customJS not ready) just no-ops the gesture.
         const getTD = () => {
@@ -592,7 +677,13 @@ class TaskTodayList {
         // readable and forces the cluster to wrap instead. align-items:flex-start
         // pins the cluster to the top of the first title line while a long title
         // wraps within its own column.
-        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border); width: 100%; box-sizing: border-box;';
+        row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 4px 6px 8px; border-radius: 4px; border: 1px solid transparent; border-bottom: 1px solid var(--background-modifier-border); width: 100%; box-sizing: border-box; position: relative;';
+        if (!TaskTodayList._rowActionsStyleInjected && typeof document !== 'undefined' && document.head) {
+            const s = document.createElement('style');
+            s.textContent = TaskTodayList._ROW_ACTIONS_CSS;
+            document.head.appendChild(s);
+            TaskTodayList._rowActionsStyleInjected = true;
+        }
         if (!TaskTodayList._rowDividerStyleInjected && typeof document !== 'undefined' && document.head) {
             const s = document.createElement('style');
             s.textContent = '.sauce-task-today-row:last-child { border-bottom: none !important; }';
@@ -611,6 +702,26 @@ class TaskTodayList {
         // still allowing the title's own text to wrap internally.
         const titleGroup = row.createEl('div', { cls: 'sauce-task-today-titlegroup' });
         titleGroup.style.cssText = 'display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0;';
+
+        if (opts.dragHandle) {
+            const drag = titleGroup.createEl('span', { cls: 'sauce-task-drag' });
+            drag.style.cssText = 'display: inline-flex; align-items: center; height: 1.5em; flex-shrink: 0; cursor: grab; color: var(--text-faint, #999); user-select: none; touch-action: none;';
+            drag.draggable = true;
+            try { drag.setAttribute('draggable', 'true'); drag.setAttribute('aria-label', 'Drag to reorder'); } catch (_e) {}
+            if (path) drag.dataset.path = String(path);
+            drag.textContent = '\u22EE\u22EE';
+        }
+        if (opts.selectable) {
+            const sel = titleGroup.createEl('input', { cls: 'sauce-task-select', type: 'checkbox' });
+            sel.type = 'checkbox';
+            sel.checked = !!opts.selected;
+            sel.style.cssText = 'margin: 0; height: 1.5em; cursor: pointer; flex-shrink: 0;';
+            try { sel.setAttribute('aria-label', 'Select task'); } catch (_e) {}
+            sel.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            sel.addEventListener('change', () => {
+                try { if (typeof opts.onSelect === 'function') opts.onSelect(task, !!sel.checked); } catch (_e) {}
+            });
+        }
 
         // Functional done-checkbox — starts UNCHECKED (open tasks only). On
         // change → delegate the write to TaskDialog.markDone(path); revert +
@@ -658,6 +769,11 @@ class TaskTodayList {
                 try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }
         });
+
+        const prioLevel = TaskTodayList._priorityLevel(task);
+        const prioBar = titleGroup.createEl('span', { cls: 'sauce-task-prio-bar is-' + prioLevel });
+        prioBar.style.cssText = 'width: 3px; align-self: stretch; min-height: 1.5em; border-radius: 2px; flex-shrink: 0; background: ' + TaskTodayList._PRIO_BAR_COLOR[prioLevel] + ';';
+        try { prioBar.setAttribute('aria-hidden', 'true'); } catch (_e) {}
 
         // Title — clicking the title (not the checkbox) opens the task NOTE. The
         // text is rendered via renderInlineLinks so `[label](url)`, `[[wikilink]]`,
@@ -721,6 +837,8 @@ class TaskTodayList {
             const chip = chips.createEl('span', { text: label, cls: cls });
             chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted);';
         };
+        const notesText = TaskTodayList._notesChipText(path, TE);
+        if (notesText) addChip(notesText, 'sauce-task-notes');
         if (task && task.project) addChip(TaskTodayList._projectChipText(task.project));
         if (task && task.priority) addChip(String(task.priority));
         if (task && task.due) addChip('due: ' + task.due);
@@ -730,6 +848,13 @@ class TaskTodayList {
         // the task actually has ≥1 subtask.
         if (task && task.subtask_count && task.subtask_count.total > 0) {
             addChip(task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
+        }
+        if (opts.showAge !== false) {
+            const age = TaskTodayList._ageChip(task, todayStr, TE);
+            if (age) {
+                const ageChip = chips.createEl('span', { text: age.text, cls: 'sauce-task-age ' + age.cls });
+                ageChip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: ' + (age.cls === 'is-stale' ? 'var(--color-orange, #ea580c)' : 'var(--text-error, #e05561)') + ';';
+            }
         }
 
         // Row actions at the FAR-RIGHT end of the cluster. Open rows render
@@ -751,9 +876,10 @@ class TaskTodayList {
         const ICON = {
             tomorrow: svg('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m12 14 2 2-2 2"/><path d="M9 16h5"/>'),
             wrench: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
+            more: svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>'),
             trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
         };
-        const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions' });
+        const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions sauce-task-actions' });
         actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
         const ACTION_BASE = 'display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 100%; min-height: 24px; padding: 0; border: none; border-radius: var(--radius-s, 4px); background: transparent; color: var(--text-faint, #999); cursor: pointer; flex-shrink: 0; transition: background 120ms ease, color 120ms ease;';
         const mkActionBtn = (cls, aria, icon, danger) => {
@@ -775,7 +901,59 @@ class TaskTodayList {
             const viewedDay = options && typeof options.viewedDay === 'string'
                 ? options.viewedDay
                 : '';
-            return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref);
+            const res = await TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref);
+            notifyRescheduled(res);
+            return res;
+        };
+        const notifyRescheduled = (res) => {
+            try { if (res && res.ok && typeof opts.onRescheduled === 'function') opts.onRescheduled(task, res.due); } catch (_e) {}
+        };
+        const doReschedule = async (newDue) => {
+            const viewedDay = typeof opts.viewedDay === 'string' ? opts.viewedDay : '';
+            const res = await TaskTodayList.reschedule(row, task, newDue, viewedDay, TDref);
+            notifyRescheduled(res);
+            return res;
+        };
+        const doPickDate = () => {
+            if (!path) return;
+            try {
+                const existing = typeof row.querySelector === 'function' ? row.querySelector('.sauce-task-datepick') : null;
+                if (existing) { existing.remove(); return; }
+            } catch (_e) {}
+            const input = row.createEl('input', { cls: 'sauce-task-datepick', type: 'date' });
+            input.type = 'date';
+            input.style.cssText = 'position: absolute; right: 8px; top: 100%; z-index: 20; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 4px); padding: 2px 6px;';
+            const close = () => { try { input.remove(); } catch (_e) {} };
+            input.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            input.addEventListener('change', async () => {
+                const value = String(input.value || '');
+                close();
+                if (value) await doReschedule(value);
+            });
+            input.addEventListener('keydown', (ev) => { if (ev && ev.key === 'Escape') close(); });
+            try { if (typeof input.showPicker === 'function') input.showPicker(); else if (typeof input.focus === 'function') input.focus(); } catch (_e) {}
+        };
+        const doMore = (ev) => {
+            const MenuCls = (typeof Menu !== 'undefined' && Menu) || null;
+            if (!MenuCls) return;
+            try {
+                const menu = new MenuCls();
+                menu.addItem((i) => i.setTitle('Move to backlog').setIcon('inbox').onClick(() => doReschedule('')));
+                menu.addItem((i) => i.setTitle('Pick date\u2026').setIcon('calendar').onClick(() => doPickDate()));
+                if (typeof opts.onMove === 'function') {
+                    menu.addItem((i) => i.setTitle('Move up').setIcon('arrow-up').onClick(() => { try { opts.onMove(task, -1); } catch (_e) {} }));
+                    menu.addItem((i) => i.setTitle('Move down').setIcon('arrow-down').onClick(() => { try { opts.onMove(task, 1); } catch (_e) {} }));
+                }
+                menu.addItem((i) => i.setTitle('Delete').setIcon('trash').onClick(() => doDelete()));
+                if (ev && ev.clientX != null && typeof menu.showAtMouseEvent === 'function') menu.showAtMouseEvent(ev);
+                else if (typeof menu.showAtPosition === 'function') {
+                    const target = ev && ev.currentTarget;
+                    const rect = target && typeof target.getBoundingClientRect === 'function' ? target.getBoundingClientRect() : null;
+                    menu.showAtPosition({ x: rect ? rect.left : 0, y: rect ? rect.bottom : 0 });
+                } else if (typeof menu.showAtMouseEvent === 'function') menu.showAtMouseEvent(ev);
+            } catch (e) {
+                try { new Notice('Could not open menu: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+            }
         };
         const doEdit = () => {
             const TD = getTD();
@@ -805,7 +983,7 @@ class TaskTodayList {
                     await RS.mutateStructure({
                         path,
                         failureMessage: 'Could not delete task',
-                        apply: () => TaskTodayList._removeRowReceipt(row, task, delBtn),
+                        apply: () => TaskTodayList._removeRowReceipt(row, task, delBtn || moreBtn),
                         write: async () => {
                             if (!deferred) return res;
                             const deleted = await TD.markDeleted(path);
@@ -833,17 +1011,37 @@ class TaskTodayList {
             }
         };
 
-        if (task && task.status === 'open') {
+        const isOpen = !!(task && task.status === 'open');
+        let delBtn = null;
+        let moreBtn = null;
+        if (isOpen) {
             const tomorrowBtn = mkActionBtn('sauce-task-action-tomorrow', 'Move to tomorrow', ICON.tomorrow, false);
             tomorrowBtn.addEventListener('click', async (ev) => {
                 try { ev.stopPropagation(); } catch (_e) {}
                 await doTomorrow();
             });
+            const monday = TE && typeof TE.nextMonday === 'function' ? TE.nextMonday(todayStr) : null;
+            if (monday) {
+                const monBtn = mkActionBtn('sauce-task-action-nextmon', 'Move to next Monday', '', false);
+                monBtn.style.width = 'auto';
+                monBtn.style.padding = '0 6px';
+                monBtn.style.fontSize = '0.78em';
+                monBtn.textContent = '\u2192 Mon ' + Number(monday.slice(8, 10));
+                monBtn.addEventListener('click', async (ev) => {
+                    try { ev.stopPropagation(); } catch (_e) {}
+                    await doReschedule(monday);
+                });
+            }
         }
         const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.wrench, false);
         editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });
-        const delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
-        delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
+        if (isOpen) {
+            moreBtn = mkActionBtn('sauce-task-action-more', 'More actions', ICON.more, false);
+            moreBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doMore(ev); });
+        } else {
+            delBtn = mkActionBtn('sauce-task-action-delete', 'Delete task', ICON.trash, true);
+            delBtn.addEventListener('click', async (ev) => { try { ev.stopPropagation(); } catch (_e) {} await doDelete(); });
+        }
 
         return row;
     }
