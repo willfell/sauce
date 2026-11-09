@@ -52,6 +52,7 @@ class TaskTodayList {
     buildBands(parsedTasks, todayStr) { return TaskTodayList.buildBands(parsedTasks, todayStr); }
     nextDay(todayStr) { return TaskTodayList.nextDay(todayStr); }
     markTaskRow(row, task) { return TaskTodayList.markTaskRow(row, task); }
+    reschedule(row, task, newDue, viewedDay, TDref) { return TaskTodayList.reschedule(row, task, newDue, viewedDay, TDref); }
     rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
     renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
@@ -189,6 +190,24 @@ class TaskTodayList {
      * caller invokes this method directly.
      */
     static async rescheduleTomorrow(row, task, viewedDay, TDref) {
+        let baseDay = String(viewedDay || '');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDay)) {
+            const momentRef = (typeof window !== 'undefined' && window.moment) || null;
+            baseDay = typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
+        }
+        const tomorrow = TaskTodayList.nextDay(baseDay);
+        if (!tomorrow) return { ok: false, no_op: true };
+        return TaskTodayList.reschedule(row, task, tomorrow, viewedDay, TDref);
+    }
+
+    /**
+     * Reschedule one OPEN task to an explicit `newDue` (YYYY-MM-DD, or '' to move
+     * it to the backlog) with the same optimistic-removal / rollback / in-flight
+     * mechanics as rescheduleTomorrow, and clear any manual `rank` in the same
+     * atomic frontmatter write. `viewedDay` is accepted for call-shape parity
+     * with rescheduleTomorrow and is not otherwise used.
+     */
+    static async reschedule(row, task, newDue, viewedDay, TDref) {
         try {
             if (!row || !task || task.status !== 'open' || !task.path) return { ok: false, no_op: true };
             const TD = TDref
@@ -204,14 +223,10 @@ class TaskTodayList {
                 return { ok: false, no_op: true };
             }
 
-            let baseDay = String(viewedDay || '');
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDay)) {
-                const momentRef = (typeof window !== 'undefined' && window.moment) || null;
-                baseDay = typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
-            }
-            const tomorrow = TaskTodayList.nextDay(baseDay);
+            const target = newDue == null ? '' : String(newDue);
+            if (target !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(target)) return { ok: false, no_op: true };
             const file = appRef.vault.getAbstractFileByPath(task.path);
-            if (!tomorrow || !file) return { ok: false, no_op: true };
+            if (!file) return { ok: false, no_op: true };
 
             const taskPath = String(task.path);
             const inFlight = TaskTodayList._rescheduleInFlight
@@ -320,14 +335,15 @@ class TaskTodayList {
                         // optimistic action reaches the file. Revalidate and
                         // mutate within the same atomic frontmatter callback.
                         if (!fm || fm.status !== 'open') return;
-                        fm.due = tomorrow;
+                        fm.due = target;
+                        fm.rank = '';
                         mutationApplied = true;
                     });
                     if (!mutationApplied) {
                         restore();
                         return staleOpenNoOp();
                     }
-                    return { ok: true, due: tomorrow };
+                    return { ok: true, due: target };
                 } catch (e) {
                     restore();
                     if (liveStatusChecked && !mutationApplied) return staleOpenNoOp();

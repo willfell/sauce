@@ -60,6 +60,7 @@ class TaskDialog {
     _recurrencePickerValid(state) { return TaskDialog._recurrencePickerValid(state); }
     _rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn) { return TaskDialog._rollForwardDate(recurrence, todayStr, anchorDateStr, matchesFn); }
     _moreOptionsShouldStartExpanded(state) { return TaskDialog._moreOptionsShouldStartExpanded(state); }
+    _renderSafe() { return TaskDialog._renderSafe(); }
 
     // ---------- Static pure helpers ----------
 
@@ -1390,7 +1391,9 @@ class TaskDialog {
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.title = payload.title;
+            const prevDue = fm.due == null ? '' : String(fm.due);
             fm.due = payload.due || '';
+            if (prevDue !== String(fm.due)) fm.rank = '';
             fm.priority = payload.priority || '';
             fm.recurrence = payload.recurrence || '';
             if (payload.project && payload.project.name) {
@@ -1491,6 +1494,102 @@ class TaskDialog {
     }
 
     /**
+     * REOPEN — bring a done task back: status=open, completed_at cleared, then
+     * move spice/tasks/_done/<f> back to spice/tasks/<unique f>. Both steps run
+     * inside ONE RenderSafe.mutate write. Refuses a path that is not under
+     * _done/. At most one reopen per path is in flight; a duplicate resolves
+     * { ok: false, reason: 'in-flight' } without writing. Never throws.
+     * Resolves { ok: true, path } | { ok: false, reason }.
+     */
+    async reopen(path) {
+        const src = String(path == null ? '' : path);
+        const DONE = 'spice/tasks/_done/';
+        if (src.indexOf(DONE) !== 0 || src.length === DONE.length) return { ok: false, reason: 'not-done' };
+        const RS = TaskDialog._renderSafe();
+        if (!RS || typeof RS.mutate !== 'function') return { ok: false, reason: 'render-safe-unavailable' };
+        const inFlight = TaskDialog._reopenInFlight || (TaskDialog._reopenInFlight = new Set());
+        if (inFlight.has(src)) return { ok: false, reason: 'in-flight' };
+        inFlight.add(src);
+        try {
+            const { app, file } = this._resolveFile(src);
+            if (!app) return { ok: false, reason: 'app unavailable' };
+            if (!file) return { ok: false, reason: 'task file not found' };
+            const TE = TaskDialog._taskEntity();
+            if (!TE || typeof TE._uniqueName !== 'function') return { ok: false, reason: 'task-entity-unavailable' };
+            const exists = (p) => !!(app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                && app.vault.getAbstractFileByPath(p));
+            const target = 'spice/tasks/' + TE._uniqueName(src.slice(DONE.length), exists);
+            let reopened = false;
+            const result = await RS.mutate({
+                app,
+                path: src,
+                failureMessage: 'Could not reopen task',
+                write: async () => {
+                    await app.fileManager.processFrontMatter(file, (fm) => {
+                        fm.status = 'open';
+                        fm.completed_at = '';
+                    });
+                    reopened = true;
+                    await app.fileManager.renameFile(file, target);
+                    return target;
+                },
+                revert: async () => {
+                    if (!reopened || file.path === target) return;
+                    await app.fileManager.processFrontMatter(file, (fm) => {
+                        fm.status = 'done';
+                    });
+                },
+            });
+            if (!result.ok) {
+                return { ok: false, reason: (result.error && (result.error.message || String(result.error))) || 'write failed' };
+            }
+            return { ok: true, path: target };
+        } catch (e) {
+            return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
+        } finally {
+            inFlight.delete(src);
+        }
+    }
+
+    /**
+     * SET FIELDS — write exactly `fields` into one task's frontmatter through a
+     * RenderSafe.mutate write (rank / priority / project from bulk and drag
+     * gestures). When `fields` carries `due` and not `rank`, `rank` is cleared in
+     * the same write: a date move invalidates a manual position. Never throws.
+     * Resolves { ok: true } | { ok: false, reason }.
+     */
+    async setFields(path, fields) {
+        try {
+            if (!fields || typeof fields !== 'object' || Array.isArray(fields)
+                || Object.keys(fields).length === 0) return { ok: false, reason: 'no-fields' };
+            const RS = TaskDialog._renderSafe();
+            if (!RS || typeof RS.mutate !== 'function') return { ok: false, reason: 'render-safe-unavailable' };
+            const { app, file } = this._resolveFile(path);
+            if (!app) return { ok: false, reason: 'app unavailable' };
+            if (!file) return { ok: false, reason: 'task file not found' };
+            const patch = Object.assign({}, fields);
+            if (Object.prototype.hasOwnProperty.call(patch, 'due')
+                && !Object.prototype.hasOwnProperty.call(patch, 'rank')) patch.rank = '';
+            const result = await RS.mutate({
+                app,
+                path: String(path),
+                failureMessage: 'Could not update task',
+                write: async () => {
+                    await app.fileManager.processFrontMatter(file, (fm) => {
+                        for (const key of Object.keys(patch)) fm[key] = patch[key];
+                    });
+                },
+            });
+            if (!result.ok) {
+                return { ok: false, reason: (result.error && (result.error.message || String(result.error))) || 'write failed' };
+            }
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
+        }
+    }
+
+    /**
      * DELETE (recoverable) — set status=deleted (processFrontMatter, this file
      * only), then move into spice/tasks/_trash/ (renameFile). No hard delete; the
      * note is recoverable. No other note read.
@@ -1515,6 +1614,15 @@ class TaskDialog {
                 && app.vault.getAbstractFileByPath(folder)) return;
             await app.vault.createFolder(folder);
         } catch (_e) { /* already exists — createFolder throws in that case */ }
+    }
+
+    /** Reach the stored RenderSafe instance (customJS), or null on cold-load. */
+    static _renderSafe() {
+        try {
+            return (typeof window !== 'undefined' && window.customJS && window.customJS.RenderSafe) || null;
+        } catch (_e) {
+            return null;
+        }
     }
 
     /** Reach the stored TaskEntity instance (customJS), or null on cold-load. */
