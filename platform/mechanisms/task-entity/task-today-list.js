@@ -60,8 +60,109 @@ class TaskTodayList {
     _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
     _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
     _projectChipText(v) { return TaskTodayList._projectChipText(v); }
+    get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
+    classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
+    doneTimeLabel(task) { return TaskTodayList.doneTimeLabel(task); }
+    renderDoneRow(container, task, options) { return TaskTodayList.renderDoneRow(container, task, options); }
 
     // ---------- Static pure helper ----------
+
+    /**
+     * Refusals the write rails return silently, before any write (no Notice of
+     * their own). A surface that starts a write adds its own Notice for these.
+     */
+    static get SILENT_REASONS() {
+        return [
+            'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
+            'app unavailable', 'no-fields', 'task-entity-unavailable',
+        ];
+    }
+
+    /**
+     * Today-surface failure policy. Returns:
+     *   'ok'      - succeeded
+     *   'skipped' - a no_op refusal (cold load, in flight, task no longer open)
+     *   'silent'  - refused before writing with no Notice (see SILENT_REASONS),
+     *               or the call itself threw past its own guard (null result)
+     *   'noticed' - the write failed and its rail already told the user
+     */
+    static classifyOutcome(res) {
+        if (res && res.ok === true) return 'ok';
+        if (res && res.no_op) return 'skipped';
+        if (!res) return 'silent';
+        const reason = String(res.reason || '');
+        return TaskTodayList.SILENT_REASONS.includes(reason) ? 'silent' : 'noticed';
+    }
+
+    /**
+     * Local HH:mm of a task's completed_at (or of a bare completed_at value):
+     * Luxon via toFormat, else the time part of an ISO string (written with its
+     * own offset, so it is the local wall time). Missing / unparseable -> ''.
+     */
+    static doneTimeLabel(task) {
+        try {
+            let v = task;
+            if (v && typeof v === 'object' && typeof v.toFormat !== 'function' && 'completed_at' in v) {
+                v = v.completed_at;
+            }
+            if (v == null || v === '') return '';
+            if (typeof v === 'object' && typeof v.toFormat === 'function') return String(v.toFormat('HH:mm') || '');
+            const m = /T(\d{2}):(\d{2})/.exec(String(v));
+            return m ? m[1] + ':' + m[2] : '';
+        } catch (_e) { return ''; }
+    }
+
+    /**
+     * One Done-today row: struck title (click opens the note), completion HH:mm
+     * and, for a task archived under spice/tasks/_done/, an Undo button
+     * (aria-label "Undo: <title>") that hands the reopen flow to
+     * options.onUndo(task, button). options.notice(msg) reports an open failure
+     * (default: an Obsidian Notice). Never throws; returns the row or null.
+     */
+    static renderDoneRow(container, task, options) {
+        if (!container || typeof container.createEl !== 'function' || !task) return null;
+        const opts = options || {};
+        const notice = typeof opts.notice === 'function'
+            ? opts.notice
+            : (msg) => { try { if (typeof Notice === 'function') new Notice(msg, 6000); } catch (_e) {} };
+        const row = container.createEl('div', { cls: 'sauce-today-done-row' });
+        row.dataset.sauceTaskPath = String(task.path || '');
+        row.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 3px 6px; font-size: 0.9em;';
+        const title = row.createEl('span', { cls: 'sauce-today-done-title' });
+        title.style.cssText = 'flex: 1 1 auto; min-width: 0; text-decoration: line-through; color: var(--text-muted); overflow-wrap: anywhere; cursor: pointer;';
+        const text = task.title || '(untitled)';
+        try { TaskTodayList.renderInlineLinks(title, text, task.path); } catch (_e) { title.textContent = text; }
+        title.addEventListener('click', () => {
+            try {
+                const appRef = (typeof window !== 'undefined' && window.app)
+                    || (typeof app !== 'undefined' && app) || null;
+                if (task.path && appRef && appRef.workspace) appRef.workspace.openLinkText(task.path, '');
+            } catch (e) { notice('Could not open task: ' + (e && (e.message || e))); }
+        });
+        const time = TaskTodayList.doneTimeLabel(task);
+        if (time) {
+            const stamp = row.createEl('span', { cls: 'sauce-today-done-time' });
+            stamp.textContent = time;
+            stamp.style.cssText = 'font-size: 0.8em; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0;';
+        }
+        let TD = null;
+        try {
+            TD = opts.TD || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog) || null;
+        } catch (_e) { TD = null; }
+        const canUndo = String(task.path || '').indexOf('spice/tasks/_done/') === 0
+            && !!TD && typeof TD.reopen === 'function' && typeof opts.onUndo === 'function';
+        if (canUndo) {
+            const undo = row.createEl('button', { cls: 'sauce-today-undo' });
+            undo.textContent = 'Undo';
+            undo.style.cssText = 'font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-accent); cursor: pointer; background: none; border: none; padding: 0; box-shadow: none; height: auto;';
+            try { undo.setAttribute('type', 'button'); undo.setAttribute('aria-label', 'Undo: ' + text); } catch (_e) {}
+            undo.addEventListener('click', (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try { return opts.onUndo(task, undo); } catch (_e) { return undefined; }
+            });
+        }
+        return row;
+    }
 
     /**
      * Return the next calendar date after a normalized YYYY-MM-DD string.

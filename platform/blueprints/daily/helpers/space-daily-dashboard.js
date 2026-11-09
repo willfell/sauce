@@ -292,46 +292,6 @@ class SpaceDailyDashboard {
   }
 
   /**
-   * Local HH:mm of a completed_at value: Luxon via toFormat, else the time part
-   * of an ISO string (written with its own offset, so it is the local wall time).
-   * Missing / unparseable → "".
-   */
-  static doneTimeLabel(v) {
-    try {
-      if (v == null || v === "") return "";
-      if (typeof v === "object" && typeof v.toFormat === "function") return String(v.toFormat("HH:mm") || "");
-      const m = /T(\d{2}):(\d{2})/.exec(String(v));
-      return m ? m[1] + ":" + m[2] : "";
-    } catch (_e) { return ""; }
-  }
-
-  /**
-   * Today-panel failure policy. Every write the panel starts goes through a rail
-   * that already shows a Notice when the write itself throws (RenderSafe.mutate,
-   * TaskTodayList.reschedule). The panel adds its own Notice only for refusals
-   * that rail returns silently, before any write. Returns:
-   *   'ok'      — succeeded
-   *   'skipped' — a no_op refusal (cold load, in flight, task no longer open)
-   *   'silent'  — refused before writing with no Notice (reason in the list), or
-   *               the call itself threw past its own guard
-   *   'noticed' — the write failed and its rail already told the user
-   */
-  static classifyTodayOutcome(res) {
-    if (res && res.ok === true) return "ok";
-    if (res && res.no_op) return "skipped";
-    if (!res) return "silent";
-    const reason = String(res.reason || "");
-    return SpaceDailyDashboard.TODAY_SILENT_REASONS.includes(reason) ? "silent" : "noticed";
-  }
-
-  static get TODAY_SILENT_REASONS() {
-    return [
-      "in-flight", "render-safe-unavailable", "not-done", "task file not found",
-      "app unavailable", "no-fields", "task-entity-unavailable",
-    ];
-  }
-
-  /**
    * In-progress bulk / reorder operations for a day's panel, held on the class
    * rather than the per-render state so a panel that Dataview re-renders mid
    * operation still sees the lock.
@@ -1792,7 +1752,7 @@ class SpaceDailyDashboard {
           for (const c of changes) {
             let res = null;
             try { res = await TD.setFields(c.path, { rank: c.rank }); } catch (_e) { res = null; }
-            const outcome = SpaceDailyDashboard.classifyTodayOutcome(res);
+            const outcome = TTL.classifyOutcome(res);
             if (outcome !== "ok") {
               failed++;
               if (outcome === "silent") silent++;
@@ -1924,7 +1884,7 @@ class SpaceDailyDashboard {
             for (const t of overdue) {
               let res = null;
               try { res = await TTL.reschedule(rows.get(t.path), t, todayStr, todayStr, TD); } catch (_e) { res = null; }
-              const outcome = SpaceDailyDashboard.classifyTodayOutcome(res);
+              const outcome = TTL.classifyOutcome(res);
               if (outcome === "ok") applyMoved(t, todayStr);
               else if (outcome === "silent") silent++;
             }
@@ -1993,39 +1953,18 @@ class SpaceDailyDashboard {
       if (doneToday.length > 0) {
         const dn = mkSection("done", "Done today · " + doneToday.length);
         for (const t of doneToday) {
-          const row = dn.list.createEl("div", { cls: "sauce-today-done-row" });
-          row.dataset.sauceTaskPath = String(t.path || "");
-          row.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 3px 6px; font-size: 0.9em;";
-          const title = row.createEl("span", { cls: "sauce-today-done-title" });
-          title.style.cssText = "flex: 1 1 auto; min-width: 0; text-decoration: line-through; color: var(--text-muted); overflow-wrap: anywhere; cursor: pointer;";
-          const text = (t && t.title) || "(untitled)";
-          if (typeof TTL.renderInlineLinks === "function") TTL.renderInlineLinks(title, text, t.path);
-          else title.textContent = text;
-          title.addEventListener("click", () => {
-            try { if (t.path && appRef && appRef.workspace) appRef.workspace.openLinkText(t.path, ""); }
-            catch (e) { notice("Could not open task: " + (e && (e.message || e))); }
-          });
-          const time = SpaceDailyDashboard.doneTimeLabel(t.completed_at);
-          if (time) {
-            const tm = row.createEl("span", { cls: "sauce-today-done-time" });
-            tm.textContent = time;
-            tm.style.cssText = "font-size: 0.8em; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0;";
-          }
-          const canUndo = String(t.path || "").indexOf("spice/tasks/_done/") === 0
-            && !!TD && typeof TD.reopen === "function";
-          if (canUndo) {
-            const undo = mkButton(row, "sauce-today-undo", "Undo", linkCss);
-            try { undo.setAttribute("aria-label", "Undo: " + text); } catch (_e) {}
-            undo.addEventListener("click", async (ev) => {
-              stop(ev);
+          TTL.renderDoneRow(dn.list, t, {
+            TD,
+            notice,
+            onUndo: async (task, undo) => {
               if (undo.disabled) return;
               undo.disabled = true;
               let res = null;
-              try { res = await TD.reopen(t.path); } catch (_e) { res = null; }
-              const outcome = SpaceDailyDashboard.classifyTodayOutcome(res);
+              try { res = await TD.reopen(task.path); } catch (_e) { res = null; }
+              const outcome = TTL.classifyOutcome(res);
               if (outcome === "ok") {
-                model.doneToday = model.doneToday.filter((d) => d !== t);
-                const reopened = Object.assign({}, t, { status: "open", completed_at: null, path: res.path || t.path });
+                model.doneToday = model.doneToday.filter((d) => d !== task);
+                const reopened = Object.assign({}, task, { status: "open", completed_at: null, path: res.path || task.path });
                 let bucket = null;
                 try { bucket = TE && typeof TE.bucketOf === "function" ? TE.bucketOf(reopened, todayStr) : null; } catch (_e) { bucket = null; }
                 if (bucket === "today") model.today.push(reopened);
@@ -2036,8 +1975,8 @@ class SpaceDailyDashboard {
                 undo.disabled = false;
                 if (outcome === "silent") notice("Could not reopen task: " + ((res && res.reason) || "unknown"));
               }
-            });
-          }
+            },
+          });
         }
         const foot = dn.s.createEl("div", { cls: "sauce-today-done-foot" });
         foot.style.cssText = "margin: 4px 6px 0 6px;";

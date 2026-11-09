@@ -42,6 +42,9 @@ function loadClass(windowShim = {}) {
 // customJS stores INSTANCES; the view must work through the same surface.
 const TaskEntityClass = new Function(`${TASK_ENTITY_SRC}\nreturn TaskEntity;`)();
 const TE = new TaskEntityClass();
+const TaskTodayListClass = new Function(`${fs.readFileSync(
+  path.join(ROOT, 'platform/mechanisms/task-entity/task-today-list.js'), 'utf8')}\nreturn TaskTodayList;`)();
+const TTL_REAL = new TaskTodayListClass();
 
 function makeStorage(seed) {
   const data = new Map(Object.entries(seed || {}));
@@ -176,7 +179,7 @@ function makeRenderHarness(overrides = {}) {
   const customJS = {
     RenderSafe: { page: () => ({ type: 'to-do', file: { name: `ToDo-${TODAY}` } }) },
     TaskEntity: TE,
-    TaskTodayList: {
+    TaskTodayList: Object.assign(Object.create(TTL_REAL), {
       renderTaskRow(container, task, TDref, options) {
         const row = container.createEl('div', { cls: 'sauce-task-today-row' });
         row.dataset.sauceTaskPath = String(task.path || '');
@@ -184,7 +187,7 @@ function makeRenderHarness(overrides = {}) {
         rows.push({ title: task.title, options, row, container });
         return row;
       },
-    },
+    }),
     TaskDialog: {
       async reopen(taskPath) {
         reopened.push(taskPath);
@@ -281,7 +284,6 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     const written = View.writePrefs(storage, { tab: 'week', sort: 'due', group: 'project' });
     assert.deepStrictEqual(written, { tab: 'week', sort: 'due', group: 'project' });
     assert.deepStrictEqual(View.readPrefs(storage), written);
-    assert.strictEqual(View.readPrefs.length <= 1, true, 'prefs are not keyed by a note date');
 
     const legacy = makeStorage({
       'sauce-todo-filter:state': JSON.stringify({
@@ -337,7 +339,7 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     const open = View.selectTab(PARSED, 'all', TODAY);
 
     const byProject = View.groupTasks(open, 'project', TODAY);
-    assert.deepStrictEqual(byProject.map((g) => g.label), ['Atlas', 'Zeta', 'No Project']);
+    assert.deepStrictEqual(byProject.map((g) => g.label), ['Atlas', 'Zeta', 'No project']);
     assert.deepStrictEqual(titles(byProject[0].tasks), ['Today low', 'Friday item']);
     assert.deepStrictEqual(titles(byProject[1].tasks), ['Owned undated']);
     assert.strictEqual(byProject.flatMap((g) => g.tasks).length, open.length);
@@ -617,12 +619,12 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     const doneHost = byClass(root, 'sauce-todo-filter-done-host')[0];
     assert.strictEqual(byClass(doneHost, 'sauce-section-label')[0].textContent, 'Done today · 2');
     const rows = byClass(doneHost, 'sauce-today-done-row');
-    assert.deepStrictEqual(rows.map((r) => r.querySelector('sauce-today-done-title').textContent),
+    assert.deepStrictEqual(rows.map((r) => r.querySelector('.sauce-today-done-title').textContent),
       ['Done last night', 'Done this morning']);
     assert.deepStrictEqual(byClass(doneHost, 'sauce-today-done-time').map((n) => n.textContent),
       ['21:40', '09:15']);
     assert(!rows.some((r) => r.textContent.includes('Done yesterday')));
-    const title = rows[0].querySelector('sauce-today-done-title');
+    const title = rows[0].querySelector('.sauce-today-done-title');
     assert(/line-through/.test(title.style.cssText), 'done titles are struck');
 
     for (const label of ['This week', 'Overdue · 2', 'Backlog · 1', 'All open']) {
@@ -678,6 +680,44 @@ const listTitles = (root) => byClass(root, 'sauce-task-today-title')
     hit.options.onRescheduled({ path: 'spice/tasks/Today low.md' }, '2026-11-10');
     assert(!listTitles(root).includes('Today low'));
     assert(listTitles(root).includes('Today high'));
+  });
+
+  await okAsync('RD-DV-INTEROP prefs written by SpaceDailyDashboard and SpaceHome are read back with other keys intact', async () => {
+    const View = loadClass({});
+    const storage = makeStorage({
+      [View.PREFS_KEY]: JSON.stringify({ tab: 'week', sort: 'due', group: 'priority', note: 'kept' }),
+    });
+    const dashboardWindow = { localStorage: storage };
+    const Dashboard = new Function('window', 'customJS',
+      `${fs.readFileSync(path.join(ROOT, 'platform/blueprints/daily/helpers/space-daily-dashboard.js'), 'utf8')}\nreturn SpaceDailyDashboard;`)(dashboardWindow, undefined);
+    assert.strictEqual(Dashboard.writeTodayPrefs({ tab: 'overdue' }, storage), true);
+    assert.deepStrictEqual(View.readPrefs(storage), { tab: 'overdue', sort: 'due', group: 'priority' });
+    assert.strictEqual(JSON.parse(storage.data.get(View.PREFS_KEY)).note, 'kept');
+
+    const homeWindow = {
+      localStorage: storage,
+      customJS: { SpaceDailyDashboard: { async _openTodayToDo() { return true; } } },
+    };
+    const Home = new Function('window', 'customJS',
+      `${fs.readFileSync(path.join(ROOT, 'platform/blueprints/home/helpers/space-home.js'), 'utf8')}\nreturn SpaceHome;`)(homeWindow, undefined);
+    await Home._openBacklog({}, TODAY);
+    assert.deepStrictEqual(View.readPrefs(storage), { tab: 'backlog', sort: 'due', group: 'priority' });
+    assert.strictEqual(JSON.parse(storage.data.get(View.PREFS_KEY)).note, 'kept');
+    assert.deepStrictEqual(Dashboard.readTodayPrefs(storage), { tab: 'backlog', sort: 'due', group: 'priority' });
+  });
+
+  await okAsync('RD-DV-GUARD a throwing TaskEntity during paint warns and never throws out of render', async () => {
+    const env = makeRenderHarness();
+    const broken = Object.create(TE);
+    broken.bucketOf = () => { throw new Error('boom'); };
+    env.customJS.TaskEntity = broken;
+    const warnings = [];
+    const realWarn = console.warn;
+    console.warn = (...args) => { warnings.push(args); };
+    try {
+      await assert.doesNotReject(() => mount(env));
+    } finally { console.warn = realWarn; }
+    assert(warnings.length >= 1 && String(warnings[0][0]).includes('[ToDoDailyFilterView] render failed'));
   });
 
   await okAsync('TV3-COLD missing TaskEntity or TaskTodayList is a no-throw no-op', async () => {

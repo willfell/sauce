@@ -756,6 +756,58 @@ ok('TD1A-NEXT-DAY advances normalized dates across month + year boundaries', () 
     'invalid calendar dates fail closed');
 });
 
+ok('RD-DONE-POLICY classifyOutcome / SILENT_REASONS / doneTimeLabel are reachable through the instance', () => {
+  assert(JSON.stringify(TaskTodayList.SILENT_REASONS) === JSON.stringify([
+    'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
+    'app unavailable', 'no-fields', 'task-entity-unavailable']));
+  assert(TaskTodayList.classifyOutcome({ ok: true }) === 'ok');
+  assert(TaskTodayList.classifyOutcome({ ok: false, no_op: true }) === 'skipped');
+  assert(TaskTodayList.classifyOutcome(null) === 'silent');
+  for (const reason of TaskTodayList.SILENT_REASONS) {
+    assert(TaskTodayList.classifyOutcome({ ok: false, reason }) === 'silent', reason);
+  }
+  assert(TaskTodayList.classifyOutcome({ ok: false, reason: 'write failed' }) === 'noticed');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: '2026-11-09T09:15:00-06:00' }) === '09:15');
+  assert(TaskTodayList.doneTimeLabel('2026-11-09T21:40:00-06:00') === '21:40');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: { toFormat: (f) => (f === 'HH:mm' ? '07:05' : '') } }) === '07:05');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: null }) === '');
+  assert(TaskTodayList.doneTimeLabel({ completed_at: 'garbage' }) === '');
+});
+
+ok('RD-DONE-ROW renderDoneRow draws struck title, HH:mm and an Undo only for archived tasks', () => {
+  const mk = (cls) => {
+    const el = {
+      className: cls || '', children: [], style: { cssText: '' }, dataset: {}, attributes: {}, listeners: {}, _text: '',
+      createEl(tag, o) { const c = mk((o && o.cls) || ''); c.tag = tag; if (o && o.text != null) c.textContent = o.text; this.children.push(c); return c; },
+      setAttribute(k, v) { this.attributes[k] = v; },
+      addEventListener(t, f) { this.listeners[t] = f; },
+      get textContent() { return this._text; },
+      set textContent(v) { this._text = String(v); },
+    };
+    return el;
+  };
+  const find = (el, cls) => el.children.find((c) => c.className.split(' ').includes(cls));
+  const calls = [];
+  const win = global.window;
+  global.window = { customJS: { TaskDialog: { reopen() {} } } };
+  try {
+    const archived = { title: 'Ship it', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00' };
+    const row = TaskTodayList.renderDoneRow(mk(''), archived, { onUndo: (t, b) => calls.push([t.title, b.attributes['aria-label']]) });
+    assert(row.className === 'sauce-today-done-row' && row.dataset.sauceTaskPath === archived.path);
+    assert(/line-through/.test(find(row, 'sauce-today-done-title').style.cssText));
+    assert(find(row, 'sauce-today-done-time').textContent === '09:15');
+    const undo = find(row, 'sauce-today-undo');
+    assert(undo && undo.attributes['aria-label'] === 'Undo: Ship it');
+    undo.listeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert(JSON.stringify(calls) === JSON.stringify([['Ship it', 'Undo: Ship it']]));
+
+    const live = TaskTodayList.renderDoneRow(mk(''), { title: 'Open', path: 'spice/tasks/Open.md' }, { onUndo() {} });
+    assert(!find(live, 'sauce-today-undo'), 'no Undo outside _done/');
+    assert(!find(live, 'sauce-today-done-time'), 'no time without completed_at');
+    assert(TaskTodayList.renderDoneRow(null, archived, {}) === null);
+  } finally { global.window = win; }
+});
+
 // ---------- TaskNoteView static helper (pure) ----------
 //
 // TaskNoteView is the clean task-note card rendered in a task note's body. Its

@@ -18,9 +18,6 @@ class ToDoDailyFilterView {
     static get SORT_MODES() { return ['smart', 'manual', 'priority', 'due', 'oldest', 'touched']; }
     static get GROUP_MODES() { return ['none', 'project', 'priority', 'due']; }
     static get STALE_DIVIDER_LABEL() { return 'Stale · overdue 30+ days'; }
-    static get SILENT_REOPEN_REASONS() {
-        return ['in-flight', 'render-safe-unavailable', 'not-done', 'task file not found'];
-    }
 
     static get SORT_OPTIONS() {
         return [
@@ -166,25 +163,16 @@ class ToDoDailyFilterView {
     }
 
     /** Done tasks completed on `todayStr`, latest completion first. */
-    static doneToday(tasks, todayStr, TEref) {
+    static doneToday(tasks, todayStr, TEref, TTLref) {
         const TE = ToDoDailyFilterView._te(TEref);
-        if (!TE) return [];
+        const TTL = TTLref
+            || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
+        if (!TE || !TTL) return [];
         return (Array.isArray(tasks) ? tasks : [])
             .filter((task) => task && task.status === 'done' && TE.completedDay(task) === todayStr)
-            .map((task, index) => ({ task, index, time: ToDoDailyFilterView.doneTimeLabel(task.completed_at) }))
+            .map((task, index) => ({ task, index, time: TTL.doneTimeLabel(task) }))
             .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : a.index - b.index))
             .map((entry) => entry.task);
-    }
-
-    static doneTimeLabel(value) {
-        try {
-            if (value == null || value === '') return '';
-            if (typeof value === 'object' && typeof value.toFormat === 'function') {
-                return String(value.toFormat('HH:mm') || '');
-            }
-            const m = /T(\d{2}):(\d{2})/.exec(String(value));
-            return m ? `${m[1]}:${m[2]}` : '';
-        } catch (_e) { return ''; }
     }
 
     static sortTasks(tasks, mode, todayStr, TEref) {
@@ -208,7 +196,7 @@ class ToDoDailyFilterView {
         switch (group) {
             case 'project': {
                 const groups = ToDoDailyFilterView.groupByProject(list);
-                const none = groups.findIndex((g) => g.label === 'No Project');
+                const none = groups.findIndex((g) => g.label === 'No project');
                 if (none >= 0 && none !== groups.length - 1) groups.push(groups.splice(none, 1)[0]);
                 return groups;
             }
@@ -266,7 +254,7 @@ class ToDoDailyFilterView {
         if (value.includes('|')) value = value.split('|').pop();
         if (value.includes('/')) value = value.split('/').pop();
         value = value.replace(/\.md$/i, '').trim();
-        return value || 'No Project';
+        return value || 'No project';
     }
 
     static groupByProject(tasks) {
@@ -484,7 +472,8 @@ class ToDoDailyFilterView {
             const dialog = CJS.TaskDialog;
             try { res = dialog && typeof dialog.reopen === 'function' ? await dialog.reopen(task.path) : null; }
             catch (_e) { res = null; }
-            if (res && res.ok === true) {
+            const outcome = TTL.classifyOutcome(res);
+            if (outcome === 'ok') {
                 task.status = 'open';
                 task.completed_at = null;
                 task.path = res.path || task.path;
@@ -492,55 +481,26 @@ class ToDoDailyFilterView {
                 return;
             }
             undo.disabled = false;
-            if (res && res.no_op) return;
-            const reason = String((res && res.reason) || '');
-            if (!res || View.SILENT_REOPEN_REASONS.includes(reason)) {
-                View._notice(`Could not reopen task: ${reason || 'unknown'}`);
-            }
+            if (outcome === 'silent') View._notice(`Could not reopen task: ${(res && res.reason) || 'unknown'}`);
         };
         const paintDone = () => {
             clear(doneHost);
-            if (prefs.tab !== 'today') return;
-            const done = View.doneToday(tasks, todayStr, TE);
+            if (prefs.tab !== 'today' || typeof TTL.renderDoneRow !== 'function') return;
+            const done = View.doneToday(tasks, todayStr, TE, TTL);
             if (!done.length) return;
             label(doneHost, `Done today · ${done.length}`);
             for (const task of done) {
-                const row = doneHost.createEl('div', { cls: 'sauce-today-done-row' });
-                row.dataset.sauceTaskPath = String(task.path || '');
-                row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:3px 6px; font-size:0.9em;';
-                const title = row.createEl('span', { cls: 'sauce-today-done-title' });
-                title.style.cssText = 'flex:1 1 auto; min-width:0; text-decoration:line-through; color:var(--text-muted); overflow-wrap:anywhere; cursor:pointer;';
-                const text = task.title || '(untitled)';
-                if (typeof TTL.renderInlineLinks === 'function') {
-                    try { TTL.renderInlineLinks(title, text, task.path); } catch (_e) { title.textContent = text; }
-                } else {
-                    title.textContent = text;
-                }
-                title.addEventListener('click', () => {
-                    try {
-                        const appRef = (typeof window !== 'undefined' && window.app) || null;
-                        if (task.path && appRef && appRef.workspace) appRef.workspace.openLinkText(task.path, '');
-                    } catch (e) { View._notice(`Could not open task: ${e && (e.message || e)}`); }
-                });
-                const time = View.doneTimeLabel(task.completed_at);
-                if (time) {
-                    const stamp = row.createEl('span', { cls: 'sauce-today-done-time', text: time });
-                    stamp.style.cssText = 'font-size:0.8em; color:var(--text-faint); font-variant-numeric:tabular-nums; flex-shrink:0;';
-                }
-                const canUndo = String(task.path || '').indexOf('spice/tasks/_done/') === 0
-                    && CJS.TaskDialog && typeof CJS.TaskDialog.reopen === 'function';
-                if (canUndo) {
-                    const undo = row.createEl('button', { cls: 'sauce-today-undo', text: 'Undo' });
-                    undo.setAttribute('type', 'button');
-                    undo.setAttribute('aria-label', `Undo: ${text}`);
-                    undo.addEventListener('click', onClick(() => reopen(task, undo)));
-                }
+                TTL.renderDoneRow(doneHost, task, { TD, notice: View._notice, onUndo: reopen });
             }
         };
         const paint = () => {
-            updateControls();
-            paintList();
-            paintDone();
+            try {
+                updateControls();
+                paintList();
+                paintDone();
+            } catch (e) {
+                try { console.warn('[ToDoDailyFilterView] render failed', e); } catch (_e) { /* no console */ }
+            }
         };
 
         const commit = (patch) => {
