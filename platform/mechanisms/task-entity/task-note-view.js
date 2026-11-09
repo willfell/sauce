@@ -390,6 +390,15 @@ class TaskNoteView {
             try { todayStr = (window.moment && window.moment().format) ? window.moment().format('YYYY-MM-DD') : ''; } catch (_e) { todayStr = ''; }
 
             // ----- Card container -----
+            // Replace any card an earlier execution left in this container.
+            // Dataview clears the block and then awaits the view-file read, so a
+            // refresh that starts inside that gap runs this render a second time
+            // into the same container; without this the card shows twice until
+            // the next refresh. Same dedupe ChromeBar.render does for the bar.
+            try {
+                const stale = c.querySelectorAll ? c.querySelectorAll(':scope > .sauce-task-note-view') : [];
+                for (const prev of Array.from(stale || [])) { if (prev && prev.remove) prev.remove(); }
+            } catch (_e) { /* best-effort */ }
             const card = c.createEl('div', { cls: 'sauce-task-note-view' });
             card.style.cssText = [
                 'display:flex', 'flex-direction:column', 'gap:14px',
