@@ -858,8 +858,9 @@ class TaskTodayList {
         }
 
         // Row actions at the FAR-RIGHT end of the cluster. Open rows render
-        // tomorrow + edit + delete; completed/archive rows render edit + delete
-        // only. The controls live in a fixed 1.5em-tall flex box
+        // tomorrow + next-Monday + edit + a "more" (⋯) button whose menu holds
+        // backlog / pick date / move up-down / delete; completed/archive rows
+        // render edit + a standalone delete only. The controls live in a fixed 1.5em-tall flex box
         // that vertically centers them against the FIRST line of the
         // (line-height:1.5) title — the same trick the checkbox wrapper uses — so
         // the row stays aligned even when a long title wraps, and every button is
@@ -868,7 +869,8 @@ class TaskTodayList {
         //   - Edit      → TaskDialog.open({ edit: path })   (the edit dialog, NOT
         //                 the note — the note opens via the title click)
         //   - Tomorrow  → rescheduleTomorrow(row, task, viewedDay)
-        //   - Delete    → TaskDialog.confirmDelete(path)     (yes/no modal; on
+        //   - Delete    → TaskDialog.confirmDelete(path)     (via the ⋯ menu for
+        //                 open rows; yes/no modal; on
         //                 confirm the row is removed optimistically)
         // Every gesture is lazily resolved (getTD() / window at click-time) + fully
         // guarded, so a cold-load just no-ops the tap. Never throws.
@@ -923,34 +925,52 @@ class TaskTodayList {
             const input = row.createEl('input', { cls: 'sauce-task-datepick', type: 'date' });
             input.type = 'date';
             input.style.cssText = 'position: absolute; right: 8px; top: 100%; z-index: 20; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 4px); padding: 2px 6px;';
-            const close = () => { try { input.remove(); } catch (_e) {} };
+            let outside = null;
+            const close = () => {
+                try { input.remove(); } catch (_e) {}
+                if (outside) {
+                    try { document.removeEventListener('pointerdown', outside, true); } catch (_e) {}
+                    outside = null;
+                }
+            };
             input.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+            try {
+                if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+                    outside = (ev) => {
+                        const t = ev && ev.target;
+                        if (t && (t === input || (typeof input.contains === 'function' && input.contains(t)))) return;
+                        close();
+                    };
+                    setTimeout(() => {
+                        if (outside && input.parentNode) document.addEventListener('pointerdown', outside, true);
+                    }, 0);
+                }
+            } catch (_e) {}
             input.addEventListener('change', async () => {
                 const value = String(input.value || '');
                 close();
                 if (value) await doReschedule(value);
             });
             input.addEventListener('keydown', (ev) => { if (ev && ev.key === 'Escape') close(); });
-            try { if (typeof input.showPicker === 'function') input.showPicker(); else if (typeof input.focus === 'function') input.focus(); } catch (_e) {}
+            let picked = false;
+            try { if (typeof input.showPicker === 'function') { input.showPicker(); picked = true; } } catch (_e) {}
+            if (!picked) { try { if (typeof input.focus === 'function') input.focus(); } catch (_e) {} }
         };
         const doMore = (ev) => {
-            const MenuCls = (typeof Menu !== 'undefined' && Menu) || null;
-            if (!MenuCls) return;
+            let MP = null;
+            try { MP = (typeof window !== 'undefined' && window.customJS && window.customJS.MenuPopover) || null; } catch (_e) { MP = null; }
+            if (!MP || typeof MP.open !== 'function') return;
             try {
-                const menu = new MenuCls();
-                menu.addItem((i) => i.setTitle('Move to backlog').setIcon('inbox').onClick(() => doReschedule('')));
-                menu.addItem((i) => i.setTitle('Pick date\u2026').setIcon('calendar').onClick(() => doPickDate()));
+                const entries = [
+                    { label: 'Move to backlog', onSelect: () => doReschedule('') },
+                    { label: 'Pick date\u2026', onSelect: () => doPickDate() },
+                ];
                 if (typeof opts.onMove === 'function') {
-                    menu.addItem((i) => i.setTitle('Move up').setIcon('arrow-up').onClick(() => { try { opts.onMove(task, -1); } catch (_e) {} }));
-                    menu.addItem((i) => i.setTitle('Move down').setIcon('arrow-down').onClick(() => { try { opts.onMove(task, 1); } catch (_e) {} }));
+                    entries.push({ label: 'Move up', onSelect: () => { try { opts.onMove(task, -1); } catch (_e) {} } });
+                    entries.push({ label: 'Move down', onSelect: () => { try { opts.onMove(task, 1); } catch (_e) {} } });
                 }
-                menu.addItem((i) => i.setTitle('Delete').setIcon('trash').onClick(() => doDelete()));
-                if (ev && ev.clientX != null && typeof menu.showAtMouseEvent === 'function') menu.showAtMouseEvent(ev);
-                else if (typeof menu.showAtPosition === 'function') {
-                    const target = ev && ev.currentTarget;
-                    const rect = target && typeof target.getBoundingClientRect === 'function' ? target.getBoundingClientRect() : null;
-                    menu.showAtPosition({ x: rect ? rect.left : 0, y: rect ? rect.bottom : 0 });
-                } else if (typeof menu.showAtMouseEvent === 'function') menu.showAtMouseEvent(ev);
+                entries.push({ label: 'Delete', danger: true, onSelect: () => doDelete() });
+                MP.open(entries, { anchor: moreBtn || (ev && ev.currentTarget) || undefined });
             } catch (e) {
                 try { new Notice('Could not open menu: ' + (e && (e.message || e)), 6000); } catch (_e) {}
             }

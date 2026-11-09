@@ -327,15 +327,11 @@ function makeEnv(initialFiles, opts) {
     return Promise.resolve().then(fn).finally(() => { Cls.reschedule = orig; });
   };
   const stubMenu = (menus) => {
-    global.Menu = class {
-      constructor() { this.items = []; menus.push(this); }
-      addItem(cb) {
-        const item = { title: '', handler: null, setTitle(t) { this.title = t; return this; }, setIcon() { return this; }, onClick(fn) { this.handler = fn; return this; } };
-        cb(item); this.items.push(item); return this;
-      }
-      addSeparator() { return this; }
-      showAtMouseEvent() { this.shown = true; }
-      showAtPosition() { this.shown = true; }
+    global.window.customJS.MenuPopover = {
+      open(entries, o) {
+        menus.push({ shown: true, opts: o, entries, items: entries.map((e) => ({ title: e.label, handler: e.onSelect, danger: e.danger })) });
+        return {};
+      },
     };
   };
 
@@ -431,6 +427,8 @@ function makeEnv(initialFiles, opts) {
         assert(!findByCls(row, 'sauce-task-action-delete'), 'standalone trash button is gone from open rows');
         await fireClick(more);
         assert(menus.length === 1 && menus[0].shown, 'menu opened');
+        assert(menus[0].opts.anchor === more, 'menu anchored on the more button');
+        assert(menus[0].items[2].danger === true && !menus[0].items[0].danger, 'only Delete is danger');
         eq(menus[0].items.map((i) => i.title), ['Move to backlog', 'Pick date…', 'Delete'], 'items without onMove');
         await menus[0].items[0].handler();
         assert(calls.length === 1 && calls[0][2] === '', 'backlog -> reschedule(..., "")');
@@ -445,7 +443,7 @@ function makeEnv(initialFiles, opts) {
         await m.items[3].handler();
         eq(moves, [-1, 1], 'onMove directions');
       });
-    } finally { delete global.Menu; }
+    } finally { delete global.window.customJS.MenuPopover; }
   });
 
   await ok('RD-ROW-PICKDATE', async () => {
@@ -467,18 +465,56 @@ function makeEnv(initialFiles, opts) {
         assert(done.length === 1 && done[0] === '2026-12-01', 'onRescheduled');
         assert(!findByCls(row, 'sauce-task-datepick'), 'popover removed after pick');
       });
-    } finally { delete global.Menu; }
+    } finally { delete global.window.customJS.MenuPopover; }
+  });
+
+  await ok('RD-ROW-PICKDATE-FOCUS-AND-OUTSIDE', async () => {
+    rowEnv();
+    const menus = [];
+    stubMenu(menus);
+    const listeners = {};
+    const prevDoc = global.document;
+    global.document = {
+      addEventListener(n, fn) { listeners[n] = fn; },
+      removeEventListener(n, fn) { if (listeners[n] === fn) delete listeners[n]; },
+    };
+    try {
+      const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+      const orig = row.createEl;
+      row.createEl = function (t, o) {
+        const c = orig.call(this, t, o);
+        if (t === 'input' && o && o.cls === 'sauce-task-datepick') c.showPicker = () => { throw new Error('picker unsupported'); };
+        return c;
+      };
+      await fireClick(findByCls(row, 'sauce-task-action-more'));
+      await menus[0].items.find((i) => i.title === 'Pick date…').handler();
+      const input = findByCls(row, 'sauce-task-datepick');
+      assert(input, 'popover rendered');
+      assert(input._focusCount === 1, 'focus is the fallback when showPicker throws');
+      await new Promise((r) => setTimeout(r, 5));
+      assert(typeof listeners.pointerdown === 'function', 'outside-click listener registered');
+      listeners.pointerdown({ target: input });
+      assert(findByCls(row, 'sauce-task-datepick'), 'click inside the popover keeps it open');
+      listeners.pointerdown({ target: makeTreeNode('div') });
+      assert(!findByCls(row, 'sauce-task-datepick'), 'outside click closes it');
+      assert(!listeners.pointerdown, 'listener removed on close');
+    } finally {
+      if (prevDoc === undefined) delete global.document; else global.document = prevDoc;
+      delete global.window.customJS.MenuPopover;
+    }
   });
 
   await ok('RD-ROW-MENU-COLD', async () => {
-    rowEnv();
-    delete global.Menu;
-    const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
-    const more = findByCls(row, 'sauce-task-action-more');
-    assert(more, 'more button renders without Menu');
-    let threw = false;
-    try { await fireClick(more); } catch (_e) { threw = true; }
-    assert(!threw, 'click is a no-op');
+    for (const MenuPopover of [undefined, {}, { open: 'nope' }, { open() { throw new Error('boom'); } }]) {
+      rowEnv();
+      if (MenuPopover) global.window.customJS.MenuPopover = MenuPopover;
+      const row = TaskTodayList.renderTaskRow(makeTreeNode('div'), openTask(), null);
+      const more = findByCls(row, 'sauce-task-action-more');
+      assert(more, 'more button renders without MenuPopover');
+      let threw = false;
+      try { await fireClick(more); } catch (_e) { threw = true; }
+      assert(!threw, 'click is a no-op / never throws for ' + JSON.stringify(MenuPopover && Object.keys(MenuPopover)));
+    }
   });
 
   await ok('RD-ROW-SELECT', async () => {

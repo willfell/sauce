@@ -2995,24 +2995,16 @@ function fireClick(el) {
 }
 function childIndex(parent, node) { return (parent && parent.children) ? parent.children.indexOf(node) : -1; }
 // Open rows keep Delete inside the "more actions" menu (no standalone trash
-// button): stub Obsidian's Menu, open it from the row, and run its Delete item.
+// button): stub customJS.MenuPopover.open, open it from the row, and run the
+// Delete entry's onSelect.
 function clickMenuDelete(row) {
-  const prevMenu = global.Menu;
-  let deleteItem = null;
-  global.Menu = class {
-    addItem(cb) {
-      const item = { title: '', setTitle(t) { this.title = t; return this; }, setIcon() { return this; }, onClick(fn) { this.handler = fn; return this; } };
-      cb(item);
-      if (item.title === 'Delete') deleteItem = item;
-      return this;
-    }
-    addSeparator() { return this; }
-    showAtMouseEvent() {}
-    showAtPosition() {}
-  };
+  const cj = global.window.customJS = global.window.customJS || {};
+  const prevMP = cj.MenuPopover;
+  let deleteEntry = null;
+  cj.MenuPopover = { open(entries) { deleteEntry = entries.find((e) => e.label === 'Delete') || null; return {}; } };
   try { fireClick(findByCls(row, 'sauce-task-action-more')); }
-  finally { if (prevMenu === undefined) delete global.Menu; else global.Menu = prevMenu; }
-  return deleteItem ? deleteItem.handler() : undefined;
+  finally { if (prevMP === undefined) delete cj.MenuPopover; else cj.MenuPopover = prevMP; }
+  return deleteEntry ? deleteEntry.onSelect() : undefined;
 }
 
 async function runRowActionTests() {
