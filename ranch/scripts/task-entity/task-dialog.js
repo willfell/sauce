@@ -85,6 +85,16 @@ class TaskDialog {
     _writeOpenAfterPref(on) { return TaskDialog._writeOpenAfterPref(on); }
     _injectDialogCss(doc) { return TaskDialog._injectDialogCss(doc); }
     get _DIALOG_CSS() { return TaskDialog._DIALOG_CSS; }
+    openShell(opts) { return TaskDialog.openShell(opts); }
+    get FIELD_CSS() { return TaskDialog.FIELD_CSS; }
+    get DATE_CSS() { return TaskDialog.DATE_CSS; }
+    sectionLabel(parent, text) { return TaskDialog.sectionLabel(parent, text); }
+    setPressed(el, base, on) { return TaskDialog.setPressed(el, base, on); }
+    pill(parent, base, text) { return TaskDialog.pill(parent, base, text); }
+    actionButton(parent, o) { return TaskDialog.actionButton(parent, o); }
+    isCmdEnter(event) { return TaskDialog.isCmdEnter(event); }
+    filterList(host, opts) { return TaskDialog.filterList(host, opts); }
+    projectField(parent, opts) { return TaskDialog.projectField(parent, opts); }
 
     // ---------- Static pure helpers ----------
 
@@ -832,7 +842,7 @@ class TaskDialog {
         };
         state.whenKey = TaskDialog.whenKeyForDue(state.due, todayStr);
 
-        // ----- Shared SauceModal shell; TaskDialog owns only field internals. -----
+        // ----- Shared SauceModal shell (openShell); TaskDialog owns only field internals. -----
         const doc = (typeof document !== 'undefined' && document) ? document : null;
         const sauceModal = (typeof globalThis !== 'undefined' && globalThis.customJS)
             ? globalThis.customJS.SauceModal : null;
@@ -846,12 +856,11 @@ class TaskDialog {
         let addAnotherBtn = null;
         let titleInput = null;
         let detachKeys = () => {};
-        const isCmdEnter = (event) => !!(event && event.key === 'Enter' && !event.isComposing
-            && (event.metaKey || event.ctrlKey));
-        const modalHandle = sauceModal.open({
+        const isCmdEnter = TaskDialog.isCmdEnter;
+        const shell = TaskDialog.openShell({
             doc,
             title: editPath ? 'Edit task' : 'New task',
-            buttons: [],
+            closeReason: 'task-dialog',
             // SauceModal listens in capture phase, so only the title field may
             // use plain Enter as the dialog-level Save gesture. Nested controls
             // such as the note filter and web-link mini-form own their own Enter
@@ -866,55 +875,25 @@ class TaskDialog {
                     || isCmdEnter(event)) return submitTask('save');
                 return false;
             },
-            closeOnSubmit: false,
             onClose: () => { try { detachKeys(); } catch (_e) {} },
         });
-        if (!modalHandle) {
+        if (!shell) {
             try { new Notice('TaskDialog: could not open SauceModal'); } catch (_e) {}
             return;
         }
-        const closeOverlay = () => modalHandle.close('task-dialog');
-        const host = modalHandle.body;
-        const modalEl = modalHandle.modal || null;
-        TaskDialog._injectDialogCss(doc);
-        try { if (modalEl && modalEl.classList) modalEl.classList.add('sauce-task-dialog'); } catch (_e) {}
-        try {
-            if (modalEl && typeof doc.createElement === 'function') {
-                const closeX = doc.createElement('button');
-                closeX.className = 'sauce-task-dialog-close';
-                closeX.textContent = '✕';
-                closeX.setAttribute('type', 'button');
-                closeX.setAttribute('aria-label', 'Close');
-                closeX.onclick = () => closeOverlay();
-                // Before the body so it follows the heading in DOM and tab order.
-                if (host && typeof modalEl.insertBefore === 'function') modalEl.insertBefore(closeX, host);
-                else modalEl.appendChild(closeX);
-            }
-        } catch (_e) { /* the header close is a convenience; Escape still closes */ }
+        const modalHandle = shell.handle;
+        const closeOverlay = shell.close;
+        const modalEl = shell.modal;
 
-        const fieldCss = 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-primary,#1e1e1e); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
-        // Native iOS <input type="date"> has an intrinsic min-width and ignores
-        // width:100% even with box-sizing+min-width:0 — the boxes overflow the
-        // modal. `-webkit-appearance:none; appearance:none` strips the intrinsic
-        // control chrome/sizing (the native date picker still opens on tap), so
-        // the input finally respects the container width like the text fields.
-        const dateCss = fieldCss + ' -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;';
-        const sectionLabel = (parent, text) => parent.createDiv({ cls: 'sauce-task-section-label', text });
-        // Selection state for every pill group: class + aria-pressed together.
-        const setPressed = (el, base, on) => {
-            el.className = base + (on ? ' is-selected' : '');
-            try { el.setAttribute('aria-pressed', on ? 'true' : 'false'); } catch (_e) {}
-        };
-        const mkPill = (parent, base, text) => {
-            const b = parent.createEl('button', { cls: base, text });
-            try { b.setAttribute('type', 'button'); } catch (_e) {}
-            return b;
-        };
+        const fieldCss = TaskDialog.FIELD_CSS;
+        const dateCss = TaskDialog.DATE_CSS;
+        const sectionLabel = TaskDialog.sectionLabel;
+        const setPressed = TaskDialog.setPressed;
+        const mkPill = TaskDialog.pill;
 
         // ----- Two columns: left = what (title / notes / links), right = when / how. -----
-        const cols = host.createDiv({ cls: 'sauce-task-dialog-cols' });
-        const left = cols.createDiv({ cls: 'sauce-task-dialog-left' });
-        const right = cols.createDiv({ cls: 'sauce-task-dialog-right' });
+        const left = shell.left;
+        const right = shell.right;
 
         // Title (large). Live shortcut parsing runs in create mode only: an
         // existing title is never rewritten by a trailing word that happens to
@@ -1042,26 +1021,8 @@ class TaskDialog {
                 if (openKind === kind) { closeInserter(); return; }
                 closeInserter();
                 openKind = kind;
-                const filterInput = inserterBox.createEl('input', { type: 'text' });
-                filterInput.placeholder = placeholder;
-                filterInput.style.cssText = fieldCss;
-                const results = inserterBox.createDiv({ cls: 'sauce-task-picker-results' });
-                const renderResults = () => {
-                    results.empty();
-                    const q = (filterInput.value || '').trim().toLowerCase();
-                    const hits = (q ? names.filter((n) => n.toLowerCase().indexOf(q) >= 0) : names).slice(0, 30);
-                    if (!hits.length) {
-                        results.createDiv({ cls: 'sauce-task-picker-empty', text: q ? 'No matches' : 'Nothing to pick' });
-                        return;
-                    }
-                    for (const n of hits) {
-                        const row = results.createDiv({ cls: 'sauce-task-picker-row ' + rowCls, text: n });
-                        row.onclick = () => onPick(n);
-                    }
-                };
-                filterInput.oninput = renderResults;
-                renderResults();
-                setTimeout(() => { try { filterInput.focus(); } catch (_e) {} }, 30);
+                const picker = TaskDialog.filterList(inserterBox, { placeholder, names, rowCls, onPick });
+                setTimeout(() => { try { picker.input.focus(); } catch (_e) {} }, 30);
             };
 
             // ----- Note picker (FIX 6 — sorted MOST-RECENTLY-EDITED first) -----
@@ -1187,54 +1148,17 @@ class TaskDialog {
         // Enumerated dependency-free via metadataCache (no `dv` in a
         // button-invoked dialog). A seeded/edited project that is not among the
         // recent chips is shown as its own selected chip, so it is never hidden.
-        const projects = TaskDialog._loadProjectList(app);
-        const projectNames = projects.map((p) => p.name);
         let recentNames = [];
         try { recentNames = TaskDialog.recentProjects(TaskDialog._recentTaskRows(app, todayStr), todayStr, 6); }
         catch (_e) { recentNames = []; }
-        const shortcutProjectNames = Array.from(new Set(projectNames.concat(recentNames)));
-        const projSec = right.createDiv({ cls: 'sauce-task-section' });
-        sectionLabel(projSec, 'Project');
-        const projSearch = projSec.createEl('input', { type: 'text', cls: 'sauce-task-project-search' });
-        projSearch.placeholder = 'Search projects…';
-        projSearch.style.cssText = fieldCss;
-        const projChips = projSec.createDiv({ cls: 'sauce-task-pill-row sauce-task-project-chips' });
-        const projCaption = projSec.createDiv({ cls: 'sauce-task-caption' });
-        let projHits = [];
-        const renderProjects = () => {
-            projChips.empty();
-            const q = (projSearch.value || '').trim();
-            const cur = (state.projectName || '').trim();
-            let caption;
-            if (q) {
-                projHits = TaskDialog.projectMatches(projectNames, q, 8);
-                caption = projHits.length ? '' : 'No matching projects';
-            } else {
-                projHits = recentNames.slice();
-                if (cur && projHits.indexOf(cur) < 0) projHits.unshift(cur);
-                caption = recentNames.length ? 'Your most-used projects, most recent first'
-                    : (projectNames.length ? 'Type to search your projects' : 'No projects yet');
-            }
-            for (const n of projHits) {
-                const c = mkPill(projChips, 'sauce-task-pill sauce-task-project-chip', n);
-                setPressed(c, 'sauce-task-pill sauce-task-project-chip', n === cur);
-                c.onclick = () => setProject(state.projectName === n ? '' : n);
-            }
-            projCaption.textContent = caption;
-            projCaption.style.display = caption ? '' : 'none';
-        };
-        const setProject = (name) => { state.projectName = name || ''; projSearch.value = ''; renderProjects(); renderWhen(); };
-        projSearch.oninput = renderProjects;
-        // Enter in the search picks the first match instead of saving the task
-        // (SauceModal only treats Enter in the title as Save).
-        projSearch.addEventListener('keydown', (ev) => {
-            if (ev && ev.key === 'Enter' && !ev.isComposing && !ev.metaKey && !ev.ctrlKey
-                && (projSearch.value || '').trim() && projHits.length) {
-                if (ev.preventDefault) ev.preventDefault();
-                setProject(projHits[0]);
-            }
+        const projField = TaskDialog.projectField(right, {
+            app,
+            recentNames,
+            value: state.projectName,
+            onChange: (name) => { state.projectName = name; renderWhen(); },
         });
-        renderProjects();
+        const shortcutProjectNames = Array.from(new Set(projField.projectNames.concat(recentNames)));
+        const setProject = projField.set;
 
         // ----- Right column: Repeats — one button that expands in place -----
         // The structured picker composes the SAME RecurrenceParser grammar the
@@ -1431,20 +1355,7 @@ class TaskDialog {
             open: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
         };
 
-        // Sauce-core owns button geometry, state, focus, and tone presentation.
-        const mkBtn = (parent, o) => {
-            const variant = o.variant || 'ghost';
-            const cls = 'sauce-btn'
-                + (variant === 'accent' ? ' sauce-btn-accent' : '')
-                + (variant === 'danger' ? ' sauce-btn-danger' : '')
-                + (o.cls ? ' ' + o.cls : '');
-            const b = parent.createEl('button', { cls });
-            try { b.setAttribute('type', 'button'); } catch (_e) {}
-            if (o.icon) { const ic = b.createSpan(); ic.style.cssText = 'display:inline-flex; align-items:center;'; ic.innerHTML = o.icon; }
-            if (o.label) b.createSpan({ text: o.label });
-            if (o.kbd) b.createSpan({ cls: 'sauce-task-kbd', text: o.kbd });
-            return b;
-        };
+        const mkBtn = TaskDialog.actionButton;
 
         let openAfterCb = null;
         if (editPath) {
@@ -1567,6 +1478,229 @@ class TaskDialog {
         } catch (_e) {}
 
         updateSubmit();
+    }
+
+    // ---------- Shared dialog parts ----------
+    //
+    // The pieces TaskDialog is built from, as statics so other dialogs (the
+    // New meeting dialog, Edit attendees, EntityCreate's people prompt) build
+    // the same markup with the same classes and _DIALOG_CSS styles them all.
+    // Each part never throws out of a render.
+
+    /**
+     * Open the shared dialog shell on SauceModal: the `sauce-task-dialog`
+     * class (so _DIALOG_CSS applies), the header ✕, and either the two
+     * columns (`left` / `right`) or, with `columns: false`, one column
+     * (`left` only, modal gets `sauce-task-dialog-single`). `cls` adds the
+     * caller's own class. Returns null when SauceModal or a document is
+     * missing, so the caller can fall back.
+     *   → { handle, modal, body, footer, left, right, close, doc }
+     */
+    static openShell(opts) {
+        const o = opts || {};
+        const doc = o.doc || ((typeof document !== 'undefined' && document) ? document : null);
+        const sauceModal = (typeof globalThis !== 'undefined' && globalThis.customJS)
+            ? globalThis.customJS.SauceModal : null;
+        if (!doc || !sauceModal || typeof sauceModal.open !== 'function') return null;
+        let handle = null;
+        try {
+            handle = sauceModal.open({
+                doc,
+                title: o.title,
+                buttons: [],
+                onSubmit: o.onSubmit,
+                closeOnSubmit: false,
+                onClose: o.onClose,
+            });
+        } catch (_e) { handle = null; }
+        if (!handle) return null;
+        const modal = handle.modal || null;
+        const host = handle.body;
+        const close = () => handle.close(o.closeReason || 'dialog');
+        TaskDialog._injectDialogCss(doc);
+        try {
+            if (modal && modal.classList) {
+                modal.classList.add('sauce-task-dialog');
+                if (o.columns === false) modal.classList.add('sauce-task-dialog-single');
+                for (const c of String(o.cls || '').split(/\s+/)) if (c) modal.classList.add(c);
+            }
+        } catch (_e) {}
+        try {
+            if (modal && typeof doc.createElement === 'function') {
+                const closeX = doc.createElement('button');
+                closeX.className = 'sauce-task-dialog-close';
+                closeX.textContent = '✕';
+                closeX.setAttribute('type', 'button');
+                closeX.setAttribute('aria-label', 'Close');
+                closeX.onclick = () => close();
+                // Before the body so it follows the heading in DOM and tab order.
+                if (host && typeof modal.insertBefore === 'function') modal.insertBefore(closeX, host);
+                else modal.appendChild(closeX);
+            }
+        } catch (_e) { /* the header close is a convenience; Escape still closes */ }
+        let left = null;
+        let right = null;
+        if (o.columns === false) {
+            left = host.createDiv({ cls: 'sauce-task-dialog-left' });
+        } else {
+            const cols = host.createDiv({ cls: 'sauce-task-dialog-cols' });
+            left = cols.createDiv({ cls: 'sauce-task-dialog-left' });
+            right = cols.createDiv({ cls: 'sauce-task-dialog-right' });
+        }
+        return { handle, modal, body: host, footer: handle.footer, left, right, close, doc };
+    }
+
+    /** Inline style for a text field inside the dialog (theme variables only). */
+    static get FIELD_CSS() {
+        return 'width:100%; min-width:0; box-sizing:border-box; padding:7px 10px; background:var(--background-primary,#1e1e1e); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px; line-height:1.4;';
+    }
+
+    /**
+     * Inline style for a native date / datetime-local input. iOS gives it an
+     * intrinsic min-width that ignores width:100%; `appearance: none` strips
+     * that sizing (the native picker still opens on tap) so it fits the column.
+     */
+    static get DATE_CSS() {
+        return TaskDialog.FIELD_CSS + ' -webkit-appearance:none; appearance:none; max-width:100%; text-align:left;';
+    }
+
+    /** Uppercase section heading (When, Priority, Project, Attendees…). */
+    static sectionLabel(parent, text) {
+        return parent.createDiv({ cls: 'sauce-task-section-label', text });
+    }
+
+    /** Selection state for a pill: class + aria-pressed together. */
+    static setPressed(el, base, on) {
+        el.className = base + (on ? ' is-selected' : '');
+        try { el.setAttribute('aria-pressed', on ? 'true' : 'false'); } catch (_e) {}
+    }
+
+    /** A type="button" pill or quiet button with class `base`. */
+    static pill(parent, base, text) {
+        const b = parent.createEl('button', { cls: base, text });
+        try { b.setAttribute('type', 'button'); } catch (_e) {}
+        return b;
+    }
+
+    /**
+     * A footer button. Sauce-core owns button geometry, state, focus and tone;
+     * `variant` is ghost (default) / accent / danger, `kbd` adds the shortcut
+     * hint (hidden on a phone).
+     */
+    static actionButton(parent, o) {
+        const variant = o.variant || 'ghost';
+        const cls = 'sauce-btn'
+            + (variant === 'accent' ? ' sauce-btn-accent' : '')
+            + (variant === 'danger' ? ' sauce-btn-danger' : '')
+            + (o.cls ? ' ' + o.cls : '');
+        const b = parent.createEl('button', { cls });
+        try { b.setAttribute('type', 'button'); } catch (_e) {}
+        if (o.icon) { const ic = b.createSpan(); ic.style.cssText = 'display:inline-flex; align-items:center;'; ic.innerHTML = o.icon; }
+        if (o.label) b.createSpan({ text: o.label });
+        if (o.kbd) b.createSpan({ cls: 'sauce-task-kbd', text: o.kbd });
+        return b;
+    }
+
+    /** ⌘↵ / Ctrl↵ (not mid-IME-composition). */
+    static isCmdEnter(event) {
+        return !!(event && event.key === 'Enter' && !event.isComposing && (event.metaKey || event.ctrlKey));
+    }
+
+    /**
+     * A filter field over a fixed list of names with a scrolling result list
+     * (at most 30 rows, list order kept). Clicking a row calls onPick(name).
+     *   → { input, results, render }
+     */
+    static filterList(host, opts) {
+        const o = opts || {};
+        const names = Array.isArray(o.names) ? o.names : [];
+        const input = host.createEl('input', { type: 'text' });
+        input.placeholder = o.placeholder || '';
+        input.style.cssText = TaskDialog.FIELD_CSS;
+        const results = host.createDiv({ cls: 'sauce-task-picker-results' });
+        const render = () => {
+            results.empty();
+            const q = (input.value || '').trim().toLowerCase();
+            const hits = (q ? names.filter((n) => n.toLowerCase().indexOf(q) >= 0) : names).slice(0, 30);
+            if (!hits.length) {
+                results.createDiv({ cls: 'sauce-task-picker-empty', text: q ? 'No matches' : 'Nothing to pick' });
+                return;
+            }
+            for (const n of hits) {
+                const row = results.createDiv({ cls: 'sauce-task-picker-row ' + (o.rowCls || ''), text: n });
+                row.onclick = () => { if (typeof o.onPick === 'function') o.onPick(n); };
+            }
+        };
+        input.oninput = render;
+        render();
+        return { input, results, render };
+    }
+
+    /**
+     * The Project section: a search field, a row of project chips (the
+     * `recentNames` when the search is empty, the current project first if it
+     * is not among them; matches while typing) and a caption. Clicking the
+     * selected chip clears it; Enter in the search picks the first match.
+     * Projects come from _loadProjectList(app) unless `projectNames` is given.
+     * onChange(name) runs after every change ('' = no project).
+     *   → { set(name), get(), projectNames, search }
+     */
+    static projectField(parent, opts) {
+        const o = opts || {};
+        const projectNames = Array.isArray(o.projectNames) ? o.projectNames
+            : TaskDialog._loadProjectList(o.app).map((p) => p.name);
+        const recentNames = Array.isArray(o.recentNames) ? o.recentNames : [];
+        let value = String(o.value || '');
+        const sec = parent.createDiv({ cls: 'sauce-task-section' });
+        TaskDialog.sectionLabel(sec, o.label || 'Project');
+        const search = sec.createEl('input', { type: 'text', cls: 'sauce-task-project-search' });
+        search.placeholder = 'Search projects…';
+        try { search.setAttribute('aria-label', 'Search projects'); } catch (_e) {}
+        search.style.cssText = TaskDialog.FIELD_CSS;
+        const chips = sec.createDiv({ cls: 'sauce-task-pill-row sauce-task-project-chips' });
+        const caption = sec.createDiv({ cls: 'sauce-task-caption' });
+        let hits = [];
+        const CHIP = 'sauce-task-pill sauce-task-project-chip';
+        const render = () => {
+            chips.empty();
+            const q = (search.value || '').trim();
+            const cur = value.trim();
+            let text;
+            if (q) {
+                hits = TaskDialog.projectMatches(projectNames, q, 8);
+                text = hits.length ? '' : 'No matching projects';
+            } else {
+                hits = recentNames.slice();
+                if (cur && hits.indexOf(cur) < 0) hits.unshift(cur);
+                text = recentNames.length ? 'Your most-used projects, most recent first'
+                    : (projectNames.length ? 'Type to search your projects' : 'No projects yet');
+            }
+            for (const n of hits) {
+                const c = TaskDialog.pill(chips, CHIP, n);
+                TaskDialog.setPressed(c, CHIP, n === cur);
+                c.onclick = () => set(value === n ? '' : n);
+            }
+            caption.textContent = text;
+            caption.style.display = text ? '' : 'none';
+        };
+        const set = (name) => {
+            value = String(name || '');
+            search.value = '';
+            render();
+            if (typeof o.onChange === 'function') { try { o.onChange(value); } catch (_e) {} }
+        };
+        search.oninput = render;
+        // Enter in the search picks the first match instead of submitting
+        // (SauceModal only treats Enter in the title as submit).
+        search.addEventListener('keydown', (ev) => {
+            if (ev && ev.key === 'Enter' && !ev.isComposing && !ev.metaKey && !ev.ctrlKey
+                && (search.value || '').trim() && hits.length) {
+                if (ev.preventDefault) ev.preventDefault();
+                set(hits[0]);
+            }
+        });
+        render();
+        return { set, get: () => value, projectNames, search };
     }
 
     /** Today as YYYY-MM-DD: the caller's value, else moment(), else the local date. */
@@ -1744,6 +1878,7 @@ class TaskDialog {
             '.sauce-task-dialog > .sauce-modal-footer { box-sizing: border-box; flex: 0 0 auto; margin: 0; padding: 12px 20px; border-top: 1px solid var(--background-modifier-border); justify-content: space-between; align-items: center; }',
             '.sauce-task-dialog button.sauce-task-dialog-close { position: absolute; top: 10px; right: 12px; width: 32px; height: 32px; padding: 0; border: none; border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-muted); font-size: 14px; cursor: pointer; }',
             '.sauce-task-dialog button.sauce-task-dialog-close:hover { background: var(--background-modifier-hover); color: var(--text-normal); }',
+            '.sauce-modal.sauce-task-dialog.sauce-task-dialog-single { width: min(100%, 480px); }',
             '.sauce-task-dialog-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); min-height: 100%; }',
             '.sauce-task-dialog-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px 20px; }',
             '.sauce-task-dialog-right { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding: 18px 20px; background: var(--background-secondary); border-left: 1px solid var(--background-modifier-border); }',
@@ -1802,6 +1937,12 @@ class TaskDialog {
             '  .sauce-task-footer-left > .sauce-btn, .sauce-task-footer-right > .sauce-btn { flex: 1 1 0; min-width: 0; }',
             '  .sauce-task-kbd { display: none; }',
             '}',
+            // A phone theme can size every button to its touch height; these
+            // out-rank such a `body.is-phone button` rule so pills stay pills.
+            'body.is-phone .sauce-task-dialog button.sauce-task-pill, body.is-phone .sauce-task-dialog button.sauce-task-quiet { height: auto; min-height: 32px; }',
+            'body.is-phone .sauce-task-dialog button.sauce-task-chip-x { height: 18px; min-height: 18px; }',
+            'body.is-phone .sauce-task-dialog button.sauce-task-dialog-close { height: 32px; min-height: 32px; }',
+            'body.is-phone .sauce-task-kbd { display: none; }',
             '',
         ].join('\n');
     }

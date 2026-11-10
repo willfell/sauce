@@ -59,7 +59,8 @@
     "MeetingsHubCards",
     "MeetingsBrowseList",
     "MeetingLeafActions",
-    "MeetingChromeBar"
+    "MeetingChromeBar",
+    "MeetingCreateDialog"
   ],
   "breadcrumb": {
     "types": {
@@ -102,6 +103,10 @@
     {
       "source": "helpers/meeting-chrome-bar.js",
       "dest": "{{scripts_path}}/meetings/meeting-chrome-bar.js"
+    },
+    {
+      "source": "helpers/meeting-create-dialog.js",
+      "dest": "{{scripts_path}}/meetings/meeting-create-dialog.js"
     }
   ],
   "claude_surface": [

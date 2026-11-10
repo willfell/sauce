@@ -149,10 +149,15 @@ const cfg = inst._config();
 
 {
   const src = fs.readFileSync(path.join(ROOT, 'platform/blueprints/meetings/helpers/meeting-chrome-bar.js'), 'utf8');
-  const lifecycleContract = (body) => /structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\)/.test(body);
-  const missingLifecycleMutant = src.replace(/\s*structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\),/, '');
+  // Both New Meeting paths carry the lifecycle: the one dialog and the
+  // EntityCreate prompt fallback. Dropping it from either is a mutant.
+  const LIFECYCLE_RE = /structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\)/g;
+  const lifecycleContract = (body) => (body.match(LIFECYCLE_RE) || []).length === 2;
+  const missingFallbackMutant = src.replace(/\s*structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\),/, '');
+  const missingDialogMutant = src.replace(/,\s*structuralLifecycle:\s*self\._entityCreateLifecycle\(dv\) \}/, ' }');
   ok('PERF5-REQUIREMENT-MUTANTS kills the missing EntityCreate lifecycle source mutant',
-    lifecycleContract(src) && !lifecycleContract(missingLifecycleMutant));
+    lifecycleContract(src) && !lifecycleContract(missingFallbackMutant) && !lifecycleContract(missingDialogMutant)
+      && missingFallbackMutant !== src && missingDialogMutant !== src);
 }
 
 console.log(`\n${results.filter(([, c]) => c).length}/${results.length} passed`);

@@ -2103,6 +2103,14 @@ okAsync('GA-P3-MEETING-ATTENDEE-AUTHORITY executes the handler predicate against
   await withGestureRuntime(appRef, makeGestureFacade(calls), async () => {
     const inst = new Klass();
     inst._listPeople = () => ['Alice'];
+    // Edit attendees renders the shared PeoplePicker; this check is about the
+    // Save authority, so a picker stub that owns no writes stands in for it.
+    global.customJS.PeoplePicker = {
+      mount: (host) => ({
+        input: host.createEl('input'), list: host.createEl('div'),
+        redraw() {}, renderChips() {}, refreshAdd() {}, whenIdle: () => Promise.resolve(),
+      }),
+    };
     let savePromise = null;
     inst._openModal = ({ build }) => {
       const panel = makeRuntimeEl();

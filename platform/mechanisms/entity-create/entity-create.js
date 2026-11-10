@@ -651,156 +651,51 @@ class EntityCreate {
         });
     }
 
-    // people-multi — pick any number of existing people (spice/people/*.md) via a
-    // searchable checklist, and/or type a NEW name and "+ Add" it (creating a
-    // spice/people/<name>.md stub on the fly, mirroring the Meeting.md Templater
-    // suggester loop). Resolves to an ARRAY of selected display names (feed a
-    // frontmatter array field via the {{prompts.<key>|links}} pipe). Cancel →
-    // null (aborts create, like every other prompt). Empty selection is allowed
-    // for an optional prompt → resolves []. Never throws out of the click paths.
+    // people-multi — pick any number of people with the shared PeoplePicker
+    // (the same picker the New meeting dialog and Edit attendees use), in the
+    // shared dialog shell (TaskDialog.openShell, one column). Typing a new name
+    // and "＋ Add new person" creates its spice/people/<name>.md stub.
+    // Resolves to the ARRAY of picked names (feed a frontmatter array via the
+    // {{prompts.<key>|links}} pipe); Cancel / Esc / backdrop → null (aborts the
+    // create, like every other prompt). When the picker or the shell is not
+    // loaded (cold load) it resolves [] with a Notice, so the create goes on
+    // without attendees. Never throws.
     _promptPeopleMulti(p, ctx) {
         return new Promise((resolve) => {
-            // Enumerate existing people (basenames), excluding the "People" hub note.
-            let people = [];
+            let settled = false;
+            const done = (v) => { if (!settled) { settled = true; resolve(v); } };
             try {
-                people = app.vault.getMarkdownFiles()
-                    .filter((f) => f.path.startsWith("spice/people/") && f.basename !== "People")
-                    .map((f) => f.basename)
-                    .sort((a, b) => a.localeCompare(b));
-            } catch (_e) { people = []; }
-
-            const selected = new Set();
-
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 340px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); display: flex; flex-direction: column; gap: 10px;";
-
-            const heading = document.createElement("div");
-            heading.textContent = p.label || "Attendees";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600;";
-            dialog.appendChild(heading);
-
-            // Selected-chips row.
-            const chips = document.createElement("div");
-            chips.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; min-height: 4px;";
-            dialog.appendChild(chips);
-
-            // Search / add-new input.
-            const search = document.createElement("input");
-            search.type = "text";
-            search.placeholder = "Search or add a person…";
-            search.style.cssText = "padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
-            dialog.appendChild(search);
-
-            // Scrollable list of matching people.
-            const list = document.createElement("div");
-            list.style.cssText = "max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 4px;";
-            dialog.appendChild(list);
-
-            const renderChips = () => {
-                chips.innerHTML = "";
-                for (const name of selected) {
-                    const chip = document.createElement("span");
-                    chip.style.cssText = "display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--interactive-accent); color: var(--text-on-accent); font-size: 0.85em;";
-                    chip.textContent = name;
-                    const x = document.createElement("span");
-                    x.textContent = "×";
-                    x.style.cssText = "cursor: pointer; font-weight: 700;";
-                    x.onclick = () => { selected.delete(name); renderChips(); renderList(); };
-                    chip.appendChild(x);
-                    chips.appendChild(chip);
+                const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || {};
+                const PP = cjs.PeoplePicker;
+                const TD = cjs.TaskDialog;
+                const shell = (PP && typeof PP.mount === "function" && TD && typeof TD.openShell === "function")
+                    ? TD.openShell({
+                        title: p.label || "Attendees",
+                        columns: false,
+                        cls: "sauce-people-prompt",
+                        closeReason: "people-prompt",
+                        onSubmit: () => false,
+                        onClose: () => done(null),
+                    })
+                    : null;
+                if (!shell) {
+                    try { new Notice("Attendee picker unavailable; creating without attendees.", 6000); } catch (_e) {}
+                    done([]);
+                    return;
                 }
-            };
-
-            const addNewStub = async (rawName) => {
-                const name = String(rawName || "").trim();
-                if (!name) return;
-                if (!people.includes(name)) {
-                    const stubPath = `spice/people/${name}.md`;
-                    try {
-                        if (!app.vault.getAbstractFileByPath(stubPath)) {
-                            const iso = (ctx && ctx.now && typeof ctx.now.format === "function")
-                                ? ctx.now.format("YYYY-MM-DDTHH:mm:ssZ") : "";
-                            await app.vault.create(stubPath, `---\ntype: person\ncreated_at: "${iso}"\naliases: []\n---\n\n# [[${name}]]\n\n## Notes\n-\n`);
-                        }
-                        people.push(name);
-                        people.sort((a, b) => a.localeCompare(b));
-                    } catch (_e) {
-                        // Path-hostile name or create error — skip; user can retry.
-                        return;
-                    }
-                }
-                selected.add(name);
-                search.value = "";
-                renderChips();
-                renderList();
-            };
-
-            const renderList = () => {
-                const q = search.value.trim().toLowerCase();
-                list.innerHTML = "";
-                const matches = people.filter((n) => !q || n.toLowerCase().includes(q));
-                for (const name of matches) {
-                    const row = document.createElement("label");
-                    row.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 0.9em;";
-                    const cb = document.createElement("input");
-                    cb.type = "checkbox";
-                    cb.checked = selected.has(name);
-                    cb.onchange = () => { if (cb.checked) selected.add(name); else selected.delete(name); renderChips(); };
-                    row.appendChild(cb);
-                    const span = document.createElement("span");
-                    span.textContent = name;
-                    row.appendChild(span);
-                    list.appendChild(row);
-                }
-                // Offer "+ Add" when the typed name matches no existing person.
-                if (q && !people.some((n) => n.toLowerCase() === q)) {
-                    const add = document.createElement("div");
-                    add.style.cssText = "padding: 6px; color: var(--interactive-accent); cursor: pointer; font-size: 0.9em; font-weight: 600;";
-                    add.textContent = `+ Add "${search.value.trim()}"`;
-                    add.onclick = () => addNewStub(search.value);
-                    list.appendChild(add);
-                }
-            };
-
-            search.addEventListener("input", renderList);
-            search.addEventListener("keydown", (e) => {
-                if (e.key === "Enter") {
-                    e.preventDefault();
-                    const q = search.value.trim();
-                    if (q && !people.some((n) => n.toLowerCase() === q.toLowerCase())) addNewStub(q);
-                }
-                if (e.key === "Escape") { close(); resolve(null); }
-            });
-
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-muted); min-height: 1em;";
-            dialog.appendChild(status);
-
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-            const close = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
-
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { close(); resolve(null); };
-
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Done";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => { close(); resolve(Array.from(selected)); };
-
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            renderChips();
-            renderList();
-            setTimeout(() => search.focus(), 0);
+                const picker = PP.mount(shell.left, { app, now: ctx && ctx.now, autofocus: true });
+                const right = shell.footer.createDiv({ cls: "sauce-task-footer-right" });
+                const cancel = TD.actionButton(right, { label: "Cancel", cls: "sauce-people-prompt-cancel" });
+                cancel.onclick = () => shell.close();
+                const ok = TD.actionButton(right, { label: "Done", variant: "accent", cls: "sauce-people-prompt-done" });
+                ok.onclick = async () => {
+                    try { await picker.whenIdle(); } catch (_e) {}
+                    done(picker.names());
+                    shell.close();
+                };
+            } catch (_e) {
+                done([]);
+            }
         });
     }
 

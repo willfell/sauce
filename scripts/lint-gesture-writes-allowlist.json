@@ -6,11 +6,6 @@
       "lines": [142]
     },
     {
-      "path": "platform/blueprints/meetings/helpers/meeting-leaf-actions.js",
-      "reason": "New-person creation delegates its receipt-bound structural transaction to RenderSafe.mutateStructure, whose create callback is outside this lint's RenderSafe.mutate authority.",
-      "lines": [367]
-    },
-    {
       "path": "platform/blueprints/project/helpers/doc-bulk-move.js",
       "reason": "Bulk document relocation is a structural rename transaction whose target is not the active source note; its frontmatter rewrite is part of that transaction.",
       "lines": [217]
