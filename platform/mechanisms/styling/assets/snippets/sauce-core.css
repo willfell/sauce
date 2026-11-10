@@ -242,6 +242,7 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--size-4-2, 8px);
+  margin-left: auto;
 }
 
 .sauce-todo-filter-sep {
@@ -255,6 +256,48 @@ body .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle:focus-visible {
   height: 1px;
   width: 100%;
   background: var(--sauce-hairline);
+}
+
+.sauce-todo-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sauce-todo-search-icon {
+  position: absolute;
+  left: 12px;
+  display: inline-flex;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+body .sauce-todo-search .sauce-todo-search-input.sauce-todo-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 0 14px 0 34px;
+  border: 1px solid var(--sauce-hairline);
+  border-radius: var(--sauce-radius-pill);
+  background: var(--background-primary, #fff);
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 0.9em;
+  box-shadow: none;
+}
+
+body .sauce-todo-search .sauce-todo-search-input.sauce-todo-search-input:focus {
+  border-color: var(--interactive-accent, #7c3aed);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--interactive-accent, #7c3aed) 30%, transparent);
+  outline: none;
+}
+
+.sauce-todo-caption {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  padding: 0 2px;
 }
 
 .sauce-task-priority-dot {

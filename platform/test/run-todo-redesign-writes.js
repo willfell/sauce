@@ -803,17 +803,19 @@ process.exitCode = 1;
   const pill = (c, label) => allByCls(c, 'sauce-done-pill').find((b) => b.textContent === label);
   const clearBodyCache = () => { const k = TaskDoneArchive.constructor; if (k._bodyCache) k._bodyCache.clear(); };
 
-  await ok('RD-DL-RENDER default last-week: header, pills, bars, project panel, grouped Reopen rows', async () => {
+  await ok('RD-DL-RENDER default last-week: header, pills, day strip, grouped Reopen rows', async () => {
     const env = doneEnv();
     const c = await mountDone(env);
     assert(headerOf(c) === '3 done Nov 2 – 8, across 2 projects', 'header: ' + headerOf(c));
     const pills = allByCls(c, 'sauce-done-pill');
     assert(pills.map((b) => b.textContent).join('|') === 'Today|Yesterday|This week|Last week|This month|Pick range…', 'pills ' + pills.map((b) => b.textContent));
     assert(pill(c, 'Last week').attributes['aria-pressed'] === 'true' && pill(c, 'Today').attributes['aria-pressed'] === 'false', 'pressed state');
-    const bars = allByCls(c, 'sauce-done-bar');
-    assert(bars.length === 7 && bars.map((b) => b.attributes['aria-label']).join(',') === '0 done,1 done,0 done,0 done,2 done,0 done,0 done', 'bar labels ' + bars.map((b) => b.attributes['aria-label']));
-    const projRows = allByCls(c, 'sauce-done-project-row');
-    assert(projRows.length === 3 && textOf(projRows[2]).startsWith('No project'), 'project panel keeps a No project row, last: ' + projRows.map(textOf));
+    const cells = allByCls(c, 'sauce-done-day-cell');
+    assert(cells.length === 7 && cells.map((b) => b.attributes['aria-label']).join(',') === 'Mon 2: 0 done,Tue 3: 1 done,Wed 4: 0 done,Thu 5: 0 done,Fri 6: 2 done,Sat 7: 0 done,Sun 8: 0 done', 'cell labels ' + cells.map((b) => b.attributes['aria-label']));
+    assert(allByCls(c, 'sauce-done-strip-spacer').length === 0, 'a Monday-Sunday week needs no leading spacer');
+    assert(cells.every((b) => b.attributes['aria-pressed'] === 'false'), 'no day picked yet');
+    assert(String(pill(c, 'Last week').className).includes('sauce-pill-toggle') && String(pill(c, 'Last week').className).includes('is-active'), 'presets are pill toggles; the active one is lit');
+    assert(!allByCls(c, 'sauce-done-bar').length && !allByCls(c, 'sauce-done-project-row').length, 'the old bars and project panel are gone');
     const days = allByCls(c, 'sauce-done-day').map((d) => textOf(d));
     assert(days.length === 2 && /Fri Nov 6/.test(days[0]) && /Tue Nov 3/.test(days[1]), 'day headings ' + days);
     const rows = allByCls(c, 'sauce-today-done-row');
@@ -980,12 +982,60 @@ process.exitCode = 1;
 
   await ok('RD-DL-HEADER-PROJECTS counts named projects only; unprojected-only range says 0 projects; one says "1 project"', async () => {
     const only = DONE_PAGES.filter((p) => p.title === 'Water plants');
-    let c = await mountDone(doneEnv({ pages: only }));
+    const onlyEnv = doneEnv({ pages: only });
+    let c = await mountDone(onlyEnv);
     assert(headerOf(c) === '1 done Nov 2 – 8, across 0 projects', 'unprojected only: ' + headerOf(c));
-    assert(allByCls(c, 'sauce-done-project-row').length === 1, 'the No project row is still listed');
+    fireClick(allByCls(c, 'sauce-done-project-filter')[0]);
+    const menu = onlyEnv.log.menus[0].entries;
+    assert(menu.map((e) => e.label).join('|') === 'All projects|No project' && menu[1].sublabel === '1 done',
+      'the Project menu still lists No project, with its count: ' + JSON.stringify(menu.map((e) => [e.label, e.sublabel])));
     const one = DONE_PAGES.filter((p) => p.title !== 'Call vendor');
     c = await mountDone(doneEnv({ pages: one }));
     assert(headerOf(c) === '2 done Nov 2 – 8, across 1 project', 'singular: ' + headerOf(c));
+  });
+
+  await ok('RD-DL-DAYCELLS Monday-first cells with a leading spacer count; one day or 43+ days draws no strip', async () => {
+    const K = TaskDoneArchive.constructor;
+    const parsed = DONE_PAGES.map((p) => TaskEntity.parseNote(p));
+    const month = K.dayCells(parsed, '2026-11-01', '2026-11-30', '2026-11-09');
+    assert(month.lead === 6 && month.cells.length === 30, 'Nov 1 2026 is a Sunday: six spacers, thirty days ' + JSON.stringify([month.lead, month.cells.length]));
+    assert(month.cells[2].label === 'Tue 3' && month.cells[2].count === 1 && month.cells[5].count === 2, 'counts land on their day');
+    assert(month.cells[8].isToday && !month.cells[7].isToday, 'today is flagged');
+    assert(K.dayCells(parsed, '2026-11-09', '2026-11-09', '2026-11-09') === null, 'a single day has no strip');
+    assert(K.dayCells(parsed, '2026-09-01', '2026-11-30', '2026-11-09') === null, 'over 42 days has no strip');
+    assert(K.dayCells(parsed, 'bad', '2026-11-30', '2026-11-09') === null && K.dayCells(null, '2026-11-02', '2026-11-08', '').cells.every((x) => x.count === 0), 'tolerant');
+  });
+
+  await ok('RD-DL-DAY a day cell shows that day; the day pill, the same cell or a preset goes back to the range', async () => {
+    const env = doneEnv();
+    const c = await mountDone(env);
+    const cell = (date) => allByCls(c, 'sauce-done-day-cell').find((x) => x.dataset.date === date);
+    fireClick(cell('2026-11-06'));
+    await settle();
+    assert(allByCls(c, 'sauce-today-done-row').length === 2, 'only Friday');
+    assert(cell('2026-11-06').attributes['aria-pressed'] === 'true' && String(cell('2026-11-06').className).includes('is-selected'), 'the cell is picked');
+    const dayPill = allByCls(c, 'sauce-done-day-pill')[0];
+    assert(dayPill && textOf(dayPill).startsWith('Fri Nov 6') && allByCls(c, 'sauce-done-pills')[0].children[0] === dayPill, 'the day pill leads the presets');
+    assert(pill(c, 'Last week').attributes['aria-pressed'] === 'false', 'no preset is lit while a day is shown');
+    assert(/2 of 3/.test(textOf(findByCls(c, 'sauce-done-showing'))), 'showing line counts the day');
+    assert(headerOf(c).startsWith('3 done'), 'the caption keeps the range total');
+
+    fireClick(dayPill);
+    await settle();
+    assert(!allByCls(c, 'sauce-done-day-pill').length && allByCls(c, 'sauce-today-done-row').length === 3, 'the pill goes back');
+
+    fireClick(cell('2026-11-03'));
+    await settle();
+    fireClick(cell('2026-11-03'));
+    await settle();
+    assert(!allByCls(c, 'sauce-done-day-pill').length && allByCls(c, 'sauce-today-done-row').length === 3, 'the same cell goes back');
+
+    fireClick(cell('2026-11-04'));
+    await settle();
+    assert(textOf(findByCls(c, 'sauce-done-empty')) === 'Nothing completed Wed Nov 4.', 'an empty day says so');
+    fireClick(pill(c, 'Last week'));
+    await settle();
+    assert(!allByCls(c, 'sauce-done-day-pill').length && allByCls(c, 'sauce-today-done-row').length === 3, 'a preset goes back');
   });
 
   await ok('RD-DL-SEARCH overlapping queries: the list follows the latest query and the indicator clears', async () => {

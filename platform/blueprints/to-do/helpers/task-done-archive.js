@@ -5,14 +5,16 @@ class TaskDoneArchive {
     rangeFor(preset, todayStr) { return TaskDoneArchive.rangeFor(preset, todayStr); }
     rangeLabel(preset, range) { return TaskDoneArchive.rangeLabel(preset, range); }
     summarize(parsedTasks, from, to) { return TaskDoneArchive.summarize(parsedTasks, from, to); }
+    dayCells(parsedTasks, from, to, todayStr) { return TaskDoneArchive.dayCells(parsedTasks, from, to, todayStr); }
     standupMarkdown(groups) { return TaskDoneArchive.standupMarkdown(groups); }
     searchableBody(raw) { return TaskDoneArchive.searchableBody(raw); }
 
     /**
-     * Entry point invoked by customjs-guard: render(dv). The Done log: range
-     * presets, per-day and per-project summaries, title + notes search,
-     * Project / Source filters, a date-grouped list with Reopen, and Copy as
-     * standup. Dependency chain: TaskEntity (parseNote) + TaskTodayList
+     * Entry point invoked by customjs-guard: render(dv). The Done log, drawn in
+     * the To-Do view's layout: title + notes search, a strip of day cells
+     * (click one to see that day), range preset pills, Project (with counts) /
+     * Source filters, a range caption, a date-grouped list with Reopen, and
+     * Copy as standup. Dependency chain: TaskEntity (parseNote) + TaskTodayList
      * (renderDoneRow). Returns quietly if any dependency is absent (cold-load
      * safe). Dual-fire-safe via __taskDoneArchiveGen.
      */
@@ -78,60 +80,88 @@ class TaskDoneArchive {
         };
         const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
 
+        // Layout follows the To-Do view: search, a strip of day cells, the
+        // pill row (range presets left; Project / Source / Copy right), a
+        // caption, a hairline rule, then day-labelled sections of done rows.
+        // Clicking a day cell shows just that day; a day pill leads the
+        // presets while it does, and its ×, the same cell or any preset
+        // goes back to the whole range.
+        state.day = null;
         const root = container.createEl('div', { cls: 'sauce-done-log' });
-        root.style.cssText = 'display: flex; flex-direction: column; gap: 10px;';
-        const pillsHost = root.createEl('div', { cls: 'sauce-done-pills' });
-        pillsHost.style.cssText = 'display: flex; flex-wrap: wrap; gap: 6px;';
+        root.style.cssText = 'display: flex; flex-direction: column; gap: 10px; width: 100%;';
+        const searchHost = root.createEl('label', { cls: 'sauce-todo-search sauce-done-controls' });
+        const stripHost = root.createEl('div', { cls: 'sauce-done-strip-host' });
+        const controls = root.createEl('div', { cls: 'sauce-todo-filter-controls sauce-done-filter-controls' });
+        const pillsHost = controls.createEl('div', { cls: 'sauce-pill-group sauce-done-pills' });
+        pillsHost.setAttribute('role', 'group');
+        pillsHost.setAttribute('aria-label', 'Completed when');
+        const rightHost = controls.createEl('div', { cls: 'sauce-todo-filter-right' });
         const customHost = root.createEl('div', { cls: 'sauce-done-custom' });
-        const headerHost = root.createEl('div', { cls: 'sauce-done-header' });
-        headerHost.style.cssText = 'font-weight: 600;';
-        const panelsHost = root.createEl('div', { cls: 'sauce-done-panels' });
-        panelsHost.style.cssText = 'display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;';
-        const searchHost = root.createEl('div', { cls: 'sauce-done-controls' });
-        searchHost.style.cssText = 'display: flex; flex-wrap: wrap; gap: 6px; align-items: center;';
-        const statusHost = root.createEl('div', { cls: 'sauce-done-status' });
+        const captionHost = root.createEl('div', { cls: 'sauce-todo-caption sauce-done-caption' });
+        captionHost.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;';
+        const headerHost = captionHost.createEl('span', { cls: 'sauce-done-header' });
+        const statusHost = captionHost.createEl('span', { cls: 'sauce-done-status' });
+        statusHost.style.cssText = 'display: inline-flex; gap: 12px;';
+        root.createEl('div', { cls: 'sauce-todo-filter-rule' }).setAttribute('aria-hidden', 'true');
         const listHost = root.createEl('div', { cls: 'sauce-done-list' });
+        listHost.style.cssText = 'display: flex; flex-direction: column; gap: 4px; width: 100%;';
 
-        const buttonCss = 'font-size: 0.85em; cursor: pointer; background: none; box-shadow: none; height: auto; text-transform: none; letter-spacing: 0;';
+        const pillCls = (base, active) => base + ' sauce-pill-toggle' + (active ? ' is-active' : '');
 
         const rangeTasks = () => allTasks.filter(t => {
             const day = Self._dayOf(t);
             return !!day && day >= state.range.from && day <= state.range.to;
         });
+        const filtered = () => Self.filterTasks(rangeTasks(), {
+            text: state.text, project: state.project, source: state.source, bodies: state.bodies,
+        });
+        const leaveDay = () => { state.day = null; refresh(); };
 
         const paintPills = () => {
             clear(pillsHost);
             const make = (key, label) => {
-                const pressed = state.preset === key;
-                const b = pillsHost.createEl('button', { cls: 'sauce-done-pill', text: label });
+                const pressed = !state.day && state.preset === key;
+                const b = pillsHost.createEl('button', { cls: pillCls('sauce-done-pill', pressed), text: label });
                 b.setAttribute('type', 'button');
                 b.setAttribute('aria-pressed', pressed ? 'true' : 'false');
-                b.style.cssText = buttonCss + 'padding: 2px 10px; border-radius: 999px; border: 1px solid '
-                    + (pressed ? 'var(--interactive-accent)' : 'var(--background-modifier-border)')
-                    + '; color: ' + (pressed ? 'var(--text-accent)' : 'var(--text-normal)') + ';';
                 return b;
             };
+            if (state.day) {
+                const text = Self._dayLabel(state.day);
+                const dayPill = pillsHost.createEl('button', { cls: 'sauce-pill-toggle is-active sauce-done-day-pill' });
+                dayPill.setAttribute('type', 'button');
+                dayPill.setAttribute('title', 'Show the whole range');
+                dayPill.setAttribute('aria-label', 'Showing ' + text + '. Show the whole range');
+                dayPill.createEl('span', { cls: 'sauce-done-day-pill-label', text });
+                const x = dayPill.createEl('span', { cls: 'sauce-done-day-pill-x', text: '×' });
+                x.setAttribute('aria-hidden', 'true');
+                x.style.cssText = 'margin-left: 6px; font-size: 1.15em; line-height: 1; opacity: 0.8;';
+                onClick(dayPill, leaveDay);
+            }
             for (const preset of Self.PRESETS) {
                 onClick(make(preset.key, preset.label), () => selectPreset(preset.key));
             }
             onClick(make('custom', 'Pick range…'), () => {
-                if (state.preset === 'custom') return;
+                if (state.preset === 'custom' && !state.day) return;
                 state.preset = 'custom';
+                state.day = null;
                 refresh();
             });
         };
 
         const paintCustom = () => {
             clear(customHost);
+            customHost.style.cssText = '';
             if (state.preset !== 'custom') return;
-            customHost.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.85em;';
+            customHost.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 0.85em;';
             const field = (cls, label, value) => {
                 const wrap = customHost.createEl('label');
-                wrap.style.cssText = 'display: inline-flex; gap: 4px; align-items: center; color: var(--text-muted);';
+                wrap.style.cssText = 'display: inline-flex; gap: 6px; align-items: center; color: var(--text-muted);';
                 wrap.createEl('span', { text: label });
                 const input = wrap.createEl('input', { cls: cls, type: 'date' });
                 input.value = value;
                 input.setAttribute('aria-label', label + ' date');
+                input.style.cssText = 'border: 1px solid var(--sauce-hairline, var(--background-modifier-border)); border-radius: var(--radius-s, 4px); background: var(--background-primary); color: var(--text-normal); padding: 2px 6px;';
                 return input;
             };
             const from = field('sauce-done-range-from', 'From', state.range.from);
@@ -142,6 +172,7 @@ class TaskDoneArchive {
                 if (Self._parts(f) && Self._parts(t) && f <= t) {
                     if (f === state.range.from && t === state.range.to) return;
                     state.range = { from: f, to: t };
+                    state.day = null;
                     refresh();
                     return;
                 }
@@ -161,35 +192,44 @@ class TaskDoneArchive {
             return sum;
         };
 
-        const paintPanels = (sum) => {
-            clear(panelsHost);
-            if (!sum.total) return;
-            const max = sum.bars.reduce((m, b) => Math.max(m, b.n), 0);
-            const barsWrap = panelsHost.createEl('div', { cls: 'sauce-done-bars' });
-            barsWrap.style.cssText = 'display: flex; align-items: flex-end; gap: 3px; flex: 1 1 220px; min-width: 0;';
-            const labelEvery = sum.bars.length > 14 ? 7 : 1;
-            sum.bars.forEach((bar, i) => {
-                const col = barsWrap.createEl('div', { cls: 'sauce-done-bar-col' });
-                col.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 1 1 0; min-width: 0; gap: 2px;';
-                const px = bar.n > 0 && max > 0 ? Math.max(4, Math.round(bar.n / max * 48)) : 4;
-                const el = col.createEl('div', { cls: 'sauce-done-bar' });
-                el.style.cssText = 'width: 100%; max-width: 28px; border-radius: 2px; height: ' + px + 'px; background: '
-                    + (bar.n > 0 ? 'var(--interactive-accent)' : 'var(--background-modifier-border)') + ';';
-                el.setAttribute('role', 'img');
-                el.setAttribute('aria-label', bar.n + ' done');
-                el.setAttribute('title', bar.label + ': ' + bar.n + ' done');
-                const lab = col.createEl('div', { cls: 'sauce-done-bar-label', text: i % labelEvery === 0 ? bar.label : '' });
-                lab.style.cssText = 'font-size: 0.65em; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;';
-            });
-            const projWrap = panelsHost.createEl('div', { cls: 'sauce-done-projects' });
-            projWrap.style.cssText = 'display: flex; flex-direction: column; gap: 2px; flex: 1 1 180px; min-width: 0; font-size: 0.85em;';
-            for (const proj of sum.projects) {
-                const row = projWrap.createEl('div', { cls: 'sauce-done-project-row' });
-                row.style.cssText = 'display: flex; justify-content: space-between; gap: 8px;';
-                const name = row.createEl('span', { text: proj.name });
-                name.style.cssText = 'overflow-wrap: anywhere;' + (proj.name === Self.NO_PROJECT ? ' color: var(--text-muted);' : '');
-                const n = row.createEl('span', { text: String(proj.n) });
-                n.style.cssText = 'color: var(--text-muted); font-variant-numeric: tabular-nums;';
+        // Day cells mirror the To-Do week strip: seven equal columns, weeks
+        // starting Monday, each cell the day and how many were done. Counts
+        // follow the search and filters, so the strip agrees with the list.
+        const paintStrip = () => {
+            clear(stripHost);
+            const strip = Self.dayCells(filtered(), state.range.from, state.range.to, todayStr);
+            if (!strip) return;
+            const grid = stripHost.createEl('div', { cls: 'sauce-done-strip' });
+            grid.setAttribute('role', 'group');
+            grid.setAttribute('aria-label', 'Completed per day');
+            grid.style.cssText = 'display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; width: 100%; box-sizing: border-box;';
+            for (let i = 0; i < strip.lead; i++) {
+                const spacer = grid.createEl('div', { cls: 'sauce-done-strip-spacer' });
+                spacer.setAttribute('aria-hidden', 'true');
+            }
+            for (const cell of strip.cells) {
+                const picked = state.day === cell.date;
+                const button = grid.createEl('button', {
+                    cls: 'sauce-done-day-cell' + (cell.isToday ? ' is-today' : '') + (picked ? ' is-selected' : ''),
+                });
+                button.setAttribute('type', 'button');
+                button.setAttribute('aria-label', cell.label + ': ' + cell.count + ' done');
+                button.setAttribute('aria-pressed', picked ? 'true' : 'false');
+                if (cell.isToday) button.setAttribute('aria-current', 'date');
+                button.dataset.date = cell.date;
+                const rest = picked ? 'color-mix(in srgb, var(--interactive-accent) 14%, transparent)' : 'transparent';
+                const border = picked || cell.isToday ? 'var(--interactive-accent)' : 'var(--background-modifier-border)';
+                const ink = picked || cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)';
+                const glow = picked ? ' box-shadow: 0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent);' : '';
+                button.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; min-width: 0; height: auto; padding: 6px 4px; box-sizing: border-box; border-radius: var(--radius-m, 6px); border: 1px solid ' + border + '; color: ' + ink + '; background: ' + rest + ';' + glow + ' cursor: pointer;';
+                const name = button.createEl('span', { cls: 'sauce-done-day-cell-label', text: cell.label });
+                name.style.cssText = 'font-size: 0.8em; font-weight: 600; max-width: 100%; white-space: normal; text-align: center; line-height: 1.2;';
+                const count = button.createEl('span', { cls: 'sauce-done-day-cell-count', text: String(cell.count) });
+                count.style.cssText = 'font-size: 0.75em; color: ' + (picked ? 'var(--text-accent)' : cell.count ? 'var(--text-muted)' : 'var(--text-faint)') + '; font-variant-numeric: tabular-nums;';
+                onClick(button, () => {
+                    state.day = picked ? null : cell.date;
+                    refresh();
+                });
             }
         };
 
@@ -215,40 +255,51 @@ class TaskDoneArchive {
             clear(statusHost);
             const q = state.text.trim();
             if (state.loading > 0 && q.length >= 3) {
-                const l = statusHost.createEl('div', { cls: 'sauce-done-loading', text: 'Searching notes…' });
-                l.style.cssText = 'font-size: 0.8em; color: var(--text-muted); font-style: italic;';
+                const l = statusHost.createEl('span', { cls: 'sauce-done-loading', text: 'Searching notes…' });
+                l.style.cssText = 'font-style: italic;';
             }
-            if (q || state.project || state.source) {
+            if (q || state.project || state.source || state.day) {
                 const total = rangeTasks().length;
-                const s = statusHost.createEl('div', { cls: 'sauce-done-showing', text: 'Showing ' + state.visible.length + ' of ' + total });
-                s.style.cssText = 'font-size: 0.8em; color: var(--text-muted);';
+                statusHost.createEl('span', { cls: 'sauce-done-showing', text: 'Showing ' + state.visible.length + ' of ' + total });
             }
+        };
+
+        // The first day sits right under the filter rule, so it skips
+        // SectionLabel's own hairline; later days keep theirs as separators.
+        const sectionLabel = (text) => {
+            const top = !listHost.firstChild;
+            const holder = listHost.createEl('div', { cls: 'sauce-done-day' });
+            holder.setAttribute('role', 'heading');
+            holder.setAttribute('aria-level', '3');
+            const SL = CJS.SectionLabel;
+            if (SL && typeof SL.render === 'function') {
+                try { SL.render({ ...dv, container: holder }, top ? { text, top: true } : { text }); return holder; }
+                catch (_e) { /* fall through to plain text */ }
+            }
+            holder.textContent = text;
+            holder.style.cssText = 'font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; padding: 8px 2px 2px;';
+            return holder;
         };
 
         const paintList = () => {
             clear(listHost);
-            state.visible = Self.filterTasks(rangeTasks(), {
-                text: state.text, project: state.project, source: state.source, bodies: state.bodies,
-            });
+            const all = filtered();
+            state.visible = state.day ? all.filter(t => Self._dayOf(t) === state.day) : all;
             paintStatus();
             if (!state.visible.length) {
-                const filtered = !!(state.text.trim() || state.project || state.source);
+                const narrowed = !!(state.text.trim() || state.project || state.source);
                 const p = listHost.createEl('p', {
                     cls: 'sauce-done-empty',
-                    text: filtered ? 'No completed tasks match.' : 'No completed tasks in this range.',
+                    text: narrowed ? 'No completed tasks match.'
+                        : state.day ? 'Nothing completed ' + Self._dayLabel(state.day) + '.'
+                            : 'No completed tasks in this range.',
                 });
-                p.style.cssText = 'color: var(--text-muted); font-size: 0.85em; font-style: italic; padding: 8px 0;';
+                p.style.cssText = 'color: var(--text-muted); font-size: 0.85em; font-style: italic; padding: 6px 0; margin: 0;';
                 return;
             }
             const year = todayStr.slice(0, 4);
             for (const [dateStr, tasks] of Self.groupByDate(state.visible)) {
-                const heading = listHost.createEl('div', {
-                    cls: 'sauce-done-day',
-                    text: Self._dayLabel(dateStr) + (dateStr.slice(0, 4) !== year ? ', ' + dateStr.slice(0, 4) : '') + ' · ' + tasks.length,
-                });
-                heading.setAttribute('role', 'heading');
-                heading.setAttribute('aria-level', '3');
-                heading.style.cssText = 'font-size: 0.8em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 6px 2px;';
+                sectionLabel(Self._dayLabel(dateStr) + (dateStr.slice(0, 4) !== year ? ', ' + dateStr.slice(0, 4) : '') + ' · ' + tasks.length);
                 for (const task of tasks) {
                     try {
                         TTL.renderDoneRow(listHost, task, {
@@ -286,65 +337,76 @@ class TaskDoneArchive {
             }));
             state.loading--;
             if (isStale()) return;
+            paintStrip();
             paintList();
         };
 
-        const options = (names, allLabel) => [allLabel].concat(names);
-        const openMenu = (anchor, labels, current, allLabel, apply) => {
+        const openMenu = (anchor, entries, current, allLabel, apply) => {
             const MP = CJS.MenuPopover;
-            const values = labels;
             if (MP && typeof MP.open === 'function') {
                 try {
-                    MP.open(options(values, allLabel).map((label, i) => ({
-                        label,
-                        ...((i === 0 ? !current : label === current) ? { icon: '✓' } : {}),
-                        onSelect: () => apply(i === 0 ? '' : label),
+                    MP.open([{ label: allLabel, value: '' }].concat(entries).map((entry, i) => ({
+                        label: entry.label,
+                        ...(entry.sublabel ? { sublabel: entry.sublabel } : {}),
+                        ...((i === 0 ? !current : entry.value === current) ? { icon: '✓' } : {}),
+                        onSelect: () => apply(entry.value),
                     })), { anchor });
                 } catch (_e) { notify('Could not open menu'); }
                 return;
             }
-            const all = [''].concat(values);
+            const all = [''].concat(entries.map(e => e.value));
             apply(all[(all.indexOf(current) + 1) % all.length]);
         };
 
-        const projectNames = () => {
-            const seen = new Set();
-            for (const t of rangeTasks()) seen.add(Self._projectOf(t));
-            const named = Array.from(seen).filter(n => n !== Self.NO_PROJECT).sort((a, b) => a.localeCompare(b));
-            return seen.has(Self.NO_PROJECT) ? named.concat([Self.NO_PROJECT]) : named;
+        // Project entries carry their count in this range, which is where the
+        // old per-project panel's numbers now live.
+        const projectEntries = () => {
+            const counts = new Map();
+            for (const t of rangeTasks()) {
+                const name = Self._projectOf(t);
+                counts.set(name, (counts.get(name) || 0) + 1);
+            }
+            const named = Array.from(counts.keys()).filter(n => n !== Self.NO_PROJECT).sort((a, b) => a.localeCompare(b));
+            const names = counts.has(Self.NO_PROJECT) ? named.concat([Self.NO_PROJECT]) : named;
+            return names.map(name => ({ label: name, value: name, sublabel: counts.get(name) + ' done' }));
         };
 
-        const search = searchHost.createEl('input', { cls: 'sauce-done-search', type: 'search' });
-        search.setAttribute('placeholder', 'Search title and notes…');
+        const searchIcon = searchHost.createEl('span', { cls: 'sauce-todo-search-icon' });
+        searchIcon.setAttribute('aria-hidden', 'true');
+        searchIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+        const search = searchHost.createEl('input', { cls: 'sauce-done-search sauce-todo-search-input', type: 'search' });
+        search.setAttribute('placeholder', 'Search completed tasks and their notes…');
         search.setAttribute('aria-label', 'Search completed tasks');
-        search.style.cssText = 'flex: 1 1 180px; min-width: 0;';
         search.addEventListener('input', () => {
             state.text = String(search.value || '');
+            paintStrip();
             paintList();
             ensureBodies();
         });
-        const projectBtn = searchHost.createEl('button', { cls: 'sauce-done-project-filter' });
-        const sourceBtn = searchHost.createEl('button', { cls: 'sauce-done-source-filter' });
-        const copyBtn = searchHost.createEl('button', { cls: 'sauce-done-copy', text: 'Copy as standup' });
-        for (const b of [projectBtn, sourceBtn, copyBtn]) {
-            b.setAttribute('type', 'button');
-            b.style.cssText = buttonCss + 'padding: 2px 8px; border-radius: var(--radius-s, 4px); border: 1px solid var(--background-modifier-border); color: var(--text-normal);';
-        }
+        const projectBtn = rightHost.createEl('button', { cls: 'sauce-done-project-filter sauce-pill-toggle' });
+        const sourceBtn = rightHost.createEl('button', { cls: 'sauce-done-source-filter sauce-pill-toggle' });
+        const copyBtn = rightHost.createEl('button', { cls: 'sauce-done-copy sauce-pill-toggle', text: 'Copy as standup' });
+        for (const b of [projectBtn, sourceBtn, copyBtn]) b.setAttribute('type', 'button');
         projectBtn.setAttribute('aria-haspopup', 'menu');
         sourceBtn.setAttribute('aria-haspopup', 'menu');
         const paintFilterButtons = () => {
             projectBtn.textContent = state.project ? 'Project: ' + state.project + ' ▾' : 'Project ▾';
             sourceBtn.textContent = state.source ? 'Source: ' + state.source + ' ▾' : 'Source ▾';
+            projectBtn.className = pillCls('sauce-done-project-filter', !!state.project);
+            sourceBtn.className = pillCls('sauce-done-source-filter', !!state.source);
         };
-        onClick(projectBtn, () => openMenu(projectBtn, projectNames(), state.project, 'All projects', (value) => {
+        const applyFilter = () => {
+            paintFilterButtons();
+            paintStrip();
+            paintList();
+        };
+        onClick(projectBtn, () => openMenu(projectBtn, projectEntries(), state.project, 'All projects', (value) => {
             state.project = value;
-            paintFilterButtons();
-            paintList();
+            applyFilter();
         }));
-        onClick(sourceBtn, () => openMenu(sourceBtn, Self.SOURCES.slice(), state.source, 'All sources', (value) => {
+        onClick(sourceBtn, () => openMenu(sourceBtn, Self.SOURCES.map(s => ({ label: s, value: s })), state.source, 'All sources', (value) => {
             state.source = value;
-            paintFilterButtons();
-            paintList();
+            applyFilter();
         }));
         onClick(copyBtn, async () => {
             const visible = state.visible;
@@ -360,20 +422,23 @@ class TaskDoneArchive {
         });
 
         const refresh = () => {
-            if (state.project && projectNames().indexOf(state.project) < 0) state.project = '';
+            if (state.project && !projectEntries().some(e => e.value === state.project)) state.project = '';
+            if (state.day && (state.day < state.range.from || state.day > state.range.to)) state.day = null;
             paintPills();
             paintCustom();
-            const sum = paintHeader();
-            paintPanels(sum);
+            paintHeader();
             paintFilterButtons();
+            paintStrip();
             paintList();
             ensureBodies();
         };
         const selectPreset = (key) => {
             const range = Self.rangeFor(key, todayStr);
             if (!range) return;
+            if (state.preset === key && !state.day) return;
             state.preset = key;
             state.range = range;
+            state.day = null;
             Self._writePreset(storage, key);
             refresh();
         };
@@ -689,6 +754,35 @@ class TaskDoneArchive {
             }
         }
         return { total, projects, bars };
+    }
+
+    /**
+     * Day cells for the strip above the pills: one per day of [from, to],
+     * `{ date, label: 'Mon 2', count, isToday }`, plus `lead`, the empty
+     * cells before `from` so the seven columns run Monday to Sunday. Null for
+     * a single day (the list already is that day) or a span over 42 days.
+     */
+    static dayCells(parsedTasks, from, to, todayStr) {
+        const pf = TaskDoneArchive._parts(from);
+        const pt = TaskDoneArchive._parts(to);
+        if (!pf || !pt || from >= to) return null;
+        const span = Math.round((pt.t - pf.t) / 86400000) + 1;
+        if (span > 42) return null;
+        const counts = new Map();
+        for (const t of (Array.isArray(parsedTasks) ? parsedTasks : [])) {
+            const day = t ? TaskDoneArchive._dayOf(t) : null;
+            if (day && day >= from && day <= to) counts.set(day, (counts.get(day) || 0) + 1);
+        }
+        const cells = [];
+        for (let day = from; day && day <= to; day = TaskDoneArchive._addDays(day, 1)) {
+            cells.push({
+                date: day,
+                label: TaskDoneArchive.WEEKDAYS[TaskDoneArchive._dow(day)] + ' ' + TaskDoneArchive._parts(day).d,
+                count: counts.get(day) || 0,
+                isToday: day === todayStr,
+            });
+        }
+        return { lead: TaskDoneArchive._dow(from), cells };
     }
 
     /**

@@ -652,6 +652,14 @@
       "lane": "parallel"
     },
     {
+      "id": "installed-notes-no-templater",
+      "cmd": [
+        "node",
+        "platform/test/run-installed-notes-no-templater.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "task-note-rerender",
       "cmd": [
         "node",
