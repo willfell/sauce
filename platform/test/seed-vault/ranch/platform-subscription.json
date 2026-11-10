@@ -87,7 +87,7 @@
     },
     {
       "name": "styling",
-      "version": "0.5.2"
+      "version": "0.6.0"
     },
     {
       "name": "convenience",
@@ -157,7 +157,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.32.0"
+      "version": "0.33.0"
     },
     {
       "name": "journal",
