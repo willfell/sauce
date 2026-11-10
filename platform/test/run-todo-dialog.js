@@ -1464,7 +1464,9 @@ function reloadWithDom() {
         const at = css.indexOf('@media (max-width: 720px)');
         must(at >= 0, 'has the 720px media query');
         const block = css.slice(at, css.indexOf('}\n}', at) + 3);
-        must(/\.sauce-task-dialog-cols\s*\{[^}]*grid-template-columns:\s*1fr\s*;/.test(block), 'stacks the columns: ' + block);
+        // minmax(0, 1fr), not 1fr: a bare 1fr track sizes to its widest
+        // child's min-content (a long link chip), pushing the sheet off a phone.
+        must(/\.sauce-task-dialog-cols\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/.test(block), 'stacks the columns: ' + block);
         const style = env.doc.head.children.find((c) => c.id === 'sauce-task-dialog-css');
         must(style && style.textContent === css, 'style injected into head');
         must(env.dlg._DIALOG_CSS === css, 'instance getter delegates');

@@ -1009,6 +1009,22 @@
       "lane": "parallel"
     },
     {
+      "id": "todo-scoped-surfaces",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-scoped-surfaces.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-phone-fit",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-phone-fit.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-daily-filter-view",
       "cmd": [
         "node",

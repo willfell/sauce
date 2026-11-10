@@ -584,6 +584,25 @@ process.exitCode = 1;
     assert(drag && drag.draggable === true && drag.dataset.path === task.path, 'drag handle');
   });
 
+  await ok('RD-ROW-PHONE the due chip carries its short date for phones; showProject:false drops the project column', async () => {
+    rowEnv();
+    const task = { path: 'spice/tasks/P.md', title: 'P', status: 'open', due: '2026-11-10', priority: 'high', project: '[[Atlas]]' };
+    let row = TaskTodayList.renderTaskRow(makeTreeNode('div'), task, null, {});
+    const due = findByCls(row, 'sauce-task-due');
+    assert(due && due.textContent === 'due: 2026-11-10' && due.dataset.short === 'Nov 10', 'due chip keeps its text and gains data-short');
+    assert(findByCls(row, 'sauce-task-project') && findByCls(row, 'is-project'), 'project column by default');
+    row = TaskTodayList.renderTaskRow(makeTreeNode('div'), task, null, { showProject: false });
+    assert(!findByCls(row, 'sauce-task-project') && !findByCls(row, 'is-project'), 'showProject:false drops the project column');
+    assert(TaskTodayList.shortDueLabel('2026-01-05') === 'Jan 5' && TaskTodayList.shortDueLabel('2026-12-31T09:00') === 'Dec 31'
+      && TaskTodayList.shortDueLabel('') === '' && TaskTodayList.shortDueLabel('soon') === ''
+      && TaskTodayList.shortDueLabel({ toFormat: () => '2026-03-14' }) === 'Mar 14', 'shortDueLabel');
+    const css = (TaskTodayList._ROW_ACTIONS_CSS || TaskTodayList.constructor._ROW_ACTIONS_CSS);
+    assert(css.includes('.is-phone .sauce-task-today-row .sauce-task-meta-slot.is-priority { display: none !important; }')
+      && css.includes('.is-phone .sauce-task-today-row .sauce-task-due[data-short]::after { content: attr(data-short);')
+      && /@media \(max-width: 480px\) \{[^@]*sauce-task-actions \{ margin-left: auto;/.test(css),
+    'phone row rules: chips left, actions right, priority steps aside, short due');
+  });
+
   await ok('RD-ROW-ONDONE onDone fires once after a successful checkbox completion, never on failure', async () => {
     rowEnv();
     const run = async (markDone, withHook) => {
@@ -812,6 +831,9 @@ process.exitCode = 1;
     assert(pill(c, 'Last week').attributes['aria-pressed'] === 'true' && pill(c, 'Today').attributes['aria-pressed'] === 'false', 'pressed state');
     const cells = allByCls(c, 'sauce-done-day-cell');
     assert(cells.length === 7 && cells.map((b) => b.attributes['aria-label']).join(',') === 'Mon 2: 0 done,Tue 3: 1 done,Wed 4: 0 done,Thu 5: 0 done,Fri 6: 2 done,Sat 7: 0 done,Sun 8: 0 done', 'cell labels ' + cells.map((b) => b.attributes['aria-label']));
+    const label = allByCls(cells[0], 'sauce-done-day-cell-label')[0];
+    assert(label && label.children.length === 2 && label.children[0].textContent === 'Mon ' && label.children[1].textContent === '2',
+      'a cell label is day name and date as two spans, so a phone can stack them');
     assert(allByCls(c, 'sauce-done-strip-spacer').length === 0, 'a Monday-Sunday week needs no leading spacer');
     assert(cells.every((b) => b.attributes['aria-pressed'] === 'false'), 'no day picked yet');
     assert(String(pill(c, 'Last week').className).includes('sauce-pill-toggle') && String(pill(c, 'Last week').className).includes('is-active'), 'presets are pill toggles; the active one is lit');
