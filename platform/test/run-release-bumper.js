@@ -189,5 +189,59 @@ console.log("\n--- HC-V0129-RELEASE-SNAPSHOT ---");
     }
 }
 
+// ---- Release range: count from the commit a release was computed from ----
+// v0.307.1's release PR was computed before #910 landed and merged after it,
+// so its tag sat on top of #910 and #910's components were never bumped.
+console.log("\n--- HC-RELEASE-RANGE ---");
+{
+    const SHA = "65a7cbc2d1e4f00000000000000000000000abcd";
+    const squashBody = `chore(release): v0.307.1 (#911)\n\nRelease-Computed-From: ${SHA}\n\nCo-authored-by: willfell <x@users.noreply.github.com>\n`;
+    eq("HC-RELEASE-RANGE-A: trailer read from a squashed release commit", cr.computedFromOf(squashBody), SHA);
+    eq("HC-RELEASE-RANGE-B: no trailer -> null", cr.computedFromOf("chore(release): v0.307.0 (#908)\n"), null);
+    eq("HC-RELEASE-RANGE-C: trailer must be a hex sha", cr.computedFromOf("Release-Computed-From: main\n"), null);
+    ok("HC-RELEASE-RANGE-D: release commits are recognised", cr.isReleaseCommit("chore(release): v1.2.3") && !cr.isReleaseCommit("fix(release): x")
+        && !cr.isReleaseCommit("chore(seed): rebaseline") && !cr.isReleaseCommit("chore: tidy"));
+    const r1 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: squashBody, tag: "v0.307.1", isAncestor: (s) => s === SHA });
+    eq("HC-RELEASE-RANGE-E: reachable trailer -> range from the computed-from sha", r1.range, `${SHA}..HEAD`);
+    eq("HC-RELEASE-RANGE-F: reason computed-from", r1.reason, "computed-from");
+    const r2 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: squashBody, tag: "v0.307.1", isAncestor: () => false });
+    eq("HC-RELEASE-RANGE-G: unreachable trailer -> range from the release commit", r2.range, "f4f5..HEAD");
+    const r3 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: "chore(release): v0.307.0", tag: "v0.307.0", isAncestor: () => true });
+    eq("HC-RELEASE-RANGE-H: no trailer -> range from the release commit (same as its tag)", r3.range, "f4f5..HEAD");
+    const r4 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: squashBody, isAncestor: () => { throw new Error("git"); } });
+    eq("HC-RELEASE-RANGE-I: a failing ancestry check falls back to the release commit", r4.range, "f4f5..HEAD");
+    eq("HC-RELEASE-RANGE-J: no release commit -> last tag", cr.resolveRange({ tag: "v0.1.0" }).range, "v0.1.0..HEAD");
+    eq("HC-RELEASE-RANGE-K: nothing -> all of HEAD", cr.resolveRange({}).range, "HEAD");
+
+    // The race replayed: from the computed-from sha, #910's feat is counted and
+    // the release commit (which touched the same manifests) is not.
+    const man = {
+        workshop_version: "0.307.1",
+        blueprints: [{ name: "meetings", version: "0.19.4", path: "blueprints/meetings" }],
+        mechanisms: [{ name: "section-label", version: "0.2.2", path: "mechanisms/section-label" },
+                     { name: "convenience", version: "0.6.1", path: "mechanisms/convenience" }],
+    };
+    const raced = [
+        { hash: "f4f5", message: squashBody, files: ["platform/mechanisms/convenience/manifest.json", "platform/blueprints/meetings/manifest.json"] },
+        { hash: "65a7", message: "feat(meetings): bring the meetings pages onto the To-Do design (#910)",
+          files: ["platform/blueprints/meetings/helpers/meetings-browse-list.js", "platform/mechanisms/section-label/filter-bar.js"] },
+    ].filter((c) => !cr.isReleaseCommit(c.message));
+    const plan = cr.computePlan(raced, man);
+    const to = Object.fromEntries(plan.components.map((c) => [c.name, c.to]));
+    eq("HC-RELEASE-RANGE-L: the stranded feat bumps meetings", to.meetings, "0.20.0");
+    eq("HC-RELEASE-RANGE-M: the stranded feat bumps section-label", to["section-label"], "0.3.0");
+    ok("HC-RELEASE-RANGE-N: the release commit itself bumps nothing", !("convenience" in to));
+
+    const wf = fs.readFileSync(path.join(REPO_ROOT, ".github/workflows/release.yml"), "utf8");
+    ok("HC-RELEASE-RANGE-O: prepare-release records the sha it computes from in the release commit",
+        /id: base\s+run: echo "sha=\$\(git rev-parse HEAD\)" >> "\$GITHUB_OUTPUT"/.test(wf)
+        && /commit-message: \|\n\s+chore\(release\): v\$\{\{ steps\.ver\.outputs\.version \}\}\n\n\s+Release-Computed-From: \$\{\{ steps\.base\.outputs\.sha \}\}/.test(wf)
+        && wf.indexOf("id: base") < wf.indexOf("compute-release.js --write"));
+    const src = fs.readFileSync(path.join(REPO_ROOT, "scripts/release/compute-release.js"), "utf8");
+    ok("HC-RELEASE-RANGE-P: the CLI resolves its range this way and drops release commits",
+        /resolveRange\(\{\s*releaseHash: rel && rel\.hash/.test(src)
+        && src.indexOf("getCommits(range).filter((c) => !isReleaseCommit(c.message))") >= 0);
+}
+
 console.log(`\nrun-release-bumper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

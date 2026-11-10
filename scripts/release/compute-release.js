@@ -129,6 +129,59 @@ function getCommits(range) {
     });
 }
 
+// --- release range ---
+// prepare-release records the main commit it computed a release from in the
+// release commit (`Release-Computed-From: <sha>`). A commit that lands on main
+// after that computation but before the release PR merges ends up BELOW the
+// release commit and its tag, yet was never counted (v0.307.1 sat on top of
+// #910 that way and #910's components were never bumped). Counting from the
+// recorded sha instead of from the release commit picks such commits up in
+// the next release. Release commits themselves are never counted.
+const COMPUTED_FROM_RE = /^\s*Release-Computed-From:\s*([0-9a-f]{7,40})\s*$/m;
+
+function computedFromOf(message) {
+    const m = COMPUTED_FROM_RE.exec(String(message == null ? "" : message));
+    return m ? m[1] : null;
+}
+
+function isReleaseCommit(message) {
+    return /^chore\(release\):/.test(String(message == null ? "" : message).trim());
+}
+
+// resolveRange({ releaseHash, releaseMessage, tag, isAncestor }) -> { range, base, reason }
+//   releaseHash/releaseMessage: the newest chore(release) commit reachable from HEAD.
+//   isAncestor(sha): true when sha is an ancestor of HEAD.
+function resolveRange(opts) {
+    const o = opts || {};
+    if (o.releaseHash) {
+        const from = computedFromOf(o.releaseMessage);
+        let reachable = false;
+        try { reachable = !!(from && typeof o.isAncestor === "function" && o.isAncestor(from)); } catch (_e) { reachable = false; }
+        if (reachable) return { range: `${from}..HEAD`, base: from, reason: "computed-from" };
+        return { range: `${o.releaseHash}..HEAD`, base: o.releaseHash, reason: "release-commit" };
+    }
+    if (o.tag) return { range: `${o.tag}..HEAD`, base: o.tag, reason: "tag" };
+    return { range: "HEAD", base: null, reason: "all" };
+}
+
+// Newest chore(release) commit reachable from HEAD: { hash, message } or null.
+function lastReleaseCommit() {
+    try {
+        const out = execFileSync("git", ["log", "-1", "--extended-regexp", "--grep=^chore\\(release\\):", "--format=%H%x1f%B", "HEAD"],
+            { cwd: REPO_ROOT, encoding: "utf8" });
+        const i = out.indexOf("\x1f");
+        if (i < 0) return null;
+        return { hash: out.slice(0, i).trim(), message: out.slice(i + 1) };
+    } catch (e) { return null; }
+}
+
+function isAncestorOfHead(sha) {
+    try {
+        execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: REPO_ROOT, stdio: "ignore" });
+        return true;
+    } catch (e) { return false; }
+}
+
 function lastTag() {
     try {
         return execFileSync("git", ["describe", "--tags", "--abbrev=0", "--match", "v*"],
@@ -201,18 +254,23 @@ function applyPlan(plan, root) {
     if (fs.existsSync(snapDir)) writeSnapshot(buildSnapshot(man), root);
 }
 
-module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan, buildSnapshot, writeSnapshot, SNAPSHOT_REL };
+module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan, buildSnapshot, writeSnapshot, SNAPSHOT_REL, computedFromOf, isReleaseCommit, resolveRange, lastReleaseCommit };
 
 // --- CLI ---
 if (require.main === module) {
     const WRITE = process.argv.includes("--write");
     const manifest = loadManifest();
-    const tag = lastTag();
-    const range = tag ? `${tag}..HEAD` : "HEAD";
-    const commits = getCommits(range);
+    const rel = lastReleaseCommit();
+    const { range, reason } = resolveRange({
+        releaseHash: rel && rel.hash,
+        releaseMessage: rel && rel.message,
+        tag: lastTag(),
+        isAncestor: isAncestorOfHead,
+    });
+    const commits = getCommits(range).filter((c) => !isReleaseCommit(c.message));
     const plan = computePlan(commits, manifest);
 
-    console.log(`compute-release: range ${range} — ${commits.length} commit(s)`);
+    console.log(`compute-release: range ${range} (${reason}) — ${commits.length} commit(s)`);
     if (!plan.components.length && plan.workshop.level === "none") {
         console.log("compute-release: no releasable changes.");
         process.exit(0);
