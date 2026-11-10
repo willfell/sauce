@@ -164,6 +164,25 @@ former can ever be replaced by `mutateStructure`. Later slices update their
 owned rows in place; PERF-9 turns the remaining structural-refresh rule into a
 CI check, and PERF-10 supplies measured budgets for the query gaps.
 
+## Refresh gate: a Dataview re-execution must not destroy live UI
+
+Dataview re-executes a `dataviewjs` block whenever its index revision moves: its own debounced `dataview:refresh-views` (`refreshInterval`, 2500 ms) after **any** note is saved, the one being typed in included, and the sauce plugin's reconciler about 500 ms after a background write. `DataviewJSRenderer.render()` starts with `container.innerHTML = ""`, so an ungated widget is torn down and rebuilt even when its output is identical. Symptoms: a note flashes and jumps while typing, a half-typed input loses its text and focus, an open menu closes.
+
+`RenderSafe.beginRefresh(dv)` / `settleRefresh(dv, error)` take over the renderer's refresh (never its first render). `customjs-guard` calls them around every widget dispatch, so every guarded widget is gated with no per-widget code. A refresh then:
+
+1. runs the block into a hidden scratch element inserted beside the real container (same width, so width-dependent layout matches);
+2. compares each top-level child with what the previous render produced;
+3. leaves an unchanged child alone (same node: focus, typed text, open menus and scroll survive, nothing repaints) and swaps a changed child in one synchronous step, carrying typed text, focus and caret onto the matching field.
+
+Rules that follow from this:
+
+- **Split a widget's output into top-level children by rate of change.** The unit of comparison is the top-level child of `dv.container`. Home renders a head and a dashboard as siblings, so a task change swaps the dashboard and keeps the head with its open menu. One wrapper around everything means any change replaces everything.
+- **Render the same markup for the same data.** A per-render counter, random id or timestamp in an attribute makes every refresh a swap. `data-sauce-task-order` is the one known case and is ignored by `RenderSafe._stableMarkup`; do not add another without adding it there.
+- **Do not rely on `await dv.view(...)` meaning "rendered".** `DataviewInlineApi.view()` wraps the view body as `(async () => { … })()` and does not return it, so the promise resolves once the view has started. The gate counts begin/settle pairs per run for exactly this reason. Always `await` a nested `dv.view` anyway: an un-awaited one may begin after the outer view has settled and miss the commit.
+- **State a refresh must keep belongs in the DOM node or in a field the user typed in.** Only fields that received a real `input` event, or hold focus, are carried across a swap; a value the widget set itself is data and comes from the fresh render.
+
+Kill switch for diagnosis: `window.__sauceRefreshGate = false` or `localStorage["sauce.refresh-gate"] = "off"` restores Dataview's clear-and-rebuild. Each gate records `lastOutcome` (`kept`, `replaced`, `ungated`, `failed`, `timeout`, `detached`) and `lastError` on `dv.component.__sauceRefreshGate`. Harness: `platform/test/run-refresh-gate.js`.
+
 ## Skill / command override seam
 
 Direct edits to canonical `.claude/commands/<x>.md` or `.claude/skills/<bp>/**/SKILL.md` in any consumer vault are **REVERTED on next install** per landmine #22. Use `.claude/commands.local/` or `.claude/skills.local/` as the override seam instead. `/audit` surfaces direct-canonical edits as `consumer_edit_at_risk` before work is lost.

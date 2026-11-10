@@ -668,6 +668,14 @@
       "lane": "parallel"
     },
     {
+      "id": "refresh-gate",
+      "cmd": [
+        "node",
+        "platform/test/run-refresh-gate.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "wiki-render-guards",
       "cmd": [
         "node",

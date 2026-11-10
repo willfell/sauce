@@ -415,4 +415,367 @@ class RenderSafe {
       if (win.setTimeout) win.setTimeout(() => { done = true; if (obs) { try { obs.disconnect(); } catch (_e) {} } }, 3000);
     } catch (_e) { /* never throw */ }
   }
+
+  // ---------- Refresh gate: a Dataview re-execution must not destroy live UI ----------
+  //
+  // Dataview re-executes a dataviewjs block whenever its index revision moves:
+  // its own debounced `dataview:refresh-views` after ANY note is saved (the
+  // one being typed in included), and the sauce plugin's reconciler ~500ms
+  // after a background write. DataviewJSRenderer.render() starts with
+  // `container.innerHTML = ""`, so every widget is torn down and rebuilt from
+  // nothing even when its output is identical. That is the "it reset on me"
+  // class: the note flashes and jumps while typing, a half-typed input loses
+  // its text and focus, an open menu closes.
+  //
+  // The gate takes over the renderer's refresh (never its first render). It
+  // runs the block into a hidden scratch element beside the real container,
+  // then commits per top-level child: a child whose markup equals what the last
+  // render produced is left untouched (same node, so focus, typed text, open
+  // menus and scroll survive, and nothing repaints); a child that really
+  // changed is swapped in one synchronous step, with typed text, focus and
+  // caret carried onto the matching field. The container is never empty.
+  //
+  // customjs-guard calls beginRefresh(dv) before the widget renders and
+  // settleRefresh(dv) after; that is the whole integration. Those two calls are
+  // also the ONLY reliable "this run has finished rendering" signal: Dataview's
+  // dv.view() does not return the view's async body, so `await dv.view(...)`,
+  // and with it the renderer's own render() promise, resolve as soon as the
+  // view has STARTED. The gate therefore counts begin/settle pairs per run
+  // (nested views included) and commits a scratch run only once they balance. Everything here
+  // feature-detects and never throws: with no `dv.component.render`, with the
+  // kill switch set (`window.__sauceRefreshGate = false` or localStorage
+  // `sauce.refresh-gate` = "off"), or on any failure, Dataview's own render
+  // runs exactly as before.
+  beginRefresh(dv) {
+    try {
+      const component = dv && dv.component;
+      const container = dv && dv.container;
+      if (!component || !container || typeof component.render !== 'function') return null;
+      let gate = component.__sauceRefreshGate || null;
+      if (gate) {
+        const run = gate.scratchRun;
+        const inScratch = !!gate.scratchDvs && gate.scratchDvs.has(dv);
+        if (run && (inScratch ? run.dvs.includes(dv) : container === run.el)) {
+          if (!inScratch) { run.dvs.push(dv); gate.scratchDvs.add(dv); }
+          run.began = true;
+          run.depth += 1;
+        } else if (!inScratch && container === gate.container) {
+          gate.depth += 1;
+        }
+        return gate;
+      }
+      if (this._refreshGateDisabled()) return null;
+      const self = this;
+      gate = {
+        component,
+        container,
+        origRender: component.render,
+        depth: 1,
+        settled: false,
+        snapshot: null,
+        running: null,
+        queued: false,
+        scratchRun: null,
+        scratchDvs: typeof WeakSet === 'function' ? new WeakSet() : null,
+        lastOutcome: null,
+        lastError: null,
+        edited: typeof WeakSet === 'function' ? new WeakSet() : null,
+      };
+      Object.defineProperty(component, '__sauceRefreshGate', { value: gate, configurable: true, writable: true });
+      component.render = function () { return self._gatedRender(gate); };
+      try {
+        if (gate.edited && typeof container.addEventListener === 'function') {
+          container.addEventListener('input', (ev) => {
+            try { if (ev && ev.target) gate.edited.add(ev.target); } catch (_e) {}
+          }, true);
+        }
+      } catch (_e) {}
+      return gate;
+    } catch (_e) { return null; }
+  }
+
+  settleRefresh(dv, error) {
+    try {
+      const gate = dv && dv.component && dv.component.__sauceRefreshGate;
+      if (!gate || !dv.container) return;
+      if (gate.scratchDvs && gate.scratchDvs.has(dv)) {
+        const run = gate.scratchRun;
+        if (run && run.dvs.includes(dv)) {
+          if (error) run.failed = true;
+          run.depth = Math.max(0, run.depth - 1);
+          if (run.depth === 0 && run.onIdle) run.onIdle();
+        }
+        return;
+      }
+      if (dv.container !== gate.container) return;
+      gate.depth = Math.max(0, gate.depth - 1);
+      if (gate.depth === 0) {
+        gate.snapshot = this._refreshSnapshot(gate.container);
+        gate.settled = true;
+      }
+    } catch (_e) {}
+  }
+
+  _refreshGateDisabled() {
+    try {
+      if (typeof window !== 'undefined' && window.__sauceRefreshGate === false) return true;
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('sauce.refresh-gate') === 'off') return true;
+    } catch (_e) {}
+    return false;
+  }
+
+  _refreshNodes(el) {
+    try { return Array.from((el && (el.childNodes || el.children)) || []); } catch (_e) { return []; }
+  }
+
+  // What a freshly rendered node shows. Serialized markup alone misses state
+  // a widget sets as a PROPERTY (an input's value, a checkbox's checked), so
+  // those are appended; otherwise changed data rendered that way would compare
+  // equal and the stale node would be kept.
+  _refreshMarkup(node) {
+    try {
+      if (!node || typeof node.outerHTML !== 'string') return 'T:' + String((node && node.textContent) || '');
+      const fields = [];
+      const tag = String(node.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') fields.push(node);
+      if (typeof node.querySelectorAll === 'function') fields.push(...this._fieldList(node));
+      const props = fields.map((el) => String(el.value == null ? '' : el.value)
+        + (el.checked ? '\u0001c' : '') + (el.indeterminate ? '\u0001i' : '')).join('\u0000');
+      return 'E:' + this._stableMarkup(node.outerHTML) + '\u0002' + props;
+    } catch (_e) { return 'X:' + Math.random(); }
+  }
+
+  // Attributes that differ between two renders of identical data and carry no
+  // meaning across renders. `data-sauce-task-order` is TaskTodayList's
+  // process-wide row sequence: it only orders siblings within one render, and
+  // it grows on every render, so comparing it would mark every task list as
+  // changed on every refresh.
+  _stableMarkup(html) {
+    return String(html).replace(/\sdata-sauce-task-order="[^"]*"/g, '');
+  }
+
+  _refreshSnapshot(container) {
+    const nodes = this._refreshNodes(container);
+    return { nodes, markup: nodes.map((n) => this._refreshMarkup(n)) };
+  }
+
+  // One gated refresh at a time per block; refreshes that arrive meanwhile
+  // coalesce into a single follow-up run.
+  _gatedRender(gate) {
+    if (gate.running) { gate.queued = true; return gate.running; }
+    gate.running = (async () => {
+      try {
+        do {
+          gate.queued = false;
+          await this._gatedRenderOnce(gate);
+        } while (gate.queued);
+      } finally { gate.running = null; }
+    })();
+    return gate.running;
+  }
+
+  async _gatedRenderOnce(gate) {
+    const { component, container } = gate;
+    let scratch = null;
+    try {
+      const parent = container.parentNode;
+      const doc = container.ownerDocument || (typeof document !== 'undefined' ? document : null);
+      const usable = gate.settled && gate.snapshot && parent && doc
+        && typeof doc.createElement === 'function'
+        && container.isConnected !== false
+        && !this._refreshGateDisabled();
+      if (!usable) { gate.lastOutcome = 'ungated'; return await this._ungatedRender(gate); }
+
+      scratch = doc.createElement(container.tagName || 'div');
+      try {
+        scratch.className = String(container.className || '').replace(/\bnode-insert-event\b/g, '').trim();
+        let width = 0;
+        try { width = container.getBoundingClientRect().width || 0; } catch (_e) { width = 0; }
+        scratch.style.cssText = 'position:absolute;left:0;top:0;height:0;overflow:hidden;visibility:hidden;'
+          + 'pointer-events:none;' + (width > 0 ? 'width:' + width + 'px;' : 'width:100%;');
+        scratch.setAttribute('aria-hidden', 'true');
+        scratch.setAttribute('data-sauce-refresh-scratch', '');
+      } catch (_e) {}
+      parent.insertBefore(scratch, container.nextSibling || null);
+    } catch (error) {
+      gate.lastOutcome = 'ungated';
+      gate.lastError = error;
+      try { if (scratch && scratch.parentNode) scratch.parentNode.removeChild(scratch); } catch (_e2) {}
+      return this._ungatedRender(gate);
+    }
+
+    const run = { el: scratch, dvs: [], depth: 0, began: false, failed: false, onIdle: null };
+    gate.scratchRun = run;
+    try {
+      const shadow = Object.create(component, {
+        container: { value: scratch, writable: true, configurable: true },
+        containerEl: { value: scratch, writable: true, configurable: true },
+      });
+      await gate.origRender.call(shadow);
+      if (!(await this._scratchRunFinished(run))) { gate.lastOutcome = 'timeout'; return; }
+      // A widget that threw has produced nothing usable: what is on screen is
+      // better than an empty block. The next refresh tries again.
+      if (run.failed) { gate.lastOutcome = 'failed'; return; }
+      if (container.isConnected === false || container.parentNode == null) { gate.lastOutcome = 'detached'; return; }
+      const replaced = this._commitRefresh(gate, scratch);
+      gate.lastOutcome = replaced ? 'replaced' : 'kept';
+      if (replaced) {
+        // Closures from this run that still hold `dv` must reach the real
+        // container, where their output now lives.
+        for (const dv of run.dvs) {
+          try { if (dv && dv.container === scratch) dv.container = container; } catch (_e) {}
+        }
+      }
+    } catch (error) {
+      // The scratch run failed outside Dataview's own error handling: leave
+      // what is on screen alone; the next refresh tries again.
+      gate.lastOutcome = 'failed';
+      gate.lastError = error;
+    } finally {
+      run.onIdle = null;
+      if (gate.scratchRun === run) gate.scratchRun = null;
+      try { if (scratch.parentNode) scratch.parentNode.removeChild(scratch); } catch (_e) {}
+    }
+  }
+
+  // Resolves true once every view the scratch run started has settled. By the
+  // time Dataview's render() promise has resolved, every AWAITED dv.view of the
+  // block has begun, so "began and balanced" is complete output. A run in which
+  // no guarded view began at all (the guard printed a diagnostic instead) has
+  // nothing more to wait for. Resolves false if the run never balances within
+  // the limit, in which case the caller leaves the screen as it is.
+  _scratchRunFinished(run) {
+    if (!run.began || run.depth === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let finished = false;
+      let timer = null;
+      const finish = (ok) => {
+        if (finished) return;
+        finished = true;
+        run.onIdle = null;
+        try { if (timer != null && typeof clearTimeout === 'function') clearTimeout(timer); } catch (_e) {}
+        resolve(ok);
+      };
+      run.onIdle = () => finish(true);
+      try {
+        const limit = Number.isFinite(this._scratchRunTimeoutMs) ? this._scratchRunTimeoutMs : 15000;
+        if (typeof setTimeout === 'function') timer = setTimeout(() => finish(false), limit);
+      } catch (_e) {}
+    });
+  }
+
+  async _ungatedRender(gate) {
+    gate.settled = false;
+    gate.snapshot = null;
+    gate.depth = 0;
+    return gate.origRender.call(gate.component);
+  }
+
+  // Move the scratch output into the real container. Returns true when any
+  // node was replaced, false when everything on screen was kept.
+  _commitRefresh(gate, scratch) {
+    const container = gate.container;
+    const live = this._refreshNodes(container);
+    const fresh = this._refreshNodes(scratch);
+    const freshMarkup = fresh.map((n) => this._refreshMarkup(n));
+    const snap = gate.snapshot;
+    const intact = !!snap && snap.nodes.length === live.length && snap.nodes.every((n, i) => n === live[i]);
+
+    if (intact && fresh.length === live.length && freshMarkup.every((m, i) => m === snap.markup[i])) {
+      return false;
+    }
+
+    const fields = this._captureFields(gate, container);
+    if (intact) {
+      const common = Math.min(live.length, fresh.length);
+      for (let i = 0; i < common; i++) {
+        if (freshMarkup[i] !== snap.markup[i]) container.replaceChild(fresh[i], live[i]);
+      }
+      for (let i = common; i < live.length; i++) container.removeChild(live[i]);
+      for (let i = common; i < fresh.length; i++) container.appendChild(fresh[i]);
+    } else {
+      // Something other than the last render owns part of the container (a
+      // widget appended later, an interleaved first render). Replace it all,
+      // still in one step.
+      for (const node of live) { try { container.removeChild(node); } catch (_e) {} }
+      for (const node of fresh) container.appendChild(node);
+    }
+    gate.snapshot = { nodes: this._refreshNodes(container), markup: freshMarkup };
+    this._restoreFields(gate, container, fields);
+    return true;
+  }
+
+  _fieldKey(el) {
+    const attr = (name) => { try { return String(el.getAttribute(name) || ''); } catch (_e) { return ''; } };
+    return [String(el.tagName || '').toLowerCase(), attr('type'), attr('name'), attr('placeholder'),
+      attr('aria-label'), attr('data-capture-key'), String(el.className || '')].join('|');
+  }
+
+  _isTextField(el) {
+    const tag = String(el.tagName || '').toLowerCase();
+    if (tag === 'textarea') return true;
+    if (tag !== 'input') return false;
+    const type = String((el.getAttribute && el.getAttribute('type')) || el.type || 'text').toLowerCase();
+    return ['text', 'search', 'url', 'tel', 'email', 'password', 'number', 'date', 'time', 'datetime-local', ''].includes(type);
+  }
+
+  _fieldList(root) {
+    try { return Array.from(root.querySelectorAll('input, textarea, select')); } catch (_e) { return []; }
+  }
+
+  // What the user has typed or is focused on, keyed so the same field can be
+  // found in a re-rendered subtree. Only fields the user actually edited (or
+  // the focused one) are carried; a value a widget set itself is data and must
+  // come from the fresh render.
+  _captureFields(gate, container) {
+    const out = [];
+    try {
+      const doc = container.ownerDocument || (typeof document !== 'undefined' ? document : null);
+      const active = doc ? doc.activeElement : null;
+      const ordinals = new Map();
+      for (const el of this._fieldList(container)) {
+        const key = this._fieldKey(el);
+        const ordinal = ordinals.get(key) || 0;
+        ordinals.set(key, ordinal + 1);
+        const focused = el === active;
+        const edited = !!(gate.edited && gate.edited.has(el));
+        if (!focused && !edited) continue;
+        const text = this._isTextField(el);
+        const entry = { el, key, ordinal, focused, edited, text, value: el.value };
+        if (focused && text) {
+          try { entry.start = el.selectionStart; entry.end = el.selectionEnd; entry.direction = el.selectionDirection; } catch (_e) {}
+        }
+        out.push(entry);
+      }
+    } catch (_e) {}
+    return out;
+  }
+
+  _restoreFields(gate, container, fields) {
+    if (!fields || !fields.length) return;
+    try {
+      const byKey = new Map();
+      for (const el of this._fieldList(container)) {
+        const key = this._fieldKey(el);
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(el);
+      }
+      for (const entry of fields) {
+        const candidates = byKey.get(entry.key) || [];
+        if (candidates.includes(entry.el)) continue; // its node was kept; nothing was lost
+        const target = candidates[entry.ordinal];
+        if (!target) continue;
+        if (entry.edited && (entry.text || String(target.tagName || '').toLowerCase() === 'select')) {
+          try { target.value = entry.value; } catch (_e) {}
+          try { if (gate.edited) gate.edited.add(target); } catch (_e) {}
+        }
+        if (entry.focused) {
+          try { target.focus({ preventScroll: true }); } catch (_e) {}
+          if (entry.text && typeof entry.start === 'number' && typeof target.setSelectionRange === 'function') {
+            try { target.setSelectionRange(entry.start, entry.end, entry.direction || 'none'); } catch (_e) {}
+          }
+        }
+      }
+    } catch (_e) {}
+  }
 }
