@@ -71,8 +71,52 @@ class ToDoDailyFilterView {
                 searchPlaceholder: 'Search recurring tasks…',
                 emptyText: 'No recurring tasks yet. Set "Repeats" on a task to see it here.',
             },
+            project: {
+                key: 'project',
+                prefsKey: 'sauce-todo-filter:prefs:project',
+                tabs: ['all', 'overdue', 'week', 'undated'],
+                defaults: { tab: 'all', sort: 'due', group: 'none' },
+                counted: ['all', 'overdue'],
+                labels: {},
+                strip: false, search: false, done: false, reorder: false, recurringOnly: false,
+                scoped: true,
+                showProject: false,
+                recentDone: { days: 14, label: 'Recently done', limit: 5 },
+                emptyText: 'Nothing open on this project.',
+            },
+            trip: {
+                key: 'trip',
+                prefsKey: 'sauce-todo-filter:prefs:trip',
+                tabs: ['all', 'overdue', 'week', 'undated'],
+                defaults: { tab: 'all', sort: 'due', group: 'none' },
+                counted: ['all', 'overdue'],
+                labels: {},
+                strip: false, search: false, done: false, reorder: false, recurringOnly: false,
+                scoped: true,
+                recentDone: { days: null, label: 'Done', limit: 5 },
+                emptyText: 'Nothing open for this trip.',
+            },
+            meeting: {
+                key: 'meeting',
+                prefsKey: 'sauce-todo-filter:prefs:meeting',
+                tabs: ['all', 'overdue'],
+                defaults: { tab: 'all', sort: 'due', group: 'none' },
+                counted: ['all', 'overdue'],
+                labels: {},
+                strip: false, search: false, done: false, reorder: false, recurringOnly: false,
+                scoped: true,
+                tools: ['select'],
+                recentDone: { days: null, label: 'Done', limit: 5 },
+                emptyText: 'Nothing open from this meeting.',
+            },
         };
     }
+
+    /** Every tab key selectTab knows; a surface shows a subset of these. */
+    static get TAB_KEYS() { return [...ToDoDailyFilterView.TABS, 'undated']; }
+
+    /** Shown alone, with no pills, when a scoped note has no tasks at all. */
+    static get BLANK_SCOPE_TEXT() { return 'No tasks yet. Use + New Task above.'; }
 
     static surface(key) {
         const all = ToDoDailyFilterView.SURFACES;
@@ -200,10 +244,12 @@ class ToDoDailyFilterView {
         const TE = ToDoDailyFilterView._te(TEref);
         if (!TE) return [];
         const open = ToDoDailyFilterView._openTasks(tasks);
-        const key = ToDoDailyFilterView.TABS.includes(tab) ? tab : 'today';
+        const key = ToDoDailyFilterView.TAB_KEYS.includes(tab) ? tab : 'today';
         switch (key) {
             case 'all':
                 return open;
+            case 'undated':
+                return open.filter((task) => !ToDoDailyFilterView._dueOf(task));
             case 'backlog':
                 return open.filter((task) => TE.isBacklog(task));
             case 'overdue': {
@@ -242,6 +288,32 @@ class ToDoDailyFilterView {
             .filter((task) => task && task.status === 'done' && TE.completedDay(task) === todayStr)
             .map((task, index) => ({ task, index, time: TTL.doneTimeLabel(task) }))
             .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : a.index - b.index))
+            .map((entry) => entry.task);
+    }
+
+    /**
+     * Done tasks completed in the `days` days up to and including `todayStr`
+     * (every done task when `days` is null), latest completion first. A task
+     * with no completion day only counts when `days` is null.
+     */
+    static doneRecent(tasks, todayStr, days, TEref, TTLref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        const TTL = TTLref
+            || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
+        if (!TE || typeof TE.completedDay !== 'function') return [];
+        const windowed = Number.isInteger(days) && days > 0;
+        const from = windowed && typeof TE.addDays === 'function' ? TE.addDays(todayStr, -(days - 1)) : '';
+        if (windowed && !from) return [];
+        const timeOf = (task) => (TTL && typeof TTL.doneTimeLabel === 'function' ? TTL.doneTimeLabel(task) : '');
+        return (Array.isArray(tasks) ? tasks : [])
+            .filter((task) => task && task.status === 'done')
+            .map((task, index) => ({ task, index, day: String(TE.completedDay(task) || ''), time: timeOf(task) }))
+            .filter((entry) => !windowed || (entry.day && entry.day >= from && entry.day <= todayStr))
+            .sort((a, b) => {
+                if (a.day !== b.day) return a.day < b.day ? 1 : -1;
+                if (a.time !== b.time) return a.time < b.time ? 1 : -1;
+                return a.index - b.index;
+            })
             .map((entry) => entry.task);
     }
 
@@ -403,6 +475,7 @@ class ToDoDailyFilterView {
             '.sauce-todo-bulkbar .sauce-todo-bulk-count { font-size: 0.85em; font-weight: 600; color: var(--text-muted); margin-right: 4px; }',
             '.sauce-todo-bulkbar button { font-size: 0.85em; }',
             '@media (max-width: 720px) { .sauce-todo-bulkbar { width: 100%; align-self: stretch; } }',
+            'body.is-phone .sauce-todo-bulkbar button.sauce-todo-bulk-action { height: auto; min-height: 30px; padding: 4px 10px; font-size: 13px; }',
         ].join('\n');
     }
 
@@ -483,16 +556,19 @@ class ToDoDailyFilterView {
      * the selection, the week-strip day being shown (`day`, a YYYY-MM-DD or
      * null), in-flight locks ('bulk', 'reorder') and the live render. Each
      * surface keeps its own entry; other days' entries are dropped once they
-     * hold no lock.
+     * hold no lock. A scoped surface (one project, trip or meeting) keys its
+     * entry by `scopeId` too, so Select mode on one note never follows you
+     * into the next.
      */
-    static _dayState(todayStr, surfaceKey) {
+    static _dayState(todayStr, surfaceKey, scopeId) {
         const day = String(todayStr || '');
-        const key = `${ToDoDailyFilterView.surface(surfaceKey).key}|${day}`;
+        const scope = scopeId ? `:${String(scopeId)}` : '';
+        const key = `${ToDoDailyFilterView.surface(surfaceKey).key}${scope}|${day}`;
         const all = ToDoDailyFilterView._dayStates || (ToDoDailyFilterView._dayStates = new Map());
         for (const [k, entry] of all) {
-            if (k.slice(k.indexOf('|') + 1) !== day && !entry.locks.size) all.delete(k);
+            if (k.slice(k.lastIndexOf('|') + 1) !== day && !entry.locks.size) all.delete(k);
         }
-        if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null, day: null });
+        if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null, day: null, doneAll: false });
         return all.get(key);
     }
 
@@ -507,6 +583,11 @@ class ToDoDailyFilterView {
 
         const View = ToDoDailyFilterView;
         const S = View.surface(opts && opts.surface);
+        // A scoped surface draws one note's tasks: the caller (TaskProjectList,
+        // TaskTripList, TaskMeetingList) owns the membership rule and passes it
+        // as { id, match }. Without one there is nothing to draw.
+        const scope = S.scoped ? (opts && opts.scope) : null;
+        if (S.scoped && (!scope || !scope.id || typeof scope.match !== 'function')) return;
         const CJS = typeof window !== 'undefined' && window.customJS ? window.customJS : null;
         const TE = CJS && CJS.TaskEntity;
         const TTL = CJS && CJS.TaskTodayList;
@@ -535,8 +616,29 @@ class ToDoDailyFilterView {
             const pages = raw && typeof raw.array === 'function' ? raw.array() : Array.from(raw || []);
             tasks = pages.map((candidate) => TE.parseNote(candidate));
         } catch (_e) { tasks = []; }
+        if (scope) {
+            tasks = tasks.filter((task) => {
+                try { return !!scope.match(task); } catch (_e) { return false; }
+            });
+            // The lists this replaces showed each task's subtask count; keep it.
+            if (typeof TE.subtaskCountsByParent === 'function') {
+                let counts = {};
+                try { counts = TE.subtaskCountsByParent(dv) || {}; } catch (_e) { counts = {}; }
+                for (const task of tasks) {
+                    const base = task && task.path ? String(task.path).split('/').pop().replace(/\.md$/i, '') : '';
+                    if (task && task.subtask_count == null) task.subtask_count = counts[base] || null;
+                }
+            }
+        }
 
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
+
+        if (scope && !tasks.length) {
+            const blank = dv.container.createEl('div', { cls: `sauce-todo-daily-filter-view is-${S.key} is-blank` });
+            const line = blank.createEl('div', { cls: 'sauce-todo-filter-empty', text: View.BLANK_SCOPE_TEXT });
+            line.style.cssText = 'color:var(--text-muted); font-size:0.85em; font-style:italic; padding:4px 0;';
+            return;
+        }
 
         const storage = View.storage();
         let prefs = View.readPrefs(storage, S.key);
@@ -580,7 +682,7 @@ class ToDoDailyFilterView {
         const doneHost = root.createEl('div', { cls: 'sauce-todo-filter-done-host' });
         doneHost.style.cssText = 'display:flex; flex-direction:column; gap:4px; width:100%;';
         const bulkHost = root.createEl('div', { cls: 'sauce-todo-bulk-host' });
-        bulkHost.style.cssText = 'display:flex; flex-direction:column; position:sticky; bottom:12px; z-index:5; width:100%;';
+        bulkHost.style.cssText = 'display:flex; flex-direction:column; position:sticky; bottom:var(--sauce-bulk-bottom, 12px); z-index:5; width:100%;';
 
         const clear = (host) => { while (host.firstChild) host.removeChild(host.firstChild); };
         // `top` drops SectionLabel's own hairline where the filter rule
@@ -601,7 +703,8 @@ class ToDoDailyFilterView {
             return list;
         };
 
-        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open', ...S.labels };
+        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open', undated: 'No date', ...S.labels };
+        const tools = Array.isArray(S.tools) ? S.tools : ['sort', 'group', 'select'];
         const tabButtons = {};
         const tabText = (key) => {
             if (!S.counted.includes(key)) return TAB_LABELS[key];
@@ -647,17 +750,19 @@ class ToDoDailyFilterView {
                 setPill(button, active);
                 button.setAttribute('aria-selected', active ? 'true' : 'false');
             }
-            setPill(sortButton, prefs.sort !== S.defaults.sort);
-            setPill(groupButton, prefs.group !== S.defaults.group);
-            setPill(selectButton, state.selecting);
-            selectButton.setAttribute('aria-pressed', state.selecting ? 'true' : 'false');
+            if (sortButton) setPill(sortButton, prefs.sort !== S.defaults.sort);
+            if (groupButton) setPill(groupButton, prefs.group !== S.defaults.group);
+            if (selectButton) {
+                setPill(selectButton, state.selecting);
+                selectButton.setAttribute('aria-pressed', state.selecting ? 'true' : 'false');
+            }
         };
 
         // Selection and in-flight locks live on the class, keyed by todayStr,
         // so they survive the Dataview re-render the view's own writes cause.
         // Selection is in memory only (never persisted) and survives tab
         // switches; leaving Select mode clears it.
-        const state = View._dayState(todayStr, S.key);
+        const state = View._dayState(todayStr, S.key, scope && scope.id);
         const selected = state.selected;
         const isMobile = typeof TTL._isMobile === 'function'
             && TTL._isMobile(typeof window !== 'undefined' ? window.app : null);
@@ -809,7 +914,9 @@ class ToDoDailyFilterView {
                     paintBulk();
                 };
             }
-            if (!isMobile) options.dragHandle = manual ? true : 'Drag to a day';
+            if (S.showProject === false) options.showProject = false;
+            // A handle only where a drag lands: manual order, or the week strip.
+            if (!isMobile && (manual || S.strip)) options.dragHandle = manual ? true : 'Drag to a day';
             if (manual) options.onMove = onMove;
             let row = null;
             try {
@@ -896,9 +1003,37 @@ class ToDoDailyFilterView {
             undo.disabled = false;
             if (outcome === 'silent') View._notice(`Could not reopen task: ${(res && res.reason) || 'unknown'}`);
         };
+        // A scoped note lists its own finished tasks under the open ones, on
+        // the All tab only: the first few, then "Show N more".
+        const paintRecentDone = () => {
+            const R = S.recentDone;
+            const done = View.doneRecent(tasks, todayStr, R.days, TE, TTL);
+            if (!done.length) return;
+            label(doneHost, `${R.label} · ${done.length}`);
+            const limit = Number.isInteger(R.limit) && R.limit > 0 ? R.limit : done.length;
+            const shown = state.doneAll ? done : done.slice(0, limit);
+            for (const task of shown) {
+                const day = typeof TE.completedDay === 'function' ? TE.completedDay(task) : '';
+                const stamp = day && day !== todayStr ? View._dayLabel(day) : null;
+                TTL.renderDoneRow(doneHost, task, { TD, notice: View._notice, onUndo: reopen, undoLabel: 'Reopen', stamp });
+            }
+            if (shown.length < done.length) {
+                const more = doneHost.createEl('button', {
+                    cls: 'sauce-todo-done-more', text: `Show ${done.length - shown.length} more`,
+                });
+                more.setAttribute('type', 'button');
+                more.style.cssText = 'align-self:flex-start; background:none; border:none; box-shadow:none; padding:2px 6px; height:auto; font-size:0.85em; color:var(--text-accent); cursor:pointer;';
+                more.addEventListener('click', onClick(() => { state.doneAll = true; paint(); }));
+            }
+        };
         const paintDone = () => {
             clear(doneHost);
-            if (!S.done || typeof TTL.renderDoneRow !== 'function') return;
+            if (typeof TTL.renderDoneRow !== 'function') return;
+            if (S.recentDone) {
+                if (!state.day && prefs.tab === 'all') paintRecentDone();
+                return;
+            }
+            if (!S.done) return;
             if (!state.day && prefs.tab !== 'today') return;
             const day = state.day || todayStr;
             const done = View.doneToday(tasks, day, TE, TTL);
@@ -934,7 +1069,12 @@ class ToDoDailyFilterView {
                 const ink = picked || cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)';
                 const glow = picked ? ' box-shadow:0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent);' : '';
                 button.style.cssText = `display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:100%; min-width:0; height:auto; padding:6px 4px; box-sizing:border-box; border-radius:var(--radius-m, 6px); border:1px solid ${border}; color:${ink}; background:${rest};${glow} cursor:pointer;`;
-                const name = button.createEl('span', { cls: 'sauce-todo-week-label', text: cell.label });
+                // Day name and date as two spans, so a phone can stack them
+                // (sauce-core) and every cell keeps the same height.
+                const name = button.createEl('span', { cls: 'sauce-todo-week-label' });
+                const gap = String(cell.label).indexOf(' ');
+                name.createEl('span', { text: gap > 0 ? String(cell.label).slice(0, gap + 1) : String(cell.label) });
+                if (gap > 0) name.createEl('span', { text: String(cell.label).slice(gap + 1) });
                 name.style.cssText = 'font-size:0.8em; font-weight:600; max-width:100%; white-space:normal; text-align:center; line-height:1.2;';
                 const count = button.createEl('span', { cls: 'sauce-todo-week-count', text: String(cell.count) });
                 count.style.cssText = `font-size:0.75em; color:${picked ? 'var(--text-accent)' : cell.count ? 'var(--text-muted)' : 'var(--text-faint)'}; font-variant-numeric:tabular-nums;`;
@@ -1109,24 +1249,33 @@ class ToDoDailyFilterView {
                 commit({ tab: key });
             }));
         }
-        const sortButton = rightSide.createEl('button', { text: 'Sort ▾' });
-        sortButton.setAttribute('type', 'button');
-        sortButton.setAttribute('aria-haspopup', 'menu');
-        sortButton.addEventListener('click', onClick(
-            () => openMenu(sortButton, TTL.SORT_OPTIONS || [], 'sort', prefs.sort)));
-        const groupButton = rightSide.createEl('button', { text: 'Group ▾' });
-        groupButton.setAttribute('type', 'button');
-        groupButton.setAttribute('aria-haspopup', 'menu');
-        groupButton.addEventListener('click', onClick(
-            () => openMenu(groupButton, TTL.GROUP_OPTIONS || [], 'group', prefs.group)));
+        let sortButton = null;
+        if (tools.includes('sort')) {
+            sortButton = rightSide.createEl('button', { text: 'Sort ▾' });
+            sortButton.setAttribute('type', 'button');
+            sortButton.setAttribute('aria-haspopup', 'menu');
+            sortButton.addEventListener('click', onClick(
+                () => openMenu(sortButton, TTL.SORT_OPTIONS || [], 'sort', prefs.sort)));
+        }
+        let groupButton = null;
+        if (tools.includes('group')) {
+            groupButton = rightSide.createEl('button', { text: 'Group ▾' });
+            groupButton.setAttribute('type', 'button');
+            groupButton.setAttribute('aria-haspopup', 'menu');
+            groupButton.addEventListener('click', onClick(
+                () => openMenu(groupButton, TTL.GROUP_OPTIONS || [], 'group', prefs.group)));
+        }
         state.live = { paint, taskByPath };
-        const selectButton = rightSide.createEl('button', { text: 'Select' });
-        selectButton.setAttribute('type', 'button');
-        selectButton.addEventListener('click', onClick(() => {
-            state.selecting = !state.selecting;
-            if (!state.selecting) selected.clear();
-            paint();
-        }));
+        let selectButton = null;
+        if (tools.includes('select')) {
+            selectButton = rightSide.createEl('button', { text: 'Select' });
+            selectButton.setAttribute('type', 'button');
+            selectButton.addEventListener('click', onClick(() => {
+                state.selecting = !state.selecting;
+                if (!state.selecting) selected.clear();
+                paint();
+            }));
+        }
 
         paint();
     }

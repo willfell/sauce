@@ -300,6 +300,47 @@ body .sauce-todo-search .sauce-todo-search-input.sauce-todo-search-input:focus {
   padding: 0 2px;
 }
 
+/* Phone. A theme's phone button height would otherwise inflate every pill to
+   a full input height, so the pill sets its own. The filter row stays one
+   line and scrolls sideways instead of wrapping into three; the padding keeps
+   the active pill's glow inside the scroller. Week-strip cells stack the day
+   name over the date so all seven read alike. */
+body.is-phone .sauce-pill-toggle.sauce-pill-toggle.sauce-pill-toggle {
+  height: auto;
+  min-height: 28px;
+  padding: 3px 11px;
+  font-size: 13px;
+}
+body.is-phone .sauce-todo-filter-controls {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px 10px 10px 2px;
+  margin: -2px 0 -6px;
+}
+body.is-phone .sauce-todo-filter-controls::-webkit-scrollbar {
+  display: none;
+}
+body.is-phone .sauce-todo-filter-controls > .sauce-pill-group,
+body.is-phone .sauce-todo-filter-right {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+body.is-phone .sauce-todo-filter-right {
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 1px solid var(--sauce-hairline);
+}
+body.is-phone .sauce-todo-week-label > span,
+body.is-phone .sauce-done-day-cell-label > span {
+  display: block;
+}
+body.is-phone .sauce-todo-daily-filter-view {
+  --sauce-bulk-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+}
+
 .sauce-task-priority-dot {
   display: inline-block;
   /* border-box so the levels that draw a border are the same 7px as the levels

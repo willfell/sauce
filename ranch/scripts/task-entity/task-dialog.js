@@ -929,7 +929,7 @@ class TaskDialog {
         if (!editPath) {
             left.createDiv({
                 cls: 'sauce-task-hint',
-                text: 'Shortcuts work while typing: next mon, !high, #Project. Each fills the matching field on the right.',
+                text: 'Shortcuts work while typing: next mon, !high, #Project. Each fills its matching field.',
             });
             setTimeout(() => titleInput.focus(), 50);
         }
@@ -1741,7 +1741,7 @@ class TaskDialog {
             '.sauce-modal.sauce-task-dialog { position: relative; width: min(100%, 900px); max-height: min(92vh, 720px); padding: 0; display: flex; flex-direction: column; overflow: hidden; }',
             '.sauce-task-dialog > .sauce-modal-title { margin: 0; padding: 16px 56px 14px 20px; border-bottom: 1px solid var(--background-modifier-border); }',
             '.sauce-task-dialog > .sauce-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }',
-            '.sauce-task-dialog > .sauce-modal-footer { flex: 0 0 auto; margin: 0; padding: 12px 20px; border-top: 1px solid var(--background-modifier-border); justify-content: space-between; align-items: center; }',
+            '.sauce-task-dialog > .sauce-modal-footer { box-sizing: border-box; flex: 0 0 auto; margin: 0; padding: 12px 20px; border-top: 1px solid var(--background-modifier-border); justify-content: space-between; align-items: center; }',
             '.sauce-task-dialog button.sauce-task-dialog-close { position: absolute; top: 10px; right: 12px; width: 32px; height: 32px; padding: 0; border: none; border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-muted); font-size: 14px; cursor: pointer; }',
             '.sauce-task-dialog button.sauce-task-dialog-close:hover { background: var(--background-modifier-hover); color: var(--text-normal); }',
             '.sauce-task-dialog-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); min-height: 100%; }',
@@ -1779,9 +1779,28 @@ class TaskDialog {
             '.sauce-task-open-after-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }',
             '.sauce-task-kbd { margin-left: 6px; opacity: 0.75; font-size: 11px; }',
             '@media (max-width: 720px) {',
-            '  .sauce-task-dialog-cols { grid-template-columns: 1fr; }',
+            '  .sauce-task-dialog-cols { grid-template-columns: minmax(0, 1fr); }',
             '  .sauce-task-dialog-right { border-left: none; border-top: 1px solid var(--background-modifier-border); }',
             '  .sauce-modal.sauce-task-dialog { max-height: calc(100vh - 32px); }',
+            '}',
+            // Phone: the sheet clears the status bar and home indicator, the
+            // title and pills shrink to fit, a theme's tall phone buttons are
+            // reset, and the footer stacks into two short rows (Open / Done /
+            // Delete side by side, then the primary action full width).
+            '@media (max-width: 600px) {',
+            '  .sauce-modal-backdrop:has(> .sauce-task-dialog) { padding: calc(env(safe-area-inset-top, 0px) + 8px) 8px calc(env(safe-area-inset-bottom, 0px) + 8px); align-items: stretch; }',
+            '  .sauce-modal.sauce-task-dialog { max-height: 100%; min-width: 0; }',
+            '  .sauce-task-dialog > .sauce-modal-title { padding: 12px 52px 10px 16px; font-size: 1em; }',
+            '  .sauce-task-dialog button.sauce-task-dialog-close { top: 6px; right: 8px; }',
+            '  .sauce-task-dialog-left, .sauce-task-dialog-right { padding: 14px 16px; }',
+            '  .sauce-task-dialog-right { gap: 14px; }',
+            '  .sauce-task-dialog input.sauce-task-title { font-size: 1.15em; }',
+            '  .sauce-task-dialog textarea.sauce-task-notes { min-height: 96px; }',
+            '  .sauce-task-dialog button.sauce-task-pill, .sauce-task-dialog button.sauce-task-quiet { height: auto; min-height: 32px; padding: 5px 12px; font-size: 13px; }',
+            '  .sauce-task-dialog > .sauce-modal-footer { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 16px; }',
+            '  .sauce-task-dialog > .sauce-modal-footer > .sauce-task-footer-left, .sauce-task-dialog > .sauce-modal-footer > .sauce-task-footer-right { flex: 0 0 auto; min-width: 0; flex-wrap: nowrap; margin-left: 0; }',
+            '  .sauce-task-footer-left > .sauce-btn, .sauce-task-footer-right > .sauce-btn { flex: 1 1 0; min-width: 0; }',
+            '  .sauce-task-kbd { display: none; }',
             '}',
             '',
         ].join('\n');

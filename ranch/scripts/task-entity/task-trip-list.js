@@ -29,7 +29,9 @@
  *   TaskTripList._matches(task, tripSlug) → bool  (raw-slug equality AND non-meeting)
  *
  * Instance API (browser-side):
- *   TaskTripList.render(dv)   ← the customjs-guard entry point
+ *   TaskTripList.render(dv)   ← the customjs-guard entry point; draws the shared
+ *                          To-Do view's 'trip' surface when it is loaded,
+ *                          else _renderFlat(dv), the original flat list
  */
 class TaskTripList {
 
@@ -67,7 +69,44 @@ class TaskTripList {
      * a flat list. Fully guarded — returns quietly on cold-load (no throw); each
      * row is drawn by the shared static renderer.
      */
+    /**
+     * The shared To-Do view (to-do blueprint) when it is loaded and knows the
+     * 'trip' surface, else null. customJS stores instances, so the
+     * surface table is read off the constructor.
+     */
+    static _sharedView() {
+        try {
+            const View = typeof window !== 'undefined' && window.customJS && window.customJS.ToDoDailyFilterView;
+            const ctor = View && View.constructor;
+            const surfaces = ctor && ctor.SURFACES;
+            return View && typeof View.render === 'function' && surfaces && surfaces.trip ? View : null;
+        } catch (_e) { return null; }
+    }
+
+    /**
+     * Entry point invoked by customjs-guard. With the shared To-Do view loaded
+     * this note's tasks draw on its 'trip' surface (pills, Select,
+     * recently done), with TaskTripList._matches as the membership rule. A vault
+     * without the to-do blueprint keeps the flat list in _renderFlat.
+     */
     async render(dv) {
+        if (!dv || !dv.container) return;
+        if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
+        const View = TaskTripList._sharedView();
+        if (!View) return this._renderFlat(dv);
+        const page = (window.customJS && window.customJS.RenderSafe)
+            ? window.customJS.RenderSafe.page(dv)
+            : (dv.current && dv.current());
+        if (!page) return;
+        const ourSlug = String(page.trip_slug == null ? '' : page.trip_slug).trim();
+        if (!ourSlug) return;
+        return View.render(dv, {
+            surface: 'trip',
+            scope: { id: ourSlug, match: (task) => TaskTripList._matches(task, ourSlug) },
+        });
+    }
+
+    async _renderFlat(dv) {
         if (!dv || !dv.container) return;
         // Skip inside embeds — the host note renders its own list.
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;

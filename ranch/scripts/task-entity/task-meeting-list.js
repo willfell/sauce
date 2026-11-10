@@ -28,7 +28,9 @@
  *   TaskMeetingList._matches(task, meetingBasename) → bool
  *
  * Instance API (browser-side):
- *   TaskMeetingList.render(dv)   ← the customjs-guard entry point
+ *   TaskMeetingList.render(dv)   ← the customjs-guard entry point; draws the shared
+ *                          To-Do view's 'meeting' surface when it is loaded,
+ *                          else _renderFlat(dv), the original flat list
  */
 class TaskMeetingList {
 
@@ -61,7 +63,45 @@ class TaskMeetingList {
      * source_note matches, and draws a flat list. Fully guarded — returns quietly
      * on cold-load (no throw); each row is drawn by the shared static renderer.
      */
+    /**
+     * The shared To-Do view (to-do blueprint) when it is loaded and knows the
+     * 'meeting' surface, else null. customJS stores instances, so the
+     * surface table is read off the constructor.
+     */
+    static _sharedView() {
+        try {
+            const View = typeof window !== 'undefined' && window.customJS && window.customJS.ToDoDailyFilterView;
+            const ctor = View && View.constructor;
+            const surfaces = ctor && ctor.SURFACES;
+            return View && typeof View.render === 'function' && surfaces && surfaces.meeting ? View : null;
+        } catch (_e) { return null; }
+    }
+
+    /**
+     * Entry point invoked by customjs-guard. With the shared To-Do view loaded
+     * this note's tasks draw on its 'meeting' surface (pills, Select,
+     * recently done), with TaskMeetingList._matches as the membership rule. A vault
+     * without the to-do blueprint keeps the flat list in _renderFlat.
+     */
     async render(dv) {
+        if (!dv || !dv.container) return;
+        if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
+        const View = TaskMeetingList._sharedView();
+        if (!View) return this._renderFlat(dv);
+        const page = (window.customJS && window.customJS.RenderSafe)
+            ? window.customJS.RenderSafe.page(dv)
+            : (dv.current && dv.current());
+        if (!page) return;
+        const rawName = (page.file && page.file.name) || '';
+        const meetingBasename = String(rawName).replace(/\.md$/i, '').trim();
+        if (!meetingBasename) return;
+        return View.render(dv, {
+            surface: 'meeting',
+            scope: { id: meetingBasename, match: (task) => TaskMeetingList._matches(task, meetingBasename) },
+        });
+    }
+
+    async _renderFlat(dv) {
         if (!dv || !dv.container) return;
         // Skip inside embeds — the host note renders its own list.
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;

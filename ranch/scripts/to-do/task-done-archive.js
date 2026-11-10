@@ -222,7 +222,12 @@ class TaskDoneArchive {
                 const ink = picked || cell.isToday ? 'var(--text-accent)' : 'var(--text-normal)';
                 const glow = picked ? ' box-shadow: 0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent);' : '';
                 button.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; min-width: 0; height: auto; padding: 6px 4px; box-sizing: border-box; border-radius: var(--radius-m, 6px); border: 1px solid ' + border + '; color: ' + ink + '; background: ' + rest + ';' + glow + ' cursor: pointer;';
-                const name = button.createEl('span', { cls: 'sauce-done-day-cell-label', text: cell.label });
+                // Day name and date as two spans, so a phone can stack them
+                // (sauce-core) and every cell keeps the same height.
+                const name = button.createEl('span', { cls: 'sauce-done-day-cell-label' });
+                const gap = String(cell.label).indexOf(' ');
+                name.createEl('span', { text: gap > 0 ? String(cell.label).slice(0, gap + 1) : String(cell.label) });
+                if (gap > 0) name.createEl('span', { text: String(cell.label).slice(gap + 1) });
                 name.style.cssText = 'font-size: 0.8em; font-weight: 600; max-width: 100%; white-space: normal; text-align: center; line-height: 1.2;';
                 const count = button.createEl('span', { cls: 'sauce-done-day-cell-count', text: String(cell.count) });
                 count.style.cssText = 'font-size: 0.75em; color: ' + (picked ? 'var(--text-accent)' : cell.count ? 'var(--text-muted)' : 'var(--text-faint)') + '; font-variant-numeric: tabular-nums;';

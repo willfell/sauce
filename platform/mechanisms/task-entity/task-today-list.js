@@ -72,6 +72,7 @@ class TaskTodayList {
     get GROUP_OPTIONS() { return TaskTodayList.GROUP_OPTIONS; }
     get DRAG_MIME() { return TaskTodayList.DRAG_MIME; }
     _isMobile(appRef) { return TaskTodayList._isMobile(appRef); }
+    shortDueLabel(due) { return TaskTodayList.shortDueLabel(due); }
     _fromFormField(event) { return TaskTodayList._fromFormField(event); }
     clearDateLabel(task) { return TaskTodayList.clearDateLabel(task); }
 
@@ -345,7 +346,9 @@ class TaskTodayList {
                 chip.style.cssText = 'font-size: 0.78em; padding: 1px 6px; border-radius: 4px; background: var(--background-modifier-border); color: var(--text-muted); flex-shrink: 0;';
             }
         }
-        const time = TaskTodayList.doneTimeLabel(task);
+        // opts.stamp replaces the HH:mm label (a list spanning days passes the
+        // completion day); null or undefined keeps the time.
+        const time = opts.stamp != null && opts.stamp !== '' ? String(opts.stamp) : TaskTodayList.doneTimeLabel(task);
         if (time) {
             const stamp = row.createEl('span', { cls: 'sauce-today-done-time' });
             stamp.textContent = time;
@@ -871,6 +874,23 @@ class TaskTodayList {
      * project / priority / due line up down a list. Sized for "due: YYYY-MM-DD",
      * "highest", and a typical project name (longer names ellipsize).
      */
+    /**
+     * "Nov 10" for a due of 2026-11-10 (string, or a Luxon-like date): the
+     * phone's due chip. '' when the value has no calendar date.
+     */
+    static shortDueLabel(due) {
+        let s = '';
+        try {
+            if (due && typeof due === 'object' && typeof due.toFormat === 'function') s = String(due.toFormat('yyyy-MM-dd') || '');
+            else s = String(due == null ? '' : due);
+        } catch (_e) { s = ''; }
+        const m = /^\s*(\d{4})-(\d{2})-(\d{2})/.exec(s);
+        if (!m) return '';
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const month = months[Number(m[2]) - 1];
+        return month ? month + ' ' + Number(m[3]) : '';
+    }
+
     static get META_SLOT_WIDTH() {
         return { project: '11em', priority: '5.6em', due: '9.8em' };
     }
@@ -891,7 +911,19 @@ class TaskTodayList {
             + ' .sauce-task-today-row .sauce-task-today-chips { flex-wrap: wrap !important; flex-shrink: 1 !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot { width: auto !important; visibility: visible !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot:empty { display: none !important; }';
-        const scoped = (prefix) => touch.split(' .sauce-task-today-row').join(' ' + prefix + ' .sauce-task-today-row')
+        // Phone: one line under the title. Chips sit left, actions right; the
+        // priority chip steps aside (the coloured bar already says it), the
+        // due chip shows its short date, and a long project name ellipsizes.
+        const phone = ' .sauce-task-today-row .sauce-task-today-right { justify-content: flex-start !important; flex-wrap: nowrap; column-gap: 8px; }'
+            + ' .sauce-task-today-row .sauce-task-today-chips { flex-wrap: nowrap !important; flex-shrink: 1 !important; min-width: 0; justify-content: flex-start !important; gap: 6px !important; }'
+            + ' .sauce-task-today-row .sauce-task-meta-slot.is-priority { display: none !important; }'
+            + ' .sauce-task-today-row .sauce-task-meta-slot.is-project { min-width: 0; flex-shrink: 1 !important; }'
+            + ' .sauce-task-today-row .sauce-task-meta-slot.is-project > span { max-width: 9em; }'
+            + ' .sauce-task-today-row .sauce-task-due[data-short] { font-size: 0 !important; }'
+            + ' .sauce-task-today-row .sauce-task-due[data-short]::after { content: attr(data-short); font-size: 12px; }'
+            + ' .sauce-task-today-row .sauce-task-actions { margin-left: auto; height: 28px !important; }'
+            + ' .sauce-task-today-row .sauce-task-actions > button { height: 28px !important; min-height: 28px !important; }';
+        const scoped = (prefix, css) => (css || touch).split(' .sauce-task-today-row').join(' ' + prefix + ' .sauce-task-today-row')
             .replace(/^\.sauce-task-today-row/, prefix + ' .sauce-task-today-row');
         const hover = (sel) => '.sauce-task-today-row:hover ' + sel + ', .sauce-task-today-row:focus-within ' + sel;
         return '.sauce-task-today-row .sauce-task-actions { position: absolute; top: 8px; right: 6px; padding-left: 8px;'
@@ -900,7 +932,9 @@ class TaskTodayList {
             + ' ' + hover('.sauce-task-meta-slot.is-priority') + ', ' + hover('.sauce-task-meta-slot.is-due') + ' { visibility: hidden; }'
             + ' ' + scoped('.is-mobile')
             + ' @media (hover: none) { ' + touch + ' }'
-            + ' @media (max-width: 560px) { ' + touch + ' }';
+            + ' @media (max-width: 560px) { ' + touch + ' }'
+            + ' ' + scoped('.is-phone', phone.trim())
+            + ' @media (max-width: 480px) { ' + phone + ' }';
     }
 
     static get _PRIO_BAR_COLOR() {
@@ -1180,12 +1214,20 @@ class TaskTodayList {
                     age.cls === 'is-stale' ? 'var(--color-orange, #ea580c)' : 'var(--text-error, #e05561)');
             }
         }
-        const projectSlot = mkSlot('project', TaskTodayList.META_SLOT_WIDTH.project);
-        if (task && task.project) addChip(projectSlot, TaskTodayList._projectChipText(task.project), 'sauce-task-project');
+        // opts.showProject === false drops the project column entirely, for a
+        // list that is already one project's (every chip would repeat it).
+        if (opts.showProject !== false) {
+            const projectSlot = mkSlot('project', TaskTodayList.META_SLOT_WIDTH.project);
+            if (task && task.project) addChip(projectSlot, TaskTodayList._projectChipText(task.project), 'sauce-task-project');
+        }
         const prioritySlot = mkSlot('priority', TaskTodayList.META_SLOT_WIDTH.priority);
         if (task && task.priority) addChip(prioritySlot, String(task.priority), 'sauce-task-priority');
         const dueSlot = mkSlot('due', TaskTodayList.META_SLOT_WIDTH.due);
-        if (task && task.due) addChip(dueSlot, 'due: ' + task.due, 'sauce-task-due');
+        if (task && task.due) {
+            const dueChip = addChip(dueSlot, 'due: ' + task.due, 'sauce-task-due');
+            const short = TaskTodayList.shortDueLabel(task.due);
+            if (short && dueChip && dueChip.dataset) dueChip.dataset.short = short;
+        }
 
         // Row actions at the FAR-RIGHT end of the cluster. Open rows render
         // tomorrow + next-Monday + edit + a "more" (⋯) button whose menu holds
