@@ -422,6 +422,14 @@
   animation: sectionExplorerPaneIn 0.28s var(--se-ease) both;
 }
 
+/* The entry animations are for a first paint. A node the refresh gate swaps
+ * in (RenderSafe marks it data-sauce-refreshed) replaces content already on
+ * screen, so it appears in place. */
+[data-sauce-refreshed] .se-rail-row,
+[data-sauce-refreshed] .se-page-pane {
+  animation: none;
+}
+
 @media (max-width: 720px) {
   .se-root { flex-direction: column; }
   .se-rail { flex: 0 0 auto; }

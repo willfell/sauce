@@ -187,6 +187,47 @@ class SpaceDailyDashboard {
     if (!TE || typeof TE.parseNote !== "function" || typeof TE.queryToday !== "function") {
       return { open: [], done: 0, overdue: [], stale: [], doneToday: [], backlog: 0 };
     }
+    // Home asks for the day's counts and then mounts this dashboard, which asks
+    // for the same selection again in the same refresh. Callers mutate the task
+    // objects they get (the Today panel's optimistic moves), so every caller
+    // receives its own copies.
+    const copyTasks = (list) => list.map((t) => (t && typeof t === "object" ? Object.assign({}, t) : t));
+    const sel = SpaceDailyDashboard._perRevision(dv, "tasks|" + todayStr, TE,
+      () => SpaceDailyDashboard._selectTasksNow(dv, todayStr, TE));
+    return {
+      open: copyTasks(sel.open),
+      done: sel.done,
+      overdue: copyTasks(sel.overdue),
+      stale: copyTasks(sel.stale),
+      doneToday: copyTasks(sel.doneToday),
+      backlog: sel.backlog,
+    };
+  }
+
+  /**
+   * Run `compute` once per Dataview index revision for `key`, and reuse the
+   * result while the index has not moved (index.revision increments on every
+   * reload, rename and delete). `owner` is an identity the result also depends
+   * on (the live TaskEntity class, replaced on a CustomJS reload). Without a
+   * numeric dv.index.revision (cold load, harness stubs) nothing is kept.
+   */
+  static _perRevision(dv, key, owner, compute) {
+    const index = dv && dv.index && typeof dv.index.revision === "number" ? dv.index : null;
+    if (!index) return compute();
+    let memo = SpaceDailyDashboard._revisionMemo;
+    if (!memo || memo.index !== index || memo.revision !== index.revision) {
+      memo = { index, revision: index.revision, entries: new Map() };
+      SpaceDailyDashboard._revisionMemo = memo;
+    }
+    const hit = memo.entries.get(key);
+    if (hit && hit.owner === owner) return hit.value;
+    const value = compute();
+    // A scan that moved the index while it ran is not kept.
+    if (index.revision === memo.revision) memo.entries.set(key, { owner, value });
+    return value;
+  }
+
+  static _selectTasksNow(dv, todayStr, TE) {
     const toArr = (q) => {
       try {
         const r = dv.pages(q);
@@ -383,6 +424,12 @@ class SpaceDailyDashboard {
   static selectMeetings(dv, todayStr) {
     const today = String(todayStr == null ? "" : todayStr).trim();
     if (!today) return [];
+    // Shared with Home's count pass in the same refresh (see selectTasks).
+    return SpaceDailyDashboard._perRevision(dv, "meetings|" + today, null,
+      () => SpaceDailyDashboard._selectMeetingsNow(dv, today)).slice();
+  }
+
+  static _selectMeetingsNow(dv, today) {
     try {
       const r = dv.pages('"spice/meetings/notes"');
       if (!r) return [];

@@ -912,6 +912,25 @@ failures += !run("REGRESSION: ProjectDocsIndex.render with a class-shaped dv sti
   delete global.customJS;
 });
 
+// The rail and pane entry animations replayed every time the refresh gate
+// swapped a changed explorer in. RenderSafe marks swapped-in nodes; the
+// stylesheet must key on the very attribute RenderSafe sets.
+failures += !run("entry animations are switched off under the refresh gate's own mark", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../mechanisms/section-explorer/section-explorer.css"), "utf8");
+  const gate = fs.readFileSync(path.join(__dirname, "../mechanisms/render-safe/render-safe.js"), "utf8");
+  const set = gate.match(/setAttribute\('(data-sauce-[a-z-]+)', ''\)/);
+  assert.ok(set, "RenderSafe._markRefreshed sets a data-sauce-* attribute");
+  const attr = set[1];
+  const rule = css.match(/([^{}]*)\{\s*animation:\s*none;\s*\}/g) || [];
+  const selectors = rule.join("\n");
+  for (const cls of [".se-rail-row", ".se-page-pane"]) {
+    assert.ok(selectors.includes("[" + attr + "] " + cls),
+      "expected `[" + attr + "] " + cls + " { animation: none; }` in section-explorer.css");
+    assert.ok(new RegExp("\\" + cls + "\\s*\\{[^}]*animation:\\s*sectionExplorer").test(css),
+      cls + " still has its first-paint entry animation");
+  }
+});
+
 // ── Regression: section-explorer.css was written to disk correctly on every
 // consumer vault but NEVER actually applied, because Obsidian CSS snippets
 // are OFF by default until registered in .obsidian/appearance.json's
