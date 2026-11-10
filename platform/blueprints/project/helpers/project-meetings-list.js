@@ -200,7 +200,43 @@ class ProjectMeetingsList {
 
   // ---------- Instance / browser render ----------
 
+  /**
+   * The project's meetings in the shared meetings view (MeetingsBrowseList,
+   * surface 'project'): search, day strip, range tabs, Person ▾ and Open tasks.
+   * Vaults without the meetings view (or before it registers) keep the flat
+   * month list below (_renderFlat).
+   */
   async render(dv) {
+    if (!dv || !dv.container) return;
+    if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
+    try {
+      const cjs = (typeof globalThis !== 'undefined' && globalThis.customJS)
+        || (typeof window !== 'undefined' && window.customJS) || null;
+      const View = cjs && cjs.MeetingsBrowseList;
+      const FB = cjs && cjs.FilterBar;
+      if (View && typeof View.render === 'function' && FB && typeof FB.layout === 'function') {
+        let page = null;
+        try {
+          page = cjs.RenderSafe && typeof cjs.RenderSafe.page === 'function'
+            ? cjs.RenderSafe.page(dv)
+            : (typeof dv.current === 'function' ? dv.current() : null);
+        } catch (_e) { page = null; }
+        if (!page || !page.file) return;
+        const ref = ProjectMeetingsList._projectRef(page);
+        if (!ref) return;
+        return await View.render(dv, {
+          surface: 'project',
+          scope: {
+            id: ref.path || ref.name,
+            match: (p) => !!p && p.type === 'meeting' && ProjectMeetingsList._matches(p.project, ref),
+          },
+        });
+      }
+    } catch (_e) { return; }
+    return this._renderFlat(dv);
+  }
+
+  async _renderFlat(dv) {
     if (!dv || !dv.container) return;
     if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
 

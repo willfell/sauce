@@ -79,17 +79,33 @@ class MeetingLeafActions {
     }
     return { attendees, people: attendees.slice() };
   }
+  static canonicalLinkNames(values) {
+    if (!values || typeof values[Symbol.iterator] !== "function") return [];
+    try { return Array.from(values).map((value) => MeetingLeafActions.cleanProjectName(value)).filter(Boolean); }
+    catch (_e) { return []; }
+  }
   static personStubBody(name, isoNow) {
     return `---\ntype: person\ncreated_at: "${isoNow}"\naliases: []\n---\n\n# [[${name}]]\n\n## Notes\n-\n`;
+  }
+  static _enqueuePerson(queue, operation) {
+    const run = () => Promise.resolve().then(operation);
+    const result = (queue.tail || Promise.resolve()).then(run, run);
+    queue.tail = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
   async render(dv) {
-    if (dv.container.closest(".markdown-embed")) return;
-    try { if (dv.container.closest(".markdown-preview-view")?.querySelector(".meeting-chrome-root")) return; } catch (_e) {}
-    const myGen = (dv.container.__meetingLeafRenderGen || 0) + 1;
-    dv.container.__meetingLeafRenderGen = myGen;
-    while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
+    try {
+      if (!dv || !dv.container || typeof dv.container.createEl !== "function") return;
+      if (dv.container.closest?.(".markdown-embed")) return;
+      if (dv.container.closest?.(".markdown-preview-view")?.querySelector?.(".meeting-chrome-root")) return;
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
+        || (typeof window !== "undefined" && window.customJS) || null;
+      if (!cjs?.AccentButton || typeof cjs.AccentButton.render !== "function") return;
+      const myGen = (dv.container.__meetingLeafRenderGen || 0) + 1;
+      dv.container.__meetingLeafRenderGen = myGen;
+      while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
     const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
@@ -108,11 +124,12 @@ class MeetingLeafActions {
     const row = wrap.createEl("div");
     row.style.cssText = "display: flex; gap: 12px; margin: 0 auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;";
 
-    customJS.AccentButton.render(row, { label: "New Task", icon: plusIcon, onClick: () => this._onNewTask(dv), flex: true });
-    customJS.AccentButton.render(row, { label: "Add to Project", icon: folderIcon, onClick: () => this._onAddToProject(dv), flex: true });
-    customJS.AccentButton.render(row, { label: "Edit Attendees", icon: usersIcon, onClick: () => this._onEditAttendees(dv), flex: true });
+      cjs.AccentButton.render(row, { label: "New Task", icon: plusIcon, onClick: () => this._onNewTask(dv), flex: true });
+      cjs.AccentButton.render(row, { label: "Add to Project", icon: folderIcon, onClick: () => this._onAddToProject(dv), flex: true });
+      cjs.AccentButton.render(row, { label: "Edit Attendees", icon: usersIcon, onClick: () => this._onEditAttendees(dv), flex: true });
 
-    wrap.createEl("hr").style.cssText = DIVIDER;
+      wrap.createEl("hr").style.cssText = DIVIDER;
+    } catch (_e) { /* cold-load render entries never reject */ }
   }
 
   // ── data sources ───────────────────────────────────────────────────────────
@@ -129,6 +146,65 @@ class MeetingLeafActions {
         .filter((f) => f.path.startsWith("spice/people/") && f.basename !== "People")
         .map((f) => f.basename).sort();
     } catch (_e) { return []; }
+  }
+
+  async _mutateFrontmatter(dv, file, opts) {
+    const renderSafe = globalThis.customJS?.RenderSafe;
+    if (!renderSafe || typeof renderSafe.mutate !== "function") {
+      new Notice((opts.failureMessage || "Could not update meeting") + ": RenderSafe is unavailable.", 6000);
+      return false;
+    }
+    const result = await renderSafe.mutate({
+      app,
+      dv,
+      path: file.path,
+      failureMessage: opts.failureMessage || "Could not update meeting",
+      optimistic: opts.optimistic,
+      revert: opts.revert,
+      write: () => app.fileManager.processFrontMatter(file, opts.write),
+      isCurrent: opts.isCurrent,
+    });
+    return result.ok === true;
+  }
+
+  _page(dv) {
+    try {
+      const renderSafe = globalThis.customJS?.RenderSafe;
+      return renderSafe?.page?.(dv) || (dv && typeof dv.current === "function" ? dv.current() : null);
+    } catch (_e) { return null; }
+  }
+
+  _personLifecycle({ name, selected, people, addInput, list, redrawList, updateAddButton }) {
+    return {
+      apply: () => {
+        const receipt = {
+          hadSelected: selected.has(name),
+          peopleLength: people.length,
+          inputValue: addInput.value,
+          priorNodes: Array.from(list.childNodes || list.children || []),
+          focusTarget: (typeof document !== "undefined") ? document.activeElement : addInput,
+        };
+        selected.add(name);
+        people.push(name);
+        addInput.value = "";
+        redrawList("");
+        updateAddButton();
+        return receipt;
+      },
+      rollback: (receipt) => {
+        if (!receipt) return;
+        if (!receipt.hadSelected) selected.delete(name);
+        people.splice(receipt.peopleLength);
+        addInput.value = receipt.inputValue;
+        if (typeof list.replaceChildren === "function") list.replaceChildren(...receipt.priorNodes);
+        else {
+          while (list.firstChild) list.removeChild(list.firstChild);
+          for (const node of receipt.priorNodes) list.appendChild?.(node);
+        }
+        updateAddButton();
+        try { (receipt.focusTarget || addInput)?.focus?.(); } catch (_e) {}
+      },
+    };
   }
 
   // ── handlers ───────────────────────────────────────────────────────────────
@@ -177,39 +253,56 @@ class MeetingLeafActions {
     }
   }
 
-  _onAddToProject(dv) {
-    const cur = dv.current && dv.current();
+  // `page` (optional) names the meeting when the call comes from a list row
+  // (MeetingsBrowseList's ⋯ menu) rather than from the meeting note itself.
+  _onAddToProject(dv, page) {
+    const cur = (page && page.file) ? page : this._page(dv);
     if (!cur || !cur.file) { new Notice("Open a meeting note to use this action."); return; }
     const file = app.vault.getAbstractFileByPath(cur.file.path);
     if (!file) { new Notice("Could not resolve the current note."); return; }
     const projects = this._listProjects(dv);
     this._openModal({ title: "Add meeting to project", build: (panel, close) => {
-      const list = panel.createEl("div");
-      list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin-top:10px;";
-      const choose = async (name) => {
-        try {
-          await app.fileManager.processFrontMatter(file, (fm) => { fm.project = name ? `[[${name}]]` : ""; });
+      const list = panel.createEl("div", { cls: "sauce-meeting-modal-list" });
+      list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin-top:10px; max-height:52vh; overflow:auto;";
+      const choose = async (name, focusTarget) => {
+        const prior = {
+          disabled: focusTarget.disabled,
+          text: focusTarget.textContent,
+        };
+        const saved = await this._mutateFrontmatter(dv, file, {
+          failureMessage: "Could not set project",
+          optimistic: () => { focusTarget.disabled = true; focusTarget.textContent = "Saving…"; },
+          revert: () => {
+            focusTarget.disabled = prior.disabled;
+            focusTarget.textContent = prior.text;
+            try { focusTarget?.focus?.(); } catch (_e) {}
+          },
+          write: (fm) => { fm.project = name ? `[[${name}]]` : ""; },
+          isCurrent: (page) => MeetingLeafActions.cleanProjectName(page && page.project) === name,
+        });
+        if (saved) {
           new Notice(name ? `Added to ${name}` : "Cleared project");
-        } catch (e) { new Notice("Could not set project: " + (e.message || e), 6000); }
-        close();
+          close();
+        }
       };
       for (const opt of ["(none)", ...projects.map((p) => p.name)]) {
-        const b = list.createEl("button", { text: opt });
-        b.style.cssText = "text-align:left; padding:6px 10px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal); cursor:pointer;";
-        b.onclick = () => choose(opt === "(none)" ? "" : opt);
+        const b = list.createEl("button", { text: opt, cls: "sauce-btn sauce-meeting-modal-option" });
+        b.style.cssText = "justify-content:flex-start; text-align:left; width:100%; min-height:32px;";
+        b.onclick = () => choose(opt === "(none)" ? "" : opt, b);
       }
     }});
   }
 
-  _onEditAttendees(dv) {
-    const cur = dv.current && dv.current();
+  _onEditAttendees(dv, page) {
+    const cur = (page && page.file) ? page : this._page(dv);
     if (!cur || !cur.file) { new Notice("Open a meeting note to use this action."); return; }
     const file = app.vault.getAbstractFileByPath(cur.file.path);
     if (!file) { new Notice("Could not resolve the current note."); return; }
     const people = this._listPeople();
-    const current = new Set(((cur.attendees) || []).map(MeetingLeafActions.stripWikilink));
+    const current = new Set(MeetingLeafActions.canonicalLinkNames(cur.attendees));
     const selected = new Set([...current].filter(Boolean));
     this._openModal({ title: "Edit attendees", build: (panel, close) => {
+      const personQueue = { tail: Promise.resolve() };
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:4px; margin:10px 0; max-height:46vh; overflow:auto;";
       const renderRow = (name) => {
@@ -233,7 +326,7 @@ class MeetingLeafActions {
       addWrap.style.cssText = "display:flex; gap:6px; margin-top:8px;";
       const addInput = addWrap.createEl("input"); addInput.type = "text"; addInput.placeholder = "Search or add new…";
       addInput.style.cssText = "flex:1; padding:5px 8px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
-      const addBtn = addWrap.createEl("button", { text: "Add" });
+      const addBtn = addWrap.createEl("button", { text: "Add", cls: "sauce-btn" });
       const updateAddButton = () => {
         const typed = (addInput.value || "").trim();
         const typedLc = typed.toLowerCase();
@@ -250,40 +343,96 @@ class MeetingLeafActions {
         if (addBtn.disabled) return;
         const name = (addInput.value || "").trim(); if (!name) return;
         const stubPath = `spice/people/${name}.md`;
-        try { if (!app.vault.getAbstractFileByPath(stubPath)) await app.vault.create(stubPath, MeetingLeafActions.personStubBody(name, window.moment().format("YYYY-MM-DDTHH:mm:ssZZ"))); }
-        catch (e) { new Notice("Could not add person: " + (e.message || e), 6000); return; }
-        selected.add(name); people.push(name);
-        addInput.value = "";
-        redrawList("");
-        updateAddButton();
+        const renderSafe = globalThis.customJS?.RenderSafe;
+        if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
+          new Notice("Could not add person: RenderSafe is unavailable.", 6000);
+          return;
+        }
+        await MeetingLeafActions._enqueuePerson(personQueue, async () => {
+          const existing = app.vault.getAbstractFileByPath(stubPath);
+          if (existing) return true;
+          const lifecycle = this._personLifecycle({
+            name, selected, people, addInput, list, redrawList, updateAddButton,
+          });
+          const result = await renderSafe.mutateStructure({
+            app,
+            dv,
+            path: stubPath,
+            failureMessage: "Could not add person",
+            apply: lifecycle.apply,
+            rollback: lifecycle.rollback,
+            write: () => {
+              const now = (typeof window !== "undefined" && typeof window.moment === "function")
+                ? window.moment().format("YYYY-MM-DDTHH:mm:ssZZ") : new Date().toISOString();
+              return app.vault.create(stubPath, MeetingLeafActions.personStubBody(name, now));
+            },
+          });
+          return result.ok === true;
+        });
       };
-      const save = panel.createEl("button", { text: "Save attendees" });
-      save.style.cssText = "margin-top:12px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
+      const footer = panel.createEl("div", { cls: "sauce-modal-footer" });
+      const save = footer.createEl("button", { text: "Save attendees", cls: "sauce-btn sauce-btn-accent" });
       save.onclick = async () => {
-        try {
-          const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter([...selected]);
-          await app.fileManager.processFrontMatter(file, (fm) => { fm.attendees = attendees; fm.people = ppl; });
+        await personQueue.tail;
+        const selectedNames = [...selected];
+        const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter(selectedNames);
+        const expected = JSON.stringify(selectedNames);
+        const prior = {
+          disabled: save.disabled,
+          text: save.textContent,
+        };
+        const saved = await this._mutateFrontmatter(dv, file, {
+          failureMessage: "Could not update attendees",
+          optimistic: () => { save.disabled = true; save.textContent = "Saving…"; },
+          revert: () => {
+            save.disabled = prior.disabled;
+            save.textContent = prior.text;
+            try { save.focus?.(); } catch (_e) {}
+          },
+          write: (fm) => { fm.attendees = attendees; fm.people = ppl; },
+          isCurrent: (page) => JSON.stringify(MeetingLeafActions.canonicalLinkNames(page && page.attendees)) === expected,
+        });
+        if (saved) {
           new Notice(`Attendees updated (${attendees.length})`);
-        } catch (e) { new Notice("Could not update attendees: " + (e.message || e), 6000); }
-        close();
+          close();
+        }
       };
     }});
   }
 
-  // ── modal overlay (mirrors ToDoCreateTask._renderOverlay) ──────────────────
+  // ── modal overlay (shared .sauce-modal shell) ─────────────────────────────
+  // Phone: the same contract TaskDialog keeps — the dialog clears the status
+  // bar and the home indicator, stays inside the screen, and the footer button
+  // spans the width.
+  static get DIALOG_CSS() {
+    const rules = [
+      [".sauce-modal-backdrop.sauce-meeting-modal-overlay", "padding: calc(env(safe-area-inset-top, 0px) + 8px) 8px calc(env(safe-area-inset-bottom, 0px) + 8px); align-items: flex-start;"],
+      [".sauce-modal.sauce-meeting-modal", "width: 100% !important; max-height: 100%; min-width: 0;"],
+      [".sauce-meeting-modal > .sauce-modal-title", "font-size: 1em;"],
+      [".sauce-meeting-modal .sauce-meeting-modal-list", "max-height: none !important;"],
+      [".sauce-meeting-modal > .sauce-modal-footer > .sauce-btn", "flex: 1 1 0; min-height: 36px;"],
+    ];
+    const css = (prefix) => rules.map(([sel, body]) => prefix + sel + " { " + body + " }").join(" ");
+    return "@media (max-width: 600px) { " + css("") + " } " + css("body.is-phone ");
+  }
+
+
   _openModal({ title, build }) {
     const prior = document.querySelector(".sauce-meeting-modal-overlay");
     if (prior) prior.remove();
-    const overlay = document.body.createDiv({ cls: "sauce-meeting-modal-overlay" });
-    overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 9999;";
-    const modal = overlay.createDiv();
-    modal.style.cssText = "background: var(--background-primary, #1c1c1c); color: var(--text-normal, #ddd); border: 1px solid var(--background-modifier-border, #444); border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: 80vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);";
+    const overlay = document.body.createDiv({ cls: "sauce-modal-backdrop sauce-meeting-modal-overlay" });
+    overlay.createEl("style").textContent = MeetingLeafActions.DIALOG_CSS;
+    const modal = overlay.createDiv({ cls: "sauce-modal sauce-meeting-modal" });
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-label", title);
+    modal.style.cssText = "width: min(100%, 460px);";
     const escListener = (ev) => { if (ev.key === "Escape") close(); };
     const close = () => { document.removeEventListener("keydown", escListener); overlay.remove(); };
     overlay.onclick = (e) => { if (e.target === overlay) close(); };
     document.addEventListener("keydown", escListener);
-    const h = modal.createEl("div", { text: title });
-    h.style.cssText = "font-weight:600; font-size:1.05em; margin-bottom:4px;";
+    modal.createEl("div", { text: title, cls: "sauce-modal-title" });
     build(modal, close);
   }
+
 }

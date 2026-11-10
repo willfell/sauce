@@ -14,9 +14,5 @@ await dv.view("{{views_path}}/customjs-guard", { class: "MeetingChromeBar" });
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Meetings", top: true }] });
-```
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "MeetingsBrowseList" });
 ```

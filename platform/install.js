@@ -7858,6 +7858,17 @@ function _stripMeetingsHubEntityCreateBlock(body) {
 // _archivedHubPath — pure. Maps a per-day hub note under spice/meetings/hubs/
 // into the _archive/ subtree, preserving the relative path. Idempotent: a path
 // already under _archive/ (or outside the hubs root) is returned unchanged.
+// _stripMeetingsHubLabel — pure. Removes the dataviewjs block that draws the
+// "Meetings" SectionLabel (any views path, `top: true` or not) from the
+// persistent hub body, plus one blank line after it. Only a fence whose sole
+// statement is that SectionLabel call is touched; everything else is kept
+// byte for byte. Non-string input comes back unchanged.
+function _stripMeetingsHubLabel(body) {
+  if (typeof body !== "string") return body;
+  const re = /```dataviewjs[ \t]*\r?\n[ \t]*await dv\.view\("[^"\n]*customjs-guard", \{ class: "SectionLabel", args: \[\{ text: "Meetings"(?:, top: true)? \}\] \}\);[ \t]*\r?\n```[ \t]*(?:\r?\n(?:[ \t]*\r?\n)?|$)/g;
+  return body.replace(re, "");
+}
+
 function _archivedHubPath(fpath) {
   if (typeof fpath !== "string") return fpath;
   const ROOT = "spice/meetings/hubs/";
@@ -7908,10 +7919,6 @@ async function applyMeetingsHubScaffoldArchiveHeal(tp, variables, history, git) 
         "```",
         "",
         "```dataviewjs",
-        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Meetings", top: true }] });`,
-        "```",
-        "",
-        "```dataviewjs",
         `await dv.view("${viewsPath}/customjs-guard", { class: "MeetingsBrowseList" });`,
         "```",
         "",
@@ -7924,6 +7931,29 @@ async function applyMeetingsHubScaffoldArchiveHeal(tp, variables, history, git) 
   } catch (e) {
     history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md",
       reason: `scaffold failed: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+  }
+
+  // 1b. The meetings view draws its own search, tabs and caption under the
+  // chrome bar (the To-Do pages carry no heading above their view), so an
+  // existing hub's "Meetings" SectionLabel block goes. Backup-first, idempotent.
+  try {
+    if (await adapter.exists(MEETINGS_PATH)) {
+      const before = await adapter.read(MEETINGS_PATH);
+      const after = _stripMeetingsHubLabel(before);
+      if (after !== before) {
+        const backupPath = `.sauce-backup/${ts}/${MEETINGS_PATH}`;
+        try { await adapter.mkdir(backupPath.substring(0, backupPath.lastIndexOf("/"))); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(MEETINGS_PATH, after);
+        history?.push({ event: "info", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md", action: "label_removed",
+          reason: `removed the Meetings SectionLabel above MeetingsBrowseList in ${MEETINGS_PATH}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "meetings_hub_scaffold_archive_heal", name: "Meetings.md",
+      reason: `label removal failed: ${e && e.message ? e.message : String(e)}`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
   }
 
@@ -22863,6 +22893,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyMeetingChromeModernizeHeal = applyMeetingChromeModernizeHeal;
     module.exports._modernizeMeetingBody = _modernizeMeetingBody;
     module.exports._archivedHubPath = _archivedHubPath;
+    module.exports._stripMeetingsHubLabel = _stripMeetingsHubLabel;
     module.exports._cleanProjectLinkName = _cleanProjectLinkName;
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
