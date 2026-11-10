@@ -191,56 +191,87 @@ console.log("\n--- HC-V0129-RELEASE-SNAPSHOT ---");
 
 // ---- Release range: count from the commit a release was computed from ----
 // v0.307.1's release PR was computed before #910 landed and merged after it,
-// so its tag sat on top of #910 and #910's components were never bumped.
+// so its tag sat on top of #910 and #910's components were never bumped. The
+// record lives in platform/release-state.json, inside the release commit's
+// tree: a commit-message trailer did not survive the auto-merged squash.
 console.log("\n--- HC-RELEASE-RANGE ---");
 {
+    const { execFileSync } = require("child_process");
     const SHA = "65a7cbc2d1e4f00000000000000000000000abcd";
-    const squashBody = `chore(release): v0.307.1 (#911)\n\nRelease-Computed-From: ${SHA}\n\nCo-authored-by: willfell <x@users.noreply.github.com>\n`;
-    eq("HC-RELEASE-RANGE-A: trailer read from a squashed release commit", cr.computedFromOf(squashBody), SHA);
-    eq("HC-RELEASE-RANGE-B: no trailer -> null", cr.computedFromOf("chore(release): v0.307.0 (#908)\n"), null);
-    eq("HC-RELEASE-RANGE-C: trailer must be a hex sha", cr.computedFromOf("Release-Computed-From: main\n"), null);
+    const state = (v) => JSON.stringify({ computed_from: v });
+    eq("HC-RELEASE-RANGE-A: computed_from read from release-state.json", cr.computedFromOf(state(SHA)), SHA);
+    eq("HC-RELEASE-RANGE-B: empty / missing / malformed state -> null",
+        [cr.computedFromOf(state("")), cr.computedFromOf(null), cr.computedFromOf("{")].join(), ",,");
+    eq("HC-RELEASE-RANGE-C: computed_from must be a hex sha", cr.computedFromOf(state("main")), null);
     ok("HC-RELEASE-RANGE-D: release commits are recognised", cr.isReleaseCommit("chore(release): v1.2.3") && !cr.isReleaseCommit("fix(release): x")
         && !cr.isReleaseCommit("chore(seed): rebaseline") && !cr.isReleaseCommit("chore: tidy"));
-    const r1 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: squashBody, tag: "v0.307.1", isAncestor: (s) => s === SHA });
-    eq("HC-RELEASE-RANGE-E: reachable trailer -> range from the computed-from sha", r1.range, `${SHA}..HEAD`);
+    const r1 = cr.resolveRange({ releaseHash: "f4f5", releaseState: state(SHA), tag: "v0.307.1", isAncestor: (s) => s === SHA });
+    eq("HC-RELEASE-RANGE-E: reachable computed_from -> range from it", r1.range, `${SHA}..HEAD`);
     eq("HC-RELEASE-RANGE-F: reason computed-from", r1.reason, "computed-from");
-    const r2 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: squashBody, tag: "v0.307.1", isAncestor: () => false });
-    eq("HC-RELEASE-RANGE-G: unreachable trailer -> range from the release commit", r2.range, "f4f5..HEAD");
-    const r3 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: "chore(release): v0.307.0", tag: "v0.307.0", isAncestor: () => true });
-    eq("HC-RELEASE-RANGE-H: no trailer -> range from the release commit (same as its tag)", r3.range, "f4f5..HEAD");
-    const r4 = cr.resolveRange({ releaseHash: "f4f5", releaseMessage: squashBody, isAncestor: () => { throw new Error("git"); } });
+    const r2 = cr.resolveRange({ releaseHash: "f4f5", releaseState: state(SHA), tag: "v0.307.1", isAncestor: () => false });
+    eq("HC-RELEASE-RANGE-G: unreachable computed_from -> range from the release commit", r2.range, "f4f5..HEAD");
+    const r3 = cr.resolveRange({ releaseHash: "f4f5", releaseState: null, tag: "v0.307.0", isAncestor: () => true });
+    eq("HC-RELEASE-RANGE-H: no state -> range from the release commit (same as its tag)", r3.range, "f4f5..HEAD");
+    const r4 = cr.resolveRange({ releaseHash: "f4f5", releaseState: state(SHA), isAncestor: () => { throw new Error("git"); } });
     eq("HC-RELEASE-RANGE-I: a failing ancestry check falls back to the release commit", r4.range, "f4f5..HEAD");
     eq("HC-RELEASE-RANGE-J: no release commit -> last tag", cr.resolveRange({ tag: "v0.1.0" }).range, "v0.1.0..HEAD");
     eq("HC-RELEASE-RANGE-K: nothing -> all of HEAD", cr.resolveRange({}).range, "HEAD");
 
-    // The race replayed: from the computed-from sha, #910's feat is counted and
-    // the release commit (which touched the same manifests) is not.
-    const man = {
-        workshop_version: "0.307.1",
-        blueprints: [{ name: "meetings", version: "0.19.4", path: "blueprints/meetings" }],
-        mechanisms: [{ name: "section-label", version: "0.2.2", path: "mechanisms/section-label" },
-                     { name: "convenience", version: "0.6.1", path: "mechanisms/convenience" }],
-    };
-    const raced = [
-        { hash: "f4f5", message: squashBody, files: ["platform/mechanisms/convenience/manifest.json", "platform/blueprints/meetings/manifest.json"] },
-        { hash: "65a7", message: "feat(meetings): bring the meetings pages onto the To-Do design (#910)",
-          files: ["platform/blueprints/meetings/helpers/meetings-browse-list.js", "platform/mechanisms/section-label/filter-bar.js"] },
-    ].filter((c) => !cr.isReleaseCommit(c.message));
-    const plan = cr.computePlan(raced, man);
-    const to = Object.fromEntries(plan.components.map((c) => [c.name, c.to]));
-    eq("HC-RELEASE-RANGE-L: the stranded feat bumps meetings", to.meetings, "0.20.0");
-    eq("HC-RELEASE-RANGE-M: the stranded feat bumps section-label", to["section-label"], "0.3.0");
-    ok("HC-RELEASE-RANGE-N: the release commit itself bumps nothing", !("convenience" in to));
+    // The race replayed in a real repo. S is where the release is computed;
+    // F (#910) lands next; the release commit R is squashed on top of F with
+    // a title-only message, carrying the state file that names S.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-race-"));
+    try {
+        const git = (...a) => execFileSync("git", a, { cwd: tmp, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+        const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true }); fs.writeFileSync(path.join(tmp, rel), text); };
+        const commit = (msg) => { git("add", "-A"); git("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg); return git("rev-parse", "HEAD"); };
+        git("init", "-q");
+        write("platform/blueprints/meetings/manifest.json", "{}\n");
+        write("platform/mechanisms/section-label/manifest.json", "{}\n");
+        write("platform/mechanisms/convenience/manifest.json", "{}\n");
+        write(cr.RELEASE_STATE_REL, state("") + "\n");
+        commit("chore(release): v0.307.0 (#908)");
+        write("platform/mechanisms/convenience/c.js", "1\n");
+        const S = commit("fix(convenience): homepage reset (#909)");
+        write("platform/blueprints/meetings/helpers/m.js", "1\n");
+        write("platform/mechanisms/section-label/filter-bar.js", "1\n");
+        commit("feat(meetings): bring the meetings pages onto the To-Do design (#910)");
+        write("platform/mechanisms/convenience/manifest.json", "{\"v\":1}\n");
+        cr.writeReleaseState(tmp, S);
+        commit("chore(release): v0.307.1 (#911)");
+        write("platform/mechanisms/other/x.js", "1\n");
+        commit("fix(render-safe): keep live UI (#913)");
+        const got = cr.releaseCommits(tmp);
+        const subjects = got.commits.map((c) => c.message.split("\n")[0]);
+        eq("HC-RELEASE-RANGE-L: the squashed release commit's state file names the computed-from commit",
+            cr.computedFromOf(cr.releaseStateAt(git("rev-parse", "HEAD~1"), tmp)), S);
+        eq("HC-RELEASE-RANGE-M: the next release counts from it (reason)", got.reason, "computed-from");
+        ok("HC-RELEASE-RANGE-N: the stranded feat is counted, the release commit and earlier commits are not",
+            subjects.includes("feat(meetings): bring the meetings pages onto the To-Do design (#910)")
+            && subjects.includes("fix(render-safe): keep live UI (#913)")
+            && !subjects.some((x) => x.startsWith("chore(release)")) && !subjects.some((x) => x.includes("#909")));
+        const man = {
+            workshop_version: "0.307.1",
+            blueprints: [{ name: "meetings", version: "0.19.4", path: "blueprints/meetings" }],
+            mechanisms: [{ name: "section-label", version: "0.2.2", path: "mechanisms/section-label" },
+                         { name: "convenience", version: "0.6.1", path: "mechanisms/convenience" }],
+        };
+        const to = Object.fromEntries(cr.computePlan(got.commits, man).components.map((c) => [c.name, c.to]));
+        ok("HC-RELEASE-RANGE-O: the stranded feat bumps meetings and section-label; convenience is not bumped again",
+            to.meetings === "0.20.0" && to["section-label"] === "0.3.0" && !("convenience" in to));
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
 
-    const wf = fs.readFileSync(path.join(REPO_ROOT, ".github/workflows/release.yml"), "utf8");
-    ok("HC-RELEASE-RANGE-O: prepare-release records the sha it computes from in the release commit",
-        /id: base\s+run: echo "sha=\$\(git rev-parse HEAD\)" >> "\$GITHUB_OUTPUT"/.test(wf)
-        && /commit-message: \|\n\s+chore\(release\): v\$\{\{ steps\.ver\.outputs\.version \}\}\n\n\s+Release-Computed-From: \$\{\{ steps\.base\.outputs\.sha \}\}/.test(wf)
-        && wf.indexOf("id: base") < wf.indexOf("compute-release.js --write"));
     const src = fs.readFileSync(path.join(REPO_ROOT, "scripts/release/compute-release.js"), "utf8");
-    ok("HC-RELEASE-RANGE-P: the CLI resolves its range this way and drops release commits",
-        /resolveRange\(\{\s*releaseHash: rel && rel\.hash/.test(src)
-        && src.indexOf("getCommits(range).filter((c) => !isReleaseCommit(c.message))") >= 0);
+    const cli = src.slice(src.indexOf("// --- CLI ---"));
+    ok("HC-RELEASE-RANGE-P: the CLI counts releaseCommits() and --write records the computed-from sha after applying the plan",
+        /const \{ range, reason, commits \} = releaseCommits\(\);/.test(cli)
+        && cli.indexOf("writeReleaseState(REPO_ROOT, headSha());") > cli.indexOf("applyPlan(plan, REPO_ROOT);")
+        && src.indexOf("getCommits(range, cwd).filter((c) => !isReleaseCommit(c.message))") >= 0);
+    const seeded = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, cr.RELEASE_STATE_REL), "utf8"));
+    ok("HC-RELEASE-RANGE-Q: release-state.json is tracked with a computed_from key (so preflight-bumped restores it)",
+        Object.prototype.hasOwnProperty.call(seeded, "computed_from"));
 }
 
 console.log(`\nrun-release-bumper: ${pass} passed, ${fail} failed`);

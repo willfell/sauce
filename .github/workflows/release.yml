@@ -33,9 +33,6 @@ jobs:
           cache: npm
       - name: Install deps
         run: npm install --omit=dev
-      - name: Record the main commit this release is computed from
-        id: base
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Compute + apply per-component + umbrella bumps
         run: node scripts/release/compute-release.js --write
       - name: Detect whether anything is releasable
@@ -65,10 +62,7 @@ jobs:
           token: ${{ secrets.RELEASE_PAT }}
           branch: release/next
           delete-branch: false
-          commit-message: |
-            chore(release): v${{ steps.ver.outputs.version }}
-
-            Release-Computed-From: ${{ steps.base.outputs.sha }}
+          commit-message: "chore(release): v${{ steps.ver.outputs.version }}"
           title: "chore(release): v${{ steps.ver.outputs.version }}"
           body: |
             Automated release PR — merging this tags **v${{ steps.ver.outputs.version }}** and ships to brew.
@@ -76,8 +70,6 @@ jobs:
             `compute-release.js` computed these per-component + umbrella bumps from the conventional
             commits since the last `v*` tag, and **preflight already passed on this exact bumped state**
             (run inside prepare-release). Merge to release.
-
-            Release-Computed-From: ${{ steps.base.outputs.sha }}
       - name: Install gh
         if: steps.diff.outputs.changed == 'true' && steps.cpr.outputs.pull-request-number != ''
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gh
