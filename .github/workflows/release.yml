@@ -10,18 +10,15 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   # ---- maintain the standing release PR on every main push (skip the bot's own commits) ----
   prepare-release:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):') && !startsWith(github.event.head_commit.message, 'docs(prompts):')) }}
     runs-on: sauce
-    timeout-minutes: 30
-    env:
-      SAUCE_PREFLIGHT_JOBS: '4'
+    timeout-minutes: 15
+    concurrency:
+      group: release-prepare
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,9 +44,6 @@ jobs:
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
-      - name: Validate the bumped state (preflight gate — replaces the PR's missing auto-CI)
-        if: steps.diff.outputs.changed == 'true'
-        run: npm run release:preflight
       - name: Read computed version
         if: steps.diff.outputs.changed == 'true'
         id: ver
@@ -68,8 +62,8 @@ jobs:
             Automated release PR — merging this tags **v${{ steps.ver.outputs.version }}** and ships to brew.
 
             `compute-release.js` computed these per-component + umbrella bumps from the conventional
-            commits since the last `v*` tag, and **preflight already passed on this exact bumped state**
-            (run inside prepare-release). Merge to release.
+            commits since the last release. Its required checks run preflight on this bumped state on
+            Linux and macOS, and it merges itself when they pass.
       - name: Install gh
         if: steps.diff.outputs.changed == 'true' && steps.cpr.outputs.pull-request-number != ''
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gh
@@ -87,6 +81,9 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: sauce
     timeout-minutes: 30
+    concurrency:
+      group: release-ship
+      cancel-in-progress: false
     env:
       SAUCE_PREFLIGHT_JOBS: '4'
     steps:
@@ -175,31 +172,3 @@ jobs:
           PR="${{ steps.cpr_tap.outputs.pull-request-number }}"
           gh pr merge "$PR" --repo willfell/homebrew-sauce --squash --delete-branch \
             || gh pr merge "$PR" --repo willfell/homebrew-sauce --squash --admin --delete-branch
-
-  # ---- post-merge seed rebaseline (NEVER on-branch — landmine) ----
-  rebaseline-seed:
-    if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
-    runs-on: sauce
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-      - name: Install deps
-        run: npm install --omit=dev
-      - name: Rebaseline seed (post-merge only)
-        run: |
-          npm run seed:prev
-          npm run seed:rebaseline
-      - name: Commit rebaselined seed
-        run: |
-          VERSION=$(node -e "console.log(require('./package.json').version)")
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add platform/test/seed-vault platform/test/seed-vault-prev
-          git diff --cached --quiet || git commit -m "chore(seed): rebaseline to v$VERSION"
-          git push origin HEAD:main

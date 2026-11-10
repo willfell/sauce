@@ -726,4 +726,7 @@ async function main() {
 main().catch((error) => {
   console.error(error.stack || error.message);
   process.exitCode = 1;
+  // A browser helper that outlives the kill keeps the inherited pipes open and
+  // with them this process; do not wait for the runner's 15-minute step kill.
+  setTimeout(() => process.exit(1), 2000);
 });

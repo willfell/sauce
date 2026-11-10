@@ -1022,4 +1022,10 @@ function behavioralMutationContract() {
         behavioralMutationContract();
     }
     console.log(`cross-blueprint style adoption C7a${MUTATION_CHILD ? ` mutation ${MUTATION}` : ""}: PASS`);
-})().catch((error) => { console.error(error && error.stack || error); process.exitCode = 1; });
+})().catch((error) => {
+    console.error(error && error.stack || error);
+    process.exitCode = 1;
+    // A browser helper that outlives the kill keeps the inherited stderr pipe open
+    // and with it this process; do not wait for the runner's 15-minute step kill.
+    setTimeout(() => process.exit(1), 2000);
+});

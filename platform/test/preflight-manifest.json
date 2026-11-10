@@ -54,6 +54,15 @@
       "group": "chrome"
     },
     {
+      "id": "chrome-cdp-launch",
+      "cmd": [
+        "node",
+        "platform/test/run-chrome-cdp-launch.js"
+      ],
+      "lane": "parallel",
+      "group": "chrome"
+    },
+    {
       "id": "finance-style-adoption",
       "cmd": [
         "node",
@@ -920,6 +929,14 @@
       "cmd": [
         "node",
         "platform/test/run-ci-runner-policy.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "release-workflow-shape",
+      "cmd": [
+        "node",
+        "platform/test/run-release-workflow-shape.js"
       ],
       "lane": "parallel"
     },
