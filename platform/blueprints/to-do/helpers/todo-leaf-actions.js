@@ -186,7 +186,7 @@ class ToDoLeafActions {
             const body = [
                 '---',
                 'type: to-do-hub',
-                `created_at: "${window.moment().format('YYYY-MM-DDTHH:mm:ssZZ')}"`,
+                `created_at: "${window.moment().format('YYYY-MM-DDTHH:mm:ssZ')}"`,
                 'cssclasses:',
                 '  - wide',
                 '---',
@@ -256,7 +256,7 @@ class ToDoLeafActions {
         const body = [
             '---',
             'type: to-do-hub',
-            `created_at: "${window.moment().format('YYYY-MM-DDTHH:mm:ssZZ')}"`,
+            `created_at: "${window.moment().format('YYYY-MM-DDTHH:mm:ssZ')}"`,
             'cssclasses:',
             '  - wide',
             '---',

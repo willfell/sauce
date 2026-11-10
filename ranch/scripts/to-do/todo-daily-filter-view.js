@@ -30,12 +30,62 @@ class ToDoDailyFilterView {
     static get GROUP_MODES() { return ['none', 'project', 'priority', 'due']; }
     static get STALE_DIVIDER_LABEL() { return 'Stale · overdue 30+ days'; }
 
-    static _defaultPrefs() { return { tab: 'today', sort: 'smart', group: 'none' }; }
+    /**
+     * The pages this view draws. `daily` is the To-Do note; `all` is All
+     * To-Dos and `recurring` is the Recurring index, both reached through
+     * their own thin classes (ToDoAllList, TaskRecurringList). Each surface
+     * has its own tabs, defaults and prefs key, so a tab picked on one page
+     * never moves another.
+     */
+    static get SURFACES() {
+        return {
+            daily: {
+                key: 'daily',
+                prefsKey: ToDoDailyFilterView.PREFS_KEY,
+                tabs: ToDoDailyFilterView.TABS,
+                defaults: { tab: 'today', sort: 'smart', group: 'none' },
+                counted: ['overdue', 'backlog'],
+                labels: {},
+                strip: true, search: false, done: true, reorder: true, recurringOnly: false,
+                emptyText: 'No tasks in this view.',
+            },
+            all: {
+                key: 'all',
+                prefsKey: 'sauce-todo-filter:prefs:all',
+                tabs: ['all', 'overdue', 'week', 'backlog'],
+                defaults: { tab: 'all', sort: 'due', group: 'none' },
+                counted: ['all', 'overdue', 'backlog'],
+                labels: {},
+                strip: false, search: true, done: false, reorder: false, recurringOnly: false,
+                searchPlaceholder: 'Search open tasks…',
+                emptyText: 'No open tasks. All clear.',
+            },
+            recurring: {
+                key: 'recurring',
+                prefsKey: 'sauce-todo-filter:prefs:recurring',
+                tabs: ['all', 'week', 'overdue'],
+                defaults: { tab: 'all', sort: 'due', group: 'none' },
+                counted: ['all', 'overdue'],
+                labels: { all: 'All' },
+                strip: false, search: true, done: false, reorder: false, recurringOnly: true,
+                searchPlaceholder: 'Search recurring tasks…',
+                emptyText: 'No recurring tasks yet. Set "Repeats" on a task to see it here.',
+            },
+        };
+    }
 
-    static _normalizePrefs(value) {
-        const out = ToDoDailyFilterView._defaultPrefs();
+    static surface(key) {
+        const all = ToDoDailyFilterView.SURFACES;
+        return Object.prototype.hasOwnProperty.call(all, key) ? all[key] : all.daily;
+    }
+
+    static _defaultPrefs(surfaceKey) { return { ...ToDoDailyFilterView.surface(surfaceKey).defaults }; }
+
+    static _normalizePrefs(value, surfaceKey) {
+        const S = ToDoDailyFilterView.surface(surfaceKey);
+        const out = { ...S.defaults };
         if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
-        if (ToDoDailyFilterView.TABS.includes(value.tab)) out.tab = value.tab;
+        if (S.tabs.includes(value.tab)) out.tab = value.tab;
         if (ToDoDailyFilterView.SORT_MODES.includes(value.sort)) out.sort = value.sort;
         if (ToDoDailyFilterView.GROUP_MODES.includes(value.group)) out.group = value.group;
         return out;
@@ -46,32 +96,54 @@ class ToDoDailyFilterView {
         catch (_e) { return null; }
     }
 
-    static _readRaw(storage) {
+    static _readRaw(storage, surfaceKey) {
         try {
             if (!storage || typeof storage.getItem !== 'function') return {};
-            const raw = storage.getItem(ToDoDailyFilterView.PREFS_KEY);
+            const raw = storage.getItem(ToDoDailyFilterView.surface(surfaceKey).prefsKey);
             const parsed = raw ? JSON.parse(raw) : null;
             return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
         } catch (_e) { return {}; }
     }
 
-    static readPrefs(storage) {
-        return ToDoDailyFilterView._normalizePrefs(ToDoDailyFilterView._readRaw(storage));
+    static readPrefs(storage, surfaceKey) {
+        return ToDoDailyFilterView._normalizePrefs(ToDoDailyFilterView._readRaw(storage, surfaceKey), surfaceKey);
     }
 
     /**
      * Read-merge-write: keys this view does not own survive, and the owned keys
      * are normalised per key. Persistence is best-effort and never throws.
      */
-    static writePrefs(storage, patch) {
-        const raw = ToDoDailyFilterView._readRaw(storage);
-        const merged = ToDoDailyFilterView._normalizePrefs({ ...raw, ...(patch || {}) });
+    static writePrefs(storage, patch, surfaceKey) {
+        const raw = ToDoDailyFilterView._readRaw(storage, surfaceKey);
+        const merged = ToDoDailyFilterView._normalizePrefs({ ...raw, ...(patch || {}) }, surfaceKey);
         try {
             if (storage && typeof storage.setItem === 'function') {
-                storage.setItem(ToDoDailyFilterView.PREFS_KEY, JSON.stringify({ ...raw, ...merged }));
+                storage.setItem(ToDoDailyFilterView.surface(surfaceKey).prefsKey, JSON.stringify({ ...raw, ...merged }));
             }
         } catch (_e) { /* local preference persistence is best-effort */ }
         return merged;
+    }
+
+    /**
+     * Tasks whose title or project contains every word of `text`, case
+     * insensitive, in input order. Blank text keeps everything.
+     */
+    static searchTasks(tasks, text) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        const words = String(text == null ? '' : text).toLowerCase().split(/\s+/).filter(Boolean);
+        if (!words.length) return list.slice();
+        return list.filter((task) => {
+            if (!task) return false;
+            const project = ToDoDailyFilterView._projectLabel(task);
+            const hay = `${task.title || ''} ${project === 'No project' ? '' : project}`.toLowerCase();
+            return words.every((w) => hay.includes(w));
+        });
+    }
+
+    /** Open tasks with a `recurrence` set, in input order. */
+    static recurringOnly(tasks) {
+        return (Array.isArray(tasks) ? tasks : []).filter((task) =>
+            task && task.recurrence && String(task.recurrence).trim() !== '');
     }
 
     static _te(ref) {
@@ -409,14 +481,16 @@ class ToDoDailyFilterView {
     /**
      * Per-day gesture state shared by every render of the view: Select mode,
      * the selection, the week-strip day being shown (`day`, a YYYY-MM-DD or
-     * null), in-flight locks ('bulk', 'reorder') and the live render. Other
-     * days' entries are dropped once they hold no lock.
+     * null), in-flight locks ('bulk', 'reorder') and the live render. Each
+     * surface keeps its own entry; other days' entries are dropped once they
+     * hold no lock.
      */
-    static _dayState(todayStr) {
-        const key = String(todayStr || '');
+    static _dayState(todayStr, surfaceKey) {
+        const day = String(todayStr || '');
+        const key = `${ToDoDailyFilterView.surface(surfaceKey).key}|${day}`;
         const all = ToDoDailyFilterView._dayStates || (ToDoDailyFilterView._dayStates = new Map());
-        for (const [day, entry] of all) {
-            if (day !== key && !entry.locks.size) all.delete(day);
+        for (const [k, entry] of all) {
+            if (k.slice(k.indexOf('|') + 1) !== day && !entry.locks.size) all.delete(k);
         }
         if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null, day: null });
         return all.get(key);
@@ -427,11 +501,12 @@ class ToDoDailyFilterView {
         return { dataset: {}, parentNode: null, remove() {} };
     }
 
-    async render(dv) {
+    async render(dv, opts) {
         if (!dv || !dv.container) return;
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
 
         const View = ToDoDailyFilterView;
+        const S = View.surface(opts && opts.surface);
         const CJS = typeof window !== 'undefined' && window.customJS ? window.customJS : null;
         const TE = CJS && CJS.TaskEntity;
         const TTL = CJS && CJS.TaskTodayList;
@@ -464,14 +539,35 @@ class ToDoDailyFilterView {
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
         const storage = View.storage();
-        let prefs = View.readPrefs(storage);
+        let prefs = View.readPrefs(storage, S.key);
         const TD = CJS.TaskDialog || null;
         const SL = CJS.SectionLabel || null;
 
-        const root = dv.container.createEl('div', { cls: 'sauce-todo-daily-filter-view' });
+        const root = dv.container.createEl('div', { cls: `sauce-todo-daily-filter-view is-${S.key}` });
         root.style.cssText = 'display:flex; flex-direction:column; gap:10px; width:100%;';
 
         root.createEl('style').textContent = View.BULKBAR_CSS;
+        // Search is in memory only: it narrows the tabs, their counts and the
+        // list, and clears when the note reloads.
+        let query = '';
+        if (S.search) {
+            const searchWrap = root.createEl('label', { cls: 'sauce-todo-search' });
+            const icon = searchWrap.createEl('span', { cls: 'sauce-todo-search-icon' });
+            icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+            const input = searchWrap.createEl('input', { cls: 'sauce-todo-search-input', type: 'search' });
+            input.setAttribute('placeholder', S.searchPlaceholder || 'Search…');
+            input.setAttribute('aria-label', S.searchPlaceholder ? S.searchPlaceholder.replace(/…$/, '') : 'Search tasks');
+            input.addEventListener('input', () => {
+                query = String(input.value || '');
+                paint();
+            });
+        }
+        const pool = () => {
+            let list = S.recurringOnly ? View.recurringOnly(tasks) : tasks;
+            if (query.trim()) list = View.searchTasks(list, query);
+            return list;
+        };
         const aboveTabs = root.createEl('div', { cls: 'sauce-todo-above-tabs' });
         const controls = root.createEl('div', { cls: 'sauce-todo-filter-controls' });
         const tabGroup = controls.createEl('div', { cls: 'sauce-pill-group sauce-todo-filter-tabs' });
@@ -487,10 +583,12 @@ class ToDoDailyFilterView {
         bulkHost.style.cssText = 'display:flex; flex-direction:column; position:sticky; bottom:12px; z-index:5; width:100%;';
 
         const clear = (host) => { while (host.firstChild) host.removeChild(host.firstChild); };
-        const label = (parent, text) => {
+        // `top` drops SectionLabel's own hairline where the filter rule
+        // already sits directly above, so the two never stack.
+        const label = (parent, text, top) => {
             const holder = parent.createEl('div', { cls: 'sauce-todo-filter-section-label' });
             if (SL && typeof SL.render === 'function') {
-                try { SL.render({ ...dv, container: holder }, { text }); return holder; }
+                try { SL.render({ ...dv, container: holder }, top ? { text, top: true } : { text }); return holder; }
                 catch (_e) { /* fall through to plain text */ }
             }
             holder.textContent = text;
@@ -503,11 +601,11 @@ class ToDoDailyFilterView {
             return list;
         };
 
-        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open' };
+        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open', ...S.labels };
         const tabButtons = {};
         const tabText = (key) => {
-            if (key !== 'overdue' && key !== 'backlog') return TAB_LABELS[key];
-            const n = View.selectTab(tasks, key, todayStr, TE).length;
+            if (!S.counted.includes(key)) return TAB_LABELS[key];
+            const n = View.selectTab(pool(), key, todayStr, TE).length;
             return n > 0 ? `${TAB_LABELS[key]} · ${n}` : TAB_LABELS[key];
         };
         const setPill = (button, active) => {
@@ -542,15 +640,15 @@ class ToDoDailyFilterView {
         };
         const updateControls = () => {
             updateDayPill();
-            for (const key of View.TABS) {
+            for (const key of S.tabs) {
                 const button = tabButtons[key];
                 const active = !state.day && prefs.tab === key;
                 button.textContent = tabText(key);
                 setPill(button, active);
                 button.setAttribute('aria-selected', active ? 'true' : 'false');
             }
-            setPill(sortButton, prefs.sort !== 'smart');
-            setPill(groupButton, prefs.group !== 'none');
+            setPill(sortButton, prefs.sort !== S.defaults.sort);
+            setPill(groupButton, prefs.group !== S.defaults.group);
             setPill(selectButton, state.selecting);
             selectButton.setAttribute('aria-pressed', state.selecting ? 'true' : 'false');
         };
@@ -559,7 +657,7 @@ class ToDoDailyFilterView {
         // so they survive the Dataview re-render the view's own writes cause.
         // Selection is in memory only (never persisted) and survives tab
         // switches; leaving Select mode clears it.
-        const state = View._dayState(todayStr);
+        const state = View._dayState(todayStr, S.key);
         const selected = state.selected;
         const isMobile = typeof TTL._isMobile === 'function'
             && TTL._isMobile(typeof window !== 'undefined' ? window.app : null);
@@ -610,7 +708,7 @@ class ToDoDailyFilterView {
             try { if (TD && typeof TD.donePath === 'function') task.path = TD.donePath(task.path) || task.path; }
             catch (_e) { /* keep the open path */ }
         };
-        const canReorder = () => !state.day && prefs.tab === 'today'
+        const canReorder = () => S.reorder && !state.day && prefs.tab === 'today'
             && (prefs.sort === 'smart' || prefs.sort === 'manual')
             && prefs.group === 'none'
             && !!TD && typeof TD.setFields === 'function'
@@ -735,23 +833,25 @@ class ToDoDailyFilterView {
                 return;
             }
             for (const group of View.groupTasks(sorted, prefs.group, todayStr)) {
+                const first = host === listHost && !host.firstChild;
                 const section = host.createEl('div', { cls: 'sauce-todo-filter-project-group' });
-                label(section, group.label);
+                label(section, group.label, first);
                 const list = makeList(section);
                 for (const task of group.tasks) renderRow(list, task, stale);
             }
         };
         const paintList = () => {
             clear(listHost);
+            const searching = !!query.trim();
             if (state.day) {
-                const rows = View.selectDay(tasks, state.day);
-                if (!rows.length) { paintEmpty(`Nothing due ${View._dayLabel(state.day)}.`); return; }
+                const rows = View.selectDay(pool(), state.day);
+                if (!rows.length) { paintEmpty(searching ? 'No tasks match.' : `Nothing due ${View._dayLabel(state.day)}.`); return; }
                 paintRows(listHost, rows, false);
                 return;
             }
             if (prefs.tab === 'overdue') {
-                const split = View.splitOverdue(tasks, todayStr, TE);
-                if (!split.overdue.length && !split.stale.length) { paintEmpty(); return; }
+                const split = View.splitOverdue(pool(), todayStr, TE);
+                if (!split.overdue.length && !split.stale.length) { paintEmpty(searching ? 'No tasks match.' : ''); return; }
                 if (split.overdue.length) paintRows(listHost, split.overdue, false);
                 if (split.stale.length) {
                     const divider = listHost.createEl('div', {
@@ -762,8 +862,14 @@ class ToDoDailyFilterView {
                 }
                 return;
             }
-            const rows = View.selectTab(tasks, prefs.tab, todayStr, TE);
-            if (!rows.length) { paintEmpty(); return; }
+            const rows = View.selectTab(pool(), prefs.tab, todayStr, TE);
+            if (!rows.length) {
+                // The surface's own empty copy only when nothing exists at all;
+                // a tab that is merely empty keeps the neutral line.
+                const none = !pool().some((t) => t && String(t.status || 'open').toLowerCase() === 'open');
+                paintEmpty(searching ? 'No tasks match.' : none ? S.emptyText : '');
+                return;
+            }
             paintRows(listHost, rows, false);
         };
         const paintEmpty = (text) => {
@@ -792,7 +898,7 @@ class ToDoDailyFilterView {
         };
         const paintDone = () => {
             clear(doneHost);
-            if (typeof TTL.renderDoneRow !== 'function') return;
+            if (!S.done || typeof TTL.renderDoneRow !== 'function') return;
             if (!state.day && prefs.tab !== 'today') return;
             const day = state.day || todayStr;
             const done = View.doneToday(tasks, day, TE, TTL);
@@ -804,6 +910,7 @@ class ToDoDailyFilterView {
         };
         const paintStrip = () => {
             clear(aboveTabs);
+            if (!S.strip) return;
             const cells = View.weekStrip(tasks, todayStr, TE);
             if (!cells.length) return;
             const strip = aboveTabs.createEl('div', { cls: 'sauce-todo-week-strip' });
@@ -966,7 +1073,7 @@ class ToDoDailyFilterView {
         };
 
         const commit = (patch) => {
-            prefs = View.writePrefs(storage, { ...prefs, ...patch });
+            prefs = View.writePrefs(storage, { ...prefs, ...patch }, S.key);
             paint();
         };
         const onClick = (handler) => (event) => {
@@ -990,7 +1097,7 @@ class ToDoDailyFilterView {
             commit({ [key]: options[(index + 1) % options.length].key });
         };
 
-        for (const key of View.TABS) {
+        for (const key of S.tabs) {
             const button = tabGroup.createEl('button', { text: TAB_LABELS[key] });
             tabButtons[key] = button;
             button.setAttribute('type', 'button');

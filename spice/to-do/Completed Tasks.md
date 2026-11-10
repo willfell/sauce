@@ -1,6 +1,6 @@
 ---
 type: to-do-hub
-created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
+created_at: "2026-07-06T17:07:58-06:00"
 tags:
   - "{{vault_identity_tag}}"
 cssclasses:
