@@ -95,10 +95,10 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 ### How the pipeline works (context, not a to-do list)
 
 1. You merge feature work to `main` (conventional commits). **This is the only manual step.**
-2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last release to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes **all version records** (catalogue, per-component manifests, `ranch/platform-subscription.json`, `package.json`, the snapshot fixture, AND `platform/test/seed-vault/ranch/platform-subscription.json` per-item pins so `run-seed-migrations` doesn't skew), runs preflight on the bumped state, opens/updates one standing **release PR via `RELEASE_PAT`** (so the PR triggers CI), and **enables GitHub auto-merge (`--squash`)** on it.
+2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last release to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes **all version records** (catalogue, per-component manifests, `ranch/platform-subscription.json`, `package.json`, the snapshot fixture, AND `platform/test/seed-vault/ranch/platform-subscription.json` per-item pins so `run-seed-migrations` doesn't skew), opens/updates one standing **release PR via `RELEASE_PAT`** (so the PR triggers CI), and **enables GitHub auto-merge (`--squash`)** on it. It does not run preflight itself: the release PR's required checks run it on the bumped state on both platforms, so a run here would only delay the PR.
 3. The release PR's required checks run → pass → GitHub **auto-squash-merges** it. **No human step.** The squash commit `chore(release): vX` triggers `tag-and-ship`.
 4. `tag-and-ship` creates + pushes `v<X.Y.Z>` (`GITHUB_TOKEN`), patches `Formula/sauce.rb` in `willfell/homebrew-sauce`, and **auto-merges** the tap PR (`TAP_PR_TOKEN`) → `brew upgrade sauce` serves it.
-5. The seed vault is **NOT** auto-rebaselined — auto-regenerating it over-heals the pre-heal migration fixtures and wedges `run-seed-migrations` on main (incident: v0.132.0, commit `68b75aa9`). `scripts/rebaseline-seed.js` + `seed-prev-snapshot.js` are **CI no-ops** (`GITHUB_ACTIONS` guard), so the `rebaseline-seed` job runs but changes nothing. Ratcheting the seed is a **manual, reviewed** action (§ Seed-vault rebaseline).
+5. The seed vault is **NOT** auto-rebaselined — auto-regenerating it over-heals the pre-heal migration fixtures and wedges `run-seed-migrations` on main (incident: v0.132.0, commit `68b75aa9`). `scripts/rebaseline-seed.js` + `seed-prev-snapshot.js` are **CI no-ops** (`GITHUB_ACTIONS` guard), and `release.yml` has no seed job. Ratcheting the seed is a **manual, reviewed** action (§ Seed-vault rebaseline).
 
 **Net: develop → merge to `main` → done.** Everything after step 1 is automatic — you do not touch versions, tags, the tap, or even the release PR. `RELEASE_PAT` (a repo secret; classic `repo`+`workflow`) is what lets the release PR get CI (it's opened by the PAT, not `GITHUB_TOKEN`); it is the only secret beyond the pre-existing `TAP_PR_TOKEN`. Repo setting "Allow auto-merge" must stay ON.
 
@@ -106,13 +106,13 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 
 Engine + full design: `scripts/release/compute-release.js`, `scripts/release/lib/`, `platform/test/run-release-bumper.js`, and `Docs/plans/2026-06-23-v0.129.0-auto-release-pipeline-{design,plan,result}.md`. Preview a bump anytime with `npm run release:plan` (dry-run; writes nothing).
 
-### Catch a `prepare-release` wedge BEFORE you merge
+### Catch a release-PR wedge BEFORE you merge
 
-`prepare-release` validates `release:preflight` on the **bumped** state (after the bumper rewrites every version record). A test that pins a component version as a hardcoded literal passes normal PR CI (which runs on the *un-bumped* tree) but **fails on the bumped state**, wedging the release after merge. This bit v0.133/v0.134/v0.135 in a row.
+The release PR's required checks run `release:preflight` on the **bumped** state (after the bumper rewrites every version record). A test that pins a component version as a hardcoded literal passes normal PR CI (which runs on the *un-bumped* tree) but **fails on the bumped state**, wedging the release after merge. This bit v0.133/v0.134/v0.135 in a row.
 
 Two defenses, both live as of the pipeline-hardening cycle:
 - **Version assertions read the snapshot SSOT.** Every component-version assertion reads `VERSION_SNAPSHOT.components["<name>"]` (from `platform/test/fixtures/component-versions.snapshot.json`, which the bumper regenerates in lockstep), never a literal. If you add a new version assertion, mirror that pattern — do NOT hardcode `"x.y.z"`.
-- **`npm run release:preflight-bumped`** replicates the `prepare-release` validation locally: it runs `compute-release --write`, runs the full preflight on the bumped tree, then hard-restores the working tree. Run it on a **clean** tree before merging any PR that bumps a component (it refuses on a dirty tree). Green here ⇒ `prepare-release` won't wedge. (The preflight runner stops dispatching new steps on the first failure — in-flight steps still finish, and any step never dispatched is recorded as `skipped` — so this is more reliable than eyeballing; for an exhaustive scan, artificially bump every component in lockstep and run each harness independently — that's how the full sweep was verified.)
+- **`npm run release:preflight-bumped`** replicates the release PR's check locally: it runs `compute-release --write`, runs the full preflight on the bumped tree, then hard-restores the working tree. Run it on a **clean** tree before merging any PR that bumps a component (it refuses on a dirty tree). Green here ⇒ the release PR won't wedge. (The preflight runner stops dispatching new steps on the first failure — in-flight steps still finish, and any step never dispatched is recorded as `skipped` — so this is more reliable than eyeballing; for an exhaustive scan, artificially bump every component in lockstep and run each harness independently — that's how the full sweep was verified.)
 
 ### Manual escape hatch (automation down / not yet deployed)
 
@@ -141,7 +141,7 @@ Direct-push to `origin/main` remains possible (admin override) but the preferred
 
 ### Seed-vault rebaseline (cycle close)
 
-The migration-regression harness runs against a checked-in synthetic seed vault under `platform/test/seed-vault/`. **This is a manual, reviewed action — never automated.** The CI `rebaseline-seed` job is a no-op (`GITHUB_ACTIONS` guard in both scripts) because a blind rebaseline **heals the pre-heal fixtures the harness depends on**, wedging `run-seed-migrations` on main (incident: v0.132.0). Rebaseline only when you deliberately need to ratchet the seed forward, and **review the diff + re-run `node platform/test/run-seed-migrations.js` (must stay green) before committing**:
+The migration-regression harness runs against a checked-in synthetic seed vault under `platform/test/seed-vault/`. **This is a manual, reviewed action — never automated.** Both scripts refuse to run in CI (`GITHUB_ACTIONS` guard) because a blind rebaseline **heals the pre-heal fixtures the harness depends on**, wedging `run-seed-migrations` on main (incident: v0.132.0). Rebaseline only when you deliberately need to ratchet the seed forward, and **review the diff + re-run `node platform/test/run-seed-migrations.js` (must stay green) before committing**:
 
 ```
 npm run seed:prev         # archive current seed -> seed-vault-prev/
@@ -180,7 +180,6 @@ Every job in this repo runs on the Mac mini. Nothing runs on GitHub-hosted runne
 | `codeql.yml` | `analyze` | B |
 | `release.yml` | `prepare-release` | A |
 | `release.yml` | `tag-and-ship` | A |
-| `release.yml` | `rebaseline-seed` | A |
 | `ci.yml` | `lint / actionlint` (reusable, `with: runner: sauce`) | A |
 
 `platform/test/run-ci-runner-policy.js` (preflight step `ci-runner-policy`) enforces this **per job**: every `runs-on` must resolve statically to the allowed self-hosted labels (a bare `${{ matrix.X }}` resolves; `vars`/`inputs`/fallback expressions and `group:` mappings are refused), every reusable-workflow call must be an allowlisted callee that is passed `with: runner:`, every `runs-on` job must set `timeout-minutes` in 1..60, and no workflow may trigger on `pull_request_target` or `workflow_run`. Its mutation fixtures prove each rule still fires. The reusable-call rule exists because dropping `with: runner:` silently falls back to the callee's `ubuntu-latest` default — and the callee's own runner-policy step skips itself in exactly that case. Adding a new pool label or reusable workflow means extending `ALLOWED_LABELS` / `REUSABLE_WITH_RUNNER_INPUT` in that harness.

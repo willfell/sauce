@@ -171,11 +171,25 @@ function connectCdpSocket(endpoint) {
   });
 }
 
+// Chrome's helper processes inherit its stderr pipe. Killing the browser does not
+// close that pipe while a helper is still alive, and an open pipe keeps this
+// process's event loop running: the harness prints its assertion and then sits
+// there until the preflight runner's 15-minute step kill. So let go of the pipe
+// as well as the child.
+function releaseChild(child) {
+  if (!child) return;
+  try { if (child.stderr) child.stderr.destroy(); } catch (_e) {}
+  try { child.unref(); } catch (_e) {}
+}
+
 async function stopChild(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  child.kill('SIGKILL');
-  await Promise.race([exited, wait(5000)]);
+  if (!child) return;
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    child.kill('SIGKILL');
+    await Promise.race([exited, wait(5000)]);
+  }
+  releaseChild(child);
 }
 
 async function removeTreeWithRetry(target) {
@@ -195,6 +209,66 @@ async function removeTreeWithRetry(target) {
   throw lastError;
 }
 
+// Start an isolated headless Chrome and wait for its DevTools port.
+//
+// A browser that never comes up is a property of the machine, not of the page
+// under test, and it has failed CI both ways: killed before it published the
+// port, and alive but silent for the whole budget. Neither says anything about
+// the fixture, so one relaunch is allowed before the harness fails. The first
+// failure is written to stderr, so a run that needed the relaunch still shows it.
+const CHROME_LAUNCH_ATTEMPTS = 2;
+
+async function launchChrome(executable, options = {}) {
+  const readyTimeoutMs = options.readyTimeoutMs || CHROME_READY_TIMEOUT_MS;
+  let failure = '';
+  for (let attempt = 1; attempt <= CHROME_LAUNCH_ATTEMPTS; attempt++) {
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-cdp-'));
+    const chrome = childProcess.spawn(executable, [
+      '--headless=new', '--no-sandbox', '--disable-gpu', '--hide-scrollbars',
+      '--allow-file-access-from-files', '--force-prefers-reduced-motion',
+      '--disable-background-networking', '--remote-debugging-port=0',
+      `--user-data-dir=${profile}`, 'about:blank',
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+
+    // Keep Chrome's stderr and its exit. Discarding them is why a browser that dies
+    // on startup and one that is merely slow produced the same bare assertion.
+    let chromeStderr = '';
+    chrome.stderr.on('data', (chunk) => { chromeStderr += chunk; });
+    let chromeExit = null;
+    chrome.on('exit', (code, signal) => { chromeExit = { code, signal }; });
+    chrome.on('error', (error) => { chromeExit = { code: null, signal: String(error && error.code || error) }; });
+    const tail = () => chromeStderr.trim().split(/\r?\n/).filter(Boolean).slice(-5).join(' | ') || '(no stderr)';
+
+    const portFile = path.join(profile, 'DevToolsActivePort');
+    // Chrome creates the file and writes it non-atomically, so poll for valid
+    // content rather than mere existence: an empty read resolves to port 80 and
+    // would talk to whatever else is listening there.
+    let port = '';
+    const portDeadline = Date.now() + readyTimeoutMs;
+    while (Date.now() < portDeadline) {
+      if (fs.existsSync(portFile)) {
+        const first = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0].trim();
+        if (/^\d+$/.test(first) && Number(first) > 0) { port = first; break; }
+      }
+      // A dead browser will never publish the port. Say so instead of blaming the clock.
+      if (chromeExit) break;
+      await wait(50);
+    }
+    if (port) return { chrome, profile, port, tail };
+
+    failure = chromeExit
+      ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
+        + `before publishing its DevTools endpoint: ${tail()}`
+      : `Chrome publishes its DevTools endpoint within ${readyTimeoutMs}ms: ${tail()}`;
+    await stopChild(chrome);
+    await removeTreeWithRetry(profile);
+    if (attempt < CHROME_LAUNCH_ATTEMPTS) {
+      console.error(`chrome-cdp: launch attempt ${attempt} of ${CHROME_LAUNCH_ATTEMPTS} failed, relaunching: ${failure}`);
+    }
+  }
+  assert.fail(failure);
+}
+
 // Render `url` at an exact viewport in an isolated browser and return the fixture
 // marker plus one screenshot. Determinism is asserted by calling this twice and
 // comparing the two screenshots: two screenshots of a single loaded page would only
@@ -205,45 +279,11 @@ async function removeTreeWithRetry(target) {
 // documentFits), so callers read it exactly as they read a parsed <meta> tag.
 async function captureViewport(executable, url, width, height, options = {}) {
   const markerSelector = options.markerSelector || '#fixture-results';
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-cdp-'));
-  const chrome = childProcess.spawn(executable, [
-    '--headless=new', '--no-sandbox', '--disable-gpu', '--hide-scrollbars',
-    '--allow-file-access-from-files', '--force-prefers-reduced-motion',
-    '--disable-background-networking', '--remote-debugging-port=0',
-    `--user-data-dir=${profile}`, 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
-
-  // Keep Chrome's stderr and its exit. Discarding them is why a browser that dies
-  // on startup and one that is merely slow produced the same bare assertion.
-  let chromeStderr = '';
-  chrome.stderr.on('data', (chunk) => { chromeStderr += chunk; });
-  let chromeExit = null;
-  chrome.on('exit', (code, signal) => { chromeExit = { code, signal }; });
-  const tail = () => chromeStderr.trim().split(/\r?\n/).filter(Boolean).slice(-5).join(' | ') || '(no stderr)';
+  const { chrome, profile, port, tail } = await launchChrome(executable, options);
 
   let socket;
   let sendCommand;
   try {
-    const portFile = path.join(profile, 'DevToolsActivePort');
-    // Chrome creates the file and writes it non-atomically, so poll for valid
-    // content rather than mere existence: an empty read resolves to port 80 and
-    // would talk to whatever else is listening there.
-    let port = '';
-    const portDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
-    while (Date.now() < portDeadline) {
-      if (fs.existsSync(portFile)) {
-        const first = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0].trim();
-        if (/^\d+$/.test(first) && Number(first) > 0) { port = first; break; }
-      }
-      // A dead browser will never publish the port. Say so instead of blaming the clock.
-      if (chromeExit) break;
-      await wait(50);
-    }
-    assert(/^\d+$/.test(port) && Number(port) > 0, chromeExit
-      ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
-        + `before publishing its DevTools endpoint: ${tail()}`
-      : `Chrome publishes its DevTools endpoint within ${CHROME_READY_TIMEOUT_MS}ms: ${tail()}`);
-
     const target = await deadline(createCdpTarget(port, url),
       CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${tail()})`);
     socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
@@ -302,4 +342,4 @@ async function captureViewport(executable, url, width, height, options = {}) {
   }
 }
 
-module.exports = { captureViewport, chromeExecutable, CHROME_READY_TIMEOUT_MS };
+module.exports = { captureViewport, chromeExecutable, CHROME_READY_TIMEOUT_MS, CHROME_LAUNCH_ATTEMPTS };

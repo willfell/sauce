@@ -253,7 +253,7 @@ for (const file of files) {
     findings.map((f) => `line ${f.line} [${f.rule}] ${f.detail}`).join("; ")
   );
 }
-check(jobCount >= 8, `parsed every job across the workflows (${jobCount})`);
+check(jobCount >= 7, `parsed every job across the workflows (${jobCount})`);
 
 console.log("\n--- mutation fixtures: each rule still bites ---");
 

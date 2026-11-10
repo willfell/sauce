@@ -67,7 +67,7 @@ function diffTree(a, b) {
 
 function main() {
     // Seed rebaseline is a MANUAL, reviewed action only. Auto-running it in CI
-    // (the release.yml rebaseline-seed job) over-heals the pre-heal migration
+    // (release.yml once had a job for it) over-heals the pre-heal migration
     // fixtures and wedges run-seed-migrations on main (incident: v0.132.0,
     // commit 68b75aa9). Skip in CI; run locally to ratchet the seed deliberately.
     // See build-test-verify.md § Seed-vault rebaseline.
