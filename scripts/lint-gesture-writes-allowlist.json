@@ -8,7 +8,7 @@
     {
       "path": "platform/blueprints/meetings/helpers/meeting-leaf-actions.js",
       "reason": "New-person creation delegates its receipt-bound structural transaction to RenderSafe.mutateStructure, whose create callback is outside this lint's RenderSafe.mutate authority.",
-      "lines": [365]
+      "lines": [367]
     },
     {
       "path": "platform/blueprints/project/helpers/doc-bulk-move.js",

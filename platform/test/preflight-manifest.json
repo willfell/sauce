@@ -1329,6 +1329,14 @@
       "lane": "parallel"
     },
     {
+      "id": "meetings-view",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-view.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "meetings-chrome-modernize-heal",
       "cmd": [
         "node",

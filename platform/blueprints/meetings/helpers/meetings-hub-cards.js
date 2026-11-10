@@ -103,7 +103,33 @@ class MeetingsHubCards {
     return names;
   }
 
+  /**
+   * A one-day hub draws that day's meetings with the shared meeting row
+   * (MeetingsBrowseList, surface 'day'). Without the meetings view or
+   * FilterBar the BeaconCards rows below (_renderCards) draw instead.
+   */
   async render(dv) {
+    try {
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
+        || (typeof window !== "undefined" && window.customJS) || null;
+      const View = cjs && cjs.MeetingsBrowseList;
+      const FB = cjs && cjs.FilterBar;
+      if (dv && View && typeof View.render === "function" && FB && typeof FB.layout === "function") {
+        let page = null;
+        try {
+          page = cjs.RenderSafe && typeof cjs.RenderSafe.page === "function"
+            ? cjs.RenderSafe.page(dv)
+            : (typeof dv.current === "function" ? dv.current() : null);
+        } catch (_e) { page = null; }
+        if (!page || !page.file) return;
+        const m = /(\d{4}-\d{2}-\d{2})/.exec(String(page.file.name || ""));
+        return await View.render(dv, { surface: "day", day: m ? m[1] : undefined });
+      }
+    } catch (_e) { return; }
+    return this._renderCards(dv);
+  }
+
+  async _renderCards(dv) {
     try {
     if (!dv || typeof dv.pages !== "function") return;
     // Dataview may render before indexing the embedding note. RenderSafe keeps a
