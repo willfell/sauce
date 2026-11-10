@@ -3,7 +3,7 @@
     {
       "path": "platform/blueprints/project/helpers/project-workstreams.js",
       "reason": "The workstream picker delegates its structural transaction to RenderSafe.mutateStructure, whose write callback is outside this lint's RenderSafe.mutate authority.",
-      "lines": [136]
+      "lines": [142]
     },
     {
       "path": "platform/blueprints/meetings/helpers/meeting-leaf-actions.js",

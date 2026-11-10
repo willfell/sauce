@@ -194,8 +194,14 @@ class ProjectDocsIndex {
         const project = this._projectPage(dv2, projectPath);
         const discoveredSet = new Set();
         const hubByLabel = {};
+        // One scan of the docs tree for this whole listing. Each section used
+        // to rescan it twice more (its docs, then its sub-section hubs), so a
+        // hub with S sections paid 1 + 2S scans per refresh.
+        let docsTree = null;
+        try { docsTree = dv2.pages(`"${docsFolder}"`); } catch (_e) { docsTree = null; }
         try {
-          const hubs = dv2.pages(`"${docsFolder}"`)
+          if (!docsTree) throw new Error("docs tree unavailable");
+          const hubs = docsTree
             .where((p) => p && p.type === "section-hub" && Number(p.depth) === 1);
           for (const h of hubs) {
             const label = this._stripLink(h.section || (h.file && h.file.name) || "");
@@ -218,7 +224,8 @@ class ProjectDocsIndex {
           const hub = hubByLabel[label];
           let docsInSection;
           try {
-            docsInSection = dv2.pages(`"${docsFolder}"`)
+            if (!docsTree) throw new Error("docs tree unavailable");
+            docsInSection = docsTree
               .where((p) => p.type === "doc-note" && String(p.file.folder || "").startsWith(sectionFolder));
           } catch (_e) { docsInSection = []; }
           let maxMtime = 0;
@@ -230,7 +237,8 @@ class ProjectDocsIndex {
           // was hardcoded 0, so "N sections" never showed on docs-hub cards.
           let subSectionCount = 0;
           try {
-            const subs = dv2.pages(`"${docsFolder}"`)
+            if (!docsTree) throw new Error("docs tree unavailable");
+            const subs = docsTree
               .where((p) => p && p.type === "section-hub" && Number(p.depth) === 2
                 && String(p.file.folder || "").startsWith(sectionFolder + "/"));
             subSectionCount = (subs.array ? subs.array() : Array.from(subs)).length;

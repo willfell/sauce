@@ -670,10 +670,18 @@ class MeetingsBrowseList {
       const inTab = (tab) => Self.selectTab(models, tab, todayStr);
       const range = () => (prefs.tab === 'all' ? null : FB.rangeFor(prefs.tab, todayStr));
 
+      let searchTimer = null;
       if (S.search) {
         FB.search(hosts.search, {
           placeholder: S.searchPlaceholder, label: 'Search meetings', value: state.text, inputCls: 'sauce-meetings-search',
-          onInput: (text) => { state.text = text; paint(); },
+          // Coalesce fast typing: a paint rebuilds every visible row (the All
+          // tab has no cap), so it follows the last keystroke, not each one.
+          onInput: (text) => {
+            state.text = text;
+            if (typeof setTimeout !== 'function') { paint(); return; }
+            if (searchTimer != null && typeof clearTimeout === 'function') clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => { searchTimer = null; paint(); }, 120);
+          },
         });
       }
 

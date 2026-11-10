@@ -191,10 +191,19 @@ class ToDoCreateTask {
             box-shadow: 0 8px 24px rgba(0,0,0,0.4);
         `;
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-        document.addEventListener('keydown', this._escListener = (ev) => {
+        // Every close path calls overlay.remove(), so the Escape listener is
+        // released there. (There is no DOM "remove" event: the listener that
+        // waited for one never fired, leaving a document keydown handler and
+        // the detached dialog behind on every open.)
+        const escListener = this._escListener = (ev) => {
             if (ev.key === 'Escape') overlay.remove();
-        });
-        overlay.addEventListener('remove', () => document.removeEventListener('keydown', this._escListener));
+        };
+        const detachOverlay = overlay.remove.bind(overlay);
+        overlay.remove = () => {
+            document.removeEventListener('keydown', escListener);
+            detachOverlay();
+        };
+        document.addEventListener('keydown', escListener);
 
         const title = modal.createEl('h3', { text: '+ New Task' });
         title.style.cssText = 'margin: 0 0 14px;';

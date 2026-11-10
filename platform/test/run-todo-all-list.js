@@ -114,17 +114,25 @@ const titles = (container) => byClass(container, 'sauce-task-today-title').map((
     ok('TAL-ALL-LIST every open task, soonest due first, undated last; done excluded',
       titles(e.container).join('|') === 'Pay rent|Late report|Today call|Water plants|Friday demo|Someday idea');
     const input = byClass(e.container, 'sauce-todo-search-input')[0];
+    // Search repaints follow the last keystroke after a short pause.
+    const searchSettled = () => new Promise((resolve) => setTimeout(resolve, 180));
+    input.value = 'at';
+    await input.fire('input');
     input.value = 'atlas';
     await input.fire('input');
+    ok('TAL-ALL-SEARCH-COALESCE typing does not repaint per keystroke', titles(e.container).length === 6);
+    await searchSettled();
     ok('TAL-ALL-SEARCH search narrows the list and the counts (title or project)',
       titles(e.container).join('|') === 'Friday demo'
       && byClass(e.container, 'sauce-todo-filter-tabs')[0].children[0].textContent === 'All open · 1');
     input.value = 'zzz';
     await input.fire('input');
+    await searchSettled();
     ok('TAL-ALL-SEARCH-EMPTY a search with no hits says so', byClass(e.container, 'sauce-todo-filter-empty')[0].textContent === 'No tasks match.');
     const overdue = buttons(e.container).find((b) => b.textContent.startsWith('Overdue'));
     input.value = '';
     await input.fire('input');
+    await searchSettled();
     await overdue.fire('click');
     ok('TAL-ALL-PREFS a tab picked on All To-Dos persists under its own key, never the To-Do note\'s',
       JSON.parse(e.store.get('sauce-todo-filter:prefs:all')).tab === 'overdue' && !e.store.has('sauce-todo-filter:prefs:v2'));

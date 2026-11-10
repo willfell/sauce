@@ -27,14 +27,16 @@ class ToDoDailyUnassignedMeetings {
 
         let parsed;
         try {
-            const raw = dv.pages('"spice/tasks"').where(p =>
+            // The archives are excluded in the SOURCE so Dataview never builds a page
+            // object for a finished or trashed task; the path checks below stay as a guard.
+            const raw = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
                 p && p.type === 'task' && p.status === 'open'
                 && p.file && p.file.path
                 && !p.file.path.includes('/_trash/')
                 && !p.file.path.includes('/_done/'));
-            parsed = raw.map(p => TE.parseNote(p)).array
-                ? raw.map(p => TE.parseNote(p)).array()
-                : Array.from(raw).map(p => TE.parseNote(p));
+            // Parse each task once (the old feature test mapped the whole list twice).
+            const mapped = raw.map(p => TE.parseNote(p));
+            parsed = typeof mapped.array === 'function' ? mapped.array() : Array.from(mapped);
         } catch (e) { return; }
 
         const tasks = parsed.filter(t =>

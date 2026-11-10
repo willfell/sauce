@@ -295,6 +295,45 @@ function makeApp(tree) {
     assert(typeof res.profile.total_ms === 'number' && res.profile.total_ms >= 0, 'profile.total_ms is a non-negative number');
   });
 
+  await ok('BR-1b class files are read concurrently and registered in listing order', async () => {
+    const mod = loadPluginModule();
+    const tree = BOOT_TREE();
+    tree['ranch/scripts'].files = ['ranch/scripts/foo.js', 'ranch/scripts/notclass.js', 'ranch/scripts/zed.js'];
+    tree['ranch/scripts/zed.js'] = 'class Zed { }';
+    let inFlight = 0;
+    let peak = 0;
+    const pending = [];
+    const app = {
+      vault: {
+        adapter: {
+          list: async (dir) => tree[dir] || { files: [], folders: [] },
+          // Every read parks until released; a loader that awaited them one at
+          // a time would never have more than one outstanding.
+          read: (p) => new Promise((resolve, reject) => {
+            inFlight += 1;
+            peak = Math.max(peak, inFlight);
+            pending.push(() => {
+              inFlight -= 1;
+              if (typeof tree[p] === 'string') resolve(tree[p]); else reject(new Error('ENOENT ' + p));
+            });
+          }),
+          exists: async () => false,
+        },
+      },
+    };
+    const w = (typeof window !== 'undefined') ? window : globalThis;
+    delete w.customJS;
+    const loading = mod.loadCustomJsClasses(app);
+    for (let i = 0; i < 10; i++) await flush();
+    assert(peak === 4, 'all four class-file reads are outstanding together, peak was ' + peak);
+    // Release in REVERSE order: registration must still follow the listing.
+    while (pending.length) pending.pop()();
+    const res = await loading;
+    delete w.customJS;
+    assert(JSON.stringify(res.registered) === JSON.stringify(['Foo', 'Zed', 'Bar']),
+      'registration keeps listing order (own files, then subfolders), got ' + JSON.stringify(res.registered));
+  });
+
   await ok('BR-2 receipt writes ONLY after layout-ready + idle deferral (zero writes before)', async () => {
     const SaucePlugin = loadPluginModule();
     const rig = makeBootRig(BOOT_TREE());

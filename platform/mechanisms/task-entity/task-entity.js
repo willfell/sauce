@@ -712,12 +712,27 @@ class TaskEntity {
     static subtaskCountsByParent(dv) {
         try {
             if (!dv || typeof dv.pages !== 'function') return {};
+            // Every task widget on a page asks for the same counts during the
+            // same refresh. Reuse them while the Dataview index has not moved
+            // (index.revision increments on every reload, rename and delete),
+            // so sibling widgets share one scan instead of each running their own.
+            const index = dv.index && typeof dv.index.revision === 'number' ? dv.index : null;
+            const memo = TaskEntity._subtaskCountsMemo;
+            if (index && memo && memo.index === index && memo.revision === index.revision) return memo.counts;
+            const revision = index ? index.revision : null;
             const raw = dv.pages('"spice/tasks"').where(p =>
                 p && p.type === 'task' && p.file && p.file.path
                 && !p.file.path.includes('/_trash/'));
             const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
-            const parsed = arr.map(p => TaskEntity.parseNote(p));
-            return TaskEntity._groupSubtaskCounts(parsed);
+            // Counting needs two fields per task, normalized exactly as parseNote
+            // does; a full parseNote of the whole archive was wasted work.
+            const light = arr.map(p => ({
+                parent_task: p.parent_task != null ? TaskEntity._linkText(p.parent_task) : '',
+                status: p.status || 'open',
+            }));
+            const counts = TaskEntity._groupSubtaskCounts(light);
+            if (index) TaskEntity._subtaskCountsMemo = { index, revision, counts };
+            return counts;
         } catch (_e) {
             return {};
         }

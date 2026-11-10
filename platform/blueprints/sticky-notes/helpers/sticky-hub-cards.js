@@ -172,6 +172,15 @@ class StickyHubCards {
             const pages = dv.pages('"spice/sticky-notes"').where((p) => p.type === "sticky-note");
             const needle = (ctx && ctx.text ? ctx.text : "").toLowerCase();
 
+            // Load every body this pass needs together; the loop below then reads
+            // them from bodyCache. Awaiting them one note at a time made the first
+            // paint (and the first search keystroke) wait on each read in turn.
+            const needsBody = [];
+            for (const s of pages) {
+                if (needle || !(s.title && String(s.title).trim())) needsBody.push(s.file.path);
+            }
+            await Promise.all(needsBody.map((path) => readBody(path)));
+
             const items = [];
             for (const s of pages) {
                 const body = needle ? await readBody(s.file.path) : "";

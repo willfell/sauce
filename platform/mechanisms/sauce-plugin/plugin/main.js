@@ -136,23 +136,24 @@ async function loadCustomJsClasses(app) {
   const folder = await resolveScriptsFolder(app);
   const t1 = monotonicNow();
   stages.push({ name: 'resolve-scripts-folder', elapsed_ms: elapsedMs(t0, t1) });
-  const files = [];
-  let bytes = 0;
+  // Reads are issued together and collected in listing order: a vault ships
+  // ~180 class files, and awaiting them one at a time made boot pay every
+  // adapter round trip back to back (the dominant boot stage, worst on mobile
+  // where each read crosses the native bridge). Order is preserved so the
+  // registration order, and with it first-wins dedupe, is unchanged.
   const walk = async (dir) => {
     let listing;
-    try { listing = await adapter.list(dir); } catch (_e) { return; }
-    for (const f of (listing.files || [])) {
-      if (f.endsWith('.js')) {
-        try {
-          const body = await adapter.read(f);
-          files.push({ path: f, body });
-          bytes += body.length;
-        } catch (_e) { /* skip unreadable */ }
-      }
-    }
-    for (const d of (listing.folders || [])) await walk(d);
+    try { listing = await adapter.list(dir); } catch (_e) { return []; }
+    const own = (listing.files || []).filter((f) => f.endsWith('.js')).map(async (f) => {
+      try { return { path: f, body: await adapter.read(f) }; } catch (_e) { return null; /* skip unreadable */ }
+    });
+    const nested = (listing.folders || []).map((d) => walk(d));
+    const [ownFiles, nestedFiles] = await Promise.all([Promise.all(own), Promise.all(nested)]);
+    return ownFiles.filter(Boolean).concat(...nestedFiles);
   };
-  await walk(folder);
+  const files = await walk(folder);
+  let bytes = 0;
+  for (const f of files) bytes += f.body.length;
   const t2 = monotonicNow();
   stages.push({ name: 'read-class-files', elapsed_ms: elapsedMs(t1, t2), files: files.length, bytes });
   const w = (typeof window !== 'undefined') ? window : globalThis;

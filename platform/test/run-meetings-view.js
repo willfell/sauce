@@ -289,17 +289,26 @@ function env(opts) {
     await one(c, 'sauce-filter-day-pill').fire('click');
     ok('MV-DAY-EXIT the day pill goes back to the whole week', rowTitles(c).length === 3 && !one(c, 'sauce-filter-day-pill'));
 
+    // Search repaints follow the last keystroke after a short pause, so a burst
+    // of typing costs one rebuild of the list, not one per character.
+    const searchSettled = () => new Promise((resolve) => setTimeout(resolve, 180));
     const input = one(c, 'sauce-todo-search-input');
+    input.value = 'b';
+    await input.fire('input');
     input.value = 'bob';
     await input.fire('input');
+    ok('MV-SEARCH-COALESCE typing does not repaint per keystroke', rowTitles(c).length === 3);
+    await searchSettled();
     ok('MV-SEARCH-LIST search narrows the list and the tab counts',
       rowTitles(c).join() === 'Standup' && pillTexts(c)[1] === 'This week · 1' && pillTexts(c)[3] === 'This month · 1'
       && one(c, 'sauce-filter-caption').textContent === '3 meetings this week, across 1 project · showing 1');
     input.value = 'zzz';
     await input.fire('input');
+    await searchSettled();
     ok('MV-SEARCH-EMPTY a search with no hits says "No meetings match."', one(c, 'sauce-meetings-empty').textContent === 'No meetings match.');
     input.value = '';
     await input.fire('input');
+    await searchSettled();
 
     await one(c, 'sauce-meetings-person-filter').fire('click');
     const menu = e.menus[e.menus.length - 1].entries;

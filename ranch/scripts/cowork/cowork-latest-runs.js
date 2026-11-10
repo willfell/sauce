@@ -13,6 +13,11 @@
  */
 class CoworkLatestRuns {
   async render(dv) {
+    // One scan of the cowork tree per render, shared by every row below. The
+    // folder holds every atomic note ever written and each row used to rescan it.
+    // Lazy so a query failure still surfaces inside each row's own try/catch.
+    let coworkScan = null;
+    const coworkPages = () => coworkScan || (coworkScan = dv.pages('"spice/cowork"'));
     const orchestrators = [
       { slug: "morning-briefing", type: "cowork-morning-briefing", label: "Morning briefing" },
       { slug: "midday-tripwire",  type: "cowork-midday-tripwire",  label: "Midday tripwire" },
@@ -45,7 +50,7 @@ class CoworkLatestRuns {
 
       let latest = null;
       try {
-        const matches = dv.pages('"spice/cowork"')
+        const matches = coworkPages()
           .where(p => p && p.type === orch.type)
           .sort(p => p.created_at, "desc")
           .limit(1)
