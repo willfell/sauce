@@ -47,7 +47,7 @@
     },
     {
       "name": "section-label",
-      "version": "0.2.2"
+      "version": "0.2.3"
     },
     {
       "name": "task-interactions",
@@ -55,7 +55,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.19.1"
+      "version": "0.19.2"
     },
     {
       "name": "modal",
@@ -75,7 +75,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.9.3"
+      "version": "0.9.4"
     },
     {
       "name": "people-rendering",
@@ -141,7 +141,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.19.5"
+      "version": "0.19.6"
     },
     {
       "name": "people",
@@ -153,7 +153,7 @@
     },
     {
       "name": "project",
-      "version": "1.69.1"
+      "version": "1.69.2"
     },
     {
       "name": "to-do",
