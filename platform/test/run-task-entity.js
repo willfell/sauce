@@ -1010,18 +1010,15 @@ ok('TNV-sub-3 SUBTASKS section renders only status===open children as rows (regr
     'the row-render loop must iterate openSubtasks, not the unfiltered list');
 });
 
-// TNV-DONE-1/2. Completed-subtask history: the SUBTASKS section renders a
-// collapsible "Completed (N)" <details> block listing every subtask whose
-// status is 'done' (from allSubtasks, the unfiltered open+done list — NOT
-// openSubtasks, which only feeds the open rows above it), each row's
-// checkbox pre-checked (mirrors TaskDoneTodayList's exact convention:
-// render via the shared renderTaskRow, then set cb.checked = true via
-// querySelector afterward, since renderTaskRow always starts unchecked).
-// Rendered ONLY when there is at least one done subtask — no empty
-// "Completed (0)" clutter. Source-text assertion (this method's dv
+// TNV-DONE-1. Finished subtasks: the SUBTASKS section lists every subtask
+// whose status is 'done' (from allSubtasks, the unfiltered open+done list —
+// NOT openSubtasks, which only feeds the open rows above it) as shared done
+// rows (TaskTodayList.renderDoneRow) with Reopen, the same rows the To-Do
+// view draws. Rendered ONLY when there is at least one done subtask — no
+// empty "Done · 0" clutter. Source-text assertion (this method's dv
 // dependency has no dv-stub test in this harness; see TNV-sub-3 for the
-// same convention).
-ok('TNV-DONE-1 SUBTASKS section renders a Completed(N) details block from done subtasks only when non-empty', () => {
+// same convention). Behaviour is covered by run-task-note-card.
+ok('TNV-DONE-1 SUBTASKS section lists done subtasks as done rows with Reopen, only when there are some', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-note-view.js'), 'utf8');
   const m = /if\s*\(!isSubtask\s*&&\s*filePath\)\s*\{([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
   const sectionMatch = m.exec(src);
@@ -1029,12 +1026,10 @@ ok('TNV-DONE-1 SUBTASKS section renders a Completed(N) details block from done s
   const section = sectionMatch[1];
   assert(/doneSubtasks\s*=\s*allSubtasks\.filter/.test(section),
     'doneSubtasks must be derived by filtering allSubtasks (status===done), got section:\n' + section);
-  assert(/if\s*\(doneSubtasks\.length\)/.test(section),
-    'the Completed block must be gated on doneSubtasks.length (no empty block)');
-  assert(/for\s*\(const st of doneSubtasks\)/.test(section),
-    'the Completed row loop must iterate doneSubtasks');
-  assert(/cb\.checked\s*=\s*true/.test(section),
-    'each Completed row must have its checkbox pre-checked (mirrors TaskDoneTodayList)');
+  assert(/if\s*\(doneSubtasks\.length\s*&&/.test(section),
+    'the done list must be gated on doneSubtasks.length (no empty block)');
+  assert(/TTL\.renderDoneRow\(doneHost,\s*st,\s*\{[^}]*onUndo:\s*reopenSub[^}]*undoLabel:\s*'Reopen'/.test(section),
+    'each done subtask must draw as a shared done row with Reopen');
 });
 
 // ---------- TaskEntity.subtaskCountsByParent (SCP-*) ----------

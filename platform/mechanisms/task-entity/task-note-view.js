@@ -4,15 +4,18 @@
  * TaskEntity, TaskDialog, TaskTodayList). Without it a `type: task` note opens
  * bare; TaskNoteView turns the note into a real page:
  *
- *   - a HEADER block: a color-coded status pill (OPEN / DONE / DELETED) + the
- *     prominent task title,
- *   - a "DETAILS" section: a labelled row PER SET FIELD only, with HUMAN dates
- *     (never a raw ISO timestamp) + a muted relative hint ("Today", "in 8 days"),
- *     an overdue-red Due date, a colored Priority badge, and a clickable Project
- *     link,
- *   - a "SOURCE" line ("From <link>") when a source note is set,
- *   - a full-width primary "Edit task" button that opens the TaskDialog in edit
- *     mode.
+ *   - a HEADER: "Part of <parent>" on a subtask, the title, and one wrapping
+ *     row of chips (status, due as "Due today" / "Overdue · N days", priority,
+ *     repeats, a clickable project). The card's left edge carries the
+ *     priority colour, as task rows do.
+ *   - LINKS: one row per link, its label and the site it goes to,
+ *   - SUBTASKS (top-level tasks): a progress bar, the open children as shared
+ *     task rows, "+ Add subtask…", and the finished ones as done rows with
+ *     Reopen (five, then "Show N more"),
+ *   - a footer of Mark done (or Reopen once archived) beside Edit, and a quiet
+ *     line: created, done, and the source note.
+ *   Styles live in one injected stylesheet (_CSS) with phone rules, so the
+ *   card fits a phone and follows the theme.
  *
  * The user's freeform notes render natively BELOW this widget (below the
  * `<!-- TASK_NOTES -->` marker); the card ends cleanly so those flow beneath.
@@ -337,11 +340,189 @@ class TaskNoteView {
         }
     }
 
+    // ---------- Card helpers (pure) ----------
+
+    /**
+     * Short calendar label for a date-ish value: "Nov 12", or "Nov 12, 2025"
+     * when its year differs from todayStr's. Blank / unparseable → ''. Pure.
+     */
+    static _shortDate(value, todayStr) {
+        const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const ymd = TaskNoteView._ymd(value);
+        if (!ymd || ymd.mo < 1 || ymd.mo > 12) return '';
+        const today = TaskNoteView._ymd(todayStr);
+        const base = MO[ymd.mo - 1] + ' ' + ymd.d;
+        return today && today.y !== ymd.y ? base + ', ' + ymd.y : base;
+    }
+
+    /**
+     * The due chip for the card header: { text, tone } where tone is
+     * 'danger' (an open task past its date), 'accent' (due today) or ''.
+     * "Due today" / "Due tomorrow" / "Overdue · N days" / "Due Thu, Nov 12".
+     * A done or deleted task never reads as overdue. No due → null. Pure.
+     */
+    static _dueChip(due, todayStr, status) {
+        const ymd = TaskNoteView._ymd(due);
+        if (!ymd) return null;
+        const open = String(status || 'open').trim().toLowerCase() === 'open';
+        const dn = TaskNoteView._dayNumber(ymd);
+        const today = TaskNoteView._ymd(todayStr);
+        const delta = today ? dn - TaskNoteView._dayNumber(today) : null;
+        if (delta === 0) return { text: 'Due today', tone: open ? 'accent' : '' };
+        if (delta === 1) return { text: 'Due tomorrow', tone: '' };
+        if (delta != null && delta < 0 && open) {
+            const n = -delta;
+            return { text: 'Overdue · ' + n + (n === 1 ? ' day' : ' days'), tone: 'danger' };
+        }
+        const WD = ['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'];
+        const wd = WD[((dn % 7) + 7) % 7];
+        return { text: 'Due ' + wd + ', ' + TaskNoteView._shortDate(due, todayStr), tone: '' };
+    }
+
+    /**
+     * Subtask progress: { done, total, pct, text } with text "1 of 3 done"
+     * ('' when there are none) and pct a whole number 0–100. Pure.
+     */
+    static _progress(subtasks) {
+        const list = (Array.isArray(subtasks) ? subtasks : []).filter(Boolean);
+        const total = list.length;
+        const done = list.filter((t) => t.status === 'done').length;
+        return {
+            done, total,
+            pct: total ? Math.round((done / total) * 100) : 0,
+            text: total ? done + ' of ' + total + ' done' : '',
+        };
+    }
+
+    /**
+     * What a link entry points at: { kind: 'note' | 'web', host } where host is
+     * the bare hostname of a web link ("github.com"). Pure; never throws.
+     */
+    static _linkMeta(entry) {
+        const s = String(entry == null ? '' : entry).trim();
+        if (/^\[\[/.test(s)) return { kind: 'note', host: '' };
+        const m = /\]\((https?:\/\/[^)\s]+)\)/.exec(s) || /^<?(https?:\/\/[^\s>]+)>?$/.exec(s);
+        if (!m) return { kind: 'note', host: '' };
+        const host = /^https?:\/\/([^/?#:]+)/i.exec(m[1]);
+        return { kind: 'web', host: host ? host[1].replace(/^www\./i, '') : '' };
+    }
+
+    /**
+     * The card's footer buttons for a status and note path: an open task gets
+     * Mark done + Edit; a done task archived under spice/tasks/_done/ gets
+     * Reopen + Edit; anything else gets Edit alone. Pure.
+     */
+    static _actionsFor(status, path) {
+        const s = String(status || 'open').trim().toLowerCase();
+        if (s === 'open') return ['done', 'edit'];
+        if (s === 'done' && String(path || '').indexOf('spice/tasks/_done/') === 0) return ['reopen', 'edit'];
+        return ['edit'];
+    }
+
+    static get _ICONS() {
+        const svg = (d) => '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+        return {
+            check: svg('<path d="M20 6 9 17l-5-5"/>'),
+            edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+            reopen: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
+            up: svg('<path d="m18 15-6-6-6 6"/>'),
+            web: svg('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>'),
+            note: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>'),
+            repeat: svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+        };
+    }
+
+    /**
+     * The card stylesheet. Theme variables only, so it follows the active
+     * theme. Phone rules sit under body.is-phone and a 480px query; the
+     * button and input rules repeat their class to outrank a theme's phone
+     * control height.
+     */
+    static get _CSS() {
+        return [
+            '.sauce-task-note-view { --tnv-prio: transparent; position: relative; display: flex; flex-direction: column; gap: 14px; width: 100%; box-sizing: border-box; margin: 4px 0 12px; padding: 18px 18px 14px 20px; border: 1px solid var(--background-modifier-border); border-radius: var(--sauce-radius-modal, 12px); background: var(--background-secondary); }',
+            '.sauce-task-note-view::before { content: ""; position: absolute; left: -1px; top: 18px; bottom: 18px; width: 3px; border-radius: 0 3px 3px 0; background: var(--tnv-prio); pointer-events: none; }',
+            '.sauce-task-note-view[data-priority="highest"], .sauce-task-note-view[data-priority="high"] { --tnv-prio: var(--color-red, #dc2626); }',
+            '.sauce-task-note-view[data-priority="medium"] { --tnv-prio: var(--color-orange, #ea580c); }',
+            '.sauce-task-note-view[data-priority="low"] { --tnv-prio: var(--text-faint, #888); }',
+            '.sauce-tnv-head { display: flex; flex-direction: column; gap: 8px; min-width: 0; }',
+            '.sauce-tnv-parent { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; max-width: 100%; font-size: 0.8em; color: var(--text-muted); text-decoration: none; cursor: pointer; }',
+            '.sauce-tnv-parent > .sauce-tnv-parent-name { color: var(--text-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+            '.sauce-tnv-title { margin: 0; font-size: 1.35em; font-weight: 700; line-height: 1.25; color: var(--text-normal); overflow-wrap: anywhere; }',
+            '.sauce-task-note-view[data-status="done"] .sauce-tnv-title, .sauce-task-note-view[data-status="deleted"] .sauce-tnv-title { color: var(--text-muted); }',
+            '.sauce-tnv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }',
+            '.sauce-tnv-chip { box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; min-height: 24px; max-width: 100%; padding: 2px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: var(--background-primary); color: var(--text-muted); font-size: 0.78em; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }',
+            '.sauce-tnv-chip > svg { flex-shrink: 0; }',
+            '.sauce-tnv-chip.is-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--interactive-accent); flex-shrink: 0; }',
+            '.sauce-tnv-chip.is-status.is-done::before { background: var(--color-green, #4c9a5a); }',
+            '.sauce-tnv-chip.is-status.is-deleted::before { background: var(--text-faint, #888); }',
+            '.sauce-tnv-chip.is-accent { border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent); color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); }',
+            '.sauce-tnv-chip.is-danger { border-color: color-mix(in srgb, var(--color-red, #dc2626) 55%, transparent); color: var(--color-red, #dc2626); background: color-mix(in srgb, var(--color-red, #dc2626) 12%, transparent); }',
+            '.sauce-tnv-chip.is-prio-highest, .sauce-tnv-chip.is-prio-high { color: var(--color-red, #dc2626); }',
+            '.sauce-tnv-chip.is-prio-medium { color: var(--color-orange, #ea580c); }',
+            'a.sauce-tnv-chip.is-project { color: var(--text-accent); cursor: pointer; }',
+            '@media (hover: hover) { a.sauce-tnv-chip.is-project:hover, .sauce-tnv-link:hover, .sauce-tnv-parent:hover > .sauce-tnv-parent-name { border-color: var(--background-modifier-border-hover); text-decoration: none; filter: brightness(1.08); } }',
+            '.sauce-tnv-section { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--background-modifier-border); }',
+            '.sauce-tnv-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }',
+            '.sauce-tnv-label { font-size: 0.72em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }',
+            '.sauce-tnv-count { font-size: 0.78em; color: var(--text-muted); font-variant-numeric: tabular-nums; }',
+            '.sauce-tnv-links { display: flex; flex-direction: column; gap: 6px; }',
+            '.sauce-tnv-link { box-sizing: border-box; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 10px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m, 8px); background: var(--background-primary); color: var(--text-muted); transition: border-color 120ms ease, filter 120ms ease; }',
+            '.sauce-tnv-link > svg { flex-shrink: 0; color: var(--text-faint); }',
+            '.sauce-tnv-link-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.92em; }',
+            '.sauce-tnv-link-text a { color: var(--text-accent); text-decoration: none; }',
+            '.sauce-tnv-link-host { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.76em; color: var(--text-faint); }',
+            '.sauce-tnv-progress { height: 6px; border-radius: 999px; background: var(--background-modifier-border); overflow: hidden; }',
+            '.sauce-tnv-progress > span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--color-green, #4c9a5a); transition: width 480ms var(--sauce-ease, cubic-bezier(0.2, 0.9, 0.25, 1)); }',
+            '.sauce-tnv-subtasks { display: flex; flex-direction: column; gap: 0; }',
+            '.sauce-tnv-empty { font-size: 0.85em; font-style: italic; color: var(--text-muted); }',
+            'body .sauce-tnv-add.sauce-tnv-add { box-sizing: border-box; width: 100%; height: auto; min-height: 34px; padding: 6px 12px; border: 1px dashed var(--background-modifier-border-hover, var(--background-modifier-border)); border-radius: var(--radius-m, 8px); background: transparent; color: var(--text-normal); font-size: 0.9em; box-shadow: none; transition: border-color 120ms ease, background 120ms ease; }',
+            'body .sauce-tnv-add.sauce-tnv-add:focus { border-style: solid; border-color: var(--interactive-accent); background: var(--background-primary); outline: none; }',
+            '.sauce-tnv-done-list { display: flex; flex-direction: column; gap: 2px; }',
+            '.sauce-tnv-done-list:not(:empty) { margin-top: 6px; }',
+            '.sauce-tnv-done-list .sauce-today-done-row { padding: 4px 6px; }',
+            'body .sauce-tnv-more.sauce-tnv-more { align-self: flex-start; height: auto; min-height: 0; padding: 2px 6px; border: none; background: none; box-shadow: none; color: var(--text-accent); font-size: 0.85em; cursor: pointer; }',
+            '.sauce-tnv-actions { display: flex; gap: 8px; padding-top: 14px; border-top: 1px solid var(--background-modifier-border); }',
+            '.sauce-tnv-actions > .sauce-btn { flex: 0 0 auto; }',
+            '.sauce-tnv-actions > .sauce-btn.sauce-tnv-primary { flex: 1 1 auto; }',
+            'body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-done { border-color: var(--color-green, #4c9a5a); background: var(--color-green, #4c9a5a); color: var(--text-on-accent, #fff); }',
+            '@media (hover: hover) { body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-done:hover { border-color: var(--color-green, #4c9a5a); background: var(--color-green, #4c9a5a); color: var(--text-on-accent, #fff); filter: brightness(1.08); } }',
+            'body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-reopen { border-color: var(--interactive-accent); color: var(--interactive-accent); }',
+            '.sauce-tnv-done.is-completing > svg { animation: sauce-pop var(--sauce-dur-reveal, 340ms) var(--sauce-spring, cubic-bezier(0.34, 1.56, 0.5, 1)) both; }',
+            '.sauce-tnv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 0.78em; color: var(--text-faint); }',
+            '.sauce-tnv-meta a { color: var(--text-muted); text-decoration: none; cursor: pointer; }',
+            '.sauce-tnv-meta-sep { opacity: 0.6; }',
+            'body.is-phone .sauce-task-note-view { padding: 16px 14px 12px 16px; gap: 12px; }',
+            'body.is-phone .sauce-tnv-title { font-size: 1.25em; }',
+            'body.is-phone .sauce-tnv-actions > .sauce-btn.sauce-btn.sauce-btn.sauce-btn { flex: 1 1 0; height: auto; min-height: 42px; }',
+            'body.is-phone .sauce-tnv-add.sauce-tnv-add.sauce-tnv-add { height: auto; min-height: 40px; font-size: 16px; }',
+            'body.is-phone .sauce-tnv-chip { min-height: 26px; }',
+            '@media (max-width: 480px) { .sauce-tnv-actions > .sauce-btn { flex: 1 1 0; } }',
+            '@media (prefers-reduced-motion: reduce) { .sauce-tnv-progress > span, .sauce-tnv-link, .sauce-tnv-add, .sauce-task-note-view.sauce-anim-reveal, .sauce-tnv-done > svg { transition: none !important; animation: none !important; } }',
+        ].join('\n');
+    }
+
+    /** Inject (or refresh) the card stylesheet once per document head. */
+    static _injectCss(doc) {
+        try {
+            const head = doc && doc.head;
+            if (!head || typeof doc.createElement !== 'function') return;
+            const ID = 'sauce-task-note-css';
+            let el = Array.from(head.children || []).find((c) => c && c.id === ID) || null;
+            if (!el) {
+                el = doc.createElement('style');
+                el.id = ID;
+                head.appendChild(el);
+            }
+            if (el.textContent !== TaskNoteView._CSS) el.textContent = TaskNoteView._CSS;
+        } catch (_e) { /* unstyled is still usable */ }
+    }
+
     // ---------- Instance / browser render ----------
 
     /**
      * Entry point invoked by customjs-guard: `render(dv)`. Reads the current
-     * page's task frontmatter and draws a sectioned card. Fully guarded — returns
+     * page's task frontmatter and draws the card. Fully guarded — returns
      * quietly on cold-load (no throw), and each field is read defensively so one
      * bad value can't break the whole card.
      */
@@ -375,12 +556,14 @@ class TaskNoteView {
                 title: str(parsed ? parsed.title : page.title),
                 status: str((parsed && parsed.status) || page.status || 'open'),
                 due: str(parsed ? parsed.due : page.due),
+                recurrence: str(parsed ? parsed.recurrence : page.recurrence),
                 priority: str(parsed ? parsed.priority : page.priority),
                 project: str(parsed ? parsed.project : page.project),
                 source_note: str(parsed ? parsed.source_note : page.source_note),
                 parent_task: str(parsed ? parsed.parent_task : page.parent_task),
                 created_at: str(parsed ? parsed.created_at : page.created_at),
-                // Structured card links (FIX 5) — read from the parsed view (already
+                completed_at: str(parsed ? parsed.completed_at : page.completed_at),
+                // Structured card links — read from the parsed view (already
                 // normalized to a string array) or the raw page frontmatter (which
                 // Dataview may surface as strings and/or Link objects).
                 links: (parsed && Array.isArray(parsed.links)) ? parsed.links : page.links,
@@ -388,6 +571,34 @@ class TaskNoteView {
             const filePath = (page.file && page.file.path) || (parsed && parsed.path) || null;
             let todayStr = '';
             try { todayStr = (window.moment && window.moment().format) ? window.moment().format('YYYY-MM-DD') : ''; } catch (_e) { todayStr = ''; }
+            const status = task.status.trim().toLowerCase() || 'open';
+            const ICON = TaskNoteView._ICONS;
+            const TE = window.customJS && window.customJS.TaskEntity;
+            const linkText = (v) => {
+                let out = '';
+                try { if (TE && typeof TE._linkText === 'function') out = TE._linkText(v); } catch (_e) { out = ''; }
+                return String(out || this._stripWikilink(v) || '').trim();
+            };
+            const openLink = (target) => (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try {
+                    if (window.app && window.app.workspace && typeof window.app.workspace.openLinkText === 'function') {
+                        window.app.workspace.openLinkText(target, filePath || '', false);
+                    }
+                } catch (_e) { /* open best-effort */ }
+            };
+            const icon = (el, name) => { try { if (el && ICON[name]) el.insertAdjacentHTML('afterbegin', ICON[name]); } catch (_e) {} return el; };
+            const notice = (msg) => { try { new Notice(msg, 6000); } catch (_e) {} };
+            const refresh = () => {
+                try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
+                try {
+                    if (window.app && window.app.commands && typeof window.app.commands.executeCommandById === 'function') {
+                        window.app.commands.executeCommandById('dataview:dataview-force-refresh-views');
+                    }
+                } catch (_e) {}
+            };
+
+            try { if (typeof document !== 'undefined') TaskNoteView._injectCss(document); } catch (_e) {}
 
             // ----- Card container -----
             // Replace any card an earlier execution left in this container.
@@ -400,242 +611,81 @@ class TaskNoteView {
                 for (const prev of Array.from(stale || [])) { if (prev && prev.remove) prev.remove(); }
             } catch (_e) { /* best-effort */ }
             const card = c.createEl('div', { cls: 'sauce-task-note-view' });
-            card.style.cssText = [
-                'display:flex', 'flex-direction:column', 'gap:14px',
-                'margin:4px 0 10px', 'width:100%', 'box-sizing:border-box',
-                'padding:16px', 'border:1px solid var(--background-modifier-border)',
-                'border-radius:var(--radius-m, 8px)',
-                'background:var(--background-secondary)',
-            ].join(';') + ';';
-
-            // ----- Header: title LEFT, status pill RIGHT (single flex row) -----
-            // Title on the left (takes the row, wraps within its own column), pill
-            // pinned top-right (never shrinks). align-items:flex-start keeps the pill
-            // at the top of the first title line while a long title wraps below it.
-            const header = card.createEl('div');
-            header.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start; gap:12px;';
-
-            const status = task.status.trim().toLowerCase();
-
-            // TITLE first (left column).
-            const titleEl = header.createEl('div', { text: task.title || '(untitled)' });
-            titleEl.style.cssText = 'flex:1 1 auto; min-width:0; font-size:1.3em; font-weight:700; line-height:1.25; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word; text-align:left;';
-
-            // PILL second (right column) — sits on the right, never shrinks. The
-            // color-coding is preserved (OPEN accent / DONE green / DELETED muted).
-            const pill = header.createEl('span', { text: this._statusLabel(task.status).toUpperCase() });
-            const pillBase = 'flex-shrink:0; font-size:0.68em; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; padding:3px 10px; border-radius:999px; box-sizing:border-box; white-space:nowrap;';
-            if (status === 'done') {
-                pill.style.cssText = pillBase + 'background:var(--color-green, #4c9a5a); color:var(--text-on-accent, #fff);';
-            } else if (status === 'deleted') {
-                pill.style.cssText = pillBase + 'background:var(--background-modifier-border); color:var(--text-muted);';
-            } else {
-                pill.style.cssText = pillBase + 'background:var(--interactive-accent, #6a6abf); color:var(--text-on-accent, #fff);';
-            }
-
-            // ----- Divider -----
-            const drawDivider = () => {
-                const hr = card.createEl('div');
-                hr.style.cssText = 'height:1px; background:var(--background-modifier-border); width:100%;';
-            };
-
-            // ----- DETAILS section (set fields only, human values) -----
-            const overdue = (v) => {
-                try {
-                    if (status !== 'open') return false;
-                    const d = TaskNoteView._ymd(v);
-                    const t = TaskNoteView._ymd(todayStr);
-                    if (!d || !t) return false;
-                    return TaskNoteView._dayNumber(d) < TaskNoteView._dayNumber(t);
-                } catch (_e) { return false; }
-            };
-
-            const hasDue = !!task.due;
-            const prioMeta = TaskNoteView._priorityMeta(task.priority);
-            // Clean, comparable link target for the Project row. Prefer
-            // TaskEntity._linkText (coerces a Dataview Link object, a
-            // `[[path/to/Note.md|alias]]`, or a bare string to the note BASENAME);
-            // optional-chained so a TDZ'd customJS never throws, with the local
-            // `^[[…]]$` strip as the cold-load fallback.
-            let projName = '';
+            // The card rises in once per note per session, not on every
+            // Dataview refresh.
+            const seen = TaskNoteView._seen || (TaskNoteView._seen = new Set());
+            if (filePath && !seen.has(filePath)) { seen.add(filePath); card.classList.add('sauce-anim-reveal'); }
+            let prioLevel = 'none';
             try {
-                const TE = window.customJS && window.customJS.TaskEntity;
-                if (TE && typeof TE._linkText === 'function') {
-                    projName = TE._linkText(parsed ? parsed.project : page.project);
-                }
-            } catch (_e) { projName = ''; }
-            if (!projName) {
-                projName = task.project.trim();
-                const pm = /^\[\[([^\]]+)\]\]$/.exec(projName);
-                if (pm) projName = pm[1];
-            }
-            projName = String(projName || '').trim();
-            const hasProject = !!projName;
-            const createdHuman = task.created_at ? TaskNoteView._humanDate(task.created_at, todayStr) : { text: '' };
-            const hasCreated = !!createdHuman.text;
+                const TTLp = window.customJS && window.customJS.TaskTodayList;
+                prioLevel = TTLp && typeof TTLp._priorityLevel === 'function' ? TTLp._priorityLevel(task) : String(task.priority || '').trim().toLowerCase() || 'none';
+            } catch (_e) { prioLevel = 'none'; }
+            try { card.setAttribute('data-priority', prioLevel); card.setAttribute('data-status', status); } catch (_e) {}
 
-            // FIX 6 — DETAILS is gated on _fieldRows(task): the SINGLE source of truth
-            // for what the section contains (Scheduled / Due / Priority / Project).
-            // When _fieldRows is empty there are no set detail fields, so we render
-            // NEITHER the DETAILS label NOR an empty grid — the card goes straight
-            // from the header to SOURCE / LINKS / Edit. (Created is a trailing muted
-            // stamp shown INSIDE the section when present; it never resurrects an
-            // otherwise-empty DETAILS block.)
-            const anyDetails = TaskNoteView._fieldRows(task).length > 0;
-            if (anyDetails) {
-                drawDivider();
-
-                const sectionLabel = card.createEl('div', { text: 'DETAILS' });
-                sectionLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
-
-                const grid = card.createEl('div');
-                grid.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
-
-                // Build one label→value row.
-                const addRow = (label, buildValue) => {
-                    try {
-                        const row = grid.createEl('div');
-                        row.style.cssText = 'display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px;';
-                        const lab = row.createEl('span', { text: label });
-                        lab.style.cssText = 'flex:0 0 84px; min-width:84px; font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);';
-                        const valWrap = row.createEl('span');
-                        valWrap.style.cssText = 'flex:1 1 auto; min-width:0; font-size:0.95em; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word;';
-                        buildValue(valWrap);
-                    } catch (_e) { /* one bad row must not break the card */ }
-                };
-
-                // Due — human date; overdue+open → text-error; muted relative hint.
-                if (hasDue) {
-                    addRow('Due', (wrap) => {
-                        const h = TaskNoteView._humanDate(task.due, todayStr);
-                        const isOverdue = overdue(task.due);
-                        const dueEl = wrap.createEl('span', { text: h.text || task.due });
-                        if (isOverdue) dueEl.style.cssText = 'color:var(--text-error, #e05252); font-weight:600;';
-                        if (h.relative) {
-                            const rel = wrap.createEl('span', { text: ' (' + h.relative + ')' });
-                            rel.style.cssText = (isOverdue ? 'color:var(--text-error, #e05252);' : 'color:var(--text-muted);') + ' font-size:0.9em;';
-                        }
-                    });
-                }
-
-                // Priority — colored badge.
-                if (prioMeta) {
-                    addRow('Priority', (wrap) => {
-                        const badge = wrap.createEl('span', { text: prioMeta.label });
-                        badge.style.cssText = 'display:inline-block; font-size:0.82em; font-weight:600; padding:1px 9px; border-radius:999px; border:1px solid ' + prioMeta.color + '; color:' + prioMeta.color + ';';
-                    });
-                }
-
-                // Project — clickable internal link.
-                if (hasProject) {
-                    addRow('Project', (wrap) => {
-                        const link = wrap.createEl('a', { text: projName });
-                        link.classList.add('internal-link');
-                        link.style.cssText = 'color:var(--link-color, var(--text-accent)); cursor:pointer; text-decoration:none;';
-                        link.addEventListener('click', (ev) => {
-                            ev.preventDefault();
-                            try {
-                                if (window.app && window.app.workspace && typeof window.app.workspace.openLinkText === 'function') {
-                                    window.app.workspace.openLinkText(projName, filePath || '', false);
-                                }
-                            } catch (_e) { /* open best-effort */ }
-                        });
-                    });
-                }
-
-                // Created — small muted human date (bottom of the section).
-                if (hasCreated) {
-                    addRow('Created', (wrap) => {
-                        wrap.style.cssText = 'flex:1 1 auto; min-width:0; font-size:0.82em; color:var(--text-muted);';
-                        wrap.createEl('span', { text: createdHuman.text });
-                    });
-                }
-            }
-
-            // ----- SOURCE line ("From <link>") -----
-            if (task.source_note) {
-                try {
-                    // Clean, comparable link target for the source meeting. Prefer
-                    // TaskEntity._linkText (Link object / path / `[[…|alias]]` →
-                    // BASENAME); optional-chained for cold-load, with the local
-                    // wikilink strip as the fallback.
-                    let target = '';
-                    try {
-                        const TE = window.customJS && window.customJS.TaskEntity;
-                        if (TE && typeof TE._linkText === 'function') target = TE._linkText(task.source_note);
-                    } catch (_e) { target = ''; }
-                    if (!target) target = this._stripWikilink(task.source_note);
-                    if (target) {
-                        drawDivider();
-                        const fromRow = card.createEl('div');
-                        fromRow.style.cssText = 'font-size:0.88em; color:var(--text-muted); display:flex; align-items:center; gap:5px; flex-wrap:wrap;';
-                        fromRow.createEl('span', { text: 'From' });
-                        const link = fromRow.createEl('a', { text: target });
-                        link.classList.add('internal-link');
-                        link.style.cssText = 'color:var(--link-color, var(--text-accent)); cursor:pointer; text-decoration:none;';
-                        link.addEventListener('click', (ev) => {
-                            ev.preventDefault();
-                            try {
-                                if (window.app && window.app.workspace && typeof window.app.workspace.openLinkText === 'function') {
-                                    window.app.workspace.openLinkText(target, filePath || '', false);
-                                }
-                            } catch (_e) { /* open best-effort */ }
-                        });
-                    }
-                } catch (_e) { /* source link best-effort */ }
-            }
-
-            // ----- "Part of" — a subtask's own note links back to its parent -----
+            // ----- Header: parent link (subtasks), title, one row of chips -----
+            const head = card.createEl('div', { cls: 'sauce-tnv-head' });
             const isSubtask = !!task.parent_task;
             if (isSubtask) {
                 try {
-                    drawDivider();
-                    const partOfRow = card.createEl('div');
-                    partOfRow.style.cssText = 'font-size:0.88em; color:var(--text-muted); display:flex; align-items:center; gap:5px; flex-wrap:wrap;';
-                    partOfRow.createEl('span', { text: 'Part of' });
-                    const parentLink = partOfRow.createEl('a', { text: task.parent_task });
-                    parentLink.classList.add('internal-link');
-                    parentLink.style.cssText = 'color:var(--link-color, var(--text-accent)); cursor:pointer; text-decoration:none;';
-                    parentLink.addEventListener('click', (ev) => {
-                        ev.preventDefault();
-                        try {
-                            if (window.app && window.app.workspace && typeof window.app.workspace.openLinkText === 'function') {
-                                window.app.workspace.openLinkText(task.parent_task, filePath || '', false);
-                            }
-                        } catch (_e) { /* open best-effort */ }
-                    });
+                    const parentName = linkText(task.parent_task);
+                    const partOf = head.createEl('a', { cls: 'sauce-tnv-parent', href: '#' });
+                    icon(partOf, 'up');
+                    partOf.createEl('span', { text: 'Part of' });
+                    partOf.createEl('span', { cls: 'sauce-tnv-parent-name', text: parentName });
+                    partOf.addEventListener('click', openLink(parentName));
                 } catch (_e) { /* part-of link best-effort */ }
             }
+            head.createEl('div', { cls: 'sauce-tnv-title', text: task.title || '(untitled)' });
 
-            // ----- LINKS section (FIX 5) — structured links rendered INSIDE the card -----
-            // Each entry is a markdown link string ([[Note]] / [label](url) / <url>)
-            // rendered as CLICKABLE markdown so the user's added links live neatly in
-            // the card (not as raw text at the bottom of the note). One bad entry
-            // can't throw the card — _linkEntries + the per-entry try/catch guard it.
+            const chips = head.createEl('div', { cls: 'sauce-tnv-chips' });
+            chips.createEl('span', { cls: 'sauce-tnv-chip is-status is-' + status, text: this._statusLabel(task.status) });
+            try {
+                const dueChip = TaskNoteView._dueChip(task.due, todayStr, status);
+                if (dueChip) {
+                    const el = chips.createEl('span', { cls: 'sauce-tnv-chip is-due' + (dueChip.tone ? ' is-' + dueChip.tone : ''), text: dueChip.text });
+                    const full = TaskNoteView._humanDate(task.due, todayStr).text;
+                    if (full) el.setAttribute('title', full);
+                }
+            } catch (_e) {}
+            const prioMeta = TaskNoteView._priorityMeta(task.priority);
+            if (prioMeta) chips.createEl('span', { cls: 'sauce-tnv-chip is-prio-' + prioLevel, text: prioMeta.label + ' priority' });
+            if (task.recurrence.trim()) {
+                const rep = chips.createEl('span', { cls: 'sauce-tnv-chip is-repeat', text: task.recurrence.trim() });
+                icon(rep, 'repeat');
+            }
+            const projName = task.project.trim() ? linkText(parsed ? parsed.project : page.project) : '';
+            if (projName) {
+                const proj = chips.createEl('a', { cls: 'sauce-tnv-chip is-project', text: projName, href: '#' });
+                proj.classList.add('internal-link');
+                proj.addEventListener('click', openLink(projName));
+            }
+
+            // ----- Links: one row each, label then the site it goes to -----
             try {
                 const linkEntries = TaskNoteView._linkEntries(task);
                 if (linkEntries.length) {
-                    drawDivider();
-                    const linksLabel = card.createEl('div', { text: 'LINKS' });
-                    linksLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
-                    const linksWrap = card.createEl('div');
-                    linksWrap.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+                    const section = card.createEl('div', { cls: 'sauce-tnv-section' });
+                    section.createEl('div', { cls: 'sauce-tnv-label', text: 'Links' });
+                    const list = section.createEl('div', { cls: 'sauce-tnv-links' });
                     for (const entry of linkEntries) {
                         try {
-                            const row = linksWrap.createEl('div');
-                            row.style.cssText = 'font-size:0.95em; line-height:1.35; color:var(--text-normal); overflow-wrap:break-word; word-break:break-word;';
-                            TaskNoteView._renderInlineMarkdown(row, entry, filePath || '');
+                            const meta = TaskNoteView._linkMeta(entry);
+                            const row = list.createEl('div', { cls: 'sauce-tnv-link' });
+                            icon(row, meta.kind === 'web' ? 'web' : 'note');
+                            const text = row.createEl('span', { cls: 'sauce-tnv-link-text' });
+                            TaskNoteView._renderInlineMarkdown(text, entry, filePath || '');
+                            if (meta.host) row.createEl('span', { cls: 'sauce-tnv-link-host', text: meta.host });
                         } catch (_e) { /* one bad link must not break the card */ }
                     }
                 }
-            } catch (_e) { /* LINKS section best-effort */ }
+            } catch (_e) { /* Links section best-effort */ }
 
             // ----- SUBTASKS — only meaningful when NOT itself a subtask (one level
-            // of nesting only, per design). Live-queries spice/tasks/ for every open
-            // child whose parent_task points at THIS note, reuses the shared
-            // TaskTodayList.renderTaskRow for each row (same checkbox/edit/delete/
-            // badge behavior as every other task surface), and offers an inline
-            // one-gesture "+ Add subtask" quick-create.
+            // of nesting only, per design). Live-queries spice/tasks/ for every
+            // child whose parent_task points at THIS note. Open children draw with
+            // the shared TaskTodayList.renderTaskRow (same checkbox/edit/badge
+            // behaviour as every task surface); finished ones with renderDoneRow
+            // and Reopen, as on the To-Do view. A progress bar fills as they close.
             if (!isSubtask && filePath) {
                 try {
                     const thisBasename = filePath.split('/').pop().replace(/\.md$/i, '');
@@ -662,44 +712,112 @@ class TaskNoteView {
                             }
                         }
                     } catch (_e) { allSubtasks = []; }
-                    // FIX: only OPEN subtasks are rendered as rows. Without this
-                    // filter, a just-completed subtask (moved to _done/, but still
-                    // under spice/tasks/ so still fetched above) reappears unchecked
-                    // on Dataview's next auto-refresh, and a second click calls
-                    // markDone on the now-stale path — "task file not found" error.
-                    // allSubtasks (open + done) still feeds the N/M progress count
-                    // below, which is correct as-is.
-                    const openSubtasks = allSubtasks.filter(t => {
-                        if (!t || t.status !== 'open') return false;
-                        const childPath = String(t.path || '');
-                        return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
-                    });
-
-                    drawDivider();
-                    const subHeadRow = card.createEl('div');
-                    subHeadRow.style.cssText = 'display:flex; align-items:baseline; justify-content:space-between; gap:8px;';
-                    const subLabel = subHeadRow.createEl('div', { text: 'SUBTASKS' });
-                    subLabel.style.cssText = 'font-size:0.68em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted);';
-                    const progressText = TaskNoteView._subtaskProgressText(allSubtasks);
-                    if (progressText) {
-                        const prog = subHeadRow.createEl('span', { text: progressText });
-                        prog.style.cssText = 'font-size:0.78em; color:var(--text-muted);';
-                    }
-
-                    const subList = card.createEl('div');
-                    subList.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
                     const TTL = window.customJS && window.customJS.TaskTodayList;
-                    if (TTL && typeof TTL.renderTaskRow === 'function') {
-                        for (const st of openSubtasks) {
-                            try { TTL.renderTaskRow(subList, st, null); } catch (_e) {}
-                        }
-                    }
 
-                    const addRow = card.createEl('div');
-                    addRow.style.cssText = 'display:flex; gap:8px; margin-top:2px;';
-                    const addInput = addRow.createEl('input', { type: 'text' });
+                    const section = card.createEl('div', { cls: 'sauce-tnv-section is-subtasks' });
+                    const subHead = section.createEl('div', { cls: 'sauce-tnv-section-head' });
+                    subHead.createEl('div', { cls: 'sauce-tnv-label', text: 'Subtasks' });
+                    const countEl = subHead.createEl('span', { cls: 'sauce-tnv-count' });
+                    const bar = section.createEl('div', { cls: 'sauce-tnv-progress' });
+                    const fill = bar.createEl('span');
+                    try { bar.setAttribute('role', 'progressbar'); bar.setAttribute('aria-label', 'Subtasks done'); } catch (_e) {}
+                    const subList = section.createEl('div', { cls: 'sauce-tnv-subtasks' });
+                    const addInput = section.createEl('input', { cls: 'sauce-tnv-add', type: 'text' });
                     addInput.placeholder = '+ Add subtask…';
-                    addInput.style.cssText = 'flex:1 1 auto; min-width:0; box-sizing:border-box; padding:6px 10px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:var(--radius-s,6px); color:var(--text-normal,#ddd); font-size:13px;';
+                    try { addInput.setAttribute('aria-label', 'Add subtask'); addInput.setAttribute('enterkeyhint', 'done'); } catch (_e) {}
+                    const doneHost = section.createEl('div', { cls: 'sauce-tnv-done-list' });
+                    let doneAll = false;
+
+                    // The bar starts empty and fills on the next frame, so it
+                    // animates on open; a later repaint slides from the old width.
+                    const paintProgress = (first) => {
+                        const prog = TaskNoteView._progress(allSubtasks);
+                        countEl.textContent = prog.text;
+                        bar.style.display = prog.total ? '' : 'none';
+                        try { bar.setAttribute('aria-valuenow', String(prog.pct)); } catch (_e) {}
+                        const apply = () => { fill.style.width = prog.pct + '%'; };
+                        if (first && typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(apply));
+                        else apply();
+                    };
+                    const reopenSub = async (st, undo) => {
+                        if (undo.disabled) return;
+                        undo.disabled = true;
+                        let res = null;
+                        try {
+                            const TDr = window.customJS && window.customJS.TaskDialog;
+                            res = TDr && typeof TDr.reopen === 'function' ? await TDr.reopen(st.path) : null;
+                        } catch (_e) { res = null; }
+                        if (res && res.ok) {
+                            st.status = 'open';
+                            st.completed_at = null;
+                            st.path = res.path || st.path;
+                            paintSubtasks();
+                            return;
+                        }
+                        undo.disabled = false;
+                        notice('Could not reopen subtask: ' + ((res && res.reason) || 'unknown'));
+                    };
+                    const paintSubtasks = (first) => {
+                        while (subList.firstChild) subList.removeChild(subList.firstChild);
+                        while (doneHost.firstChild) doneHost.removeChild(doneHost.firstChild);
+                        // Only OPEN subtasks are rendered as rows. Without this
+                        // filter, a just-completed subtask (moved to _done/, but
+                        // still under spice/tasks/ so still fetched above)
+                        // reappears unchecked on Dataview's next auto-refresh, and
+                        // a second click calls markDone on the now-stale path —
+                        // "task file not found". allSubtasks (open + done) still
+                        // feeds the progress count.
+                        const openSubtasks = allSubtasks.filter(t => {
+                            if (!t || t.status !== 'open') return false;
+                            const childPath = String(t.path || '');
+                            return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
+                        });
+                        if (TTL && typeof TTL.renderTaskRow === 'function') {
+                            for (const st of openSubtasks) {
+                                try {
+                                    TTL.renderTaskRow(subList, st, null, {
+                                        showProject: false,
+                                        todayStr,
+                                        onDone: (doneTask) => {
+                                            doneTask.status = 'done';
+                                            try { doneTask.completed_at = window.moment().format('YYYY-MM-DDTHH:mm:ssZ'); } catch (_e) {}
+                                            paintSubtasks();
+                                        },
+                                    });
+                                } catch (_e) {}
+                            }
+                        }
+                        if (!allSubtasks.length) {
+                            subList.createEl('div', { cls: 'sauce-tnv-empty', text: 'Break this into steps. Add one below.' });
+                        }
+                        paintProgress(first);
+
+                        // Finished subtasks, newest first: the first five, then
+                        // "Show N more". Reopen puts one back in the list above.
+                        const doneSubtasks = allSubtasks.filter(t => t && t.status === 'done');
+                        if (doneSubtasks.length && TTL && typeof TTL.renderDoneRow === 'function') {
+                            const stampOf = (t) => {
+                                try { return (TE && typeof TE.completedDay === 'function') ? TE.completedDay(t) : String(t.completed_at || '').slice(0, 10); } catch (_e) { return ''; }
+                            };
+                            doneSubtasks.sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
+                            doneHost.createEl('div', { cls: 'sauce-tnv-label', text: 'Done · ' + doneSubtasks.length });
+                            const shown = doneAll ? doneSubtasks : doneSubtasks.slice(0, 5);
+                            for (const st of shown) {
+                                try {
+                                    const day = stampOf(st);
+                                    const stamp = day && day !== todayStr ? TaskNoteView._shortDate(day, todayStr) : null;
+                                    TTL.renderDoneRow(doneHost, st, { notice, onUndo: reopenSub, undoLabel: 'Reopen', stamp });
+                                } catch (_e) {}
+                            }
+                            if (shown.length < doneSubtasks.length) {
+                                const more = doneHost.createEl('button', { cls: 'sauce-tnv-more', text: 'Show ' + (doneSubtasks.length - shown.length) + ' more' });
+                                try { more.setAttribute('type', 'button'); } catch (_e) {}
+                                more.addEventListener('click', () => { doneAll = true; paintSubtasks(); });
+                            }
+                        }
+                    };
+                    paintSubtasks(true);
+
                     let addSequence = 0;
                     let addInputRevision = 0;
                     addInput.addEventListener('input', () => { addInputRevision++; });
@@ -756,7 +874,7 @@ class TaskNoteView {
                                         };
                                         let node = null;
                                         try {
-                                            node = TTL.renderTaskRow(subList, optimisticTask, null);
+                                            node = TTL.renderTaskRow(subList, optimisticTask, null, { showProject: false, todayStr });
                                             if (!node || node.parentNode !== subList) {
                                                 throw new Error('subtask row render did not return an attached row');
                                             }
@@ -764,6 +882,7 @@ class TaskNoteView {
                                             restoreChildren();
                                             throw error;
                                         }
+                                        try { node.classList.add('sauce-anim-reveal'); } catch (_e) {}
                                         addInput.value = '';
                                         try { addInput.focus(); } catch (_e) {}
                                         return { parent: subList, node, focusTarget: addInput, title, sequence };
@@ -814,104 +933,89 @@ class TaskNoteView {
                         }
                     };
                     addInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); doAdd(); } });
-
-                    // ----- Completed subtasks — collapsible history (mirrors
-                    // TaskDoneTodayList's exact convention: reuse the shared
-                    // renderTaskRow for a uniform row, then pre-check the
-                    // checkbox afterward since renderTaskRow always starts
-                    // unchecked). Uses allSubtasks (unfiltered — open+done),
-                    // NOT openSubtasks, so a completed subtask shows up here
-                    // instead of vanishing with no trace. Rendered only when
-                    // there's at least one done subtask — no empty clutter.
-                    const doneSubtasks = allSubtasks.filter(t => t && t.status === 'done');
-                    if (doneSubtasks.length) {
-                        const doneDetails = card.createEl('details');
-                        doneDetails.setAttribute('open', '');
-                        doneDetails.style.cssText = 'width:100%; box-sizing:border-box; margin-top:6px;';
-                        const doneSummary = doneDetails.createEl('summary');
-                        doneSummary.style.cssText = 'cursor:pointer; user-select:none; list-style:none; font-size:0.68em; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); font-weight:600;';
-                        doneSummary.textContent = 'Completed (' + doneSubtasks.length + ')';
-                        const doneList = doneDetails.createEl('div');
-                        doneList.style.cssText = 'display:flex; flex-direction:column; gap:2px; margin-top:4px;';
-                        if (TTL && typeof TTL.renderTaskRow === 'function') {
-                            for (const st of doneSubtasks) {
-                                try {
-                                    const row = TTL.renderTaskRow(doneList, st, null);
-                                    const cb = row && row.querySelector && row.querySelector('input[type="checkbox"]');
-                                    if (cb) cb.checked = true;
-                                } catch (_e) {}
-                            }
-                        }
-                    }
                 } catch (_e) { /* SUBTASKS section best-effort — never break the card */ }
             }
 
-            // ----- Full-width "Mark done" button (OPEN tasks only) -----
-            if (status === 'open') {
-                drawDivider();
-                const doneBtn = card.createEl('button', { text: 'Mark done' });
-                doneBtn.style.cssText = [
-                    'width:100%', 'box-sizing:border-box', 'min-height:38px',
-                    'padding:9px 14px', 'border-radius:var(--radius-s, 4px)',
-                    'border:1px solid var(--color-green, #4c9a5a)',
-                    'background:var(--color-green, #4c9a5a)',
-                    'color:var(--text-on-accent, #fff)', 'cursor:pointer',
-                    'font-size:0.95em', 'font-weight:600',
-                ].join(';') + ';';
-                doneBtn.addEventListener('mouseenter', () => {
-                    try { doneBtn.style.opacity = '0.85'; } catch (_e) {}
-                });
-                doneBtn.addEventListener('mouseleave', () => {
-                    try { doneBtn.style.opacity = '1'; } catch (_e) {}
-                });
-                doneBtn.addEventListener('click', async () => {
-                    try {
+            // ----- Footer: Mark done / Reopen + Edit on one row -----
+            const actions = card.createEl('div', { cls: 'sauce-tnv-actions' });
+            const button = (cls, text, iconName) => {
+                const b = actions.createEl('button', { cls: 'sauce-btn ' + cls });
+                try { b.setAttribute('type', 'button'); } catch (_e) {}
+                icon(b, iconName);
+                b.createEl('span', { text });
+                return b;
+            };
+            for (const action of TaskNoteView._actionsFor(status, filePath)) {
+                if (action === 'done') {
+                    const doneBtn = button('sauce-tnv-done sauce-tnv-primary', 'Mark done', 'check');
+                    doneBtn.addEventListener('click', async () => {
                         const TD = window.customJS && window.customJS.TaskDialog;
-                        if (TD && typeof TD.markDone === 'function' && filePath) {
-                            doneBtn.disabled = true;
-                            doneBtn.textContent = 'Marking done…';
-                            await TD.markDone(filePath);
-                            try { window.customJS?.RenderSafe?.captureScroll?.(); } catch (_e) {}
-                            try {
-                                if (window.app && window.app.commands && typeof window.app.commands.executeCommandById === 'function') {
-                                    window.app.commands.executeCommandById('dataview:dataview-force-refresh-views');
-                                }
-                            } catch (_e) {}
+                        if (!TD || typeof TD.markDone !== 'function' || !filePath || doneBtn.disabled) return;
+                        const label = doneBtn.querySelector ? doneBtn.querySelector('span') : null;
+                        doneBtn.disabled = true;
+                        if (label) label.textContent = 'Marking done…';
+                        try {
+                            const res = await TD.markDone(filePath);
+                            if (res && res.ok === false) throw new Error(res.reason || 'unknown');
+                            doneBtn.classList.add('is-completing');
+                            if (label) label.textContent = 'Done';
+                            refresh();
+                        } catch (e) {
+                            doneBtn.disabled = false;
+                            if (label) label.textContent = 'Mark done';
+                            notice('Could not complete task: ' + (e && (e.message || e)));
                         }
-                    } catch (e) {
-                        doneBtn.disabled = false;
-                        doneBtn.textContent = 'Mark done';
-                        try { new Notice('Could not complete task: ' + (e && (e.message || e)), 6000); } catch (_e) {}
-                    }
-                });
+                    });
+                } else if (action === 'reopen') {
+                    const reopenBtn = button('sauce-tnv-reopen sauce-tnv-primary', 'Reopen', 'reopen');
+                    reopenBtn.addEventListener('click', async () => {
+                        const TD = window.customJS && window.customJS.TaskDialog;
+                        if (!TD || typeof TD.reopen !== 'function' || reopenBtn.disabled) return;
+                        reopenBtn.disabled = true;
+                        let res = null;
+                        try { res = await TD.reopen(filePath); } catch (e) { res = { ok: false, reason: e && (e.message || e) }; }
+                        if (res && res.ok) { refresh(); return; }
+                        reopenBtn.disabled = false;
+                        notice('Could not reopen task: ' + ((res && res.reason) || 'unknown'));
+                    });
+                } else {
+                    const editBtn = button('sauce-tnv-edit', 'Edit', 'edit');
+                    editBtn.addEventListener('click', () => {
+                        try {
+                            if (window.customJS && window.customJS.TaskDialog && typeof window.customJS.TaskDialog.open === 'function' && filePath) {
+                                window.customJS.TaskDialog.open({ edit: filePath });
+                            }
+                        } catch (e) {
+                            notice('Could not open task editor: ' + (e && (e.message || e)));
+                        }
+                    });
+                }
             }
 
-            // ----- Full-width primary "Edit task" button -----
-            drawDivider();
-            const editBtn = card.createEl('button', { text: 'Edit task' });
-            editBtn.style.cssText = [
-                'width:100%', 'box-sizing:border-box', 'min-height:38px',
-                'padding:9px 14px', 'border-radius:var(--radius-s, 4px)',
-                'border:1px solid var(--interactive-accent, #6a6abf)',
-                'background:var(--interactive-accent, #6a6abf)',
-                'color:var(--text-on-accent, #fff)', 'cursor:pointer',
-                'font-size:0.95em', 'font-weight:600',
-            ].join(';') + ';';
-            editBtn.addEventListener('mouseenter', () => {
-                try { editBtn.style.background = 'var(--interactive-accent-hover, var(--interactive-accent, #6a6abf))'; } catch (_e) {}
-            });
-            editBtn.addEventListener('mouseleave', () => {
-                try { editBtn.style.background = 'var(--interactive-accent, #6a6abf)'; } catch (_e) {}
-            });
-            editBtn.addEventListener('click', () => {
-                try {
-                    if (window.customJS && window.customJS.TaskDialog && typeof window.customJS.TaskDialog.open === 'function' && filePath) {
-                        window.customJS.TaskDialog.open({ edit: filePath });
-                    }
-                } catch (e) {
-                    try { new Notice('Could not open task editor: ' + (e && (e.message || e)), 6000); } catch (_e) {}
+            // ----- Quiet footer: when it was made, done, and where it came from -----
+            try {
+                const bits = [];
+                const created = TaskNoteView._shortDate(task.created_at, todayStr);
+                if (created) bits.push({ text: 'Created ' + created });
+                if (status === 'done') {
+                    const finished = TaskNoteView._shortDate(task.completed_at, todayStr);
+                    if (finished) bits.push({ text: 'Done ' + finished });
                 }
-            });
+                const source = task.source_note ? linkText(task.source_note) : '';
+                if (source) bits.push({ text: 'From ', link: source });
+                if (bits.length) {
+                    const meta = card.createEl('div', { cls: 'sauce-tnv-meta' });
+                    bits.forEach((bit, i) => {
+                        if (i) meta.createEl('span', { cls: 'sauce-tnv-meta-sep', text: '·' });
+                        const span = meta.createEl('span', { text: bit.text });
+                        if (bit.link) {
+                            const a = span.createEl('a', { text: bit.link, href: '#' });
+                            a.classList.add('internal-link');
+                            a.addEventListener('click', openLink(bit.link));
+                        }
+                    });
+                }
+            } catch (_e) { /* footer best-effort */ }
         } catch (_e) {
             // Never throw out of render (cold-load safety).
         }
