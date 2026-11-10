@@ -1346,6 +1346,41 @@ function descendants(el) {
     assertTrue("HOME-CSS-3 .sauce-home-greeting centers its children", /align-items:\s*center/.test(rule));
   }
 
+  // ── HOME-OPEN-REFRESH: opening the homepage must not bump the Dataview index.
+  // The Homepage plugin's `refreshDataview` calls dataview.index.touch() on
+  // EVERY homepage open (startup, the open-homepage hotkey, and every new tab
+  // via new-tab-default-page). touch() bumps the index revision, and Dataview's
+  // debounced `dataview:refresh-views` (refreshInterval, 2500ms) then clears and
+  // re-executes every visible dataviewjs block. On Home that is the reported
+  // "loads, then ~2s later snaps and resets, closing the open + menu". Home
+  // needs no such nudge: Dataview re-renders a stale block itself when it is
+  // shown again, and SpaceHome's day watcher covers the clock-only rollover.
+  // A homepage `commands[]` entry that force-refreshes Dataview has the same
+  // effect, so it is locked out too.
+  {
+    const conv = JSON.parse(fs.readFileSync(
+      path.join(WORKSHOP, "platform", "mechanisms", "convenience", "manifest.json"), "utf8"
+    ));
+    const hpEntry = (conv.community_plugin_settings || []).find((e) => e && e.id === "homepage");
+    const homepages = (hpEntry && hpEntry.settings && hpEntry.settings.homepages) || {};
+    const names = Object.keys(homepages);
+    assertTrue("HOME-OPEN-REFRESH-1 convenience ships a homepage config", names.length > 0);
+    const touching = names.filter((n) => homepages[n].refreshDataview !== false);
+    assertTrue(
+      "HOME-OPEN-REFRESH-2 no shipped homepage touches the Dataview index on open (refreshDataview:false)",
+      touching.length === 0,
+      `refreshDataview is not false on: ${touching.join(", ")}`
+    );
+    const refreshCommands = names.flatMap((n) => (homepages[n].commands || [])
+      .map((c) => c && c.id)
+      .filter((id) => typeof id === "string" && /^dataview:/.test(id)));
+    assertTrue(
+      "HOME-OPEN-REFRESH-3 no shipped homepage runs a Dataview command on open",
+      refreshCommands.length === 0,
+      `homepage commands[] runs: ${refreshCommands.join(", ")}`
+    );
+  }
+
   // ── Summary ────────────────────────────────────────────────────────────────
   console.log("\n=== Summary ===");
   for (const [name, ok] of results) console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
