@@ -84,8 +84,8 @@ class EntityCreate {
         for (const p of spec.prompts || []) {
             // v0.5.0: presetPrompts short-circuit. Trusted values from the
             // calling helper (e.g. + New Knowledge button passing section="knowledge")
-            // bypass derive + UI + validation entirely. _loadSpec() re-reads the
-            // registry JSON on every invocation, so per-call options_source
+            // bypass derive + UI + validation entirely. _loadSpec() hands every
+            // invocation its own copy of the spec, so per-call options_source
             // mutation below is safe.
             if (Object.prototype.hasOwnProperty.call(presetPrompts, p.key)) {
                 ctx.prompts[p.key] = presetPrompts[p.key];
@@ -96,8 +96,8 @@ class EntityCreate {
                 continue;
             }
             // v0.5.0: options_source resolution (currently "all_projects").
-            // Mutates p.options in place; safe because _loadSpec re-reads JSON
-            // per invocation.
+            // Mutates p.options in place; safe because _loadSpec returns a fresh
+            // copy per invocation.
             if (p.options_source) {
                 p.options = this._resolveOptionsSource(p.options_source, dv);
                 // v0.6.0 (Issue 4): skip-prompt-when-empty. When the resolved
@@ -330,10 +330,26 @@ class EntityCreate {
             const registryPath = "ranch/entity-create-registry.json";
             const file = app.vault.getAbstractFileByPath(registryPath);
             if (!file) return null;
-            const raw = await app.vault.adapter.read(registryPath);
-            const reg = JSON.parse(raw);
-            const list = Array.isArray(reg) ? reg : (reg && Array.isArray(reg.entries) ? reg.entries : []);
-            return list.find(e => e && e.id === instance) || null;
+            // Every button render asks for its spec, on every refresh. Keep the
+            // parsed registry while the file is unchanged (the vault keeps its
+            // mtime in memory, so the check costs no IO) instead of re-reading
+            // and re-parsing it per button.
+            const mtime = file.stat && typeof file.stat.mtime === "number" ? file.stat.mtime : null;
+            const memo = this._registryMemo;
+            let list;
+            if (mtime != null && memo && memo.file === file && memo.mtime === mtime) {
+                list = memo.list;
+            } else {
+                const raw = await app.vault.adapter.read(registryPath);
+                const reg = JSON.parse(raw);
+                list = Array.isArray(reg) ? reg : (reg && Array.isArray(reg.entries) ? reg.entries : []);
+                if (mtime != null) this._registryMemo = { file, mtime, list };
+            }
+            // Callers mutate the spec they are handed (options_source, defaults
+            // seeding), so each call gets its own copy of the one entry it asked
+            // for; the memo itself is never exposed.
+            const found = list.find(e => e && e.id === instance) || null;
+            return found ? JSON.parse(JSON.stringify(found)) : null;
         } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);
             console.error("entity-create: malformed registry JSON — " + msg);

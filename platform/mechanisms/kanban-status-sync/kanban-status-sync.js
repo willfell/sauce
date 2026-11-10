@@ -45,12 +45,16 @@ class KanbanStatusSync {
     }
     // Dataview field access for hyphenated frontmatter keys uses bracket form.
     const boards = dv.pages().where(p => p && p["kanban-plugin"] === "board").array();
+    // Bucket every live tracked card by its board ONCE for the whole run.
+    // syncBoard's reverse pass used to run its own full-vault query per board,
+    // so a vault with B boards paid B+1 full scans on the first open of the day.
+    const trackedByBoard = this._trackedByBoard();
     let synced = 0;
     let archived = 0;
     for (const board of boards) {
       if (!board.file || !board.file.path) continue;
       try {
-        const r = await this.syncBoard(board.file.path, today);
+        const r = await this.syncBoard(board.file.path, today, trackedByBoard ? (trackedByBoard.get(board.file.path) || []) : undefined);
         synced += r.synced || 0;
         archived += r.archived || 0;
       } catch (e) {
@@ -65,6 +69,33 @@ class KanbanStatusSync {
     return result;
   }
 
+  _dataviewApi() {
+    if (typeof window !== "undefined" && window.app && window.app.plugins &&
+        window.app.plugins.plugins && window.app.plugins.plugins.dataview) {
+      const api = window.app.plugins.plugins.dataview.api;
+      if (api && typeof api.pages === "function") return api;
+    }
+    return null;
+  }
+
+  // Map(boardPath -> live pages tracked to it), from one vault query. Returns
+  // null when Dataview is unreachable so syncBoard keeps its own fallback.
+  _trackedByBoard() {
+    try {
+      const dvApi = this._dataviewApi();
+      if (!dvApi) return null;
+      const tracked = dvApi.pages()
+        .where(p => p && typeof p.kanban_board === "string" && p.kanban_board && p.status !== "archived")
+        .array();
+      const byBoard = new Map();
+      for (const p of tracked) {
+        if (!byBoard.has(p.kanban_board)) byBoard.set(p.kanban_board, []);
+        byBoard.get(p.kanban_board).push(p);
+      }
+      return byBoard;
+    } catch (_e) { return null; }
+  }
+
   /**
    * Sync one board file.
    *
@@ -72,7 +103,7 @@ class KanbanStatusSync {
    * Reverse pass: query dv for cards previously linked to this board but missing
    *               from the current placement; mark archived.
    */
-  async syncBoard(boardPath, today) {
+  async syncBoard(boardPath, today, trackedPages) {
     if (!app || !app.vault || !app.metadataCache) return { synced: 0, archived: 0 };
     const boardFile = app.vault.getAbstractFileByPath(boardPath);
     if (!boardFile || !("extension" in boardFile)) return { synced: 0, archived: 0 };
@@ -123,15 +154,18 @@ class KanbanStatusSync {
     }
 
     // Reverse pass: cards previously tracked to this board but now missing.
-    let dvApi = null;
-    if (typeof window !== "undefined" && window.app && window.app.plugins &&
-        window.app.plugins.plugins && window.app.plugins.plugins.dataview) {
-      dvApi = window.app.plugins.plugins.dataview.api;
+    // `trackedPages` is the caller's precomputed bucket for this board (see
+    // syncAllBoards); a direct call without it runs its own query.
+    let orphans = Array.isArray(trackedPages) ? trackedPages : null;
+    if (!orphans) {
+      const dvApi = this._dataviewApi();
+      if (dvApi) {
+        orphans = dvApi.pages()
+          .where(p => p && p.kanban_board === boardPath && p.status !== "archived")
+          .array();
+      }
     }
-    if (dvApi && typeof dvApi.pages === "function") {
-      const orphans = dvApi.pages()
-        .where(p => p && p.kanban_board === boardPath && p.status !== "archived")
-        .array();
+    if (orphans) {
       for (const p of orphans) {
         if (!p.file || !p.file.path) continue;
         if (Object.prototype.hasOwnProperty.call(resolved, p.file.path)) continue;
@@ -139,6 +173,9 @@ class KanbanStatusSync {
         if (!cardFile) continue;
         const cache = app.metadataCache.getFileCache(cardFile) || {};
         const fm = cache.frontmatter || {};
+        // The tracked set is a snapshot; a card another board claimed earlier
+        // in this same run is no longer this board's orphan.
+        if (typeof fm.kanban_board === "string" && fm.kanban_board && fm.kanban_board !== boardPath) continue;
         const prev = (typeof fm.status === "string") ? fm.status : null;
         await app.fileManager.processFrontMatter(cardFile, (cur) => {
           cur.status_prev = prev;

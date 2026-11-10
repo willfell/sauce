@@ -16,7 +16,9 @@ class ProjectReferencedByCards {
         // created project). Next render tick will succeed.
         if (!current || !current.file) return;
         const projectFolder = current.file.folder;
-        const incoming = dv.pages().where(p =>
+        // Candidates come from Dataview's reverse-link index for this note, not a
+        // walk of every page in the vault; the predicate below is unchanged.
+        const incoming = dv.pages("[[" + current.file.path + "]]").where(p =>
             p.file.outlinks && p.file.outlinks.some(l => l.path === current.file.path)
             && !p.file.path.includes("Planning-Board")
             && !p.file.path.startsWith(projectFolder + "/")

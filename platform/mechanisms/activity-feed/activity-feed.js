@@ -422,15 +422,18 @@ class ActivityFeed {
     // anyFieldPresent flag, once true, suppresses the mtime fallback below
     // for that page even if no listed key was in-window — strict semantics
     // per landmine #23.
+    // v0.7.1 (sauce v0.84.1): numeric epoch bounds. String-compare of full-ISO
+    // timestamps is brittle when offsets mix (e.g., one source serializes
+    // -06:00, another Z). moment().valueOf() collapses both to absolute epoch
+    // ms. Resolved once per query (on first use), not once per scanned page:
+    // the predicate runs for every page in every bucket folder.
+    let boundsMs = null;
+    const windowBoundsMs = () => boundsMs
+      || (boundsMs = { start: window.moment(start).valueOf(), end: window.moment(end).valueOf() });
     const inWindow = (p) => {
       if (!p) return false;
       let anyFieldPresent = false;
-      // v0.7.1 (sauce v0.84.1): cache numeric epoch bounds once per call.
-      // String-compare of full-ISO timestamps is brittle when offsets mix
-      // (e.g., one source serializes -06:00, another Z). moment().valueOf()
-      // collapses both to absolute epoch ms.
-      const startMs = window.moment(start).valueOf();
-      const endMs   = window.moment(end).valueOf();
+      const { start: startMs, end: endMs } = windowBoundsMs();
       for (const key of tsKeysOpt) {
         const tsRaw = p[key];
         if (!tsRaw) continue;

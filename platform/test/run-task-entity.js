@@ -1086,6 +1086,35 @@ ok('SCP-5 subtaskCountsByParent is a function (class + instance) and delegates t
   assert(typeof TaskEntity.subtaskCountsByParent === 'function', 'delegator on the instance');
 });
 
+ok('SCP-6 subtaskCountsByParent runs one scan per Dataview index revision, shared across widgets', () => {
+  let scans = 0;
+  const pages = [
+    { type: 'task', status: 'done', parent_task: '[[Parent]]', file: { path: 'spice/tasks/_done/a.md' } },
+    { type: 'task', status: 'open', parent_task: { path: 'spice/tasks/Parent.md' }, file: { path: 'spice/tasks/b.md' } },
+    { type: 'task', status: 'open', parent_task: '[[Parent]]', file: { path: 'spice/tasks/_trash/c.md' } },
+    { type: 'task', status: 'open', file: { path: 'spice/tasks/Parent.md' } },
+  ];
+  const index = { revision: 7 };
+  const makeDv = () => ({
+    index,
+    pages: () => { scans += 1; return { where: (predicate) => ({ array: () => pages.filter(predicate) }) }; },
+  });
+  const first = TaskEntityClass.subtaskCountsByParent(makeDv());
+  assert(deepEq(first, { Parent: { done: 1, total: 2 } }), 'counts open + done children, never trashed ones, got ' + JSON.stringify(first));
+  // A second widget (its own dv, same index) in the same refresh reuses the pass.
+  const second = TaskEntityClass.subtaskCountsByParent(makeDv());
+  assert(scans === 1 && deepEq(second, first), 'same revision → no second scan, scans=' + scans);
+  pages.push({ type: 'task', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/d.md' } });
+  index.revision = 8;
+  const third = TaskEntityClass.subtaskCountsByParent(makeDv());
+  assert(scans === 2 && deepEq(third, { Parent: { done: 1, total: 3 } }), 'index moved → rescanned, scans=' + scans + ' got ' + JSON.stringify(third));
+  // No index to key on (cold load, harness stubs) → never memoised.
+  const bare = { pages: () => { scans += 1; return { where: (predicate) => ({ array: () => pages.filter(predicate) }) }; } };
+  TaskEntityClass.subtaskCountsByParent(bare);
+  TaskEntityClass.subtaskCountsByParent(bare);
+  assert(scans === 4, 'without dv.index every call scans, scans=' + scans);
+});
+
 // ---------- TaskChromeBar (TCB-*) ----------
 //
 // Task notes are pure leaf entities in the ChromeBar model: no primary

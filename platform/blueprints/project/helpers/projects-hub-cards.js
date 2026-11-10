@@ -229,7 +229,12 @@ class ProjectsHubCards {
         //
         // WS1: the only filter is DocSearch text (persist:false); no status/team/
         // product scope. All non-hub project notes are candidates.
-        const projectHubs = dv.pages('"spice/projects"')
+        // ONE scan of the projects tree feeds both the hub list and every
+        // project's "last edited" time. This used to run a further dv.pages() per
+        // project (and read each board from disk one after another), and it all
+        // reruns on every search keystroke.
+        const allProjectPages = dv.pages('"spice/projects"');
+        const projectHubs = allProjectPages
             .where(p => (p.type === "project"
                       || (p.file.etags.includes("#project")
                           && p.type !== "map"
@@ -239,21 +244,25 @@ class ProjectsHubCards {
                      && !p.file.name.toLowerCase().endsWith("-board"))
             .where(p => customJS.DocSearch.matches(p, this._filterCtx));
 
-        const enriched = [];
-        for (const project of projectHubs) {
+        const treeFiles = [];
+        for (const f of allProjectPages) {
+            if (f && f.file && f.file.path && !f.file.path.includes("/steps/")) treeFiles.push(f.file);
+        }
+        const hubList = (projectHubs && typeof projectHubs.array === "function") ? projectHubs.array() : Array.from(projectHubs || []);
+        const readBoard = (file) => (typeof app.vault.cachedRead === "function" ? app.vault.cachedRead(file) : app.vault.read(file));
+        const enriched = await Promise.all(hubList.map(async (project) => {
             const projectDir = project.file.folder;
-            const filesInProject = dv.pages(`"${projectDir}"`)
-                .where(f => !f.file.path.includes("/steps/"));
+            const prefix = projectDir + "/";
             let latestMtime = project.file.mtime;
-            for (const f of filesInProject) {
-                if (f.file.mtime > latestMtime) latestMtime = f.file.mtime;
+            for (const file of treeFiles) {
+                if (file.path.startsWith(prefix) && file.mtime > latestMtime) latestMtime = file.mtime;
             }
             const slug = projectDir.split("/").pop();
             const boardPath = `${projectDir}/${slug}-board.md`;
             const boardFile = app.vault.getAbstractFileByPath(boardPath);
             let total = 0, done = 0, blocked = 0;
             if (boardFile) {
-                const bc = await app.vault.read(boardFile);
+                const bc = await readBoard(boardFile);
                 let lane = "";
                 for (const line of bc.split("\n")) {
                     if (line.startsWith("## ")) lane = line.replace("## ", "").trim();  // lint-display-markers:allow Kanban board lane parse, not a display marker
@@ -264,8 +273,8 @@ class ProjectsHubCards {
                     }
                 }
             }
-            enriched.push({ project, latestMtime, total, done, blocked });
-        }
+            return { project, latestMtime, total, done, blocked };
+        }));
 
         this._lookup = new Map(enriched.map(e => [e.project.file.path, e]));
         this._allPages = enriched.map(e => e.project);

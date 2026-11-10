@@ -111,9 +111,10 @@ class ProjectDashboard {
       // Enrich recent meetings with attendees + badges (SpaceDailyDashboard parity).
       try {
         const realAppRef = ctx.app;
-        for (const m of (groups.meetings || [])) {
+        // Enrich the (up to four) meetings together, not one read after another.
+        await Promise.all((groups.meetings || []).map(async (m) => {
           m.enriched = await this._enrichMeeting(realAppRef, m.page || {});
-        }
+        }));
       } catch (_e) {}
       this._renderRecentGroups(root, ctx, groups);
     } catch (_e) {
@@ -240,13 +241,32 @@ class ProjectDashboard {
 
   // ── queries ───────────────────────────────────────────────────────
 
+  // Per-render memo, held on the render's own ctx: the tile counts and the
+  // Recent groups query the same folders, and the tile count and the lane
+  // stats read the same board. Each is fetched once per render.
+  _scan(dv, ctx, source) {
+    const memo = ctx._scans || (ctx._scans = new Map());
+    if (!memo.has(source)) memo.set(source, dv.pages(source));
+    return memo.get(source);
+  }
+
+  _readFile(ctx, file) {
+    const memo = ctx._reads || (ctx._reads = new Map());
+    const key = file && file.path ? file.path : file;
+    if (!memo.has(key)) {
+      const vault = ctx.app.vault;
+      memo.set(key, typeof vault.cachedRead === "function" ? vault.cachedRead(file) : vault.read(file));
+    }
+    return memo.get(key);
+  }
+
   async _counts(dv, ctx) {
     const { app: realApp, folder, projectName, currentPath } = ctx;
     const counts = { docs: 0, board: 0, todo: 0, map: 0, meetings: 0 };
 
     // Docs — count doc-note under folder/docs.
     try {
-      counts.docs = dv.pages(`"${folder}/docs"`).where(p => p && p.type === "doc-note").length || 0;
+      counts.docs = this._scan(dv, ctx, `"${folder}/docs"`).where(p => p && p.type === "doc-note").length || 0;
     } catch (_e) {}
 
     // Board — count unchecked `- [ ] …` outside the "## Completed" lane.
@@ -255,7 +275,7 @@ class ProjectDashboard {
       const boardFile = realApp && realApp.vault && realApp.vault.getAbstractFileByPath
         ? realApp.vault.getAbstractFileByPath(boardPath) : null;
       if (boardFile) {
-        const content = await realApp.vault.read(boardFile);
+        const content = await this._readFile(ctx, boardFile);
         let lane = "";
         for (const line of String(content || "").split("\n")) {
           if (line.startsWith("## ")) { lane = line.replace("## ", "").trim(); continue; } // lint-display-markers:allow
@@ -270,7 +290,7 @@ class ProjectDashboard {
       const todoFile = realApp && realApp.vault && realApp.vault.getAbstractFileByPath
         ? realApp.vault.getAbstractFileByPath(todoPath) : null;
       if (todoFile) {
-        const content = await realApp.vault.read(todoFile);
+        const content = await this._readFile(ctx, todoFile);
         for (const line of String(content || "").split("\n")) {
           if (/^- \[ \] /.test(line)) counts.todo += 1;
         }
@@ -285,7 +305,7 @@ class ProjectDashboard {
 
     // Meetings — dv.pages meetings/notes filtered by project match.
     try {
-      counts.meetings = dv.pages('"spice/meetings/notes"')
+      counts.meetings = this._scan(dv, ctx, '"spice/meetings/notes"')
         .where(p => p && p.type === "meeting" && ProjectDashboard._projectMatches(p.project, currentPath, projectName))
         .length || 0;
     } catch (_e) {}
@@ -307,7 +327,7 @@ class ProjectDashboard {
 
     const out = [];
     try {
-      const rows = dv.pages('"spice/tasks"').where(p =>
+      const rows = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
         p && p.type === "task" && p.status === "open"
         && p.file && p.file.path
         && !p.file.path.includes("/_trash/")
@@ -339,7 +359,7 @@ class ProjectDashboard {
       const boardFile = realApp && realApp.vault && realApp.vault.getAbstractFileByPath
         ? realApp.vault.getAbstractFileByPath(boardPath) : null;
       if (!boardFile) return stats;
-      const content = await realApp.vault.read(boardFile);
+      const content = await this._readFile(ctx, boardFile);
       let key = "";
       for (const line of String(content || "").split("\n")) {
         if (line.startsWith("## ")) { key = laneKey[line.replace("## ", "").trim()] || ""; continue; } // lint-display-markers:allow
@@ -357,7 +377,7 @@ class ProjectDashboard {
 
     try {
       const rows = [];
-      for (const p of dv.pages(`"${folder}/docs"`).where(p => p && p.type === "doc-note")) {
+      for (const p of this._scan(dv, ctx, `"${folder}/docs"`).where(p => p && p.type === "doc-note")) {
         rows.push({ page: p, kind: "doc", mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || 0 });
       }
       groups.docs = take(rows);
@@ -365,7 +385,7 @@ class ProjectDashboard {
 
     try {
       const rows = [];
-      for (const p of dv.pages('"spice/meetings/notes"')
+      for (const p of this._scan(dv, ctx, '"spice/meetings/notes"')
           .where(p => p && p.type === "meeting" && ProjectDashboard._projectMatches(p.project, currentPath, projectName))) {
         rows.push({ page: p, kind: "meeting", mtime: (p && p.file && p.file.mtime && p.file.mtime.ts) || 0 });
       }
@@ -391,7 +411,9 @@ class ProjectDashboard {
     try {
       if (realApp && realApp.vault && p && p.file && p.file.path) {
         const f = realApp.vault.getAbstractFileByPath(p.file.path);
-        if (f && typeof realApp.vault.read === "function") content = await realApp.vault.read(f);
+        if (f && typeof realApp.vault.read === "function") {
+          content = typeof realApp.vault.cachedRead === "function" ? await realApp.vault.cachedRead(f) : await realApp.vault.read(f);
+        }
       }
     } catch (_e) {}
 

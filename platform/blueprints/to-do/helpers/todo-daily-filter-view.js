@@ -660,9 +660,14 @@ class ToDoDailyFilterView {
             const input = searchWrap.createEl('input', { cls: 'sauce-todo-search-input', type: 'search' });
             input.setAttribute('placeholder', S.searchPlaceholder || 'Search…');
             input.setAttribute('aria-label', S.searchPlaceholder ? S.searchPlaceholder.replace(/…$/, '') : 'Search tasks');
+            // Coalesce fast typing: a paint rebuilds every row, so it follows the
+            // last keystroke, not each one.
+            let searchTimer = null;
             input.addEventListener('input', () => {
                 query = String(input.value || '');
-                paint();
+                if (typeof setTimeout !== 'function') { paint(); return; }
+                if (searchTimer != null && typeof clearTimeout === 'function') clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => { searchTimer = null; paint(); }, 120);
             });
         }
         const pool = () => {

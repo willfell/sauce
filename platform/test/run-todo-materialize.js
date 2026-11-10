@@ -422,7 +422,8 @@ console.log('run-todo-materialize:');
         container,
         current() { return { type: 'to-do' }; },
         pages(glob) {
-            if (glob !== '"spice/tasks"') return { where() { return { array() { return []; } }; } };
+            // Open-task surfaces exclude the _done/_trash archives in the source.
+            if (glob !== '"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"') return { where() { return { array() { return []; } }; } };
             return {
                 where(fn) {
                     const filtered = [assignedNote, unassignedNote, dailyNote].filter(fn);

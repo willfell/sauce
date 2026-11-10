@@ -533,6 +533,35 @@ ok("EC-13 _evalDerive lowercase(prompts.tag) === 'fooo'",
     });
 }
 
+// 26b. The registry is read once while the file is unchanged, re-read when its
+// mtime moves, and every caller gets its own copy of the spec (create() mutates
+// the spec it is handed).
+{
+    const registry = (label) => JSON.stringify({ entries: [{ id: "meeting", label, prompts: [{ key: "k" }] }] });
+    const ecMemo = loadEntityCreate({ vaultFiles: { "ranch/entity-create-registry.json": registry("First") } });
+    const registryFile = { path: "ranch/entity-create-registry.json", stat: { mtime: 100 } };
+    let reads = 0;
+    ecMemo.app.vault.getAbstractFileByPath = (path) => (path === registryFile.path ? registryFile : null);
+    const readRegistry = ecMemo.app.vault.adapter.read;
+    ecMemo.app.vault.adapter.read = async (path) => { reads += 1; return readRegistry(path); };
+    const instMemo = new ecMemo.Cls();
+    (async () => {
+        const first = await instMemo._loadSpec("meeting");
+        first.prompts[0].options = ["mutated by a caller"];
+        first.label = "Mutated";
+        const second = await instMemo._loadSpec("meeting");
+        ok("EC-26b one registry read serves repeated spec lookups", reads === 1, `reads=${reads}`);
+        ok("EC-26c each lookup returns a private copy (caller mutation never leaks)",
+            second !== first && second.label === "First" && second.prompts[0].options === undefined,
+            `got ${JSON.stringify(second)}`);
+        ecMemo.vaultFiles["ranch/entity-create-registry.json"] = registry("Second");
+        registryFile.stat.mtime = 200;
+        const third = await instMemo._loadSpec("meeting");
+        ok("EC-26d a changed registry file (new mtime) is re-read", reads === 2 && third.label === "Second",
+            `reads=${reads} got ${JSON.stringify(third)}`);
+    })().catch((error) => ok("EC-26b registry memo case completes", false, error && error.stack || String(error)));
+}
+
 // 27. _loadSpec("unknown") returns null (no throw)
 {
     const ec3 = loadEntityCreate({

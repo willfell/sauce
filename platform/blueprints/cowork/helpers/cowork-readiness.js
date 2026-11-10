@@ -8,6 +8,11 @@
  */
 class CoworkReadiness {
   async render(dv) {
+    // One scan of the cowork tree per render, shared by every row below. The
+    // folder holds every atomic note ever written and each row used to rescan it.
+    // Lazy so a query failure still surfaces inside each row's own try/catch.
+    let coworkScan = null;
+    const coworkPages = () => coworkScan || (coworkScan = dv.pages('"spice/cowork"'));
     const container = dv.el("div", "", { cls: "cowork-readiness-panel" });
     container.style.cssText = `
       background-color: var(--background-secondary);
@@ -60,7 +65,7 @@ class CoworkReadiness {
     // Row 3: MCP routing (from .routing-cache.json)
     let routingLine = "MCP routing: (no cache — runs cowork:check-vault-routing on first scheduled invocation)";
     try {
-      const cachePages = dv.pages('"spice/cowork"').where(p => p.file.name === ".routing-cache").array();
+      const cachePages = coworkPages().where(p => p.file.name === ".routing-cache").array();
       const cache = cachePages[0];
       if (cache && typeof cache.status === "string") {
         const lastChecked = cache.last_checked ? ` (last checked: ${cache.last_checked})` : "";
@@ -89,7 +94,7 @@ class CoworkReadiness {
     for (const orch of orchestrators) {
       let lastLine = `${orch.slug}: (never)`;
       try {
-        const matches = dv.pages('"spice/cowork"')
+        const matches = coworkPages()
           .where(p => p.type === orch.type)
           .sort(p => p.created_at, "desc")
           .limit(1)
@@ -110,7 +115,7 @@ class CoworkReadiness {
     jobsHeader.style.cssText = "margin-top: 12px; font-weight: 600; font-size: 0.95em;";
     let jobsLine = "(no scheduled-jobs.md — run cowork:onboard-scheduled-jobs)";
     try {
-      const jobsPages = dv.pages('"spice/cowork"').where(p => p.file.name === "scheduled-jobs").array();
+      const jobsPages = coworkPages().where(p => p.file.name === "scheduled-jobs").array();
       const jobsNote = jobsPages[0];
       if (jobsNote && Array.isArray(jobsNote.file.tasks) === false) {
         // Count table rows minus header — naive but works for our shipped template
@@ -123,7 +128,7 @@ class CoworkReadiness {
           let firedToday = 0;
           const todayYMD = window.moment().format("YYYY-MM-DD");
           for (const orch of orchestrators) {
-            const recent = dv.pages('"spice/cowork"')
+            const recent = coworkPages()
               .where(p => p.type === orch.type && typeof p.created_at === "string" && p.created_at.startsWith(todayYMD))
               .array();
             if (recent.length > 0) firedToday++;

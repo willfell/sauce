@@ -849,8 +849,73 @@ process.on("exit", (code) => {
   }
 });
 
+// The reverse (orphan) pass is fed from ONE vault query for the whole run, not
+// one full-vault query per board.
+async function runSingleScanCase() {
+  console.log("\n--- Pass 6: one tracked-cards query per run ---");
+  const boardPaths = ["boards/a-board.md", "boards/b-board.md", "boards/c-board.md"];
+  const cards = {
+    "cards/orphan-a.md": { status: "in-progress", kanban_board: "boards/a-board.md" },
+    "cards/orphan-c.md": { status: "in-progress", kanban_board: "boards/c-board.md" },
+    "cards/moved.md": { status: "in-progress", kanban_board: "boards/b-board.md" },
+  };
+  const files = {};
+  for (const path of boardPaths.concat(Object.keys(cards))) files[path] = { path, extension: "md" };
+  let boardQueries = 0;
+  let trackedQueries = 0;
+  const archivedPaths = [];
+  const appStub = {
+    vault: {
+      getAbstractFileByPath: (path) => files[path] || null,
+      read: async () => "---\nkanban-plugin: board\n---\n\n## In Progress\n\n",
+    },
+    metadataCache: {
+      getFileCache: (file) => ({ frontmatter: Object.assign({}, cards[file.path]) }),
+      getFirstLinkpathDest: () => null,
+    },
+    fileManager: {
+      processFrontMatter: async (file, update) => {
+        const next = Object.assign({}, cards[file.path]);
+        update(next);
+        if (next.status === "archived") archivedPaths.push(file.path);
+        cards[file.path] = next;
+      },
+    },
+  };
+  const boardsDv = {
+    pages() {
+      boardQueries += 1;
+      const pages = boardPaths.map((path) => ({ "kanban-plugin": "board", file: { path } }));
+      return { where: (predicate) => ({ array: () => pages.filter(predicate) }) };
+    },
+  };
+  // Dataview's index is a snapshot: it still says "moved" belongs to board b
+  // even though the card's live frontmatter (below) now names board a.
+  const indexed = Object.keys(cards).map((path) => Object.assign({}, cards[path], { file: { path } }));
+  cards["cards/moved.md"].kanban_board = "boards/a-board.md";
+  const windowStub = {
+    app: { plugins: { plugins: { dataview: { api: {
+      pages() {
+        trackedQueries += 1;
+        return { where: (predicate) => ({ array: () => indexed.filter(predicate) }) };
+      },
+    } } } } },
+  };
+  const Klass = loadKSS(appStub, windowStub);
+  const result = await new Klass().syncAllBoards(boardsDv, "2026-11-09");
+  assertEq("KSS-SCAN-1: three boards cost one board query and one tracked-cards query",
+    { boardQueries, trackedQueries }, { boardQueries: 1, trackedQueries: 1 });
+  assertEq("KSS-SCAN-2: each board archives its own orphans from the shared bucket",
+    { result, archived: archivedPaths.slice().sort() },
+    { result: { synced: 0, archived: 2, boards: 3 }, archived: ["cards/orphan-a.md", "cards/orphan-c.md"] });
+  assertTrue("KSS-SCAN-3: a card whose live frontmatter names another board is not archived from the stale bucket",
+    cards["cards/moved.md"].status === "in-progress");
+}
+
 runStartupSyncFixture()
   .catch((err) => assertTrue("KSS-IO-0: startup sync fixture completes", false, err && err.stack))
   .then(() => runDeferredStartupCases())
   .catch((err) => assertTrue("KSS-DEFER-0: deferred startup cases complete", false, err && err.stack))
+  .then(() => runSingleScanCase())
+  .catch((err) => assertTrue("KSS-SCAN-0: single-scan case completes", false, err && err.stack))
   .finally(finish);

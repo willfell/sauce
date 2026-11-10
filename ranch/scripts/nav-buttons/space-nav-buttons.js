@@ -226,13 +226,24 @@ class SpaceNavButtons {
       const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
       const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
       const currentDate = dm ? window.moment(dm[1], "YYYY-MM-DD", true) : window.moment();
-      const allDailies = app.vault.getMarkdownFiles()
-        .filter(f => f.path.startsWith(dailyMeta.folder + "/"))
-        .map(f => { const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/); return fdm ? { file: f, m: window.moment(fdm[1], "YYYY-MM-DD", true) } : null; })
-        .filter(x => x && x.m.isValid())
-        .sort((a, b) => a.m.diff(b.m));
-      const earlier = allDailies.filter(x => x.m.isBefore(currentDate, "day")).pop();
-      const later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
+      // Nearest existing daily on each side, in one pass over the YYYY-MM-DD
+      // strings (they order the same as the dates). This runs on every refresh
+      // of the note being typed in; it used to build and sort a moment for
+      // every daily note. A moment is now built only for a candidate neighbour.
+      const dailyPrefix = dailyMeta.folder + "/";
+      const curDay = currentDate.isValid() ? currentDate.format("YYYY-MM-DD") : null;
+      const validDay = (x) => { if (!x.m) x.m = window.moment(x.day, "YYYY-MM-DD", true); return x.m.isValid(); };
+      let earlier, later;
+      if (curDay) {
+        for (const f of app.vault.getMarkdownFiles()) {
+          if (!f.path.startsWith(dailyPrefix)) continue;
+          const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/);
+          if (!fdm) continue;
+          const x = { file: f, day: fdm[1], m: null };
+          if (x.day < curDay) { if ((!earlier || x.day >= earlier.day) && validDay(x)) earlier = x; }
+          else if (x.day > curDay) { if ((!later || x.day < later.day) && validDay(x)) later = x; }
+        }
+      }
 
       const prevBtn = arrowRow.createEl("button");
       prevBtn.innerHTML = chevronLeft + `<span>${earlier ? earlier.m.format("ddd, MMM D") : "—"}</span>`;

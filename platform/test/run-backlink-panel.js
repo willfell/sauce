@@ -147,9 +147,12 @@ if (src.length > 0) {
   assertTrue("BP-12: customJS.BeaconCards.render delegation present",
     /customJS\.BeaconCards\.render/.test(src));
 
-  // BP-13: dv.pages() Dataview reverse query present.
-  assertTrue("BP-13: dv.pages() Dataview query call present",
-    /dv\.pages\(\)/.test(src));
+  // BP-13: the reverse query is sourced from Dataview's inlink index for the
+  // current note, never from an unscoped full-vault dv.pages().
+  assertTrue("BP-13: reverse query sources from the current note's inlinks",
+    /dv\.pages\("\[\[" \+ currentPath \+ "\]\]"\)/.test(src));
+  assertTrue("BP-13b: no unscoped full-vault dv.pages() scan",
+    !/dv\.pages\(\)/.test(src));
 
   // BP-14: .some( + .path reverse-link match shape present.
   assertTrue("BP-14a: .some( reverse-link match present", /\.some\(/.test(src));

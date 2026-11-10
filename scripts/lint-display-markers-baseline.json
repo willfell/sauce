@@ -92,32 +92,32 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 672,
+      "line": 681,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 673,
+      "line": 682,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 674,
+      "line": 683,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 739,
+      "line": 748,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 754,
+      "line": 763,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 756,
+      "line": 765,
       "snippet": "'## From Meetings',"
     },
     {
@@ -152,7 +152,7 @@
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstreams.js",
-      "line": 55,
+      "line": 57,
       "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
     },
     {

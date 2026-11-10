@@ -49,9 +49,11 @@ class ProjectWorkstreams {
         let boardContent = "";
         if (boardFile) boardContent = await app.vault.read(boardFile);
 
+        // Split the board once; the lookup below runs per task.
+        const boardLines = boardContent.split("\n");
         const getTaskLane = (taskName) => {
             let lane = "";
-            for (const line of boardContent.split("\n")) {
+            for (const line of boardLines) {
                 if (line.startsWith("## ")) lane = line.replace("## ", "").trim();
                 if (line.includes(taskName)) return lane;
             }
@@ -71,9 +73,13 @@ class ProjectWorkstreams {
         const unassigned = [];
         for (const page of projectPages) {
             const wsId = page.workstream || "";
+            const assigned = !!wsId && workstreams.some(w => w.id === wsId);
+            // Only a workstream task needs its lane. Resolving it for every note in
+            // the project walked the whole board once per note (docs included).
+            if (!assigned && page.source_board === undefined && page.workstream === undefined) continue;
             const lane = getTaskLane(page.file.name);
             const info = { page, lane, cfg: statusConfig[lane] || statusConfig["Unknown"] };
-            if (wsId && workstreams.some(w => w.id === wsId)) {
+            if (assigned) {
                 if (!grouped[wsId]) grouped[wsId] = [];
                 grouped[wsId].push(info);
             } else if (page.source_board !== undefined || page.workstream !== undefined) {

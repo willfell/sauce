@@ -95,7 +95,10 @@ class BacklinkPanel {
     if (!currentFile || !currentFile.path) return [];
     const currentPath = currentFile.path;
 
-    const chain = dv.pages()
+    // Source the candidates from Dataview's reverse-link index (frontmatter
+    // links are indexed as outlinks) instead of walking every page in the
+    // vault on each refresh; the key predicate below still decides membership.
+    const chain = dv.pages("[[" + currentPath + "]]")
       .where((p) => {
         if (!p) return false;
         const val = p[key];
