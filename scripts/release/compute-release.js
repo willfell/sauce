@@ -112,13 +112,13 @@ function writeSnapshot(snapshot, root) {
 }
 
 // --- git range reader (CLI path) ---
-function getCommits(range) {
+function getCommits(range, cwd) {
     const RS = "\x1e", US = "\x1f";
     const fmt = `${RS}%H${US}%B${US}`;
     let out;
     try {
         out = execFileSync("git", ["log", range, "--no-merges", `--format=${fmt}`, "--name-only"],
-            { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" });
+            { cwd: cwd || REPO_ROOT, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" });
     } catch (e) {
         throw new Error(`getCommits failed (signal=${e.signal || "none"}): ${e.message}`);
     }
@@ -130,31 +130,38 @@ function getCommits(range) {
 }
 
 // --- release range ---
-// prepare-release records the main commit it computed a release from in the
-// release commit (`Release-Computed-From: <sha>`). A commit that lands on main
-// after that computation but before the release PR merges ends up BELOW the
-// release commit and its tag, yet was never counted (v0.307.1 sat on top of
-// #910 that way and #910's components were never bumped). Counting from the
-// recorded sha instead of from the release commit picks such commits up in
-// the next release. Release commits themselves are never counted.
-const COMPUTED_FROM_RE = /^\s*Release-Computed-From:\s*([0-9a-f]{7,40})\s*$/m;
+// `compute-release --write` records the main commit it computed a release
+// from in RELEASE_STATE_REL, so the record travels inside the release
+// commit's tree (a commit-message trailer does not: the auto-merged squash
+// keeps only the title). A commit that lands on main after that computation
+// but before the release PR merges ends up BELOW the release commit and its
+// tag, yet was never counted (v0.307.1 sat on top of #910 that way and #910's
+// components were never bumped). Counting from the recorded sha instead of
+// from the release commit picks such commits up in the next release.
+// Release commits themselves are never counted.
+const RELEASE_STATE_REL = "platform/release-state.json";
+const SHA_RE = /^[0-9a-f]{7,40}$/;
 
-function computedFromOf(message) {
-    const m = COMPUTED_FROM_RE.exec(String(message == null ? "" : message));
-    return m ? m[1] : null;
+// The computed_from sha in a release-state.json text, or null.
+function computedFromOf(stateText) {
+    try {
+        const v = JSON.parse(String(stateText == null ? "" : stateText)).computed_from;
+        return typeof v === "string" && SHA_RE.test(v) ? v : null;
+    } catch (_e) { return null; }
 }
 
 function isReleaseCommit(message) {
     return /^chore\(release\):/.test(String(message == null ? "" : message).trim());
 }
 
-// resolveRange({ releaseHash, releaseMessage, tag, isAncestor }) -> { range, base, reason }
-//   releaseHash/releaseMessage: the newest chore(release) commit reachable from HEAD.
+// resolveRange({ releaseHash, releaseState, tag, isAncestor }) -> { range, base, reason }
+//   releaseHash: the newest chore(release) commit reachable from HEAD.
+//   releaseState: RELEASE_STATE_REL's text in that commit's tree.
 //   isAncestor(sha): true when sha is an ancestor of HEAD.
 function resolveRange(opts) {
     const o = opts || {};
     if (o.releaseHash) {
-        const from = computedFromOf(o.releaseMessage);
+        const from = computedFromOf(o.releaseState);
         let reachable = false;
         try { reachable = !!(from && typeof o.isAncestor === "function" && o.isAncestor(from)); } catch (_e) { reachable = false; }
         if (reachable) return { range: `${from}..HEAD`, base: from, reason: "computed-from" };
@@ -164,28 +171,46 @@ function resolveRange(opts) {
     return { range: "HEAD", base: null, reason: "all" };
 }
 
+// RELEASE_STATE_REL's text at a commit, or null.
+function releaseStateAt(hash, cwd) {
+    try {
+        return execFileSync("git", ["show", `${hash}:${RELEASE_STATE_REL}`],
+            { cwd: cwd || REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch (e) { return null; }
+}
+
+// Record the commit this release is computed from (under --write only).
+function writeReleaseState(root, sha) {
+    writeJson(path.join(root, RELEASE_STATE_REL), { computed_from: sha });
+}
+
+function headSha(cwd) {
+    try { return execFileSync("git", ["rev-parse", "HEAD"], { cwd: cwd || REPO_ROOT, encoding: "utf8" }).trim(); }
+    catch (e) { return ""; }
+}
+
 // Newest chore(release) commit reachable from HEAD: { hash, message } or null.
-function lastReleaseCommit() {
+function lastReleaseCommit(cwd) {
     try {
         const out = execFileSync("git", ["log", "-1", "--extended-regexp", "--grep=^chore\\(release\\):", "--format=%H%x1f%B", "HEAD"],
-            { cwd: REPO_ROOT, encoding: "utf8" });
+            { cwd: cwd || REPO_ROOT, encoding: "utf8" });
         const i = out.indexOf("\x1f");
         if (i < 0) return null;
         return { hash: out.slice(0, i).trim(), message: out.slice(i + 1) };
     } catch (e) { return null; }
 }
 
-function isAncestorOfHead(sha) {
+function isAncestorOfHead(sha, cwd) {
     try {
-        execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: REPO_ROOT, stdio: "ignore" });
+        execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: cwd || REPO_ROOT, stdio: "ignore" });
         return true;
     } catch (e) { return false; }
 }
 
-function lastTag() {
+function lastTag(cwd) {
     try {
         return execFileSync("git", ["describe", "--tags", "--abbrev=0", "--match", "v*"],
-            { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+            { cwd: cwd || REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     } catch (e) { return null; }
 }
 
@@ -254,20 +279,27 @@ function applyPlan(plan, root) {
     if (fs.existsSync(snapDir)) writeSnapshot(buildSnapshot(man), root);
 }
 
-module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan, buildSnapshot, writeSnapshot, SNAPSHOT_REL, computedFromOf, isReleaseCommit, resolveRange, lastReleaseCommit };
+module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan, buildSnapshot, writeSnapshot, SNAPSHOT_REL, computedFromOf, isReleaseCommit, resolveRange, lastReleaseCommit, releaseStateAt, writeReleaseState, RELEASE_STATE_REL, isAncestorOfHead, headSha, releaseCommits };
+
+// The commits the next release counts, read from the git repo at `cwd`.
+// -> { range, reason, commits }
+function releaseCommits(cwd) {
+    const rel = lastReleaseCommit(cwd);
+    const { range, reason } = resolveRange({
+        releaseHash: rel && rel.hash,
+        releaseState: rel ? releaseStateAt(rel.hash, cwd) : null,
+        tag: lastTag(cwd),
+        isAncestor: (sha) => isAncestorOfHead(sha, cwd),
+    });
+    const commits = getCommits(range, cwd).filter((c) => !isReleaseCommit(c.message));
+    return { range, reason, commits };
+}
 
 // --- CLI ---
 if (require.main === module) {
     const WRITE = process.argv.includes("--write");
     const manifest = loadManifest();
-    const rel = lastReleaseCommit();
-    const { range, reason } = resolveRange({
-        releaseHash: rel && rel.hash,
-        releaseMessage: rel && rel.message,
-        tag: lastTag(),
-        isAncestor: isAncestorOfHead,
-    });
-    const commits = getCommits(range).filter((c) => !isReleaseCommit(c.message));
+    const { range, reason, commits } = releaseCommits();
     const plan = computePlan(commits, manifest);
 
     console.log(`compute-release: range ${range} (${reason}) — ${commits.length} commit(s)`);
@@ -283,6 +315,7 @@ if (require.main === module) {
         process.exit(0);
     }
     applyPlan(plan, REPO_ROOT);
+    writeReleaseState(REPO_ROOT, headSha());
     console.log("compute-release: version records updated. (No tag/push/seed — those are workflow steps.)");
     process.exit(0);
 }
