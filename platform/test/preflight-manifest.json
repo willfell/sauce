@@ -1042,6 +1042,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-note-card",
+      "cmd": [
+        "node",
+        "platform/test/run-task-note-card.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-phone-fit",
       "cmd": [
         "node",
