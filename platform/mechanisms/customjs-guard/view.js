@@ -57,7 +57,23 @@ if (!className) {
     if (typeof target !== "function") {
       stampGuardReceipt("invalid", dv.paragraph(`_${className}.${method} is not a function_`));
     } else {
-      await target.call(klass, dv, ...args);
+      // Refresh gate: later Dataview re-executions of this block go through
+      // RenderSafe, which keeps unchanged output on screen instead of clearing
+      // and rebuilding it. Optional by construction: a vault without
+      // RenderSafe, or any failure, renders exactly as before.
+      const refreshGate = window.customJS.RenderSafe;
+      const gated = !!refreshGate && typeof refreshGate.beginRefresh === "function"
+        && typeof refreshGate.settleRefresh === "function";
+      if (gated) { try { refreshGate.beginRefresh(dv); } catch (_e) {} }
+      let renderError = null;
+      try {
+        await target.call(klass, dv, ...args);
+      } catch (error) {
+        renderError = error || new Error("render failed");
+        throw error;
+      } finally {
+        if (gated) { try { refreshGate.settleRefresh(dv, renderError); } catch (_e) {} }
+      }
       stampGuardReceipt("dispatched", null);
     }
   }
