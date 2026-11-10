@@ -93,6 +93,11 @@ class MeetingChromeBar {
       },
       dispatch: (dv, ctx, id) => {
         if (id === "new-meeting") {
+          // One dialog with every field (MeetingCreateDialog); it hands the
+          // answers to EntityCreate as presetPrompts. When it can't open
+          // (a piece not loaded yet), EntityCreate's own prompts run instead.
+          if (customJS && customJS.MeetingCreateDialog && typeof customJS.MeetingCreateDialog.open === "function"
+            && customJS.MeetingCreateDialog.open({ dv, structuralLifecycle: self._entityCreateLifecycle(dv) }) === true) return;
           if (customJS && customJS.EntityCreate && typeof customJS.EntityCreate.create === "function") {
             customJS.EntityCreate.create({
               instance: "meeting",

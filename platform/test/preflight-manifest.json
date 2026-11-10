@@ -1345,6 +1345,14 @@
       "lane": "parallel"
     },
     {
+      "id": "meetings-create-dialog",
+      "cmd": [
+        "node",
+        "platform/test/run-meetings-create-dialog.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "meetings-chrome-modernize-heal",
       "cmd": [
         "node",

@@ -20,6 +20,10 @@
  *   {{prompts.<key>|number}}                — emit unquoted numeric YAML scalar
  *                                             (handled by _renderFrontmatter)
  *   {{prompts.<key>|lowercase}}             — String.toLowerCase
+ *   {{prompts.<key>|or-now:<fmt>}}          — prompt value, else ctx.now.format(<fmt>)
+ *   {{prompts.<key>|links}}                 — expand an ARRAY-valued prompt (e.g.
+ *                                             people-multi) into a YAML list of
+ *                                             "[[name]]" wikilinks; [] when empty
  *   {{now.<moment-format>}}                 — ctx.now.format(<moment-format>)
  *   {{current_file.frontmatter.<key>}}      — read frontmatter of the note
  *                                             whose dv container hosts the button
@@ -55,7 +59,7 @@
 class EntityCreate {
     async render(dv, opts) {
         if (dv.container.closest(".markdown-embed")) return;
-        const { instance, presetPrompts = {} } = opts || {};
+        const { instance, presetPrompts = {}, structuralLifecycle = null } = opts || {};
         const spec = await this._loadSpec(instance);
         if (!spec) { dv.paragraph(`EntityCreate: no spec for "${instance}"`); return; }
 
@@ -64,11 +68,11 @@ class EntityCreate {
         customJS.AccentButton.render(dv.container, {
             label: spec.label,
             icon: resolved || plusIcon,
-            onClick: () => this.create({ instance, dv, presetPrompts })
+            onClick: () => this.create({ instance, dv, presetPrompts, structuralLifecycle })
         });
     }
 
-    async create({ instance, dv, presetPrompts = {} }) {
+    async create({ instance, dv, presetPrompts = {}, structuralLifecycle = null }) {
         const spec = await this._loadSpec(instance);
         if (!spec) return;
         const ctx = {
@@ -133,7 +137,6 @@ class EntityCreate {
         }
         const targetPath = this._substitute(this._joinDestination(spec.destination), ctx);
         const folder = this._substitute(this._destFolder(spec.destination), ctx);
-        await this._ensureFolder(folder);
         // v0.6.0 (Issue 1): open the just-created TFile directly via
         // workspace.getLeaf().openFile() rather than openLinkText(path, "").
         // openLinkText routes through the link resolver, which can race against
@@ -160,11 +163,42 @@ class EntityCreate {
         const body = spec.body_template
             ? await this._readBody(spec.body_template, ctx)
             : (spec.inline_body ? this._substitute(spec.inline_body, ctx) : "");
-        const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
-        for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
-        const leaf = app.workspace.getLeaf(false);
-        await leaf.openFile(newFile);
-        customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+        const persist = async () => {
+            await this._ensureFolder(folder);
+            const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
+            for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
+            const leaf = app.workspace.getLeaf(false);
+            await leaf.openFile(newFile);
+            customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+            return newFile;
+        };
+
+        // Optional, backwards-compatible structural lifecycle. Project docs
+        // supply this hook so the originating Dataview surface can show a
+        // receipt-bound preview before vault.create settles and remove the
+        // exact preview node + restore focus if any persistence step rejects.
+        if (structuralLifecycle
+            && typeof structuralLifecycle.apply === "function"
+            && typeof structuralLifecycle.rollback === "function") {
+            const renderSafe = (typeof customJS !== "undefined") ? customJS.RenderSafe : null;
+            if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
+                new Notice("Could not create item: RenderSafe is unavailable.", 6000);
+                return null;
+            }
+            const lifecycleCtx = { instance, dv, targetPath, folder, prompts: ctx.prompts, spec };
+            const result = await renderSafe.mutateStructure({
+                app,
+                dv,
+                path: targetPath,
+                failureMessage: `Could not create ${spec.label || "item"}`,
+                apply: () => structuralLifecycle.apply(lifecycleCtx),
+                rollback: (receipt, error) => structuralLifecycle.rollback(receipt, error, lifecycleCtx),
+                write: persist,
+            });
+            return result.ok === true ? result.value : null;
+        }
+
+        return persist();
     }
 
     // ---------- v0.107.0: seed_from_defaults resolution ----------
@@ -432,12 +466,14 @@ class EntityCreate {
 
     _prompt(p, ctx) {
         switch (p.type) {
-            case "string": return this._promptText(p, ctx, "text");
-            case "date":   return this._promptText(p, ctx, "date");
-            case "month":  return this._promptText(p, ctx, "month");
-            case "number": return this._promptText(p, ctx, "number");
-            case "select": return this._promptSelect(p, ctx);
-            default:       return Promise.resolve(null);
+            case "string":       return this._promptText(p, ctx, "text");
+            case "date":         return this._promptText(p, ctx, "date");
+            case "datetime":     return this._promptText(p, ctx, "datetime-local");
+            case "month":        return this._promptText(p, ctx, "month");
+            case "number":       return this._promptText(p, ctx, "number");
+            case "select":       return this._promptSelect(p, ctx);
+            case "people-multi": return this._promptPeopleMulti(p, ctx);
+            default:             return Promise.resolve(null);
         }
     }
 
@@ -599,6 +635,54 @@ class EntityCreate {
         });
     }
 
+    // people-multi — pick any number of people with the shared PeoplePicker
+    // (the same picker the New meeting dialog and Edit attendees use), in the
+    // shared dialog shell (TaskDialog.openShell, one column). Typing a new name
+    // and "＋ Add new person" creates its spice/people/<name>.md stub.
+    // Resolves to the ARRAY of picked names (feed a frontmatter array via the
+    // {{prompts.<key>|links}} pipe); Cancel / Esc / backdrop → null (aborts the
+    // create, like every other prompt). When the picker or the shell is not
+    // loaded (cold load) it resolves [] with a Notice, so the create goes on
+    // without attendees. Never throws.
+    _promptPeopleMulti(p, ctx) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+            try {
+                const cjs = (typeof globalThis !== "undefined" && globalThis.customJS) || {};
+                const PP = cjs.PeoplePicker;
+                const TD = cjs.TaskDialog;
+                const shell = (PP && typeof PP.mount === "function" && TD && typeof TD.openShell === "function")
+                    ? TD.openShell({
+                        title: p.label || "Attendees",
+                        columns: false,
+                        cls: "sauce-people-prompt",
+                        closeReason: "people-prompt",
+                        onSubmit: () => false,
+                        onClose: () => done(null),
+                    })
+                    : null;
+                if (!shell) {
+                    try { new Notice("Attendee picker unavailable; creating without attendees.", 6000); } catch (_e) {}
+                    done([]);
+                    return;
+                }
+                const picker = PP.mount(shell.left, { app, now: ctx && ctx.now, autofocus: true });
+                const right = shell.footer.createDiv({ cls: "sauce-task-footer-right" });
+                const cancel = TD.actionButton(right, { label: "Cancel", cls: "sauce-people-prompt-cancel" });
+                cancel.onclick = () => shell.close();
+                const ok = TD.actionButton(right, { label: "Done", variant: "accent", cls: "sauce-people-prompt-done" });
+                ok.onclick = async () => {
+                    try { await picker.whenIdle(); } catch (_e) {}
+                    done(picker.names());
+                    shell.close();
+                };
+            } catch (_e) {
+                done([]);
+            }
+        });
+    }
+
     // ---------- validate predicates ----------
     // Supported: "safe-filename", "min:<n>", "max:<n>", "gte:<other-key>"
 
@@ -708,6 +792,16 @@ class EntityCreate {
             const p = file.path != null ? String(file.path) : "";
             const i = p.lastIndexOf("/");
             return i >= 0 ? p.slice(0, i) : "";
+        });
+
+        // 3d. {{prompts.<key>|or-now:<moment-format>}} — the prompt value when the user
+        // entered one, else ctx.now formatted. Lets an OPTIONAL date/time prompt fall
+        // back to creation time (e.g. meetings "+ New Meeting"). Must precede the
+        // generic |<pipe> rule so "or-now:FMT" isn't parsed as a bare pipe name.
+        out = out.replace(/\{\{prompts\.([a-zA-Z0-9_]+)\|or-now:([^}]+)\}\}/g, (_, key, fmt) => {
+            const v = ctx.prompts ? ctx.prompts[key] : undefined;
+            if (v != null && String(v).trim() !== "") return String(v).trim();
+            try { return ctx.now ? ctx.now.format(fmt) : ""; } catch (_e) { return ""; }
         });
 
         // 4. {{prompts.<key>|<pipe>}}
@@ -865,6 +959,19 @@ class EntityCreate {
             return;
         }
         if (typeof val === "string") {
+            // {{prompts.<key>|links}} — expand an ARRAY-valued prompt into a YAML
+            // list of "[[name]]" wikilinks (e.g. attendees / people from a
+            // people-multi prompt). Empty / non-array → `key: []`.
+            const linksMatch = val.match(/^\{\{prompts\.([a-zA-Z0-9_]+)\|links\}\}$/);
+            if (linksMatch) {
+                const arr = (ctx && ctx.prompts && Array.isArray(ctx.prompts[linksMatch[1]]))
+                    ? ctx.prompts[linksMatch[1]] : [];
+                const names = arr.map((n) => String(n == null ? "" : n).trim()).filter(Boolean);
+                if (!names.length) { lines.push(`${key}: []`); return; }
+                lines.push(`${key}:`);
+                for (const n of names) lines.push(`  - ${this._yamlString(`[[${n}]]`)}`);
+                return;
+            }
             // Detect |number pipe in the source string before substitution —
             // if present, emit as unquoted numeric scalar.
             if (this._hasNumberPipe(val)) {
@@ -960,7 +1067,7 @@ class EntityCreate {
         try {
             const subbed = this._substitute(relPath, ctx);
             // relPath is expected to be a vault-relative path (the installer
-            // substitutes ranch/templates at install time so this arrives
+            // substitutes {{templates_path}} at install time so this arrives
             // pre-resolved). Read via adapter directly — getAbstractFileByPath
             // gates on Obsidian's vault index, which lags newly-materialized
             // files (e.g. templates added in the same install run before user

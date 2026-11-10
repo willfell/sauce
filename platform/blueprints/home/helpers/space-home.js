@@ -641,6 +641,9 @@ class SpaceHome {
       || null;
     try {
       if (key === "meeting") {
+        // The one New meeting dialog first; EntityCreate's prompts when it can't open.
+        if (cjs && cjs.MeetingCreateDialog && typeof cjs.MeetingCreateDialog.open === "function"
+          && cjs.MeetingCreateDialog.open({ dv: dv }) === true) return;
         if (cjs && cjs.EntityCreate && typeof cjs.EntityCreate.create === "function") {
           cjs.EntityCreate.create({ instance: "meeting", dv: dv });
         }

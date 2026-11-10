@@ -21,12 +21,17 @@
     }
   ],
   "customjs_classes": [
-    "EntityCreate"
+    "EntityCreate",
+    "PeoplePicker"
   ],
   "files": [
     {
       "source": "entity-create.js",
       "dest": "{{scripts_path}}/entity-create/entity-create.js"
+    },
+    {
+      "source": "people-picker.js",
+      "dest": "{{scripts_path}}/entity-create/people-picker.js"
     }
   ],
   "post_install": [],

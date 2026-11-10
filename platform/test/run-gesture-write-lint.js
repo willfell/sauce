@@ -69,9 +69,13 @@ ok('GW-6 a reasonless gesture-write-ok marker is rejected', lintSource(`
 `).length === 1);
 
 const allowlist = loadAllowlist();
+// meeting-leaf-actions.js left this list when Edit attendees moved onto the
+// shared PeoplePicker: its new-person create now runs in the picker's onAdd
+// hook, not a DOM gesture assignment, so this lint no longer sees it. That
+// create is still bound to RenderSafe.mutateStructure behind the person queue,
+// which run-meeting-leaf-actions.js pins with PERF5-REQUIREMENT-MUTANTS.
 ok('GW-7 required automated writers have reasoned allowlist entries', [
   'platform/blueprints/project/helpers/project-workstreams.js',
-  'platform/blueprints/meetings/helpers/meeting-leaf-actions.js',
   'platform/blueprints/project/helpers/doc-bulk-move.js',
   'platform/blueprints/project/helpers/doc-leaf-actions.js',
 ].every((entry) => allowlist.has(entry)));

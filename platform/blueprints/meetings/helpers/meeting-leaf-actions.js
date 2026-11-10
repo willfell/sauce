@@ -301,58 +301,34 @@ class MeetingLeafActions {
     const people = this._listPeople();
     const current = new Set(MeetingLeafActions.canonicalLinkNames(cur.attendees));
     const selected = new Set([...current].filter(Boolean));
-    this._openModal({ title: "Edit attendees", build: (panel, close) => {
+    this._openModal({ title: "Edit attendees", build: (panel, close, footerHost) => {
       const personQueue = { tail: Promise.resolve() };
-      const list = panel.createEl("div");
-      list.style.cssText = "display:flex; flex-direction:column; gap:4px; margin:10px 0; max-height:46vh; overflow:auto;";
-      const renderRow = (name) => {
-        const r = list.createEl("label");
-        r.style.cssText = "display:flex; align-items:center; gap:8px; padding:3px 4px; cursor:pointer;";
-        const cb = r.createEl("input"); cb.type = "checkbox"; cb.checked = selected.has(name);
-        cb.onchange = () => { if (cb.checked) selected.add(name); else selected.delete(name); };
-        r.createEl("span", { text: name });
-      };
-      const redrawList = (filter) => {
-        while (list.firstChild) list.removeChild(list.firstChild);
-        const q = (filter || "").toLowerCase();
-        const candidates = [...new Set([...people, ...selected])].sort();
-        const filtered = q
-          ? candidates.filter((n) => n.toLowerCase().includes(q) || selected.has(n))
-          : candidates;
-        filtered.forEach(renderRow);
-      };
-      redrawList("");
-      const addWrap = panel.createEl("div");
-      addWrap.style.cssText = "display:flex; gap:6px; margin-top:8px;";
-      const addInput = addWrap.createEl("input"); addInput.type = "text"; addInput.placeholder = "Search or add new…";
-      addInput.style.cssText = "flex:1; padding:5px 8px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
-      const addBtn = addWrap.createEl("button", { text: "Add", cls: "sauce-btn" });
-      const updateAddButton = () => {
-        const typed = (addInput.value || "").trim();
-        const typedLc = typed.toLowerCase();
-        const matchesExisting = typed.length > 0 && people.some((n) => n.toLowerCase() === typedLc);
-        const canAdd = typed.length > 0 && !matchesExisting;
-        addBtn.disabled = !canAdd;
-        addBtn.style.opacity = canAdd ? "1" : "0.5";
-        addBtn.style.cursor = canAdd ? "pointer" : "not-allowed";
-        addBtn.textContent = canAdd ? `Add "${typed}" as new person` : "Add";
-      };
-      addInput.oninput = () => { redrawList(addInput.value); updateAddButton(); };
-      updateAddButton();
-      addBtn.onclick = async () => {
-        if (addBtn.disabled) return;
-        const name = (addInput.value || "").trim(); if (!name) return;
+      // The shared PeoplePicker (the New meeting dialog uses the same one):
+      // chips of who is picked, search, the people list, ＋ Add new person.
+      const PP = globalThis.customJS?.PeoplePicker;
+      if (!PP || typeof PP.mount !== "function") {
+        panel.createEl("div", { text: "The people picker is not loaded yet. Close this and try again in a moment." });
+        return;
+      }
+      let picker = null;
+      // A new person is a receipt-bound structural create: the picker paints
+      // them first, and a failed write restores the exact list it replaced.
+      const onAdd = async (name) => {
         const stubPath = `spice/people/${name}.md`;
         const renderSafe = globalThis.customJS?.RenderSafe;
         if (!renderSafe || typeof renderSafe.mutateStructure !== "function") {
           new Notice("Could not add person: RenderSafe is unavailable.", 6000);
-          return;
+          return false;
         }
-        await MeetingLeafActions._enqueuePerson(personQueue, async () => {
+        return MeetingLeafActions._enqueuePerson(personQueue, async () => {
           const existing = app.vault.getAbstractFileByPath(stubPath);
           if (existing) return true;
           const lifecycle = this._personLifecycle({
-            name, selected, people, addInput, list, redrawList, updateAddButton,
+            name, selected, people,
+            addInput: picker.input,
+            list: picker.list,
+            redrawList: () => picker.redraw(),
+            updateAddButton: () => { picker.renderChips(); picker.refreshAdd(); },
           });
           const result = await renderSafe.mutateStructure({
             app,
@@ -370,9 +346,13 @@ class MeetingLeafActions {
           return result.ok === true;
         });
       };
-      const footer = panel.createEl("div", { cls: "sauce-modal-footer" });
-      const save = footer.createEl("button", { text: "Save attendees", cls: "sauce-btn sauce-btn-accent" });
+      picker = PP.mount(panel, { app, people, selected, onAdd });
+      const footer = footerHost
+        ? footerHost.createEl("div", { cls: "sauce-task-footer-right" })
+        : panel.createEl("div", { cls: "sauce-modal-footer" });
+      const save = footer.createEl("button", { text: "Save attendees", cls: "sauce-btn sauce-btn-accent sauce-meeting-attendees-save" });
       save.onclick = async () => {
+        await picker.whenIdle();
         await personQueue.tail;
         const selectedNames = [...selected];
         const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter(selectedNames);
@@ -417,7 +397,15 @@ class MeetingLeafActions {
   }
 
 
+  // The shared dialog shell (TaskDialog.openShell, one column) when it is
+  // loaded, so these dialogs look like New meeting and the task dialog;
+  // otherwise this module's own .sauce-modal overlay.
   _openModal({ title, build }) {
+    const TD = globalThis.customJS?.TaskDialog;
+    const shell = (TD && typeof TD.openShell === "function")
+      ? TD.openShell({ title, columns: false, cls: "sauce-meeting-modal", closeReason: "meeting-modal", onSubmit: () => false })
+      : null;
+    if (shell) { build(shell.left, shell.close, shell.footer); return; }
     const prior = document.querySelector(".sauce-meeting-modal-overlay");
     if (prior) prior.remove();
     const overlay = document.body.createDiv({ cls: "sauce-modal-backdrop sauce-meeting-modal-overlay" });

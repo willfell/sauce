@@ -465,9 +465,10 @@ function env(opts) {
       d.includes('body.is-phone .sauce-modal-backdrop.sauce-meeting-modal-overlay { padding: calc(env(safe-area-inset-top, 0px) + 8px)')
       && d.includes('@media (max-width: 600px) {'));
     const leafSrc = read('blueprints/meetings/helpers/meeting-leaf-actions.js');
-    ok('MV-DIALOG-SHELL the meeting dialogs use the shared .sauce-modal shell and sauce-btn buttons',
-      leafSrc.includes('cls: "sauce-modal-backdrop sauce-meeting-modal-overlay"') && leafSrc.includes('cls: "sauce-modal sauce-meeting-modal"')
-      && leafSrc.includes('cls: "sauce-btn sauce-btn-accent"') && !leafSrc.includes('rgba(0,0,0,0.55)'));
+    ok('MV-DIALOG-SHELL the meeting dialogs use the shared dialog shell (TaskDialog.openShell, .sauce-modal fallback) and sauce-btn buttons',
+      /TD\.openShell\(\{ title, columns: false, cls: "sauce-meeting-modal"/.test(leafSrc)
+      && leafSrc.includes('cls: "sauce-modal-backdrop sauce-meeting-modal-overlay"') && leafSrc.includes('cls: "sauce-modal sauce-meeting-modal"')
+      && leafSrc.includes('cls: "sauce-btn sauce-btn-accent sauce-meeting-attendees-save"') && !leafSrc.includes('rgba(0,0,0,0.55)'));
   }
 
   // ── Dialog target from a list row ─────────────────────────────────────────

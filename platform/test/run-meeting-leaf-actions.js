@@ -9,6 +9,9 @@ function loadHelperClass(rel, className) {
   return new Function('window', `${stubs}\n${src}\nreturn ${className};`)(sharedWindow);
 }
 const MLA = loadHelperClass('blueprints/meetings/helpers/meeting-leaf-actions.js', 'MeetingLeafActions');
+// Edit attendees renders the shared PeoplePicker (entity-create mechanism).
+const PeoplePickerClass = new Function(`${fs.readFileSync(path.resolve(__dirname, '..', 'mechanisms/entity-create/people-picker.js'), 'utf8')}\nreturn PeoplePicker;`)();
+const hasCls = (node, cls) => String(node.className || '').split(/\s+/).includes(cls);
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) { if (cond) { console.log(`  ok  ${label}`); pass++; } else { console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); failures.push(label); fail++; } }
 function makeModalNode(tag = 'div', text = '') {
@@ -21,12 +24,19 @@ function makeModalNode(tag = 'div', text = '') {
     disabled: false,
     focusCount: 0,
     classList: { add() {} },
+    className: '',
     createEl(childTag, opts = {}) {
       const child = makeModalNode(childTag, opts.text || '');
+      if (opts.cls) child.className = opts.cls;
+      if (opts.type) child.type = opts.type;
       child.parentNode = this;
       this.childNodes.push(child);
       return child;
     },
+    createDiv(opts = {}) { return this.createEl('div', opts); },
+    createSpan(opts = {}) { return this.createEl('span', opts); },
+    empty() { for (const child of this.childNodes) child.parentNode = null; this.childNodes = []; },
+    addEventListener() {},
     removeChild(child) {
       const index = this.childNodes.indexOf(child);
       if (index >= 0) this.childNodes.splice(index, 1);
@@ -221,7 +231,8 @@ ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `--
     (mlaSrc.match(/if \(saved\) \{[\s\S]{0,180}close\(\);[\s\S]{0,20}\}/g) || []).length >= 2
     && !/\}\s*close\(\);\s*\n\s*\};/.test(mlaSrc));
 
-  const personBlock = (body) => body.slice(body.indexOf('addBtn.onclick'), body.indexOf('const save =', body.indexOf('addBtn.onclick')));
+  // The new-person handler the shared PeoplePicker calls (its onAdd hook).
+  const personBlock = (body) => body.slice(body.indexOf('const onAdd = async'), body.indexOf('const save =', body.indexOf('const onAdd = async')));
   const personLifecycleContract = (body) => {
     const block = personBlock(body);
     const lifecycle = body.slice(body.indexOf('_personLifecycle('), body.indexOf('// ── handlers'));
@@ -325,6 +336,7 @@ ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `--
     },
   };
   global.customJS = {
+    PeoplePicker: new PeoplePickerClass(),
     RenderSafe: {
       page: () => meetingPage,
       async mutateStructure(opts) {
@@ -351,10 +363,10 @@ ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `--
   };
 
   handlerInst._onEditAttendees({ current: () => meetingPage });
-  const attendeeList = modalNodes(attendeePanel).find((node) => /max-height:46vh/.test(node.style.cssText));
-  const attendeeInput = modalNodes(attendeePanel).find((node) => node.tagName === 'INPUT' && node.placeholder === 'Search or add new…');
+  const attendeeList = modalNodes(attendeePanel).find((node) => hasCls(node, 'sauce-people-picker-list'));
+  const attendeeInput = modalNodes(attendeePanel).find((node) => node.tagName === 'INPUT' && hasCls(node, 'sauce-people-picker-search'));
   const attendeeButtons = () => modalNodes(attendeePanel).filter((node) => node.tagName === 'BUTTON');
-  const addPersonButton = attendeeButtons().find((node) => /^Add/.test(node.textContent));
+  const addPersonButton = attendeeButtons().find((node) => hasCls(node, 'sauce-people-picker-add'));
   const saveAttendeesButton = attendeeButtons().find((node) => node.textContent === 'Save attendees');
   attendeeInput.value = 'Alice';
   attendeeInput.oninput();
@@ -399,6 +411,7 @@ ok('MLA-DIV-3 Meeting.md template no longer brackets MeetingLeafActions with `--
   // triggering control state/focus for an immediate retry.
   const installFailingFieldMutation = (page) => {
     global.customJS = {
+      PeoplePicker: new PeoplePickerClass(),
       RenderSafe: {
         page: () => page,
         async mutate(opts) {
