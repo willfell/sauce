@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * run-todo-project-head.js — projects get their own colour, and a grouped list
- * opens each project with a heading in it. TaskTodayList.projectHue/projectTint
- * give one colour per project name, used by the row's project chip and by
- * ToDoDailyFilterView.renderProjectHeader (badge with initials, the name as a
- * link, the count, overdue). Rows show subtask progress as a small meter.
- * Zero-dep; exit 0 iff all pass.
+ * run-todo-project-head.js — projects get a quiet colour of their own, and a
+ * grouped list opens each project with a plain heading.
+ * TaskTodayList.projectHue/projectTint give one soft colour per project name,
+ * shown as the dot on a row's project chip.
+ * ToDoDailyFilterView.renderProjectHeader draws the name as a link, the count
+ * and overdue, in the theme's own text. Rows show subtask progress as a small
+ * meter. Zero-dep; exit 0 iff all pass.
  */
 'use strict';
 
@@ -58,31 +59,25 @@ ok('PH-TINT the tint is a soft, low-saturation pastel mixed into the theme\'s mu
   && /^color-mix\(in srgb, hsl\([^)]*\) 45%, var\(--text-muted/.test(tint.fg)
   && /12%, transparent\)$/.test(tint.bg) && TTL.projectTint('') === null);
 
-ok('PH-INITIALS initials come from the first two words, or the first two letters',
-  View.projectInitials('Content-Registry') === 'CR' && View.projectInitials('MCP Mesh') === 'MM'
-  && View.projectInitials('ERC') === 'ER' && View.projectInitials('') === '');
-
 {
   const host = makeEl('div');
   const opened = [];
   global.window = { app: { workspace: { openLinkText: (n) => opened.push(n) } } };
   const TE = { bucketOf: (t) => t.bucket };
   const head = View.renderProjectHeader(host, { label: 'Content-Registry', tasks: [{ bucket: 'overdue' }, { bucket: 'today' }, { bucket: 'overdue' }] }, { TTL, TE, todayStr: '2026-11-10', first: true });
-  const t = TTL.projectTint('Content-Registry');
-  ok('PH-HEAD the heading carries the project colour, a badge with initials, the name, the count and overdue',
+  ok('PH-HEAD the heading is the name, the count and overdue, with no badge and no colour of its own',
     head.className === 'sauce-todo-project-head is-first'
-    && head.style.cssText === '--sauce-proj: ' + t.dot + '; --sauce-proj-fg: ' + t.fg + '; --sauce-proj-bg: ' + t.bg + ';'
-    && one(head, 'sauce-todo-project-badge').textContent === 'CR'
+    && head.style.cssText === '' && !one(head, 'sauce-todo-project-badge')
+    && head.children.map((c) => c.className).join() === 'sauce-todo-project-name,sauce-todo-project-count,sauce-todo-project-late'
     && one(head, 'sauce-todo-project-name').textContent === 'Content-Registry'
     && one(head, 'sauce-todo-project-count').textContent === '3'
     && one(head, 'sauce-todo-project-late').textContent === '2 overdue');
   one(head, 'sauce-todo-project-name')._listeners.click({ preventDefault() {} });
   ok('PH-HEAD-LINK the name opens the project note', one(head, 'sauce-todo-project-name').tagName === 'A' && opened[0] === 'Content-Registry');
   const none = View.renderProjectHeader(makeEl('div'), { label: 'No project', tasks: [{ bucket: 'today' }] }, { TTL, TE, todayStr: '2026-11-10' });
-  ok('PH-HEAD-NONE "No project" is neutral: no colour, no link, no overdue line when none are late',
+  ok('PH-HEAD-NONE "No project" is plain text, not a link, with no overdue line when none are late',
     none.className === 'sauce-todo-project-head is-none' && none.style.cssText === ''
-    && one(none, 'sauce-todo-project-name').tagName === 'SPAN' && !one(none, 'sauce-todo-project-late')
-    && one(none, 'sauce-todo-project-badge').textContent === '–');
+    && one(none, 'sauce-todo-project-name').tagName === 'SPAN' && !one(none, 'sauce-todo-project-late'));
 }
 
 const viewSrc = read('blueprints/to-do/helpers/todo-daily-filter-view.js');
@@ -113,11 +108,10 @@ ok('PH-WIRED grouping by project draws the project heading; other groupings keep
 const core = read('mechanisms/styling/assets/snippets/sauce-core.css');
 {
   const block = (sel) => { const at = core.indexOf(sel + ' {'); return at < 0 ? '' : core.slice(at, core.indexOf('}', at) + 1); };
-  ok('PH-CSS only the badge is tinted: the name keeps the theme text, the heading has no band, gradient or glow',
-    /background: var\(--sauce-proj-bg/.test(block('.sauce-todo-project-badge'))
+  ok('PH-CSS the heading is the theme\'s own text: no badge styles, no project colour, no band, gradient or glow',
+    !core.includes('.sauce-todo-project-badge') && !core.includes('--sauce-proj')
     && /color: var\(--text-normal\)/.test(block('.sauce-todo-project-name'))
-    && !/gradient|box-shadow/.test(block('.sauce-todo-project-head') + block('.sauce-todo-project-badge'))
-    && !/sauce-proj/.test(block('.sauce-todo-project-head') + block('.sauce-todo-project-count')));
+    && !/gradient|box-shadow/.test(block('.sauce-todo-project-head')));
 }
 
 const failed = results.filter(([, pass]) => !pass);
