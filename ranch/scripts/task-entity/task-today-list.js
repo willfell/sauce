@@ -1266,7 +1266,12 @@ class TaskTodayList {
                 const name = TaskTodayList._projectChipText(task.project);
                 const chip = addChip(projectSlot, name, 'sauce-task-project');
                 const tint = TaskTodayList.projectTint(name);
-                if (chip && tint) chip.style.cssText += ' color: ' + tint.fg + '; background: ' + tint.bg + ';';
+                // The chip stays the neutral grey; a small dot in the
+                // project's colour sits before the name.
+                if (chip && tint) {
+                    chip.style.cssText += ' padding-left: 15px; background-image: radial-gradient(circle at 7px 50%, '
+                        + tint.dot + ' 2.6px, transparent 3.2px);';
+                }
             }
         }
         const prioritySlot = mkSlot('priority', TaskTodayList.META_SLOT_WIDTH.priority);
@@ -1679,20 +1684,22 @@ class TaskTodayList {
     }
 
     /**
-     * The colours a project's chip and heading use, mixed from its hue with
-     * the theme's own text colour so they read on light and dark themes:
-     * { hue, base, fg, bg, line }. Null without a project. Pure.
+     * The colours a project's chip dot and heading badge use: a soft, low
+     * saturation pastel of its hue, mixed into the theme's muted text so it
+     * sits quietly beside the warm accent on light and dark themes:
+     * { hue, base, dot, fg, bg, line }. Null without a project. Pure.
      */
     static projectTint(name) {
         const hue = TaskTodayList.projectHue(name);
         if (hue == null) return null;
-        const base = 'hsl(' + hue + ' 68% 56%)';
+        const base = 'hsl(' + hue + ' 30% 62%)';
         return {
             hue,
             base,
-            fg: 'color-mix(in srgb, ' + base + ' 78%, var(--text-normal, #ccc))',
-            bg: 'color-mix(in srgb, ' + base + ' 15%, transparent)',
-            line: 'color-mix(in srgb, ' + base + ' 45%, transparent)',
+            dot: 'color-mix(in srgb, ' + base + ' 70%, var(--text-muted, #999))',
+            fg: 'color-mix(in srgb, ' + base + ' 45%, var(--text-muted, #999))',
+            bg: 'color-mix(in srgb, ' + base + ' 12%, transparent)',
+            line: 'color-mix(in srgb, ' + base + ' 30%, transparent)',
         };
     }
 

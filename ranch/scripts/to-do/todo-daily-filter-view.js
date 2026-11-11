@@ -427,7 +427,7 @@ class ToDoDailyFilterView {
         let tint = null;
         try { tint = !none && TTL && typeof TTL.projectTint === 'function' ? TTL.projectTint(name) : null; } catch (_e) { tint = null; }
         const head = host.createEl('div', { cls: 'sauce-todo-project-head' + (none ? ' is-none' : '') + (o.first ? ' is-first' : '') });
-        if (tint) head.style.cssText = `--sauce-proj: ${tint.base}; --sauce-proj-fg: ${tint.fg};`;
+        if (tint) head.style.cssText = `--sauce-proj: ${tint.dot}; --sauce-proj-fg: ${tint.fg}; --sauce-proj-bg: ${tint.bg};`;
         const badge = head.createEl('span', { cls: 'sauce-todo-project-badge', text: none ? '–' : ToDoDailyFilterView.projectInitials(name) });
         try { badge.setAttribute('aria-hidden', 'true'); } catch (_e) {}
         const nameEl = head.createEl(none ? 'span' : 'a', { cls: 'sauce-todo-project-name', text: name || 'No project' });
