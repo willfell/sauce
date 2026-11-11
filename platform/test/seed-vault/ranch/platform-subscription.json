@@ -55,7 +55,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.20.0"
+      "version": "0.20.1"
     },
     {
       "name": "modal",
@@ -87,7 +87,7 @@
     },
     {
       "name": "styling",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "convenience",
@@ -157,7 +157,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.35.0"
+      "version": "0.35.1"
     },
     {
       "name": "journal",
