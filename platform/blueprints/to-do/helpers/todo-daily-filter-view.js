@@ -399,6 +399,61 @@ class ToDoDailyFilterView {
         return value || 'No project';
     }
 
+    /**
+     * Two-letter badge for a project: the first letters of its first two
+     * words ("Content-Registry" → "CR", "MCP Mesh" → "MM"), or the first two
+     * letters of a one-word name ("ERC" → "ER"). Pure.
+     */
+    static projectInitials(name) {
+        const words = String(name == null ? '' : name).split(/[\s\-_./]+/).filter(Boolean);
+        if (!words.length) return '';
+        const two = words.length >= 2 ? words[0][0] + words[1][0] : words[0].slice(0, 2);
+        return two.toUpperCase();
+    }
+
+    /**
+     * The heading over one project's group when the list is grouped by
+     * project: a badge in the project's own colour with its initials, the
+     * name (a link to the project note), the number of tasks, and how many
+     * are overdue. The colour comes from TaskTodayList.projectTint, so the
+     * heading matches the project chips on rows. "No project" stays neutral.
+     * Returns the heading element.
+     */
+    static renderProjectHeader(host, group, opts) {
+        const o = opts || {};
+        const name = String((group && group.label) || '');
+        const none = !name || name === 'No project';
+        const TTL = o.TTL;
+        let tint = null;
+        try { tint = !none && TTL && typeof TTL.projectTint === 'function' ? TTL.projectTint(name) : null; } catch (_e) { tint = null; }
+        const head = host.createEl('div', { cls: 'sauce-todo-project-head' + (none ? ' is-none' : '') + (o.first ? ' is-first' : '') });
+        if (tint) head.style.cssText = `--sauce-proj: ${tint.base}; --sauce-proj-fg: ${tint.fg};`;
+        const badge = head.createEl('span', { cls: 'sauce-todo-project-badge', text: none ? '–' : ToDoDailyFilterView.projectInitials(name) });
+        try { badge.setAttribute('aria-hidden', 'true'); } catch (_e) {}
+        const nameEl = head.createEl(none ? 'span' : 'a', { cls: 'sauce-todo-project-name', text: name || 'No project' });
+        if (!none) {
+            try { nameEl.setAttribute('href', '#'); nameEl.setAttribute('title', 'Open ' + name); } catch (_e) {}
+            nameEl.addEventListener('click', (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (_e) {}
+                try {
+                    const appRef = (typeof window !== 'undefined' && window.app) || null;
+                    if (appRef && appRef.workspace) appRef.workspace.openLinkText(name, '', false);
+                } catch (_e) { /* open best-effort */ }
+            });
+        }
+        const tasks = Array.isArray(group && group.tasks) ? group.tasks : [];
+        head.createEl('span', { cls: 'sauce-todo-project-count', text: String(tasks.length) });
+        let late = 0;
+        try {
+            const TE = o.TE;
+            if (TE && typeof TE.bucketOf === 'function' && o.todayStr) {
+                late = tasks.filter((t) => TE.bucketOf(t, o.todayStr) === 'overdue').length;
+            }
+        } catch (_e) { late = 0; }
+        if (late) head.createEl('span', { cls: 'sauce-todo-project-late', text: `${late} overdue` });
+        return head;
+    }
+
     static groupByProject(tasks) {
         const groups = new Map();
         for (const task of (Array.isArray(tasks) ? tasks : [])) {
@@ -947,7 +1002,8 @@ class ToDoDailyFilterView {
             for (const group of View.groupTasks(sorted, prefs.group, todayStr)) {
                 const first = host === listHost && !host.firstChild;
                 const section = host.createEl('div', { cls: 'sauce-todo-filter-project-group' });
-                label(section, group.label, first);
+                if (prefs.group === 'project') View.renderProjectHeader(section, group, { first, todayStr, TE, TTL });
+                else label(section, group.label, first);
                 const list = makeList(section);
                 for (const task of group.tasks) renderRow(list, task, stale);
             }
@@ -1141,6 +1197,19 @@ class ToDoDailyFilterView {
                 rowByPath.get(p) || View._detachedRow(), taskByPath(p), due, viewedDay, TD),
             (p, res) => patchTask(p, (t) => applyMoved(t, res && res.due != null ? res.due : due)));
         };
+        // Each selected task moves one day past the later of the viewed day
+        // and its own due date, as the row's own tomorrow button does.
+        const bulkTomorrow = () => {
+            if (typeof TTL.reschedule !== 'function') return undefined;
+            const dueFor = (task) => (typeof TTL.tomorrowFor === 'function'
+                ? TTL.tomorrowFor(task, viewedDay) : TE.tomorrow(todayStr));
+            const due = {};
+            return bulk('move', (p) => {
+                const task = taskByPath(p);
+                due[p] = dueFor(task);
+                return TTL.reschedule(rowByPath.get(p) || View._detachedRow(), task, due[p], viewedDay, TD);
+            }, (p, res) => patchTask(p, (t) => applyMoved(t, res && res.due != null ? res.due : due[p])));
+        };
         const bulkFields = (fields) => {
             if (!TD || typeof TD.setFields !== 'function') return undefined;
             return bulk('update', (p) => TD.setFields(p, fields),
@@ -1193,7 +1262,7 @@ class ToDoDailyFilterView {
                 button.addEventListener('click', onClick(() => handler(button)));
                 return button;
             };
-            action('→ Tomorrow', () => bulkReschedule(TE.tomorrow(todayStr)));
+            action('→ Tomorrow', () => bulkTomorrow());
             action('→ Next Mon', () => bulkReschedule(TE.nextMonday(todayStr)));
             action('Priority ▾', (button) => openPicker(button, priorityEntries())).setAttribute('aria-haspopup', 'menu');
             action('Project ▾', (button) => openPicker(button, projectEntries())).setAttribute('aria-haspopup', 'menu');

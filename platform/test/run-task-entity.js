@@ -1000,7 +1000,7 @@ ok('TNV-sub-2 _subtaskProgressText tolerates empty/null input', () => {
 // render() for the same convention).
 ok('TNV-sub-3 SUBTASKS section renders only status===open children as rows (regression)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-note-view.js'), 'utf8');
-  const m = /if\s*\(!isSubtask\s*&&\s*filePath\)\s*\{([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
+  const m = /\/\/ ----- SUBTASKS([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
   const sectionMatch = m.exec(src);
   assert(sectionMatch, 'SUBTASKS section block found in task-note-view.js');
   const section = sectionMatch[1];
@@ -1020,7 +1020,7 @@ ok('TNV-sub-3 SUBTASKS section renders only status===open children as rows (regr
 // same convention). Behaviour is covered by run-task-note-card.
 ok('TNV-DONE-1 SUBTASKS section lists done subtasks as done rows with Reopen, only when there are some', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'task-note-view.js'), 'utf8');
-  const m = /if\s*\(!isSubtask\s*&&\s*filePath\)\s*\{([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
+  const m = /\/\/ ----- SUBTASKS([\s\S]*?)\n\s+\}\s*catch\s*\(_e\)\s*\{\s*\/\*\s*SUBTASKS section best-effort/;
   const sectionMatch = m.exec(src);
   assert(sectionMatch, 'SUBTASKS section block found in task-note-view.js');
   const section = sectionMatch[1];
@@ -1647,15 +1647,18 @@ ok('RTR-2 _projectChipText yields the clean project basename (Link/path/wikilink
 // project / meeting render() via TaskEntity.subtaskCountsByParent — never
 // queried by renderTaskRow itself, which stays dv-free per its existing
 // design). When present and total > 0, render one more chip
-// "{done}/{total} subtasks" with cls 'sauce-task-today-subtask-chip' so tests
-// (and nothing else) can find it. Absent or total===0 → no chip.
-ok('RTR-SUB-1 renderTaskRow renders the subtask-count chip when subtask_count.total > 0', () => {
+// a meter chip with cls 'sauce-task-today-subtask-chip': a small bar filled to
+// the share done, then "{done}/{total}". Absent or total===0 → no chip.
+ok('RTR-SUB-1 renderTaskRow renders the subtask meter when subtask_count.total > 0', () => {
   const container = makeRowStubEl('div');
   const task = { title: 'Groceries', path: 'spice/tasks/Groceries.md', subtask_count: { done: 2, total: 5 } };
   const row = TaskTodayList.renderTaskRow(container, task, null);
   const chip = findByClsAttr(row, 'sauce-task-today-subtask-chip');
   assert(chip, 'subtask chip exists');
-  assert(chip.textContent === '2/5 subtasks', 'chip text is "2/5 subtasks", got ' + chip.textContent);
+  const text = chip.children.map((c) => c.textContent).filter(Boolean).join('');
+  assert(text === '2/5', 'chip text is "2/5", got ' + text);
+  const fill = findByClsAttr(row, 'sauce-task-subtask-fill');
+  assert(fill && /width: 40%/.test(fill.style.cssText), 'bar filled to 40%, got ' + (fill && fill.style.cssText));
 });
 
 ok('RTR-SUB-2 renderTaskRow renders no subtask chip when subtask_count is absent or total is 0', () => {

@@ -23,6 +23,7 @@ function makeEl(tag, cls) {
     style: { cssText: '' }, attributes: {}, dataset: {}, _text: '', _listeners: {}, disabled: false, placeholder: '',
     classList: {
       add: (...c) => { const s = new Set(el.className.split(/\s+/).filter(Boolean)); c.forEach((x) => s.add(x)); el.className = [...s].join(' '); },
+      remove: (...c) => { el.className = el.className.split(/\s+/).filter((x) => x && !c.includes(x)).join(' '); },
       contains: (x) => el.className.split(/\s+/).includes(x),
     },
     createEl(t, o) {
@@ -177,9 +178,12 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
 
     const markBtn = byClass(one(container, 'sauce-tnv-actions'), 'sauce-btn')[0];
     await markBtn._listeners.click();
-    ok('TNC-MARKDONE Mark done completes this note, shows Done and refreshes the views',
+    ok('TNC-MARKDONE-CELEBRATE Mark done completes this note, strikes the title and pops a check before refreshing',
       calls.markDone[0] === 'spice/tasks/Help Henry out with Routes.md' && markBtn.textContent === 'Done'
-      && markBtn.classList.contains('is-completing') && calls.commands.includes('dataview:dataview-force-refresh-views'));
+      && markBtn.classList.contains('is-completing') && card.classList.contains('is-completing')
+      && one(card, 'sauce-tnv-burst-mark') && !calls.commands.includes('dataview:dataview-force-refresh-views'));
+    await new Promise((r) => setTimeout(r, TNV._CELEBRATE_MS + 50));
+    ok('TNC-MARKDONE then the views refresh', calls.commands.includes('dataview:dataview-force-refresh-views'));
 
     const again = harness(HENRY, kids);
     await new TNV().render(again.dv);
@@ -217,9 +221,10 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
     const parent = one(container, 'sauce-tnv-parent');
     ok('TNC-PARENT a subtask note opens with "Part of" its parent, which is a link',
       parent && one(parent, 'sauce-tnv-parent-name').textContent === 'Help Henry out with Routes');
-    parent._listeners.click({ preventDefault() {}, stopPropagation() {} });
+    one(parent, 'sauce-tnv-parent-name')._listeners.click({ preventDefault() {}, stopPropagation() {} });
     ok('TNC-PARENT-OPEN the parent link opens the parent note', calls.open.includes('Help Henry out with Routes'));
-    ok('TNC-SUB-NOSUB a subtask has no subtasks section of its own', !one(container, 'is-subtasks'));
+    ok('TNC-SUB-OWN a subtask note has a Subtasks section of its own, so it can be broken down further',
+      !!one(container, 'is-subtasks') && !!one(container, 'sauce-tnv-add'));
     ok('TNC-SUB-OVERDUE its overdue date reads in the danger tone',
       byClass(container, 'is-due')[0].className.includes('is-danger') && byClass(container, 'is-due')[0].textContent === 'Overdue · 2 days');
   }
@@ -237,6 +242,95 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
       calls.reopen[0] === 'spice/tasks/_done/Help Henry out with Routes.md' && calls.commands.includes('dataview:dataview-force-refresh-views'));
     ok('TNC-DONE-META the quiet line adds the day it was done', /Done Nov 10/.test(one(container, 'sauce-tnv-meta').textContent));
   }
+
+  {
+    const under = (parent, title, status, extra) => Object.assign(kid(title, status, extra), { parent_task: '[[' + parent + ']]' });
+    const NEST = Object.assign({}, HENRY, { title: 'Nest root', file: { path: 'spice/tasks/Nest root.md', name: 'Nest root' } });
+    const kids = [
+      under('Nest root', 'A', 'open'),
+      under('Nest root', 'B', 'done', { completed_at: '2026-11-10T09:00:00-07:00' }),
+      under('A', 'A1', 'open'),
+      under('A', 'A2', 'done', { completed_at: '2026-11-10T08:00:00-07:00' }),
+      under('A1', 'A1a', 'open'),
+      under('A1a', 'A1a-i', 'open'),
+      under('A1a-i', 'too deep', 'open'),
+    ];
+    const { dv, container, calls } = harness(NEST, kids);
+    await new TNV().render(dv);
+    const rowA = calls.rows.find((r) => r.task.title === 'A');
+    ok('TNC-NEST-METER a subtask with its own subtasks shows their progress on its row',
+      rowA && JSON.stringify(rowA.task.subtask_count) === JSON.stringify({ done: 1, total: 2 }));
+    const nests = byClass(container, 'sauce-tnv-nest');
+    ok('TNC-NEST-TREE open sub-subtasks nest under their parent row, three levels deep and no further',
+      nests.length === 2 && nests[0].children.some((c) => c.textContent === 'A1')
+      && calls.rows.some((r) => r.task.title === 'A1a-i') === false
+      && calls.rows.map((r) => r.task.title).join() === 'A,A1,A1a');
+    ok('TNC-NEST-COUNT the card counts its own direct subtasks', one(container, 'sauce-tnv-count').textContent === '1 of 2 done');
+    ok('TNC-ROWS-IN on first open the rows rise in one after another',
+      byClass(container, 'row').every((r) => r.classList.contains('sauce-tnv-row-in'))
+      && byClass(container, 'row')[1].style.animationDelay === '45ms');
+    const ring = one(container, 'sauce-tnv-ring');
+    ok('TNC-RING the header ring shows the share of subtasks done',
+      ring.style.display === '' && ring.attributes['aria-label'] === '50% of subtasks done');
+
+    const rowA1 = calls.rows.find((r) => r.task.title === 'A1');
+    calls.rows.length = 0;
+    rowA1.options.onDone(rowA1.task);
+    const rowA2 = calls.rows.find((r) => r.task.title === 'A');
+    ok('TNC-NEST-ONDONE ticking a nested subtask updates its parent row at once',
+      rowA2 && JSON.stringify(rowA2.task.subtask_count) === JSON.stringify({ done: 2, total: 2 })
+      && !calls.rows.some((r) => r.task.title === 'A1'));
+
+    calls.rows.length = 0;
+    rowA2.options.onDone(rowA2.task);
+    const markBtn = byClass(one(container, 'sauce-tnv-actions'), 'sauce-btn')[0];
+    ok('TNC-READY with every subtask done, the count says so, the ring is complete and Mark done glows',
+      one(container, 'sauce-tnv-count').textContent === 'All 2 done' && ring.classList.contains('is-complete')
+      && markBtn.classList.contains('is-ready'));
+
+    const again = harness(NEST, kids);
+    await new TNV().render(again.dv);
+    ok('TNC-ROWS-IN-ONCE a refresh draws the rows without the rise', !byClass(again.container, 'row').some((r) => r.classList.contains('sauce-tnv-row-in')));
+  }
+
+  {
+    const under = (parent, title, status) => Object.assign(kid(title, status), { parent_task: '[[' + parent + ']]' });
+    const LOOP = { type: 'task', title: 'Loop A', status: 'open', parent_task: '[[Loop B]]', file: { path: 'spice/tasks/Loop A.md', name: 'Loop A' } };
+    const kids = [Object.assign(under('Loop A', 'Loop B', 'open'), {}), LOOP];
+    const { dv, container, calls } = harness(LOOP, kids);
+    await new TNV().render(dv);
+    ok('TNC-LOOP a parent loop draws once and stops, never nesting the note inside its own card',
+      calls.rows.map((r) => r.task.title).join() === 'Loop B' && !one(container, 'sauce-tnv-nest')
+      && byClass(container, 'sauce-tnv-parent-name').map((a) => a.textContent).join() === 'Loop B');
+  }
+
+  {
+    const GRAND = { type: 'task', title: 'Review the PR', status: 'open', parent_task: '[[Help Henry out with Routes]]', file: { path: 'spice/tasks/Review the PR.md', name: 'Review the PR' } };
+    const LEAF = { type: 'task', title: 'Leave a comment', status: 'open', parent_task: '[[Review the PR]]', file: { path: 'spice/tasks/Leave a comment.md', name: 'Leave a comment' } };
+    const ROOT = Object.assign({}, HENRY, { parent_task: '[[Launch]]' });
+    const LAUNCH = { type: 'task', title: 'Launch', status: 'open', file: { path: 'spice/tasks/Launch.md', name: 'Launch' } };
+    const { dv, container, calls } = harness(LEAF, [LAUNCH, ROOT, GRAND, LEAF]);
+    await new TNV().render(dv);
+    ok('TNC-CHAIN a deep subtask shows its whole chain of parents, outermost first, each a link',
+      byClass(container, 'sauce-tnv-parent-name').map((a) => a.textContent).join(' › ') === 'Launch › Help Henry out with Routes › Review the PR');
+    byClass(container, 'sauce-tnv-parent-name')[0]._listeners.click({ preventDefault() {}, stopPropagation() {} });
+    ok('TNC-CHAIN-OPEN each link in the chain opens that task', calls.open.includes('Launch'));
+  }
+
+  ok('TNC-ANCESTORS-PURE the chain stops at a loop, at the note itself, and after five',
+    JSON.stringify(TNV._ancestors('B', new Map([['B', { parent_task: 'A' }], ['A', { parent_task: 'B' }]]), null, 'X')) === JSON.stringify(['A', 'B'])
+    && JSON.stringify(TNV._ancestors('B', new Map([['B', { parent_task: 'X' }]]), null, 'X')) === JSON.stringify(['B'])
+    && TNV._ancestors('L0', new Map(Array.from({ length: 9 }, (_, i) => ['L' + i, { parent_task: 'L' + (i + 1) }])), null, '').length === 5);
+  ok('TNC-INDEX-PURE the index groups subtasks by parent and ignores a task naming itself',
+    (() => {
+      const idx = TNV._taskIndex([{ path: 'spice/tasks/A.md', parent_task: 'P' }, { path: 'spice/tasks/_done/B.md', parent_task: 'P' }, { path: 'spice/tasks/S.md', parent_task: 'S' }], null);
+      return idx.children.get('P').length === 2 && !idx.children.has('S') && idx.byName.has('B');
+    })());
+  ok('TNC-CSS-NEST the tree indents with a guide line, tighter on a phone',
+    /\.sauce-tnv-nest \{ margin: 0 0 2px 16px; padding-left: 10px; border-left: 2px solid/.test(css)
+    && /body\.is-phone \.sauce-tnv-nest \{ margin-left: 8px; padding-left: 8px; \}/.test(css));
+  ok('TNC-CSS-MOTION-ALL reduced motion also stops the rows, the ring, the glow and the celebration',
+    /prefers-reduced-motion: reduce\) \{[^}]*\.sauce-tnv-done,[^}]*\.sauce-tnv-row-in,[^}]*\.sauce-tnv-ring-arc,[^}]*\.sauce-tnv-burst-mark[^}]*animation: none !important;/.test(css));
 
   const failed = results.filter(([, pass]) => !pass);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);

@@ -212,6 +212,19 @@ process.exitCode = 1;
     assert(env.files.get(p)._fm.rank === '', 'rank cleared');
   });
 
+  await ok('RD-W-TOMORROW-AHEAD on Tuesday\'s note, Tomorrow sends a Wednesday task to Thursday and a Thursday task to Friday', async () => {
+    const wed = 'spice/tasks/wed.md';
+    const thu = 'spice/tasks/thu.md';
+    const late = 'spice/tasks/late.md';
+    const env = makeEnv({ [wed]: { status: 'open', due: '2026-11-11' }, [thu]: { status: 'open', due: '2026-11-12' }, [late]: { status: 'open', due: '2026-11-02' } });
+    const r1 = await TaskTodayList.rescheduleTomorrow(makeRow(), { path: wed, due: '2026-11-11', status: 'open' }, '2026-11-10', { open() {} });
+    const r2 = await TaskTodayList.rescheduleTomorrow(makeRow(), { path: thu, due: '2026-11-12', status: 'open' }, '2026-11-10', { open() {} });
+    const r3 = await TaskTodayList.rescheduleTomorrow(makeRow(), { path: late, due: '2026-11-02', status: 'open' }, '2026-11-10', { open() {} });
+    assert(r1.ok && env.files.get(wed)._fm.due === '2026-11-12', 'Wed → Thu: ' + JSON.stringify(r1));
+    assert(r2.ok && env.files.get(thu)._fm.due === '2026-11-13', 'Thu → Fri: ' + JSON.stringify(r2));
+    assert(r3.ok && env.files.get(late)._fm.due === '2026-11-11', 'overdue → the day after the note: ' + JSON.stringify(r3));
+  });
+
   await ok('RD-W-REOPEN', async () => {
     const src = 'spice/tasks/_done/A.md';
     const env = makeEnv({ [src]: { status: 'done', completed_at: '2026-11-06T10:00:00-07:00', title: 'A' } });
