@@ -52,9 +52,11 @@ ok('PH-HUE-SPREAD different projects mostly get different hues',
     hues.every((h) => Number.isInteger(h) && h >= 0 && h <= 345 && h % 15 === 0) && new Set(hues).size === 24);
 }
 const tint = TTL.projectTint('ERC');
-ok('PH-TINT the tint mixes the hue with the theme text and fades it for backgrounds',
-  tint.base === 'hsl(' + TTL.projectHue('ERC') + ' 68% 56%)' && /color-mix\(in srgb, hsl\([^)]*\) 78%, var\(--text-normal/.test(tint.fg)
-  && /15%, transparent\)$/.test(tint.bg) && TTL.projectTint('') === null);
+ok('PH-TINT the tint is a soft, low-saturation pastel mixed into the theme\'s muted text, faint for backgrounds',
+  tint.base === 'hsl(' + TTL.projectHue('ERC') + ' 30% 62%)'
+  && /^color-mix\(in srgb, hsl\([^)]*\) 70%, var\(--text-muted/.test(tint.dot)
+  && /^color-mix\(in srgb, hsl\([^)]*\) 45%, var\(--text-muted/.test(tint.fg)
+  && /12%, transparent\)$/.test(tint.bg) && TTL.projectTint('') === null);
 
 ok('PH-INITIALS initials come from the first two words, or the first two letters',
   View.projectInitials('Content-Registry') === 'CR' && View.projectInitials('MCP Mesh') === 'MM'
@@ -66,9 +68,10 @@ ok('PH-INITIALS initials come from the first two words, or the first two letters
   global.window = { app: { workspace: { openLinkText: (n) => opened.push(n) } } };
   const TE = { bucketOf: (t) => t.bucket };
   const head = View.renderProjectHeader(host, { label: 'Content-Registry', tasks: [{ bucket: 'overdue' }, { bucket: 'today' }, { bucket: 'overdue' }] }, { TTL, TE, todayStr: '2026-11-10', first: true });
+  const t = TTL.projectTint('Content-Registry');
   ok('PH-HEAD the heading carries the project colour, a badge with initials, the name, the count and overdue',
     head.className === 'sauce-todo-project-head is-first'
-    && head.style.cssText === '--sauce-proj: ' + TTL.projectTint('Content-Registry').base + '; --sauce-proj-fg: ' + TTL.projectTint('Content-Registry').fg + ';'
+    && head.style.cssText === '--sauce-proj: ' + t.dot + '; --sauce-proj-fg: ' + t.fg + '; --sauce-proj-bg: ' + t.bg + ';'
     && one(head, 'sauce-todo-project-badge').textContent === 'CR'
     && one(head, 'sauce-todo-project-name').textContent === 'Content-Registry'
     && one(head, 'sauce-todo-project-count').textContent === '3'
@@ -101,14 +104,21 @@ ok('PH-WIRED grouping by project draws the project heading; other groupings keep
   global.window = { customJS: {}, moment: () => ({ format: () => '2026-11-10' }) };
   const row = TTL.renderTaskRow(container, { title: 'Ship it', path: 'spice/tasks/Ship it.md', project: '[[ERC]]', status: 'open' }, null, { todayStr: '2026-11-10' });
   const chip = one(row, 'sauce-task-project');
-  ok('PH-ROW-CHIP a row\'s project chip wears its project colour',
-    chip && chip.style.cssText.includes('color: ' + TTL.projectTint('ERC').fg + ';') && chip.style.cssText.includes('background: ' + TTL.projectTint('ERC').bg + ';'));
+  ok('PH-ROW-CHIP a row\'s project chip stays neutral grey with a small dot in its project colour',
+    chip && chip.style.cssText.includes('background: var(--background-modifier-border);')
+    && chip.style.cssText.includes('background-image: radial-gradient(circle at 7px 50%, ' + TTL.projectTint('ERC').dot + ' 2.6px, transparent 3.2px);')
+    && !chip.style.cssText.includes('color: ' + TTL.projectTint('ERC').fg));
 }
 
 const core = read('mechanisms/styling/assets/snippets/sauce-core.css');
-ok('PH-CSS the heading styles read the project colour and the badge motion respects reduced motion',
-  /\.sauce-todo-project-badge \{[^}]*background: linear-gradient\(135deg, color-mix\(in srgb, var\(--sauce-proj/.test(core)
-  && /@media \(hover: hover\) and \(prefers-reduced-motion: no-preference\) \{\s*\.sauce-todo-project-badge \{ transition/.test(core));
+{
+  const block = (sel) => { const at = core.indexOf(sel + ' {'); return at < 0 ? '' : core.slice(at, core.indexOf('}', at) + 1); };
+  ok('PH-CSS only the badge is tinted: the name keeps the theme text, the heading has no band, gradient or glow',
+    /background: var\(--sauce-proj-bg/.test(block('.sauce-todo-project-badge'))
+    && /color: var\(--text-normal\)/.test(block('.sauce-todo-project-name'))
+    && !/gradient|box-shadow/.test(block('.sauce-todo-project-head') + block('.sauce-todo-project-badge'))
+    && !/sauce-proj/.test(block('.sauce-todo-project-head') + block('.sauce-todo-project-count')));
+}
 
 const failed = results.filter(([, pass]) => !pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
