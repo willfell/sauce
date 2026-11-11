@@ -1042,6 +1042,14 @@
       "lane": "parallel"
     },
     {
+      "id": "todo-project-head",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-project-head.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "task-note-card",
       "cmd": [
         "node",

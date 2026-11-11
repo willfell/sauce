@@ -60,6 +60,9 @@ class TaskTodayList {
     _renderTitleMarkdown(titleEl, mdText, sourcePath) { return TaskTodayList._renderTitleMarkdown(titleEl, mdText, sourcePath); }
     _stripWikilink(v) { return TaskTodayList._stripWikilink(v); }
     _projectChipText(v) { return TaskTodayList._projectChipText(v); }
+    projectHue(name) { return TaskTodayList.projectHue(name); }
+    projectTint(name) { return TaskTodayList.projectTint(name); }
+    renderSubtaskMeter(slot, count) { return TaskTodayList.renderSubtaskMeter(slot, count); }
     get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
     classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
     moveInOrder(list, path, dir) { return TaskTodayList.moveInOrder(list, path, dir); }
@@ -1207,7 +1210,7 @@ class TaskTodayList {
         // queried here (renderTaskRow stays dv-free by design). Shown only when
         // the task actually has ≥1 subtask.
         if (task && task.subtask_count && task.subtask_count.total > 0) {
-            addChip(extras, task.subtask_count.done + '/' + task.subtask_count.total + ' subtasks', 'sauce-task-today-subtask-chip');
+            TaskTodayList.renderSubtaskMeter(extras, task.subtask_count);
         }
         if (opts.showAge !== false) {
             const age = TaskTodayList._ageChip(task, todayStr, TE);
@@ -1220,7 +1223,12 @@ class TaskTodayList {
         // list that is already one project's (every chip would repeat it).
         if (opts.showProject !== false) {
             const projectSlot = mkSlot('project', TaskTodayList.META_SLOT_WIDTH.project);
-            if (task && task.project) addChip(projectSlot, TaskTodayList._projectChipText(task.project), 'sauce-task-project');
+            if (task && task.project) {
+                const name = TaskTodayList._projectChipText(task.project);
+                const chip = addChip(projectSlot, name, 'sauce-task-project');
+                const tint = TaskTodayList.projectTint(name);
+                if (chip && tint) chip.style.cssText += ' color: ' + tint.fg + '; background: ' + tint.bg + ';';
+            }
         }
         const prioritySlot = mkSlot('priority', TaskTodayList.META_SLOT_WIDTH.priority);
         if (task && task.priority) addChip(prioritySlot, String(task.priority), 'sauce-task-priority');
@@ -1614,6 +1622,67 @@ class TaskTodayList {
      * TaskEntity isn't loaded (cold load / Node), so the chip is always clean.
      * Never throws.
      */
+    /**
+     * A project's own hue (0–359), the same for the same name on every
+     * surface: a small string hash snapped to 24 evenly spaced hues so
+     * neighbouring projects stay apart. Blank / "No project" → null. Pure.
+     */
+    static projectHue(name) {
+        const s = String(name == null ? '' : name).trim().toLowerCase();
+        if (!s || s === 'no project') return null;
+        let h = 2166136261;
+        for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+        h ^= h >>> 16;
+        h = Math.imul(h, 0x85ebca6b) >>> 0;
+        h = (h ^ (h >>> 13)) >>> 0;
+        return (h % 24) * 15;
+    }
+
+    /**
+     * The colours a project's chip and heading use, mixed from its hue with
+     * the theme's own text colour so they read on light and dark themes:
+     * { hue, base, fg, bg, line }. Null without a project. Pure.
+     */
+    static projectTint(name) {
+        const hue = TaskTodayList.projectHue(name);
+        if (hue == null) return null;
+        const base = 'hsl(' + hue + ' 68% 56%)';
+        return {
+            hue,
+            base,
+            fg: 'color-mix(in srgb, ' + base + ' 78%, var(--text-normal, #ccc))',
+            bg: 'color-mix(in srgb, ' + base + ' 15%, transparent)',
+            line: 'color-mix(in srgb, ' + base + ' 45%, transparent)',
+        };
+    }
+
+    /**
+     * The subtask progress chip on a row: a small bar that fills with the
+     * share done, then "done/total". Green once every subtask is done. The
+     * full count is in its title and aria-label. Returns the chip; never
+     * throws.
+     */
+    static renderSubtaskMeter(slot, count) {
+        try {
+            const done = Math.max(0, Number(count && count.done) || 0);
+            const total = Math.max(0, Number(count && count.total) || 0);
+            if (!slot || !total) return null;
+            const pct = Math.min(100, Math.round((done / total) * 100));
+            const complete = done >= total;
+            const chip = slot.createEl('span', { cls: 'sauce-task-today-subtask-chip' + (complete ? ' is-complete' : '') });
+            chip.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; padding: 2px 8px; border-radius: 5px; background: var(--background-modifier-border); line-height: 1.4; white-space: nowrap;'
+                + ' color: ' + (complete ? 'var(--color-green, #4c9a5a)' : 'var(--text-muted)') + ';';
+            const bar = chip.createEl('span', { cls: 'sauce-task-subtask-bar' });
+            bar.style.cssText = 'display: inline-block; width: 26px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--background-modifier-border-hover, rgba(127,127,127,0.35)); flex-shrink: 0;';
+            const fill = bar.createEl('span', { cls: 'sauce-task-subtask-fill' });
+            fill.style.cssText = 'display: block; height: 100%; width: ' + pct + '%; border-radius: inherit; background: var(--color-green, #4c9a5a);';
+            chip.createEl('span', { text: done + '/' + total });
+            const label = done + ' of ' + total + ' subtasks done';
+            try { chip.setAttribute('title', label); chip.setAttribute('aria-label', label); } catch (_e) {}
+            return chip;
+        } catch (_e) { return null; }
+    }
+
     static _projectChipText(v) {
         try {
             const TE = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskEntity) || null;

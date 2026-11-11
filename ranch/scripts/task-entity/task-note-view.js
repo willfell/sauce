@@ -419,6 +419,87 @@ class TaskNoteView {
         return ['edit'];
     }
 
+    /** How long the Mark done celebration plays before the views refresh (ms). */
+    static get _CELEBRATE_MS() { return 650; }
+
+    /** Basename of a task path ("spice/tasks/_done/A.md" → "A"). Pure. */
+    static _baseOf(path) {
+        return String(path == null ? '' : path).split('/').pop().replace(/\.md$/i, '');
+    }
+
+    /**
+     * Index parsed tasks for the card: { children, byName } where children
+     * maps a parent's basename to its subtasks (open and done) and byName
+     * maps a basename to its task. `linkText` turns a parent_task value into
+     * a basename. Pure; never throws.
+     */
+    static _taskIndex(tasks, linkText) {
+        const children = new Map();
+        const byName = new Map();
+        const toName = typeof linkText === 'function' ? linkText : (v) => String(v == null ? '' : v);
+        for (const t of Array.isArray(tasks) ? tasks : []) {
+            if (!t) continue;
+            const name = TaskNoteView._baseOf(t.path);
+            if (name && !byName.has(name)) byName.set(name, t);
+            let parent = '';
+            try { parent = String(toName(t.parent_task) || '').trim(); } catch (_e) { parent = ''; }
+            if (!parent || parent === name) continue;
+            if (!children.has(parent)) children.set(parent, []);
+            children.get(parent).push(t);
+        }
+        return { children, byName };
+    }
+
+    /**
+     * The chain of parents above a subtask, outermost first, ending with its
+     * own parent: ["Launch", "Help Henry", "Review PR"]. Stops at a loop, at
+     * `self`, or after five. Pure.
+     */
+    static _ancestors(parentName, byName, linkText, self) {
+        const toName = typeof linkText === 'function' ? linkText : (v) => String(v == null ? '' : v);
+        const chain = [];
+        const seen = new Set(self ? [self] : []);
+        let cur = String(parentName || '').trim();
+        while (cur && !seen.has(cur) && chain.length < 5) {
+            chain.unshift(cur);
+            seen.add(cur);
+            const t = byName && byName.get ? byName.get(cur) : null;
+            let next = '';
+            try { next = t ? String(toName(t.parent_task) || '').trim() : ''; } catch (_e) { next = ''; }
+            cur = next;
+        }
+        return chain;
+    }
+
+    /**
+     * Draw or update the header ring for a subtask progress. The first call
+     * (applyValue false) builds the ring empty and sets its label; the second
+     * sets the arc, so the arc sweeps in. Hidden with no subtasks. Never throws.
+     */
+    static _paintRing(ring, prog, applyValue) {
+        try {
+            if (!ring) return;
+            if (!prog || !prog.total) { ring.style.display = 'none'; return; }
+            ring.style.display = '';
+            const C = 97.39;
+            let arc = ring.querySelector ? ring.querySelector('.sauce-tnv-ring-arc') : null;
+            if (!arc) {
+                ring.innerHTML = '<svg viewBox="0 0 36 36" aria-hidden="true">'
+                    + '<circle class="sauce-tnv-ring-track" cx="18" cy="18" r="15.5"/>'
+                    + '<circle class="sauce-tnv-ring-arc" cx="18" cy="18" r="15.5" stroke-dasharray="' + C + '" stroke-dashoffset="' + C + '" transform="rotate(-90 18 18)"/>'
+                    + '</svg><span class="sauce-tnv-ring-text"></span>';
+                arc = ring.querySelector ? ring.querySelector('.sauce-tnv-ring-arc') : null;
+            }
+            const text = ring.querySelector ? ring.querySelector('.sauce-tnv-ring-text') : null;
+            if (text) text.textContent = prog.pct + '%';
+            ring.setAttribute('aria-label', prog.pct + '% of subtasks done');
+            if (ring.dataset) ring.dataset.pct = String(prog.pct);
+            if (applyValue && arc) arc.style.strokeDashoffset = String(Math.round(C * (1 - prog.pct / 100) * 100) / 100);
+            if (prog.done === prog.total) ring.classList.add('is-complete');
+            else if (ring.classList.remove) ring.classList.remove('is-complete');
+        } catch (_e) { /* the ring is decoration */ }
+    }
+
     static get _ICONS() {
         const svg = (d) => '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
         return {
@@ -445,11 +526,32 @@ class TaskNoteView {
             '.sauce-task-note-view[data-priority="highest"], .sauce-task-note-view[data-priority="high"] { --tnv-prio: var(--color-red, #dc2626); }',
             '.sauce-task-note-view[data-priority="medium"] { --tnv-prio: var(--color-orange, #ea580c); }',
             '.sauce-task-note-view[data-priority="low"] { --tnv-prio: var(--text-faint, #888); }',
-            '.sauce-tnv-head { display: flex; flex-direction: column; gap: 8px; min-width: 0; }',
-            '.sauce-tnv-parent { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; max-width: 100%; font-size: 0.8em; color: var(--text-muted); text-decoration: none; cursor: pointer; }',
-            '.sauce-tnv-parent > .sauce-tnv-parent-name { color: var(--text-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+            '@keyframes sauce-tnv-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
+            '@keyframes sauce-tnv-strike { to { background-size: 100% 2px; } }',
+            '@keyframes sauce-tnv-burst { 0% { opacity: 0; transform: scale(0.4); } 45% { opacity: 1; transform: scale(1.12); } 70% { transform: scale(0.96); } 100% { opacity: 1; transform: scale(1); } }',
+            '@keyframes sauce-tnv-ripple { from { opacity: 0.55; transform: scale(0.6); } to { opacity: 0; transform: scale(2.2); } }',
+            '@keyframes sauce-tnv-glow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-green, #4c9a5a) 45%, transparent); } 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-green, #4c9a5a) 0%, transparent); } }',
+            '@keyframes sauce-tnv-bump { 0% { filter: brightness(1); } 35% { filter: brightness(1.45) saturate(1.2); } 100% { filter: brightness(1); } }',
+            '@keyframes sauce-tnv-sheen { from { transform: translateX(-100%); } to { transform: translateX(260%); } }',
+            '.sauce-tnv-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }',
+            '.sauce-tnv-head-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }',
+            '.sauce-tnv-parent { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; max-width: 100%; font-size: 0.8em; color: var(--text-muted); }',
+            '.sauce-tnv-parent > svg { flex-shrink: 0; }',
+            '.sauce-tnv-parent-name { max-width: 16em; color: var(--text-accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }',
+            '.sauce-tnv-parent-sep { color: var(--text-faint); }',
             '.sauce-tnv-title { margin: 0; font-size: 1.35em; font-weight: 700; line-height: 1.25; color: var(--text-normal); overflow-wrap: anywhere; }',
+            '.sauce-tnv-title-text { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat; background-position: 0 58%; background-size: 0 2px; }',
             '.sauce-task-note-view[data-status="done"] .sauce-tnv-title, .sauce-task-note-view[data-status="deleted"] .sauce-tnv-title { color: var(--text-muted); }',
+            '.sauce-task-note-view[data-status="done"] .sauce-tnv-title-text { background-size: 100% 2px; }',
+            '.sauce-task-note-view.is-completing .sauce-tnv-title { color: var(--text-muted); transition: color 300ms ease; }',
+            '.sauce-task-note-view.is-completing .sauce-tnv-title-text { animation: sauce-tnv-strike 420ms var(--sauce-ease, ease) forwards; }',
+            '.sauce-tnv-ring { position: relative; flex: 0 0 auto; width: 54px; height: 54px; }',
+            '.sauce-tnv-ring > svg { display: block; width: 100%; height: 100%; }',
+            '.sauce-tnv-ring-track { fill: none; stroke: var(--background-modifier-border); stroke-width: 3.4; }',
+            '.sauce-tnv-ring-arc { fill: none; stroke: var(--color-green, #4c9a5a); stroke-width: 3.4; stroke-linecap: round; transition: stroke-dashoffset 900ms var(--sauce-ease, cubic-bezier(0.2, 0.9, 0.25, 1)); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--color-green, #4c9a5a) 40%, transparent)); }',
+            '.sauce-tnv-ring-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.74em; font-weight: 700; color: var(--text-normal); font-variant-numeric: tabular-nums; }',
+            '.sauce-tnv-ring.is-complete .sauce-tnv-ring-text { color: var(--color-green, #4c9a5a); }',
+            '.sauce-tnv-ring.is-complete > svg { animation: sauce-tnv-burst 520ms var(--sauce-spring, ease) both; }',
             '.sauce-tnv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }',
             '.sauce-tnv-chip { box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; min-height: 24px; max-width: 100%; padding: 2px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: var(--background-primary); color: var(--text-muted); font-size: 0.78em; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }',
             '.sauce-tnv-chip > svg { flex-shrink: 0; }',
@@ -473,8 +575,12 @@ class TaskNoteView {
             '.sauce-tnv-link-text a { color: var(--text-accent); text-decoration: none; }',
             '.sauce-tnv-link-host { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.76em; color: var(--text-faint); }',
             '.sauce-tnv-progress { height: 6px; border-radius: 999px; background: var(--background-modifier-border); overflow: hidden; }',
-            '.sauce-tnv-progress > span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--color-green, #4c9a5a); transition: width 480ms var(--sauce-ease, cubic-bezier(0.2, 0.9, 0.25, 1)); }',
+            '.sauce-tnv-progress > span { position: relative; display: block; height: 100%; width: 0; overflow: hidden; border-radius: inherit; background: linear-gradient(90deg, var(--color-green, #4c9a5a), color-mix(in srgb, var(--color-green, #4c9a5a) 70%, #fff)); transition: width 620ms var(--sauce-ease, cubic-bezier(0.2, 0.9, 0.25, 1)); }',
+            '.sauce-tnv-progress > span::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent); animation: sauce-tnv-sheen 2.6s ease-in-out 600ms infinite; }',
+            '.sauce-tnv-progress.is-bump > span { animation: sauce-tnv-bump 640ms ease; }',
             '.sauce-tnv-subtasks { display: flex; flex-direction: column; gap: 0; }',
+            '.sauce-tnv-nest { margin: 0 0 2px 16px; padding-left: 10px; border-left: 2px solid var(--background-modifier-border); }',
+            '.sauce-tnv-row-in { animation: sauce-tnv-rise 360ms var(--sauce-ease, ease) both; }',
             '.sauce-tnv-empty { font-size: 0.85em; font-style: italic; color: var(--text-muted); }',
             'body .sauce-tnv-add.sauce-tnv-add { box-sizing: border-box; width: 100%; height: auto; min-height: 34px; padding: 6px 12px; border: 1px dashed var(--background-modifier-border-hover, var(--background-modifier-border)); border-radius: var(--radius-m, 8px); background: transparent; color: var(--text-normal); font-size: 0.9em; box-shadow: none; transition: border-color 120ms ease, background 120ms ease; }',
             'body .sauce-tnv-add.sauce-tnv-add:focus { border-style: solid; border-color: var(--interactive-accent); background: var(--background-primary); outline: none; }',
@@ -488,7 +594,12 @@ class TaskNoteView {
             'body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-done { border-color: var(--color-green, #4c9a5a); background: var(--color-green, #4c9a5a); color: var(--text-on-accent, #fff); }',
             '@media (hover: hover) { body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-done:hover { border-color: var(--color-green, #4c9a5a); background: var(--color-green, #4c9a5a); color: var(--text-on-accent, #fff); filter: brightness(1.08); } }',
             'body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-reopen { border-color: var(--interactive-accent); color: var(--interactive-accent); }',
-            '.sauce-tnv-done.is-completing > svg { animation: sauce-pop var(--sauce-dur-reveal, 340ms) var(--sauce-spring, cubic-bezier(0.34, 1.56, 0.5, 1)) both; }',
+            '.sauce-tnv-done.is-completing > svg { animation: sauce-tnv-burst 420ms var(--sauce-spring, cubic-bezier(0.34, 1.56, 0.5, 1)) both; }',
+            'body .sauce-btn.sauce-btn.sauce-btn.sauce-tnv-done.is-ready { animation: sauce-tnv-glow 1.8s ease-in-out infinite; }',
+            '.sauce-tnv-burst { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; border-radius: inherit; background: color-mix(in srgb, var(--background-secondary) 55%, transparent); }',
+            '.sauce-tnv-burst-mark { position: relative; display: flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 50%; background: var(--color-green, #4c9a5a); color: #fff; box-shadow: 0 6px 24px color-mix(in srgb, var(--color-green, #4c9a5a) 45%, transparent); animation: sauce-tnv-burst 520ms var(--sauce-spring, cubic-bezier(0.34, 1.56, 0.5, 1)) both; }',
+            '.sauce-tnv-burst-mark > svg { width: 30px; height: 30px; stroke-width: 3; }',
+            '.sauce-tnv-burst-mark::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--color-green, #4c9a5a); animation: sauce-tnv-ripple 700ms ease-out 120ms both; }',
             '.sauce-tnv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 0.78em; color: var(--text-faint); }',
             '.sauce-tnv-meta a { color: var(--text-muted); text-decoration: none; cursor: pointer; }',
             '.sauce-tnv-meta-sep { opacity: 0.6; }',
@@ -497,8 +608,10 @@ class TaskNoteView {
             'body.is-phone .sauce-tnv-actions > .sauce-btn.sauce-btn.sauce-btn.sauce-btn { flex: 1 1 0; height: auto; min-height: 42px; }',
             'body.is-phone .sauce-tnv-add.sauce-tnv-add.sauce-tnv-add { height: auto; min-height: 40px; font-size: 16px; }',
             'body.is-phone .sauce-tnv-chip { min-height: 26px; }',
-            '@media (max-width: 480px) { .sauce-tnv-actions > .sauce-btn { flex: 1 1 0; } }',
-            '@media (prefers-reduced-motion: reduce) { .sauce-tnv-progress > span, .sauce-tnv-link, .sauce-tnv-add, .sauce-task-note-view.sauce-anim-reveal, .sauce-tnv-done > svg { transition: none !important; animation: none !important; } }',
+            'body.is-phone .sauce-tnv-ring { width: 46px; height: 46px; }',
+            'body.is-phone .sauce-tnv-nest { margin-left: 8px; padding-left: 8px; }',
+            '@media (max-width: 480px) { .sauce-tnv-actions > .sauce-btn { flex: 1 1 0; } .sauce-tnv-nest { margin-left: 8px; padding-left: 8px; } }',
+            '@media (prefers-reduced-motion: reduce) { .sauce-tnv-progress > span, .sauce-tnv-progress > span::after, .sauce-tnv-link, .sauce-tnv-add, .sauce-task-note-view.sauce-anim-reveal, .sauce-tnv-done, .sauce-tnv-done > svg, .sauce-tnv-row-in, .sauce-tnv-ring-arc, .sauce-tnv-ring > svg, .sauce-tnv-title-text, .sauce-tnv-burst-mark, .sauce-tnv-burst-mark::after { transition: none !important; animation: none !important; } .sauce-task-note-view.is-completing .sauce-tnv-title-text { background-size: 100% 2px; } }',
         ].join('\n');
     }
 
@@ -614,7 +727,8 @@ class TaskNoteView {
             // The card rises in once per note per session, not on every
             // Dataview refresh.
             const seen = TaskNoteView._seen || (TaskNoteView._seen = new Set());
-            if (filePath && !seen.has(filePath)) { seen.add(filePath); card.classList.add('sauce-anim-reveal'); }
+            const firstOpen = !!filePath && !seen.has(filePath);
+            if (firstOpen) { seen.add(filePath); card.classList.add('sauce-anim-reveal'); }
             let prioLevel = 'none';
             try {
                 const TTLp = window.customJS && window.customJS.TaskTodayList;
@@ -622,22 +736,52 @@ class TaskNoteView {
             } catch (_e) { prioLevel = 'none'; }
             try { card.setAttribute('data-priority', prioLevel); card.setAttribute('data-status', status); } catch (_e) {}
 
-            // ----- Header: parent link (subtasks), title, one row of chips -----
+            // ----- Every task under spice/tasks, parsed once. The subtask tree
+            // below this note and the chain of parents above it both come from
+            // this one map, so a subtask can have subtasks of its own.
+            const thisBasename = filePath ? filePath.split('/').pop().replace(/\.md$/i, '') : '';
+            let index = { children: new Map(), byName: new Map() };
+            if (filePath) {
+                try {
+                    const raw = dv.pages('"spice/tasks"').where(p => !!(p && p.type === 'task' && p.file && p.file.path
+                        && !p.file.path.includes('/_trash/')));
+                    const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
+                    const parsedAll = [];
+                    if (TE && typeof TE.parseNote === 'function') {
+                        for (const p of arr) {
+                            try { const t = TE.parseNote(p); if (t) parsedAll.push(t); } catch (_e) { /* one malformed task must not brick the note */ }
+                        }
+                    }
+                    index = TaskNoteView._taskIndex(parsedAll, linkText);
+                } catch (_e) { /* no tree: the card still draws */ }
+            }
+
+            // ----- Header: the parent chain, the title and chips, and a ring
+            // that fills as the subtasks close -----
             const head = card.createEl('div', { cls: 'sauce-tnv-head' });
+            const headMain = head.createEl('div', { cls: 'sauce-tnv-head-main' });
             const isSubtask = !!task.parent_task;
             if (isSubtask) {
                 try {
                     const parentName = linkText(task.parent_task);
-                    const partOf = head.createEl('a', { cls: 'sauce-tnv-parent', href: '#' });
+                    const chain = TaskNoteView._ancestors(parentName, index.byName, linkText, thisBasename);
+                    const partOf = headMain.createEl('div', { cls: 'sauce-tnv-parent' });
                     icon(partOf, 'up');
                     partOf.createEl('span', { text: 'Part of' });
-                    partOf.createEl('span', { cls: 'sauce-tnv-parent-name', text: parentName });
-                    partOf.addEventListener('click', openLink(parentName));
+                    chain.forEach((name, i) => {
+                        if (i) partOf.createEl('span', { cls: 'sauce-tnv-parent-sep', text: '›' });
+                        const a = partOf.createEl('a', { cls: 'sauce-tnv-parent-name', text: name, href: '#' });
+                        a.addEventListener('click', openLink(name));
+                    });
                 } catch (_e) { /* part-of link best-effort */ }
             }
-            head.createEl('div', { cls: 'sauce-tnv-title', text: task.title || '(untitled)' });
+            const titleEl = headMain.createEl('div', { cls: 'sauce-tnv-title' });
+            titleEl.createEl('span', { cls: 'sauce-tnv-title-text', text: task.title || '(untitled)' });
+            const ring = head.createEl('div', { cls: 'sauce-tnv-ring' });
+            ring.style.display = 'none';
+            try { ring.setAttribute('role', 'img'); } catch (_e) {}
 
-            const chips = head.createEl('div', { cls: 'sauce-tnv-chips' });
+            const chips = headMain.createEl('div', { cls: 'sauce-tnv-chips' });
             chips.createEl('span', { cls: 'sauce-tnv-chip is-status is-' + status, text: this._statusLabel(task.status) });
             try {
                 const dueChip = TaskNoteView._dueChip(task.due, todayStr, status);
@@ -680,38 +824,19 @@ class TaskNoteView {
                 }
             } catch (_e) { /* Links section best-effort */ }
 
-            // ----- SUBTASKS — only meaningful when NOT itself a subtask (one level
-            // of nesting only, per design). Live-queries spice/tasks/ for every
-            // child whose parent_task points at THIS note. Open children draw with
-            // the shared TaskTodayList.renderTaskRow (same checkbox/edit/badge
-            // behaviour as every task surface); finished ones with renderDoneRow
-            // and Reopen, as on the To-Do view. A progress bar fills as they close.
-            if (!isSubtask && filePath) {
+            // ----- SUBTASKS — on every task note, subtasks included, so a
+            // subtask can be broken down further. Direct children draw with the
+            // shared TaskTodayList.renderTaskRow (same checkbox/edit/badge
+            // behaviour as every task surface), each with its own progress
+            // meter; an open child's open children nest under it, indented, up
+            // to three levels. Finished children draw with renderDoneRow and
+            // Reopen. The bar and the header ring fill as they close.
+            let subtaskList = [];
+            let syncReady = () => {};
+            if (filePath) {
                 try {
-                    const thisBasename = filePath.split('/').pop().replace(/\.md$/i, '');
-                    let allSubtasks = [];
-                    try {
-                        const raw = dv.pages('"spice/tasks"').where(p => {
-                            if (!p || p.type !== 'task' || !p.file || !p.file.path) return false;
-                            if (p.file.path.includes('/_trash/')) return false;
-                            let pt = '';
-                            try {
-                                const TE2 = window.customJS && window.customJS.TaskEntity;
-                                pt = (TE2 && typeof TE2._linkText === 'function') ? TE2._linkText(p.parent_task) : String(p.parent_task || '');
-                            } catch (_e) { pt = ''; }
-                            return pt === thisBasename;
-                        });
-                        const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
-                        const TEsub = window.customJS && window.customJS.TaskEntity;
-                        if (TEsub && typeof TEsub.parseNote === 'function') {
-                            for (const child of arr) {
-                                try {
-                                    const parsedChild = TEsub.parseNote(child);
-                                    if (parsedChild) allSubtasks.push(parsedChild);
-                                } catch (_e) { /* one malformed child must not brick the task note */ }
-                            }
-                        }
-                    } catch (_e) { allSubtasks = []; }
+                    const allSubtasks = index.children.get(thisBasename) || [];
+                    subtaskList = allSubtasks;
                     const TTL = window.customJS && window.customJS.TaskTodayList;
 
                     const section = card.createEl('div', { cls: 'sauce-tnv-section is-subtasks' });
@@ -732,12 +857,59 @@ class TaskNoteView {
                     // animates on open; a later repaint slides from the old width.
                     const paintProgress = (first) => {
                         const prog = TaskNoteView._progress(allSubtasks);
-                        countEl.textContent = prog.text;
+                        countEl.textContent = prog.total && prog.done === prog.total ? 'All ' + prog.total + ' done' : prog.text;
                         bar.style.display = prog.total ? '' : 'none';
                         try { bar.setAttribute('aria-valuenow', String(prog.pct)); } catch (_e) {}
-                        const apply = () => { fill.style.width = prog.pct + '%'; };
+                        TaskNoteView._paintRing(ring, prog, false);
+                        const apply = () => { fill.style.width = prog.pct + '%'; TaskNoteView._paintRing(ring, prog, true); };
                         if (first && typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(apply));
                         else apply();
+                        syncReady(prog);
+                    };
+                    // A subtask ticked off flashes the bar as it fills.
+                    const bump = () => {
+                        try {
+                            bar.classList.remove('is-bump');
+                            void bar.offsetWidth;
+                            bar.classList.add('is-bump');
+                        } catch (_e) {}
+                    };
+                    const isOpenTask = (t) => {
+                        if (!t || t.status !== 'open') return false;
+                        const p = String(t.path || '');
+                        return !p.includes('/_done/') && !p.includes('/_trash/');
+                    };
+                    let rowIndex = 0;
+                    const markDoneLocally = (doneTask) => {
+                        doneTask.status = 'done';
+                        try { doneTask.completed_at = window.moment().format('YYYY-MM-DDTHH:mm:ssZ'); } catch (_e) {}
+                        bump();
+                        paintSubtasks();
+                    };
+                    // One open subtask row, then its own open subtasks nested
+                    // under it. `trail` stops a parent loop; depth caps at three.
+                    const drawRow = (host, st, depth, first, trail) => {
+                        const key = TaskNoteView._baseOf(st.path);
+                        const kids = (key && index.children.get(key)) || [];
+                        st.subtask_count = kids.length
+                            ? { done: kids.filter((k) => k && k.status === 'done').length, total: kids.length }
+                            : null;
+                        const row = TTL.renderTaskRow(host, st, null, { showProject: false, todayStr, onDone: markDoneLocally });
+                        if (row && first) {
+                            try {
+                                row.classList.add('sauce-tnv-row-in');
+                                row.style.animationDelay = (Math.min(rowIndex++, 10) * 45) + 'ms';
+                            } catch (_e) {}
+                        }
+                        const next = new Set(trail);
+                        if (key) next.add(key);
+                        const openKids = kids.filter((k) => isOpenTask(k) && !next.has(TaskNoteView._baseOf(k.path)));
+                        if (openKids.length && depth < 3 && key && !trail.has(key)) {
+                            const nest = host.createEl('div', { cls: 'sauce-tnv-nest' });
+                            for (const kid of openKids) {
+                                try { drawRow(nest, kid, depth + 1, first, next); } catch (_e) {}
+                            }
+                        }
                     };
                     const reopenSub = async (st, undo) => {
                         if (undo.disabled) return;
@@ -773,18 +945,9 @@ class TaskNoteView {
                             return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
                         });
                         if (TTL && typeof TTL.renderTaskRow === 'function') {
+                            rowIndex = 0;
                             for (const st of openSubtasks) {
-                                try {
-                                    TTL.renderTaskRow(subList, st, null, {
-                                        showProject: false,
-                                        todayStr,
-                                        onDone: (doneTask) => {
-                                            doneTask.status = 'done';
-                                            try { doneTask.completed_at = window.moment().format('YYYY-MM-DDTHH:mm:ssZ'); } catch (_e) {}
-                                            paintSubtasks();
-                                        },
-                                    });
-                                } catch (_e) {}
+                                try { drawRow(subList, st, 1, first, new Set([thisBasename])); } catch (_e) {}
                             }
                         }
                         if (!allSubtasks.length) {
@@ -816,7 +979,7 @@ class TaskNoteView {
                             }
                         }
                     };
-                    paintSubtasks(true);
+                    paintSubtasks(firstOpen);
 
                     let addSequence = 0;
                     let addInputRevision = 0;
@@ -948,6 +1111,15 @@ class TaskNoteView {
             for (const action of TaskNoteView._actionsFor(status, filePath)) {
                 if (action === 'done') {
                     const doneBtn = button('sauce-tnv-done sauce-tnv-primary', 'Mark done', 'check');
+                    // Once every subtask is done, Mark done glows to say so.
+                    syncReady = (prog) => {
+                        try {
+                            const ready = !!(prog && prog.total && prog.done === prog.total);
+                            if (ready) doneBtn.classList.add('is-ready');
+                            else if (doneBtn.classList.remove) doneBtn.classList.remove('is-ready');
+                        } catch (_e) {}
+                    };
+                    syncReady(TaskNoteView._progress(subtaskList));
                     doneBtn.addEventListener('click', async () => {
                         const TD = window.customJS && window.customJS.TaskDialog;
                         if (!TD || typeof TD.markDone !== 'function' || !filePath || doneBtn.disabled) return;
@@ -957,9 +1129,17 @@ class TaskNoteView {
                         try {
                             const res = await TD.markDone(filePath);
                             if (res && res.ok === false) throw new Error(res.reason || 'unknown');
+                            // Celebrate, then let Dataview redraw the done card:
+                            // the title strikes through and a check pops.
                             doneBtn.classList.add('is-completing');
+                            card.classList.add('is-completing');
+                            try {
+                                const burst = card.createEl('div', { cls: 'sauce-tnv-burst' });
+                                icon(burst.createEl('span', { cls: 'sauce-tnv-burst-mark' }), 'check');
+                            } catch (_e) {}
                             if (label) label.textContent = 'Done';
-                            refresh();
+                            if (typeof setTimeout === 'function') setTimeout(refresh, TaskNoteView._CELEBRATE_MS);
+                            else refresh();
                         } catch (e) {
                             doneBtn.disabled = false;
                             if (label) label.textContent = 'Mark done';
