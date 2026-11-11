@@ -12,7 +12,7 @@ const { lockState, pidAlive } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'turn-lock.js'));
 const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck, matchesGlob, parseGateConfig } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
-const { cmpVersion, deployPlan, verifyDeploy } =
+const { cmpVersion, deployPlan, verifyDeploy, pollTap, brewFailure } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'deploy.js'));
 
 let pass = 0, fail = 0; const failures = [];
@@ -483,6 +483,37 @@ ok('DP-9 verifyDeploy ok only when installed matches target',
   verifyDeploy({ target: '0.146.0', installed: '0.146.0' }).ok === true && verifyDeploy({ target: '0.146.0', installed: '0.145.1' }).ok === false && verifyDeploy({ target: '0.146.0', installed: '' }).ok === false);
 ok('DP-10 cmpVersion is numeric not lexical (0.9.0 < 0.10.0); unequal length compares + treats trailing zero as equal',
   cmpVersion('0.9.0', '0.10.0') === -1 && cmpVersion('0.145', '0.145.1') === -1 && cmpVersion('0.146.1', '0.146') === 1 && cmpVersion('0.146.0', '0.146') === 0);
+
+{
+  // A failed `brew update` used to skip `brew upgrade sauce` (one try block),
+  // leaving the bottle behind a tag that was already on the tap.
+  const brewError = (stderr) => Object.assign(new Error('Command failed: brew update'), { stderr, stdout: '' });
+  let bottle = '0.307.1';
+  const calls = [];
+  const out = pollTap({
+    exec: (args) => {
+      calls.push(args.join(' '));
+      if (args[0] === 'update') throw brewError('==> Updating Homebrew...\nError: Another `brew update` process is already running.\n');
+      bottle = '0.307.2';
+    },
+    bottleVersion: () => bottle,
+  });
+  ok('DP-11 a failed brew update still runs brew upgrade sauce',
+    calls.join(',') === 'update,upgrade sauce' && bottle === '0.307.2', calls.join(','));
+  ok('DP-12 the report names the new bottle and why the update failed',
+    out.includes('bottle 0.307.2') && out.includes('Another `brew update` process is already running'), out);
+
+  const failed = pollTap({
+    exec: (args) => { if (args[0] === 'upgrade') throw brewError('Warning: noise\nError: sauce: SHA256 mismatch\nsome trailing hint\n'); },
+    bottleVersion: () => '0.307.1',
+  });
+  ok('DP-13 a failed upgrade reports brew\'s own error line, not "Command failed"',
+    failed === 'brew upgrade failed: Error: sauce: SHA256 mismatch', failed);
+  ok('DP-14 a poll that changes nothing says the bottle did not move',
+    pollTap({ exec: () => {}, bottleVersion: () => '0.307.1' }) === 'polled tap → bottle still 0.307.1');
+  ok('DP-15 brewFailure falls back to the last output line, then the message',
+    brewFailure({ stderr: '', stdout: 'a\nb\n' }) === 'b' && brewFailure(new Error('spawnSync brew ENOENT')) === 'spawnSync brew ENOENT');
+}
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);

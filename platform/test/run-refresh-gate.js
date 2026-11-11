@@ -275,6 +275,14 @@ function makeCard(state) {
         ok('GATE-12 a value the widget set itself comes from the fresh render, not the old node',
             prefilled2 !== prefilled && prefilled2.value === 'Plan');
 
+        const mark = (n) => n.getAttribute('data-sauce-refreshed');
+        ok('GATE-12b only the swapped-in node is marked as a refresh, so its entry animation can be skipped',
+            mark(newCard) === '' && mark(head2) === null && mark(oldCard) === null,
+            `new=${mark(newCard)} kept=${mark(head2)} old=${mark(oldCard)}`);
+        await renderer.refresh();                       // same data again
+        ok('GATE-12c the mark does not make the next identical refresh look changed',
+            container.childNodes[1] === newCard && container.childNodes[0] === head);
+
         // The carried field is still "edited": a second change carries it again.
         state.rows = ['a', 'b', 'c'];
         await renderer.refresh();

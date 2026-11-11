@@ -1274,6 +1274,56 @@ process.exitCode = 1;
       && cold.doneToday.length === 0 && cold.backlog === 0, 'cold load returns empty new keys');
   });
 
+  await ok('RD-P-SELECT-SHARED Home counts and the dashboard share one scan per index revision, with private copies', async () => {
+    const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
+    const TE = new TaskEntityClass();
+    const Dash = loadDashboard(makeMomentWindow(), {});
+    const scans = {};
+    const index = { revision: 3 };
+    const meetingPages = [{ file: { name: P_TODAY + ' Standup', path: 'spice/meetings/notes/' + P_TODAY + ' Standup.md' } }];
+    const makeDv = () => ({
+      index,
+      pages: (q) => {
+        scans[q] = (scans[q] || 0) + 1;
+        return q === '"spice/tasks"' ? sectionPages : q === '"spice/tasks/_done"' ? sectionDone
+          : q === '"spice/meetings/notes"' ? meetingPages : [];
+      },
+    });
+    const total = () => Object.values(scans).reduce((a, b) => a + b, 0);
+    // Home's count pass, then the nested dashboard's own selection (its own dv).
+    const counts = Dash.computeCounts(makeDv(), P_TODAY, TE);
+    assert(total() === 3, 'count pass scans tasks, _done and meetings once each: ' + JSON.stringify(scans));
+    const first = Dash.selectTasks(makeDv(), P_TODAY, TE);
+    const meetings = Dash.selectMeetings(makeDv(), P_TODAY);
+    assert(total() === 3, 'same revision → the dashboard reuses the count pass: ' + JSON.stringify(scans));
+    assert(counts.today === first.open.length && counts.meetings === meetings.length && meetings.length === 1,
+      'shared selection matches the counts');
+    // The Today panel mutates the tasks it is handed; the next caller must not see that.
+    first.open[0].title = 'MUTATED';
+    first.open.pop();
+    meetings.pop();
+    const second = Dash.selectTasks(makeDv(), P_TODAY, TE);
+    assert(second.open.length === 2 && second.open.every((t) => t.title !== 'MUTATED'),
+      'each caller gets its own task copies: ' + second.open.map((t) => t.title));
+    assert(Dash.selectMeetings(makeDv(), P_TODAY).length === 1, 'each caller gets its own meetings array');
+    // Another day in the same revision is its own selection.
+    assert(Dash.selectTasks(makeDv(), '2026-07-09', TE).open.length === 1, 'a different day is selected on its own');
+    const before = total();
+    index.revision = 4;
+    Dash.selectTasks(makeDv(), P_TODAY, TE);
+    assert(total() === before + 2, 'index moved → rescanned: ' + JSON.stringify(scans));
+    // A reloaded TaskEntity class is not served the old class's parse.
+    const again = total();
+    Dash.selectTasks(makeDv(), P_TODAY, new TaskEntityClass());
+    assert(total() === again + 2, 'new TaskEntity instance → rescanned');
+    // No index to key on (cold load, harness stubs) → never shared.
+    const bare = { pages: makeDv().pages };
+    const cold = total();
+    Dash.selectTasks(bare, P_TODAY, TE);
+    Dash.selectTasks(bare, P_TODAY, TE);
+    assert(total() === cold + 4, 'without dv.index every call scans');
+  });
+
   await ok('RD-P-LIVE-GATE past date keeps the old panel; today and Home asOf render sections', async () => {
     const Dash = loadDashboard(makeMomentWindow(), {});
     assert(Dash.isLivePanel(P_TODAY, P_TODAY) === true, 'equal days are live');

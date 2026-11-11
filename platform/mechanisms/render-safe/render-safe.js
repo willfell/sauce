@@ -550,8 +550,21 @@ class RenderSafe {
   // process-wide row sequence: it only orders siblings within one render, and
   // it grows on every render, so comparing it would mark every task list as
   // changed on every refresh.
+  // `data-sauce-refreshed` is the gate's own mark (see _markRefreshed).
   _stableMarkup(html) {
-    return String(html).replace(/\sdata-sauce-task-order="[^"]*"/g, '');
+    return String(html)
+      .replace(/\sdata-sauce-task-order="[^"]*"/g, '')
+      .replace(/\sdata-sauce-refreshed(="[^"]*")?/g, '');
+  }
+
+  // A node the gate swaps in replaces one the reader was already looking at,
+  // so it must not play a widget's entry animation again. The mark lets a
+  // stylesheet tell a refresh from a first paint
+  // (`[data-sauce-refreshed] .row { animation: none; }`). It is set after the
+  // markup comparison and stripped by _stableMarkup, so it never makes two
+  // renders of the same data look different.
+  _markRefreshed(node) {
+    try { if (node && typeof node.setAttribute === 'function') node.setAttribute('data-sauce-refreshed', ''); } catch (_e) {}
   }
 
   _refreshSnapshot(container) {
@@ -689,16 +702,16 @@ class RenderSafe {
     if (intact) {
       const common = Math.min(live.length, fresh.length);
       for (let i = 0; i < common; i++) {
-        if (freshMarkup[i] !== snap.markup[i]) container.replaceChild(fresh[i], live[i]);
+        if (freshMarkup[i] !== snap.markup[i]) { this._markRefreshed(fresh[i]); container.replaceChild(fresh[i], live[i]); }
       }
       for (let i = common; i < live.length; i++) container.removeChild(live[i]);
-      for (let i = common; i < fresh.length; i++) container.appendChild(fresh[i]);
+      for (let i = common; i < fresh.length; i++) { this._markRefreshed(fresh[i]); container.appendChild(fresh[i]); }
     } else {
       // Something other than the last render owns part of the container (a
       // widget appended later, an interleaved first render). Replace it all,
       // still in one step.
       for (const node of live) { try { container.removeChild(node); } catch (_e) {} }
-      for (const node of fresh) container.appendChild(node);
+      for (const node of fresh) { this._markRefreshed(node); container.appendChild(node); }
     }
     gate.snapshot = { nodes: this._refreshNodes(container), markup: freshMarkup };
     this._restoreFields(gate, container, fields);

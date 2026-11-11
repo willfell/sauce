@@ -15,7 +15,7 @@
  * Pure: cmpVersion, deployPlan, verifyDeploy. Side effects (brew upgrade +
  * `sauce update --bump-pins` + version read) live only in the CLI.
  *
- * Exports: cmpVersion, deployPlan, verifyDeploy, VAULTS
+ * Exports: cmpVersion, deployPlan, verifyDeploy, pollTap, brewFailure, VAULTS
  * CLI: node scripts/autoloop/deploy.js run [--dry] [--json]
  *      node scripts/autoloop/deploy.js plan        (compute only, no side effects)
  */
@@ -69,7 +69,37 @@ function verifyDeploy(o) {
   return { ok: true };
 }
 
-module.exports = { cmpVersion, deployPlan, verifyDeploy, VAULTS };
+// Why a brew step failed: the last line brew printed, not Node's generic
+// "Command failed: brew update", which names the step and hides the cause.
+function brewFailure(e) {
+  const text = (v) => (v == null ? '' : String(v));
+  const lines = (text(e && e.stderr) + '\n' + text(e && e.stdout)).split('\n').map((l) => l.trim()).filter(Boolean);
+  const errorLine = lines.filter((l) => /^(Error|fatal|error):/.test(l)).pop();
+  return errorLine || lines.pop() || text(e && e.message).split('\n')[0] || 'unknown error';
+}
+
+/**
+ * pollTap — bring the local bottle up to what the tap publishes. `brew update`
+ * and `brew upgrade sauce` are separate steps: a failed update (another brew
+ * process holding the lock, one unrelated tap failing to fetch) must not skip
+ * the upgrade, which refreshes the tap itself and is the step that matters.
+ * @param {{exec:(args:string[])=>void, bottleVersion:()=>string}} o
+ * @returns {string} one-line outcome for the deploy report
+ */
+function pollTap(o) {
+  const { exec, bottleVersion } = o;
+  const before = bottleVersion();
+  let updateError = null;
+  try { exec(['update']); } catch (e) { updateError = brewFailure(e); }
+  try { exec(['upgrade', 'sauce']); } catch (e) {
+    return `brew upgrade failed: ${brewFailure(e)}` + (updateError ? ` (brew update failed first: ${updateError})` : '');
+  }
+  const after = bottleVersion();
+  const moved = cmpVersion(after, before) > 0 ? `polled tap → bottle ${after}` : `polled tap → bottle still ${after}`;
+  return moved + (updateError ? ` (brew update failed: ${updateError})` : '');
+}
+
+module.exports = { cmpVersion, deployPlan, verifyDeploy, pollTap, brewFailure, VAULTS };
 
 if (require.main === module) {
   const fs = require('fs');
@@ -103,11 +133,10 @@ if (require.main === module) {
   const tag = latestTag();
   let brewOut = 'current';
   if (!dry && cmpVersion(bottleVersion(), tag) < 0) {
-    try {
-      execFileSync('brew', ['update'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF });
-      execFileSync('brew', ['upgrade', 'sauce'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF });
-      brewOut = `polled tap → bottle ${bottleVersion()}`;
-    } catch (e) { brewOut = `brew update/upgrade failed: ${e.message.split('\n')[0]}`; }
+    brewOut = pollTap({
+      exec: (args) => { execFileSync('brew', args, { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF }); },
+      bottleVersion,
+    });
   }
   const shipped = bottleVersion();
   const vaults = VAULTS.map((v) => ({ name: v.name, version: installedVersion(v.path) }));
