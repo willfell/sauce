@@ -1042,6 +1042,14 @@
       "lane": "parallel"
     },
     {
+      "id": "todo-tomorrow",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-tomorrow.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-project-head",
       "cmd": [
         "node",

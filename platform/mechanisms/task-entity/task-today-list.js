@@ -15,7 +15,8 @@
  * processFrontMatter rail against the resolved task file. Every gesture keeps
  * the single-file-write invariant (a bad write can only ever touch one task):
  *   - checkbox change → TaskDialog.markDone(path)   (status=done + move to _done/)
- *   - tomorrow action → processFrontMatter(file, fm => fm.due = nextDay(viewedDay))
+ *   - tomorrow action → processFrontMatter(file, fm => fm.due = tomorrowFor(task, viewedDay)),
+ *     the day after the later of the viewed day and the task's own due date
  *   - title click     → app.workspace.openLinkText(path)  (opens the task NOTE;
  *                       its TaskNoteView carries the Edit button for editing)
  *
@@ -54,6 +55,8 @@ class TaskTodayList {
     markTaskRow(row, task) { return TaskTodayList.markTaskRow(row, task); }
     reschedule(row, task, newDue, viewedDay, TDref) { return TaskTodayList.reschedule(row, task, newDue, viewedDay, TDref); }
     rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
+    tomorrowFor(task, viewedDay) { return TaskTodayList.tomorrowFor(task, viewedDay); }
+    dayLabel(ymd) { return TaskTodayList.dayLabel(ymd); }
     renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
     _parseInlineLinks(text) { return TaskTodayList._parseInlineLinks(text); }
@@ -504,14 +507,50 @@ class TaskTodayList {
      * caller invokes this method directly.
      */
     static async rescheduleTomorrow(row, task, viewedDay, TDref) {
+        const tomorrow = TaskTodayList.tomorrowFor(task, viewedDay);
+        if (!tomorrow) return { ok: false, no_op: true };
+        return TaskTodayList.reschedule(row, task, tomorrow, viewedDay, TDref);
+    }
+
+    /**
+     * The day "Move to tomorrow" sends a task to: the day after the later of
+     * the viewed day and the task's own due date. A task already due ahead of
+     * the viewed day moves one day further (due Wed → Thu, due Thu → Fri)
+     * rather than staying put or moving back; an overdue or undated task goes
+     * to the day after the viewed day. A missing or malformed viewedDay falls
+     * back to the wall clock. '' when no day can be worked out. Pure apart
+     * from that fallback.
+     */
+    static tomorrowFor(task, viewedDay) {
         let baseDay = String(viewedDay || '');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDay)) {
             const momentRef = (typeof window !== 'undefined' && window.moment) || null;
-            baseDay = typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : '';
+            try { baseDay = typeof momentRef === 'function' ? String(momentRef().format('YYYY-MM-DD') || '') : ''; } catch (_e) { baseDay = ''; }
         }
-        const tomorrow = TaskTodayList.nextDay(baseDay);
-        if (!tomorrow) return { ok: false, no_op: true };
-        return TaskTodayList.reschedule(row, task, tomorrow, viewedDay, TDref);
+        const due = TaskTodayList._dueDay(task && task.due);
+        if (due && TaskTodayList.nextDay(due) && due > baseDay) baseDay = due;
+        return TaskTodayList.nextDay(baseDay);
+    }
+
+    /** A due value (string or Luxon-like) as YYYY-MM-DD, or ''. Pure. */
+    static _dueDay(due) {
+        let s = '';
+        try {
+            if (due && typeof due === 'object' && typeof due.toFormat === 'function') s = String(due.toFormat('yyyy-MM-dd') || '');
+            else s = String(due == null ? '' : due);
+        } catch (_e) { s = ''; }
+        const m = /^\s*(\d{4}-\d{2}-\d{2})/.exec(s);
+        return m ? m[1] : '';
+    }
+
+    /** "Thu Nov 12" for 2026-11-12; '' for anything else. Pure. */
+    static dayLabel(ymd) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
+        if (!m) return '';
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return days[d.getUTCDay()] + ' ' + months[d.getUTCMonth()] + ' ' + Number(m[3]);
     }
 
     /**
@@ -1417,7 +1456,8 @@ class TaskTodayList {
         let delBtn = null;
         let moreBtn = null;
         if (isOpen) {
-            const tomorrowBtn = mkActionBtn('sauce-task-action-tomorrow', 'Move to tomorrow', ICON.tomorrow, false);
+            const target = TaskTodayList.dayLabel(TaskTodayList.tomorrowFor(task, typeof opts.viewedDay === 'string' ? opts.viewedDay : ''));
+            const tomorrowBtn = mkActionBtn('sauce-task-action-tomorrow', target ? 'Move to ' + target : 'Move to tomorrow', ICON.tomorrow, false);
             tomorrowBtn.addEventListener('click', async (ev) => {
                 try { ev.stopPropagation(); } catch (_e) {}
                 await doTomorrow();

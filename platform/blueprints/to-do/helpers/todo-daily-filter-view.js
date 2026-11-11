@@ -1197,6 +1197,19 @@ class ToDoDailyFilterView {
                 rowByPath.get(p) || View._detachedRow(), taskByPath(p), due, viewedDay, TD),
             (p, res) => patchTask(p, (t) => applyMoved(t, res && res.due != null ? res.due : due)));
         };
+        // Each selected task moves one day past the later of the viewed day
+        // and its own due date, as the row's own tomorrow button does.
+        const bulkTomorrow = () => {
+            if (typeof TTL.reschedule !== 'function') return undefined;
+            const dueFor = (task) => (typeof TTL.tomorrowFor === 'function'
+                ? TTL.tomorrowFor(task, viewedDay) : TE.tomorrow(todayStr));
+            const due = {};
+            return bulk('move', (p) => {
+                const task = taskByPath(p);
+                due[p] = dueFor(task);
+                return TTL.reschedule(rowByPath.get(p) || View._detachedRow(), task, due[p], viewedDay, TD);
+            }, (p, res) => patchTask(p, (t) => applyMoved(t, res && res.due != null ? res.due : due[p])));
+        };
         const bulkFields = (fields) => {
             if (!TD || typeof TD.setFields !== 'function') return undefined;
             return bulk('update', (p) => TD.setFields(p, fields),
@@ -1249,7 +1262,7 @@ class ToDoDailyFilterView {
                 button.addEventListener('click', onClick(() => handler(button)));
                 return button;
             };
-            action('→ Tomorrow', () => bulkReschedule(TE.tomorrow(todayStr)));
+            action('→ Tomorrow', () => bulkTomorrow());
             action('→ Next Mon', () => bulkReschedule(TE.nextMonday(todayStr)));
             action('Priority ▾', (button) => openPicker(button, priorityEntries())).setAttribute('aria-haspopup', 'menu');
             action('Project ▾', (button) => openPicker(button, projectEntries())).setAttribute('aria-haspopup', 'menu');

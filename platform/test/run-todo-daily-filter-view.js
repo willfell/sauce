@@ -927,6 +927,17 @@ process.exitCode = 1;
     assert.deepStrictEqual(await View.runBulk(null, null, null), { done: [], failed: [] });
   });
 
+  await okAsync('RD-DV-SEL-TOMORROW-AHEAD bulk Tomorrow moves each task one day past the later of the viewed day and its own due', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    await findButton(controlsOf(root), 'All open').fire('click');
+    await findButton(controlsOf(root), 'Select').fire('click');
+    select(env, 'Friday item', 'Overdue mid');
+    await bulkButton(root, '→ Tomorrow').fire('click');
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue]), [
+      ['spice/tasks/Friday item.md', '2026-11-14'], ['spice/tasks/Overdue mid.md', '2026-11-10']]);
+  });
+
   await okAsync('RD-DV-SEL-ACTIONS Tomorrow / Backlog reschedule; Priority and Project menus write fields', async () => {
     const env = makeRenderHarness();
     const { root } = await mount(env);
