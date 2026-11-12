@@ -267,6 +267,9 @@ async function launchChrome(executable, options = {}) {
   let failure = '';
   for (let attempt = 1; attempt <= CHROME_LAUNCH_ATTEMPTS; attempt++) {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-cdp-'));
+    // A caller that needs profile state before Chrome starts (preferences that
+    // must be off from the first frame) writes it here, on every attempt.
+    if (options.prepareProfile) options.prepareProfile(profile);
     const chrome = childProcess.spawn(executable, [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--hide-scrollbars',
       '--allow-file-access-from-files', '--force-prefers-reduced-motion',
@@ -365,4 +368,4 @@ async function captureViewport(executable, url, width, height, options = {}) {
   }
 }
 
-module.exports = { captureViewport, chromeExecutable, CHROME_READY_TIMEOUT_MS, CHROME_LAUNCH_ATTEMPTS };
+module.exports = { captureViewport, launchChrome, chromeExecutable, CHROME_READY_TIMEOUT_MS, CHROME_LAUNCH_ATTEMPTS };
