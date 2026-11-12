@@ -300,10 +300,9 @@ body .sauce-todo-search .sauce-todo-search-input.sauce-todo-search-input:focus {
   padding: 0 2px;
 }
 
-/* Grouped by project: each group opens with a quiet heading. Only the small
-   initials badge carries the project's colour (--sauce-proj-bg/-fg, a soft
-   pastel set inline from TaskTodayList.projectTint); the name and count stay
-   in the theme's own text colours, the same dot colour marks its row chips. */
+/* Grouped by project: each group opens with a quiet heading in the theme's
+   own text colours (name, count, overdue) over a thin rule. The project's
+   colour shows only as the dot on its rows' chips. */
 .sauce-todo-project-head {
   box-sizing: border-box;
   display: flex;
@@ -315,20 +314,6 @@ body .sauce-todo-search .sauce-todo-search-input.sauce-todo-search-input:focus {
   border-bottom: 1px solid var(--background-modifier-border);
 }
 .sauce-todo-project-head.is-first { margin-top: 6px; }
-.sauce-todo-project-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--sauce-proj-bg, var(--background-modifier-border));
-  color: var(--sauce-proj-fg, var(--text-muted));
-  font-size: 0.64em;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
 .sauce-todo-project-name {
   min-width: 0;
   overflow: hidden;

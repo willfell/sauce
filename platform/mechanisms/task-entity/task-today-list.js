@@ -1684,7 +1684,7 @@ class TaskTodayList {
     }
 
     /**
-     * The colours a project's chip dot and heading badge use: a soft, low
+     * The colours for a project's chip dot: a soft, low
      * saturation pastel of its hue, mixed into the theme's muted text so it
      * sits quietly beside the warm accent on light and dark themes:
      * { hue, base, dot, fg, bg, line }. Null without a project. Pure.

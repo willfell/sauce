@@ -400,36 +400,17 @@ class ToDoDailyFilterView {
     }
 
     /**
-     * Two-letter badge for a project: the first letters of its first two
-     * words ("Content-Registry" → "CR", "MCP Mesh" → "MM"), or the first two
-     * letters of a one-word name ("ERC" → "ER"). Pure.
-     */
-    static projectInitials(name) {
-        const words = String(name == null ? '' : name).split(/[\s\-_./]+/).filter(Boolean);
-        if (!words.length) return '';
-        const two = words.length >= 2 ? words[0][0] + words[1][0] : words[0].slice(0, 2);
-        return two.toUpperCase();
-    }
-
-    /**
      * The heading over one project's group when the list is grouped by
-     * project: a badge in the project's own colour with its initials, the
-     * name (a link to the project note), the number of tasks, and how many
-     * are overdue. The colour comes from TaskTodayList.projectTint, so the
-     * heading matches the project chips on rows. "No project" stays neutral.
-     * Returns the heading element.
+     * project: the name (a link to the project note) in the theme's own
+     * text, the number of tasks, and how many are overdue. The project's
+     * colour shows only as the dot on its rows' chips. "No project" is plain
+     * text, not a link. Returns the heading element.
      */
     static renderProjectHeader(host, group, opts) {
         const o = opts || {};
         const name = String((group && group.label) || '');
         const none = !name || name === 'No project';
-        const TTL = o.TTL;
-        let tint = null;
-        try { tint = !none && TTL && typeof TTL.projectTint === 'function' ? TTL.projectTint(name) : null; } catch (_e) { tint = null; }
         const head = host.createEl('div', { cls: 'sauce-todo-project-head' + (none ? ' is-none' : '') + (o.first ? ' is-first' : '') });
-        if (tint) head.style.cssText = `--sauce-proj: ${tint.dot}; --sauce-proj-fg: ${tint.fg}; --sauce-proj-bg: ${tint.bg};`;
-        const badge = head.createEl('span', { cls: 'sauce-todo-project-badge', text: none ? '–' : ToDoDailyFilterView.projectInitials(name) });
-        try { badge.setAttribute('aria-hidden', 'true'); } catch (_e) {}
         const nameEl = head.createEl(none ? 'span' : 'a', { cls: 'sauce-todo-project-name', text: name || 'No project' });
         if (!none) {
             try { nameEl.setAttribute('href', '#'); nameEl.setAttribute('title', 'Open ' + name); } catch (_e) {}
