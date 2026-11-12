@@ -39,10 +39,25 @@ ok('TF-NAME-SANITIZED illegal characters are dropped before the check',
   const title = 'T'.repeat(80);
   const parent = 'P'.repeat(80);
   const r = TE.taskName(title, { parentTitle: parent, taken: isTaken(title.toLowerCase()) });
-  ok('TF-NAME-LENGTH-CAP an 80 + 80 character name fits in 120 and still starts with the title',
-    r.length <= 120 && r.startsWith('T'.repeat(30)) && /\(P+\)$/.test(r));
+  ok('TF-NAME-LENGTH-CAP an 80 + 80 character name keeps the whole title and trims the parent qualifier to fit 120',
+    r.length <= 120 && r.startsWith(title) && /^T{80} \(P{1,37}\)$/.test(r) && r.length === 120);
   const r2 = TE.taskName(title, { parentTitle: parent, taken: (n) => !/ 2$/.test(n) });
-  ok('TF-NAME-LENGTH-CAP-NUMBER a number suffix on a capped name still fits in 120', r2.length <= 120 && / 2$/.test(r2));
+  ok('TF-NAME-LENGTH-CAP-NUMBER a number suffix on a capped name keeps the title, fits in 120 and ends in the number',
+    r2.length <= 120 && r2.startsWith(title) && / 2$/.test(r2) && r2.length === 120);
+  const r3 = TE.taskName(title, { createdAt: '2026-11-10', taken: isTaken(title.toLowerCase()) });
+  ok('TF-NAME-LENGTH-CAP-DATE a date qualifier on a long title is not cut', r3 === title + ' (Nov 10)');
+
+  const realSanitize = TE._sanitizeTitle;
+  TE._sanitizeTitle = (t) => String(t).slice(0, 120);
+  try {
+    const full = 'F'.repeat(120);
+    const seen = new Set([full.toLowerCase()]);
+    const r4 = TE.taskName(full, { parentTitle: 'Parent', taken: (n) => seen.has(n) });
+    ok('TF-NAME-LENGTH-CAP-FULL a title that alone fills 120 drops the qualifier and takes a number, still within 120 and unique',
+      r4.length <= 120 && !seen.has(r4.toLowerCase()) && / 2$/.test(r4) && r4.startsWith('F'.repeat(100)));
+  } finally {
+    TE._sanitizeTitle = realSanitize;
+  }
 }
 
 ok('TF-PATHS folderNotePath', TE.folderNotePath('spice/tasks/A', 'B') === 'spice/tasks/A/B/B.md');
