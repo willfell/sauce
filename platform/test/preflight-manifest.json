@@ -444,6 +444,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-plan",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-plan.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",

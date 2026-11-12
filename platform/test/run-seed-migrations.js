@@ -909,6 +909,36 @@ withTempVault((vault) => {
            (installedJson?.history || []).some((entry) => entry.step === "project_meetings_page_backfill"));
     }
 
+    // ===== HC-TASKFOLDERS-SEED-* — applyTaskFoldersHeal (task folder dry run) =====
+    // The seed's tasks are flat notes (spice/tasks/<x>.md, spice/tasks/_done/<x>.md),
+    // so the real install sequence must write the dry-run report and move none
+    // of them: every planned `from` is still there and no `to` exists. The
+    // idempotency phase below then proves a second install rewrites the report
+    // byte-identically.
+    {
+        const reportsDir = path.join(vault, "ranch/reports");
+        const reports = fs.existsSync(reportsDir)
+            ? fs.readdirSync(reportsDir).filter((f) => /^task-folders-\d{4}-\d{2}-\d{2}\.md$/.test(f))
+            : [];
+        ok("HC-TASKFOLDERS-SEED-1 install writes one task-folders dry-run report", reports.length === 1, reports.join(", "));
+        let tfPlan = null;
+        if (reports.length === 1) {
+            const body = fs.readFileSync(path.join(reportsDir, reports[0]), "utf8");
+            const m = /```json\n([\s\S]*?)\n```/.exec(body);
+            try { tfPlan = JSON.parse(m[1]); } catch (_e) { tfPlan = null; }
+        }
+        const tfMoves = (tfPlan && tfPlan.moves) || [];
+        ok("HC-TASKFOLDERS-SEED-2 the report plans the seed's flat done task into _done/YYYY/MM/<Name>/",
+           tfMoves.some((mv) => mv.from === "spice/tasks/_done/Seed Done Task.md" &&
+             /^spice\/tasks\/_done\/\d{4}\/\d{2}\/Seed Done Task\/Seed Done Task\.md$/.test(mv.to)),
+           JSON.stringify(tfMoves.map((mv) => mv.from)));
+        ok("HC-TASKFOLDERS-SEED-3 the heal moved nothing: every planned from exists and no to does",
+           tfMoves.length > 0 &&
+           tfMoves.every((mv) => helpers.fileExists(vault, mv.from) && !helpers.fileExists(vault, mv.to)));
+        ok("HC-TASKFOLDERS-SEED-4 the heal is recorded in install history",
+           (installedJson?.history || []).some((entry) => entry.step === "task_folders_heal" && entry.action === "report_written"));
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     // A normal same-version install skips already-current blueprint items at
     // install.js's version gate. Mark only the project ledger entry stale so

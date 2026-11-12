@@ -628,6 +628,14 @@ module.exports = async function (tp) {
     // 6a8. task-entity — strip --- chrome separators from existing task notes.
     await applyTaskNoteChromeHrHeal(tp, installedNow.history, git);
 
+    // 6a8b. task-entity — task folder migration DRY RUN: plan where every task
+    // note goes in the folder layout and write ranch/reports/task-folders-
+    // <date>.md when anything would move. Runs after the task heals above so
+    // it plans their output. Never moves a note; the moves are applied inside
+    // Obsidian from the report's Apply button (TaskFolders). Ungated,
+    // idempotent, never throws.
+    await applyTaskFoldersHeal(tp, installedNow.history, git);
+
     // 6a9. to-do — inject ToDoDailyTripGroups block into existing daily notes.
     await applyTodoDailyTripGroupsHeal(tp, installedNow.history, git);
 
@@ -13499,6 +13507,585 @@ async function applyTaskNoteChromeHrHeal(tp, history, git) {
   } catch (_e) { /* top-level, never throw */ }
 }
 
+// ---------------------------------------------------------------------------
+// Task folder migration: plan + dry-run report (spec
+// Docs/superpowers/specs/2026-11-10-task-folders-design.md, "Migration heal").
+// The installer only PLANS and writes a report; the moves are applied inside
+// Obsidian by the TaskFolders customJS class from the report note. Nothing
+// here writes, removes or renames a task note.
+// ---------------------------------------------------------------------------
+
+const _TF_ROOT = "spice/tasks";
+
+function _tfStr(v) {
+  if (v == null) return "";
+  if (Array.isArray(v)) return v.length ? _tfStr(v[0]) : "";
+  return String(v);
+}
+
+function _tfParts(p) {
+  const s = String(p == null ? "" : p);
+  const i = s.lastIndexOf("/");
+  const dir = i < 0 ? "" : s.slice(0, i);
+  const base = (i < 0 ? s : s.slice(i + 1)).replace(/\.(md|base)$/i, "");
+  const j = dir.lastIndexOf("/");
+  return { dir, base, folderName: j < 0 ? dir : dir.slice(j + 1) };
+}
+
+function _tfIsFolderNote(p) {
+  const n = _tfParts(p);
+  return n.base !== "" && n.base === n.folderName;
+}
+
+// Mirror of TaskEntity._isTaskFolder / parentNotePathOf: a folder note's
+// parent is the folder note of the folder directly above it, unless that
+// folder is the task root, _done, _done/YYYY(/MM) or _trash.
+function _tfIsTaskFolder(dir) {
+  if (dir.indexOf(_TF_ROOT + "/") !== 0) return false;
+  if (dir === _TF_ROOT + "/_done" || dir === _TF_ROOT + "/_trash") return false;
+  if (/^spice\/tasks\/_done\/\d{4}(\/\d{2})?$/.test(dir)) return false;
+  return true;
+}
+
+function _tfFolderParentPath(p) {
+  if (!_tfIsFolderNote(p)) return "";
+  const folder = _tfParts(p).dir;
+  const j = folder.lastIndexOf("/");
+  if (j < 0) return "";
+  const up = folder.slice(0, j);
+  if (!_tfIsTaskFolder(up)) return "";
+  return up + "/" + up.slice(up.lastIndexOf("/") + 1) + ".md";
+}
+
+// The link target of a parent_task-style value: `"[[path/Name|alias]]"` →
+// `path/Name`. Empty when there is none.
+function _tfLinkTarget(v) {
+  let s = _tfStr(v).trim();
+  s = s.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1").trim();
+  const m = /^!?\[\[([^\]]*)\]\]$/.exec(s);
+  if (m) s = m[1];
+  s = s.split("|")[0].split("#")[0].trim().replace(/\.md$/i, "");
+  return s;
+}
+
+function _tfTime(v) {
+  const s = _tfStr(v).trim();
+  if (!s) return NaN;
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? NaN : t;
+}
+
+// Mirror of TaskEntity.taskState: anything under _trash/ is deleted; else the
+// status decides, and a missing or unknown status is open.
+function _tfPlace(path, fm) {
+  if (String(path).indexOf(_TF_ROOT + "/_trash/") === 0) return "trash";
+  const st = _tfStr(fm && fm.status).trim();
+  if (st === "deleted") return "trash";
+  if (st === "done") return "done";
+  return "open";
+}
+
+function _tfMonth(v) {
+  const m = /(\d{4})-(\d{2})/.exec(_tfStr(v));
+  return m ? m[1] + "/" + m[2] : "";
+}
+
+function _tfCmpOldest(a, b) {
+  const ta = Number.isNaN(a.created) ? Infinity : a.created;
+  const tb = Number.isNaN(b.created) ? Infinity : b.created;
+  if (ta !== tb) return ta < tb ? -1 : 1;
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}
+
+// Strip fenced code blocks and inline code spans (Obsidian does not treat a
+// wikilink inside them as a link), keeping offsets by blanking the text.
+function _tfBlankCode(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  return text
+    .replace(/^(```|~~~)[^\n]*\n[\s\S]*?(^\1[ \t]*$|(?![\s\S]))/gm, blank)
+    .replace(/`[^`\n]*`/g, blank);
+}
+
+// The query text of a note: the lines inside ```dataview / ```dataviewjs /
+// ```base blocks, plus any other line that calls dv.pages(. A .base file is
+// query text throughout.
+function _tfQueryLines(p, text) {
+  const lines = String(text || "").split(/\r?\n/);
+  if (/\.base$/i.test(p)) return lines;
+  const out = [];
+  let fence = null;
+  let inQuery = false;
+  for (const line of lines) {
+    const f = /^(```|~~~)\s*([A-Za-z0-9_-]*)/.exec(line);
+    if (fence === null && f) {
+      fence = f[1];
+      inQuery = /^(dataview|dataviewjs|base)$/i.test(f[2]);
+      continue;
+    }
+    if (fence !== null && line.trim().startsWith(fence)) { fence = null; inQuery = false; continue; }
+    if (inQuery || (fence === null && line.indexOf("dv.pages(") >= 0)) out.push(line);
+  }
+  return out;
+}
+
+// planTaskFolders — pure. Works out where every task note goes in the folder
+// layout, without moving anything.
+//   notes      [{ path, fm, body, mtime? }]: every `type: task` note under
+//              spice/tasks at any depth (fm parsed frontmatter; body the whole
+//              file text; mtime optional, ms).
+//   allMdPaths every .md path in the vault (for the vault-wide name check).
+//   otherNotes [{ path, body }]: the other notes (and .base files) whose links
+//              and queries are checked; optional.
+//   opts       { today: "YYYY-MM-DD" }: last-resort month for an undated done
+//              root; optional.
+// Returns { moves, renames, parentPicks, promoted, ambiguousLinks, queryRefs,
+// unresolved }; moves are ordered parents before children.
+function planTaskFolders(notes, allMdPaths, otherNotes, opts) {
+  const o = opts || {};
+  const plan = { moves: [], renames: [], parentPicks: [], promoted: [], ambiguousLinks: [], queryRefs: [], unresolved: [] };
+
+  const tasks = [];
+  const byPath = new Map();
+  for (const n of (notes || [])) {
+    if (!n || typeof n.path !== "string" || n.path.indexOf(_TF_ROOT + "/") !== 0) continue;
+    const fm = n.fm || {};
+    if (fm.type != null && _tfStr(fm.type).trim() !== "task") continue;
+    if (byPath.has(n.path)) continue;
+    const base = _tfParts(n.path).base;
+    const t = {
+      path: n.path, fm, body: typeof n.body === "string" ? n.body : "", mtime: n.mtime,
+      base, lower: base.toLowerCase(),
+      title: _tfStr(fm.title).trim() || base,
+      created: _tfTime(fm.created_at),
+      place: _tfPlace(n.path, fm),
+    };
+    tasks.push(t);
+    byPath.set(t.path, t);
+  }
+  tasks.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
+  const allPaths = new Set();
+  for (const p of (allMdPaths || [])) if (typeof p === "string" && /\.md$/i.test(p)) allPaths.add(p);
+  for (const t of tasks) allPaths.add(t.path);
+  const byLower = new Map();
+  for (const p of allPaths) {
+    const k = _tfParts(p).base.toLowerCase();
+    if (!byLower.has(k)) byLower.set(k, []);
+    byLower.get(k).push(p);
+  }
+  for (const list of byLower.values()) list.sort();
+
+  // 1. Parents. The folder wins for a nested folder note; anything else (a
+  // flat note, a top-level folder note) falls back to parent_task, resolved to
+  // task notes only.
+  const parentOf = new Map();
+  const linkParent = new Map();
+  const pickAmong = (child, cands) => {
+    let pool = cands.filter((c) => c.place === child.place);
+    if (!pool.length) pool = cands.slice();
+    if (pool.length > 1 && !Number.isNaN(child.created)) {
+      const before = pool.filter((c) => !Number.isNaN(c.created) && c.created < child.created);
+      if (before.length) pool = before;
+    }
+    pool.sort((a, b) => {
+      const ta = Number.isNaN(a.created) ? -Infinity : a.created;
+      const tb = Number.isNaN(b.created) ? -Infinity : b.created;
+      if (ta !== tb) return tb - ta;
+      return a.path < b.path ? -1 : 1;
+    });
+    return pool[0];
+  };
+  for (const t of tasks) {
+    const fp = _tfFolderParentPath(t.path);
+    if (fp && byPath.has(fp)) { parentOf.set(t.path, fp); continue; }
+    const link = _tfLinkTarget(t.fm.parent_task);
+    if (!link) continue;
+    const ll = link.toLowerCase();
+    const cands = link.indexOf("/") >= 0
+      ? tasks.filter((c) => c !== t && (c.path.toLowerCase() === ll + ".md" || c.path.toLowerCase().endsWith("/" + ll + ".md")))
+      : tasks.filter((c) => c !== t && c.lower === _tfParts(ll).base);
+    if (!cands.length) {
+      const others = (byLower.get(_tfParts(ll).base) || []).filter((p) => p !== t.path);
+      plan.unresolved.push({ path: t.path, why: `parent_task [[${link}]] names no task note` +
+        (others.length ? ` (only ${others.join(", ")}, which is not a task)` : "") + "; it becomes top-level" });
+      continue;
+    }
+    let picked = cands[0];
+    if (cands.length > 1) {
+      picked = pickAmong(t, cands);
+      plan.parentPicks.push({ child: t.path, picked: picked.path, candidates: cands.map((c) => c.path).sort() });
+    }
+    parentOf.set(t.path, picked.path);
+    linkParent.set(t.path, picked.path);
+  }
+
+  // 2. Loops: each note has at most one parent, so a walk up meets at most
+  // one cycle; it is broken at its oldest task, which becomes top-level.
+  const state = new Map();
+  for (const t of tasks) {
+    if (state.get(t.path)) continue;
+    const stack = [];
+    let cur = t.path;
+    while (cur && !state.get(cur)) { state.set(cur, 1); stack.push(cur); cur = parentOf.get(cur) || ""; }
+    if (cur && state.get(cur) === 1) {
+      const cycle = stack.slice(stack.indexOf(cur)).map((p) => byPath.get(p));
+      const oldest = cycle.slice().sort(_tfCmpOldest)[0];
+      parentOf.delete(oldest.path);
+      const ring = cycle.map((c) => c.base).concat([cycle[0].base]).join(" → ");
+      plan.unresolved.push({ path: oldest.path, why: `parent loop (${ring}); broken at its oldest task, which becomes top-level` });
+    }
+    for (const p of stack) state.set(p, 2);
+  }
+
+  const children = new Map();
+  for (const t of tasks) {
+    const pp = parentOf.get(t.path);
+    if (!pp) continue;
+    if (!children.has(pp)) children.set(pp, []);
+    children.get(pp).push(byPath.get(t.path));
+  }
+
+  // 3. Trees. A root keeps its own place. A child follows its tree, except a
+  // deleted task leaves a tree that is not in the trash, and an open task
+  // under a done tree becomes an open top-level task (parent_task kept).
+  const node = new Map();
+  const roots = [];
+  const visit = (t, parent) => {
+    let n;
+    if (!parent) n = { t, parent: null, eff: t.place, kind: "root" };
+    else if (t.place === "trash" && parent.eff !== "trash") n = { t, parent: null, eff: "trash", kind: "left", former: parent.t };
+    else if (t.place === "open" && parent.eff === "done") {
+      n = { t, parent: null, eff: "open", kind: "promoted", former: parent.t };
+      plan.promoted.push({ path: t.path, formerParent: parent.t.path });
+    } else n = { t, parent, eff: parent.eff, kind: "child" };
+    node.set(t.path, n);
+    if (!n.parent) roots.push(n);
+    for (const c of (children.get(t.path) || []).slice().sort(_tfCmpOldest)) visit(c, n);
+  };
+  for (const t of tasks) if (!parentOf.has(t.path)) visit(t, null);
+
+  // 4. Names. A task whose basename is unique vault-wide keeps it. The rest
+  // are named oldest created_at first by _taskFolderName, against the
+  // vault's other basenames and every name already kept or given out.
+  const owner = new Map();
+  for (const p of allPaths) {
+    if (byPath.has(p)) continue;
+    const k = _tfParts(p).base.toLowerCase();
+    if (!owner.has(k)) owner.set(k, p);
+  }
+  const clashesOf = (t) => (byLower.get(t.lower) || []).filter((p) => p !== t.path);
+  const pending = [];
+  for (const t of tasks) {
+    if (clashesOf(t).length === 0) { node.get(t.path).name = t.base; owner.set(t.lower, t.path); }
+    else pending.push(t);
+  }
+  pending.sort(_tfCmpOldest);
+  for (const t of pending) {
+    const n = node.get(t.path);
+    const parentTitle = n.parent ? n.parent.t.title : undefined;
+    const name = _taskFolderName(t.title, { parentTitle, createdAt: _tfStr(t.fm.created_at), taken: (x) => owner.has(x) });
+    const plain = _sanitizeTaskTitleForFilename(t.title);
+    const plainOwner = name.toLowerCase() !== plain.toLowerCase() ? owner.get(plain.toLowerCase()) : "";
+    owner.set(name.toLowerCase(), t.path);
+    n.name = name;
+    if (name !== t.base) {
+      n.renameWhy = `clash with ${clashesOf(t).join(", ")}` +
+        (plainOwner && plainOwner !== t.path && clashesOf(t).indexOf(plainOwner) < 0 ? `; "${plain}" is taken by ${plainOwner}` : "");
+    }
+  }
+
+  // 5. Paths, parents before children.
+  const doneMonth = (t) => {
+    const m = /^spice\/tasks\/_done\/(\d{4})\/(\d{2})\/[^/]+\/[^/]+\.md$/.exec(t.path);
+    if (m && _tfIsFolderNote(t.path)) return { month: m[1] + "/" + m[2], from: "its current _done folder" };
+    let month = _tfMonth(t.fm.completed_at);
+    if (month) return { month, from: "completed_at" };
+    if (typeof t.mtime === "number" && Number.isFinite(t.mtime)) {
+      const d = new Date(t.mtime);
+      return { month: d.getFullYear() + "/" + String(d.getMonth() + 1).padStart(2, "0"), from: "file mtime" };
+    }
+    month = _tfMonth(t.fm.created_at);
+    if (month) return { month, from: "created_at (no completed_at or mtime)" };
+    let today = _tfMonth(o.today);
+    if (!today) {
+      const d = new Date();
+      today = d.getFullYear() + "/" + String(d.getMonth() + 1).padStart(2, "0");
+    }
+    plan.unresolved.push({ path: t.path, why: `done task with no completed_at, mtime or created_at; filed under the report's month ${today}` });
+    return { month: today, from: "the report date" };
+  };
+  const unresolvedPaths = new Set(plan.unresolved.map((u) => u.path));
+  const placeMoves = [];
+  const walk = (n) => {
+    const t = n.t;
+    let folder;
+    let reason;
+    if (!n.parent) {
+      if (n.eff === "done") {
+        const dm = doneMonth(t);
+        folder = `${_TF_ROOT}/_done/${dm.month}/${n.name}`;
+        reason = `done top-level task, filed by ${dm.from} (${dm.month.replace("/", "-")})`;
+      } else if (n.eff === "trash") {
+        folder = `${_TF_ROOT}/_trash/${n.name}`;
+        reason = n.kind === "left" ? `deleted subtask leaves ${n.former.path} for the trash` : "deleted top-level task";
+      } else {
+        folder = `${_TF_ROOT}/${n.name}`;
+        reason = n.kind === "promoted" ? `open subtask of done ${n.former.path} becomes an open top-level task` : "open top-level task";
+      }
+      if (n.kind === "root" && unresolvedPaths.has(t.path)) reason += " (parent unresolved, see Unresolved)";
+    } else {
+      folder = `${n.parent.folder}/${n.name}`;
+      reason = `subtask of ${n.parent.name}`;
+      if (n.eff === "done") reason += " (follows its done top-level task)";
+      else if (n.eff === "trash") reason += " (follows its deleted top-level task)";
+      else if (t.place === "done") reason += " (a done subtask stays in its open tree)";
+    }
+    n.folder = folder;
+    n.to = `${folder}/${n.name}.md`;
+    if (n.renameWhy) reason += `; renamed: ${n.renameWhy}`;
+    placeMoves.push({ n, reason });
+    for (const c of (children.get(t.path) || []).map((x) => node.get(x.path)).filter((c) => c.parent === n)
+      .sort((a, b) => _tfCmpOldest(a.t, b.t))) walk(c);
+  };
+  for (const r of roots.slice().sort((a, b) => _tfCmpOldest(a.t, b.t))) walk(r);
+  for (const { n, reason } of placeMoves) {
+    if (n.to !== n.t.path) plan.moves.push({ from: n.t.path, to: n.to, name: n.name, reason });
+    if (n.renameWhy) plan.renames.push({ from: n.t.path, to: n.to, why: n.renameWhy });
+  }
+
+  const moved = new Set(plan.moves.map((m) => m.from));
+  if (!moved.size) return plan;
+
+  // 6. Links that are ambiguous today (their basename names more than one
+  // note) where one of the notes is a task that moves. resolvesTo (a current
+  // path) is settled, in order, by: the plan's parent for a parent_task link
+  // ("parent_task"); a candidate in the linking note's own folder, which
+  // Obsidian resolves first ("same-folder"); else the task candidate in the
+  // same place as the linking note (a non-task note counts as open), then
+  // the oldest ("same-place-oldest").
+  const docs = tasks.map((t) => ({ path: t.path, body: t.body, task: t }))
+    .concat((otherNotes || []).filter((d) => d && typeof d.path === "string" && !byPath.has(d.path))
+      .map((d) => ({ path: d.path, body: typeof d.body === "string" ? d.body : "", task: null })));
+  const seen = new Set();
+  for (const d of docs) {
+    if (!/\.md$/i.test(d.path) || d.path.indexOf("ranch/reports/") === 0) continue;
+    let text = d.body;
+    let fmLen = 0;
+    if (d.task && !/^---\r?\n/.test(text)) {
+      const fmLines = [];
+      for (const [k, v] of Object.entries(d.task.fm)) {
+        for (const s of (Array.isArray(v) ? v : [v])) if (typeof s === "string" && s.indexOf("[[") >= 0) fmLines.push(k + ": " + s);
+      }
+      const prefix = fmLines.length ? fmLines.join("\n") + "\n" : "";
+      fmLen = prefix.length;
+      text = prefix + text;
+    }
+    if (text.indexOf("[[") < 0) continue;
+    const scan = _tfBlankCode(text);
+    if (!fmLen) {
+      const fmEnd = /^---\r?\n[\s\S]*?\r?\n---/.exec(scan);
+      if (fmEnd) fmLen = fmEnd[0].length;
+    }
+    const re = /!?\[\[([^\]\n]+?)\]\]/g;
+    let m;
+    while ((m = re.exec(scan)) !== null) {
+      const inner = m[1];
+      const target = inner.split("|")[0].split("#")[0].trim().replace(/\.md$/i, "");
+      if (!target) continue;
+      const tl = target.toLowerCase();
+      const cands = target.indexOf("/") >= 0
+        ? Array.from(allPaths).filter((p) => p.toLowerCase() === tl + ".md" || p.toLowerCase().endsWith("/" + tl + ".md")).sort()
+        : (byLower.get(_tfParts(tl).base) || []);
+      if (cands.length < 2 || !cands.some((c) => moved.has(c))) continue;
+      let resolvesTo = "";
+      let settledBy = "";
+      const lineStart = scan.lastIndexOf("\n", m.index) + 1;
+      const line = scan.slice(lineStart, scan.indexOf("\n", m.index) < 0 ? scan.length : scan.indexOf("\n", m.index));
+      const inFm = !!d.task && m.index < fmLen;
+      if (inFm && /^parent_task\s*:/.test(line) && linkParent.has(d.path) && cands.indexOf(linkParent.get(d.path)) >= 0) {
+        resolvesTo = linkParent.get(d.path);
+        settledBy = "parent_task";
+      }
+      if (!resolvesTo) {
+        const dir = _tfParts(d.path).dir;
+        const local = cands.filter((c) => _tfParts(c).dir === dir && c !== d.path);
+        if (local.length === 1) { resolvesTo = local[0]; settledBy = "same-folder"; }
+      }
+      if (!resolvesTo) {
+        const taskCands = cands.map((c) => byPath.get(c)).filter(Boolean);
+        const myPlace = d.task ? d.task.place : "open";
+        let pool = taskCands.filter((c) => c.place === myPlace);
+        if (!pool.length) pool = taskCands;
+        pool.sort(_tfCmpOldest);
+        resolvesTo = pool[0].path;
+        settledBy = "same-place-oldest";
+      }
+      const key = d.path + "\u0000" + m[0] + "\u0000" + resolvesTo;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      plan.ambiguousLinks.push({ in: d.path, link: text.slice(m.index, m.index + m[0].length), resolvesTo, settledBy, candidates: cands.slice() });
+    }
+  }
+
+  // 7. Query text naming _done, _trash or a moving task's path: reported only.
+  const needles = [_TF_ROOT + "/_done", _TF_ROOT + "/_trash"]
+    .concat(Array.from(moved).map((p) => p.replace(/\.md$/i, "")));
+  const seenQ = new Set();
+  for (const d of docs) {
+    if (d.path.indexOf("ranch/reports/") === 0) continue;
+    for (const line of _tfQueryLines(d.path, d.body)) {
+      if (!needles.some((nd) => line.indexOf(nd) >= 0)) continue;
+      const key = d.path + "\u0000" + line.trim();
+      if (seenQ.has(key)) continue;
+      seenQ.add(key);
+      plan.queryRefs.push({ in: d.path, text: line.trim() });
+    }
+  }
+  return plan;
+}
+
+// renderTaskFoldersReport — pure. The dry-run report note: summary, the
+// Apply block (TaskFolders, Task 9), every list, and the full plan as a
+// fenced json block that TaskFolders reads back.
+function renderTaskFoldersReport(plan, dateStr) {
+  const p = plan || {};
+  const list = (k) => (Array.isArray(p[k]) ? p[k] : []);
+  const code = (s) => "`" + String(s).replace(/`/g, "'") + "`";
+  const out = [];
+  out.push("---", "type: task-folders-report", `created_at: ${dateStr}`, "---", "");
+  out.push(`# Task folders dry run, ${dateStr}`, "");
+  out.push("Nothing has moved. This report lists where every task note would go in the folder layout " +
+    "(`spice/tasks/<Name>/<Name>.md`). Read it, then press Apply to move the notes inside Obsidian.", "");
+  out.push("## Summary", "", "| | Count |", "| --- | ---: |");
+  out.push(`| Moves | ${list("moves").length} |`);
+  out.push(`| Renames | ${list("renames").length} |`);
+  out.push(`| Parent picks | ${list("parentPicks").length} |`);
+  out.push(`| Promoted | ${list("promoted").length} |`);
+  out.push(`| Ambiguous links | ${list("ambiguousLinks").length} |`);
+  out.push(`| Query refs | ${list("queryRefs").length} |`);
+  out.push(`| Unresolved | ${list("unresolved").length} |`, "");
+  out.push("## Apply", "", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskFolders" });', "```", "");
+  const section = (title, intro, rows) => {
+    out.push(`## ${title}`, "");
+    if (intro) out.push(intro, "");
+    if (!rows.length) out.push("None.");
+    else for (const r of rows) out.push(r);
+    out.push("");
+  };
+  section("Moves", "Parents before children.", list("moves").map((m) => `- ${code(m.from)} → ${code(m.to)}: ${m.reason}`));
+  section("Renames", "A task keeps its name unless another note in the vault has it.",
+    list("renames").map((r) => `- ${code(r.from)} → ${code(r.to)}: ${r.why}`));
+  section("Parent picks", "Several task notes share the parent's name; the pick is the one in the same place as the child, then the one created before it, then the newest.",
+    list("parentPicks").map((x) => `- ${code(x.child)}: picked ${code(x.picked)} from ${x.candidates.map(code).join(", ")}`));
+  section("Promoted", "Open subtasks of a done task become open top-level tasks; `parent_task` keeps naming the done task.",
+    list("promoted").map((x) => `- ${code(x.path)} (was under ${code(x.formerParent)})`));
+  section("Ambiguous links", "These links name more than one note today. Apply first rewrites each to the full path shown.",
+    list("ambiguousLinks").map((a) => `- ${code(a.in)}: ${code(a.link)} → ${code(a.resolvesTo)} (${a.settledBy || "picked"})`));
+  section("Query refs", "Query text is never rewritten. Check these still find what they should after Apply.",
+    list("queryRefs").map((q) => `- ${code(q.in)}: ${code(q.text)}`));
+  section("Unresolved", "", list("unresolved").map((u) => `- ${code(u.path)}: ${u.why}`));
+  out.push("## Plan data", "", "```json", JSON.stringify(p, null, 2), "```", "");
+  return out.join("\n");
+}
+
+// _tfReadFm — the scalar frontmatter keys of a note (enough for the planner:
+// type, title, status, parent_task, created_at, completed_at). A value is
+// unquoted; an unquoted `[[X]]` stays a string.
+function _tfReadFm(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(text || ""));
+  const fm = {};
+  if (!m) return fm;
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = /^([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(.*)$/.exec(line);
+    if (!kv) continue;
+    fm[kv[1]] = _unquoteScalar(kv[2].trim());
+  }
+  return fm;
+}
+
+function _tfLocalDate(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+// applyTaskFoldersHeal — ungated dry run of the task folder migration. Reads
+// every task note under spice/tasks (any depth), plans, and writes
+// ranch/reports/task-folders-YYYY-MM-DD.md when anything would move (a re-run
+// the same day overwrites it). Writes nothing else and never moves a note;
+// the moves are applied from the report inside Obsidian. Never throws.
+async function applyTaskFoldersHeal(tp, history, git) {
+  const stamp = () => ({ git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty });
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    if (!(await adapter.exists(_TF_ROOT).catch(() => false))) return;
+
+    const md = [];
+    const bases = [];
+    const walk = async (dir, depth) => {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return; }
+      for (const raw of (listing.files || [])) {
+        const f = String(raw).replace(/^\/+/, "");
+        if (/\.md$/i.test(f)) md.push(f);
+        else if (/\.base$/i.test(f)) bases.push(f);
+      }
+      if (depth >= 32) return;
+      for (const raw of (listing.folders || [])) {
+        const sub = String(raw).replace(/^\/+/, "");
+        if (sub.substring(sub.lastIndexOf("/") + 1).startsWith(".")) continue;
+        await walk(sub, depth + 1);
+      }
+    };
+    await walk("", 0);
+
+    const notes = [];
+    for (const p of md) {
+      if (p.indexOf(_TF_ROOT + "/") !== 0) continue;
+      let body;
+      try { body = await adapter.read(p); } catch (_e) { continue; }
+      const fm = _tfReadFm(body);
+      if (fm.type !== "task") continue;
+      const note = { path: p, fm, body };
+      if (_tfPlace(p, fm) === "done" && !_tfMonth(fm.completed_at) && typeof adapter.stat === "function") {
+        try { const s = await adapter.stat(p); if (s && typeof s.mtime === "number") note.mtime = s.mtime; } catch (_e) { /* no mtime */ }
+      }
+      notes.push(note);
+    }
+
+    const today = _tfLocalDate(new Date());
+    let plan = planTaskFolders(notes, md, [], { today });
+    if (!plan.moves.length) {
+      history?.push({ event: "info", step: "task_folders_heal", name: "task-entity", action: "no_moves",
+        reason: `${notes.length} task notes already in the folder layout; no report written`,
+        ...stamp(), attempted_at: new Date().toISOString() });
+      return;
+    }
+
+    const taskPaths = new Set(notes.map((n) => n.path));
+    const others = [];
+    for (const p of md.concat(bases)) {
+      if (taskPaths.has(p) || p.indexOf("ranch/") === 0) continue;
+      try { others.push({ path: p, body: await adapter.read(p) }); } catch (_e) { /* unreadable: skipped */ }
+    }
+    plan = planTaskFolders(notes, md, others, { today });
+
+    const reportPath = `ranch/reports/task-folders-${today}.md`;
+    try { await adapter.mkdir("ranch"); } catch (_e) { /* exists */ }
+    try { await adapter.mkdir("ranch/reports"); } catch (_e) { /* exists */ }
+    await adapter.write(reportPath, renderTaskFoldersReport(plan, today));
+    history?.push({ event: "info", step: "task_folders_heal", name: "task-entity", action: "report_written",
+      target: reportPath,
+      summary: { tasks: notes.length, moves: plan.moves.length, renames: plan.renames.length,
+        parent_picks: plan.parentPicks.length, promoted: plan.promoted.length,
+        ambiguous_links: plan.ambiguousLinks.length, query_refs: plan.queryRefs.length, unresolved: plan.unresolved.length },
+      ...stamp(), attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "task_folders_heal", name: "task-entity",
+      reason: `dry run failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      ...stamp(), attempted_at: new Date().toISOString() });
+  }
+}
+
 // applyTodoDailyTripGroupsHeal — inject ToDoDailyTripGroups block into
 // existing daily notes (after ToDoDailyProjectGroups). Idempotent, backup-guarded.
 async function applyTodoDailyTripGroupsHeal(tp, history, git) {
@@ -23025,6 +23612,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
     module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
     module.exports._taskFolderName = _taskFolderName;
+    module.exports.planTaskFolders = planTaskFolders;
+    module.exports.renderTaskFoldersReport = renderTaskFoldersReport;
+    module.exports.applyTaskFoldersHeal = applyTaskFoldersHeal;
     module.exports.applyRecurringTasksMigrationHeal = applyRecurringTasksMigrationHeal;
     module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
     module.exports._parseRecurringRegistry = _parseRecurringRegistry;
