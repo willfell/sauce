@@ -148,6 +148,106 @@ const savedWin = global.window;
   ok('TF-READ-FILTER-COLD-LOAD without TaskEntity the open list falls back to status open and never throws', cold === 'Top,Kid,Flat');
   global.customJS = savedCJS;
 
+  const TODAY = '2026-11-10';
+  const doneAt = TODAY + 'T09:00:00-07:00';
+  const mkDone = (p, status, title) => ({ type: 'task', status, title, completed_at: doneAt, file: { path: p, name: title } });
+  const DONE_PAGES = [
+    mkDone('spice/tasks/A/B/B.md', 'done', 'Nested done'),
+    mkDone('spice/tasks/_done/2026/11/C/C.md', 'done', 'Archived done'),
+    mkDone('spice/tasks/_done/Flat.md', 'done', 'Flat done'),
+    mkDone('spice/tasks/_trash/D/D.md', 'deleted', 'Trashed'),
+    mkDone('spice/tasks/A/E/E.md', 'deleted', 'Deleted in place'),
+    mkDone('spice/tasks/_trash/G/G.md', 'done', 'Done but trashed'),
+    { type: 'task', status: 'open', title: 'Still open', file: { path: 'spice/tasks/F/F.md', name: 'Still open' } },
+  ];
+  const WANT = ['Archived done', 'Flat done', 'Nested done'];
+  const queries = [];
+  const mkDoneDv = (container) => ({
+    container,
+    pages(q) {
+      queries.push(q);
+      const wrap = (arr) => ({ where: (fn) => wrap(arr.filter(fn)), array: () => arr.slice(), length: arr.length });
+      return wrap(DONE_PAGES.slice());
+    },
+    current: () => ({}),
+  });
+  const node = () => {
+    const n = {
+      children: [], style: {}, dataset: {}, firstChild: null, lastChild: null, lastElementChild: null,
+      classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+      createEl(_t, o) { const c = node(); c.cls = (o && o.cls) || ''; n.children.push(c); return c; },
+      createDiv() { return n.createEl('div'); },
+      appendChild(c) { n.children.push(c); return c; },
+      removeChild() {}, setAttribute() {}, addEventListener() {}, setText() {},
+      querySelector() { return null; }, querySelectorAll() { return []; }, closest() { return null; },
+    };
+    return n;
+  };
+  const stubTTL = (seen) => ({
+    renderTaskRow(_c, t) { seen.push(t.title || t.path); return node(); },
+    renderDoneRow(_c, t) { seen.push(t.title || t.path); return node(); },
+  });
+  const oldTE = {};
+  for (const k of Object.getOwnPropertyNames(TE)) {
+    if (typeof TE[k] === 'function' && !['taskState', 'isOpenTask', 'constructor'].includes(k)) oldTE[k] = TE[k].bind(TE);
+  }
+  const DoneToday = load('mechanisms/task-entity/task-done-today-list.js', 'TaskDoneTodayList');
+  const Archive = load('blueprints/to-do/helpers/task-done-archive.js', 'TaskDoneArchive');
+  const SDD = load('blueprints/daily/helpers/space-daily-dashboard.js', 'SpaceDailyDashboard');
+  const moment = () => ({ format: () => TODAY });
+  const sorted = (a) => a.slice().sort().join();
+  const runSurfaces = async (customJS) => {
+    global.window = { customJS, moment, localStorage: { getItem: () => 'today', setItem() {} }, app: { vault: {} } };
+    const out = {};
+    for (const [key, cls] of [['today', DoneToday], ['archive', Archive]]) {
+      queries.length = 0;
+      const seen = [];
+      customJS.TaskTodayList = stubTTL(seen);
+      let threw = false;
+      try { await new cls().render(mkDoneDv(node())); } catch (_e) { threw = true; }
+      out[key] = { seen, threw, queries: queries.slice() };
+    }
+    return out;
+  };
+  try {
+    const live = await runSurfaces({ TaskEntity: TE, RenderSafe: { page: () => ({}) } });
+    ok('TF-READ-DONE-TODAY-NESTED the done-today list shows nested, archived and flat done tasks, not deleted ones',
+      sorted(live.today.seen) === sorted(WANT) && !live.today.threw && live.today.queries.join() === '"spice/tasks"');
+    ok('TF-READ-DONE-ARCHIVE-NESTED the done archive shows nested, archived and flat done tasks, not deleted ones',
+      sorted(live.archive.seen) === sorted(WANT) && !live.archive.threw && live.archive.queries.join() === '"spice/tasks"');
+
+    const stale = await runSurfaces({ TaskEntity: oldTE, RenderSafe: { page: () => ({}) } });
+    ok('TF-READ-DONE-TODAY-COLD-STATE a TaskEntity without taskState still selects done, non-trashed tasks',
+      sorted(stale.today.seen) === sorted(WANT) && !stale.today.threw);
+    ok('TF-READ-DONE-ARCHIVE-COLD-STATE the archive without taskState still selects done, non-trashed tasks',
+      sorted(stale.archive.seen) === sorted(WANT) && !stale.archive.threw);
+
+    const bare = await runSurfaces({ RenderSafe: { page: () => ({}) } });
+    ok('TF-READ-DONE-SURFACES-NO-TASKENTITY with no TaskEntity at all both lists draw nothing and never throw',
+      !bare.today.threw && !bare.archive.threw && bare.today.seen.length === 0 && bare.archive.seen.length === 0);
+
+    global.window = { customJS: {}, moment };
+    const dailyDv = {
+      pages: (q) => DONE_PAGES.filter((p) => q === '"spice/tasks"'
+        || (q === '"spice/tasks/_done"' && p.file.path.indexOf('spice/tasks/_done/') === 0)),
+    };
+    const dailyLive = SDD.selectTasks(dailyDv, TODAY, new TE());
+    ok('TF-READ-DONE-DAILY-NESTED the daily done count and list include nested, archived and flat done tasks, not deleted ones',
+      dailyLive.done === 3 && sorted(dailyLive.doneToday.map((t) => t.title)) === sorted(WANT));
+    const dailyOld = SDD.selectTasks(dailyDv, TODAY, oldTE);
+    ok('TF-READ-DONE-DAILY-COLD-STATE the daily done count without taskState still counts done, non-trashed tasks',
+      dailyOld.done === 3 && sorted(dailyOld.doneToday.map((t) => t.title)) === sorted(WANT));
+    let dailyCold = null;
+    let dailyThrew = false;
+    try { dailyCold = SDD.selectTasks(dailyDv, TODAY, null); } catch (_e) { dailyThrew = true; }
+    ok('TF-READ-DONE-DAILY-NO-TASKENTITY with no TaskEntity the daily selection is empty and never throws',
+      !dailyThrew && dailyCold.done === 0 && dailyCold.doneToday.length === 0 && dailyCold.open.length === 0);
+    const donePathSrc = read('blueprints/daily/helpers/space-daily-dashboard.js');
+    ok('TF-READ-DONE-NO-DONE-SOURCE no done surface sources spice/tasks/_done',
+      ![donePathSrc, read('mechanisms/task-entity/task-done-today-list.js'), read('blueprints/to-do/helpers/task-done-archive.js')]
+        .some((src) => /pages\(\s*'"spice\/tasks\/_done"'/.test(src) || /toArr\(\s*'"spice\/tasks\/_done"'/.test(src)));
+  } finally { global.window = savedWin; }
+
   const failed = results.filter(([, c]) => !c).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

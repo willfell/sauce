@@ -349,7 +349,6 @@ process.exitCode = 1;
     '"spice/projects/foo"': [pages[0]],
     '"spice/meetings/notes"': [],
     '"spice/tasks"': [],
-    '"spice/tasks/_done"': [],
   };
 
   // Build a dv that counts unscoped sweeps + memoizable scoped sweeps and returns
@@ -1194,7 +1193,7 @@ process.exitCode = 1;
     global.window = windowShim;
     global.app = app;
     global.customJS = customJS;
-    const pagesByQuery = { '"spice/tasks"': o.taskPages || [], '"spice/tasks/_done"': o.donePages || [] };
+    const pagesByQuery = { '"spice/tasks"': (o.taskPages || []).concat(o.donePages || []) };
     const root = makeRichEl('div');
     const dv = {
       container: root,
@@ -1257,7 +1256,7 @@ process.exitCode = 1;
     const TaskEntityClass = new Function(`${TE_SRC}; return TaskEntity;`)();
     const TE = new TaskEntityClass();
     const Dash = loadDashboard(makeMomentWindow(), {});
-    const fakeDv = { pages: (q) => (q === '"spice/tasks"' ? sectionPages : q === '"spice/tasks/_done"' ? sectionDone : []) };
+    const fakeDv = { pages: (q) => (q === '"spice/tasks"' ? sectionPages.concat(sectionDone) : []) };
     const r = Dash.selectTasks(fakeDv, P_TODAY, TE);
     assert(r.open.length === 2, 'open = today tasks: ' + r.open.length);
     assert(JSON.stringify(r.overdue.map((t) => t.title).sort()) === JSON.stringify(['Late seven', 'Late three']),
@@ -1285,17 +1284,17 @@ process.exitCode = 1;
       index,
       pages: (q) => {
         scans[q] = (scans[q] || 0) + 1;
-        return q === '"spice/tasks"' ? sectionPages : q === '"spice/tasks/_done"' ? sectionDone
+        return q === '"spice/tasks"' ? sectionPages.concat(sectionDone)
           : q === '"spice/meetings/notes"' ? meetingPages : [];
       },
     });
     const total = () => Object.values(scans).reduce((a, b) => a + b, 0);
     // Home's count pass, then the nested dashboard's own selection (its own dv).
     const counts = Dash.computeCounts(makeDv(), P_TODAY, TE);
-    assert(total() === 3, 'count pass scans tasks, _done and meetings once each: ' + JSON.stringify(scans));
+    assert(total() === 2, 'count pass scans tasks and meetings once each: ' + JSON.stringify(scans));
     const first = Dash.selectTasks(makeDv(), P_TODAY, TE);
     const meetings = Dash.selectMeetings(makeDv(), P_TODAY);
-    assert(total() === 3, 'same revision → the dashboard reuses the count pass: ' + JSON.stringify(scans));
+    assert(total() === 2, 'same revision → the dashboard reuses the count pass: ' + JSON.stringify(scans));
     assert(counts.today === first.open.length && counts.meetings === meetings.length && meetings.length === 1,
       'shared selection matches the counts');
     // The Today panel mutates the tasks it is handed; the next caller must not see that.
@@ -1311,17 +1310,17 @@ process.exitCode = 1;
     const before = total();
     index.revision = 4;
     Dash.selectTasks(makeDv(), P_TODAY, TE);
-    assert(total() === before + 2, 'index moved → rescanned: ' + JSON.stringify(scans));
+    assert(total() === before + 1, 'index moved → rescanned: ' + JSON.stringify(scans));
     // A reloaded TaskEntity class is not served the old class's parse.
     const again = total();
     Dash.selectTasks(makeDv(), P_TODAY, new TaskEntityClass());
-    assert(total() === again + 2, 'new TaskEntity instance → rescanned');
+    assert(total() === again + 1, 'new TaskEntity instance → rescanned');
     // No index to key on (cold load, harness stubs) → never shared.
     const bare = { pages: makeDv().pages };
     const cold = total();
     Dash.selectTasks(bare, P_TODAY, TE);
     Dash.selectTasks(bare, P_TODAY, TE);
-    assert(total() === cold + 4, 'without dv.index every call scans');
+    assert(total() === cold + 2, 'without dv.index every call scans');
   });
 
   await ok('RD-P-LIVE-GATE past date keeps the old panel; today and Home asOf render sections', async () => {
@@ -1691,7 +1690,7 @@ process.exitCode = 1;
     const TE = new TaskEntityClass();
     const Dash = loadDashboard(makeMomentWindow(), {});
     const inst = new Dash();
-    const fakeDv = { pages: (q) => (q === '"spice/tasks"' ? sectionPages : q === '"spice/tasks/_done"' ? sectionDone
+    const fakeDv = { pages: (q) => (q === '"spice/tasks"' ? sectionPages.concat(sectionDone)
       : q === '"spice/meetings/notes"' ? [{ file: { name: 'Standup-' + P_TODAY, path: 'spice/meetings/notes/Standup-' + P_TODAY + '.md' } }] : []) };
     assert(typeof inst.computeCounts === 'function', 'instance computeCounts exists');
     const c = inst.computeCounts(fakeDv, P_TODAY, TE);

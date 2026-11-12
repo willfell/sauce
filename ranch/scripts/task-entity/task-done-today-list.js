@@ -4,7 +4,7 @@ class TaskDoneTodayList {
 
     /**
      * Entry point invoked by customjs-guard: render(dv). Live-queries
-     * spice/tasks/_done/ for tasks completed today and renders a native
+     * spice/tasks/ for done tasks completed today and renders a native
      * <details>/<summary> collapsible section. Renders nothing if no tasks
      * were completed today. Cold-load safe — returns quietly if dependencies
      * are not yet registered. Dual-fire-safe via __renderGen counter.
@@ -34,9 +34,11 @@ class TaskDoneTodayList {
 
         let doneTasks = [];
         try {
-            const raw = dv.pages('"spice/tasks/_done"').where(p =>
+            const raw = dv.pages('"spice/tasks"').where(p =>
                 p && p.type === 'task' && p.file && p.file.path
-                && (typeof TE.taskState === 'function' ? TE.taskState(p) !== 'deleted' : p.status !== 'deleted'));
+                && (typeof TE.taskState === 'function'
+                    ? TE.taskState(p) === 'done'
+                    : (p.status === 'done' && p.file.path.indexOf('spice/tasks/_trash/') !== 0)));
             const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
             doneTasks = TaskDoneTodayList.filterToday(arr.map(p => TE.parseNote(p)), today);
         } catch (_e) { return; }
