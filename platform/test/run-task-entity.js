@@ -2106,13 +2106,14 @@ async function okAsync(name, fn) {
 
 // Build a fresh spying app.vault. `taken` decides which paths getAbstractFileByPath
 // reports as existing (drives _uniqueName dedupe). Records every create call.
-function makeQuickApp(taken) {
+function makeQuickApp(taken, existing) {
   const creates = [];
   const folders = [];
   return {
     _creates: creates,
     _folders: folders,
     vault: {
+      getMarkdownFiles: () => (existing || []).map((p) => ({ path: p, basename: p.split('/').pop().replace(/\.md$/i, '') })),
       getAbstractFileByPath: (p) => (taken && taken(p) ? { path: p } : null),
       createFolder: async (p) => { folders.push(p); },
       create: async (p, content) => { creates.push({ path: p, content }); return { path: p }; },
@@ -2131,14 +2132,14 @@ async function runCreateQuickTests() {
   const prevWindow = global.window;
   const prevGlobalApp = global.app;
 
-  await okAsync('HC-TQC-1 createQuick writes exactly ONE file at spice/tasks/<title>.md', async () => {
+  await okAsync('HC-TQC-1 createQuick writes exactly ONE file at spice/tasks/<title>/<title>.md', async () => {
     const app = makeQuickApp(() => false);
     global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
     const TD = new TaskDialogClass();
     await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
     assert(app._creates.length === 1, 'exactly one vault.create: got ' + app._creates.length);
-    assert(app._creates[0].path === 'spice/tasks/call dentist.md',
-      'path is readable "<title>.md": ' + app._creates[0].path);
+    assert(app._creates[0].path === 'spice/tasks/call dentist/call dentist.md',
+      'path is the readable folder note "<title>/<title>.md": ' + app._creates[0].path);
     const c = app._creates[0].content;
     assert(/\ntype: task\n/.test(c), 'content carries type: task');
     assert(/\nstatus: open\n/.test(c), 'content carries status: open');
@@ -2156,14 +2157,13 @@ async function runCreateQuickTests() {
     assert(app._creates.length === 0, 'blank titles create nothing: got ' + app._creates.length);
   });
 
-  await okAsync('HC-TQC-3 filename collision dedupes to " 2.md"', async () => {
-    // The base name is taken once → _uniqueName bumps to "call dentist 2.md".
-    const app = makeQuickApp((p) => p === 'spice/tasks/call dentist.md');
+  await okAsync('HC-TQC-3 a name taken in the vault adds the creation date', async () => {
+    const app = makeQuickApp(() => false, ['spice/tasks/call dentist/call dentist.md']);
     global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
     const TD = new TaskDialogClass();
     await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
     assert(app._creates.length === 1, 'still one create: got ' + app._creates.length);
-    assert(app._creates[0].path === 'spice/tasks/call dentist 2.md',
+    assert(app._creates[0].path === 'spice/tasks/call dentist (Jul 2)/call dentist (Jul 2).md',
       'deduped path: ' + app._creates[0].path);
   });
 
@@ -2175,13 +2175,13 @@ async function runCreateQuickTests() {
   });
 
   await okAsync('PERF-1-QUICK-PLAN prepares the exact deduped row path and suppresses create reconciliation', async () => {
-    const app = makeQuickApp((p) => p === 'spice/tasks/call dentist.md');
+    const app = makeQuickApp(() => false, ['spice/tasks/call dentist/call dentist.md']);
     global.window = { app, customJS: { TaskEntity: TE }, moment: momentStub };
     const TD = new TaskDialogClass();
     let reconciles = 0;
     TD._reconcileAfterCreate = () => { reconciles++; };
     const plan = TD.prepareQuick({ title: 'call dentist', parent_task: '[[Parent]]' });
-    assert(plan && plan.path === 'spice/tasks/call dentist 2.md', 'plan owns exact deduped path: ' + JSON.stringify(plan && plan.path));
+    assert(plan && plan.path === 'spice/tasks/call dentist (Jul 2)/call dentist (Jul 2).md', 'plan owns exact deduped path: ' + JSON.stringify(plan && plan.path));
     assert(plan.task && plan.task.path === plan.path && plan.task.parent_task === '[[Parent]]',
       'optimistic task is a real row payload: ' + JSON.stringify(plan && plan.task));
     const result = await TD.createQuick({ plan, reconcile: false });
@@ -2195,8 +2195,8 @@ async function runCreateQuickTests() {
     const TD = new TaskDialogClass();
     const first = TD.prepareQuick({ title: 'A/B', parent_task: '[[Parent]]' });
     const second = TD.prepareQuick({ title: 'AB', parent_task: '[[Parent]]' });
-    assert(first.path === 'spice/tasks/AB.md', 'first sanitized path: ' + first.path);
-    assert(second.path === 'spice/tasks/AB 2.md', 'second in-flight path is deduped: ' + second.path);
+    assert(first.path === 'spice/tasks/AB/AB.md', 'first sanitized path: ' + first.path);
+    assert(second.path === 'spice/tasks/AB (Jul 2)/AB (Jul 2).md', 'second in-flight path is deduped: ' + second.path);
     await Promise.all([
       TD.createQuick({ plan: first, reconcile: false }),
       TD.createQuick({ plan: second, reconcile: false }),
@@ -2213,7 +2213,7 @@ async function runCreateQuickTests() {
     const failed = TD.prepareQuick({ title: 'Retry me' });
     try { await TD.createQuick({ plan: failed, reconcile: false }); } catch (_e) {}
     const retry = TD.prepareQuick({ title: 'Retry me' });
-    assert(retry.path === 'spice/tasks/Retry me.md', 'failed reservation released: ' + retry.path);
+    assert(retry.path === 'spice/tasks/Retry me/Retry me.md', 'failed reservation released: ' + retry.path);
     TD.releaseQuickPlan(retry);
   });
 
@@ -2606,7 +2606,7 @@ async function runPerf1StructuralTests() {
 
     global.window.customJS.TaskEntity = TE;
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     const rows = walk(container, (node) => node && node._task);
     assert(seamCalls === 1 && app._creates.length === 1, 'warm retry runs one structural mutation and one create');
     assert(rows.length === 1 && rows[0]._task.title === 'Cold child' && rows[0]._task.path === app._creates[0].path,
@@ -2617,7 +2617,7 @@ async function runPerf1StructuralTests() {
     input.value = 'Cold fallback';
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await new Promise((resolve) => setImmediate(resolve));
-    assert(app._creates.length === 2 && app._creates[1].path === 'spice/tasks/Cold fallback.md',
+    assert(app._creates.length === 2 && app._creates[1].path === 'spice/tasks/Cold fallback/Cold fallback.md',
       'fallback commits the already-reserved base path without suffix drift');
     assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 0,
       'fallback releases the committed plan reservation');
@@ -2671,7 +2671,7 @@ async function runPerf1StructuralTests() {
     await new Promise((resolve) => setImmediate(resolve));
     const retryRows = walk(container, (node) => node && node._task);
     assert(seamCalls === 4 && app._creates.length === 4, 'post-abandonment retry writes exactly once');
-    assert(app._creates[3].path === 'spice/tasks/Apply failure.md', 'retry reuses the unwritten base path without suffix drift');
+    assert(app._creates[3].path === 'spice/tasks/Apply failure/Apply failure.md', 'retry reuses the unwritten base path without suffix drift');
     assert(retryRows.length === 3 && retryRows[2]._task.path === app._creates[3].path,
       'retry leaves exactly one real path-bound row');
   });
@@ -2726,9 +2726,9 @@ async function runPerf1StructuralTests() {
 
     input.value = 'Fallback child';
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
-    await Promise.resolve(); await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     assert(seamCalls === 0, 'missing TaskTodayList bypasses optimistic RenderSafe apply');
-    assert(app._creates.length === 1 && app._creates[0].path === 'spice/tasks/Fallback child.md',
+    assert(app._creates.length === 1 && app._creates[0].path === 'spice/tasks/Fallback child/Fallback child.md',
       'fallback persists the already-reserved base path exactly once');
     assert(input.value === 'Fallback child', 'pending persistence keeps input recoverable');
     assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 1,
@@ -2781,8 +2781,8 @@ async function runPerf1StructuralTests() {
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await Promise.resolve(); await Promise.resolve();
     assert(pendingFallbacks.length === 2
-      && pendingFallbacks[0].path === 'spice/tasks/Older receipt.md'
-      && pendingFallbacks[1].path === 'spice/tasks/Newer receipt.md',
+      && pendingFallbacks[0].path === 'spice/tasks/Older receipt/Older receipt.md'
+      && pendingFallbacks[1].path === 'spice/tasks/Newer receipt/Newer receipt.md',
     'overlapping receipt fallbacks reserve distinct exact paths');
     assert(TD._quickCreateReservations && TD._quickCreateReservations.size === 2,
       'both overlapping receipt fallbacks retain path ownership while pending');
@@ -2802,7 +2802,7 @@ async function runPerf1StructuralTests() {
 
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await Promise.resolve(); await Promise.resolve();
-    assert(pendingFallbacks[2].path === 'spice/tasks/Newer receipt.md',
+    assert(pendingFallbacks[2].path === 'spice/tasks/Newer receipt/Newer receipt.md',
       'retry reuses the released newer base path without suffix drift');
     pendingFallbacks[2].resolve({ ok: true, path: pendingFallbacks[2].path });
     await Promise.resolve(); await Promise.resolve();
@@ -2834,8 +2834,8 @@ async function runPerf1StructuralTests() {
     inputEvent({ target: input });
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await Promise.resolve(); await Promise.resolve();
-    assert(pendingFallbacks[5].path === 'spice/tasks/Same-title overlap.md'
-      && pendingFallbacks[6].path === 'spice/tasks/Same-title overlap 2.md',
+    assert(pendingFallbacks[5].path === 'spice/tasks/Same-title overlap/Same-title overlap.md'
+      && pendingFallbacks[6].path === 'spice/tasks/Same-title overlap (Aug 2)/Same-title overlap (Aug 2).md',
     'same-title overlap reserves distinct base and suffixed paths');
     pendingFallbacks[5].resolve({ ok: true, path: pendingFallbacks[5].path });
     await Promise.resolve(); await Promise.resolve();
@@ -2872,8 +2872,8 @@ async function runPerf1StructuralTests() {
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await Promise.resolve(); await Promise.resolve();
-    assert(pendingFallbacks[9].path === 'spice/tasks/Sequence-only overlap.md'
-      && pendingFallbacks[10].path === 'spice/tasks/Sequence-only overlap 2.md',
+    assert(pendingFallbacks[9].path === 'spice/tasks/Sequence-only overlap/Sequence-only overlap.md'
+      && pendingFallbacks[10].path === 'spice/tasks/Sequence-only overlap (Aug 2)/Sequence-only overlap (Aug 2).md',
     'same-title double-submit without an input event reserves distinct paths');
     pendingFallbacks[9].resolve({ ok: true, path: pendingFallbacks[9].path });
     await Promise.resolve(); await Promise.resolve();

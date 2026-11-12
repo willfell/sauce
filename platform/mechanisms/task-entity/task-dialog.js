@@ -95,6 +95,9 @@ class TaskDialog {
     isCmdEnter(event) { return TaskDialog.isCmdEnter(event); }
     filterList(host, opts) { return TaskDialog.filterList(host, opts); }
     projectField(parent, opts) { return TaskDialog.projectField(parent, opts); }
+    _takenNames(app, reservedLower) { return TaskDialog._takenNames(app, reservedLower); }
+    _resolveTaskParent(app, parentLink) { return TaskDialog._resolveTaskParent(app, parentLink); }
+    _parentFolderFor(app, parentLink) { return TaskDialog._parentFolderFor(app, parentLink); }
 
     // ---------- Static pure helpers ----------
 
@@ -1972,12 +1975,78 @@ class TaskDialog {
     }
 
     /**
-     * CREATE — write ONE new file. Compose via TaskEntity, validate, then build
+     * Vault-wide clash check for a new task name: true when any markdown file
+     * has that basename (case-insensitive) or the name is in `reservedLower`
+     * (names already promised to in-flight creates). Candidates arrive
+     * lowercased, without ".md".
+     */
+    static _takenNames(app, reservedLower) {
+        const names = new Set();
+        try {
+            const files = app && app.vault && typeof app.vault.getMarkdownFiles === 'function'
+                ? app.vault.getMarkdownFiles() : [];
+            for (const f of files || []) {
+                const base = f && f.basename != null ? f.basename
+                    : String((f && f.path) || '').replace(/^.*\//, '').replace(/\.md$/i, '');
+                if (base) names.add(String(base).toLowerCase());
+            }
+        } catch (_e) { /* an unreadable vault reports nothing taken */ }
+        return (lowerBasename) => names.has(lowerBasename)
+            || !!(reservedLower && reservedLower.has(lowerBasename));
+    }
+
+    /**
+     * The note a `parent_task` link points at, with the title a subtask name
+     * would carry: the note's `title` frontmatter, else its basename. Null for
+     * an empty link or one that resolves to nothing.
+     */
+    static _resolveTaskParent(app, parentLink) {
+        try {
+            const name = TaskDialog._linkBasename(parentLink);
+            if (!name || !app || !app.metadataCache
+                || typeof app.metadataCache.getFirstLinkpathDest !== 'function') return null;
+            const file = app.metadataCache.getFirstLinkpathDest(name, '');
+            if (!file || !file.path) return null;
+            let title = '';
+            try {
+                const cache = typeof app.metadataCache.getFileCache === 'function'
+                    ? app.metadataCache.getFileCache(file) : null;
+                const t = cache && cache.frontmatter && cache.frontmatter.title;
+                if (t != null) title = String(t).trim();
+            } catch (_e) { /* fall back to the basename */ }
+            if (!title) title = file.basename != null ? String(file.basename)
+                : String(file.path).replace(/^.*\//, '').replace(/\.md$/i, '');
+            return { file, title };
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    /**
+     * Where a subtask of `parentLink` is created: the parent's own folder when
+     * the parent is a folder note in the live task tree. Null for no parent, an
+     * unresolved parent, a still-flat parent, or one inside _done/ or _trash/ -
+     * the subtask then goes to the task root and keeps `parent_task`.
+     */
+    static _parentFolderFor(app, parentLink) {
+        const TE = TaskDialog._taskEntity();
+        const parent = TaskDialog._resolveTaskParent(app, parentLink);
+        if (!TE || !parent) return null;
+        const path = String(parent.file.path);
+        const root = TE.TASK_ROOT + '/';
+        if (path.indexOf(root) !== 0 || !TE.isFolderNote(path)) return null;
+        const rest = path.slice(root.length);
+        if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0) return null;
+        return { folder: TE.taskFolderOf(path), title: parent.title };
+    }
+
+    /**
+     * CREATE - write ONE new file. Compose via TaskEntity, validate, then build
      * the final body as CHROME (TaskChromeBar + TaskNoteView + marker) with the
      * typed user notes appended BELOW the `<!-- TASK_NOTES -->` marker. The
-     * filename is the readable "<title>.md"; since titles can collide, dedupe the
-     * base against the vault (" 2", " 3", …) so we never clobber an existing task.
-     * Never touches any other note.
+     * note is `<parent folder>/<Name>/<Name>.md`; `<Name>` is vault-unique
+     * (TaskEntity.taskName) and reserved names (in-flight quick creates) count
+     * as taken. Never touches any other note.
      */
     _prepareCreate(app, payload, notes, opts) {
         const TE = TaskDialog._taskEntity();
@@ -1988,25 +2057,32 @@ class TaskDialog {
         const v = TE.validatePayload(payloadWithMoment);
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         const { frontmatter, body } = TE.composeNote(payloadWithMoment);
-        // Human-readable filename, deduped against the vault (title collisions).
-        const base = TE.taskFilename(payloadWithMoment);
-        const reservedPaths = opts && opts.reservedPaths;
-        const finalName = TE._uniqueName(base, (pp) => !!((reservedPaths && reservedPaths.has(pp))
-            || (app.vault && typeof app.vault.getAbstractFileByPath === 'function'
-                && app.vault.getAbstractFileByPath(pp))));
-        const path = 'spice/tasks/' + finalName;
+        const reservedNames = opts && opts.reservedNames;
+        const parentLink = payload && payload.parent_task;
+        const parentInfo = parentLink ? TaskDialog._resolveTaskParent(app, parentLink) : null;
+        const parentFolder = parentLink ? TaskDialog._parentFolderFor(app, parentLink) : null;
+        const name = TE.taskName(payload.title, {
+            parentTitle: parentInfo ? parentInfo.title : undefined,
+            createdAt: frontmatter.created_at,
+            taken: TaskDialog._takenNames(app, reservedNames),
+        });
+        const path = TE.folderNotePath(parentFolder ? parentFolder.folder : TE.TASK_ROOT, name);
         // Chrome first (from composeNote), then the typed notes below the marker.
         const chromeBody = body || '';
         const userNotes = String(notes == null ? '' : notes);
         const finalBody = userNotes ? chromeBody + userNotes + '\n' : chromeBody;
         const content = TaskDialog.renderNote(frontmatter, finalBody);
-        return { path, content, frontmatter };
+        return { path, content, frontmatter, nameKey: name.toLowerCase() };
     }
 
     async _commitCreate(app, plan, opts) {
         if (!app || !plan || !plan.path) return;
         try {
-            await this._ensureFolder(app, 'spice/tasks');
+            const parts = plan.path.split('/');
+            parts.pop();
+            for (let i = 1; i <= parts.length; i++) {
+                await this._ensureFolder(app, parts.slice(0, i).join('/'));
+            }
             const file = await app.vault.create(plan.path, plan.content);
             try { new Notice('Task created'); } catch (_e) {}
             if (!opts || opts.reconcile !== false) {
@@ -2111,10 +2187,10 @@ class TaskDialog {
             links: [],
         };
         const reservations = this._quickCreateReservations || (this._quickCreateReservations = new Set());
-        const plan = this._prepareCreate(app, payload, '', { reservedPaths: reservations });
+        const plan = this._prepareCreate(app, payload, '', { reservedNames: reservations });
         if (!plan) return;
-        reservations.add(plan.path);
-        plan._quickReservation = { owner: reservations, path: plan.path };
+        reservations.add(plan.nameKey);
+        plan._quickReservation = { owner: reservations, key: plan.nameKey };
         const fm = plan.frontmatter || {};
         plan.task = {
             title: String(fm.title || title),
@@ -2132,7 +2208,7 @@ class TaskDialog {
     releaseQuickPlan(plan) {
         const reservation = plan && plan._quickReservation;
         if (!reservation) return;
-        try { reservation.owner.delete(reservation.path); } catch (_e) {}
+        try { reservation.owner.delete(reservation.key); } catch (_e) {}
         delete plan._quickReservation;
     }
 

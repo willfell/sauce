@@ -412,6 +412,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-create",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-create.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",
