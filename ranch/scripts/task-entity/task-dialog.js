@@ -105,6 +105,7 @@ class TaskDialog {
     _restoreFields(app, priors) { return TaskDialog._restoreFields(app, priors); }
     _resolveTaskParent(app, parentLink) { return TaskDialog._resolveTaskParent(app, parentLink); }
     _parentFolderFor(app, parentLink) { return TaskDialog._parentFolderFor(app, parentLink); }
+    _planEditMove(app, file, payload, prior) { return TaskDialog._planEditMove(app, file, payload, prior); }
 
     // ---------- Static pure helpers ----------
 
@@ -1520,7 +1521,8 @@ class TaskDialog {
             if (saveBtn.disabled) return false;
             try {
                 if (editPath) {
-                    await this._saveEdit(app, editFile, buildPayload(), state.notesLoaded ? state.notes : null);
+                    const saved = await this._saveEdit(app, editFile, buildPayload(), state.notesLoaded ? state.notes : null);
+                    if (saved && saved.ok === false) return false;
                     closeOverlay();
                     return true;
                 }
@@ -1867,11 +1869,12 @@ class TaskDialog {
     }
 
     /**
-     * Basenames of open top-level task notes (not _done/ or _trash/), most
-     * recently modified first — the Subtask of… picker's candidates. When
-     * editing, the task itself and every task whose parent chain reaches it
-     * are excluded, so a pick can never make a cycle (the walk is loop-guarded).
-     * Empty on any failure.
+     * Basenames of open task notes at any depth under spice/tasks (not
+     * _done/ or _trash/), most recently modified first — the Subtask of…
+     * picker's candidates. When editing, the task itself, everything inside
+     * its folder and (for flat legacy notes) every task whose parent_task
+     * chain reaches it are excluded, so a pick can never make a cycle (the
+     * walk is loop-guarded). Empty on any failure.
      */
     static _parentCandidates(app, editPath) {
         try {
@@ -1887,11 +1890,15 @@ class TaskDialog {
                 const name = String(f.basename || '');
                 const parent = TaskDialog._linkBasename(fmx.parent_task);
                 if (name && parent && !parentOf.has(name)) parentOf.set(name, parent);
-                if (p.slice(PREFIX.length).indexOf('/') >= 0) continue;
+                const rest = p.slice(PREFIX.length);
+                if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0) continue;
                 if (fmx.status && fmx.status !== 'open') continue;
                 cand.push({ name, path: p, mtime: (f.stat && Number(f.stat.mtime)) || 0 });
             }
             const self = editPath ? String(editPath).replace(/^.*\//, '').replace(/\.md$/i, '') : '';
+            const TE = TaskDialog._taskEntity();
+            const ownTree = editPath && TE && TE.isFolderNote(String(editPath))
+                ? TE.taskFolderOf(String(editPath)) + '/' : '';
             const reachesSelf = (name) => {
                 const seen = new Set();
                 let cur = name;
@@ -1904,7 +1911,8 @@ class TaskDialog {
             };
             cand.sort((a, b) => (b.mtime - a.mtime) || a.name.localeCompare(b.name));
             return cand
-                .filter((c) => c.name && !(editPath && (c.path === editPath || reachesSelf(c.name))))
+                .filter((c) => c.name && !(editPath && (c.path === editPath
+                    || (ownTree && c.path.indexOf(ownTree) === 0) || reachesSelf(c.name))))
                 .map((c) => c.name);
         } catch (_e) {
             return [];
@@ -2263,6 +2271,65 @@ class TaskDialog {
         }
     }
 
+    /**
+     * What an edit save does to a task FOLDER note's location, decided before
+     * anything is written. Resolves { ok: true } when the note stays put (flat
+     * notes, cold TaskEntity, nothing changed), { ok: true, folder, oldName,
+     * destParent, name } for a move and/or rename, or { ok: false, reason }
+     * when the new parent is the task itself or inside its own folder.
+     * Re-parenting follows the create rule: a parent that resolves to a live
+     * folder note takes the folder, a cleared parent sends it to spice/tasks/,
+     * a flat / unresolved / done / trashed parent leaves it where it is. A
+     * rename happens only when the title changed and its sanitized form is not
+     * already the folder name; the new name is vault-unique with this task's
+     * own current name not counting as taken. Done and trashed tasks never
+     * change parent folder, they only rename in place.
+     */
+    static _planEditMove(app, file, payload, prior) {
+        const TE = TaskDialog._taskEntity();
+        const notePath = String((file && file.path) || '');
+        if (!TE || !TE.isFolderNote(notePath) || !TE.rootFolderOf(notePath)) return { ok: true };
+        const fm = prior || {};
+        const folder = TE.taskFolderOf(notePath);
+        const oldName = folder.slice(folder.lastIndexOf('/') + 1);
+        const currentParent = folder.slice(0, folder.lastIndexOf('/'));
+        const live = notePath.indexOf(TE.TASK_ROOT + '/_done/') !== 0
+            && notePath.indexOf(TE.TASK_ROOT + '/_trash/') !== 0;
+        const hasParent = Object.prototype.hasOwnProperty.call(payload, 'parent_task');
+        const newLink = hasParent ? String(payload.parent_task || '') : '';
+        const oldLink = fm.parent_task == null ? '' : String(fm.parent_task);
+        let destParent = currentParent;
+        if (live && hasParent && newLink !== oldLink) {
+            if (!newLink) {
+                destParent = TE.TASK_ROOT;
+            } else {
+                const pf = TaskDialog._parentFolderFor(app, newLink);
+                if (pf) {
+                    if (pf.folder === folder || pf.folder.indexOf(folder + '/') === 0) {
+                        return { ok: false, reason: 'a task cannot be a subtask of itself or of its own subtask' };
+                    }
+                    destParent = pf.folder;
+                }
+            }
+        }
+        const prevTitle = fm.title != null && String(fm.title).trim() !== '' ? String(fm.title).trim() : oldName;
+        const newTitle = String(payload.title == null ? '' : payload.title).trim();
+        let name = oldName;
+        if (newTitle !== prevTitle && TE._sanitizeTitle(newTitle) !== oldName) {
+            const link = hasParent ? newLink : oldLink;
+            const info = link ? TaskDialog._resolveTaskParent(app, link) : null;
+            const own = oldName.toLowerCase();
+            const takenAll = TaskDialog._takenNames(app);
+            name = TE.taskName(newTitle, {
+                parentTitle: info ? info.title : undefined,
+                createdAt: fm.created_at,
+                taken: (n) => n !== own && takenAll(n),
+            });
+        }
+        if (destParent === currentParent && name === oldName) return { ok: true };
+        return { ok: true, folder, oldName, destParent, name };
+    }
+
     /** Where a note at `path` landed after `_moveTaskFolder` returned `moved`. */
     static _movedPath(path, moved) {
         const p = String(path);
@@ -2476,6 +2543,9 @@ class TaskDialog {
         const TE = TaskDialog._taskEntity();
         const v = TE ? TE.validatePayload(payload) : { valid: !!(payload.title && String(payload.title).trim()) };
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
+        const prior = Object.assign({}, TaskDialog._fmOf(app, file) || {});
+        const plan = TaskDialog._planEditMove(app, file, payload, prior);
+        if (!plan.ok) { try { new Notice('Cannot save: ' + plan.reason); } catch (_e) {} return { ok: false, reason: plan.reason }; }
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.title = payload.title;
             const prevDue = fm.due == null ? '' : String(fm.due);
@@ -2524,7 +2594,21 @@ class TaskDialog {
                 }
             } catch (_e) { /* frontmatter already saved; body write best-effort */ }
         }
+        let finalPath = String(file.path || '');
+        if (plan.folder) {
+            const newFolder = plan.destParent + '/' + plan.name;
+            try {
+                await this._renameTaskFolder(app, plan.folder, newFolder, plan.name);
+                finalPath = newFolder + '/' + plan.name + '.md';
+            } catch (e) {
+                const fields = { title: prior.title, parent_task: prior.parent_task };
+                await TaskDialog._restoreFields(app, [{ file, fields }]);
+                try { new Notice('Could not move or rename the task: ' + ((e && e.message) || e)); } catch (_e) {}
+                return { ok: false, reason: 'move-failed' };
+            }
+        }
         try { new Notice('Task saved'); } catch (_e) {}
+        return { ok: true, path: finalPath };
     }
 
     /**
