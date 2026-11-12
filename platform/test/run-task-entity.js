@@ -3983,8 +3983,8 @@ async function runTaskDialogSauceModalTests() {
     assert(!source.includes('BTN_BASE'), 'both duplicated BTN_BASE paths must be deleted');
     assert(!source.includes('sauce-todo-create-overlay') && !source.includes('sauce-task-confirm-overlay'),
       'legacy overlay identities must be absent');
-    assert((source.match(/globalThis\.customJS\.SauceModal/g) || []).length === 3,
-      'create/edit, confirmDelete and the shared openShell each resolve the real global SauceModal instance');
+    assert((source.match(/globalThis\.customJS\.SauceModal/g) || []).length === 4,
+      'create/edit, confirmDelete, confirmComplete and the shared openShell each resolve the real global SauceModal instance');
   });
 
   await okAsync('TDSM-2 create renderer mounts real SauceModal skeleton and sauce-core footer controls', async () => {

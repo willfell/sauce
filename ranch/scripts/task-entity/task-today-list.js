@@ -164,14 +164,15 @@ class TaskTodayList {
     /**
      * Today-surface failure policy. Returns:
      *   'ok'      - succeeded
-     *   'skipped' - a no_op refusal (cold load, in flight, task no longer open)
+     *   'skipped' - a no_op refusal (cold load, in flight, task no longer open),
+     *               or the user declined a question (reason 'cancelled')
      *   'silent'  - refused before writing with no Notice (see SILENT_REASONS),
      *               or the call itself threw past its own guard (null result)
      *   'noticed' - the write failed and its rail already told the user
      */
     static classifyOutcome(res) {
         if (res && res.ok === true) return 'ok';
-        if (res && res.no_op) return 'skipped';
+        if (res && (res.no_op || res.reason === 'cancelled')) return 'skipped';
         if (!res) return 'silent';
         const reason = String(res.reason || '');
         return TaskTodayList.SILENT_REASONS.includes(reason) ? 'silent' : 'noticed';
@@ -1152,7 +1153,10 @@ class TaskTodayList {
                 const res = await TD.markDone(path);
                 if (res && res.ok === false) {
                     revert();
-                    try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
+                    // 'cancelled' = the user said No to completing open subtasks: quiet.
+                    if (res.reason !== 'cancelled') {
+                        try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
+                    }
                 } else {
                     // On success the file moves to _done/; the row is already
                     // gone. options.onDone lets the host repaint its counts.

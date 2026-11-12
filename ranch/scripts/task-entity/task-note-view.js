@@ -1123,6 +1123,12 @@ class TaskNoteView {
                         if (label) label.textContent = 'Marking done…';
                         try {
                             const res = await TD.markDone(filePath);
+                            if (res && res.ok === false && res.reason === 'cancelled') {
+                                // The user kept the task open (said No to its open subtasks).
+                                doneBtn.disabled = false;
+                                if (label) label.textContent = 'Mark done';
+                                return;
+                            }
                             if (res && res.ok === false) throw new Error(res.reason || 'unknown');
                             // Celebrate, then let Dataview redraw the done card:
                             // the title strikes through and a check pops.

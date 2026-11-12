@@ -655,6 +655,28 @@ process.exitCode = 1;
     assert(!threw, 'a throwing onDone never escapes the gesture');
   });
 
+  await ok('RD-ROW-CANCEL a declined subtasks question puts the row back quietly, with no onDone', async () => {
+    rowEnv();
+    const notices = [];
+    const savedNotice = global.Notice;
+    global.Notice = function (m) { notices.push(m); };
+    try {
+      const seen = [];
+      const td = { open() {}, async markDone() { return { ok: false, reason: 'cancelled' }; } };
+      const list = makeTreeNode('div');
+      const row = TaskTodayList.renderTaskRow(list, openTask(), td, { onDone: (t) => seen.push(t) });
+      const cb = findByCls(row, 'sauce-task-today-cbwrap').children[0];
+      cb.checked = true;
+      await fireEvent(cb, 'change');
+      assert(list.children.includes(row) && cb.checked === false, 'row restored and unchecked');
+      assert(seen.length === 0, 'no onDone');
+      assert(notices.length === 0, 'no Notice: ' + JSON.stringify(notices));
+      assert(TaskTodayList.classifyOutcome({ ok: false, reason: 'cancelled' }) === 'skipped', 'bulk treats cancelled as skipped');
+    } finally {
+      global.Notice = savedNotice;
+    }
+  });
+
   await ok('RD-DIALOG-SLUGIFY _slugify is reachable through the stored instance', async () => {
     assert(TaskDialog._slugify('Zeta Works') === 'zeta-works', 'instance delegate: ' + TaskDialog._slugify('Zeta Works'));
     assert(TaskDialog._slugify('  Q3 / Launch!! ') === 'q3-launch');

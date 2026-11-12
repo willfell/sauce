@@ -420,6 +420,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-lifecycle",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-lifecycle.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",

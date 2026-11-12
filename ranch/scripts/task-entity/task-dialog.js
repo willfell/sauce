@@ -95,7 +95,14 @@ class TaskDialog {
     isCmdEnter(event) { return TaskDialog.isCmdEnter(event); }
     filterList(host, opts) { return TaskDialog.filterList(host, opts); }
     projectField(parent, opts) { return TaskDialog.projectField(parent, opts); }
-    _takenNames(app, reservedLower) { return TaskDialog._takenNames(app, reservedLower); }
+    _takenNames(app, reservedLower, excludeUnder) { return TaskDialog._takenNames(app, reservedLower, excludeUnder); }
+    _taskNotesBelow(app, folder) { return TaskDialog._taskNotesBelow(app, folder); }
+    _openDescendants(app, folder) { return TaskDialog._openDescendants(app, folder); }
+    _fmOf(app, file) { return TaskDialog._fmOf(app, file); }
+    _isTaskFolderNote(path) { return TaskDialog._isTaskFolderNote(path); }
+    _folderNoteWhileCold(path) { return TaskDialog._folderNoteWhileCold(path); }
+    _movedPath(path, moved) { return TaskDialog._movedPath(path, moved); }
+    _restoreFields(app, priors) { return TaskDialog._restoreFields(app, priors); }
     _resolveTaskParent(app, parentLink) { return TaskDialog._resolveTaskParent(app, parentLink); }
     _parentFolderFor(app, parentLink) { return TaskDialog._parentFolderFor(app, parentLink); }
 
@@ -612,19 +619,25 @@ class TaskDialog {
     /**
      * Complete a task by PATH (no dialog). Resolves app + the task file from the
      * path, then routes through the SAME single-file _markDone internal that the
-     * edit-dialog's Done button uses (status=done + completed_at, then move to
-     * spice/tasks/_done/). Consumed by surface widgets (TaskTodayList's row
-     * checkbox) so a one-tap complete never opens the modal. Returns
-     * { ok: true } on success or { ok: false, reason } so the caller can revert
-     * its optimistic UI. Never throws.
+     * edit-dialog's Done button uses (status=done + completed_at; a top-level
+     * task folder moves to spice/tasks/_done/YYYY/MM/, a subtask stays put, a
+     * flat note moves to spice/tasks/_done/). Consumed by surface widgets
+     * (TaskTodayList's row checkbox, the task card's Mark done) so a one-tap
+     * complete never opens the edit modal. When the task still has open
+     * subtasks and `opts.completeOpenSubtasks` is not set, it asks first
+     * (confirmComplete); No resolves { ok: false, reason: 'cancelled' } with
+     * nothing changed. Returns { ok: true, path? } on success or
+     * { ok: false, reason } so the caller can revert its optimistic UI.
+     * Never throws.
      */
-    async markDone(path) {
+    async markDone(path, opts) {
         try {
             const { app, file } = this._resolveFile(path);
             if (!app) return { ok: false, reason: 'app unavailable' };
             if (!file) return { ok: false, reason: 'task file not found' };
-            await this._markDone(app, file);
-            return { ok: true };
+            const res = await this._markDone(app, file, opts);
+            if (res && res.ok === false) return res;
+            return res && res.path ? { ok: true, path: res.path } : { ok: true };
         } catch (e) {
             return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
         }
@@ -633,16 +646,18 @@ class TaskDialog {
     /**
      * Recoverable-delete a task by PATH (no dialog). Routes through the SAME
      * single-file _markDeleted internal that the edit-dialog's Delete button
-     * uses (status=deleted, then move to spice/tasks/_trash/). Returns
-     * { ok: true } / { ok: false, reason }. Never throws.
+     * uses (status=deleted, then move to spice/tasks/_trash/: a task folder
+     * moves whole, a flat note moves alone). Returns { ok: true, path? } /
+     * { ok: false, reason }. Never throws.
      */
     async markDeleted(path) {
         try {
             const { app, file } = this._resolveFile(path);
             if (!app) return { ok: false, reason: 'app unavailable' };
             if (!file) return { ok: false, reason: 'task file not found' };
-            await this._markDeleted(app, file);
-            return { ok: true };
+            const res = await this._markDeleted(app, file);
+            if (res && res.ok === false) return res;
+            return res && res.path ? { ok: true, path: res.path } : { ok: true };
         } catch (e) {
             return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
         }
@@ -699,6 +714,16 @@ class TaskDialog {
                     title = slash >= 0 ? base.slice(slash + 1) : base;
                 }
 
+                // A task folder goes to the trash whole: say how many subtasks go with it.
+                let below = 0;
+                try {
+                    const fp = String((file && file.path) || path || '');
+                    if (TaskDialog._isTaskFolderNote(fp)) {
+                        const TE = TaskDialog._taskEntity();
+                        below = TaskDialog._taskNotesBelow(app, TE.taskFolderOf(fp)).length;
+                    }
+                } catch (_e) { below = 0; }
+
                 const handle = sauceModal.open({
                     doc,
                     title: 'Delete task?',
@@ -707,6 +732,7 @@ class TaskDialog {
                         const copy = body.createEl('div', { cls: 'sauce-task-confirm-copy' });
                         copy.createSpan({ text: 'This moves ' });
                         copy.createEl('strong', { text: '“' + title + '”' });
+                        if (below > 0) copy.createSpan({ text: ' and ' + below + (below === 1 ? ' subtask' : ' subtasks') });
                         copy.createSpan({ text: ' to the trash. You can recover it from spice/tasks/_trash.' });
                     },
                     buttons: [
@@ -750,6 +776,62 @@ class TaskDialog {
                 }
             } catch (e) {
                 done({ ok: false, reason: (e && (e.message || String(e))) || 'unknown' });
+            }
+        });
+    }
+
+    /**
+     * CONFIRM-COMPLETE — the yes/no question markDone asks before finishing a
+     * task that still has open subtasks: "Also complete its N open subtasks?"
+     * Resolves true for Complete all, false for Cancel / dismiss / cold-load
+     * (no app, no document, no SauceModal). Writes nothing. Never throws.
+     */
+    async confirmComplete(path) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const done = (r) => { if (settled) return; settled = true; resolve(!!r); };
+            try {
+                const { app, file } = this._resolveFile(path);
+                if (!app || !file) { done(false); return; }
+                const doc = (typeof document !== 'undefined' && document) ? document : null;
+                const sauceModal = (typeof globalThis !== 'undefined' && globalThis.customJS)
+                    ? globalThis.customJS.SauceModal : null;
+                if (!doc || !doc.body || !sauceModal || typeof sauceModal.open !== 'function') { done(false); return; }
+                const TE = TaskDialog._taskEntity();
+                const n = TE ? TaskDialog._openDescendants(app, TE.taskFolderOf(String(file.path))).length : 0;
+                const handle = sauceModal.open({
+                    doc,
+                    title: 'Complete subtasks?',
+                    autofocus: '.sauce-task-confirm-cancel',
+                    body: (body) => {
+                        const copy = body.createEl('div', { cls: 'sauce-task-confirm-copy' });
+                        copy.createSpan({ text: 'Also complete its ' + n + (n === 1 ? ' open subtask?' : ' open subtasks?') });
+                    },
+                    buttons: [
+                        { label: 'Cancel', action: 'cancel', className: 'sauce-task-confirm-cancel' },
+                        {
+                            label: 'Complete all',
+                            tone: 'accent',
+                            close: false,
+                            className: 'sauce-task-confirm-complete',
+                            onClick: (api) => {
+                                done(true);
+                                try { api.close('complete'); } catch (_e) {}
+                            },
+                        },
+                    ],
+                    onClose: () => done(false),
+                });
+                if (!handle) done(false);
+                else {
+                    const cancelBtn = handle.footer && handle.footer.querySelector
+                        ? handle.footer.querySelector('.sauce-btn') : null;
+                    const okBtn = handle.footer && handle.footer.children ? handle.footer.children[1] : null;
+                    if (cancelBtn) cancelBtn.className += ' sauce-task-confirm-cancel';
+                    if (okBtn) okBtn.className += ' sauce-task-confirm-complete';
+                }
+            } catch (_e) {
+                done(false);
             }
         });
     }
@@ -1376,12 +1458,23 @@ class TaskDialog {
             };
             const doneBtn = mkBtn(leftGroup, { label: 'Done', icon: ICON.check, variant: 'ghost' });
             doneBtn.onclick = async () => {
-                try { await this._markDone(app, editFile); closeOverlay(); }
+                try {
+                    const res = await this._markDone(app, editFile);
+                    if (res && res.ok === false) {
+                        if (res.reason !== 'cancelled') { try { new Notice('Done failed: ' + res.reason, 6000); } catch (_e) {} }
+                        return;
+                    }
+                    closeOverlay();
+                }
                 catch (e) { try { new Notice('Done failed: ' + (e.message || e), 6000); } catch (_e) {} }
             };
             const delBtn = mkBtn(leftGroup, { label: 'Delete', icon: ICON.trash, variant: 'danger' });
             delBtn.onclick = async () => {
-                try { await this._markDeleted(app, editFile); closeOverlay(); }
+                try {
+                    const res = await this._markDeleted(app, editFile);
+                    if (res && res.ok === false) { try { new Notice('Delete failed: ' + res.reason, 6000); } catch (_e) {} return; }
+                    closeOverlay();
+                }
                 catch (e) { try { new Notice('Delete failed: ' + (e.message || e), 6000); } catch (_e) {} }
             };
         } else {
@@ -1978,14 +2071,18 @@ class TaskDialog {
      * Vault-wide clash check for a new task name: true when any markdown file
      * has that basename (case-insensitive) or the name is in `reservedLower`
      * (names already promised to in-flight creates). Candidates arrive
-     * lowercased, without ".md".
+     * lowercased, without ".md". Files under the `excludeUnder` folder are
+     * left out (the notes of a folder about to move, whose own names don't
+     * count against it).
      */
-    static _takenNames(app, reservedLower) {
+    static _takenNames(app, reservedLower, excludeUnder) {
         const names = new Set();
+        const skip = excludeUnder ? String(excludeUnder) + '/' : '';
         try {
             const files = app && app.vault && typeof app.vault.getMarkdownFiles === 'function'
                 ? app.vault.getMarkdownFiles() : [];
             for (const f of files || []) {
+                if (skip && f && String(f.path || '').indexOf(skip) === 0) continue;
                 const base = f && f.basename != null ? f.basename
                     : String((f && f.path) || '').replace(/^.*\//, '').replace(/\.md$/i, '');
                 if (base) names.add(String(base).toLowerCase());
@@ -2038,6 +2135,129 @@ class TaskDialog {
         const rest = path.slice(root.length);
         if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0) return null;
         return { folder: TE.taskFolderOf(path), title: parent.title };
+    }
+
+    /** A note's cached frontmatter, or null. Never throws. */
+    static _fmOf(app, file) {
+        try {
+            const cache = app && app.metadataCache && typeof app.metadataCache.getFileCache === 'function'
+                ? app.metadataCache.getFileCache(file) : null;
+            return (cache && cache.frontmatter) || null;
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    /**
+     * True for a task note in the folder layout: `<Name>/<Name>.md` inside a
+     * top-level task folder (live, in a _done/YYYY/MM month, or in _trash).
+     */
+    static _isTaskFolderNote(path) {
+        const TE = TaskDialog._taskEntity();
+        return !!(TE && TE.isFolderNote(path) && TE.rootFolderOf(path));
+    }
+
+    /**
+     * True when TaskEntity is not loaded yet and `path` has the folder-note
+     * shape (`spice/tasks/…/<Name>/<Name>.md`). Done and delete refuse such a
+     * note rather than move it with the flat rule into a folder that does
+     * not exist.
+     */
+    static _folderNoteWhileCold(path) {
+        if (TaskDialog._taskEntity()) return false;
+        const segs = String(path == null ? '' : path).split('/');
+        if (segs.length < 4 || segs[0] !== 'spice' || segs[1] !== 'tasks') return false;
+        return segs[segs.length - 1].replace(/\.md$/i, '') === segs[segs.length - 2];
+    }
+
+    /**
+     * Every task note (`type: task` folder note) inside `folder` at any
+     * depth, not counting the folder's own note. Never throws.
+     */
+    static _taskNotesBelow(app, folder) {
+        const out = [];
+        const TE = TaskDialog._taskEntity();
+        if (!TE || !folder) return out;
+        const dir = String(folder);
+        const prefix = dir + '/';
+        const own = prefix + dir.slice(dir.lastIndexOf('/') + 1) + '.md';
+        try {
+            const files = app && app.vault && typeof app.vault.getMarkdownFiles === 'function'
+                ? app.vault.getMarkdownFiles() : [];
+            for (const f of files || []) {
+                const p = String((f && f.path) || '');
+                if (p.indexOf(prefix) !== 0 || p === own || !TE.isFolderNote(p)) continue;
+                const fm = TaskDialog._fmOf(app, f);
+                if (!fm || fm.type !== 'task') continue;
+                out.push(f);
+            }
+        } catch (_e) { /* an unreadable vault reports none */ }
+        return out;
+    }
+
+    /** The open task notes inside `folder` at any depth. Never throws. */
+    static _openDescendants(app, folder) {
+        const TE = TaskDialog._taskEntity();
+        if (!TE) return [];
+        return TaskDialog._taskNotesBelow(app, folder).filter((f) => {
+            const fm = TaskDialog._fmOf(app, f) || {};
+            return TE.isOpenTask({ type: fm.type, status: fm.status, path: f.path });
+        });
+    }
+
+    /**
+     * Move the task folder `folder` into `destParent` with ONE renameFile on
+     * the folder, so links to every note inside follow. The year/month (or
+     * _trash) folders are ensured first. When `<Name>` is already taken there,
+     * the folder becomes `<Name> 2`, `<Name> 3`, … (also free vault-wide) and
+     * its note is renamed with it, so folder and note keep one name.
+     * Resolves { folder, name, oldFolder, oldName }.
+     */
+    async _moveTaskFolder(app, folder, destParent) {
+        const oldFolder = String(folder);
+        const oldName = oldFolder.slice(oldFolder.lastIndexOf('/') + 1);
+        const parts = String(destParent).split('/');
+        for (let i = 1; i <= parts.length; i++) await this._ensureFolder(app, parts.slice(0, i).join('/'));
+        const exists = (p) => !!(app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+            && app.vault.getAbstractFileByPath(p));
+        let name = oldName;
+        if (exists(destParent + '/' + name)) {
+            const taken = TaskDialog._takenNames(app);
+            for (let n = 2; n < 10000; n++) {
+                const candidate = oldName + ' ' + n;
+                if (!exists(destParent + '/' + candidate) && !taken(candidate.toLowerCase())) { name = candidate; break; }
+            }
+        }
+        const folderFile = app.vault.getAbstractFileByPath(oldFolder);
+        if (!folderFile) throw new Error('task folder not found');
+        const newFolder = destParent + '/' + name;
+        await app.fileManager.renameFile(folderFile, newFolder);
+        if (name !== oldName) {
+            const note = app.vault.getAbstractFileByPath(newFolder + '/' + oldName + '.md');
+            if (note) await app.fileManager.renameFile(note, newFolder + '/' + name + '.md');
+        }
+        return { folder: newFolder, name, oldFolder, oldName };
+    }
+
+    /** Where a note at `path` landed after `_moveTaskFolder` returned `moved`. */
+    static _movedPath(path, moved) {
+        const p = String(path);
+        if (p === moved.oldFolder + '/' + moved.oldName + '.md') return moved.folder + '/' + moved.name + '.md';
+        return moved.folder + p.slice(moved.oldFolder.length);
+    }
+
+    /** Put back the status / completed_at values captured before a failed write. */
+    static async _restoreFields(app, priors) {
+        for (const prior of priors.slice().reverse()) {
+            try {
+                await app.fileManager.processFrontMatter(prior.file, (fm) => {
+                    for (const key of Object.keys(prior.fields)) {
+                        if (prior.fields[key] === undefined) delete fm[key];
+                        else fm[key] = prior.fields[key];
+                    }
+                });
+            } catch (_e) { /* best effort */ }
+        }
     }
 
     /**
@@ -2284,11 +2504,17 @@ class TaskDialog {
     }
 
     /**
-     * DONE — set status=done + completed_at (processFrontMatter, this file only),
-     * then move the file into spice/tasks/_done/ (renameFile). No other note read.
+     * DONE — set status=done + completed_at (processFrontMatter). A recurring
+     * task rolls its due date forward instead and never moves. A task folder
+     * note: its open subtasks are completed too (after confirmComplete unless
+     * `opts.completeOpenSubtasks`; No resolves { ok: false, reason:
+     * 'cancelled' } with nothing written); a subtask then stays in place and a
+     * top-level task's whole folder moves to spice/tasks/_done/YYYY/MM/ by its
+     * completion month. A flat note moves alone into spice/tasks/_done/.
+     * Resolves { ok: true, path } with the note's final path.
      */
-    async _markDone(app, file) {
-        if (!file) { try { new Notice('TaskDialog: task file not found'); } catch (_e) {} return; }
+    async _markDone(app, file, opts) {
+        if (!file) { try { new Notice('TaskDialog: task file not found'); } catch (_e) {} return { ok: false, reason: 'task file not found' }; }
         // Read the CURRENT frontmatter (not the state object — markDone(path)
         // is also called directly from a row checkbox, with no open dialog) to
         // decide recurring vs. one-shot completion.
@@ -2324,7 +2550,7 @@ class TaskDialog {
                     fmw.completed_at = '';
                 });
                 try { new Notice('Task rolled to ' + nextDate); } catch (_e) {}
-                return;
+                return { ok: true, path: file.path, rolled: nextDate };
             }
             // Grammar unsupported / never fires within the horizon — fall through
             // to normal one-shot archiving rather than silently doing nothing.
@@ -2333,27 +2559,76 @@ class TaskDialog {
         const iso = (typeof window !== 'undefined' && window.moment)
             ? window.moment().format('YYYY-MM-DDTHH:mm:ssZ')
             : new Date().toISOString();
+
+        const srcPath = String(file.path);
+        if (TaskDialog._folderNoteWhileCold(srcPath)) return { ok: false, reason: 'task-entity-unavailable' };
+        if (TaskDialog._isTaskFolderNote(srcPath)) {
+            const TE = TaskDialog._taskEntity();
+            const folder = TE.taskFolderOf(srcPath);
+            const open = TaskDialog._openDescendants(app, folder);
+            if (open.length && !(opts && opts.completeOpenSubtasks)) {
+                let yes = false;
+                try { yes = await this.confirmComplete(srcPath); } catch (_e) { yes = false; }
+                if (!yes) return { ok: false, reason: 'cancelled' };
+            }
+            const priors = [];
+            const stamp = async (f) => {
+                await app.fileManager.processFrontMatter(f, (fm2) => {
+                    priors.push({ file: f, fields: { status: fm2.status, completed_at: fm2.completed_at } });
+                    fm2.status = 'done';
+                    fm2.completed_at = iso;
+                });
+            };
+            const rootDir = TE.rootFolderOf(srcPath);
+            const live = rootDir.indexOf(TE.TASK_ROOT + '/_done/') !== 0
+                && rootDir.indexOf(TE.TASK_ROOT + '/_trash/') !== 0;
+            try {
+                for (const f of open) await stamp(f);
+                await stamp(file);
+                if (!live || TE.parentNotePathOf(srcPath)) {
+                    try { new Notice('Task done'); } catch (_e) {}
+                    return { ok: true, path: srcPath };
+                }
+                const moved = await this._moveTaskFolder(app, folder, TE.doneFolderFor(iso));
+                try { new Notice('Task done'); } catch (_e) {}
+                return { ok: true, path: TaskDialog._movedPath(srcPath, moved) };
+            } catch (e) {
+                await TaskDialog._restoreFields(app, priors);
+                throw e;
+            }
+        }
+
         await app.fileManager.processFrontMatter(file, (fm2) => {
             fm2.status = 'done';
             fm2.completed_at = iso;
         });
         await this._ensureFolder(app, 'spice/tasks/_done');
-        await app.fileManager.renameFile(file, TaskDialog.donePath(file.path));
+        const target = TaskDialog.donePath(file.path);
+        await app.fileManager.renameFile(file, target);
         try { new Notice('Task done'); } catch (_e) {}
+        return { ok: true, path: target };
     }
 
     /**
-     * REOPEN — bring a done task back: status=open, completed_at cleared, then
-     * move spice/tasks/_done/<f> back to spice/tasks/<unique f>. Both steps run
-     * inside ONE RenderSafe.mutate write. Refuses a path that is not under
-     * _done/. At most one reopen per path is in flight; a duplicate resolves
-     * { ok: false, reason: 'in-flight' } without writing. Never throws.
-     * Resolves { ok: true, path } | { ok: false, reason }.
+     * REOPEN — bring a done task back: status=open, completed_at cleared.
+     *   - a done task outside _done/ (a finished subtask in place): status only;
+     *   - a task note inside a _done/YYYY/MM/<Root>/ tree: it AND every
+     *     ancestor up to <Root> reopen, then the <Root> folder moves back to
+     *     spice/tasks/<Root> (name re-checked vault-wide, ignoring the moving
+     *     notes; renamed with TaskEntity.taskName only when <Root> is taken);
+     *   - a flat spice/tasks/_done/<f>: moves back to spice/tasks/<unique f>.
+     * Each runs inside ONE RenderSafe.mutate write that restores the statuses
+     * if the move fails. Refuses _trash/ and an open task outside _done/ with
+     * 'not-done'. At most one reopen per path is in flight; a duplicate
+     * resolves { ok: false, reason: 'in-flight' } without writing. Never
+     * throws. Resolves { ok: true, path } | { ok: false, reason }.
      */
     async reopen(path) {
         const src = String(path == null ? '' : path);
+        const ROOT = 'spice/tasks/';
         const DONE = 'spice/tasks/_done/';
-        if (src.indexOf(DONE) !== 0 || src.length === DONE.length) return { ok: false, reason: 'not-done' };
+        if (src.indexOf(ROOT) !== 0 || src.indexOf('spice/tasks/_trash/') === 0
+            || src === DONE) return { ok: false, reason: 'not-done' };
         const RS = TaskDialog._renderSafe();
         if (!RS || typeof RS.mutate !== 'function') return { ok: false, reason: 'render-safe-unavailable' };
         const inFlight = TaskDialog._reopenInFlight || (TaskDialog._reopenInFlight = new Set());
@@ -2363,6 +2638,11 @@ class TaskDialog {
             const { app, file } = this._resolveFile(src);
             if (!app) return { ok: false, reason: 'app unavailable' };
             if (!file) return { ok: false, reason: 'task file not found' };
+            if (src.indexOf(DONE) !== 0) return await this._reopenInPlace(app, file, src, RS);
+            if (TaskDialog._isTaskFolderNote(src)
+                && /^spice\/tasks\/_done\/\d{4}\/\d{2}\/[^/]+$/.test(TaskDialog._taskEntity().rootFolderOf(src))) {
+                return await this._reopenDoneTree(app, src, RS);
+            }
             const TE = TaskDialog._taskEntity();
             if (!TE || typeof TE._uniqueName !== 'function') return { ok: false, reason: 'task-entity-unavailable' };
             const exists = (p) => !!(app.vault && typeof app.vault.getAbstractFileByPath === 'function'
@@ -2401,6 +2681,112 @@ class TaskDialog {
         } finally {
             inFlight.delete(src);
         }
+    }
+
+    /** Reopen a done task where it is (a finished subtask): status only. */
+    async _reopenInPlace(app, file, src, RS) {
+        const fm = TaskDialog._fmOf(app, file);
+        if (!fm || fm.status !== 'done') return { ok: false, reason: 'not-done' };
+        let prior = null;
+        const result = await RS.mutate({
+            app,
+            path: src,
+            failureMessage: 'Could not reopen task',
+            write: async () => {
+                await app.fileManager.processFrontMatter(file, (w) => {
+                    prior = { status: w.status, completed_at: w.completed_at };
+                    w.status = 'open';
+                    w.completed_at = '';
+                });
+                return src;
+            },
+        });
+        if (!result.ok) {
+            return { ok: false, reason: (result.error && (result.error.message || String(result.error))) || 'write failed' };
+        }
+        return prior ? { ok: true, path: src } : { ok: false, reason: 'write failed' };
+    }
+
+    /**
+     * Reopen a task note inside spice/tasks/_done/YYYY/MM/<Root>/: the note
+     * and each ancestor up to <Root> go back to open, then the <Root> folder
+     * moves to spice/tasks/. <Root> keeps its name while that is free
+     * vault-wide (the moving notes' own names don't count); otherwise
+     * TaskEntity.taskName picks the name and the note is renamed with its
+     * folder. Statuses are restored if the move fails.
+     */
+    async _reopenDoneTree(app, src, RS) {
+        const TE = TaskDialog._taskEntity();
+        if (!TE || typeof TE.taskName !== 'function') return { ok: false, reason: 'task-entity-unavailable' };
+        const root = TE.TASK_ROOT;
+        const rootFolder = TE.rootFolderOf(src);
+        const rootName = rootFolder.slice(rootFolder.lastIndexOf('/') + 1);
+        const rootNotePath = rootFolder + '/' + rootName + '.md';
+        const chain = [src];
+        for (let p = TE.parentNotePathOf(src); p && chain.length < 1000; p = TE.parentNotePathOf(p)) chain.push(p);
+        if (chain.indexOf(rootNotePath) < 0) chain.push(rootNotePath);
+        const get = (p) => (app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+            ? app.vault.getAbstractFileByPath(p) : null);
+        const chainFiles = chain.map(get).filter((f) => f && f.path);
+
+        const takenElsewhere = TaskDialog._takenNames(app, null, rootFolder);
+        const topFolders = new Set();
+        try {
+            for (const f of app.vault.getMarkdownFiles() || []) {
+                const p = String((f && f.path) || '');
+                if (p.indexOf(root + '/') !== 0 || p.indexOf(rootFolder + '/') === 0) continue;
+                const rest = p.slice(root.length + 1);
+                if (rest.indexOf('/') > 0) topFolders.add(rest.slice(0, rest.indexOf('/')).toLowerCase());
+            }
+            const rootDir = get(root);
+            for (const c of (rootDir && Array.isArray(rootDir.children)) ? rootDir.children : []) {
+                if (c && c.name && !c.extension) topFolders.add(String(c.name).toLowerCase());
+            }
+        } catch (_e) { /* the name check falls back to basenames only */ }
+        const taken = (lower) => takenElsewhere(lower) || topFolders.has(lower);
+        let name = rootName;
+        if (taken(rootName.toLowerCase()) || get(root + '/' + rootName)) {
+            const rootFile = get(rootNotePath);
+            const rfm = (rootFile && TaskDialog._fmOf(app, rootFile)) || {};
+            const title = rfm.title != null && String(rfm.title).trim() !== '' ? rfm.title : rootName;
+            name = TE.taskName(title, { createdAt: rfm.created_at, taken });
+        }
+        const moved = { folder: root + '/' + name, name, oldFolder: rootFolder, oldName: rootName };
+        const target = TaskDialog._movedPath(src, moved);
+
+        const priors = [];
+        let movedFolder = false;
+        const result = await RS.mutate({
+            app,
+            path: src,
+            failureMessage: 'Could not reopen task',
+            write: async () => {
+                for (const f of chainFiles) {
+                    await app.fileManager.processFrontMatter(f, (w) => {
+                        priors.push({ file: f, fields: { status: w.status, completed_at: w.completed_at } });
+                        w.status = 'open';
+                        w.completed_at = '';
+                    });
+                }
+                const folderFile = get(rootFolder);
+                if (!folderFile) throw new Error('task folder not found');
+                await app.fileManager.renameFile(folderFile, moved.folder);
+                movedFolder = true;
+                if (name !== rootName) {
+                    const note = get(moved.folder + '/' + rootName + '.md');
+                    if (note) await app.fileManager.renameFile(note, moved.folder + '/' + name + '.md');
+                }
+                return target;
+            },
+            revert: async () => {
+                if (movedFolder || !priors.length) return;
+                await TaskDialog._restoreFields(app, priors);
+            },
+        });
+        if (!result.ok) {
+            return { ok: false, reason: (result.error && (result.error.message || String(result.error))) || 'write failed' };
+        }
+        return { ok: true, path: target };
     }
 
     /**
@@ -2442,18 +2828,45 @@ class TaskDialog {
     }
 
     /**
-     * DELETE (recoverable) — set status=deleted (processFrontMatter, this file
-     * only), then move into spice/tasks/_trash/ (renameFile). No hard delete; the
-     * note is recoverable. No other note read.
+     * DELETE (recoverable) — set status=deleted (processFrontMatter, this note
+     * only), then move into spice/tasks/_trash/ (renameFile). A task folder
+     * note takes its whole folder to spice/tasks/_trash/<Name>/ (subtasks keep
+     * their statuses); a deleted subtask leaves its parent's tree and keeps
+     * `parent_task`. A flat note moves alone. No hard delete; the note is
+     * recoverable. Resolves { ok: true, path }.
      */
     async _markDeleted(app, file) {
-        if (!file) { try { new Notice('TaskDialog: task file not found'); } catch (_e) {} return; }
+        if (!file) { try { new Notice('TaskDialog: task file not found'); } catch (_e) {} return { ok: false, reason: 'task file not found' }; }
+        const srcPath = String(file.path);
+        if (TaskDialog._folderNoteWhileCold(srcPath)) return { ok: false, reason: 'task-entity-unavailable' };
+        if (TaskDialog._isTaskFolderNote(srcPath)) {
+            const TE = TaskDialog._taskEntity();
+            let prior;
+            await app.fileManager.processFrontMatter(file, (fm) => {
+                prior = { file, fields: { status: fm.status } };
+                fm.status = 'deleted';
+            });
+            if (TE.rootFolderOf(srcPath).indexOf(TE.TASK_ROOT + '/_trash/') === 0) {
+                try { new Notice('Task deleted'); } catch (_e) {}
+                return { ok: true, path: srcPath };
+            }
+            try {
+                const moved = await this._moveTaskFolder(app, TE.taskFolderOf(srcPath), TE.TASK_ROOT + '/_trash');
+                try { new Notice('Task deleted'); } catch (_e) {}
+                return { ok: true, path: TaskDialog._movedPath(srcPath, moved) };
+            } catch (e) {
+                if (prior) await TaskDialog._restoreFields(app, [prior]);
+                throw e;
+            }
+        }
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.status = 'deleted';
         });
         await this._ensureFolder(app, 'spice/tasks/_trash');
-        await app.fileManager.renameFile(file, TaskDialog.trashPath(file.path));
+        const target = TaskDialog.trashPath(file.path);
+        await app.fileManager.renameFile(file, target);
         try { new Notice('Task deleted'); } catch (_e) {}
+        return { ok: true, path: target };
     }
 
     /**
