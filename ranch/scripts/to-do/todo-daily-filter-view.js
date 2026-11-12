@@ -21,10 +21,13 @@
  * same day again or any tab goes back. The day is held in memory, never in
  * the persisted prefs.
  *
- * Subtasks (any task with a parent) never list as roots: they are out of All
- * open, Backlog, No date, the recurring surface and the recently-done lists,
- * and show in Today / This week / Overdue / a picked day only when their own
- * due falls there (tab and strip counts follow the same rule).
+ * Subtasks never list as roots: they are out of All open, Backlog, No date,
+ * the recurring surface and the recently-done lists, and show in Today /
+ * This week / Overdue / a picked day only when their own due falls there (tab
+ * and strip counts follow the same rule). A task counts as a subtask only
+ * while its parent is loaded and will show it on its card: an open task needs
+ * an open parent. An open task whose parent is done, deleted or missing (a
+ * promoted task) lists as a root, so nothing leaves the open lists.
  *
  * BARE CLASS ONLY. CustomJS evaluates this file as one expression.
  */
@@ -189,24 +192,74 @@ class ToDoDailyFilterView {
         });
     }
 
-    /** Open tasks with a `recurrence` set, in input order. Subtasks never list as roots. */
-    static recurringOnly(tasks) {
-        return (Array.isArray(tasks) ? tasks : []).filter((task) =>
-            task && !ToDoDailyFilterView.isSubtask(task)
+    /**
+     * Open tasks with a `recurrence` set, in input order. Subtasks never list
+     * as roots. `parents` as isSubtask (default: built from `tasks`).
+     */
+    static recurringOnly(tasks, parents) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        const index = parents || ToDoDailyFilterView.parentIndex(list);
+        return list.filter((task) =>
+            task && !ToDoDailyFilterView.isSubtask(task, index)
             && task.recurrence && String(task.recurrence).trim() !== '');
     }
 
-    /** A subtask is any task with a parent (folder-derived or frontmatter). */
-    static isSubtask(task) {
-        return !!(task && String(task.parent_task == null ? '' : task.parent_task).trim());
+    static _baseOf(path) {
+        const s = String(path == null ? '' : path);
+        return s.slice(s.lastIndexOf('/') + 1).replace(/\.md$/i, '');
+    }
+
+    /**
+     * The tasks that can hold others on their card, from every loaded task:
+     * by path (a folder note's children name it by parent_path) and by note
+     * name (a flat child names it by its parent_task link), once for open
+     * tasks and once for every loaded task. Pure.
+     */
+    static parentIndex(tasks) {
+        const index = { openPaths: new Set(), openNames: new Set(), paths: new Set(), names: new Set() };
+        for (const task of Array.isArray(tasks) ? tasks : []) {
+            if (!task || !task.path) continue;
+            const path = String(task.path);
+            const name = ToDoDailyFilterView._baseOf(path);
+            index.paths.add(path);
+            if (name) index.names.add(name);
+            if (String(task.status || 'open').toLowerCase() === 'open') {
+                index.openPaths.add(path);
+                if (name) index.openNames.add(name);
+            }
+        }
+        return index;
+    }
+
+    /**
+     * Whether a task lives on its parent's card rather than as a root. With
+     * no `parents` index, any task with a parent counts. With one (see
+     * parentIndex), only a task whose parent is loaded counts, and an open
+     * task's parent must be open too: an open task under a done, deleted or
+     * missing parent shows on no card, so it lists as a root. A folder note's
+     * parent is matched by parent_path, a flat note's by its parent's name.
+     */
+    static isSubtask(task, parents) {
+        if (!task) return false;
+        const name = String(task.parent_task == null ? '' : task.parent_task).trim();
+        if (!name) return false;
+        if (!parents) return true;
+        const open = String(task.status || 'open').toLowerCase() === 'open';
+        const parentPath = String(task.parent_path == null ? '' : task.parent_path).trim();
+        if (parentPath) {
+            if (parentPath === task.path) return false;
+            return (open ? parents.openPaths : parents.paths).has(parentPath);
+        }
+        if (name === ToDoDailyFilterView._baseOf(task.path)) return false;
+        return (open ? parents.openNames : parents.names).has(name);
     }
 
     /**
      * Whether a task may list on its own: a root always, a subtask only when it
      * has a due date of its own. Subtasks otherwise live on their parent's card.
      */
-    static isListable(task) {
-        return !!task && (!ToDoDailyFilterView.isSubtask(task) || !!ToDoDailyFilterView._dueOf(task));
+    static isListable(task, parents) {
+        return !!task && (!ToDoDailyFilterView.isSubtask(task, parents) || !!ToDoDailyFilterView._dueOf(task));
     }
 
     static _te(ref) {
@@ -259,19 +312,25 @@ class ToDoDailyFilterView {
         return out;
     }
 
-    static selectTab(tasks, tab, todayStr, TEref) {
+    /**
+     * The open tasks on `tab`. `parents` is the parentIndex of every loaded
+     * task (default: built from `tasks`), so a search-narrowed `tasks` still
+     * sees parents that did not match.
+     */
+    static selectTab(tasks, tab, todayStr, TEref, parents) {
         const TE = ToDoDailyFilterView._te(TEref);
         if (!TE) return [];
         const open = ToDoDailyFilterView._openTasks(tasks);
+        const index = parents || ToDoDailyFilterView.parentIndex(tasks);
+        const root = (task) => !ToDoDailyFilterView.isSubtask(task, index);
         const key = ToDoDailyFilterView.TAB_KEYS.includes(tab) ? tab : 'today';
         switch (key) {
             case 'all':
-                return open.filter((task) => !ToDoDailyFilterView.isSubtask(task));
+                return open.filter(root);
             case 'undated':
-                return open.filter((task) => !ToDoDailyFilterView.isSubtask(task)
-                    && !ToDoDailyFilterView._dueOf(task));
+                return open.filter((task) => root(task) && !ToDoDailyFilterView._dueOf(task));
             case 'backlog':
-                return open.filter((task) => !ToDoDailyFilterView.isSubtask(task) && TE.isBacklog(task));
+                return open.filter((task) => root(task) && TE.isBacklog(task));
             case 'overdue': {
                 const split = ToDoDailyFilterView.splitOverdue(open, todayStr, TE);
                 return [...split.overdue, ...split.stale];
@@ -299,13 +358,14 @@ class ToDoDailyFilterView {
     }
 
     /** Done tasks completed on `todayStr`, latest completion first. */
-    static doneToday(tasks, todayStr, TEref, TTLref) {
+    static doneToday(tasks, todayStr, TEref, TTLref, parents) {
         const TE = ToDoDailyFilterView._te(TEref);
         const TTL = TTLref
             || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
         if (!TE || !TTL) return [];
+        const index = parents || ToDoDailyFilterView.parentIndex(tasks);
         return (Array.isArray(tasks) ? tasks : [])
-            .filter((task) => task && task.status === 'done' && ToDoDailyFilterView.isListable(task)
+            .filter((task) => task && task.status === 'done' && ToDoDailyFilterView.isListable(task, index)
                 && TE.completedDay(task) === todayStr)
             .map((task, index) => ({ task, index, time: TTL.doneTimeLabel(task) }))
             .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : a.index - b.index))
@@ -317,7 +377,7 @@ class ToDoDailyFilterView {
      * (every done task when `days` is null), latest completion first. A task
      * with no completion day only counts when `days` is null.
      */
-    static doneRecent(tasks, todayStr, days, TEref, TTLref) {
+    static doneRecent(tasks, todayStr, days, TEref, TTLref, parents) {
         const TE = ToDoDailyFilterView._te(TEref);
         const TTL = TTLref
             || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
@@ -326,8 +386,9 @@ class ToDoDailyFilterView {
         const from = windowed && typeof TE.addDays === 'function' ? TE.addDays(todayStr, -(days - 1)) : '';
         if (windowed && !from) return [];
         const timeOf = (task) => (TTL && typeof TTL.doneTimeLabel === 'function' ? TTL.doneTimeLabel(task) : '');
+        const index = parents || ToDoDailyFilterView.parentIndex(tasks);
         return (Array.isArray(tasks) ? tasks : [])
-            .filter((task) => task && task.status === 'done' && !ToDoDailyFilterView.isSubtask(task))
+            .filter((task) => task && task.status === 'done' && !ToDoDailyFilterView.isSubtask(task, index))
             .map((task, index) => ({ task, index, day: String(TE.completedDay(task) || ''), time: timeOf(task) }))
             .filter((entry) => !windowed || (entry.day && entry.day >= from && entry.day <= todayStr))
             .sort((a, b) => {
@@ -673,6 +734,12 @@ class ToDoDailyFilterView {
             const pages = raw && typeof raw.array === 'function' ? raw.array() : Array.from(raw || []);
             tasks = pages.map((candidate) => TE.parseNote(candidate));
         } catch (_e) { tasks = []; }
+        // Whether a task is a subtask depends on its parent being open and
+        // loaded, so it is decided over every loaded task (before the scope
+        // and the search narrow them) at each paint: a row's own write
+        // flips a task's status in place.
+        const loaded = tasks;
+        const parents = () => View.parentIndex(loaded);
         if (scope) {
             tasks = tasks.filter((task) => {
                 try { return !!scope.match(task); } catch (_e) { return false; }
@@ -728,7 +795,7 @@ class ToDoDailyFilterView {
             });
         }
         const pool = () => {
-            let list = S.recurringOnly ? View.recurringOnly(tasks) : tasks;
+            let list = S.recurringOnly ? View.recurringOnly(tasks, parents()) : tasks;
             if (query.trim()) list = View.searchTasks(list, query);
             return list;
         };
@@ -770,7 +837,7 @@ class ToDoDailyFilterView {
         const tabButtons = {};
         const tabText = (key) => {
             if (!S.counted.includes(key)) return TAB_LABELS[key];
-            const n = View.selectTab(pool(), key, todayStr, TE).length;
+            const n = View.selectTab(pool(), key, todayStr, TE, parents()).length;
             return n > 0 ? `${TAB_LABELS[key]} · ${n}` : TAB_LABELS[key];
         };
         const setPill = (button, active) => {
@@ -1032,12 +1099,13 @@ class ToDoDailyFilterView {
                 }
                 return;
             }
-            const rows = View.selectTab(pool(), prefs.tab, todayStr, TE);
+            const index = parents();
+            const rows = View.selectTab(pool(), prefs.tab, todayStr, TE, index);
             if (!rows.length) {
                 // The surface's own empty copy only when nothing exists at all;
                 // a tab that is merely empty keeps the neutral line.
                 const none = !pool().some((t) => t && String(t.status || 'open').toLowerCase() === 'open'
-                    && View.isListable(t));
+                    && View.isListable(t, index));
                 paintEmpty(searching ? 'No tasks match.' : none ? S.emptyText : '');
                 return;
             }
@@ -1071,7 +1139,7 @@ class ToDoDailyFilterView {
         // the All tab only: the first few, then "Show N more".
         const paintRecentDone = () => {
             const R = S.recentDone;
-            const done = View.doneRecent(tasks, todayStr, R.days, TE, TTL);
+            const done = View.doneRecent(tasks, todayStr, R.days, TE, TTL, parents());
             if (!done.length) return;
             label(doneHost, `${R.label} · ${done.length}`);
             const limit = Number.isInteger(R.limit) && R.limit > 0 ? R.limit : done.length;
@@ -1100,7 +1168,7 @@ class ToDoDailyFilterView {
             if (!S.done) return;
             if (!state.day && prefs.tab !== 'today') return;
             const day = state.day || todayStr;
-            const done = View.doneToday(tasks, day, TE, TTL);
+            const done = View.doneToday(tasks, day, TE, TTL, parents());
             if (!done.length) return;
             label(doneHost, `Done ${day === todayStr ? 'today' : View._dayLabel(day)} · ${done.length}`);
             for (const task of done) {

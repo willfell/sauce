@@ -168,7 +168,8 @@ process.exitCode = 1;
     const tasks = parse([
       ...ROOTS,
       sub('Flat undated', { due: null }),
-      page('Nested undated', { due: null }, 'Help Henry/Nested undated'),
+      page('Launch', { due: null, project_slug: 'atlas' }, 'Launch'),
+      page('Nested undated', { due: null }, 'Launch/Nested undated'),
     ]);
     assert(View.isSubtask(tasks.find((t) => t.title === 'Flat undated')));
     assert(View.isSubtask(tasks.find((t) => t.title === 'Nested undated')));
@@ -177,7 +178,7 @@ process.exitCode = 1;
       const got = titles(View.selectTab(tasks, tab, TODAY, TE));
       assert(!got.includes('Flat undated') && !got.includes('Nested undated'), `${tab} listed an undated subtask`);
     }
-    assert.deepStrictEqual(titles(View.selectTab(tasks, 'undated', TODAY, TE)), ['Help Henry', 'Root backlog']);
+    assert.deepStrictEqual(titles(View.selectTab(tasks, 'undated', TODAY, TE)), ['Help Henry', 'Root backlog', 'Launch']);
     assert.strictEqual(View.weekStrip(tasks, TODAY, TE).reduce((n, c) => n + c.count, 0), 1);
   });
 
@@ -217,8 +218,58 @@ process.exitCode = 1;
     assert(titles(View.selectDay(after, THURSDAY)).includes('Moved'), 'but still lists on its day');
   });
 
+  ok('ST-PROMOTED an open task whose parent is done lists as a root in every undated list', () => {
+    const tasks = parse([
+      ...ROOTS,
+      page('Done Parent', { status: 'done', completed_at: '2026-10-20' }, '_done/2026/10/Done Parent'),
+      page('Promoted', { due: null, parent_task: '[[Done Parent]]' }, 'Promoted'),
+      page('Flat done parent', { status: 'done', completed_at: '2026-10-21' }, '_done'),
+      page('Flat child', { due: null, parent_task: '[[Flat done parent]]' }),
+    ]);
+    for (const tab of ['all', 'undated']) {
+      const got = titles(View.selectTab(tasks, tab, TODAY, TE));
+      assert(got.includes('Promoted'), `${tab} dropped a promoted task: ${got}`);
+      assert(got.includes('Flat child'), `${tab} dropped the child of a done flat parent: ${got}`);
+    }
+  });
+
+  ok('ST-DONE-MIDLEVEL an open subtask under a done mid-level parent lists as a root', () => {
+    const tasks = parse([
+      page('Launch', { due: null }, 'Launch'),
+      page('Prep', { due: null, status: 'done', completed_at: '2026-11-01', parent_task: '[[Launch]]' }, 'Launch/Prep'),
+      page('Reopened', { due: null, parent_task: '[[Prep]]' }, 'Launch/Prep/Reopened'),
+      page('Still nested', { due: null, parent_task: '[[Launch]]' }, 'Launch/Still nested'),
+    ]);
+    const got = titles(View.selectTab(tasks, 'all', TODAY, TE));
+    assert.deepStrictEqual(got, ['Launch', 'Reopened']);
+  });
+
+  ok('ST-MISSING-PARENT an open task whose parent is missing or deleted lists as a root', () => {
+    const tasks = parse([
+      ...ROOTS,
+      page('Orphan', { due: null, parent_task: '[[Ghost]]' }),
+      page('Nested orphan', { due: null }, 'Gone/Nested orphan'),
+    ]);
+    for (const tab of ['all', 'undated']) {
+      const got = titles(View.selectTab(tasks, tab, TODAY, TE));
+      assert(got.includes('Orphan') && got.includes('Nested orphan'), `${tab}: ${got}`);
+    }
+    assert(View.isListable(tasks.find((t) => t.title === 'Orphan'), View.parentIndex(tasks)));
+  });
+
+  ok('ST-OPEN-PARENT a task under an open parent stays hidden; re-parented under an open parent it hides', () => {
+    const tasks = parse([...ROOTS, sub('Kid', { due: null }), page('Launch', { due: null }, 'Launch'), page('Nested kid', { due: null }, 'Launch/Nested kid')]);
+    const got = titles(View.selectTab(tasks, 'all', TODAY, TE));
+    assert(!got.includes('Kid') && !got.includes('Nested kid'), got.join(','));
+    const before = parse([...ROOTS, page('Done Parent', { status: 'done' }, '_done'), page('Moved', { due: null, parent_task: '[[Done Parent]]' })]);
+    assert(titles(View.selectTab(before, 'all', TODAY, TE)).includes('Moved'));
+    const after = parse([...ROOTS, page('Done Parent', { status: 'done' }, '_done'), page('Moved', { due: null, parent_task: '[[Help Henry]]' })]);
+    assert(!titles(View.selectTab(after, 'all', TODAY, TE)).includes('Moved'));
+  });
+
   ok('ST-RECURRING subtasks are not recurring-list members', () => {
     const tasks = parse([
+      ROOTS[0],
       page('Root weekly', { due: TODAY, recurrence: 'every week' }),
       sub('Sub weekly', { due: TODAY, recurrence: 'every week' }),
     ]);
@@ -227,6 +278,7 @@ process.exitCode = 1;
 
   ok('ST-DONE-RECENT subtasks stay out of the recently-done list; a dated one still shows in Done today', () => {
     const done = parse([
+      ROOTS[0],
       page('Root done', { status: 'done', due: TODAY, completed_at: `${TODAY}T09:00:00-06:00` }),
       sub('Sub done dated', { status: 'done', due: TODAY, completed_at: `${TODAY}T10:00:00-06:00` }),
       sub('Sub done undated', { status: 'done', due: null, completed_at: `${TODAY}T11:00:00-06:00` }),
@@ -265,8 +317,22 @@ process.exitCode = 1;
     assert.deepStrictEqual(listTitles(root), ['Help Henry']);
   });
 
+  await okAsync('ST-VIEW-PROMOTED the daily view lists a promoted task under All open, even when scoped to its project', async () => {
+    const pages = [...ROOTS,
+      page('Done Parent', { status: 'done', completed_at: '2026-10-20', project_slug: 'atlas' }, '_done/2026/10/Done Parent'),
+      page('Promoted', { due: null, parent_task: '[[Done Parent]]', project_slug: 'atlas' }, 'Promoted'),
+      sub('Hidden kid', { due: null, project_slug: 'atlas' })];
+    const { root } = await mount(pages, 'daily');
+    await findButton(root, 'All open').fire('click');
+    assert.deepStrictEqual(listTitles(root).sort(), ['Help Henry', 'Promoted', 'Root backlog', 'Root today']);
+    const scoped = await mount(pages, 'project', { id: 'atlas', match: (t) => t.project_slug === 'atlas' });
+    assert(listTitles(scoped.root).includes('Promoted'), listTitles(scoped.root).join(','));
+    assert(!listTitles(scoped.root).includes('Hidden kid'), 'a kid of an open parent outside the scope stays on its card');
+  });
+
   await okAsync('ST-VIEW-RECURRING the recurring surface drops a recurring subtask', async () => {
     const pages = [
+      ROOTS[0],
       page('Root weekly', { due: TODAY, recurrence: 'every week' }),
       sub('Sub weekly', { due: TODAY, recurrence: 'every week' }),
     ];
