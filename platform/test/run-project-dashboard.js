@@ -219,6 +219,33 @@ function makeApp(files) {
     ok('PROJDASH-3c todo count',     counts.todo === 1, JSON.stringify(counts));
     ok('PROJDASH-3d map count',      counts.map === 2, JSON.stringify(counts));
     ok('PROJDASH-3e meetings count', counts.meetings === 4, JSON.stringify(counts));
+
+    const T = 'spice/tasks';
+    const tp = (path, fm) => Object.assign({ type: 'task', status: 'open', file: { path } }, fm);
+    const taskPages = [
+        tp(`${T}/A/A.md`, { project_slug: 'foo' }),
+        tp(`${T}/A/A1/A1.md`, { project_slug: 'foo', parent_task: '[[A]]' }),
+        tp(`${T}/B/B.md`, { project_slug: 'foo', source: 'meeting' }),
+        tp(`${T}/C.md`, { project_slug: 'foo', parent_task: '"[[Gone]]"' }),
+        tp(`${T}/D.md`, { project_slug: 'foo', parent_task: '[[A]]' }),
+        tp(`${T}/E/E.md`, { project_slug: 'bar' }),
+        tp(`${T}/F/F.md`, { project_slug: 'foo', status: 'done' }),
+        tp(`${T}/G/G.md`, { project_slug: 'foo', type: 'doc-note' }),
+    ];
+    const TE = {
+        isOpenTask: (p) => p.status === 'open',
+        parentNotePathOf: (p) => { const parts = p.split('/'); return parts.length >= 5 ? parts.slice(0, -2).join('/') + '/' + parts[parts.length - 3] + '.md' : ''; },
+    };
+    const n = ProjectDashboard.openTaskCount(taskPages, 'foo', TE);
+    ok('PROJDASH-3f openTaskCount counts open project task notes from any source, a subtask only when its parent is not open',
+        n === 3, String(n));
+    ok('PROJDASH-3g openTaskCount with no slug is 0', ProjectDashboard.openTaskCount(taskPages, '', TE) === 0);
+
+    const dv2 = Object.assign({}, dv, {
+        pages: (query) => (query.includes('"spice/tasks"') ? taskPages : dv.pages(query)),
+    });
+    const counts2 = await dash._counts(dv2, Object.assign({}, ctx, { _scans: null, _reads: null, app: makeApp({ [`${folder}/${projectName} To-Do.md`]: '' }) }));
+    ok('PROJDASH-3h the To-Do tile counts task notes when the To-Do note has no checkbox lines', counts2.todo === 3, JSON.stringify(counts2));
 })();
 
 // ============================================================================

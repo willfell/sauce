@@ -284,7 +284,15 @@ class ProjectDashboard {
       }
     } catch (_e) {}
 
-    // To-Do — count unchecked in `<ProjectName> To-Do.md`.
+    // To-Do — the project's open task notes (what its To-Do note lists:
+    // Project Tasks and From Meetings), plus any legacy unchecked lines still
+    // in `<ProjectName> To-Do.md`.
+    try {
+      counts.todo += ProjectDashboard.openTaskCount(
+        this._scan(dv, ctx, '"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"'),
+        String((ctx.currentPage && ctx.currentPage.project_slug) || ctx.slug || "").trim(),
+        ProjectDashboard._taskEntity());
+    } catch (_e) {}
     try {
       const todoPath = `${folder}/${projectName} To-Do.md`;
       const todoFile = realApp && realApp.vault && realApp.vault.getAbstractFileByPath
@@ -312,6 +320,49 @@ class ProjectDashboard {
 
     return counts;
   }
+
+  static _taskEntity() {
+    try {
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
+        || (typeof window !== "undefined" && window.customJS) || null;
+      return (cjs && cjs.TaskEntity) || null;
+    } catch (_e) { return null; }
+  }
+
+  // How many open task notes belong to the project `slug` (project_slug,
+  // any source), counting a subtask only when its parent is not an open task
+  // too: it is on its parent's card, as on the To-Do list. `pages` is any
+  // iterable of Dataview task pages. Pure; never throws.
+  static openTaskCount(pages, slug, TE) {
+    const want = String(slug == null ? "" : slug).trim();
+    if (!want) return 0;
+    const isOpen = (p) => (TE && typeof TE.isOpenTask === "function"
+      ? TE.isOpenTask(p) : String(p.status || "open") === "open");
+    const open = [];
+    try {
+      for (const p of (pages && typeof pages.array === "function" ? pages.array() : Array.from(pages || []))) {
+        if (p && p.type === "task" && p.file && p.file.path && isOpen(p)) open.push(p);
+      }
+    } catch (_e) { return 0; }
+    const paths = new Set(open.map((p) => String(p.file.path)));
+    const names = new Set(open.map((p) => String(p.file.path).split("/").pop().replace(/\.md$/i, "")));
+    const linkName = (v) => {
+      const s = String(v == null ? "" : (v && v.path) || v).trim().replace(/^"|"$/g, "");
+      const m = /^\[\[([^\]|#]+)/.exec(s);
+      return (m ? m[1] : s).split("/").pop().replace(/\.md$/i, "").trim();
+    };
+    let n = 0;
+    for (const p of open) {
+      if (String(p.project_slug == null ? "" : p.project_slug).trim() !== want) continue;
+      const viaFolder = TE && typeof TE.parentNotePathOf === "function" ? TE.parentNotePathOf(p.file.path) : "";
+      if (viaFolder && paths.has(viaFolder)) continue;
+      const parent = linkName(p.parent_task);
+      if (!viaFolder && parent && names.has(parent)) continue;
+      n += 1;
+    }
+    return n;
+  }
+  openTaskCount(pages, slug, TE) { return ProjectDashboard.openTaskCount(pages, slug, TE); }
 
   // Open task-notes for THIS project → [{ title, path }], cap 6.
   // Mirrors TaskProjectList's query EXACTLY: spice/tasks, type==='task',

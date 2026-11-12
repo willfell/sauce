@@ -343,6 +343,57 @@ a.sauce-todo-project-name { cursor: pointer; }
   a.sauce-todo-project-name:hover { color: var(--text-accent); }
 }
 
+/* Collapsible groups: a rail on each group's left edge, shown on hover and
+   always on touch, folds the group's rows away and back. It stays lit while
+   the group is collapsed. */
+.sauce-todo-filter-project-group { position: relative; padding-left: 12px; }
+body .sauce-todo-group-rail.sauce-todo-group-rail {
+  position: absolute;
+  left: -2px;
+  top: 4px;
+  bottom: 4px;
+  width: 14px;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  opacity: 0;
+}
+body .sauce-todo-group-rail.sauce-todo-group-rail::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--background-modifier-border-hover, var(--text-faint));
+}
+@media (hover: hover) {
+  .sauce-todo-filter-project-group:hover > .sauce-todo-group-rail { opacity: 1; }
+  body .sauce-todo-group-rail.sauce-todo-group-rail:hover::before { left: 5px; width: 4px; background: var(--interactive-accent); }
+}
+@media (hover: none) {
+  body .sauce-todo-group-rail.sauce-todo-group-rail { opacity: 1; }
+}
+body.is-mobile .sauce-todo-group-rail.sauce-todo-group-rail,
+body .sauce-todo-filter-project-group.is-collapsed > .sauce-todo-group-rail.sauce-todo-group-rail,
+body .sauce-todo-group-rail.sauce-todo-group-rail:focus-visible { opacity: 1; }
+body .sauce-todo-filter-project-group.is-collapsed > .sauce-todo-group-rail.sauce-todo-group-rail::before {
+  background: var(--interactive-accent);
+  opacity: 0.7;
+}
+body .sauce-todo-group-rail.sauce-todo-group-rail:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: no-preference) {
+  body .sauce-todo-group-rail.sauce-todo-group-rail { transition: opacity 160ms ease; }
+  body .sauce-todo-group-rail.sauce-todo-group-rail::before { transition: left 160ms ease, width 160ms ease, background 160ms ease; }
+}
+
 /* Phone. A theme's phone button height would otherwise inflate every pill to
    a full input height, so the pill sets its own. The filter row stays one
    line and scrolls sideways instead of wrapping into three; the padding keeps

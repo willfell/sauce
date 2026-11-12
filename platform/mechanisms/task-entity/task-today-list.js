@@ -56,6 +56,7 @@ class TaskTodayList {
     reschedule(row, task, newDue, viewedDay, TDref) { return TaskTodayList.reschedule(row, task, newDue, viewedDay, TDref); }
     rescheduleTomorrow(row, task, viewedDay, TDref) { return TaskTodayList.rescheduleTomorrow(row, task, viewedDay, TDref); }
     tomorrowFor(task, viewedDay) { return TaskTodayList.tomorrowFor(task, viewedDay); }
+    showTodayAction(task, todayStr) { return TaskTodayList.showTodayAction(task, todayStr); }
     dayLabel(ymd) { return TaskTodayList.dayLabel(ymd); }
     renderTaskRow(container, task, TDref, options) { return TaskTodayList.renderTaskRow(container, task, TDref, options); }
     renderInlineLinks(el, text, sourcePath) { return TaskTodayList.renderInlineLinks(el, text, sourcePath); }
@@ -535,6 +536,17 @@ class TaskTodayList {
     }
 
     /** A due value (string or Luxon-like) as YYYY-MM-DD, or ''. Pure. */
+    /**
+     * Whether a row offers "Move to today": an open task that is not due on
+     * `todayStr` (undated, earlier or later). Needs a calendar `todayStr`.
+     */
+    static showTodayAction(task, todayStr) {
+        if (!task || String(task.status || 'open').toLowerCase() !== 'open') return false;
+        const today = TaskTodayList._dueDay(todayStr);
+        if (!today) return false;
+        return TaskTodayList._dueDay(task.due) !== today;
+    }
+
     static _dueDay(due) {
         let s = '';
         try {
@@ -1358,6 +1370,7 @@ class TaskTodayList {
         // guarded, so a cold-load just no-ops the tap. Never throws.
         const svg = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
         const ICON = {
+            today: svg('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15.5" r="2" fill="currentColor"/>'),
             tomorrow: svg('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m12 14 2 2-2 2"/><path d="M9 16h5"/>'),
             wrench: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
             more: svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>'),
@@ -1518,6 +1531,13 @@ class TaskTodayList {
         const isOpen = !!(task && task.status === 'open');
         let delBtn = null;
         let moreBtn = null;
+        if (isOpen && TaskTodayList.showTodayAction(task, todayStr)) {
+            const todayBtn = mkActionBtn('sauce-task-action-today', 'Move to today', ICON.today, false);
+            todayBtn.addEventListener('click', async (ev) => {
+                try { ev.stopPropagation(); } catch (_e) {}
+                await doReschedule(todayStr);
+            });
+        }
         if (isOpen) {
             const target = TaskTodayList.dayLabel(TaskTodayList.tomorrowFor(task, typeof opts.viewedDay === 'string' ? opts.viewedDay : ''));
             const tomorrowBtn = mkActionBtn('sauce-task-action-tomorrow', target ? 'Move to ' + target : 'Move to tomorrow', ICON.tomorrow, false);
