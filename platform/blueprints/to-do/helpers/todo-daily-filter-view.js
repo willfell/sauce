@@ -21,6 +21,11 @@
  * same day again or any tab goes back. The day is held in memory, never in
  * the persisted prefs.
  *
+ * Subtasks (any task with a parent) never list as roots: they are out of All
+ * open, Backlog, No date, the recurring surface and the recently-done lists,
+ * and show in Today / This week / Overdue / a picked day only when their own
+ * due falls there (tab and strip counts follow the same rule).
+ *
  * BARE CLASS ONLY. CustomJS evaluates this file as one expression.
  */
 class ToDoDailyFilterView {
@@ -184,10 +189,24 @@ class ToDoDailyFilterView {
         });
     }
 
-    /** Open tasks with a `recurrence` set, in input order. */
+    /** Open tasks with a `recurrence` set, in input order. Subtasks never list as roots. */
     static recurringOnly(tasks) {
         return (Array.isArray(tasks) ? tasks : []).filter((task) =>
-            task && task.recurrence && String(task.recurrence).trim() !== '');
+            task && !ToDoDailyFilterView.isSubtask(task)
+            && task.recurrence && String(task.recurrence).trim() !== '');
+    }
+
+    /** A subtask is any task with a parent (folder-derived or frontmatter). */
+    static isSubtask(task) {
+        return !!(task && String(task.parent_task == null ? '' : task.parent_task).trim());
+    }
+
+    /**
+     * Whether a task may list on its own: a root always, a subtask only when it
+     * has a due date of its own. Subtasks otherwise live on their parent's card.
+     */
+    static isListable(task) {
+        return !!task && (!ToDoDailyFilterView.isSubtask(task) || !!ToDoDailyFilterView._dueOf(task));
     }
 
     static _te(ref) {
@@ -247,11 +266,12 @@ class ToDoDailyFilterView {
         const key = ToDoDailyFilterView.TAB_KEYS.includes(tab) ? tab : 'today';
         switch (key) {
             case 'all':
-                return open;
+                return open.filter((task) => !ToDoDailyFilterView.isSubtask(task));
             case 'undated':
-                return open.filter((task) => !ToDoDailyFilterView._dueOf(task));
+                return open.filter((task) => !ToDoDailyFilterView.isSubtask(task)
+                    && !ToDoDailyFilterView._dueOf(task));
             case 'backlog':
-                return open.filter((task) => TE.isBacklog(task));
+                return open.filter((task) => !ToDoDailyFilterView.isSubtask(task) && TE.isBacklog(task));
             case 'overdue': {
                 const split = ToDoDailyFilterView.splitOverdue(open, todayStr, TE);
                 return [...split.overdue, ...split.stale];
@@ -285,7 +305,8 @@ class ToDoDailyFilterView {
             || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
         if (!TE || !TTL) return [];
         return (Array.isArray(tasks) ? tasks : [])
-            .filter((task) => task && task.status === 'done' && TE.completedDay(task) === todayStr)
+            .filter((task) => task && task.status === 'done' && ToDoDailyFilterView.isListable(task)
+                && TE.completedDay(task) === todayStr)
             .map((task, index) => ({ task, index, time: TTL.doneTimeLabel(task) }))
             .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : a.index - b.index))
             .map((entry) => entry.task);
@@ -306,7 +327,7 @@ class ToDoDailyFilterView {
         if (windowed && !from) return [];
         const timeOf = (task) => (TTL && typeof TTL.doneTimeLabel === 'function' ? TTL.doneTimeLabel(task) : '');
         return (Array.isArray(tasks) ? tasks : [])
-            .filter((task) => task && task.status === 'done')
+            .filter((task) => task && task.status === 'done' && !ToDoDailyFilterView.isSubtask(task))
             .map((task, index) => ({ task, index, day: String(TE.completedDay(task) || ''), time: timeOf(task) }))
             .filter((entry) => !windowed || (entry.day && entry.day >= from && entry.day <= todayStr))
             .sort((a, b) => {
@@ -1015,7 +1036,8 @@ class ToDoDailyFilterView {
             if (!rows.length) {
                 // The surface's own empty copy only when nothing exists at all;
                 // a tab that is merely empty keeps the neutral line.
-                const none = !pool().some((t) => t && String(t.status || 'open').toLowerCase() === 'open');
+                const none = !pool().some((t) => t && String(t.status || 'open').toLowerCase() === 'open'
+                    && View.isListable(t));
                 paintEmpty(searching ? 'No tasks match.' : none ? S.emptyText : '');
                 return;
             }

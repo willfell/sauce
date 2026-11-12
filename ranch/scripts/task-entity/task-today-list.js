@@ -1173,6 +1173,30 @@ class TaskTodayList {
         prioBar.style.cssText = 'width: 3px; align-self: stretch; min-height: 1.5em; border-radius: 2px; flex-shrink: 0; background: ' + TaskTodayList._PRIO_BAR_COLOR[prioLevel] + ';';
         try { prioBar.setAttribute('aria-hidden', 'true'); } catch (_e) {}
 
+        // Subtask marker: a muted "↳ Parent" chip before the title on any row
+        // whose task has a parent, so a subtask listed on its own due day reads
+        // as one. The parent's own card passes showParent:false (its subtask
+        // rows already sit under it). Click opens the parent note.
+        const parentName = task && task.parent_task ? String(task.parent_task).trim() : '';
+        if (parentName && opts.showParent !== false) {
+            const MAX = 22;
+            const shown = parentName.length > MAX ? parentName.slice(0, MAX - 1) + '\u2026' : parentName;
+            const parentChip = titleGroup.createEl('span', { cls: 'sauce-task-parent-chip', text: '\u21b3 ' + shown });
+            parentChip.style.cssText = 'flex: 0 1 auto; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75em; line-height: 2; color: var(--text-muted); cursor: pointer;';
+            try { parentChip.setAttribute('title', parentName); } catch (_e) {}
+            parentChip.addEventListener('click', (ev) => {
+                try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try {
+                    const appRef = (typeof window !== 'undefined' && window.app)
+                        || (typeof app !== 'undefined' && app)
+                        || null;
+                    if (appRef && appRef.workspace && typeof appRef.workspace.openLinkText === 'function') {
+                        appRef.workspace.openLinkText(parentName, (task && task.path) || '', false);
+                    }
+                } catch (_e) {}
+            });
+        }
+
         // Title — clicking the title (not the checkbox) opens the task NOTE. The
         // text is rendered via renderInlineLinks so `[label](url)`, `[[wikilink]]`,
         // and bare `http(s)://` URLs become REAL clickable `<a>` elements. This is

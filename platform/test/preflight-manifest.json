@@ -1138,6 +1138,14 @@
       "lane": "parallel"
     },
     {
+      "id": "todo-subtask-rows",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-subtask-rows.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-daily-filter-view",
       "cmd": [
         "node",

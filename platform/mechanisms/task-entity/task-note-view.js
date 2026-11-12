@@ -911,7 +911,7 @@ class TaskNoteView {
                         st.subtask_count = kids.length
                             ? { done: kids.filter((k) => k && k.status === 'done').length, total: kids.length }
                             : null;
-                        const row = TTL.renderTaskRow(host, st, null, { showProject: false, todayStr, onDone: markDoneLocally });
+                        const row = TTL.renderTaskRow(host, st, null, { showProject: false, showParent: false, todayStr, onDone: markDoneLocally });
                         if (row && first) {
                             try {
                                 row.classList.add('sauce-tnv-row-in');
@@ -1050,7 +1050,7 @@ class TaskNoteView {
                                         };
                                         let node = null;
                                         try {
-                                            node = TTL.renderTaskRow(subList, optimisticTask, null, { showProject: false, todayStr });
+                                            node = TTL.renderTaskRow(subList, optimisticTask, null, { showProject: false, showParent: false, todayStr });
                                             if (!node || node.parentNode !== subList) {
                                                 throw new Error('subtask row render did not return an attached row');
                                             }
