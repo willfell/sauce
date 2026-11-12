@@ -540,6 +540,56 @@ const orderOf = (calls, pred) => calls.findIndex(pred);
   }
 
   {
+    const { app, calls, content } = makeApp(Object.assign({}, files, { [REPORT]: report }));
+    app.isMobile = true;
+    const res = await inst.apply(app, plan, { reportPath: REPORT, now: '2026-11-11T12:00:00.000Z' });
+    ok('TF-APPLY-MOBILE on a phone apply refuses: nothing is moved, rewritten or written to the report',
+      res.refused === 'mobile' && res.moved === 0 && !calls.some((c) => c[0] === 'rename' || c[0] === 'process' || c[0] === 'createFolder') &&
+      content.get(REPORT) === report, JSON.stringify(res));
+    TaskFolders.__runs = new Map();
+    const dv = { container: makeEl('div'), currentFilePath: REPORT, app };
+    await inst.render(dv);
+    ok('TF-APPLY-MOBILE on a phone the report says "Run this on your desktop" and draws no Apply button',
+      /Run this on your desktop/.test(dv.container.textContent) && !buttonOf(dv.container), dv.container.textContent);
+  }
+
+  {
+    const failAll = new Set(plan.moves.map((m) => m.from));
+    const { app, content } = makeApp(Object.assign({}, files, { [REPORT]: report }), { failRename: failAll });
+    const res = await inst.apply(app, plan, { reportPath: REPORT, now: '2026-11-11T12:00:00.000Z' });
+    const tail = content.get(REPORT).slice(report.length);
+    ok('TF-APPLY-NOTHING-MOVED a run where no move lands records an "## Apply attempt <ISO>" section with the failures',
+      res.moved === 0 && res.failed.length > 0 && tail.includes('## Apply attempt 2026-11-11T12:00:00.000Z') &&
+      /### Failed/.test(tail), tail.slice(0, 300));
+    ok('TF-APPLY-NOTHING-MOVED that section has no applied anchor and no "## Applied" heading, so the report is not applied',
+      !inst.isApplied(content.get(REPORT)) && !/^## Applied /m.test(tail), tail.slice(0, 300));
+    TaskFolders.__runs = new Map();
+    const dv = { container: makeEl('div'), currentFilePath: REPORT, app };
+    await inst.render(dv);
+    const btn = buttonOf(dv.container);
+    ok('TF-APPLY-NOTHING-MOVED the report still offers the Apply button', btn && btn.textContent === 'Apply' && !btn.disabled,
+      dv.container.textContent);
+    if (btn) await click(btn);
+    ok('TF-APPLY-NOTHING-MOVED pressing Apply again with every move still failing leaves the button available',
+      btn && btn.textContent === 'Apply' && !btn.disabled && !inst.isApplied(content.get(REPORT)), btn && JSON.stringify(btn.texts));
+    failAll.clear();
+    const again = await inst.apply(app, plan, { reportPath: REPORT, now: '2026-11-11T14:00:00.000Z' });
+    const after = content.get(REPORT);
+    ok('TF-APPLY-NOTHING-MOVED a later run that moves notes writes the anchor and the Applied section',
+      again.moved === plan.moves.length && inst.isApplied(after) && after.includes('## Applied 2026-11-11T14:00:00.000Z'),
+      JSON.stringify({ moved: again.moved, failed: again.failed }));
+  }
+
+  {
+    const one = new Set(plan.moves.slice(1).map((m) => m.from));
+    const { app, content } = makeApp(Object.assign({}, files, { [REPORT]: report }), { failRename: one });
+    const res = await inst.apply(app, plan, { reportPath: REPORT, now: '2026-11-11T12:00:00.000Z' });
+    ok('TF-APPLY-PARTIAL a run where at least one move lands is applied: anchor and "## Applied" are written',
+      res.moved >= 1 && res.failed.length > 0 && inst.isApplied(content.get(REPORT)) &&
+      content.get(REPORT).includes('## Applied 2026-11-11T12:00:00.000Z'), JSON.stringify({ moved: res.moved, failed: res.failed.length }));
+  }
+
+  {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'mechanisms', 'task-entity', 'manifest.json'), 'utf8'));
     ok('TF-APPLY-SHIP the manifest ships task-folders.js and lists TaskFolders',
       manifest.files.some((f) => f.source === 'task-folders.js' && f.dest === '{{scripts_path}}/task-entity/task-folders.js') &&

@@ -12,6 +12,7 @@ class TaskFolders {
     apply(app, plan, opts) { return TaskFolders.apply(app, plan, opts); }
     parsePlan(text) { return TaskFolders.parsePlan(text); }
     isApplied(text) { return TaskFolders.isApplied(text); }
+    isPhone(app) { return TaskFolders.isPhone(app); }
     rewriteLinks(text, entries) { return TaskFolders.rewriteLinks(text, entries); }
     parentNameOf(path) { return TaskFolders.parentNameOf(path); }
 
@@ -161,10 +162,14 @@ class TaskFolders {
     static _yield() { return new Promise((r) => setTimeout(r, 0)); }
 
     // apply(app, plan, opts) → { moved, skipped, failed: [{ from, why }], skips, warnings,
-    // linksRewritten, parentsSet, foldersRemoved, alreadyApplied? }.
+    // linksRewritten, parentsSet, foldersRemoved, alreadyApplied?, refused? }.
+    // Refused ('mobile') on a phone: hundreds of renames on iOS, then synced
+    // to the other devices, is the risk the desktop-only rule avoids.
     //   opts.reportPath  the report note: refused when it already holds the
-    //                    applied anchor; the result (anchor + Applied section)
-    //                    is appended to it.
+    //                    applied anchor. The result is appended to it: with
+    //                    the anchor and an Applied section when at least one
+    //                    move landed, otherwise as an "Apply attempt" section
+    //                    without the anchor, so Apply stays available.
     //   opts.onProgress  (done, total) after each move.
     //   opts.now         ISO stamp for the Applied heading (default: now).
     //   opts.cacheTimeoutMs  longest wait for the link index after the link
@@ -177,6 +182,11 @@ class TaskFolders {
         try {
             if (!app || !app.vault || !app.fileManager || typeof app.fileManager.renameFile !== 'function') {
                 res.failed.push({ from: '', why: 'Obsidian app is not available' });
+                return res;
+            }
+            if (TaskFolders.isPhone(app)) {
+                res.refused = 'mobile';
+                res.failed.push({ from: '', why: TaskFolders._desktopOnlyText() });
                 return res;
             }
             const vault = app.vault;
@@ -335,9 +345,10 @@ class TaskFolders {
                 try { await vault.delete(f); res.foldersRemoved++; } catch (_e) { /* left in place */ }
             }
 
-            // 6. The result, appended to the report.
+            // 6. The result, appended to the report: the applied anchor only
+            // when something moved.
             if (TaskFolders._isFile(report)) {
-                const section = TaskFolders._appliedSection(res, o.now || new Date().toISOString());
+                const section = TaskFolders._appliedSection(res, o.now || new Date().toISOString(), res.moved > 0);
                 try {
                     await vault.process(report, (text) => String(text || '').replace(/\s*$/, '\n') + '\n' + section);
                 } catch (e) {
@@ -396,15 +407,18 @@ class TaskFolders {
         };
     }
 
-    static _appliedSection(res, iso) {
+    static _appliedSection(res, iso, applied) {
         const code = (s) => '`' + String(s).replace(/`/g, "'") + '`';
-        const out = [TaskFolders._appliedMark(), `## Applied ${iso}`, '', '| | Count |', '| --- | ---: |', // lint-display-markers:allow writes the visible heading; isApplied keys on the anchor line above it
+        const head = applied
+            ? [TaskFolders._appliedMark(), `## Applied ${iso}`] // lint-display-markers:allow writes the visible heading; isApplied keys on the anchor line above it
+            : [`## Apply attempt ${iso}`]; // lint-display-markers:allow writes the visible heading; no anchor, so Apply stays available
+        const out = head.concat(['', '| | Count |', '| --- | ---: |']).concat([
             `| Moved | ${res.moved} |`,
             `| Skipped | ${res.skipped} |`,
             `| Failed | ${res.failed.length} |`,
             `| Links rewritten | ${res.linksRewritten} |`,
             `| Parent links set | ${res.parentsSet} |`,
-            `| Folders removed | ${res.foldersRemoved} |`, ''];
+            `| Folders removed | ${res.foldersRemoved} |`, '']);
         if (res.skips.length) {
             out.push('### Skipped', '');
             for (const s of res.skips) out.push(`- ${code(s.from)}: ${s.why}`);
@@ -421,6 +435,13 @@ class TaskFolders {
             out.push('');
         }
         return out.join('\n');
+    }
+
+    // Obsidian's App sets isMobile on phones and tablets.
+    static isPhone(app) { return !!(app && app.isMobile); }
+
+    static _desktopOnlyText() {
+        return 'Run this on your desktop: Apply moves every task note, and a phone is not the place for that many renames.';
     }
 
     static _plural(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
@@ -450,7 +471,8 @@ class TaskFolders {
                 const ul = el.createEl('ul');
                 for (const f of res.failed) ul.createEl('li', { text: `${f.from || '(run)'}: ${f.why}` });
             }
-            el.createEl('p', { text: 'The details are under "Applied" at the end of this note.', cls: 'sauce-muted' });
+            const heading = res.moved > 0 ? 'Applied' : 'Apply attempt';
+            el.createEl('p', { text: `The details are under "${heading}" at the end of this note.`, cls: 'sauce-muted' });
         } catch (_e) { /* UI only */ }
     }
 
@@ -474,7 +496,7 @@ class TaskFolders {
             res = { moved: 0, skipped: 0, failed: [{ from: '', why: TaskFolders._msg(e) }], skips: [] };
         }
         run.running = false;
-        if (res.moved === 0 && res.skipped === 0 && res.failed.length && !res.alreadyApplied) {
+        if (res.moved === 0 && !res.alreadyApplied) {
             runs.delete(reportPath);
             for (const b of run.buttons) { try { b.disabled = false; b.textContent = 'Apply'; } catch (_e) { /* gone */ } }
         } else {
@@ -509,6 +531,7 @@ class TaskFolders {
             }
             if (!run && TaskFolders.isApplied(text)) { box.createEl('p', { text: 'Already applied.' }); return; }
             if (!plan.moves.length) { box.createEl('p', { text: 'Nothing to move.' }); return; }
+            if (TaskFolders.isPhone(app)) { box.createEl('p', { text: TaskFolders._desktopOnlyText() }); return; }
 
             const btn = box.createEl('button', { text: 'Apply', cls: 'sauce-btn' });
             const out = box.createEl('div');
