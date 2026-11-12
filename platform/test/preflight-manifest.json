@@ -452,6 +452,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-apply",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-apply.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",
