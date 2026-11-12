@@ -336,6 +336,27 @@ function localToday() {
       /## Apply[\s\S]*```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "TaskFolders" \}\);\n```/.test(report));
     ok('TF-REPORT renames carry their reason', report.includes('clash with spice/wiki/ems/other-stuff/Yup.md'));
     ok('TF-REPORT the summary counts the moves', report.includes(`| Moves | ${p.moves.length} |`));
+
+    const sectionOf = (heading) => {
+      const i = report.indexOf(heading + '\n');
+      if (i < 0) return '';
+      const rest = report.slice(i + heading.length + 1);
+      const j = rest.search(/^##{1,2} /m);
+      return j < 0 ? rest : rest.slice(0, j);
+    };
+    const settled = sectionOf('### Rewritten at Apply');
+    const guessed = sectionOf('### Listed only (best guess)');
+    ok('TF-REPORT-AMBIGUOUS the intro says settled links are rewritten to their full path and best-guess ones are only listed',
+      /settled[^\n]*rewritten to (its|their) full path/i.test(sectionOf('## Ambiguous links')) &&
+      /best.guess[^\n]*only listed/i.test(sectionOf('## Ambiguous links')), sectionOf('## Ambiguous links'));
+    ok('TF-REPORT-AMBIGUOUS the parent_task-settled and same-folder links sit under "Rewritten at Apply"',
+      settled.includes('`spice/tasks/Book flights.md`: `[[Plan trip]]`') &&
+      settled.includes('`spice/wiki/ems/other-stuff/Notes.md`: `[[Yup]]`') && !/same-place-oldest/.test(settled), settled);
+    ok('TF-REPORT-AMBIGUOUS the same-place-oldest links sit under "Listed only (best guess)"',
+      guessed.includes('`spice/daily/2026-11-10.md`: `[[Pay Bills|bills]]`') && !/parent_task\)|same-folder\)/.test(guessed), guessed);
+    const unresolved = sectionOf('## Unresolved');
+    ok('TF-REPORT-UNRESOLVED a missing parent is named in inline code, never as a live link',
+      unresolved.includes('`Gone Task`') && !/\[\[Gone Task\]\]/.test(report.split('## Plan data')[0]), unresolved);
   }
 
   await withVault(FIXTURE, async ({ root, tp, calls }) => {

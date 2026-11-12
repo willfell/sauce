@@ -13568,6 +13568,12 @@ function _tfLinkTarget(v) {
   return s;
 }
 
+// Inline code for a name or path quoted in report prose, so a task name is
+// never emitted as a live [[link]] that Obsidian would resolve and rewrite.
+function _tfCode(s) {
+  return "`" + String(s).replace(/`/g, "'") + "`";
+}
+
 function _tfTime(v) {
   const s = _tfStr(v).trim();
   if (!s) return NaN;
@@ -13706,8 +13712,8 @@ function planTaskFolders(notes, allMdPaths, otherNotes, opts) {
       : tasks.filter((c) => c !== t && c.lower === _tfParts(ll).base);
     if (!cands.length) {
       const others = (byLower.get(_tfParts(ll).base) || []).filter((p) => p !== t.path);
-      plan.unresolved.push({ path: t.path, why: `parent_task [[${link}]] names no task note` +
-        (others.length ? ` (only ${others.join(", ")}, which is not a task)` : "") + "; it becomes top-level" });
+      plan.unresolved.push({ path: t.path, why: `parent_task ${_tfCode(link)} names no task note` +
+        (others.length ? ` (only ${others.map(_tfCode).join(", ")}, which is not a task)` : "") + "; it becomes top-level" });
       continue;
     }
     let picked = cands[0];
@@ -13920,7 +13926,10 @@ function planTaskFolders(notes, allMdPaths, otherNotes, opts) {
         resolvesTo = pool[0].path;
         settledBy = "same-place-oldest";
       }
-      const key = d.path + "\u0000" + m[0] + "\u0000" + resolvesTo;
+      // settledBy is part of the key: the same link text on the parent_task
+      // line and in the body are settled separately, and TaskFolders rewrites
+      // each occurrence by its own entry.
+      const key = d.path + "\u0000" + m[0] + "\u0000" + resolvesTo + "\u0000" + settledBy;
       if (seen.has(key)) continue;
       seen.add(key);
       plan.ambiguousLinks.push({ in: d.path, link: text.slice(m.index, m.index + m[0].length), resolvesTo, settledBy, candidates: cands.slice() });
@@ -13961,7 +13970,11 @@ function renderTaskFoldersReport(plan, dateStr) {
   out.push(`| Renames | ${list("renames").length} |`);
   out.push(`| Parent picks | ${list("parentPicks").length} |`);
   out.push(`| Promoted | ${list("promoted").length} |`);
-  out.push(`| Ambiguous links | ${list("ambiguousLinks").length} |`);
+  const settledLink = (a) => !!a && (a.settledBy === "parent_task" || a.settledBy === "same-folder");
+  const settledLinks = list("ambiguousLinks").filter(settledLink);
+  const guessedLinks = list("ambiguousLinks").filter((a) => !settledLink(a));
+  out.push(`| Ambiguous links, rewritten | ${settledLinks.length} |`);
+  out.push(`| Ambiguous links, best guess | ${guessedLinks.length} |`);
   out.push(`| Query refs | ${list("queryRefs").length} |`);
   out.push(`| Unresolved | ${list("unresolved").length} |`, "");
   out.push("## Apply", "", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskFolders" });', "```", "");
@@ -13979,8 +13992,18 @@ function renderTaskFoldersReport(plan, dateStr) {
     list("parentPicks").map((x) => `- ${code(x.child)}: picked ${code(x.picked)} from ${x.candidates.map(code).join(", ")}`));
   section("Promoted", "Open subtasks of a done task become open top-level tasks; `parent_task` keeps naming the done task.",
     list("promoted").map((x) => `- ${code(x.path)} (was under ${code(x.formerParent)})`));
-  section("Ambiguous links", "These links name more than one note today. Apply first rewrites each to the full path shown.",
-    list("ambiguousLinks").map((a) => `- ${code(a.in)}: ${code(a.link)} → ${code(a.resolvesTo)} (${a.settledBy || "picked"})`));
+  const linkRow = (a) => `- ${code(a.in)}: ${code(a.link)} → ${code(a.resolvesTo)} (${a.settledBy || "picked"})`;
+  out.push("## Ambiguous links", "",
+    "These links name more than one note today. The settled ones (`parent_task` or the linking note's own folder says which " +
+    "note they mean) are rewritten to their full path before Apply moves anything. The best-guess ones are only listed: Apply " +
+    "leaves them as they are, and Obsidian keeps each pointing at the note it opens today. Check those by hand.", "");
+  out.push("### Rewritten at Apply", "");
+  if (!settledLinks.length) out.push("None.");
+  else for (const a of settledLinks) out.push(linkRow(a));
+  out.push("", "### Listed only (best guess)", "");
+  if (!guessedLinks.length) out.push("None.");
+  else for (const a of guessedLinks) out.push(linkRow(a));
+  out.push("");
   section("Query refs", "Query text is never rewritten. Check these still find what they should after Apply.",
     list("queryRefs").map((q) => `- ${code(q.in)}: ${code(q.text)}`));
   section("Unresolved", "", list("unresolved").map((u) => `- ${code(u.path)}: ${u.why}`));
