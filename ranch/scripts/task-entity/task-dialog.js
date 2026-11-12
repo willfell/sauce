@@ -2228,15 +2228,39 @@ class TaskDialog {
                 if (!exists(destParent + '/' + candidate) && !taken(candidate.toLowerCase())) { name = candidate; break; }
             }
         }
-        const folderFile = app.vault.getAbstractFileByPath(oldFolder);
-        if (!folderFile) throw new Error('task folder not found');
         const newFolder = destParent + '/' + name;
-        await app.fileManager.renameFile(folderFile, newFolder);
-        if (name !== oldName) {
-            const note = app.vault.getAbstractFileByPath(newFolder + '/' + oldName + '.md');
-            if (note) await app.fileManager.renameFile(note, newFolder + '/' + name + '.md');
-        }
+        await this._renameTaskFolder(app, oldFolder, newFolder, name);
         return { folder: newFolder, name, oldFolder, oldName };
+    }
+
+    /**
+     * Move/rename the task folder `oldFolder` to `newFolder`, its note taking
+     * `newName`. When the name changes the note is renamed FIRST, inside the
+     * source folder, then the folder moves with one renameFile; if the folder
+     * move fails the note gets its old name back. Either both steps land or
+     * neither does, so folder and note never disagree. Throws on failure.
+     */
+    async _renameTaskFolder(app, oldFolder, newFolder, newName) {
+        const get = (p) => app.vault.getAbstractFileByPath(p);
+        const oldName = oldFolder.slice(oldFolder.lastIndexOf('/') + 1);
+        const folderFile = get(oldFolder);
+        if (!folderFile) throw new Error('task folder not found');
+        let renamedNote = null;
+        if (newName !== oldName) {
+            const note = get(oldFolder + '/' + oldName + '.md');
+            if (note) {
+                await app.fileManager.renameFile(note, oldFolder + '/' + newName + '.md');
+                renamedNote = note;
+            }
+        }
+        try {
+            await app.fileManager.renameFile(folderFile, newFolder);
+        } catch (e) {
+            if (renamedNote) {
+                try { await app.fileManager.renameFile(renamedNote, oldFolder + '/' + oldName + '.md'); } catch (_e) { /* best effort */ }
+            }
+            throw e;
+        }
     }
 
     /** Where a note at `path` landed after `_moveTaskFolder` returned `moved`. */
@@ -2639,9 +2663,18 @@ class TaskDialog {
             if (!app) return { ok: false, reason: 'app unavailable' };
             if (!file) return { ok: false, reason: 'task file not found' };
             if (src.indexOf(DONE) !== 0) return await this._reopenInPlace(app, file, src, RS);
-            if (TaskDialog._isTaskFolderNote(src)
-                && /^spice\/tasks\/_done\/\d{4}\/\d{2}\/[^/]+$/.test(TaskDialog._taskEntity().rootFolderOf(src))) {
-                return await this._reopenDoneTree(app, src, RS);
+            const treeRoot = TaskDialog._isTaskFolderNote(src) ? TaskDialog._taskEntity().rootFolderOf(src) : '';
+            if (/^spice\/tasks\/_done\/\d{4}\/\d{2}\/[^/]+$/.test(treeRoot)) {
+                // One reopen per _done tree: a second note of the same tree
+                // (another subtask's undo) would race the folder move.
+                const treeKey = treeRoot + '/';
+                if (inFlight.has(treeKey)) return { ok: false, reason: 'in-flight' };
+                inFlight.add(treeKey);
+                try {
+                    return await this._reopenDoneTree(app, src, RS);
+                } finally {
+                    inFlight.delete(treeKey);
+                }
             }
             const TE = TaskDialog._taskEntity();
             if (!TE || typeof TE._uniqueName !== 'function') return { ok: false, reason: 'task-entity-unavailable' };
@@ -2768,14 +2801,8 @@ class TaskDialog {
                         w.completed_at = '';
                     });
                 }
-                const folderFile = get(rootFolder);
-                if (!folderFile) throw new Error('task folder not found');
-                await app.fileManager.renameFile(folderFile, moved.folder);
+                await this._renameTaskFolder(app, rootFolder, moved.folder, name);
                 movedFolder = true;
-                if (name !== rootName) {
-                    const note = get(moved.folder + '/' + rootName + '.md');
-                    if (note) await app.fileManager.renameFile(note, moved.folder + '/' + name + '.md');
-                }
                 return target;
             },
             revert: async () => {

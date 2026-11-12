@@ -66,6 +66,7 @@ function makeApp(seed) {
       renameFile: async (f, to) => {
         await Promise.resolve();
         if (app._failRename) throw new Error('rename failed');
+        if (app._failRenameIf && app._failRenameIf(f, to)) throw new Error('rename failed');
         if (files.has(to) || folders.has(to)) throw new Error('Destination exists: ' + to);
         if (!folders.has(dirOf(to))) throw new Error('Destination folder missing: ' + to);
         log.renames.push({ from: f.path, to });
@@ -461,6 +462,84 @@ const fmOf = (app, p) => (app._files.get(p) || {})._fm || null;
         r && r.ok === false && fmOf(app, 'spice/tasks/A/A.md').status === 'open'
         && fmOf(app, 'spice/tasks/A/B/B.md').status === 'open'
         && fmOf(app, 'spice/tasks/A/A.md').completed_at === undefined);
+    }
+
+    {
+      const app = makeApp({
+        'spice/tasks/_done/2026/11/A/A.md': { status: 'done', title: 'A', completed_at: ISO },
+        'spice/tasks/_done/2026/11/A/B/B.md': { status: 'done', title: 'B', completed_at: ISO },
+        'spice/tasks/_done/2026/11/A/C/C.md': { status: 'done', title: 'C', completed_at: ISO },
+      });
+      const { TD } = setup(app);
+      const [rb, rc] = await Promise.all([
+        TD.reopen('spice/tasks/_done/2026/11/A/B/B.md'),
+        TD.reopen('spice/tasks/_done/2026/11/A/C/C.md'),
+      ]);
+      const a = fmOf(app, 'spice/tasks/A/A.md');
+      const b = fmOf(app, 'spice/tasks/A/B/B.md');
+      const c = fmOf(app, 'spice/tasks/A/C/C.md');
+      ok('TF-REOPEN-TREE-INFLIGHT two reopens in one _done tree: one moves it, the other is in-flight, the tree stays consistent',
+        rb && rb.ok === true && rb.path === 'spice/tasks/A/B/B.md'
+        && rc && rc.ok === false && rc.reason === 'in-flight'
+        && a && a.status === 'open' && b && b.status === 'open'
+        && c && c.status === 'done' && c.completed_at === ISO
+        && app._log.renames.length === 1 && app._log.fmWrites.length === 2);
+      const again = await TD.reopen('spice/tasks/A/C/C.md');
+      ok('TF-REOPEN-TREE-INFLIGHT-RELEASED the tree guard is released once the first reopen settles',
+        again && again.ok === true && fmOf(app, 'spice/tasks/A/C/C.md').status === 'open');
+    }
+
+    {
+      const seed = {
+        'spice/tasks/_done/2026/11/A/x.md': { type: 'note' },
+        'spice/tasks/A/A.md': { status: 'open', title: 'A' },
+        'spice/tasks/A/B/B.md': { status: 'done', title: 'B', completed_at: '2026-11-01T08:00:00-07:00' },
+      };
+      const consistent = (app) => !!fmOf(app, 'spice/tasks/A/A.md') && fmOf(app, 'spice/tasks/A/A.md').status === 'open'
+        && fmOf(app, 'spice/tasks/A/A.md').completed_at === undefined
+        && fmOf(app, 'spice/tasks/A/B/B.md').status === 'done'
+        && !app._folders.has('spice/tasks/_done/2026/11/A 2');
+
+      const app1 = makeApp(seed);
+      const s1 = setup(app1);
+      app1._failRenameIf = (f) => !!f._fm;
+      const r1 = await s1.TD.markDone('spice/tasks/A/A.md');
+      ok('TF-DONE-COLLISION-NOTE-RENAME-FAILS a failed note rename leaves the tree where it was, statuses restored',
+        r1 && r1.ok === false && consistent(app1) && app1._log.renames.length === 0);
+
+      const app2 = makeApp(seed);
+      const s2 = setup(app2);
+      app2._failRenameIf = (f) => !f._fm;
+      const r2 = await s2.TD.markDone('spice/tasks/A/A.md');
+      ok('TF-DONE-COLLISION-FOLDER-MOVE-FAILS a failed folder move after the note rename puts the note name back',
+        r2 && r2.ok === false && consistent(app2) && !app2._files.has('spice/tasks/A/A 2.md'));
+
+      const app3 = makeApp({
+        'spice/tasks/_done/2026/11/A/A.md': { status: 'done', title: 'A', completed_at: ISO, created_at: '2026-11-03' },
+        'spice/tasks/_done/2026/11/A/B/B.md': { status: 'done', title: 'B', completed_at: ISO },
+        'spice/wiki/A.md': { type: 'wiki' },
+      });
+      const s3 = setup(app3);
+      app3._failRenameIf = (f) => !!f._fm;
+      const r3 = await s3.TD.reopen('spice/tasks/_done/2026/11/A/B/B.md');
+      const a3 = fmOf(app3, 'spice/tasks/_done/2026/11/A/A.md');
+      const b3 = fmOf(app3, 'spice/tasks/_done/2026/11/A/B/B.md');
+      ok('TF-REOPEN-RENAMED-NOTE-RENAME-FAILS a failed note rename leaves the tree in _done, statuses restored',
+        r3 && r3.ok === false && a3 && a3.status === 'done' && a3.completed_at === ISO
+        && b3 && b3.status === 'done' && b3.completed_at === ISO
+        && !app3._folders.has('spice/tasks/A (Nov 3)'));
+
+      const app4 = makeApp({
+        'spice/tasks/_done/2026/11/A/A.md': { status: 'done', title: 'A', completed_at: ISO, created_at: '2026-11-03' },
+        'spice/wiki/A.md': { type: 'wiki' },
+      });
+      const s4 = setup(app4);
+      app4._failRenameIf = (f) => !f._fm;
+      const r4 = await s4.TD.reopen('spice/tasks/_done/2026/11/A/A.md');
+      const a4 = fmOf(app4, 'spice/tasks/_done/2026/11/A/A.md');
+      ok('TF-REOPEN-RENAMED-FOLDER-MOVE-FAILS a failed folder move after the note rename puts the note name back',
+        r4 && r4.ok === false && a4 && a4.status === 'done'
+        && !app4._files.has('spice/tasks/_done/2026/11/A/A (Nov 3).md'));
     }
 
     {
