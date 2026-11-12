@@ -85,10 +85,10 @@ ok('TNC-LINK-META a web link names its site without www; a note link is a note',
   TNV._linkMeta('[PR](https://www.github.com/a/b/pull/1)').host === 'github.com'
   && TNV._linkMeta('https://teams.microsoft.com/l/x').host === 'teams.microsoft.com'
   && TNV._linkMeta('[[Retro Notes]]').kind === 'note');
-ok('TNC-ACTIONS open → Mark done + Edit; archived done → Reopen + Edit; otherwise Edit alone',
+ok('TNC-ACTIONS open → Mark done + Edit; done at any path → Reopen + Edit; deleted → Edit alone',
   TNV._actionsFor('open', 'spice/tasks/A.md').join() === 'done,edit'
   && TNV._actionsFor('done', 'spice/tasks/_done/A.md').join() === 'reopen,edit'
-  && TNV._actionsFor('done', 'spice/tasks/A.md').join() === 'edit'
+  && TNV._actionsFor('done', 'spice/tasks/A.md').join() === 'reopen,edit'
   && TNV._actionsFor('deleted', 'spice/tasks/_trash/A.md').join() === 'edit');
 
 const css = TNV._CSS;

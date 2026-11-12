@@ -3544,7 +3544,7 @@ async function testSelectTasksNotePerTask() {
       { type: "task", status: "done", completed_at: "2026-07-02",                title: "done today date", file: { path: "spice/tasks/_done/b.md" } },
       { type: "task", status: "done", completed_at: "2026-07-01T23:00:00-06:00", title: "done yesterday",  file: { path: "spice/tasks/_done/c.md" } },
       { type: "task", status: "done", completed_at: "",                          title: "done no date",    file: { path: "spice/tasks/_done/d.md" } },
-      { type: "task", status: "done", completed_at: "2026-07-02",                title: "trashed done",    file: { path: "spice/tasks/_done/_trash/e.md" } },
+      { type: "task", status: "deleted", completed_at: "2026-07-02",              title: "trashed done",    file: { path: "spice/tasks/_trash/e.md" } },
     ],
   };
   const fakeDv = { pages: (q) => pagesByQuery[q] || [] };

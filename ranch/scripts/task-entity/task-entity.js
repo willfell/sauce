@@ -509,6 +509,12 @@ class TaskEntity {
         return 'open';
     }
 
+    static _parentNameOf(path, parentTaskValue) {
+        const parentPath = path ? TaskEntity.parentNotePathOf(path) : '';
+        if (parentPath) return TaskEntity._noteParts(parentPath).base;
+        return parentTaskValue != null ? TaskEntity._linkText(parentTaskValue) : '';
+    }
+
     static isOpenTask(pageOrTask) {
         const t = pageOrTask || {};
         if (t.type != null && t.type !== '' && t.type !== 'task') return false;
@@ -761,6 +767,7 @@ class TaskEntity {
             return s === '' ? null : s;
         };
         const path = (p.file && p.file.path) || p.path || null;
+        const parentPath = path ? TaskEntity.parentNotePathOf(path) : '';
         return {
             title: p.title != null ? String(p.title) : '',
             status: p.status || 'open',
@@ -784,7 +791,10 @@ class TaskEntity {
             // Unlike source_note, parent_task normalizes to '' (not null) when
             // absent — it is read as a plain string for subtask truthiness checks
             // (`if (task.parent_task)`), so empty-string is more convenient here.
-            parent_task: p.parent_task != null ? TaskEntity._linkText(p.parent_task) : '',
+            // A folder note names its parent from the folder above it (the folder
+            // wins); a flat note keeps the frontmatter link.
+            parent_task: TaskEntity._parentNameOf(path, p.parent_task),
+            parent_path: parentPath,
             // Structured card links (FIX 5) — normalized to a clean string array so
             // TaskNoteView can render them inside the card. Dataview may hand back an
             // array of strings and/or Link objects; _normLinks coerces both.
@@ -868,12 +878,12 @@ class TaskEntity {
             const revision = index ? index.revision : null;
             const raw = dv.pages('"spice/tasks"').where(p =>
                 p && p.type === 'task' && p.file && p.file.path
-                && !p.file.path.includes('/_trash/'));
+                && TaskEntity.taskState(p) !== 'deleted');
             const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
             // Counting needs two fields per task, normalized exactly as parseNote
             // does; a full parseNote of the whole archive was wasted work.
             const light = arr.map(p => ({
-                parent_task: p.parent_task != null ? TaskEntity._linkText(p.parent_task) : '',
+                parent_task: TaskEntity._parentNameOf(p.file.path, p.parent_task),
                 status: p.status || 'open',
             }));
             const counts = TaskEntity._groupSubtaskCounts(light);

@@ -245,7 +245,7 @@
                 "fm:parent_task": "present"
               },
               "label": "fm:parent_task",
-              "link": "spice/tasks/{fm:parent_task}.md"
+              "link": "{fm:parent_task}"
             }
           ],
           "current": {

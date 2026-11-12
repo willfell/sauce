@@ -786,7 +786,7 @@ ok('RD-DONE-POLICY classifyOutcome / SILENT_REASONS / doneTimeLabel are reachabl
   assert(TaskTodayList.doneTimeLabel({ completed_at: 'garbage' }) === '');
 });
 
-ok('RD-DONE-ROW renderDoneRow draws struck title, HH:mm and an Undo only for archived tasks', () => {
+ok('RD-DONE-ROW renderDoneRow draws struck title, HH:mm and an Undo only for done tasks', () => {
   const mk = (cls) => {
     const el = {
       className: cls || '', children: [], style: { cssText: '' }, dataset: {}, attributes: {}, listeners: {}, _text: '',
@@ -803,7 +803,7 @@ ok('RD-DONE-ROW renderDoneRow draws struck title, HH:mm and an Undo only for arc
   const win = global.window;
   global.window = { customJS: { TaskDialog: { reopen() {} } } };
   try {
-    const archived = { title: 'Ship it', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00' };
+    const archived = { title: 'Ship it', status: 'done', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00' };
     const row = TaskTodayList.renderDoneRow(mk(''), archived, { onUndo: (t, b) => calls.push([t.title, b.attributes['aria-label']]) });
     assert(row.className === 'sauce-today-done-row' && row.dataset.sauceTaskPath === archived.path);
     assert(/line-through/.test(find(row, 'sauce-today-done-title').style.cssText));
@@ -813,8 +813,8 @@ ok('RD-DONE-ROW renderDoneRow draws struck title, HH:mm and an Undo only for arc
     undo.listeners.click({ preventDefault() {}, stopPropagation() {} });
     assert(JSON.stringify(calls) === JSON.stringify([['Ship it', 'Undo: Ship it']]));
 
-    const live = TaskTodayList.renderDoneRow(mk(''), { title: 'Open', path: 'spice/tasks/Open.md' }, { onUndo() {} });
-    assert(!find(live, 'sauce-today-undo'), 'no Undo outside _done/');
+    const live = TaskTodayList.renderDoneRow(mk(''), { title: 'Open', status: 'open', path: 'spice/tasks/Open.md' }, { onUndo() {} });
+    assert(!find(live, 'sauce-today-undo'), 'no Undo for an open task');
     assert(!find(live, 'sauce-today-done-time'), 'no time without completed_at');
     assert(TaskTodayList.renderDoneRow(null, archived, {}) === null);
   } finally { global.window = win; }
@@ -833,7 +833,7 @@ ok('RD-DONE-ROW-OPTS undoLabel renames the button and aria-label; showProject ad
   const win = global.window;
   global.window = { customJS: { TaskDialog: { reopen() {} } } };
   try {
-    const task = { title: 'Ship it', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00', project: '[[Alpha Project]]' };
+    const task = { title: 'Ship it', status: 'done', path: 'spice/tasks/_done/Ship it.md', completed_at: '2026-11-09T09:15:00-06:00', project: '[[Alpha Project]]' };
     const row = TaskTodayList.renderDoneRow(mk(''), task, { onUndo() {}, undoLabel: 'Reopen', showProject: true });
     const btn = find(row, 'sauce-today-undo');
     assert(btn.textContent === 'Reopen' && btn.attributes['aria-label'] === 'Reopen: Ship it', 'label ' + btn.textContent + ' / ' + btn.attributes['aria-label']);
@@ -842,7 +842,7 @@ ok('RD-DONE-ROW-OPTS undoLabel renames the button and aria-label; showProject ad
     const plain = TaskTodayList.renderDoneRow(mk(''), task, { onUndo() {} });
     assert(find(plain, 'sauce-today-undo').textContent === 'Undo' && find(plain, 'sauce-today-undo').attributes['aria-label'] === 'Undo: Ship it', 'default label unchanged');
     assert(!find(plain, 'sauce-today-done-project'), 'no chip by default');
-    const noProject = TaskTodayList.renderDoneRow(mk(''), { title: 'T', path: 'spice/tasks/_done/T.md' }, { onUndo() {}, showProject: true });
+    const noProject = TaskTodayList.renderDoneRow(mk(''), { title: 'T', status: 'done', path: 'spice/tasks/_done/T.md' }, { onUndo() {}, showProject: true });
     assert(!find(noProject, 'sauce-today-done-project'), 'no chip without a project');
   } finally { global.window = win; }
 });
@@ -2446,7 +2446,7 @@ async function runPerf1StructuralTests() {
     const childPages = [
       { type: 'task', title: 'Existing', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/Existing.md' } },
       { type: 'task', malformed: true, parent_task: 'Parent', file: { path: 'spice/tasks/Broken.md' } },
-      { type: 'task', title: 'Stale done', status: 'open', parent_task: 'Parent', file: { path: 'spice/tasks/_done/Stale done.md' } },
+      { type: 'task', title: 'Stale done', status: 'done', parent_task: 'Parent', file: { path: 'spice/tasks/_done/Stale done.md' } },
     ];
     const commands = [];
     const pendingWrites = [];

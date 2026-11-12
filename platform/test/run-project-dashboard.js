@@ -379,7 +379,7 @@ function makeApp(files) {
     { type: 'task', status: 'open',  project_slug: 'foo', source: 'meeting', file: { path: 'spice/tasks/B.md', name: 'B' }, title: 'B' },
     { type: 'task', status: 'done',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/C.md', name: 'C' }, title: 'C' },
     { type: 'task', status: 'open',  project_slug: 'bar', source: '',        file: { path: 'spice/tasks/D.md', name: 'D' }, title: 'D' },
-    { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/_done/E.md', name: 'E' }, title: 'E' },
+    { type: 'task', status: 'done',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/_done/E.md', name: 'E' }, title: 'E' },
     { type: 'task', status: 'open',  project_slug: 'foo', source: '',        file: { path: 'spice/tasks/F.md', name: 'F' }, title: 'F' },
   ];
   const where = (arr) => { const f = (fn) => where(arr.filter(fn)); return Object.assign(arr, { where: f }); };

@@ -409,13 +409,12 @@ class TaskNoteView {
 
     /**
      * The card's footer buttons for a status and note path: an open task gets
-     * Mark done + Edit; a done task archived under spice/tasks/_done/ gets
-     * Reopen + Edit; anything else gets Edit alone. Pure.
+     * Mark done + Edit; a done task gets Reopen + Edit; anything else gets Edit alone. Pure.
      */
     static _actionsFor(status, path) {
         const s = String(status || 'open').trim().toLowerCase();
         if (s === 'open') return ['done', 'edit'];
-        if (s === 'done' && String(path || '').indexOf('spice/tasks/_done/') === 0) return ['reopen', 'edit'];
+        if (s === 'done') return ['reopen', 'edit'];
         return ['edit'];
     }
 
@@ -744,7 +743,7 @@ class TaskNoteView {
             if (filePath) {
                 try {
                     const raw = dv.pages('"spice/tasks"').where(p => !!(p && p.type === 'task' && p.file && p.file.path
-                        && !p.file.path.includes('/_trash/')));
+                        && (TE && typeof TE.taskState === 'function' ? TE.taskState(p) !== 'deleted' : p.status !== 'deleted')));
                     const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
                     const parsedAll = [];
                     if (TE && typeof TE.parseNote === 'function') {
@@ -875,9 +874,9 @@ class TaskNoteView {
                         } catch (_e) {}
                     };
                     const isOpenTask = (t) => {
-                        if (!t || t.status !== 'open') return false;
-                        const p = String(t.path || '');
-                        return !p.includes('/_done/') && !p.includes('/_trash/');
+                        if (!t) return false;
+                        if (TE && typeof TE.isOpenTask === 'function') return TE.isOpenTask(t);
+                        return t.status === 'open';
                     };
                     let rowIndex = 0;
                     const markDoneLocally = (doneTask) => {
@@ -933,17 +932,13 @@ class TaskNoteView {
                         while (subList.firstChild) subList.removeChild(subList.firstChild);
                         while (doneHost.firstChild) doneHost.removeChild(doneHost.firstChild);
                         // Only OPEN subtasks are rendered as rows. Without this
-                        // filter, a just-completed subtask (moved to _done/, but
-                        // still under spice/tasks/ so still fetched above)
+                        // filter, a just-completed subtask (still under spice/tasks/
+                        // so still fetched above)
                         // reappears unchecked on Dataview's next auto-refresh, and
                         // a second click calls markDone on the now-stale path —
                         // "task file not found". allSubtasks (open + done) still
                         // feeds the progress count.
-                        const openSubtasks = allSubtasks.filter(t => {
-                            if (!t || t.status !== 'open') return false;
-                            const childPath = String(t.path || '');
-                            return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
-                        });
+                        const openSubtasks = allSubtasks.filter(t => isOpenTask(t));
                         if (TTL && typeof TTL.renderTaskRow === 'function') {
                             rowIndex = 0;
                             for (const st of openSubtasks) {

@@ -404,6 +404,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-read",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-read.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",

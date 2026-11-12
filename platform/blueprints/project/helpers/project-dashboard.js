@@ -315,8 +315,7 @@ class ProjectDashboard {
 
   // Open task-notes for THIS project → [{ title, path }], cap 6.
   // Mirrors TaskProjectList's query EXACTLY: spice/tasks, type==='task',
-  // status==='open', project_slug matches, source!=='meeting', excluding
-  // _trash/ + _done/. Single source of truth with the To-Do note's
+  // open (by status), project_slug matches, source!=='meeting'. Single source of truth with the To-Do note's
   // "Project Tasks" section — no more raw board/To-Do checkbox parsing.
   async _openTasks(ctx) {
     const { dv, currentPage, projectSlug, slug } = ctx;
@@ -327,11 +326,13 @@ class ProjectDashboard {
 
     const out = [];
     try {
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
+        || (typeof window !== "undefined" && window.customJS) || null;
+      const TE = cjs && cjs.TaskEntity;
       const rows = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
-        p && p.type === "task" && p.status === "open"
+        p && p.type === "task"
         && p.file && p.file.path
-        && !p.file.path.includes("/_trash/")
-        && !p.file.path.includes("/_done/")
+        && (TE && typeof TE.isOpenTask === "function" ? TE.isOpenTask(p) : p.status === "open")
         && String(p.project_slug == null ? "" : p.project_slug).trim() === ourSlug
         && String(p.source == null ? "" : p.source).trim() !== "meeting");
       for (const p of rows) {

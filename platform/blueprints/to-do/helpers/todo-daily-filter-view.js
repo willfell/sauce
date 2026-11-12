@@ -648,7 +648,7 @@ class ToDoDailyFilterView {
                 candidate && candidate.type === 'task'
                 && (candidate.status === 'open' || candidate.status === 'done')
                 && candidate.file && candidate.file.path
-                && !candidate.file.path.includes('/_trash/'));
+                && (typeof TE.taskState === 'function' ? TE.taskState(candidate) !== 'deleted' : true));
             const pages = raw && typeof raw.array === 'function' ? raw.array() : Array.from(raw || []);
             tasks = pages.map((candidate) => TE.parseNote(candidate));
         } catch (_e) { tasks = []; }

@@ -47,7 +47,8 @@ class TaskDoneArchive {
         let allTasks = [];
         try {
             const raw = dv.pages('"spice/tasks/_done"').where(p =>
-                p && p.type === 'task' && p.file && !p.file.path.includes('/_trash/'));
+                p && p.type === 'task' && p.file && p.file.path
+                && (typeof TE.taskState === 'function' ? TE.taskState(p) !== 'deleted' : p.status !== 'deleted'));
             const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
             allTasks = arr.map(p => TE.parseNote(p));
         } catch (_e) {}
