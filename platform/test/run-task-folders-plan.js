@@ -80,12 +80,12 @@ const EXPECT = {
   [`${T}/_done/Pack boxes.md`]: `${T}/_done/2026/09/Move house/Pack boxes/Pack boxes.md`,
   [`${T}/_done/Tape boxes.md`]: `${T}/_done/2026/09/Move house/Pack boxes/Tape boxes/Tape boxes.md`,
   [`${T}/_done/Pay Bills.md`]: `${T}/_done/2026/01/Pay Bills/Pay Bills.md`,
-  [`${T}/Pay Bills.md`]: `${T}/Pay Bills (Nov 3)/Pay Bills (Nov 3).md`,
-  [`${T}/_done/yup.md`]: `${T}/_done/2026/03/yup (Mar 4)/yup (Mar 4).md`,
+  [`${T}/Pay Bills.md`]: `${T}/Pay Bills - 11-03-26/Pay Bills - 11-03-26.md`,
+  [`${T}/_done/yup.md`]: `${T}/_done/2026/03/yup - 03-04-26/yup - 03-04-26.md`,
   [`${T}/Orphan.md`]: `${T}/Orphan/Orphan.md`,
   [`${T}/_done/Plan trip.md`]: `${T}/_done/2026/02/Plan trip/Plan trip.md`,
-  [`${T}/Plan trip.md`]: `${T}/Plan trip (May 1)/Plan trip (May 1).md`,
-  [`${T}/Book flights.md`]: `${T}/Plan trip (May 1)/Book flights/Book flights.md`,
+  [`${T}/Plan trip.md`]: `${T}/Plan trip - 05-01-26/Plan trip - 05-01-26.md`,
+  [`${T}/Book flights.md`]: `${T}/Plan trip - 05-01-26/Book flights/Book flights.md`,
   [`${T}/Loop A.md`]: `${T}/Loop A/Loop A.md`,
   [`${T}/Loop B.md`]: `${T}/Loop A/Loop B/Loop B.md`,
   [`${T}/_done/Taxes.md`]: `${T}/_done/2026/04/Taxes/Taxes.md`,
@@ -222,7 +222,7 @@ function localToday() {
   }
   {
     const keys = [`${T}/_done/Pay Bills.md`, `${T}/Pay Bills.md`, `${T}/_done/yup.md`];
-    ok('TF-PLAN-NAMES the oldest Pay Bills keeps the plain name, the other gets (Mon D), the wiki clash gets (Mon D)', !wrong(keys), wrong(keys));
+    ok('TF-PLAN-NAMES the oldest Pay Bills keeps the plain name, the other gets - MM-DD-YY, the wiki clash gets - MM-DD-YY', !wrong(keys), wrong(keys));
     const yupRename = p.renames.find((r) => r.from === `${T}/_done/yup.md`);
     ok('TF-PLAN-NAMES the wiki clash rename names the wiki path',
       yupRename && /clash with spice\/wiki\/ems\/other-stuff\/Yup\.md/.test(yupRename.why), JSON.stringify(yupRename));

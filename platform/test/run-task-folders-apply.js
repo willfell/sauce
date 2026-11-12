@@ -341,7 +341,7 @@ const orderOf = (calls, pred) => calls.findIndex(pred);
       JSON.stringify(res));
 
     ok('TF-APPLY-PARENT a child whose parent was renamed gets parent_task "[[<new parent name>]]"',
-      readFm(book).parent_task === '[[Plan trip (May 1)]]', book);
+      readFm(book).parent_task === '[[Plan trip - 05-01-26]]', book);
     const review = content.get(plan.moves.find((m) => m.from === `${T}/Review PR.md`).to);
     ok('TF-APPLY-PARENT a child whose parent kept its name is not rewritten',
       readFm(review).parent_task === '[[Help Henry]]' &&

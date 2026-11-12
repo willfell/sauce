@@ -26,7 +26,7 @@ class HomeChromeBar {
         if (p !== "spice/home/Home.md") return null;
         return { path: p };
       },
-      surfaceSpec: () => ({ primary: null, overflow: [] }),
+      surfaceSpec: () => ({ primary: null, overflow: [], quickAdd: false }),
       dispatch: () => {},
       destinations: () => ([]),
       rootClass: "home-chrome-root",

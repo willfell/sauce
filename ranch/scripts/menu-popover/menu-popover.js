@@ -25,6 +25,8 @@
  *                  app.isMobile, falling back to _isMobile(doc) when `app` is
  *                  absent (Node tests / cold load).
  *       title    = optional muted header shown at the top of the panel.
+ *       animate  = true opens the panel with motion (see _animateIn).
+ *       onClose  = called once, on whichever dismiss path closes it.
  *     Returns the overlay element (with __navClose attached), or null on no-op.
  */
 class MenuPopover {
@@ -211,10 +213,14 @@ class MenuPopover {
     // Single teardown for ALL dismiss paths (backdrop, Escape, re-open toggle,
     // row select) — removes the overlay AND the capture-phase keydown listener
     // so a stale Escape handler can never swallow keys elsewhere.
+    let closed = false;
     const close = () => {
       if (overlay.remove) overlay.remove();
       else if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       if (doc.removeEventListener) doc.removeEventListener("keydown", onKey, true);
+      if (closed) return;
+      closed = true;
+      try { if (typeof opts.onClose === "function") opts.onClose(); } catch (_e) { /* never throw */ }
     };
     const onKey = (e) => { if (e && e.key === "Escape") { if (e.preventDefault) e.preventDefault(); close(); } };
     overlay.__navClose = close;
@@ -274,6 +280,50 @@ class MenuPopover {
 
     overlay.appendChild(panel);
     doc.body.appendChild(overlay);
+    if (opts.animate) this._animateIn(overlay, panel, isMobile, anchor);
     return overlay;
+  }
+
+  // Whether the viewer asked for less motion. False when it cannot be read.
+  _reducedMotion() {
+    try {
+      return typeof window !== "undefined" && typeof window.matchMedia === "function"
+        && window.matchMedia("(prefers-reduced-motion: reduce)").matches === true;
+    } catch (_e) { return false; }
+  }
+
+  // opts.animate: the panel grows out of its anchor (desktop) or slides up
+  // with a fading backdrop (mobile), and its rows rise in one after another.
+  // Web Animations only, so nothing is left behind when it ends; skipped
+  // under prefers-reduced-motion and wherever element.animate is missing.
+  _animateIn(overlay, panel, isMobile, anchor) {
+    try {
+      if (this._reducedMotion() || !panel || typeof panel.animate !== "function") return;
+      if (isMobile) {
+        if (typeof overlay.animate === "function") overlay.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
+        panel.animate([{ transform: "translateY(100%)" }, { transform: "translateY(0)" }],
+          { duration: 280, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+      } else {
+        let origin = "top left";
+        try {
+          const a = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+          const p = panel.getBoundingClientRect ? panel.getBoundingClientRect() : null;
+          if (a && p) origin = Math.round(a.left + a.width / 2 - p.left) + "px top";
+        } catch (_e) { /* default origin */ }
+        panel.style.transformOrigin = origin;
+        panel.animate([
+          { opacity: 0, transform: "translateY(-6px) scale(0.94)" },
+          { opacity: 1, transform: "translateY(0) scale(1)" },
+        ], { duration: 220, easing: "cubic-bezier(0.34, 1.4, 0.64, 1)" });
+      }
+      const rows = panel.querySelectorAll ? Array.from(panel.querySelectorAll("button")) : [];
+      rows.slice(0, 12).forEach((row, i) => {
+        if (typeof row.animate !== "function") return;
+        row.animate([
+          { opacity: 0, transform: "translateY(6px)" },
+          { opacity: 1, transform: "translateY(0)" },
+        ], { duration: 200, delay: 50 + i * 30, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "backwards" });
+      });
+    } catch (_e) { /* animation is decoration; never throw */ }
   }
 }

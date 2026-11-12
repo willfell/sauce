@@ -407,6 +407,29 @@ process.exitCode = 1;
     assert(calls.length >= 2, 'found the card subtask rows');
     for (const call of calls) assert(/showParent: false/.test(call), `missing showParent:false in ${call}`);
   });
+
+  ok('ST-COPY-PATH a card row carries a Copy path button; list rows do not', () => {
+    const cardRow = TTL.renderTaskRow(makeEl('div'), subtask, null, { todayStr: TODAY, showParent: false, copyPath: true });
+    const btn = find(cardRow, 'sauce-task-action-copypath');
+    assert(btn, 'copy button on the card row');
+    assert.strictEqual(btn._attrs['aria-label'], 'Copy path');
+    const listRow = TTL.renderTaskRow(makeEl('div'), subtask, null, { todayStr: TODAY });
+    assert.strictEqual(find(listRow, 'sauce-task-action-copypath'), null);
+    const calls = NOTE_VIEW_SRC.match(/TTL\.renderTaskRow\([^;]*\);/g) || [];
+    for (const call of calls) assert(/copyPath: true/.test(call), `missing copyPath:true in ${call}`);
+  });
+
+  await okAsync('ST-COPY-TEXT writes the vault path through the clipboard API, falls back to Electron, reports failure', async () => {
+    const wrote = [];
+    assert.strictEqual(await TTL.copyText('spice/tasks/A/B/B.md', { clipboard: { writeText: async (t) => { wrote.push(t); } } }, null), true);
+    assert.deepStrictEqual(wrote, ['spice/tasks/A/B/B.md']);
+    const viaElectron = [];
+    const req = (m) => (m === 'electron' ? { clipboard: { writeText: (t) => viaElectron.push(t) } } : null);
+    assert.strictEqual(await TTL.copyText('x.md', { clipboard: { writeText: async () => { throw new Error('denied'); } } }, req), true);
+    assert.deepStrictEqual(viaElectron, ['x.md']);
+    assert.strictEqual(await TTL.copyText('x.md', null, null), false);
+    assert.strictEqual(await TTL.copyText('', null, null), false);
+  });
   delete global.window;
 
   console.log(`\n${passed} passed, ${failed} failed`);

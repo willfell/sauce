@@ -2150,6 +2150,46 @@ class TaskDialog {
     }
 
     /** A note's cached frontmatter, or null. Never throws. */
+    /**
+     * The due date an edit stamps on a task it detaches from its parent while
+     * the task has no due date of its own: the nearest ancestor's due
+     * (YYYY-MM-DD), so a subtask that rode on its parent's day still lists on
+     * that day once it is a top-level task. '' when the edit keeps a parent,
+     * gives a due, the task had no parent, or no ancestor has a due. The chain
+     * is walked by folder first, then by parent_task link, at most 10 levels.
+     */
+    static _detachDue(app, file, payload, prior) {
+        try {
+            if (!payload || String(payload.due || '').trim()) return '';
+            if (!Object.prototype.hasOwnProperty.call(payload, 'parent_task')) return '';
+            if (String(payload.parent_task || '').trim()) return '';
+            const fm = prior || {};
+            if (String(fm.due == null ? '' : fm.due).trim()) return '';
+            const oldLink = fm.parent_task == null ? '' : String(fm.parent_task).trim();
+            if (!oldLink) return '';
+            const TE = TaskDialog._taskEntity();
+            const byPath = (p) => (p && app && app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                ? app.vault.getAbstractFileByPath(p) : null);
+            const parentOf = (f, link) => {
+                const viaFolder = TE && typeof TE.parentNotePathOf === 'function' ? TE.parentNotePathOf(f.path) : '';
+                const folderParent = byPath(viaFolder);
+                if (folderParent) return folderParent;
+                const info = link ? TaskDialog._resolveTaskParent(app, link) : null;
+                return info ? info.file : null;
+            };
+            const seen = new Set([String((file && file.path) || '')]);
+            let cur = parentOf(file, oldLink);
+            for (let i = 0; cur && i < 10 && !seen.has(cur.path); i++) {
+                seen.add(cur.path);
+                const pfm = TaskDialog._fmOf(app, cur) || {};
+                const m = /^\s*(\d{4}-\d{2}-\d{2})/.exec(String(pfm.due == null ? '' : pfm.due));
+                if (m) return m[1];
+                cur = parentOf(cur, pfm.parent_task == null ? '' : String(pfm.parent_task).trim());
+            }
+        } catch (_e) { /* no inherited date */ }
+        return '';
+    }
+
     static _fmOf(app, file) {
         try {
             const cache = app && app.metadataCache && typeof app.metadataCache.getFileCache === 'function'
@@ -2554,10 +2594,11 @@ class TaskDialog {
         const prior = Object.assign({}, TaskDialog._fmOf(app, file) || {});
         const plan = TaskDialog._planEditMove(app, file, payload, prior);
         if (!plan.ok) { try { new Notice('Cannot save: ' + plan.reason); } catch (_e) {} return { ok: false, reason: plan.reason }; }
+        const inheritedDue = TaskDialog._detachDue(app, file, payload, prior);
         await app.fileManager.processFrontMatter(file, (fm) => {
             fm.title = payload.title;
             const prevDue = fm.due == null ? '' : String(fm.due);
-            fm.due = payload.due || '';
+            fm.due = payload.due || inheritedDue || '';
             if (prevDue !== String(fm.due)) fm.rank = '';
             fm.priority = payload.priority || '';
             fm.recurrence = payload.recurrence || '';
@@ -2610,13 +2651,18 @@ class TaskDialog {
                 finalPath = newFolder + '/' + plan.name + '.md';
             } catch (e) {
                 const fields = { title: prior.title, parent_task: prior.parent_task };
+                if (inheritedDue) { fields.due = prior.due; fields.rank = prior.rank; }
                 await TaskDialog._restoreFields(app, [{ file, fields }]);
                 try { new Notice('Could not move or rename the task: ' + ((e && e.message) || e)); } catch (_e) {}
                 return { ok: false, reason: 'move-failed' };
             }
         }
-        try { new Notice('Task saved'); } catch (_e) {}
-        return { ok: true, path: finalPath };
+        try {
+            new Notice(inheritedDue
+                ? 'Task saved. It is a top-level task now, due ' + inheritedDue + ' like its old parent.'
+                : 'Task saved');
+        } catch (_e) {}
+        return inheritedDue ? { ok: true, path: finalPath, due: inheritedDue } : { ok: true, path: finalPath };
     }
 
     /**
