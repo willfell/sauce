@@ -13977,7 +13977,9 @@ function renderTaskFoldersReport(plan, dateStr) {
   out.push(`| Ambiguous links, best guess | ${guessedLinks.length} |`);
   out.push(`| Query refs | ${list("queryRefs").length} |`);
   out.push(`| Unresolved | ${list("unresolved").length} |`, "");
-  out.push("## Apply", "", "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskFolders" });', "```", "");
+  out.push("## Apply", "",
+    "There is no undo button. Obsidian Sync's version history is the undo for a move.", "",
+    "```dataviewjs", 'await dv.view("ranch/views/customjs-guard", { class: "TaskFolders" });', "```", "");
   const section = (title, intro, rows) => {
     out.push(`## ${title}`, "");
     if (intro) out.push(intro, "");
@@ -14032,8 +14034,10 @@ function _tfLocalDate(d) {
 
 // applyTaskFoldersHeal — ungated dry run of the task folder migration. Reads
 // every task note under spice/tasks (any depth), plans, and writes
-// ranch/reports/task-folders-YYYY-MM-DD.md when anything would move (a re-run
-// the same day overwrites it). Writes nothing else and never moves a note;
+// ranch/reports/task-folders-YYYY-MM-DD.md when anything would move. A re-run
+// the same day overwrites a report not yet applied; one that has an
+// "## Applied" section is kept and the new report is written as
+// task-folders-YYYY-MM-DD-2.md (then -3, …). Writes nothing else and never moves a note;
 // the moves are applied from the report inside Obsidian. Never throws.
 async function applyTaskFoldersHeal(tp, history, git) {
   const stamp = () => ({ git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty });
@@ -14092,7 +14096,16 @@ async function applyTaskFoldersHeal(tp, history, git) {
     }
     plan = planTaskFolders(notes, md, others, { today });
 
-    const reportPath = `ranch/reports/task-folders-${today}.md`;
+    // A report that already has an "## Applied" section is the record of a
+    // run and is kept: the new report takes the next -2, -3, … suffix. A
+    // report not yet applied is overwritten.
+    let reportPath = `ranch/reports/task-folders-${today}.md`;
+    for (let n = 2; n < 1000; n++) {
+      let prior = null;
+      try { if (await adapter.exists(reportPath)) prior = await adapter.read(reportPath); } catch (_e) { prior = null; }
+      if (prior == null || !/^## Applied\b/m.test(prior)) break;
+      reportPath = `ranch/reports/task-folders-${today}-${n}.md`;
+    }
     try { await adapter.mkdir("ranch"); } catch (_e) { /* exists */ }
     try { await adapter.mkdir("ranch/reports"); } catch (_e) { /* exists */ }
     await adapter.write(reportPath, renderTaskFoldersReport(plan, today));

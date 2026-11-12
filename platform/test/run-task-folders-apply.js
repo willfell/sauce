@@ -98,8 +98,12 @@ function planOf(files) {
 
 const dirOf = (p) => (p.lastIndexOf('/') < 0 ? '' : p.slice(0, p.lastIndexOf('/')));
 
-function makeApp(files) {
+function makeApp(files, opt) {
+  const o = opt || {};
   const calls = [];
+  const listeners = new Map();
+  let nextRef = 0;
+  const stats = { inFlight: 0, maxInFlight: 0 };
   const content = new Map();
   const folders = new Set();
   const fileObjs = new Map();
@@ -164,6 +168,12 @@ function makeApp(files) {
         calls.push(['process', p]);
         const next = fn(content.get(p));
         content.set(p, next);
+        if (o.cache === 'async') {
+          setTimeout(() => {
+            calls.push(['changed', p]);
+            for (const cb of Array.from(listeners.values())) cb(fileObj(p));
+          }, 15);
+        }
         return next;
       },
       async createFolder(d) {
@@ -187,6 +197,10 @@ function makeApp(files) {
       async renameFile(file, to) {
         const from = need(file);
         calls.push(['rename', from, to]);
+        stats.inFlight++;
+        stats.maxInFlight = Math.max(stats.maxInFlight, stats.inFlight);
+        try { if (o.renameDelay) await new Promise((r) => setTimeout(r, o.renameDelay)); } finally { stats.inFlight--; }
+        if (o.failRename && o.failRename.has(from)) throw new Error('simulated rename failure');
         if (content.has(to) || folders.has(to)) throw new Error('Destination file already exists: ' + to);
         if (dirOf(to) && !folders.has(dirOf(to))) throw new Error('parent folder missing for ' + to);
         content.set(to, content.get(from));
@@ -206,7 +220,14 @@ function makeApp(files) {
     },
     _alwaysUpdateLinks: true,
   };
-  return { app, calls, content, folders };
+  if (o.cache) {
+    app.metadataCache = {
+      on(name, cb) { const ref = { id: ++nextRef, name }; if (name === 'changed') listeners.set(ref.id, cb); return ref; },
+      offref(ref) { if (ref) listeners.delete(ref.id); },
+      get listenerCount() { return listeners.size; },
+    };
+  }
+  return { app, calls, content, folders, stats };
 }
 
 // A tolerant element tree with enough of Obsidian's createEl API for render().
@@ -438,6 +459,78 @@ const orderOf = (calls, pred) => calls.findIndex(pred);
     const res = await inst.apply(app, big, {});
     global.setTimeout = origSet;
     ok('TF-APPLY-YIELD a long run yields to the UI every ~25 moves', res.moved === 60 && ticks >= 2, `ticks=${ticks} moved=${res.moved}`);
+  }
+
+  {
+    const moveOf = (from) => plan.moves.find((m) => m.from === from);
+    const kids = [`${T}/Review PR.md`, `${T}/Leave comments.md`];
+    const stayed = (content) => kids.every((k) => content.has(k) && !content.has(moveOf(k).to));
+    const parentDir = `${T}/Help Henry`;
+
+    {
+      const start = Object.assign({}, files);
+      delete start[`${T}/Help Henry.md`];
+      const { app, calls, content, folders } = makeApp(start);
+      const res = await inst.apply(app, plan, {});
+      ok('TF-APPLY-SUBTREE a parent whose from and to are both missing blocks its subtree: children stay, skipped with a reason',
+        stayed(content) && kids.every((k) => res.skips.some((s) => s.from === k && /Help Henry\.md/.test(s.why))) &&
+        !calls.some((c) => c[0] === 'rename' && kids.indexOf(c[1]) >= 0), JSON.stringify(res.skips));
+      ok('TF-APPLY-SUBTREE no folder is created for a blocked subtree',
+        !folders.has(parentDir) && !calls.some((c) => c[0] === 'createFolder' && c[1].indexOf(parentDir) === 0) && res.failed.length === 0,
+        JSON.stringify(calls.filter((c) => c[0] === 'createFolder')));
+    }
+    {
+      const start = Object.assign({}, files, { [moveOf(`${T}/Help Henry.md`).to]: 'someone else\n' });
+      const { app, calls, content } = makeApp(start);
+      const res = await inst.apply(app, plan, {});
+      ok('TF-APPLY-SUBTREE a parent whose from and to both exist blocks its subtree: children do not land under the other note',
+        stayed(content) && kids.every((k) => res.skips.some((s) => s.from === k)) &&
+        !calls.some((c) => c[0] === 'rename' && kids.indexOf(c[1]) >= 0) &&
+        !calls.some((c) => c[0] === 'createFolder' && c[1].indexOf(parentDir + '/') === 0), JSON.stringify(res.skips));
+    }
+    {
+      const start = Object.assign({}, files);
+      start[moveOf(`${T}/Help Henry.md`).to] = start[`${T}/Help Henry.md`];
+      delete start[`${T}/Help Henry.md`];
+      const { app, content } = makeApp(start);
+      const res = await inst.apply(app, plan, {});
+      ok('TF-APPLY-SUBTREE a parent already at its target lets its children move under it',
+        kids.every((k) => !content.has(k) && content.has(moveOf(k).to)) &&
+        res.skips.some((s) => s.from === `${T}/Help Henry.md`) && res.failed.length === 0 &&
+        readFm(content.get(moveOf(`${T}/Review PR.md`).to)).parent_task === '[[Help Henry]]', JSON.stringify(res));
+    }
+    {
+      const { app, calls, content } = makeApp(Object.assign({}, files), { failRename: new Set([`${T}/Help Henry.md`]) });
+      const res = await inst.apply(app, plan, {});
+      ok('TF-APPLY-SUBTREE a failed parent move blocks its subtree: the parent is failed and its children did not move',
+        res.failed.some((f) => f.from === `${T}/Help Henry.md`) && stayed(content) &&
+        !calls.some((c) => c[0] === 'rename' && kids.indexOf(c[1]) >= 0) &&
+        kids.every((k) => res.skips.some((s) => s.from === k) || res.failed.some((f) => f.from === k)), JSON.stringify(res));
+    }
+  }
+
+  {
+    const { app, calls, stats } = makeApp(Object.assign({}, files, { [REPORT]: report }), { cache: 'async', renameDelay: 2 });
+    const res = await inst.apply(app, plan, { reportPath: REPORT });
+    const touched = calls.filter((c) => c[0] === 'process' && c[1] !== REPORT).map((c) => c[1]);
+    const firstRename = orderOf(calls, (c) => c[0] === 'rename');
+    const changedAt = (p) => orderOf(calls, (c) => c[0] === 'changed' && c[1] === p);
+    ok('TF-APPLY-CACHE no renameFile runs before every rewritten note\'s metadataCache "changed" event',
+      touched.length >= 2 && firstRename > 0 && touched.every((p) => changedAt(p) >= 0 && changedAt(p) < firstRename),
+      JSON.stringify(calls.slice(0, 20)));
+    ok('TF-APPLY-CACHE renames are strictly sequential and the listener is removed',
+      stats.maxInFlight === 1 && app.metadataCache.listenerCount === 0 && res.moved === plan.moves.length &&
+      !(res.warnings || []).length, JSON.stringify({ stats, warnings: res.warnings }));
+  }
+  {
+    const { app, content } = makeApp(Object.assign({}, files, { [REPORT]: report }), { cache: 'never' });
+    const t0 = Date.now();
+    const res = await inst.apply(app, plan, { reportPath: REPORT, cacheTimeoutMs: 60 });
+    const waited = Date.now() - t0;
+    ok('TF-APPLY-CACHE when the index never reports the change the run proceeds after the timeout and says so',
+      waited >= 50 && res.moved === plan.moves.length && (res.warnings || []).some((w) => /index/i.test(w)) &&
+      /### Notes[\s\S]*index/i.test(content.get(REPORT)) && app.metadataCache.listenerCount === 0,
+      JSON.stringify({ waited, warnings: res.warnings }));
   }
 
   {

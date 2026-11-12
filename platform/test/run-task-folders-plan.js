@@ -334,6 +334,8 @@ function localToday() {
     ok('TF-REPORT the json block holds the full plan', parsed && JSON.stringify(parsed) === JSON.stringify(p));
     ok('TF-REPORT the Apply block calls TaskFolders through customjs-guard',
       /## Apply[\s\S]*```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "TaskFolders" \}\);\n```/.test(report));
+    ok('TF-REPORT the Apply section says Obsidian Sync version history is the undo for a move',
+      /## Apply\n[\s\S]*?Sync[^\n]*version history[^\n]*undo/i.test(report.split('## Moves')[0]), report.split('## Moves')[0]);
     ok('TF-REPORT renames carry their reason', report.includes('clash with spice/wiki/ems/other-stuff/Yup.md'));
     ok('TF-REPORT the summary counts the moves', report.includes(`| Moves | ${p.moves.length} |`));
 
@@ -378,6 +380,23 @@ function localToday() {
     const third = snapshot(root);
     ok('TF-HEAL-NO-MOVE a re-run the same day overwrites the one report and moves nothing',
       Object.keys(third).length === Object.keys(after).length && third[reportPath] === report1);
+
+    const applied = report1 + '\n## Applied 2026-11-11T12:00:00.000Z\n\n| Moved | 1 |\n';
+    fs.writeFileSync(path.join(root, reportPath), applied);
+    await install.applyTaskFoldersHeal(tp, [], {});
+    const second = reportPath.replace(/\.md$/, '-2.md');
+    const fourth = snapshot(root);
+    ok('TF-HEAL-APPLIED-KEPT a report that has "## Applied" is kept and the new one is written as -2',
+      fourth[reportPath] === applied && fourth[second] === report1, Object.keys(fourth).filter((k) => k.startsWith('ranch/')).join(', '));
+    await install.applyTaskFoldersHeal(tp, [], {});
+    const fifth = snapshot(root);
+    ok('TF-HEAL-APPLIED-KEPT an unapplied -2 is overwritten on the next run, not followed by -3',
+      fifth[second] === report1 && !(reportPath.replace(/\.md$/, '-3.md') in fifth));
+    fs.writeFileSync(path.join(root, second), report1 + '\n## Applied 2026-11-11T13:00:00.000Z\n');
+    await install.applyTaskFoldersHeal(tp, [], {});
+    const sixth = snapshot(root);
+    ok('TF-HEAL-APPLIED-KEPT with -1 and -2 both applied the next report is -3',
+      sixth[reportPath.replace(/\.md$/, '-3.md')] === report1 && /## Applied/.test(sixth[second]) && sixth[reportPath] === applied);
   });
 
   await withVault({

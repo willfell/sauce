@@ -154,16 +154,19 @@ class TaskFolders {
 
     static _yield() { return new Promise((r) => setTimeout(r, 0)); }
 
-    // apply(app, plan, opts) → { moved, skipped, failed: [{ from, why }], skips,
+    // apply(app, plan, opts) → { moved, skipped, failed: [{ from, why }], skips, warnings,
     // linksRewritten, parentsSet, foldersRemoved, alreadyApplied? }.
     //   opts.reportPath  the report note: refused when it already has an
     //                    "## Applied" section, and the result is appended to it.
     //   opts.onProgress  (done, total) after each move.
     //   opts.now         ISO stamp for the Applied heading (default: now).
+    //   opts.cacheTimeoutMs  longest wait for the link index after the link
+    //                    rewrites (default 5000).
     // Never throws.
     static async apply(app, plan, opts) {
         const o = opts || {};
-        const res = { moved: 0, skipped: 0, failed: [], skips: [], linksRewritten: 0, parentsSet: 0, foldersRemoved: 0 };
+        const res = { moved: 0, skipped: 0, failed: [], skips: [], warnings: [], linksRewritten: 0, parentsSet: 0, foldersRemoved: 0 };
+        let waiter = null;
         try {
             if (!app || !app.vault || !app.fileManager || typeof app.fileManager.renameFile !== 'function') {
                 res.failed.push({ from: '', why: 'Obsidian app is not available' });
@@ -188,6 +191,11 @@ class TaskFolders {
             }
 
             // 1. Settled ambiguous links → full path, before anything moves.
+            // renameFile rewrites backlinks from metadataCache, so the index
+            // must hold the rewritten links before the first move: listen for
+            // each rewritten note's "changed" event (registered before the
+            // first write so none is missed), bounded by a timeout.
+            waiter = TaskFolders._cacheWaiter(app);
             const byNote = new Map();
             for (const a of (Array.isArray(p.ambiguousLinks) ? p.ambiguousLinks : [])) {
                 if (!a || typeof a.in !== 'string') continue;
@@ -202,6 +210,7 @@ class TaskFolders {
                     let count = 0;
                     const probe = TaskFolders.rewriteLinks(await vault.read(f), entries);
                     if (!probe.count) continue;
+                    waiter.expect(f.path);
                     await vault.process(f, (text) => {
                         const r = TaskFolders.rewriteLinks(text, entries);
                         count = r.count;
@@ -212,13 +221,44 @@ class TaskFolders {
                     res.failed.push({ from: notePath, why: 'its ambiguous links could not be rewritten: ' + TaskFolders._msg(e) });
                 }
             }
+            const timeoutMs = typeof o.cacheTimeoutMs === 'number' && o.cacheTimeoutMs >= 0 ? o.cacheTimeoutMs : 5000;
+            const lagging = await waiter.wait(timeoutMs);
+            if (lagging.length) {
+                res.warnings.push(`Obsidian's link index had not picked up ${lagging.length} rewritten note(s) after ${timeoutMs / 1000}s ` +
+                    `(${lagging.join(', ')}); the moves went ahead. Check those notes' links.`);
+            }
 
-            // 2. Target folders, outermost first, for every move that can run.
+            // 2. Classify every move before anything moves. A move whose
+            // source is gone and target exists was already done, and its
+            // subtree goes ahead. A move whose source is gone (target missing
+            // too) or whose target is taken by another note is skipped, and
+            // so is everything planned under its folder: those notes would
+            // otherwise land in a folder with no folder note, or under the
+            // wrong one.
             const root = TaskFolders._root();
+            const blocked = [];
+            const blockedUnder = (m) => blocked.find((b) => m.to.indexOf(b.dir + '/') === 0) || null;
+            const state = new Map();
+            for (const m of moves) {
+                const src = TaskFolders._isFile(get(m.from));
+                const dst = !!get(m.to);
+                let st;
+                if (blockedUnder(m)) st = 'blocked';
+                else if (!src && dst) st = 'done';
+                else if (!src) st = 'vanished';
+                else if (dst) st = 'occupied';
+                else st = 'viable';
+                state.set(m, st);
+                if (st === 'vanished' || st === 'occupied') {
+                    blocked.push({ dir: TaskFolders._dirOf(m.to), from: m.from, why: st === 'vanished' ? 'no longer exists' : 'its target is taken' });
+                }
+            }
+
+            // Target folders, outermost first, only for moves that can run.
             const created = [];
             const want = new Set();
             for (const m of moves) {
-                if (!TaskFolders._isFile(get(m.from)) || get(m.to)) continue;
+                if (state.get(m) !== 'viable') continue;
                 for (let d = TaskFolders._dirOf(m.to); d && d.indexOf(root + '/') === 0; d = TaskFolders._dirOf(d)) want.add(d);
             }
             const depth = (d) => d.split('/').length;
@@ -228,30 +268,29 @@ class TaskFolders {
                 catch (e) { if (!get(d)) res.failed.push({ from: d, why: 'folder could not be created: ' + TaskFolders._msg(e) }); }
             }
 
-            // 3. Moves, in plan order (parents before children).
-            const blocked = [];
+            // 3. Moves, in plan order (parents before children), one at a
+            // time: each renameFile is awaited before the next starts.
             const done = [];
+            const skip = (m, why) => { res.skipped++; res.skips.push({ from: m.from, why }); };
             for (let i = 0; i < moves.length; i++) {
                 const m = moves[i];
-                const under = blocked.find((b) => m.to.indexOf(b + '/') === 0);
+                const under = blockedUnder(m);
                 const f = get(m.from);
-                if (under) {
-                    res.failed.push({ from: m.from, why: `not moved: the task above it (into ${under}) did not move` });
-                    blocked.push(TaskFolders._dirOf(m.to));
+                if (under && under.from !== m.from) {
+                    skip(m, `not moved: the task above it, ${under.from}, did not move (${under.why})`);
                 } else if (!TaskFolders._isFile(f)) {
-                    res.skipped++;
-                    res.skips.push({ from: m.from, why: 'no longer exists' });
+                    skip(m, get(m.to) ? 'already at its target' : 'no longer exists');
                 } else if (get(m.to)) {
-                    res.skipped++;
-                    res.skips.push({ from: m.from, why: `${m.to} already exists` });
+                    skip(m, `${m.to} already exists`);
                 } else {
                     try {
                         await app.fileManager.renameFile(f, m.to);
                         res.moved++;
                         done.push(m);
                     } catch (e) {
-                        res.failed.push({ from: m.from, why: TaskFolders._msg(e) });
-                        blocked.push(TaskFolders._dirOf(m.to));
+                        const why = TaskFolders._msg(e);
+                        res.failed.push({ from: m.from, why });
+                        blocked.push({ dir: TaskFolders._dirOf(m.to), from: m.from, why: 'its move failed' });
                     }
                 }
                 progress(i + 1);
@@ -300,8 +339,54 @@ class TaskFolders {
             }
         } catch (e) {
             res.failed.push({ from: '', why: TaskFolders._msg(e) });
+        } finally {
+            if (waiter) waiter.stop();
         }
         return res;
+    }
+
+    // Collects metadataCache "changed" events from the moment it is made.
+    // expect(path) names a note that was rewritten; wait(ms) resolves once
+    // every expected note has changed in the index, or after ms, with the
+    // paths still missing. Without a metadataCache there is nothing to wait for.
+    static _cacheWaiter(app) {
+        const mc = app && app.metadataCache;
+        const seen = new Set();
+        const expected = new Set();
+        let ref = null;
+        let handler = null;
+        let wake = null;
+        if (mc && typeof mc.on === 'function') {
+            handler = (file) => {
+                if (file && typeof file.path === 'string') seen.add(file.path);
+                if (wake) wake();
+            };
+            try { ref = mc.on('changed', handler); } catch (_e) { handler = null; }
+        }
+        const stop = () => {
+            try {
+                if (ref && typeof mc.offref === 'function') mc.offref(ref);
+                else if (handler && typeof mc.off === 'function') mc.off('changed', handler);
+            } catch (_e) { /* already gone */ }
+            ref = null;
+            handler = null;
+            wake = null;
+        };
+        const missing = () => Array.from(expected).filter((p) => !seen.has(p));
+        return {
+            expect(path) { expected.add(path); },
+            stop,
+            async wait(ms) {
+                if (!handler || !missing().length) { stop(); return []; }
+                await new Promise((resolve) => {
+                    const timer = setTimeout(() => { wake = null; resolve(); }, ms);
+                    wake = () => { if (!missing().length) { clearTimeout(timer); wake = null; resolve(); } };
+                });
+                const left = missing();
+                stop();
+                return left;
+            },
+        };
     }
 
     static _appliedSection(res, iso) {
@@ -316,6 +401,11 @@ class TaskFolders {
         if (res.skips.length) {
             out.push('### Skipped', '');
             for (const s of res.skips) out.push(`- ${code(s.from)}: ${s.why}`);
+            out.push('');
+        }
+        if (res.warnings && res.warnings.length) {
+            out.push('### Notes', '');
+            for (const w of res.warnings) out.push(`- ${w}`);
             out.push('');
         }
         if (res.failed.length) {
@@ -348,6 +438,7 @@ class TaskFolders {
             if (typeof el.empty === 'function') el.empty();
             if (res.alreadyApplied) { el.createEl('p', { text: 'Already applied.' }); return; }
             el.createEl('p', { text: TaskFolders._resultText(res) });
+            for (const w of (res.warnings || [])) el.createEl('p', { text: w });
             if (res.failed.length) {
                 const ul = el.createEl('ul');
                 for (const f of res.failed) ul.createEl('li', { text: `${f.from || '(run)'}: ${f.why}` });
