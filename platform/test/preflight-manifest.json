@@ -396,6 +396,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-core",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-core.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",

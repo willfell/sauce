@@ -58,6 +58,16 @@ class TaskEntity {
     _normLinks(v) { return TaskEntity._normLinks(v); }
     _sanitizeTitle(title) { return TaskEntity._sanitizeTitle(title); }
     _uniqueName(baseFilename, existsFn) { return TaskEntity._uniqueName(baseFilename, existsFn); }
+    get TASK_ROOT() { return TaskEntity.TASK_ROOT; }
+    taskName(title, ctx) { return TaskEntity.taskName(title, ctx); }
+    folderNotePath(parentFolder, name) { return TaskEntity.folderNotePath(parentFolder, name); }
+    isFolderNote(path) { return TaskEntity.isFolderNote(path); }
+    taskFolderOf(path) { return TaskEntity.taskFolderOf(path); }
+    parentNotePathOf(path) { return TaskEntity.parentNotePathOf(path); }
+    rootFolderOf(path) { return TaskEntity.rootFolderOf(path); }
+    doneFolderFor(completedAt) { return TaskEntity.doneFolderFor(completedAt); }
+    taskState(task) { return TaskEntity.taskState(task); }
+    isOpenTask(pageOrTask) { return TaskEntity.isOpenTask(pageOrTask); }
     _chromeBody() { return TaskEntity._chromeBody(); }
     _groupSubtaskCounts(parsedTasks) { return TaskEntity._groupSubtaskCounts(parsedTasks); }
     subtaskCountsByParent(dv) { return TaskEntity.subtaskCountsByParent(dv); }
@@ -367,6 +377,137 @@ class TaskEntity {
             if (!taken(candidate)) return candidate;
         }
         return stem + ' ' + Date.now() + ext;
+    }
+
+    static get TASK_ROOT() { return 'spice/tasks'; }
+
+    /**
+     * The note and folder name for a task: its sanitized title while no other
+     * note in the vault has that basename, else `Title (Parent Title)` for a
+     * subtask or `Title (Mon D)` (from createdAt) for a top-level task, else
+     * that plus " 2", " 3", …. `ctx.taken(lowerBasename)` is the caller's
+     * vault-wide, case-insensitive clash check (candidates are passed
+     * lowercased, no ".md"). The whole name stays within 120 characters: the
+     * title part is trimmed first, then the suffix part. No `Date` involved.
+     */
+    static taskName(title, ctx) {
+        const c = ctx || {};
+        const taken = (name) => {
+            try { return typeof c.taken === 'function' ? !!c.taken(String(name).toLowerCase()) : false; }
+            catch (_e) { return false; }
+        };
+        const MAX = 120;
+        const fit = (t, qual, num) => {
+            let q = qual;
+            let n = num;
+            if (q.length + n.length > MAX - 1) q = q.slice(0, Math.max(0, MAX - 1 - n.length));
+            const room = MAX - q.length - n.length;
+            return (t.length > room ? t.slice(0, room).trimEnd() : t) + q + n;
+        };
+        const base = TaskEntity._sanitizeTitle(title);
+        if (!taken(fit(base, '', ''))) return fit(base, '', '');
+        let qual = '';
+        if (c.parentTitle != null && String(c.parentTitle).trim() !== '') {
+            qual = ' (' + TaskEntity._sanitizeTitle(c.parentTitle) + ')';
+        } else {
+            const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(c.createdAt == null ? '' : c.createdAt));
+            const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const mon = m ? MONTHS[parseInt(m[2], 10) - 1] : null;
+            if (mon) qual = ' (' + mon + ' ' + parseInt(m[3], 10) + ')';
+        }
+        if (qual && !taken(fit(base, qual, ''))) return fit(base, qual, '');
+        for (let n = 2; n < 10000; n++) {
+            const candidate = fit(base, qual, ' ' + n);
+            if (!taken(candidate)) return candidate;
+        }
+        return fit(base, qual, ' ' + Date.now());
+    }
+
+    static folderNotePath(parentFolder, name) {
+        return parentFolder + '/' + name + '/' + name + '.md';
+    }
+
+    static _noteParts(path) {
+        const p = String(path == null ? '' : path);
+        const i = p.lastIndexOf('/');
+        const dir = i < 0 ? '' : p.slice(0, i);
+        const file = i < 0 ? p : p.slice(i + 1);
+        const base = file.replace(/\.md$/i, '');
+        const j = dir.lastIndexOf('/');
+        return { dir, base, folderName: j < 0 ? dir : dir.slice(j + 1) };
+    }
+
+    static isFolderNote(path) {
+        const n = TaskEntity._noteParts(path);
+        return n.base !== '' && n.base === n.folderName;
+    }
+
+    static taskFolderOf(path) {
+        return TaskEntity._noteParts(path).dir;
+    }
+
+    static _isTaskFolder(dir) {
+        const root = TaskEntity.TASK_ROOT;
+        if (dir.indexOf(root + '/') !== 0) return false;
+        if (dir === root + '/_done' || dir === root + '/_trash') return false;
+        if (/^spice\/tasks\/_done\/\d{4}(\/\d{2})?$/.test(dir)) return false;
+        return true;
+    }
+
+    static parentNotePathOf(path) {
+        if (!TaskEntity.isFolderNote(path)) return '';
+        const folder = TaskEntity._noteParts(path).dir;
+        const j = folder.lastIndexOf('/');
+        if (j < 0) return '';
+        const up = folder.slice(0, j);
+        if (!TaskEntity._isTaskFolder(up)) return '';
+        const k = up.lastIndexOf('/');
+        return up + '/' + up.slice(k + 1) + '.md';
+    }
+
+    static rootFolderOf(path) {
+        const p = String(path == null ? '' : path);
+        const root = TaskEntity.TASK_ROOT + '/';
+        if (p.indexOf(root) !== 0) return '';
+        const segs = p.slice(root.length).split('/');
+        let take = 1;
+        if (segs[0] === '_done') take = 4;
+        else if (segs[0] === '_trash') take = 2;
+        if (segs.length <= take) return '';
+        return root + segs.slice(0, take).join('/');
+    }
+
+    static doneFolderFor(completedAt) {
+        let s = '';
+        if (typeof completedAt === 'string') s = completedAt.trim();
+        else if (completedAt != null && completedAt !== '') s = String(TaskEntity._toDateStr(completedAt) || '');
+        let m = /^(\d{4})-(\d{2})/.exec(s);
+        if (!m) {
+            let now;
+            if (typeof window !== 'undefined' && window && typeof window.moment === 'function') now = window.moment().format('YYYY-MM');
+            else {
+                const d = new Date();
+                now = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+            }
+            m = /^(\d{4})-(\d{2})/.exec(now);
+        }
+        return TaskEntity.TASK_ROOT + '/_done/' + m[1] + '/' + m[2];
+    }
+
+    static taskState(task) {
+        const t = task || {};
+        const p = String(t.path || (t.file && t.file.path) || '');
+        if (p.indexOf(TaskEntity.TASK_ROOT + '/_trash/') === 0) return 'deleted';
+        const status = t.status || 'open';
+        if (status === 'deleted') return 'deleted';
+        if (status === 'done') return 'done';
+        return 'open';
+    }
+
+    static isOpenTask(pageOrTask) {
+        const t = pageOrTask || {};
+        if (t.type != null && t.type !== '' && t.type !== 'task') return false;
+        return TaskEntity.taskState(t) === 'open';
     }
 
     /**
