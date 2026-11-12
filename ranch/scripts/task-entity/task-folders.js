@@ -53,7 +53,13 @@ class TaskFolders {
         } catch (_e) { return null; }
     }
 
-    static isApplied(text) { return /^## Applied\b/m.test(String(text || '')); }
+    // The hidden anchor apply() writes above its visible Applied heading. A
+    // report is applied iff it holds this line; the heading is display only.
+    static _appliedMark() { return '<!-- task-folders:applied -->'; }
+
+    static isApplied(text) {
+        return String(text || '').split(/\r?\n/).some((line) => line.trim() === TaskFolders._appliedMark());
+    }
 
     // Mirror of TaskEntity's task-folder rule: a folder under spice/tasks other
     // than _done, _done/YYYY(/MM) and _trash.
@@ -156,8 +162,9 @@ class TaskFolders {
 
     // apply(app, plan, opts) → { moved, skipped, failed: [{ from, why }], skips, warnings,
     // linksRewritten, parentsSet, foldersRemoved, alreadyApplied? }.
-    //   opts.reportPath  the report note: refused when it already has an
-    //                    "## Applied" section, and the result is appended to it.
+    //   opts.reportPath  the report note: refused when it already holds the
+    //                    applied anchor; the result (anchor + Applied section)
+    //                    is appended to it.
     //   opts.onProgress  (done, total) after each move.
     //   opts.now         ISO stamp for the Applied heading (default: now).
     //   opts.cacheTimeoutMs  longest wait for the link index after the link
@@ -391,7 +398,7 @@ class TaskFolders {
 
     static _appliedSection(res, iso) {
         const code = (s) => '`' + String(s).replace(/`/g, "'") + '`';
-        const out = [`## Applied ${iso}`, '', '| | Count |', '| --- | ---: |',
+        const out = [TaskFolders._appliedMark(), `## Applied ${iso}`, '', '| | Count |', '| --- | ---: |', // lint-display-markers:allow writes the visible heading; isApplied keys on the anchor line above it
             `| Moved | ${res.moved} |`,
             `| Skipped | ${res.skipped} |`,
             `| Failed | ${res.failed.length} |`,

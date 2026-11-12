@@ -361,6 +361,12 @@ const orderOf = (calls, pred) => calls.findIndex(pred);
     ok('TF-APPLY-REPORT the report gets an "## Applied <ISO>" section with the counts',
       after.startsWith(report) && after.includes('## Applied 2026-11-11T12:00:00.000Z') &&
       after.includes(`| Moved | ${plan.moves.length} |`) && after.includes('| Failed | 0 |'), after.slice(report.length));
+    ok('TF-APPLY-MARKER the Applied section carries the hidden anchor <!-- task-folders:applied --> on its own line',
+      /^<!-- task-folders:applied -->$/m.test(after.slice(report.length)) && !report.includes('task-folders:applied'),
+      after.slice(report.length, report.length + 200));
+    ok('TF-APPLY-MARKER applied is decided by the anchor, not by the visible heading',
+      inst.isApplied(after) && inst.isApplied('x\n<!-- task-folders:applied -->\n') &&
+      !inst.isApplied('x\n## Applied 2026-11-11T12:00:00.000Z\n') && !inst.isApplied(report));
 
     const again = await inst.apply(app, plan, { reportPath: REPORT, now: '2026-11-11T13:00:00.000Z' });
     ok('TF-APPLY-IDEMPOTENT a second run moves nothing and appends nothing',

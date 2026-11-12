@@ -381,22 +381,27 @@ function localToday() {
     ok('TF-HEAL-NO-MOVE a re-run the same day overwrites the one report and moves nothing',
       Object.keys(third).length === Object.keys(after).length && third[reportPath] === report1);
 
-    const applied = report1 + '\n## Applied 2026-11-11T12:00:00.000Z\n\n| Moved | 1 |\n';
+    const applied = report1 + '\n<!-- task-folders:applied -->\n## Applied 2026-11-11T12:00:00.000Z\n\n| Moved | 1 |\n';
     fs.writeFileSync(path.join(root, reportPath), applied);
     await install.applyTaskFoldersHeal(tp, [], {});
     const second = reportPath.replace(/\.md$/, '-2.md');
     const fourth = snapshot(root);
-    ok('TF-HEAL-APPLIED-KEPT a report that has "## Applied" is kept and the new one is written as -2',
+    ok('TF-HEAL-APPLIED-KEPT a report that has the applied anchor is kept and the new one is written as -2',
       fourth[reportPath] === applied && fourth[second] === report1, Object.keys(fourth).filter((k) => k.startsWith('ranch/')).join(', '));
     await install.applyTaskFoldersHeal(tp, [], {});
     const fifth = snapshot(root);
     ok('TF-HEAL-APPLIED-KEPT an unapplied -2 is overwritten on the next run, not followed by -3',
       fifth[second] === report1 && !(reportPath.replace(/\.md$/, '-3.md') in fifth));
-    fs.writeFileSync(path.join(root, second), report1 + '\n## Applied 2026-11-11T13:00:00.000Z\n');
+    fs.writeFileSync(path.join(root, second), report1 + '\n<!-- task-folders:applied -->\n## Applied 2026-11-11T13:00:00.000Z\n');
     await install.applyTaskFoldersHeal(tp, [], {});
     const sixth = snapshot(root);
     ok('TF-HEAL-APPLIED-KEPT with -1 and -2 both applied the next report is -3',
-      sixth[reportPath.replace(/\.md$/, '-3.md')] === report1 && /## Applied/.test(sixth[second]) && sixth[reportPath] === applied);
+      sixth[reportPath.replace(/\.md$/, '-3.md')] === report1 && /task-folders:applied/.test(sixth[second]) && sixth[reportPath] === applied);
+    fs.writeFileSync(path.join(root, reportPath.replace(/\.md$/, '-3.md')), report1 + '\n## Applied by hand, no anchor\n');
+    await install.applyTaskFoldersHeal(tp, [], {});
+    const seventh = snapshot(root);
+    ok('TF-HEAL-APPLIED-KEPT the visible heading alone does not count as applied: -3 is overwritten, no -4',
+      seventh[reportPath.replace(/\.md$/, '-3.md')] === report1 && !(reportPath.replace(/\.md$/, '-4.md') in seventh));
   });
 
   await withVault({

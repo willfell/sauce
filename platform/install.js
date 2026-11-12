@@ -13517,6 +13517,10 @@ async function applyTaskNoteChromeHrHeal(tp, history, git) {
 
 const _TF_ROOT = "spice/tasks";
 
+// The hidden line TaskFolders.apply writes above its "Applied" heading; same
+// string as TaskFolders._appliedMark (task-folders.js).
+const _TF_APPLIED_MARK = "<!-- task-folders:applied -->";
+
 function _tfStr(v) {
   if (v == null) return "";
   if (Array.isArray(v)) return v.length ? _tfStr(v[0]) : "";
@@ -14035,8 +14039,8 @@ function _tfLocalDate(d) {
 // applyTaskFoldersHeal — ungated dry run of the task folder migration. Reads
 // every task note under spice/tasks (any depth), plans, and writes
 // ranch/reports/task-folders-YYYY-MM-DD.md when anything would move. A re-run
-// the same day overwrites a report not yet applied; one that has an
-// "## Applied" section is kept and the new report is written as
+// the same day overwrites a report not yet applied; one that holds the
+// applied anchor (_TF_APPLIED_MARK) is kept and the new report is written as
 // task-folders-YYYY-MM-DD-2.md (then -3, …). Writes nothing else and never moves a note;
 // the moves are applied from the report inside Obsidian. Never throws.
 async function applyTaskFoldersHeal(tp, history, git) {
@@ -14096,14 +14100,14 @@ async function applyTaskFoldersHeal(tp, history, git) {
     }
     plan = planTaskFolders(notes, md, others, { today });
 
-    // A report that already has an "## Applied" section is the record of a
-    // run and is kept: the new report takes the next -2, -3, … suffix. A
+    // A report that holds the applied anchor TaskFolders writes is the record
+    // of a run and is kept: the new report takes the next -2, -3, … suffix. A
     // report not yet applied is overwritten.
     let reportPath = `ranch/reports/task-folders-${today}.md`;
     for (let n = 2; n < 1000; n++) {
       let prior = null;
       try { if (await adapter.exists(reportPath)) prior = await adapter.read(reportPath); } catch (_e) { prior = null; }
-      if (prior == null || !/^## Applied\b/m.test(prior)) break;
+      if (prior == null || !String(prior).split(/\r?\n/).some((line) => line.trim() === _TF_APPLIED_MARK)) break;
       reportPath = `ranch/reports/task-folders-${today}-${n}.md`;
     }
     try { await adapter.mkdir("ranch"); } catch (_e) { /* exists */ }
