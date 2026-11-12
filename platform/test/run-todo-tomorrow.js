@@ -58,6 +58,24 @@ const find = (root, cls) => {
   ok('TT-BUTTON the row\'s tomorrow button names the day it moves to', btn && btn._attrs['aria-label'] === 'Move to Thu Nov 12' && btn._attrs.title === 'Move to Thu Nov 12');
 }
 
+{
+  const WED = '2026-11-12';
+  ok('TT-TODAY-SHOW "Move to today" is offered for an open task due another day or undated, not one due today or done',
+    TTL.showTodayAction({ status: 'open', due: '2026-11-13' }, WED) && TTL.showTodayAction({ status: 'open', due: '2026-11-02' }, WED)
+    && TTL.showTodayAction({ status: 'open', due: '' }, WED) && !TTL.showTodayAction({ status: 'open', due: WED }, WED)
+    && !TTL.showTodayAction({ status: 'open', due: WED + 'T09:00:00-07:00' }, WED)
+    && !TTL.showTodayAction({ status: 'done', due: '2026-11-13' }, WED) && !TTL.showTodayAction({ status: 'open', due: '2026-11-13' }, ''));
+  const calls = [];
+  const saved = global.window;
+  global.window = { customJS: { TaskDialog: { reschedule: async (p, d) => { calls.push([p, d]); return { ok: true }; } } } };
+  const later = TTL.renderTaskRow(makeEl('div'), { title: 'Thu task', path: 'spice/tasks/Thu task.md', due: '2026-11-13', status: 'open' }, null, { viewedDay: '2026-11-13', todayStr: WED });
+  const btn = find(later, 'sauce-task-action-today');
+  const onToday = TTL.renderTaskRow(makeEl('div'), { title: 'Wed task', path: 'spice/tasks/Wed task.md', due: WED, status: 'open' }, null, { todayStr: WED });
+  ok('TT-TODAY-BUTTON a row due another day carries a "Move to today" button; a row due today does not',
+    btn && btn._attrs['aria-label'] === 'Move to today' && find(onToday, 'sauce-task-action-today') === null);
+  global.window = saved;
+}
+
 const viewSrc = read('blueprints/to-do/helpers/todo-daily-filter-view.js');
 ok('TT-BULK Select mode\'s → Tomorrow uses the same per-task rule',
   /action\('→ Tomorrow', \(\) => bulkTomorrow\(\)\);/.test(viewSrc) && /TTL\.tomorrowFor\(task, viewedDay\)/.test(viewSrc));

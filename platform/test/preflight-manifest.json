@@ -1122,6 +1122,14 @@
       "lane": "parallel"
     },
     {
+      "id": "todo-collapse",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-collapse.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "task-note-card",
       "cmd": [
         "node",

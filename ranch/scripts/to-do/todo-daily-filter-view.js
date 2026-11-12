@@ -488,6 +488,119 @@ class ToDoDailyFilterView {
      * colour shows only as the dot on its rows' chips. "No project" is plain
      * text, not a link. Returns the heading element.
      */
+    /** The keys of the groups collapsed this session, kept across repaints. */
+    static get collapsedGroups() {
+        if (!ToDoDailyFilterView._collapsedSet) ToDoDailyFilterView._collapsedSet = new Set();
+        return ToDoDailyFilterView._collapsedSet;
+    }
+
+    static _reducedMotion() {
+        try {
+            return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches === true;
+        } catch (_e) { return false; }
+    }
+
+    /**
+     * Show or hide a group's list. With motion allowed and element.animate
+     * present it folds shut (height and fade) or opens with its rows rising
+     * in; otherwise it just shows or hides. A toggle mid-animation cancels the
+     * running one. The list's own display value is kept for when it opens.
+     */
+    static animateCollapse(list, collapse) {
+        if (!list || !list.style) return;
+        if (list.__display == null) list.__display = list.style.display && list.style.display !== 'none' ? list.style.display : '';
+        const shown = list.__display;
+        try { if (list.__collapseAnim && typeof list.__collapseAnim.cancel === 'function') list.__collapseAnim.cancel(); } catch (_e) {}
+        list.__collapseAnim = null;
+        if (ToDoDailyFilterView._reducedMotion() || typeof list.animate !== 'function') {
+            list.style.display = collapse ? 'none' : shown;
+            return;
+        }
+        try {
+            if (collapse) {
+                const h = list.scrollHeight || 0;
+                list.style.overflow = 'hidden';
+                const anim = list.animate([
+                    { height: h + 'px', opacity: 1, transform: 'translateY(0)' },
+                    { height: '0px', opacity: 0, transform: 'translateY(-4px)' },
+                ], { duration: 240, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+                list.__collapseAnim = anim;
+                anim.onfinish = () => { list.style.display = 'none'; list.style.overflow = ''; list.__collapseAnim = null; };
+            } else {
+                list.style.display = shown;
+                list.style.overflow = 'hidden';
+                const h = list.scrollHeight || 0;
+                const anim = list.animate([
+                    { height: '0px', opacity: 0, transform: 'translateY(-4px)' },
+                    { height: h + 'px', opacity: 1, transform: 'translateY(0)' },
+                ], { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+                list.__collapseAnim = anim;
+                anim.onfinish = () => { list.style.overflow = ''; list.__collapseAnim = null; };
+                const rows = Array.from(list.children || []).slice(0, 12);
+                rows.forEach((row, i) => {
+                    if (row && typeof row.animate === 'function') {
+                        row.animate([
+                            { opacity: 0, transform: 'translateY(6px)' },
+                            { opacity: 1, transform: 'translateY(0)' },
+                        ], { duration: 220, delay: 40 + i * 28, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' });
+                    }
+                });
+            }
+        } catch (_e) {
+            list.style.display = collapse ? 'none' : shown;
+            list.style.overflow = '';
+        }
+    }
+
+    /**
+     * Give a group section a rail on its left edge (shown on hover, always on
+     * touch) that collapses and expands the group's `list`. `key` names the
+     * group in `store` (default collapsedGroups), so a collapsed group stays
+     * collapsed when the list repaints. Returns the rail.
+     */
+    static wireCollapsible(section, list, key, label, store) {
+        if (!section || !list || typeof section.createEl !== 'function') return null;
+        const keep = store || ToDoDailyFilterView.collapsedGroups;
+        const name = String(label == null ? '' : label) || 'section';
+        const rail = section.createEl('button', { cls: 'sauce-todo-group-rail' });
+        try { if (typeof section.insertBefore === 'function' && section.firstChild && section.firstChild !== rail) section.insertBefore(rail, section.firstChild); } catch (_e) {}
+        try { rail.setAttribute('type', 'button'); } catch (_e) {}
+        const sync = (collapsed) => {
+            ToDoDailyFilterView._setClass(section, 'is-collapsed', collapsed);
+            try {
+                rail.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                rail.setAttribute('aria-label', (collapsed ? 'Expand ' : 'Collapse ') + name);
+                rail.setAttribute('title', (collapsed ? 'Expand ' : 'Collapse ') + name);
+            } catch (_e) {}
+        };
+        const start = keep.has(key);
+        sync(start);
+        if (start && list.style) {
+            if (list.__display == null) list.__display = list.style.display && list.style.display !== 'none' ? list.style.display : '';
+            list.style.display = 'none';
+        }
+        rail.addEventListener('click', (ev) => {
+            try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+            const collapse = !keep.has(key);
+            if (collapse) keep.add(key); else keep.delete(key);
+            sync(collapse);
+            ToDoDailyFilterView.animateCollapse(list, collapse);
+        });
+        return rail;
+    }
+
+    static _setClass(el, cls, on) {
+        try {
+            if (el && el.classList) { if (on) el.classList.add(cls); else el.classList.remove(cls); return; }
+            if (el) {
+                const parts = String(el.className || '').split(/\s+/).filter((c) => c && c !== cls);
+                if (on) parts.push(cls);
+                el.className = parts.join(' ');
+            }
+        } catch (_e) {}
+    }
+
     static renderProjectHeader(host, group, opts) {
         const o = opts || {};
         const name = String((group && group.label) || '');
@@ -1075,6 +1188,8 @@ class ToDoDailyFilterView {
                 else label(section, group.label, first);
                 const list = makeList(section);
                 for (const task of group.tasks) renderRow(list, task, stale);
+                View.wireCollapsible(section, list,
+                    [S.key || '', (scope && scope.id) || '', prefs.group, stale ? 'stale' : 'live', group.label].join('|'), group.label);
             }
         };
         const paintList = () => {
