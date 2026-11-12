@@ -458,13 +458,24 @@ class TaskNoteView {
     }
 
     /**
-     * The subtasks of the note at `path`: its path key first, then its
-     * basename key. Pure; never throws.
+     * The subtasks of the note at `path`: its path-keyed (folder) children,
+     * then its basename-keyed (flat) children, each once by path. Both kinds
+     * can hang under one parent until the migration runs. Pure; never throws.
      */
     static _kidsOf(index, path) {
         const kids = index && index.children;
         if (!kids || typeof kids.get !== 'function' || !path) return [];
-        return kids.get(path) || kids.get(TaskNoteView._baseOf(path)) || [];
+        const out = [];
+        const seen = new Set();
+        for (const list of [kids.get(path), kids.get(TaskNoteView._baseOf(path))]) {
+            for (const t of Array.isArray(list) ? list : []) {
+                const key = t && t.path ? t.path : t;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                out.push(t);
+            }
+        }
+        return out;
     }
 
     /**

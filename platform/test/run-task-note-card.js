@@ -347,6 +347,26 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
   }
 
   {
+    const HH = { type: 'task', title: 'Help Henry', status: 'open', source: 'manual', file: { path: 'spice/tasks/Help Henry/Help Henry.md', name: 'Help Henry' } };
+    const NESTED = { type: 'task', title: 'Review PR', status: 'open', source: 'manual', parent_task: '[[Help Henry]]', file: { path: 'spice/tasks/Help Henry/Review PR/Review PR.md', name: 'Review PR' } };
+    const FLAT = { type: 'task', title: 'Old flat task', status: 'open', source: 'manual', parent_task: '[[Help Henry]]', file: { path: 'spice/tasks/Old flat task.md', name: 'Old flat task' } };
+    const { dv, calls } = harness(HH, [HH, NESTED, FLAT]);
+    await new TNV().render(dv);
+    ok('TNC-KIDS-MIXED a folder parent shows its nested child and its flat child (re-parented, still flat) together',
+      calls.rows.map((r) => r.task.title).sort().join() === 'Old flat task,Review PR', calls.rows.map((r) => r.task.title).join());
+    const idx = TNV._taskIndex([
+      { path: 'spice/tasks/Help Henry/Review PR/Review PR.md', parent_task: 'Help Henry', parent_path: 'spice/tasks/Help Henry/Help Henry.md' },
+      { path: 'spice/tasks/Old flat task.md', parent_task: 'Help Henry', parent_path: '' },
+    ], null);
+    const merged = TNV._kidsOf(idx, 'spice/tasks/Help Henry/Help Henry.md').map((t) => t.path);
+    ok('TNC-KIDS-MERGE _kidsOf merges the path-keyed and name-keyed children, each once',
+      merged.join('|') === 'spice/tasks/Help Henry/Review PR/Review PR.md|spice/tasks/Old flat task.md', merged.join('|'));
+    const dup = { path: 'spice/tasks/Same.md' };
+    const twice = { children: new Map([['spice/tasks/P/P.md', [dup]], ['P', [dup]]]) };
+    ok('TNC-KIDS-DEDUP a child under both keys is listed once', TNV._kidsOf(twice, 'spice/tasks/P/P.md').length === 1);
+  }
+
+  {
     const GRAND = { type: 'task', title: 'Review the PR', status: 'open', parent_task: '[[Help Henry out with Routes]]', file: { path: 'spice/tasks/Review the PR.md', name: 'Review the PR' } };
     const LEAF = { type: 'task', title: 'Leave a comment', status: 'open', parent_task: '[[Review the PR]]', file: { path: 'spice/tasks/Leave a comment.md', name: 'Leave a comment' } };
     const ROOT = Object.assign({}, HENRY, { parent_task: '[[Launch]]' });
