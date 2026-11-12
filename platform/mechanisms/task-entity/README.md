@@ -52,7 +52,7 @@ spice/tasks/
   the sanitized title while no other markdown file anywhere in the vault has
   that basename (case-insensitive). On a clash a subtask adds its parent's
   title (`Review PR (Help Henry)`) and a top-level task its creation date
-  (`Pay Bills (Nov 10)`), then ` 2`, ` 3`, … Names are fixed once given: a task
+  (`Pay Bills - 11-10-26`), then ` 2`, ` 3`, … Names are fixed once given: a task
   whose name is unique is never renamed, and renames never cascade.
 - **Status is truth.** `status: done` / `deleted` decides what is open, done or
   trashed on every list, count and Reopen gate; the path only decides where the

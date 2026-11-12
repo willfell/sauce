@@ -24,11 +24,11 @@ ok('TF-NAME-PLAIN a unique title is the name', TE.taskName('Pay Bills', free) ==
 ok('TF-NAME-SUBTASK-CLASH a clashing subtask adds its parent title',
   TE.taskName('Review PR', { parentTitle: 'Help Henry', taken: isTaken('review pr') }) === 'Review PR (Help Henry)');
 ok('TF-NAME-DATE-CLASH a clashing top-level task adds its creation date',
-  TE.taskName('Pay Bills', { createdAt: '2026-11-10T14:06:43-07:00', taken: isTaken('pay bills') }) === 'Pay Bills (Nov 10)');
+  TE.taskName('Pay Bills', { createdAt: '2026-11-10T14:06:43-07:00', taken: isTaken('pay bills') }) === 'Pay Bills - 11-10-26');
 ok('TF-NAME-NUMBER a clash on the qualified name adds a number',
-  TE.taskName('Pay Bills', { createdAt: '2026-11-10T14:06:43-07:00', taken: isTaken('pay bills', 'pay bills (nov 10)') }) === 'Pay Bills (Nov 10) 2');
+  TE.taskName('Pay Bills', { createdAt: '2026-11-10T14:06:43-07:00', taken: isTaken('pay bills', 'pay bills - 11-10-26') }) === 'Pay Bills - 11-10-26 2');
 ok('TF-NAME-NUMBER-3 numbers keep counting',
-  TE.taskName('Pay Bills', { createdAt: '2026-11-10', taken: isTaken('pay bills', 'pay bills (nov 10)', 'pay bills (nov 10) 2') }) === 'Pay Bills (Nov 10) 3');
+  TE.taskName('Pay Bills', { createdAt: '2026-11-10', taken: isTaken('pay bills', 'pay bills - 11-10-26', 'pay bills - 11-10-26 2') }) === 'Pay Bills - 11-10-26 3');
 ok('TF-NAME-CASE the clash check ignores case and a bare title gets a number',
   TE.taskName('PAY BILLS', takenSet('pay bills')) === 'PAY BILLS 2');
 ok('TF-NAME-SAME-AS-PARENT a subtask named like its parent still gets the suffix',
@@ -45,7 +45,7 @@ ok('TF-NAME-SANITIZED illegal characters are dropped before the check',
   ok('TF-NAME-LENGTH-CAP-NUMBER a number suffix on a capped name keeps the title, fits in 120 and ends in the number',
     r2.length <= 120 && r2.startsWith(title) && / 2$/.test(r2) && r2.length === 120);
   const r3 = TE.taskName(title, { createdAt: '2026-11-10', taken: isTaken(title.toLowerCase()) });
-  ok('TF-NAME-LENGTH-CAP-DATE a date qualifier on a long title is not cut', r3 === title + ' (Nov 10)');
+  ok('TF-NAME-LENGTH-CAP-DATE a date qualifier on a long title is not cut', r3 === title + ' - 11-10-26');
 
   const realSanitize = TE._sanitizeTitle;
   TE._sanitizeTitle = (t) => String(t).slice(0, 120);

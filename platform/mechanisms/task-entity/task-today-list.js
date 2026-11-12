@@ -79,6 +79,7 @@ class TaskTodayList {
     get DRAG_MIME() { return TaskTodayList.DRAG_MIME; }
     _isMobile(appRef) { return TaskTodayList._isMobile(appRef); }
     shortDueLabel(due) { return TaskTodayList.shortDueLabel(due); }
+    copyText(text, nav, req) { return TaskTodayList.copyText(text, nav, req); }
     _fromFormField(event) { return TaskTodayList._fromFormField(event); }
     clearDateLabel(task) { return TaskTodayList.clearDateLabel(task); }
 
@@ -918,6 +919,32 @@ class TaskTodayList {
      * "highest", and a typical project name (longer names ellipsize).
      */
     /**
+     * Put `text` on the clipboard: the async Clipboard API, else Electron's
+     * clipboard module on desktop. Resolves true when one of them took it.
+     * `nav` and `req` default to the globals; tests pass stubs.
+     */
+    static async copyText(text, nav, req) {
+        const value = String(text == null ? '' : text);
+        if (!value) return false;
+        const n = nav !== undefined ? nav : (typeof navigator !== 'undefined' ? navigator : null);
+        try {
+            if (n && n.clipboard && typeof n.clipboard.writeText === 'function') {
+                await n.clipboard.writeText(value);
+                return true;
+            }
+        } catch (_e) { /* try the desktop clipboard */ }
+        try {
+            const r = req !== undefined ? req : (typeof require === 'function' ? require : null);
+            const electron = r ? r('electron') : null;
+            if (electron && electron.clipboard && typeof electron.clipboard.writeText === 'function') {
+                electron.clipboard.writeText(value);
+                return true;
+            }
+        } catch (_e) { /* no clipboard */ }
+        return false;
+    }
+
+    /**
      * "Nov 10" for a due of 2026-11-10 (string, or a Luxon-like date): the
      * phone's due chip. '' when the value has no calendar date.
      */
@@ -1335,6 +1362,8 @@ class TaskTodayList {
             wrench: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
             more: svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>'),
             trash: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+            copy: svg('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
+            check: svg('<path d="M20 6 9 17l-5-5"/>'),
         };
         const actions = rightCluster.createEl('div', { cls: 'sauce-task-today-actions sauce-task-actions' });
         actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 1.5em; min-height: 1.5em;';
@@ -1508,6 +1537,22 @@ class TaskTodayList {
                     await doReschedule(monday);
                 });
             }
+        }
+        if (opts.copyPath && path) {
+            const copyBtn = mkActionBtn('sauce-task-action-copypath', 'Copy path', ICON.copy, false);
+            copyBtn.addEventListener('click', async (ev) => {
+                try { ev.stopPropagation(); } catch (_e) {}
+                const done = await TaskTodayList.copyText(path);
+                try { new Notice(done ? 'Copied ' + path : 'Could not copy the path', done ? 2500 : 5000); } catch (_e) {}
+                if (!done) return;
+                try {
+                    copyBtn.innerHTML = ICON.check;
+                    copyBtn.style.color = 'var(--color-green, #4c9a5a)';
+                    setTimeout(() => {
+                        try { copyBtn.innerHTML = ICON.copy; copyBtn.style.color = 'var(--text-faint, #999)'; } catch (_e) {}
+                    }, 1200);
+                } catch (_e) {}
+            });
         }
         const editBtn = mkActionBtn('sauce-task-action-edit', 'Edit task', ICON.wrench, false);
         editBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} doEdit(); });

@@ -398,6 +398,38 @@ const gridEntries = [
       && !html.includes('<beta>') && html.includes('<svg class="ic"></svg>'), html);
 }
 
+// MP-15 — opts.onClose runs once whichever way the popup closes; opts.animate
+// animates the panel only when motion is allowed and element.animate exists.
+{
+  const inst = new MP();
+  const doc = makeDoc();
+  let closes = 0;
+  const anchor = makeEl('button');
+  const overlay = inst.open([{ label: 'A', onSelect() {} }], { doc, isMobile: false, anchor, onClose: () => { closes += 1; } });
+  overlay.__navClose();
+  overlay.__navClose();
+  ok('MP-15 onClose runs exactly once', closes === 1);
+
+  const animated = [];
+  const realCreate = doc.createElement;
+  doc.createElement = (t) => { const e = realCreate(t); e.animate = (k, o) => { animated.push({ cls: e.className, o }); }; return e; };
+  const savedWindow = global.window;
+  global.window = { innerWidth: 1024, matchMedia: () => ({ matches: false }) };
+  inst.open([{ label: 'A', onSelect() {} }], { doc, isMobile: false, animate: true });
+  const panelAnimated = animated.some((a) => a.cls === 'menu-popover-panel');
+  animated.length = 0;
+  doc.body.children.length = 0;
+  inst.open([{ label: 'A', onSelect() {} }], { doc, isMobile: false });
+  const plain = animated.length === 0;
+  global.window = { innerWidth: 1024, matchMedia: () => ({ matches: true }) };
+  doc.body.children.length = 0;
+  inst.open([{ label: 'A', onSelect() {} }], { doc, isMobile: false, animate: true });
+  const reduced = animated.length === 0;
+  global.window = savedWindow;
+  ok('MP-16 animate:true animates the panel; without it, or under reduced motion, nothing animates',
+    panelAnimated && plain && reduced, JSON.stringify({ panelAnimated, plain, reduced }));
+}
+
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
 process.exit(allPass ? 0 : 1);

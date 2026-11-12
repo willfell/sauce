@@ -178,7 +178,7 @@ const CAPTURE_DAILY = [
       /^title: Pay Bills$/m.test(read('spice/tasks/Pay Bills/Pay Bills.md')), notes.join(', '));
     const shirley = notes.filter((n) => /Call Shirley/.test(n));
     ok('TF-INST-CAPTURE-FOLDER a name taken elsewhere in the vault gets the date qualifier',
-      shirley.length === 1 && /^spice\/tasks\/Call Shirley \([A-Z][a-z]{2} \d{1,2}\)\/Call Shirley \([A-Z][a-z]{2} \d{1,2}\)\.md$/.test(shirley[0]),
+      shirley.length === 1 && /^spice\/tasks\/Call Shirley - \d{2}-\d{2}-\d{2}\/Call Shirley - \d{2}-\d{2}-\d{2}\.md$/.test(shirley[0]),
       shirley.join(', '));
     ok('TF-INST-CAPTURE-FOLDER no flat task note is written',
       notes.every((n) => n.split('/').length >= 4), notes.join(', '));

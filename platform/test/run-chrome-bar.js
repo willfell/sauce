@@ -364,6 +364,18 @@ async function cbQuickAddCases() {
     m.entries[3].onSelect();
     ok('CB-ADD-6 choosing an entry calls SpaceHome._dispatch(key, dv, today)',
       JSON.stringify(dispatches) === JSON.stringify([['sticky-note', '2026-11-11'], ['trip', '2026-11-11']]));
+    ok('CB-ADD-13 the menu opens animated and reports its close', m.opts.animate === true && typeof m.opts.onClose === 'function');
+  }
+
+  {
+    const container = makeEl('div');
+    const adapter = mkAdapter(false);
+    adapter.resolve = () => ({ ctx: {}, spec: { primary: null, overflow: [], quickAdd: false } });
+    await inst.render({ container, current: () => ({ file: { path: 'spice/home/Home.md', name: 'Home' } }) }, adapter);
+    const order = allDescendants(container).filter((e) => e.tag === 'button').map(variantOf);
+    ok('CB-ADD-14 a surface with quickAdd:false (Home) draws no "+"', JSON.stringify(order) === JSON.stringify(['home', 'go']));
+    const homeSrc = fs.readFileSync(path.resolve(__dirname, '../blueprints/home/helpers/home-chrome-bar.js'), 'utf8');
+    ok('CB-ADD-15 the Home bar declares quickAdd:false', /quickAdd:\s*false/.test(homeSrc));
   }
 
   {

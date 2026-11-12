@@ -2163,7 +2163,7 @@ async function runCreateQuickTests() {
     const TD = new TaskDialogClass();
     await TD.createQuick({ title: 'call dentist', today: '2026-07-02', source: 'daily' });
     assert(app._creates.length === 1, 'still one create: got ' + app._creates.length);
-    assert(app._creates[0].path === 'spice/tasks/call dentist (Jul 2)/call dentist (Jul 2).md',
+    assert(app._creates[0].path === 'spice/tasks/call dentist - 07-02-26/call dentist - 07-02-26.md',
       'deduped path: ' + app._creates[0].path);
   });
 
@@ -2181,7 +2181,7 @@ async function runCreateQuickTests() {
     let reconciles = 0;
     TD._reconcileAfterCreate = () => { reconciles++; };
     const plan = TD.prepareQuick({ title: 'call dentist', parent_task: '[[Parent]]' });
-    assert(plan && plan.path === 'spice/tasks/call dentist (Jul 2)/call dentist (Jul 2).md', 'plan owns exact deduped path: ' + JSON.stringify(plan && plan.path));
+    assert(plan && plan.path === 'spice/tasks/call dentist - 07-02-26/call dentist - 07-02-26.md', 'plan owns exact deduped path: ' + JSON.stringify(plan && plan.path));
     assert(plan.task && plan.task.path === plan.path && plan.task.parent_task === '[[Parent]]',
       'optimistic task is a real row payload: ' + JSON.stringify(plan && plan.task));
     const result = await TD.createQuick({ plan, reconcile: false });
@@ -2196,7 +2196,7 @@ async function runCreateQuickTests() {
     const first = TD.prepareQuick({ title: 'A/B', parent_task: '[[Parent]]' });
     const second = TD.prepareQuick({ title: 'AB', parent_task: '[[Parent]]' });
     assert(first.path === 'spice/tasks/AB/AB.md', 'first sanitized path: ' + first.path);
-    assert(second.path === 'spice/tasks/AB (Jul 2)/AB (Jul 2).md', 'second in-flight path is deduped: ' + second.path);
+    assert(second.path === 'spice/tasks/AB - 07-02-26/AB - 07-02-26.md', 'second in-flight path is deduped: ' + second.path);
     await Promise.all([
       TD.createQuick({ plan: first, reconcile: false }),
       TD.createQuick({ plan: second, reconcile: false }),
@@ -2835,7 +2835,7 @@ async function runPerf1StructuralTests() {
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await Promise.resolve(); await Promise.resolve();
     assert(pendingFallbacks[5].path === 'spice/tasks/Same-title overlap/Same-title overlap.md'
-      && pendingFallbacks[6].path === 'spice/tasks/Same-title overlap (Aug 2)/Same-title overlap (Aug 2).md',
+      && pendingFallbacks[6].path === 'spice/tasks/Same-title overlap - 08-02-26/Same-title overlap - 08-02-26.md',
     'same-title overlap reserves distinct base and suffixed paths');
     pendingFallbacks[5].resolve({ ok: true, path: pendingFallbacks[5].path });
     await Promise.resolve(); await Promise.resolve();
@@ -2873,7 +2873,7 @@ async function runPerf1StructuralTests() {
     keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
     await Promise.resolve(); await Promise.resolve();
     assert(pendingFallbacks[9].path === 'spice/tasks/Sequence-only overlap/Sequence-only overlap.md'
-      && pendingFallbacks[10].path === 'spice/tasks/Sequence-only overlap (Aug 2)/Sequence-only overlap (Aug 2).md',
+      && pendingFallbacks[10].path === 'spice/tasks/Sequence-only overlap - 08-02-26/Sequence-only overlap - 08-02-26.md',
     'same-title double-submit without an input event reserves distinct paths');
     pendingFallbacks[9].resolve({ ok: true, path: pendingFallbacks[9].path });
     await Promise.resolve(); await Promise.resolve();

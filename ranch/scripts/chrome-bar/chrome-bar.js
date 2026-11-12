@@ -14,12 +14,13 @@
  */
 class ChromeBar {
   // ── CHROME_ICONS — the bar's own control glyphs (compass = Go, chevronDown =
-  // the Go caret, moreHorizontal = the ⋯ overflow). Blueprint-destination glyphs
+  // the Go caret, plus = the quick-add "+", moreHorizontal = the ⋯ overflow). Blueprint-destination glyphs
   // stay with each blueprint's helper.
   get CHROME_ICONS() {
     return {
       compass: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/><circle cx="12" cy="12" r="10"/></svg>`,
       chevronDown: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`,
+      plus: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`,
       moreHorizontal: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
       home: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
     };
@@ -27,46 +28,90 @@ class ChromeBar {
 
   // ── renderChromeButton — the bar's own button look ──────────────────────────
   // 32px, icon-first, hover-lift + press-scale micro-motion. The CALLER supplies
-  // opts.cls (its marker class, e.g. "pcb-btn pcb-btn-go") so each blueprint's
-  // rendered DOM stays byte-identical. Icon-only when opts.label is omitted.
+  // opts.cls (its marker class, e.g. "pcb-btn pcb-btn-go"); shared sauce-core
+  // classes are appended while adopter marker/content snapshots stay identical.
+  // Icon-only when opts.label is omitted.
   // opts: { cls, label?, icon?, onClick }.
   renderChromeButton(parent, opts) {
     const o = opts || {};
-    const btn = parent.createEl("button", { cls: o.cls || "sc-chrome-btn" });
     const hasLabel = !!o.label;
+    const classes = [o.cls || "sc-chrome-btn", "sauce-btn", "sauce-chrome-btn"];
+    if (!hasLabel) classes.push("sauce-btn-icon");
+    const btn = parent.createEl("button", { cls: classes.join(" ") });
     const iconHtml = o.icon || "";
     const labelHtml = hasLabel
       ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${o.label}</span>`
       : "";
     btn.innerHTML = iconHtml + labelHtml;
-    const EASE = "cubic-bezier(0.2, 0.9, 0.25, 1)";
-    btn.style.cssText = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center;"
-      + " gap: 6px; height: 32px; box-sizing: border-box;"
-      + ` padding: 0 ${hasLabel ? "16" : "12"}px;`
-      + (hasLabel ? "" : " min-width: 38px;")
-      + " border-radius: 8px; border: 1px solid var(--interactive-accent);"
-      + " background: var(--background-primary); color: var(--interactive-accent);"
-      + " font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em;"
-      + " overflow: hidden; transform: scale(1); box-shadow: none;"
-      + ` transition: background 0.15s ${EASE}, color 0.15s ${EASE}, border-color 0.15s ${EASE},`
-      + ` box-shadow 0.15s ${EASE}, transform 0.15s ${EASE};`;
+    const hasClassList = btn.classList && typeof btn.classList.add === "function";
     btn.onmouseenter = () => {
       if (btn.disabled) return;
-      btn.style.background = "var(--interactive-accent)";
-      btn.style.color = "var(--text-on-accent)";
-      btn.style.boxShadow = "0 2px 10px rgba(0, 0, 0, 0.14)";
+      if (hasClassList) btn.classList.add("is-hovered");
     };
     btn.onmouseleave = () => {
       if (btn.disabled) return;
-      btn.style.background = "var(--background-primary)";
-      btn.style.color = "var(--interactive-accent)";
-      btn.style.boxShadow = "none";
-      btn.style.transform = "scale(1)";
+      if (hasClassList) btn.classList.remove("is-hovered", "is-pressed");
     };
-    btn.onmousedown = () => { if (!btn.disabled) btn.style.transform = "scale(0.94)"; };
-    btn.onmouseup = () => { if (!btn.disabled) btn.style.transform = "scale(1)"; };
+    btn.onmousedown = () => { if (!btn.disabled && hasClassList) btn.classList.add("is-pressed"); };
+    btn.onmouseup = () => { if (!btn.disabled && hasClassList) btn.classList.remove("is-pressed"); };
     btn.onclick = o.onClick;
     return btn;
+  }
+
+  // ── quickAddEntries — the quick-add "+" menu ────────────────────────────────
+  // "New task" first (TaskDialog, the same call Home's "+" makes), then the
+  // SpaceHome capture entries (_availableCaptures when present, else the raw
+  // _captureSpec) in spec order, each running SpaceHome._dispatch(key, dv, today).
+  // SpaceHome is a customJS INSTANCE, so its statics are reached through the
+  // instance's constructor. A missing SpaceHome leaves just New task; a missing
+  // TaskDialog turns New task into a "still loading" Notice. Never throws.
+  async quickAddEntries(dv) {
+    const cjs = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    let today = "";
+    try { today = window.moment().format("YYYY-MM-DD"); } catch (_e) { today = ""; }
+    const notify = (msg) => {
+      try { if (typeof Notice === "function") new Notice(msg); } catch (_e) { /* never throw */ }
+    };
+    const taskIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`;
+    const entries = [{
+      label: "New task",
+      icon: taskIcon,
+      onSelect: () => {
+        try {
+          const td = cjs && cjs.TaskDialog;
+          if (!td || typeof td.open !== "function") { notify("Tasks are still loading — try again in a moment"); return; }
+          td.open({ surface: "home", today });
+        } catch (_e) { /* never throw */ }
+      },
+    }];
+
+    let SH = null;
+    try {
+      const inst = cjs && cjs.SpaceHome;
+      if (inst) {
+        const hasStatics = (o) => !!o && (typeof o._availableCaptures === "function" || typeof o._captureSpec === "function");
+        SH = hasStatics(inst) ? inst : (hasStatics(inst.constructor) ? inst.constructor : null);
+      }
+    } catch (_e) { SH = null; }
+    if (SH && typeof SH._dispatch === "function") {
+      let items = [];
+      try {
+        if (typeof SH._availableCaptures === "function") items = await SH._availableCaptures();
+        else if (typeof SH._captureSpec === "function") items = SH._captureSpec();
+      } catch (_e) { items = []; }
+      for (const item of (Array.isArray(items) ? items : [])) {
+        if (!item || !item.key) continue;
+        const key = item.key;
+        entries.push({
+          label: item.label,
+          icon: item.icon,
+          onSelect: () => { try { SH._dispatch(key, dv, today); } catch (_e) { /* never throw */ } },
+        });
+      }
+    }
+    return entries;
   }
 
   // ── vaultEntries — the Go launcher's Vault section ──────────────────────────
@@ -273,7 +318,7 @@ class ChromeBar {
       }
     }
 
-    // ── RIGHT — controls (Go ▾ · primary · ⋯), pushed right via margin-left:auto ─
+    // ── RIGHT — controls (Home · Go ▾ · + · primary · ⋯), pushed right via margin-left:auto ─
     const right = bar.createEl("div");
     right.style.cssText = "margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
 
@@ -299,7 +344,37 @@ class ChromeBar {
       },
     });
 
-    // 2. Primary button — rendered whenever the surface declares one.
+    // 2. Quick-add "+" — icon-only, right after Go, on every bar except a
+    // surface whose spec sets quickAdd:false (Home, which has its own "+").
+    // The menu opens animated and the "+" turns to "×" while it is open.
+    if (spec.quickAdd !== false) {
+      const turn = (open) => {
+        try {
+          const glyph = addBtn.querySelector ? addBtn.querySelector("svg") : null;
+          if (!glyph || !glyph.style) return;
+          glyph.style.transition = "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)";
+          glyph.style.transform = open ? "rotate(135deg)" : "";
+        } catch (_e) { /* never throw */ }
+      };
+      const addBtn = this.renderChromeButton(right, {
+        cls: adapter.btnClass("add"),
+        icon: ICON.plus,
+        onClick: async () => {
+          try {
+            const entries = await this.quickAddEntries(dv);
+            if (customJS && customJS.MenuPopover && typeof customJS.MenuPopover.open === "function") {
+              const overlay = customJS.MenuPopover.open(entries, {
+                anchor: addBtn, title: "Quick add", animate: true, onClose: () => turn(false),
+              });
+              turn(!!overlay);
+            }
+          } catch (_e) { /* never throw */ }
+        },
+      });
+      try { addBtn.setAttribute("aria-label", "Quick add"); addBtn.setAttribute("title", "Quick add"); } catch (_e) { /* never throw */ }
+    }
+
+    // 3. Primary button — rendered whenever the surface declares one.
     if (spec.primary) {
       const p = spec.primary;
       this.renderChromeButton(right, {
@@ -310,7 +385,7 @@ class ChromeBar {
       });
     }
 
-    // 3. ⋯ overflow menu — when the surface declares overflow actions.
+    // 4. ⋯ overflow menu — when the surface declares overflow actions.
     if (Array.isArray(spec.overflow) && spec.overflow.length > 0) {
       const dotsBtn = this.renderChromeButton(right, {
         cls: adapter.btnClass("dots"),

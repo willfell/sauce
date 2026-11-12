@@ -328,9 +328,9 @@ const fmOf = (app, p) => (app._files.get(p) || {})._fm || null;
       const { TD } = setup(app);
       const r = await TD.reopen('spice/tasks/_done/2026/11/A/B/B.md');
       ok('TF-REOPEN-IN-DONE-TREE-RENAMED the tree comes back renamed when its name is now taken',
-        r && r.ok === true && r.path === 'spice/tasks/A (Nov 3)/B/B.md'
-        && fmOf(app, 'spice/tasks/A (Nov 3)/A (Nov 3).md').status === 'open'
-        && fmOf(app, 'spice/tasks/A (Nov 3)/B/B.md').status === 'open'
+        r && r.ok === true && r.path === 'spice/tasks/A - 11-03-26/B/B.md'
+        && fmOf(app, 'spice/tasks/A - 11-03-26/A - 11-03-26.md').status === 'open'
+        && fmOf(app, 'spice/tasks/A - 11-03-26/B/B.md').status === 'open'
         && !!fmOf(app, 'spice/wiki/A.md'));
     }
 
@@ -543,7 +543,7 @@ const fmOf = (app, p) => (app._files.get(p) || {})._fm || null;
       ok('TF-REOPEN-RENAMED-NOTE-RENAME-FAILS a failed note rename leaves the tree in _done, statuses restored',
         r3 && r3.ok === false && a3 && a3.status === 'done' && a3.completed_at === ISO
         && b3 && b3.status === 'done' && b3.completed_at === ISO
-        && !app3._folders.has('spice/tasks/A (Nov 3)'));
+        && !app3._folders.has('spice/tasks/A - 11-03-26'));
 
       const app4 = makeApp({
         'spice/tasks/_done/2026/11/A/A.md': { status: 'done', title: 'A', completed_at: ISO, created_at: '2026-11-03' },
@@ -555,7 +555,7 @@ const fmOf = (app, p) => (app._files.get(p) || {})._fm || null;
       const a4 = fmOf(app4, 'spice/tasks/_done/2026/11/A/A.md');
       ok('TF-REOPEN-RENAMED-FOLDER-MOVE-FAILS a failed folder move after the note rename puts the note name back',
         r4 && r4.ok === false && a4 && a4.status === 'done'
-        && !app4._files.has('spice/tasks/_done/2026/11/A/A (Nov 3).md'));
+        && !app4._files.has('spice/tasks/_done/2026/11/A/A - 11-03-26.md'));
     }
 
     {

@@ -384,8 +384,8 @@ class TaskEntity {
     /**
      * The note and folder name for a task: its sanitized title while no other
      * note in the vault has that basename, else `Title (Parent Title)` for a
-     * subtask or `Title (Mon D)` (from createdAt) for a top-level task, else
-     * that plus " 2", " 3", …. `ctx.taken(lowerBasename)` is the caller's
+     * subtask or `Title - MM-DD-YY` (from createdAt) for a top-level task,
+     * else that plus " 2", " 3", …. `ctx.taken(lowerBasename)` is the caller's
      * vault-wide, case-insensitive clash check (candidates are passed
      * lowercased, no ".md"). The whole name stays within 120 characters: the
      * qualifier (parent title / date) is trimmed first, and the title only
@@ -399,26 +399,24 @@ class TaskEntity {
             catch (_e) { return false; }
         };
         const MAX = 120;
-        const fit = (t, inner, num) => {
-            let qual = '';
-            if (inner) {
-                const room = MAX - t.length - num.length - 3;
-                const cut = room >= 1 ? inner.slice(0, room).trimEnd() : '';
-                if (cut) qual = ' (' + cut + ')';
+        const fit = (t, qual, num) => {
+            let q = '';
+            if (qual && qual.inner) {
+                const room = MAX - t.length - num.length - qual.open.length - qual.close.length;
+                const cut = room >= 1 ? qual.inner.slice(0, room).trimEnd() : '';
+                if (cut) q = qual.open + cut + qual.close;
             }
-            const room = MAX - qual.length - num.length;
-            return (t.length > room ? t.slice(0, room).trimEnd() : t) + qual + num;
+            const room = MAX - q.length - num.length;
+            return (t.length > room ? t.slice(0, room).trimEnd() : t) + q + num;
         };
         const base = TaskEntity._sanitizeTitle(title);
-        if (!taken(fit(base, '', ''))) return fit(base, '', '');
-        let qual = '';
+        if (!taken(fit(base, null, ''))) return fit(base, null, '');
+        let qual = null;
         if (c.parentTitle != null && String(c.parentTitle).trim() !== '') {
-            qual = TaskEntity._sanitizeTitle(c.parentTitle);
+            qual = { open: ' (', inner: TaskEntity._sanitizeTitle(c.parentTitle), close: ')' };
         } else {
             const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(c.createdAt == null ? '' : c.createdAt));
-            const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const mon = m ? MONTHS[parseInt(m[2], 10) - 1] : null;
-            if (mon) qual = mon + ' ' + parseInt(m[3], 10);
+            if (m) qual = { open: ' - ', inner: m[2] + '-' + m[3] + '-' + m[1].slice(2), close: '' };
         }
         if (qual && !taken(fit(base, qual, ''))) return fit(base, qual, '');
         for (let n = 2; n < 10000; n++) {

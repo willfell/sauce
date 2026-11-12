@@ -344,20 +344,35 @@ class ChromeBar {
       },
     });
 
-    // 2. Quick-add "+" — icon-only, always right after Go, on every bar.
-    const addBtn = this.renderChromeButton(right, {
-      cls: adapter.btnClass("add"),
-      icon: ICON.plus,
-      onClick: async () => {
+    // 2. Quick-add "+" — icon-only, right after Go, on every bar except a
+    // surface whose spec sets quickAdd:false (Home, which has its own "+").
+    // The menu opens animated and the "+" turns to "×" while it is open.
+    if (spec.quickAdd !== false) {
+      const turn = (open) => {
         try {
-          const entries = await this.quickAddEntries(dv);
-          if (customJS && customJS.MenuPopover && typeof customJS.MenuPopover.open === "function") {
-            customJS.MenuPopover.open(entries, { anchor: addBtn, title: "Quick add" });
-          }
+          const glyph = addBtn.querySelector ? addBtn.querySelector("svg") : null;
+          if (!glyph || !glyph.style) return;
+          glyph.style.transition = "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)";
+          glyph.style.transform = open ? "rotate(135deg)" : "";
         } catch (_e) { /* never throw */ }
-      },
-    });
-    try { addBtn.setAttribute("aria-label", "Quick add"); addBtn.setAttribute("title", "Quick add"); } catch (_e) { /* never throw */ }
+      };
+      const addBtn = this.renderChromeButton(right, {
+        cls: adapter.btnClass("add"),
+        icon: ICON.plus,
+        onClick: async () => {
+          try {
+            const entries = await this.quickAddEntries(dv);
+            if (customJS && customJS.MenuPopover && typeof customJS.MenuPopover.open === "function") {
+              const overlay = customJS.MenuPopover.open(entries, {
+                anchor: addBtn, title: "Quick add", animate: true, onClose: () => turn(false),
+              });
+              turn(!!overlay);
+            }
+          } catch (_e) { /* never throw */ }
+        },
+      });
+      try { addBtn.setAttribute("aria-label", "Quick add"); addBtn.setAttribute("title", "Quick add"); } catch (_e) { /* never throw */ }
+    }
 
     // 3. Primary button — rendered whenever the surface declares one.
     if (spec.primary) {

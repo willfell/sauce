@@ -121,7 +121,7 @@ function setup(app, day) {
       const { TD } = setup(app, '2026-11-10');
       await TD.createQuick({ title: 'Pay Bills', today: '2026-11-10', reconcile: false });
       ok('TF-CREATE-CLASH-VAULTWIDE a basename taken anywhere in the vault adds the creation date',
-        app._creates[0].path === 'spice/tasks/Pay Bills (Nov 10)/Pay Bills (Nov 10).md');
+        app._creates[0].path === 'spice/tasks/Pay Bills - 11-10-26/Pay Bills - 11-10-26.md');
     }
 
     {
@@ -160,13 +160,13 @@ function setup(app, day) {
       const second = TD.prepareQuick({ title: 'Call Bob' });
       ok('TF-CREATE-RESERVED two back-to-back quick creates with the same title get distinct names',
         first.path === 'spice/tasks/Call Bob/Call Bob.md'
-        && second.path === 'spice/tasks/Call Bob (Nov 10)/Call Bob (Nov 10).md');
+        && second.path === 'spice/tasks/Call Bob - 11-10-26/Call Bob - 11-10-26.md');
       await Promise.all([TD.createQuick({ plan: first, reconcile: false }), TD.createQuick({ plan: second, reconcile: false })]);
       ok('TF-CREATE-RESERVED-RELEASED both persist and the reservations are released',
         app._creates.length === 2 && TD._quickCreateReservations.size === 0);
       const third = TD.prepareQuick({ title: 'Call Bob' });
       ok('TF-CREATE-RESERVED-NEXT a later create sees the persisted notes and numbers on',
-        third.path === 'spice/tasks/Call Bob (Nov 10) 2/Call Bob (Nov 10) 2.md');
+        third.path === 'spice/tasks/Call Bob - 11-10-26 2/Call Bob - 11-10-26 2.md');
       TD.releaseQuickPlan(third);
     }
 

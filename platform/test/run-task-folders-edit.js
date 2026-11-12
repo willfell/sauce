@@ -308,6 +308,51 @@ const base = (extra) => Object.assign({
     }
 
     {
+      const app = makeApp(base({
+        'spice/tasks/A/A.md': { status: 'open', title: 'A', due: '2026-11-12', created_at: '2026-11-01T08:00:00-07:00' },
+        'spice/tasks/A/B/D/D.md': { status: 'open', title: 'D', parent_task: '[[B]]' },
+      }));
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, app._files.get('spice/tasks/A/B/B.md'), { title: 'B', parent_task: '', due: '' }, null);
+      const fm = fmOf(app, 'spice/tasks/B/B.md');
+      ok('TF-EDIT-DETACH-DUE an undated subtask detached from a dated parent takes the parent\'s due and keeps its subtasks',
+        r && r.ok === true && r.due === '2026-11-12' && fm && fm.due === '2026-11-12' && fm.parent_task === ''
+        && !!fmOf(app, 'spice/tasks/B/D/D.md') && app._log.notices.some((n) => /top-level task now, due 2026-11-12/.test(n)));
+    }
+
+    {
+      const app = makeApp(base({
+        'spice/tasks/A/A.md': { status: 'open', title: 'A', due: '2026-11-20', created_at: '2026-11-01T08:00:00-07:00' },
+        'spice/tasks/A/B/D/D.md': { status: 'open', title: 'D', parent_task: '[[B]]' },
+      }));
+      const { TD } = setup(app);
+      await TD._saveEdit(app, app._files.get('spice/tasks/A/B/D/D.md'), { title: 'D', parent_task: '', due: '' }, null);
+      ok('TF-EDIT-DETACH-DUE-ANCESTOR with an undated parent the nearest dated ancestor gives the due',
+        (fmOf(app, 'spice/tasks/D/D.md') || {}).due === '2026-11-20');
+    }
+
+    {
+      const app = makeApp(base({
+        'spice/tasks/A/A.md': { status: 'open', title: 'A', due: '2026-11-12', created_at: '2026-11-01T08:00:00-07:00' },
+      }));
+      const { TD } = setup(app);
+      await TD._saveEdit(app, app._files.get('spice/tasks/A/B/B.md'), { title: 'B', parent_task: '', due: '2026-12-01' }, null);
+      const own = (fmOf(app, 'spice/tasks/B/B.md') || {}).due;
+      const app2 = makeApp(base({
+        'spice/tasks/A/A.md': { status: 'open', title: 'A', due: '2026-11-12', created_at: '2026-11-01T08:00:00-07:00' },
+      }));
+      const s2 = setup(app2);
+      await s2.TD._saveEdit(app2, app2._files.get('spice/tasks/A/B/B.md'), { title: 'B', parent_task: '[[C]]', due: '' }, null);
+      const moved = (fmOf(app2, 'spice/tasks/C/B/B.md') || {}).due;
+      const app3 = makeApp(base());
+      const s3 = setup(app3);
+      await s3.TD._saveEdit(app3, app3._files.get('spice/tasks/A/B/B.md'), { title: 'B', parent_task: '', due: '' }, null);
+      const undated = (fmOf(app3, 'spice/tasks/B/B.md') || {}).due;
+      ok('TF-EDIT-DETACH-DUE-ONLY-WHEN-NEEDED its own due wins, a re-parent inherits nothing, an undated chain leaves it undated',
+        own === '2026-12-01' && moved === '' && undated === '');
+    }
+
+    {
       const app = makeApp(base());
       const inst = typeof setup(app).TD._planEditMove === 'function';
       const stat = typeof TDClass(window, function () {}, undefined, {})._planEditMove === 'function';
