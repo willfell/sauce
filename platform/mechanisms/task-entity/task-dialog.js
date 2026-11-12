@@ -2277,9 +2277,11 @@ class TaskDialog {
      * notes, cold TaskEntity, nothing changed), { ok: true, folder, oldName,
      * destParent, name } for a move and/or rename, or { ok: false, reason }
      * when the new parent is the task itself or inside its own folder.
-     * Re-parenting follows the create rule: a parent that resolves to a live
-     * folder note takes the folder, a cleared parent sends it to spice/tasks/,
-     * a flat / unresolved / done / trashed parent leaves it where it is. A
+     * Re-parenting: a parent that resolves to a live folder note takes the
+     * folder; a cleared parent, or one that cannot hold folders (flat,
+     * unresolved, done, trashed), sends it to spice/tasks/ so the old
+     * enclosing folder cannot keep winning on read (a task already at the top
+     * level just gets parent_task written). A
      * rename happens only when the title changed and its sanitized form is not
      * already the folder name; the new name is vault-unique with this task's
      * own current name not counting as taken. Done and trashed tasks never
@@ -2309,6 +2311,8 @@ class TaskDialog {
                         return { ok: false, reason: 'a task cannot be a subtask of itself or of its own subtask' };
                     }
                     destParent = pf.folder;
+                } else {
+                    destParent = TE.TASK_ROOT;
                 }
             }
         }

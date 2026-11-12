@@ -206,14 +206,38 @@ const base = (extra) => Object.assign({
     }
 
     {
-      const app = makeApp(base({ 'spice/tasks/F.md': { status: 'open', title: 'F' } }));
-      const { TD } = setup(app);
+      const app = makeApp(base({ 'spice/tasks/X.md': { status: 'open', title: 'X' } }));
+      const { TD, TE } = setup(app);
       const file = app._files.get('spice/tasks/A/B/B.md');
-      const r = await TD._saveEdit(app, file, { title: 'B', parent_task: '[[F]]' }, null);
-      const r2 = await TD._saveEdit(app, app._files.get('spice/tasks/A/B/B.md'), { title: 'B', parent_task: '[[Nowhere]]' }, null);
-      ok('TF-EDIT-FLAT-PARENT-STAYS a flat or unresolved new parent keeps the folder and just writes parent_task',
-        r && r.ok === true && r2 && r2.ok === true && r2.path === 'spice/tasks/A/B/B.md'
-        && app._log.renames.length === 0 && fmOf(app, 'spice/tasks/A/B/B.md').parent_task === '[[Nowhere]]');
+      const r = await TD._saveEdit(app, file, { title: 'B', parent_task: '[[X]]' }, null);
+      const fm = fmOf(app, 'spice/tasks/B/B.md');
+      const parsed = TE.parseNote(Object.assign({ file: { path: 'spice/tasks/B/B.md' } }, fm));
+      ok('TF-EDIT-FLAT-PARENT-TOP-LEVEL re-parenting a nested task to flat [[X]] moves it to spice/tasks/B/B.md and parseNote reads X',
+        r && r.ok === true && r.path === 'spice/tasks/B/B.md' && fm && fm.parent_task === '[[X]]'
+        && parsed.parent_task === 'X' && !app._folders.has('spice/tasks/A/B'));
+    }
+
+    {
+      const app = makeApp(base());
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, app._files.get('spice/tasks/A/B/B.md'), { title: 'B', parent_task: '[[Nowhere]]' }, null);
+      ok('TF-EDIT-UNRESOLVED-PARENT-TOP-LEVEL an unresolved new parent also moves a nested task to the top level',
+        r && r.ok === true && r.path === 'spice/tasks/B/B.md' && fmOf(app, 'spice/tasks/B/B.md').parent_task === '[[Nowhere]]');
+    }
+
+    {
+      const app = makeApp(base({
+        'spice/tasks/X.md': { status: 'open', title: 'X' },
+        'spice/tasks/B/B.md': { status: 'open', title: 'B', parent_task: '[[C]]' },
+      }));
+      delete app._files.get('spice/tasks/B/B.md')._fm.parent_task;
+      app._files.delete('spice/tasks/A/B/B.md');
+      app._folders.delete('spice/tasks/A/B');
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, app._files.get('spice/tasks/B/B.md'), { title: 'B', parent_task: '[[X]]' }, null);
+      ok('TF-EDIT-TOP-LEVEL-STAYS a task already at the top level just gets parent_task written',
+        r && r.ok === true && r.path === 'spice/tasks/B/B.md' && app._log.renames.length === 0
+        && fmOf(app, 'spice/tasks/B/B.md').parent_task === '[[X]]');
     }
 
     {
