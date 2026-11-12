@@ -427,10 +427,13 @@ class TaskNoteView {
     }
 
     /**
-     * Index parsed tasks for the card: { children, byName } where children
-     * maps a parent's basename to its subtasks (open and done) and byName
-     * maps a basename to its task. `linkText` turns a parent_task value into
-     * a basename. Pure; never throws.
+     * Index parsed tasks for the card: { children, byName }. children maps a
+     * parent to its subtasks (open and done): by the parent note's PATH when
+     * the task carries a parent_path (folder-derived), by the parent's
+     * basename otherwise (a flat note's parent_task link), so two parents
+     * that share a name never share children. byName maps a basename to its
+     * task. `linkText` turns a parent_task value into a basename. Read a
+     * node's children with _kidsOf. Pure; never throws.
      */
     static _taskIndex(tasks, linkText) {
         const children = new Map();
@@ -441,12 +444,27 @@ class TaskNoteView {
             const name = TaskNoteView._baseOf(t.path);
             if (name && !byName.has(name)) byName.set(name, t);
             let parent = '';
-            try { parent = String(toName(t.parent_task) || '').trim(); } catch (_e) { parent = ''; }
-            if (!parent || parent === name) continue;
+            const parentPath = String(t.parent_path == null ? '' : t.parent_path).trim();
+            if (parentPath) {
+                parent = parentPath;
+            } else {
+                try { parent = String(toName(t.parent_task) || '').trim(); } catch (_e) { parent = ''; }
+            }
+            if (!parent || parent === name || parent === t.path) continue;
             if (!children.has(parent)) children.set(parent, []);
             children.get(parent).push(t);
         }
         return { children, byName };
+    }
+
+    /**
+     * The subtasks of the note at `path`: its path key first, then its
+     * basename key. Pure; never throws.
+     */
+    static _kidsOf(index, path) {
+        const kids = index && index.children;
+        if (!kids || typeof kids.get !== 'function' || !path) return [];
+        return kids.get(path) || kids.get(TaskNoteView._baseOf(path)) || [];
     }
 
     /**
@@ -834,7 +852,7 @@ class TaskNoteView {
             let syncReady = () => {};
             if (filePath) {
                 try {
-                    const allSubtasks = index.children.get(thisBasename) || [];
+                    const allSubtasks = TaskNoteView._kidsOf(index, filePath);
                     subtaskList = allSubtasks;
                     const TTL = window.customJS && window.customJS.TaskTodayList;
 
@@ -888,8 +906,8 @@ class TaskNoteView {
                     // One open subtask row, then its own open subtasks nested
                     // under it. `trail` stops a parent loop; depth caps at three.
                     const drawRow = (host, st, depth, first, trail) => {
-                        const key = TaskNoteView._baseOf(st.path);
-                        const kids = (key && index.children.get(key)) || [];
+                        const key = st.path || '';
+                        const kids = TaskNoteView._kidsOf(index, key);
                         st.subtask_count = kids.length
                             ? { done: kids.filter((k) => k && k.status === 'done').length, total: kids.length }
                             : null;
@@ -902,7 +920,7 @@ class TaskNoteView {
                         }
                         const next = new Set(trail);
                         if (key) next.add(key);
-                        const openKids = kids.filter((k) => isOpenTask(k) && !next.has(TaskNoteView._baseOf(k.path)));
+                        const openKids = kids.filter((k) => isOpenTask(k) && !next.has(k.path));
                         if (openKids.length && depth < 3 && key && !trail.has(key)) {
                             const nest = host.createEl('div', { cls: 'sauce-tnv-nest' });
                             for (const kid of openKids) {
@@ -942,7 +960,7 @@ class TaskNoteView {
                         if (TTL && typeof TTL.renderTaskRow === 'function') {
                             rowIndex = 0;
                             for (const st of openSubtasks) {
-                                try { drawRow(subList, st, 1, first, new Set([thisBasename])); } catch (_e) {}
+                                try { drawRow(subList, st, 1, first, new Set([filePath])); } catch (_e) {}
                             }
                         }
                         if (!allSubtasks.length) {

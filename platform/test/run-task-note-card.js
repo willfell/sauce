@@ -315,6 +315,38 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
   }
 
   {
+    const note = (p, extra) => Object.assign({ type: 'task', status: 'open', source: 'manual', title: p.split('/').pop(), file: { path: 'spice/tasks/' + p + '/' + p.split('/').pop() + '.md', name: p.split('/').pop() } }, extra || {});
+    const TOP = note('Top');
+    const kids = [TOP, note('Top/A'), note('Top/A/A1'), note('Top/B', { status: 'done', completed_at: '2026-11-10T09:00:00-07:00' })];
+    const { dv, container, calls } = harness(TOP, kids);
+    await new TNV().render(dv);
+    ok('TNC-FOLDER-TREE children given as folder-note paths, with no parent_task, still nest',
+      calls.rows.map((r) => r.task.title).join() === 'A,A1' && byClass(container, 'sauce-tnv-nest').length === 1
+      && one(container, 'sauce-tnv-count').textContent === '1 of 2 done');
+  }
+
+  {
+    const note = (p, extra) => Object.assign({ type: 'task', status: 'open', source: 'manual', title: p.split('/').pop(), file: { path: 'spice/tasks/' + p + '/' + p.split('/').pop() + '.md', name: p.split('/').pop() } }, extra || {});
+    const P1 = note('P1');
+    const kids = [P1, note('P1/Notes'), note('P1/Notes/X1'), note('P2'), note('P2/Notes'), note('P2/Notes/X2')];
+    const { dv, container, calls } = harness(P1, kids);
+    await new TNV().render(dv);
+    ok('TNC-FOLDER-SAME-NAME two parents each with a child named Notes do not share children',
+      calls.rows.map((r) => r.task.title).join() === 'Notes,X1' && !calls.rows.some((r) => r.task.title === 'X2'));
+    const idx = TNV._taskIndex([
+      { path: 'spice/tasks/P1/Notes/Notes.md', parent_task: 'P1', parent_path: 'spice/tasks/P1/P1.md' },
+      { path: 'spice/tasks/P1/Notes/X1/X1.md', parent_task: 'Notes', parent_path: 'spice/tasks/P1/Notes/Notes.md' },
+      { path: 'spice/tasks/P2/Notes/X2/X2.md', parent_task: 'Notes', parent_path: 'spice/tasks/P2/Notes/Notes.md' },
+      { path: 'spice/tasks/Flat child.md', parent_task: 'Flat', parent_path: '' },
+    ], null);
+    const titles = (k) => (idx.children.get(k) || []).map((t) => TNV._baseOf(t.path)).join();
+    ok('TNC-INDEX-PATH-KEY a child with a parent path is keyed under that path; one without, under the parent basename',
+      titles('spice/tasks/P1/Notes/Notes.md') === 'X1' && titles('spice/tasks/P2/Notes/Notes.md') === 'X2'
+      && titles('Notes') === '' && titles('Flat') === 'Flat child'
+      && TNV._kidsOf(idx, 'spice/tasks/P1/Notes/Notes.md').length === 1 && TNV._kidsOf(idx, 'spice/tasks/Flat.md').length === 1);
+  }
+
+  {
     const GRAND = { type: 'task', title: 'Review the PR', status: 'open', parent_task: '[[Help Henry out with Routes]]', file: { path: 'spice/tasks/Review the PR.md', name: 'Review the PR' } };
     const LEAF = { type: 'task', title: 'Leave a comment', status: 'open', parent_task: '[[Review the PR]]', file: { path: 'spice/tasks/Leave a comment.md', name: 'Leave a comment' } };
     const ROOT = Object.assign({}, HENRY, { parent_task: '[[Launch]]' });
