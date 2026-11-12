@@ -54,6 +54,9 @@ function makeEl(tag) {
   el.querySelectorAll = () => [];
   el.getBoundingClientRect = () => ({ left: 0, bottom: 0, width: 100 });
   el.remove = () => {};
+  const attrs = {};
+  el.setAttribute = (k, v) => { attrs[k] = String(v); };
+  el.getAttribute = (k) => (k in attrs ? attrs[k] : null);
   el.addEventListener = () => {};
   el.removeEventListener = () => {};
   return el;
@@ -290,6 +293,113 @@ async function cbDayNavCase() {
   global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
 }
 
+// ── CB-ADD-1..12 — the quick-add "+" sits right after Go on every bar, opens a
+// menu with New task first then the SpaceHome capture entries, dispatches each,
+// and degrades to New task alone (never throws) when SpaceHome is missing.
+async function cbQuickAddCases() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument, prevWin = global.window, prevNotice = global.Notice;
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: false, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.window = { moment: () => ({ format: () => '2026-11-11' }) };
+  const notices = [];
+  global.Notice = function (m) { notices.push(m); };
+  const menuOpens = [];
+  const taskOpens = [];
+  const dispatches = [];
+  const spec = [
+    { key: 'meeting', label: 'Meeting', icon: '<svg m/>' },
+    { key: 'sticky-note', label: 'Sticky Note', icon: '<svg s/>' },
+    { key: 'trip', label: 'Trip', icon: '<svg t/>' },
+  ];
+  const SpaceHomeStatics = { _captureSpec: () => spec, _dispatch: (k, dv, today) => dispatches.push([k, today]) };
+  const baseCJS = () => ({
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([]) },
+    MenuPopover: { open: (entries, opts) => { menuOpens.push({ entries, opts }); return makeEl('div'); } },
+    TaskDialog: { open: (o) => taskOpens.push(o) },
+  });
+  const mkAdapter = (withPrimary) => ({
+    resolve: () => ({ ctx: {}, spec: { primary: withPrimary ? { id: 'p', label: 'New', icon: '<svg/>' } : null, overflow: withPrimary ? [{ id: 'o', label: 'O', icon: '<svg/>' }] : [] } }),
+    navEntries: async () => ([]),
+    dispatch: () => {},
+    openNavTarget: () => {},
+    rootClass: 'x-root',
+    btnClass: (v) => `x-btn x-btn-${v}`,
+  });
+  const renderBar = async (withPrimary) => {
+    const container = makeEl('div');
+    await inst.render({ container, current: () => ({ file: { path: 'spice/x/y.md', name: 'y' } }) }, mkAdapter(withPrimary));
+    return allDescendants(container);
+  };
+  const variantOf = (e) => { const m = /x-btn-(\w+)/.exec(String(e.className || '')); return m && m[1]; };
+
+  global.customJS = Object.assign(baseCJS(), { SpaceHome: SpaceHomeStatics });
+  for (const withPrimary of [false, true]) {
+    const desc = await renderBar(withPrimary);
+    const order = desc.filter((e) => e.tag === 'button').map(variantOf);
+    const want = withPrimary ? ['home', 'go', 'add', 'primary', 'dots'] : ['home', 'go', 'add'];
+    ok(`CB-ADD-1 button order is ${want.join(' > ')} (primary=${withPrimary})`, JSON.stringify(order) === JSON.stringify(want));
+    if (!withPrimary) {
+      const add = desc.find((e) => variantOf(e) === 'add');
+      ok('CB-ADD-2 "+" uses the chrome button classes, icon-only, with aria-label "Quick add"',
+        add.classList.contains('sauce-btn') && add.classList.contains('sauce-chrome-btn') && add.classList.contains('sauce-btn-icon')
+        && add.getAttribute('aria-label') === 'Quick add' && /svg/.test(add.innerHTML) && add.innerHTML.indexOf('<span') < 0);
+    }
+  }
+
+  {
+    const desc = await renderBar(false);
+    const add = desc.find((e) => variantOf(e) === 'add');
+    menuOpens.length = 0;
+    await add.onclick();
+    const m = menuOpens[0];
+    const labels = m ? m.entries.map((e) => e.label) : [];
+    ok('CB-ADD-3 click opens a menu: New task first, then the capture entries in _captureSpec order, anchored to the button',
+      !!m && JSON.stringify(labels) === JSON.stringify(['New task', 'Meeting', 'Sticky Note', 'Trip']) && m.opts.anchor === add);
+    ok('CB-ADD-4 capture entries carry the spec icons', m.entries[1].icon === '<svg m/>' && m.entries[3].icon === '<svg t/>' && !!m.entries[0].icon);
+    m.entries[0].onSelect();
+    ok('CB-ADD-5 New task opens TaskDialog like Home ({surface:"home", today})',
+      taskOpens.length === 1 && taskOpens[0].surface === 'home' && taskOpens[0].today === '2026-11-11');
+    m.entries[2].onSelect();
+    m.entries[3].onSelect();
+    ok('CB-ADD-6 choosing an entry calls SpaceHome._dispatch(key, dv, today)',
+      JSON.stringify(dispatches) === JSON.stringify([['sticky-note', '2026-11-11'], ['trip', '2026-11-11']]));
+  }
+
+  {
+    const gated = spec.filter((i) => i.key !== 'trip');
+    global.customJS = Object.assign(baseCJS(), { SpaceHome: { _availableCaptures: async () => gated, _captureSpec: () => spec, _dispatch() {} } });
+    const labels = (await inst.quickAddEntries({})).map((e) => e.label);
+    ok('CB-ADD-7 an installed-only filter (_availableCaptures) wins over the raw spec',
+      JSON.stringify(labels) === JSON.stringify(['New task', 'Meeting', 'Sticky Note']));
+    class FakeSpaceHome { render() {} }
+    FakeSpaceHome._captureSpec = () => spec;
+    FakeSpaceHome._dispatch = (k, dv, today) => dispatches.push([k, today]);
+    global.customJS = Object.assign(baseCJS(), { SpaceHome: new FakeSpaceHome() });
+    const viaCtor = (await inst.quickAddEntries({})).map((e) => e.label);
+    ok('CB-ADD-8 a SpaceHome INSTANCE is reached through its constructor statics',
+      JSON.stringify(viaCtor) === JSON.stringify(['New task', 'Meeting', 'Sticky Note', 'Trip']));
+  }
+
+  {
+    global.customJS = baseCJS();
+    const only = await inst.quickAddEntries({});
+    ok('CB-ADD-9 SpaceHome missing → the menu is New task alone', only.length === 1 && only[0].label === 'New task');
+    let threw = false;
+    const before = taskOpens.length;
+    try { only[0].onSelect(); } catch (_e) { threw = true; }
+    ok('CB-ADD-10 New task still opens TaskDialog with SpaceHome missing', !threw && taskOpens.length === before + 1);
+    delete global.customJS.TaskDialog;
+    try { only[0].onSelect(); } catch (_e) { threw = true; }
+    ok('CB-ADD-11 neither TaskDialog nor SpaceHome → a Notice, nothing thrown', !threw && notices.length === 1);
+    global.customJS = Object.assign(baseCJS(), { SpaceHome: { _captureSpec() { throw new Error('boom'); }, _dispatch() {} } });
+    let entries = null;
+    try { entries = await inst.quickAddEntries({}); } catch (_e) { entries = null; }
+    ok('CB-ADD-12 a throwing SpaceHome degrades to New task alone', !!entries && entries.length === 1);
+  }
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD; global.window = prevWin; global.Notice = prevNotice;
+}
+
 function summarize() {
   const failed = results.filter(([, c]) => !c);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
@@ -338,6 +448,7 @@ async function cbFactoryCases() {
   await cbRenderCases();
   await cbDayNavCase();
   await cbHomeButtonCase();
+  await cbQuickAddCases();
   await cbFactoryCases();
   summarize();
 })();

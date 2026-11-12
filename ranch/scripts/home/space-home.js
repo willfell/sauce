@@ -211,6 +211,58 @@ class SpaceHome {
   }
 
   /**
+   * The capture entries this vault can actually run, in _captureSpec order.
+   * Article and Journal are gated on their entity-create registry entry
+   * (reader-article / journal-entry) so the entry never appears for a vault that
+   * hasn't installed that blueprint. Trip is gated via
+   * ranch/nav-buttons-registry.json's contributions.trips — NOT via
+   * `customJS.TripNavButtons` class existence: CustomJS loads every .js file
+   * physically present under ranch/scripts/ regardless of subscription state, so
+   * an orphaned trip-nav-buttons.js left over from an old install would keep the
+   * class "available" after the vault unsubscribes from trips. The registry file
+   * is installer-owned and only lists contributions for currently-subscribed
+   * components. Shared by Home's "+" menu and the ChromeBar quick-add "+".
+   * Best-effort: a failing gate treats that entry as unavailable. Never throws.
+   */
+  static async _availableCaptures() {
+    const registryIdFor = { article: "reader-article", journal: "journal-entry" };
+    const cjsForGate = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const appForGate = (typeof app !== "undefined" && app)
+      || (typeof window !== "undefined" && window.app)
+      || null;
+    const out = [];
+    for (const item of SpaceHome._captureSpec()) {
+      if (item.key === "trip") {
+        let available = false;
+        try {
+          if (appForGate && appForGate.vault && appForGate.vault.adapter) {
+            const raw = await appForGate.vault.adapter.read("ranch/nav-buttons-registry.json");
+            const reg = JSON.parse(raw);
+            const trips = reg && reg.contributions && reg.contributions.trips;
+            available = Array.isArray(trips) && trips.length > 0;
+          }
+        } catch (_e) { /* best-effort gate check; treat as unregistered on failure */ }
+        if (!available) continue;
+      } else {
+        const registryId = registryIdFor[item.key];
+        if (registryId) {
+          let spec = null;
+          try {
+            if (cjsForGate && cjsForGate.EntityCreate && typeof cjsForGate.EntityCreate._loadSpec === "function") {
+              spec = await cjsForGate.EntityCreate._loadSpec(registryId);
+            }
+          } catch (_e) { /* best-effort gate check; treat as unregistered on failure */ }
+          if (!spec) continue;
+        }
+      }
+      out.push(item);
+    }
+    return out;
+  }
+
+  /**
    * Toggle a class on/off, stub-safe. Uses the real `classList` when present
    * (browser / Obsidian), else rewrites the element's class string (the Node DOM
    * stub keeps its class in `.cls`) so the "+" open/close state is testable both
@@ -557,49 +609,8 @@ class SpaceHome {
     };
 
     // Menu, remaining entries — the other capture actions: Meeting, Sticky Note, Article,
-    // Journal, Trip. Article and Journal are gated on their entity-create
-    // registry entry actually existing (reader-article / journal-entry) so the
-    // button never appears for a vault that hasn't installed that blueprint.
-    // Trip is gated the same way, but via ranch/nav-buttons-registry.json's
-    // contributions.trips — NOT via `customJS.TripNavButtons` class existence.
-    // CustomJS loads every .js file physically present under ranch/scripts/
-    // regardless of subscription state, so an orphaned trip-nav-buttons.js left
-    // over from an old install would keep the class "available" even after the
-    // vault unsubscribes from the trips blueprint. The registry file is
-    // installer-owned and only lists contributions for currently-subscribed
-    // components, so reading it is the source of truth for "is trips actually
-    // installed here" — the same pattern EntityCreate._loadSpec uses below.
-    const registryIdFor = { article: "reader-article", journal: "journal-entry" };
-    const cjsForGate = (typeof customJS !== "undefined" && customJS)
-      || (typeof window !== "undefined" && window.customJS)
-      || null;
-    const appForGate = (typeof app !== "undefined" && app)
-      || (typeof window !== "undefined" && window.app)
-      || null;
-    for (const item of SpaceHome._captureSpec()) {
-      if (item.key === "trip") {
-        let available = false;
-        try {
-          if (appForGate && appForGate.vault && appForGate.vault.adapter) {
-            const raw = await appForGate.vault.adapter.read("ranch/nav-buttons-registry.json");
-            const reg = JSON.parse(raw);
-            const trips = reg && reg.contributions && reg.contributions.trips;
-            available = Array.isArray(trips) && trips.length > 0;
-          }
-        } catch (_e) { /* best-effort gate check; treat as unregistered on failure */ }
-        if (!available) continue;
-      } else {
-        const registryId = registryIdFor[item.key];
-        if (registryId) {
-          let spec = null;
-          try {
-            if (cjsForGate && cjsForGate.EntityCreate && typeof cjsForGate.EntityCreate._loadSpec === "function") {
-              spec = await cjsForGate.EntityCreate._loadSpec(registryId);
-            }
-          } catch (_e) { /* best-effort gate check; treat as unregistered on failure */ }
-          if (!spec) continue;
-        }
-      }
+    // Journal, Trip — gated on what this vault has installed (_availableCaptures).
+    for (const item of await SpaceHome._availableCaptures()) {
       const mi = menu.createEl("button", { cls: "sauce-home-add-item" });
       mi.setAttribute("type", "button");
       mi.dataset.captureKey = item.key;
