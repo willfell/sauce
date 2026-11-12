@@ -269,6 +269,9 @@ const CAPTURE_DAILY = [
     ok('TF-STRAY-REPORT the report lists each action and the reason',
       /Moved into its task's folder \(2\)/.test(report) && /Made a task \(1\)/.test(report) && /Moved to project docs \(1\)/.test(report)
       && /Left in place \(2\)/.test(report) && history.some((h) => h.step === 'task_strays_heal' && h.action === 'report_written'));
+    const odd = install.planTaskStrays([{ path: 'spice/tasks/a|b\\c.md', body: 'x' }], [], [], today);
+    ok('TF-STRAY-REPORT-ESCAPE pipes and backslashes in a name cannot break the table',
+      /\| `spice\/tasks\/a\\\|b\\\\c\.md` \|/.test(install.renderTaskStraysReport(odd, today)));
     const before = mdBelow('ranch/reports');
     const h2 = [];
     await install.applyTaskStraysHeal(tp, h2, {});

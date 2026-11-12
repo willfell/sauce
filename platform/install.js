@@ -14113,6 +14113,14 @@ function _taskStrayFrontmatter(title, createdAt) {
     "---", ""].join("\n");
 }
 
+// One markdown table cell: backslashes, then pipes, escaped and newlines
+// flattened; `code` wraps it in backticks (a backtick inside becomes ').
+function _taskStrayCell(value, code) {
+  let s = String(value == null ? "" : value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  if (code) s = "`" + s.replace(/`/g, "'") + "`";
+  return s;
+}
+
 function renderTaskStraysReport(plan, today) {
   const label = { park: "Moved into its task's folder", "make-task": "Made a task", "to-docs": "Moved to project docs", leave: "Left in place" };
   const lines = ["---", "type: report", `title: Task strays ${today}`, "---", "", `# Task strays ${today}`, "",
@@ -14121,7 +14129,7 @@ function renderTaskStraysReport(plan, today) {
     const rows = plan.actions.filter((a) => a.kind === kind);
     if (!rows.length) continue;
     lines.push(`## ${label[kind]} (${rows.length})`, "", "| From | To | Why |", "| :---- | :---- | :---- |");
-    for (const a of rows) lines.push(`| \`${a.from}\` | ${a.to ? "`" + a.to + "`" : "—"} | ${String(a.reason).replace(/\|/g, "\\|")} |`);
+    for (const a of rows) lines.push(`| ${_taskStrayCell(a.from, true)} | ${a.to ? _taskStrayCell(a.to, true) : "—"} | ${_taskStrayCell(a.reason, false)} |`);
     lines.push("", "---", "");
   }
   return lines.join("\n");
@@ -23842,6 +23850,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.renderTaskFoldersReport = renderTaskFoldersReport;
     module.exports.applyTaskFoldersHeal = applyTaskFoldersHeal;
     module.exports.planTaskStrays = planTaskStrays;
+    module.exports.renderTaskStraysReport = renderTaskStraysReport;
     module.exports.applyTaskStraysHeal = applyTaskStraysHeal;
     module.exports.applyRecurringTasksMigrationHeal = applyRecurringTasksMigrationHeal;
     module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
