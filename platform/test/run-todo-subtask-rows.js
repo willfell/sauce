@@ -408,15 +408,29 @@ process.exitCode = 1;
     for (const call of calls) assert(/showParent: false/.test(call), `missing showParent:false in ${call}`);
   });
 
-  ok('ST-COPY-PATH a card row carries a Copy path button; list rows do not', () => {
+  ok('ST-COPY-PATH card rows and to-do list rows carry a Copy full path button; copyPath:false opts out', () => {
     const cardRow = TTL.renderTaskRow(makeEl('div'), subtask, null, { todayStr: TODAY, showParent: false, copyPath: true });
     const btn = find(cardRow, 'sauce-task-action-copypath');
     assert(btn, 'copy button on the card row');
-    assert.strictEqual(btn._attrs['aria-label'], 'Copy path');
+    assert.strictEqual(btn._attrs['aria-label'], 'Copy full path');
     const listRow = TTL.renderTaskRow(makeEl('div'), subtask, null, { todayStr: TODAY });
-    assert.strictEqual(find(listRow, 'sauce-task-action-copypath'), null);
-    const calls = NOTE_VIEW_SRC.match(/TTL\.renderTaskRow\([^;]*\);/g) || [];
-    for (const call of calls) assert(/copyPath: true/.test(call), `missing copyPath:true in ${call}`);
+    assert(find(listRow, 'sauce-task-action-copypath'), 'copy button on a list row');
+    const off = TTL.renderTaskRow(makeEl('div'), subtask, null, { todayStr: TODAY, copyPath: false });
+    assert.strictEqual(find(off, 'sauce-task-action-copypath'), null);
+    const noPath = TTL.renderTaskRow(makeEl('div'), Object.assign({}, subtask, { path: '' }), null, { todayStr: TODAY });
+    assert.strictEqual(find(noPath, 'sauce-task-action-copypath'), null, 'no path, no button');
+  });
+
+  ok('ST-FULL-PATH the copied path is the note on disk: getFullPath, else base path joined, else the vault path', () => {
+    const rel = 'spice/tasks/SND Errors/SND Errors.md';
+    assert.strictEqual(TTL.fullPath(rel, { vault: { adapter: { getFullPath: (p) => '/Users/me/obsidian/accuris-sauce/' + p } } }),
+      '/Users/me/obsidian/accuris-sauce/' + rel);
+    assert.strictEqual(TTL.fullPath(rel, { vault: { adapter: { getBasePath: () => '/Users/me/vault/' } } }), '/Users/me/vault/' + rel);
+    assert.strictEqual(TTL.fullPath(rel, { vault: { adapter: { getBasePath: () => 'C:\\Users\\me\\vault' } } }),
+      'C:\\Users\\me\\vault\\spice\\tasks\\SND Errors\\SND Errors.md');
+    assert.strictEqual(TTL.fullPath(rel, { vault: { adapter: {} } }), rel, 'mobile: no folder on disk, vault path');
+    assert.strictEqual(TTL.fullPath(rel, { vault: { adapter: { getFullPath: () => { throw new Error('x'); } } } }), rel);
+    assert.strictEqual(TTL.fullPath('', null), '');
   });
 
   await okAsync('ST-COPY-TEXT writes the vault path through the clipboard API, falls back to Electron, reports failure', async () => {

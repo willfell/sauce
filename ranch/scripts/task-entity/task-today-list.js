@@ -81,6 +81,7 @@ class TaskTodayList {
     _isMobile(appRef) { return TaskTodayList._isMobile(appRef); }
     shortDueLabel(due) { return TaskTodayList.shortDueLabel(due); }
     copyText(text, nav, req) { return TaskTodayList.copyText(text, nav, req); }
+    fullPath(path, appRef) { return TaskTodayList.fullPath(path, appRef); }
     _fromFormField(event) { return TaskTodayList._fromFormField(event); }
     clearDateLabel(task) { return TaskTodayList.clearDateLabel(task); }
 
@@ -931,6 +932,39 @@ class TaskTodayList {
      * "highest", and a typical project name (longer names ellipsize).
      */
     /**
+     * The note's full path on disk: the vault's folder joined to `path` by
+     * the adapter (getFullPath, else getBasePath + the platform separator),
+     * so Windows paths keep backslashes. On mobile, where the vault has no
+     * folder on disk, the vault-relative `path`. `appRef` defaults to the
+     * global app; tests pass a stub.
+     */
+    static fullPath(path, appRef) {
+        const rel = String(path == null ? '' : path);
+        if (!rel) return '';
+        let a = appRef;
+        if (a === undefined) {
+            try { a = (typeof window !== 'undefined' && window.app) || (typeof app !== 'undefined' ? app : null); } catch (_e) { a = null; }
+        }
+        const ad = a && a.vault && a.vault.adapter;
+        try {
+            if (ad && typeof ad.getFullPath === 'function') {
+                const f = ad.getFullPath(rel);
+                if (f) return String(f);
+            }
+        } catch (_e) { /* try the base path */ }
+        try {
+            if (ad && typeof ad.getBasePath === 'function') {
+                const base = String(ad.getBasePath() || '');
+                if (base) {
+                    const sep = base.indexOf('\\') >= 0 && base.indexOf('/') < 0 ? '\\' : '/';
+                    return base.replace(/[\\/]+$/, '') + sep + (sep === '\\' ? rel.replace(/\//g, '\\') : rel);
+                }
+            }
+        } catch (_e) { /* vault-relative */ }
+        return rel;
+    }
+
+    /**
      * Put `text` on the clipboard: the async Clipboard API, else Electron's
      * clipboard module on desktop. Resolves true when one of them took it.
      * `nav` and `req` default to the globals; tests pass stubs.
@@ -1561,12 +1595,13 @@ class TaskTodayList {
                 });
             }
         }
-        if (opts.copyPath && path) {
-            const copyBtn = mkActionBtn('sauce-task-action-copypath', 'Copy path', ICON.copy, false);
+        if (opts.copyPath !== false && path) {
+            const copyBtn = mkActionBtn('sauce-task-action-copypath', 'Copy full path', ICON.copy, false);
             copyBtn.addEventListener('click', async (ev) => {
                 try { ev.stopPropagation(); } catch (_e) {}
-                const done = await TaskTodayList.copyText(path);
-                try { new Notice(done ? 'Copied ' + path : 'Could not copy the path', done ? 2500 : 5000); } catch (_e) {}
+                const full = TaskTodayList.fullPath(path);
+                const done = await TaskTodayList.copyText(full);
+                try { new Notice(done ? 'Copied ' + full : 'Could not copy the path', done ? 2500 : 5000); } catch (_e) {}
                 if (!done) return;
                 try {
                     copyBtn.innerHTML = ICON.check;
