@@ -389,6 +389,61 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
     ok('TNC-CHAIN-OPEN each link in the chain opens that task', calls.open.includes('Launch'));
   }
 
+  {
+    const under = (parent, title, status, extra) => Object.assign(kid(title, status, extra), { parent_task: '[[' + parent + ']]' });
+    const LAUNCH = { type: 'task', title: 'Launch', status: 'open', file: { path: 'spice/tasks/Launch.md', name: 'Launch' } };
+    const STEP = under('Launch', 'Step two', 'open');
+    const kids = [
+      LAUNCH,
+      under('Launch', 'Step one', 'open'),
+      STEP,
+      under('Launch', 'Step three', 'open'),
+      under('Launch', 'Finished step', 'done', { completed_at: '2026-11-09T09:00:00-07:00' }),
+      under('Launch', 'Thrown away', 'deleted'),
+    ];
+    const { dv, container, calls } = harness(STEP, kids);
+    await new TNV().render(dv);
+    const root = one(container, 'sauce-tnv-parent-root');
+    ok('TNC-TRAIL-ROOT the trail starts with a To-Do link that opens All To-Dos when there is no daily for today',
+      root && root.textContent === 'To-Do' && (root._listeners.click({ preventDefault() {}, stopPropagation() {} }), calls.open.includes('spice/to-do/All-ToDos.md')));
+    const prog = one(container, 'sauce-tnv-parent-prog');
+    ok('TNC-TRAIL-PROGRESS each ancestor shows its done/total, deleted subtasks left out',
+      prog && prog.textContent === '1/4' && !prog.classList.contains('is-complete'));
+    const sibs = one(container, 'sauce-tnv-siblings');
+    ok('TNC-SIBLINGS a subtask steps to the previous and next subtask of its parent and says where it sits',
+      sibs && one(sibs, 'is-prev').textContent === 'Step one' && one(sibs, 'is-next').textContent === 'Step three'
+      && one(sibs, 'sauce-tnv-sib-pos').textContent === '2 of 4');
+    one(sibs, 'is-next')._listeners.click({ preventDefault() {}, stopPropagation() {} });
+    ok('TNC-SIBLINGS-OPEN a sibling jump opens that task by its path', calls.open.includes('spice/tasks/Step three.md'));
+  }
+
+  {
+    const ONLY = Object.assign(kid('Only child', 'open'), {});
+    const { dv, container } = harness(ONLY, [ONLY]);
+    await new TNV().render(dv);
+    ok('TNC-SIBLINGS-ONLY an only child has no sibling row', !one(container, 'sauce-tnv-siblings'));
+    ok('TNC-TRAIL-TOP a top-level task has no trail', !one(harness(HENRY, []).container, 'sauce-tnv-parent-root'));
+  }
+
+  ok('TNC-SIBLINGS-PURE open subtasks keep their order, finished ones follow newest first, deleted ones are dropped',
+    (() => {
+      const kids = new Map([['P', [
+        { path: 'spice/tasks/_done/old.md', status: 'done', completed_at: '2026-11-01' },
+        { path: 'spice/tasks/a.md', status: 'open' },
+        { path: 'spice/tasks/_done/new.md', status: 'done', completed_at: '2026-11-09' },
+        { path: 'spice/tasks/_trash/x.md', status: 'deleted' },
+        { path: 'spice/tasks/b.md', status: 'open' },
+      ]]]);
+      const names = TNV._orderedChildren('P', kids).map((t) => TNV._baseOf(t.path)).join();
+      const first = TNV._siblings('P', kids, 'a');
+      const last = TNV._siblings('P', kids, 'old');
+      return names === 'a,b,new,old' && first.prev === null && TNV._baseOf(first.next.path) === 'b' && first.pos === 1
+        && last.next === null && last.pos === 4 && TNV._siblings('P', kids, 'x') === null && TNV._siblings('Q', kids, 'a') === null;
+    })());
+  ok('TNC-CHAIN-PROGRESS-PURE every level of the trail carries its own done/total',
+    JSON.stringify(TNV._chainProgress(['A', 'B'], new Map([['A', [{ status: 'done', path: 'spice/tasks/_done/B.md' }, { status: 'open', path: 'spice/tasks/C.md' }]]])))
+      === JSON.stringify([{ name: 'A', done: 1, total: 2 }, { name: 'B', done: 0, total: 0 }]));
+
   ok('TNC-ANCESTORS-PURE the chain stops at a loop, at the note itself, and after five',
     JSON.stringify(TNV._ancestors('B', new Map([['B', { parent_task: 'A' }], ['A', { parent_task: 'B' }]]), null, 'X')) === JSON.stringify(['A', 'B'])
     && JSON.stringify(TNV._ancestors('B', new Map([['B', { parent_task: 'X' }]]), null, 'X')) === JSON.stringify(['B'])

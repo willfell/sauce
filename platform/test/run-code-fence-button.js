@@ -48,7 +48,7 @@ assertTrue("CFB-M5: init source parses", (() => {
 // every public method MUST be an instance method; a `static` method would be
 // undefined on customJS.CodeFenceButton at runtime (the v0.2.1 "unavailable" bug).
 console.log("\n--- Pass 1b: instance-method contract ---");
-for (const meth of ["computeFence", "wrapSelection", "buttonState", "wrapActiveEditor", "computeInlineTicks", "wrapInline", "wrapActiveEditorInline"]) {
+for (const meth of ["computeFence", "wrapSelection", "buttonState", "wrapActiveEditor", "computeInlineTicks", "wrapInline", "wrapActiveEditorInline", "fullNotePath", "copyActivePath"]) {
   assertTrue(`CFB-INST-${meth}: reachable on instance`, cfb && typeof cfb[meth] === "function");
   assertTrue(`CFB-INST-${meth}: NOT static (undefined on class)`, typeof CFB[meth] === "undefined");
 }
@@ -113,6 +113,60 @@ assertEq("CFB-26: backtick content padded", cfb.wrapInline("a ` b").text, "`` a 
 // Content touching a backtick at an edge → padded even at 1-tick-longest.
 assertEq("CFB-27: edge backtick padded", cfb.wrapInline("`x").text, "`` `x ``");
 
-console.log(`\n${pass} passed, ${fail} failed`);
-if (failures.length) console.log("\n" + failures.join("\n"));
-process.exit(fail ? 1 : 0);
+// Pass 6 — copy-path button: the path it copies, its state, and its spec.
+console.log("\n--- Pass 6: copy path ---");
+assertEq("CFB-28: mac vault path", cfb.fullNotePath("/Users/w/obsidian/headspace-sauce", "spice/tasks/A b.md"),
+  { path: "/Users/w/obsidian/headspace-sauce/spice/tasks/A b.md", absolute: true });
+assertEq("CFB-29: trailing and leading slashes collapse", cfb.fullNotePath("/v/", "/n.md"), { path: "/v/n.md", absolute: true });
+assertEq("CFB-30: windows base keeps backslashes", cfb.fullNotePath("C:\\Vaults\\h", "spice/n.md"),
+  { path: "C:\\Vaults\\h\\spice\\n.md", absolute: true });
+assertEq("CFB-31: no folder on disk → vault path", cfb.fullNotePath("", "spice/n.md"), { path: "spice/n.md", absolute: false });
+assertEq("CFB-32: no file → empty", cfb.fullNotePath("/v", ""), { path: "", absolute: false });
+for (const mode of ["preview", "source"]) {
+  for (const sel of [false, true]) {
+    const st = cfb.buttonState(mode, sel, "path");
+    assertEq(`CFB-33: path button enabled, untinted (${mode}, sel=${sel})`, [st.enabled, st.opacity, st.accent], [true, 1, false]);
+  }
+}
+assertEq("CFB-34: path button label", cfb.buttonState("source", false, "path").label, "Copy full path of this note");
+
+const copyRun = async () => {
+  const notices = [];
+  const copied = [];
+  const NoticeStub = function (msg) { notices.push(msg); };
+  const navStub = { clipboard: { writeText: async (t) => { copied.push(t); } } };
+  const Cls = new Function("app", "customJS", "Notice", "window", "navigator", src + "\nreturn CodeFenceButton;")(
+    undefined, undefined, NoticeStub, undefined, navStub);
+  const inst = new Cls();
+  const view = { file: { path: "spice/tasks/Leaf.md" }, app: { vault: { adapter: { getBasePath: () => "/Users/w/vault" } } } };
+  assertEq("CFB-35: copy resolves true", await inst.copyActivePath(view), true);
+  assertEq("CFB-36: copies the absolute path", copied, ["/Users/w/vault/spice/tasks/Leaf.md"]);
+  assertTrue("CFB-37: notice names the path", notices.length === 1 && notices[0].includes("/Users/w/vault/spice/tasks/Leaf.md"), JSON.stringify(notices));
+  const mobile = { file: { path: "spice/tasks/Leaf.md" }, app: { vault: { adapter: {} } } };
+  await inst.copyActivePath(mobile);
+  assertEq("CFB-38: no folder on disk copies the vault path", copied[1], "spice/tasks/Leaf.md");
+  assertEq("CFB-39: no file → false", await inst.copyActivePath({ file: null }), false);
+};
+
+const specRun = () => {
+  const Init = new Function("app", "customJS", "Notice", "window", fs.readFileSync(INIT_PATH, "utf8") + "\nreturn CodeFenceButtonInit;")(
+    undefined, undefined, function () {}, undefined);
+  const specs = new Init()._buttonSpecs();
+  assertEq("CFB-40: three header buttons, copy-path last", specs.map((x) => x.kind), ["fence", "inline", "path"]);
+  const p = specs[2];
+  assertEq("CFB-41: copy-path spec", [p.icon, p.method, p.needsSelection, p.cmdId],
+    ["clipboard-copy", "copyActivePath", false, "code-fence-button:copy-note-path"]);
+  assertTrue("CFB-42: copy-path method exists on the instance", typeof cfb[p.method] === "function");
+};
+
+(async () => {
+  try { await copyRun(); } catch (e) { fail++; failures.push("CFB-35..39 threw: " + (e && e.message)); }
+  try { specRun(); } catch (e) { fail++; failures.push("CFB-40..42 threw: " + (e && e.message)); }
+  finish();
+})();
+
+function finish() {
+  console.log(`\n${pass} passed, ${fail} failed`);
+  if (failures.length) console.log("\n" + failures.join("\n"));
+  process.exit(fail ? 1 : 0);
+}
