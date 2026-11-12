@@ -19,6 +19,14 @@ const path = require("path");
 const https = require("https");
 const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
+// bootstrap-lib keeps last-known-good downloads in SAUCE_NET_CACHE_DIR (default
+// under os.tmpdir()). Point it at a directory of this run's own, inherited by
+// the child installs below, so mocked indexes and plugin bodies are never
+// written to the machine's real cache, and no case can pass or fail on what an
+// earlier real install left there.
+const NET_CACHE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs-net-cache-"));
+process.env.SAUCE_NET_CACHE_DIR = path.join(NET_CACHE_ROOT, "shared");
+
 let _passed = 0;
 let _failed = 0;
 const _failures = [];
@@ -48,6 +56,19 @@ async function withMockedHttps(routes, fn) {
         callCount++;
         callLog.push(u);
         const route = routes[u];
+        // { networkError: "getaddrinfo ENOTFOUND ...", failTimes?: n } makes the
+        // request fail before any response, as a DNS or connection failure does,
+        // on every call or on the first n calls only.
+        if (route && route.networkError && (route.failTimes === undefined || (route._failed || 0) < route.failTimes)) {
+            route._failed = (route._failed || 0) + 1;
+            const handlers = {};
+            setTimeout(() => {
+                const err = new Error(route.networkError);
+                err.code = route.networkCode || "ENOTFOUND";
+                if (handlers.error) handlers.error(err);
+            }, 0);
+            return { on: (ev, h) => { handlers[ev] = h; }, destroy: () => {} };
+        }
         const status = route ? (route.status || 200) : 404;
         const body = route ? (route.body || "") : "";
         const respHeaders = (route && route.headers) || {};
@@ -1482,6 +1503,321 @@ function caseBS22FutureModalInstallerHistorySelector() {
 }
 
 // ============================================================
+// HC-NET — transient network failures: retry, last-known-good cache,
+// installed plugins need no index, and loud failure with nothing to fall back on
+// ============================================================
+
+const NET_DOWN = "getaddrinfo ENOTFOUND raw.githubusercontent.com";
+const NO_WAIT = { retryDelaysMs: [0, 0] };
+
+// A fresh, empty cache directory for one case.
+function freshNetCache(tag) {
+    const dir = fs.mkdtempSync(path.join(NET_CACHE_ROOT, `${tag}-`));
+    process.env.SAUCE_NET_CACHE_DIR = dir;
+    require("../bootstrap-lib/community-plugins-index.js")._clearCache();
+    return dir;
+}
+
+// A temp vault subscribed to one mechanism declaring `externalPlugins`, for
+// running the real installer in-process against mocked https.
+async function withExternalPluginVault(tag, externalPlugins, fn) {
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), `beacon-${tag}-fixture-`));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"), JSON.stringify({
+                workshop_version: "0.97.2", foundational_plugins: [],
+                mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                blueprints: []
+            }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"), JSON.stringify({
+                name: "test-epi", version: "0.1.0", kind: "mechanism",
+                external_plugins: externalPlugins, files: []
+            }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: { workshop_version: "0.97.2", mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: [] }
+            });
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+            await fn(vaultPath);
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+function preinstallPlugin(vaultPath, id) {
+    const dir = path.join(vaultPath, ".obsidian/plugins", id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ id, version: "1.0.0", name: id }), "utf8");
+    fs.writeFileSync(path.join(dir, "main.js"), "// pre-existing\n", "utf8");
+}
+
+function installHistory(vaultPath) {
+    return readJson(path.join(vaultPath, "ranch/platform-installed.json")).history || [];
+}
+
+const CLAUDIAN_INDEX = JSON.stringify([{ id: "realclaudian", name: "Claudian", repo: "YishenTu/claudian" }]);
+
+async function caseHC_NET_1_TransientIndexFailureRetried() {
+    const label = "HC-NET-1 a DNS failure on the index fetch is retried and the next attempt is used";
+    freshNetCache("net1");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    const routes = { [MOCK_INDEX_URL]: { networkError: NET_DOWN, failTimes: 1, body: CLAUDIAN_INDEX } };
+    await withMockedHttps(routes, async (ctx) => {
+        const loaded = await indexMod.loadIndex(NO_WAIT);
+        assertEqual([loaded.source, loaded.index.realclaudian && loaded.index.realclaudian.repo, ctx.getCallCount()],
+            ["network", "YishenTu/claudian", 2], `${label}: served from the network on the second of 2 requests`);
+    });
+}
+
+async function caseHC_NET_2_NonTransientNotRetried() {
+    const label = "HC-NET-2 a 404 on the index is final: one request, and it throws";
+    freshNetCache("net2");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    await withMockedHttps({}, async (ctx) => {
+        let error = null;
+        try { await indexMod.loadIndex(NO_WAIT); } catch (e) { error = e; }
+        assertEqual([Boolean(error && /returned 404/.test(error.message)), ctx.getCallCount()], [true, 1], label);
+    });
+}
+
+async function caseHC_NET_3_TransientExhaustedNoCacheThrows() {
+    const label = "HC-NET-3 an outage that outlasts the retries, with nothing cached, throws after exactly 3 requests";
+    freshNetCache("net3");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    await withMockedHttps({ [MOCK_INDEX_URL]: { networkError: NET_DOWN } }, async (ctx) => {
+        let error = null;
+        try { await indexMod.loadIndex(NO_WAIT); } catch (e) { error = e; }
+        assertEqual([Boolean(error && /Cannot reach raw\.githubusercontent\.com.*ENOTFOUND/.test(error.message)), ctx.getCallCount()],
+            [true, 3], label);
+        let again = null;
+        try { await indexMod.loadIndex(NO_WAIT); } catch (e) { again = e; }
+        assertEqual([again && again.message, ctx.getCallCount()], [error && error.message, 3],
+            `${label}: the next manifest's call, moments later, gets the same failure without another 3 requests`);
+    });
+}
+
+async function caseHC_NET_4_OutageServedFromDiskCache() {
+    const label = "HC-NET-4 an index fetched once is served from the on-disk cache when the network is down";
+    const dir = freshNetCache("net4");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    await withMockedHttps({ [MOCK_INDEX_URL]: { body: CLAUDIAN_INDEX } }, async () => {
+        await indexMod.loadIndex(NO_WAIT);
+    });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, indexMod.CACHE_ENTRY), "utf8"));
+    assertEqual([written.url, written.index], [MOCK_INDEX_URL, { realclaudian: { repo: "YishenTu/claudian", name: "Claudian" } }],
+        `${label}: a successful fetch writes the last-known-good copy outside the vault`);
+    indexMod._clearCache();
+    await withMockedHttps({ [MOCK_INDEX_URL]: { networkError: NET_DOWN } }, async (ctx) => {
+        const loaded = await indexMod.loadIndex(NO_WAIT);
+        assertEqual([loaded.source, loaded.cachedAt, loaded.index, ctx.getCallCount()],
+            ["cache", written.fetched_at, written.index, 3], `${label}: after 3 failed requests the cached copy is returned and labelled`);
+        assertTrue(/ENOTFOUND/.test(loaded.networkError || ""), `${label}: the network failure is carried for the caller to report`);
+    });
+}
+
+async function caseHC_NET_5_CacheNotUsedForNonTransient() {
+    const label = "HC-NET-5 a cached index does not hide a 404 from the server";
+    freshNetCache("net5");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    await withMockedHttps({ [MOCK_INDEX_URL]: { body: CLAUDIAN_INDEX } }, async () => { await indexMod.loadIndex(NO_WAIT); });
+    indexMod._clearCache();
+    await withMockedHttps({}, async () => {
+        let error = null;
+        try { await indexMod.loadIndex(NO_WAIT); } catch (e) { error = e; }
+        assertTrue(Boolean(error && /returned 404/.test(error.message)), label);
+    });
+}
+
+async function caseHC_NET_6_HttpsTimeoutIsTransient() {
+    const label = "HC-NET-6 a request with no response is timed out, treated as transient, and retried";
+    const _https = require("../bootstrap-lib/_https.js");
+    let calls = 0;
+    const silentClient = {
+        get() {
+            calls++;
+            return {
+                on() {},
+                destroy() {},
+                setTimeout(ms, onTimeout) { setTimeout(onTimeout, 1); },
+            };
+        }
+    };
+    // The harness's own deadline: without a request timeout getText never
+    // settles, and an unsettled promise would let this process exit as if done.
+    let guard;
+    let error = null;
+    try {
+        await Promise.race([
+            _https.getText("https://example.invalid/x", {}, { httpsClient: silentClient, timeoutMs: 5, retryDelaysMs: [0] }),
+            new Promise((_, reject) => { guard = setTimeout(() => reject(new Error("getText never settled")), 5000); }),
+        ]);
+    } catch (e) { error = e; } finally { clearTimeout(guard); }
+    assertEqual([error && error.transient, error && /no response within 5ms/.test(error.message), calls], [true, true, 2], label);
+}
+
+async function caseHC_NET_7_ServerErrorRetried() {
+    const label = "HC-NET-7 a 503 is retried and a later 200 is used";
+    freshNetCache("net7");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    let calls = 0;
+    const flakyServer = {
+        get(url, options, cb) {
+            calls++;
+            const status = calls === 1 ? 503 : 200;
+            const res = {
+                statusCode: status, headers: {}, resume() {},
+                on(ev, h) {
+                    if (ev === "data" && status === 200) setTimeout(() => h(Buffer.from(CLAUDIAN_INDEX)), 0);
+                    if (ev === "end") setTimeout(h, 1);
+                },
+            };
+            setTimeout(() => cb(res), 0);
+            return { on() {}, destroy() {} };
+        }
+    };
+    const loaded = await indexMod.loadIndex({ httpsClient: flakyServer, retryDelaysMs: [0, 0] });
+    assertEqual([loaded.source, calls], ["network", 2], label);
+}
+
+async function caseHC_NET_8_InstallIndexDownPluginsInstalled() {
+    const label = "HC-NET-8 install: index unreachable, nothing cached, every declared plugin installed -> no error, ids still enabled";
+    freshNetCache("net8");
+    await withExternalPluginVault("net8", [{ id: "realclaudian" }, { id: "smart-connections", auto_enable: false }], async (vaultPath) => {
+        preinstallPlugin(vaultPath, "realclaudian");
+        preinstallPlugin(vaultPath, "smart-connections");
+        await withMockedHttps({ [MOCK_INDEX_URL]: { networkError: NET_DOWN } }, async () => {
+            await runInstallInProcess(vaultPath);
+        });
+        const events = installHistory(vaultPath).filter((h) => h.step === "external_plugin_install");
+        assertEqual(events.filter((h) => h.event === "error" || h.event === "skip"), [], `${label}: no error or skip entry`);
+        assertTrue(events.some((h) => h.event === "info" && h.action === "index_unreachable_all_installed"
+            && /ENOTFOUND/.test(h.message)), `${label}: an info entry names the outage`);
+        assertEqual(readJson(path.join(vaultPath, ".obsidian/community-plugins.json")), ["realclaudian"],
+            `${label}: the installed plugin is enabled, the auto_enable:false one is not`);
+    });
+}
+
+async function caseHC_NET_9_InstallIndexDownPluginMissing() {
+    const label = "HC-NET-9 install: index unreachable, nothing cached, a declared plugin missing -> loud error naming it";
+    freshNetCache("net9");
+    await withExternalPluginVault("net9", [{ id: "realclaudian" }, { id: "smart-connections" }], async (vaultPath) => {
+        preinstallPlugin(vaultPath, "smart-connections");
+        await withMockedHttps({ [MOCK_INDEX_URL]: { networkError: NET_DOWN } }, async () => {
+            await runInstallInProcess(vaultPath);
+        });
+        const errors = installHistory(vaultPath).filter((h) => h.step === "external_plugin_install" && h.event === "error");
+        assertEqual(errors.map((h) => [/^index fetch failed: .*ENOTFOUND/.test(h.message), h.missing_plugin_ids]),
+            [[true, ["realclaudian"]]], label);
+        assertEqual(readJson(path.join(vaultPath, ".obsidian/community-plugins.json")), [],
+            `${label}: nothing is enabled on that path, as before`);
+    });
+}
+
+async function caseHC_NET_10_FetchPluginCache() {
+    const label = "HC-NET-10 fetchPlugin keeps a last-known-good copy and vendors it when GitHub is unreachable";
+    const dir = freshNetCache("net10");
+    const fetchPluginMod = require("../bootstrap-lib/fetch-plugin.js");
+    const base = "https://github.com/YishenTu/claudian/releases/latest/download";
+    const down = { [`${base}/manifest.json`]: { networkError: "getaddrinfo ENOTFOUND github.com" } };
+    await withTempVault({}, async (first) => {
+        await withMockedHttps(pluginRoutes("realclaudian", "YishenTu/claudian"), async () => {
+            await fetchPluginMod.fetchPlugin({ id: "realclaudian", repo: "YishenTu/claudian", vaultPath: first, ...NO_WAIT });
+        });
+    });
+    assertTrue(fs.existsSync(path.join(dir, "plugins/realclaudian.json")), `${label}: a successful fetch writes plugins/realclaudian.json`);
+    await withTempVault({}, async (second) => {
+        let result;
+        await withMockedHttps(down, async (ctx) => {
+            result = await fetchPluginMod.fetchPlugin({ id: "realclaudian", repo: "YishenTu/claudian", vaultPath: second, ...NO_WAIT });
+            assertEqual(ctx.getCallCount(), 3, `${label}: the download is attempted 3 times first`);
+        });
+        const pluginDir = path.join(second, ".obsidian/plugins/realclaudian");
+        assertEqual([result.status, result.source, fs.readFileSync(path.join(pluginDir, "main.js"), "utf8"),
+            fs.readFileSync(path.join(pluginDir, "styles.css"), "utf8")],
+        ["fetched", "cache", "// realclaudian mock main.js\n", "/* realclaudian mock styles.css */\n"],
+        `${label}: the cached manifest, main.js and styles.css are vendored and the result says so`);
+    });
+    await withTempVault({}, async (third) => {
+        let error = null;
+        await withMockedHttps({}, async () => {
+            try { await fetchPluginMod.fetchPlugin({ id: "realclaudian", repo: "YishenTu/claudian", vaultPath: third, ...NO_WAIT }); }
+            catch (e) { error = e; }
+        });
+        assertTrue(Boolean(error && /manifest\.json returned 404/.test(error.message))
+            && !fs.existsSync(path.join(third, ".obsidian/plugins/realclaudian")),
+        `${label}: a 404 is not papered over with the cached copy`);
+    });
+    await withTempVault({}, async (fourth) => {
+        let error = null;
+        await withMockedHttps({ "https://github.com/someone-else/claudian/releases/latest/download/manifest.json": { networkError: "getaddrinfo ENOTFOUND github.com" } }, async () => {
+            try { await fetchPluginMod.fetchPlugin({ id: "realclaudian", repo: "someone-else/claudian", vaultPath: fourth, ...NO_WAIT }); }
+            catch (e) { error = e; }
+        });
+        assertTrue(Boolean(error && /manifest\.json Cannot reach .*ENOTFOUND/.test(error.message)),
+            `${label}: a cached copy from a different repo is not used, and the outage is reported`);
+    });
+}
+
+async function caseHC_NET_11_InstallFullOutageFromCache() {
+    const label = "HC-NET-11 install during a full outage, after one good run on this machine: index and plugin come from the cache, no error";
+    freshNetCache("net11");
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    const plugin = pluginRoutes("realclaudian", "YishenTu/claudian");
+    await withExternalPluginVault("net11a", [{ id: "realclaudian" }], async (vaultPath) => {
+        await withMockedHttps(Object.assign({ [MOCK_INDEX_URL]: { body: CLAUDIAN_INDEX } }, plugin), async () => {
+            await runInstallInProcess(vaultPath);
+        });
+    });
+    indexMod._clearCache();
+    const outage = { [MOCK_INDEX_URL]: { networkError: NET_DOWN } };
+    for (const url of Object.keys(plugin)) outage[url] = { networkError: "getaddrinfo ENOTFOUND github.com" };
+    await withExternalPluginVault("net11b", [{ id: "realclaudian" }], async (vaultPath) => {
+        await withMockedHttps(outage, async () => {
+            await runInstallInProcess(vaultPath);
+        });
+        const events = installHistory(vaultPath).filter((h) => h.step === "external_plugin_install");
+        assertEqual(events.filter((h) => h.event === "error" || h.event === "skip"), [], `${label}: no error or skip entry`);
+        assertTrue(events.some((h) => h.event === "info" && h.action === "index_from_cache"), `${label}: the cached index is recorded`);
+        assertTrue(events.some((h) => h.event === "fetched" && h.plugin_id === "realclaudian" && h.source === "cache"),
+            `${label}: the cached plugin install is recorded`);
+        assertTrue(fs.existsSync(path.join(vaultPath, ".obsidian/plugins/realclaudian/main.js"))
+            && readJson(path.join(vaultPath, ".obsidian/community-plugins.json")).includes("realclaudian"),
+        `${label}: the plugin is vendored and enabled`);
+    });
+}
+
+async function caseHC_NET_12_BootstrapIndexDown() {
+    const label = "HC-NET-12 bootstrap: index unreachable and nothing cached -> skipped when every plugin is installed, thrown when one is missing";
+    freshNetCache("net12");
+    const { phaseFetchPlugins } = require("../bootstrap.js");
+    const workshopManifest = { foundational_plugins: [{ id: "dataview" }, { id: "customjs" }] };
+    const run = (vaultPath, forceReinstall) => withMockedHttps({ [MOCK_INDEX_URL]: { networkError: NET_DOWN } }, () => phaseFetchPlugins({
+        vaultPath, workshopPath: WORKSHOP_ROOT, workshopManifest, subscription: { mechanisms: [], blueprints: [] }, forceReinstall,
+    }));
+    await withTempVault({}, async (vaultPath) => {
+        preinstallPlugin(vaultPath, "dataview");
+        preinstallPlugin(vaultPath, "customjs");
+        const warn = console.warn;
+        console.warn = () => {};
+        let result;
+        try { result = await run(vaultPath, []); } finally { console.warn = warn; }
+        assertEqual([result.skipped.map((x) => x.id).sort(), result.failed, result.fetched], [["customjs", "dataview"], [], []],
+            `${label}: all installed -> both skipped`);
+        let error = null;
+        try { await run(vaultPath, ["dataview"]); } catch (e) { error = e; }
+        assertTrue(Boolean(error && /ENOTFOUND/.test(error.message)), `${label}: a forced reinstall still needs the index and throws`);
+    });
+    await withTempVault({}, async (vaultPath) => {
+        preinstallPlugin(vaultPath, "dataview");
+        let error = null;
+        try { await run(vaultPath, []); } catch (e) { error = e; }
+        assertTrue(Boolean(error && /Cannot reach raw\.githubusercontent\.com/.test(error.message)), `${label}: one missing -> throws`);
+    });
+}
+
+// ============================================================
 // Runner
 // ============================================================
 
@@ -1520,7 +1856,19 @@ const cases = {
         caseHC_EPI_5_IdNotInIndex,
         caseHC_EPI_6_EndToEndChain,
         // v0.94.x — auto_enable:false installs the dir without enabling
-        caseHC_EPI_7_AutoEnableFalseNotEnabled
+        caseHC_EPI_7_AutoEnableFalseNotEnabled,
+        caseHC_NET_1_TransientIndexFailureRetried,
+        caseHC_NET_2_NonTransientNotRetried,
+        caseHC_NET_3_TransientExhaustedNoCacheThrows,
+        caseHC_NET_4_OutageServedFromDiskCache,
+        caseHC_NET_5_CacheNotUsedForNonTransient,
+        caseHC_NET_6_HttpsTimeoutIsTransient,
+        caseHC_NET_7_ServerErrorRetried,
+        caseHC_NET_8_InstallIndexDownPluginsInstalled,
+        caseHC_NET_9_InstallIndexDownPluginMissing,
+        caseHC_NET_10_FetchPluginCache,
+        caseHC_NET_11_InstallFullOutageFromCache,
+        caseHC_NET_12_BootstrapIndexDown
     ]
 };
 
@@ -1543,6 +1891,7 @@ async function main() {
             }
         }
     }
+    try { fs.rmSync(NET_CACHE_ROOT, { recursive: true, force: true }); } catch (e) {}
     console.log("========");
     console.log(`Result: ${_passed} passed, ${_failed} failed.`);
     if (_failed > 0) process.exit(1);

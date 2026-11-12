@@ -22,6 +22,14 @@
  *       from v0.1.3+). Backup-failure is a hard fail (mirrors
  *       applyTemplaterHotkeys posture in install.js).
  *     - Return { status: "fetched", files: {...} }
+ *     - A successful download is also written to the on-disk last-known-good
+ *       cache (net-cache.js, entry plugins/<id>.json, keyed by repo).
+ *     - If a download fails TRANSIENTLY (network / timeout / 5xx / 429, after
+ *       _https.getText's retries) and the cache holds this id from the same
+ *       repo, the cached files are vendored instead and the result is
+ *       { status: "fetched", files, source: "cache", cachedAt }. Without a
+ *       cached copy, and for every non-transient failure (404 ...), it throws
+ *       exactly as before.
  *
  *   Honors process.env.GITHUB_TOKEN.
  *
@@ -38,6 +46,7 @@ const fs = require("fs");
 const path = require("path");
 
 const _https = require("./_https.js");
+const netCache = require("./net-cache.js");
 
 const _PLUGIN_ID_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 
@@ -96,6 +105,54 @@ async function fetchPlugin(opts) {
         headers.Authorization = "Bearer " + token;
     }
 
+    const cacheEntry = `plugins/${id}.json`;
+    let downloaded;
+    try {
+        downloaded = await _downloadAssets(id, repo, headers, opts);
+    } catch (e) {
+        const cached = e && e.transient === true ? _readCachedPlugin(cacheEntry, repo) : null;
+        if (!cached) throw e;
+        fs.mkdirSync(pluginDir, { recursive: true });
+        const files = _vendor(cached.files, manifestTarget, mainTarget, stylesTarget);
+        return { status: "fetched", files, source: "cache", cachedAt: cached.fetched_at, networkError: e.message };
+    }
+
+    fs.mkdirSync(pluginDir, { recursive: true });
+    const files = _vendor(downloaded, manifestTarget, mainTarget, stylesTarget);
+    netCache.writeEntry(cacheEntry, { repo, fetched_at: new Date().toISOString(), files });
+    return { status: "fetched", files };
+}
+
+function _readCachedPlugin(cacheEntry, repo) {
+    const entry = netCache.readEntry(cacheEntry);
+    if (!entry || entry.repo !== repo || !entry.files) return null;
+    const { manifestJson, mainJs, stylesCss } = entry.files;
+    if (typeof manifestJson !== "string" || typeof mainJs !== "string") return null;
+    if (stylesCss !== undefined && typeof stylesCss !== "string") return null;
+    return entry;
+}
+
+function _vendor(assets, manifestTarget, mainTarget, stylesTarget) {
+    _writeWithBackup(manifestTarget, assets.manifestJson);
+    _writeWithBackup(mainTarget, assets.mainJs);
+
+    const files = { manifestJson: assets.manifestJson, mainJs: assets.mainJs };
+    if (typeof assets.stylesCss === "string") {
+        _writeWithBackup(stylesTarget, assets.stylesCss);
+        files.stylesCss = assets.stylesCss;
+    }
+    return files;
+}
+
+// Errors keep the `transient` flag from _https.getText so fetchPlugin can tell
+// a network outage from a release that is really missing an asset.
+function _assetError(message, cause) {
+    const err = new Error(message);
+    err.transient = Boolean(cause && cause.transient === true);
+    return err;
+}
+
+async function _downloadAssets(id, repo, headers, opts) {
     const baseUrl = `https://github.com/${repo}/releases/latest/download`;
     const manifestUrl = `${baseUrl}/manifest.json`;
     const mainUrl = `${baseUrl}/main.js`;
@@ -108,9 +165,9 @@ async function fetchPlugin(opts) {
     } catch (e) {
         const m = String(e && e.message || e);
         if (m.includes("404")) {
-            throw new Error(`Failed to fetch ${id}: manifest.json returned 404`);
+            throw _assetError(`Failed to fetch ${id}: manifest.json returned 404`, e);
         }
-        throw new Error(`Failed to fetch ${id}: manifest.json ${m}`);
+        throw _assetError(`Failed to fetch ${id}: manifest.json ${m}`, e);
     }
 
     // Required: main.js. 404 (or any non-200) → throw.
@@ -120,9 +177,9 @@ async function fetchPlugin(opts) {
     } catch (e) {
         const m = String(e && e.message || e);
         if (m.includes("404")) {
-            throw new Error(`Failed to fetch ${id}: main.js returned 404`);
+            throw _assetError(`Failed to fetch ${id}: main.js returned 404`, e);
         }
-        throw new Error(`Failed to fetch ${id}: main.js ${m}`);
+        throw _assetError(`Failed to fetch ${id}: main.js ${m}`, e);
     }
 
     // Optional: styles.css. 404 → tolerate (some plugins ship without styles).
@@ -135,22 +192,10 @@ async function fetchPlugin(opts) {
             stylesCss = null;
         } else {
             // Non-404 styles.css failure is still a hard fail (mirror manifest/main posture).
-            throw new Error(`Failed to fetch ${id}: styles.css ${m}`);
+            throw _assetError(`Failed to fetch ${id}: styles.css ${m}`, e);
         }
     }
-
-    fs.mkdirSync(pluginDir, { recursive: true });
-
-    _writeWithBackup(manifestTarget, manifestJson);
-    _writeWithBackup(mainTarget, mainJs);
-
-    const files = { manifestJson, mainJs };
-    if (stylesCss !== null) {
-        _writeWithBackup(stylesTarget, stylesCss);
-        files.stylesCss = stylesCss;
-    }
-
-    return { status: "fetched", files };
+    return stylesCss === null ? { manifestJson, mainJs } : { manifestJson, mainJs, stylesCss };
 }
 
 module.exports = { fetchPlugin };
