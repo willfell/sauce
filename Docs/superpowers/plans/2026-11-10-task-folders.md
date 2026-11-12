@@ -375,6 +375,36 @@
 - [ ] **Step 4: Run the tests.** Run the new harness plus `run-customjs-loadable.js` (expected: CJS-LOAD and CJS-REF both ok, now counting `TaskFolders`).
 - [ ] **Step 5: Mirror and commit.** `git commit -m "feat(task-entity): apply the task folder migration from its report inside Obsidian"`
 
+### Task 11 (added by Will, 2026-11-11): subtasks list only on their day, marked as subtasks
+
+Will: "editing a task, and making it a subtask of another task … still keeps that task … a root to-do item that gets listed on the daily to do note. that shouldn't be the case, it should be forever a subtask. a subtask should be able to have a due date on it … and it should be listed on the daily to do note when the filter is on for the day it is due, with an indicator to show that it's a sub task."
+
+**Files:**
+- Modify: `platform/blueprints/to-do/helpers/todo-daily-filter-view.js`. A subtask is any task whose `parseNote` gives a non-empty `parent_task`.
+  - Subtasks never appear in the undated tabs: All open, Backlog, No date, and the recurring and done lists.
+  - In the date tabs (Today, This week, Overdue, and a day picked in the week strip), a subtask appears only when it has its own `due` that falls in that view.
+  - Week-strip counts follow the same rule.
+  - Tab counts follow the same rule.
+  - This applies to every surface the view draws (daily, all, recurring, project, trip, meeting). Subtasks live on their parent's card.
+- Modify: `platform/mechanisms/task-entity/task-today-list.js`, `renderTaskRow`. When the task has a parent and `options.showParent !== false`, draw a muted `↳ <Parent>` chip before the title. It ellipsizes at about 22 characters, and clicking it opens the parent note. The task card's own subtask rows pass `showParent: false`, since they sit under their parent already.
+- Modify: `platform/mechanisms/task-entity/task-note-view.js`: pass `showParent: false` to its subtask rows.
+- Create: `platform/test/run-todo-subtask-rows.js`.
+- Mirror: `ranch/scripts/...` for every changed file.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `ST-HIDDEN-UNDATED`: an undated subtask is in no tab.
+  - `ST-HIDDEN-ALL`: a dated subtask is not in All open, Backlog or No date.
+  - `ST-TODAY`: a subtask due today is in Today.
+  - `ST-DAY`: a subtask due Thursday is in the Thursday strip day and counted in that cell, but not in Today.
+  - `ST-OVERDUE`: a subtask past its due is in Overdue.
+  - `ST-REPARENTED`: a task given a parent drops out of All open.
+  - `ST-INDICATOR`: its row shows `↳ Help Henry` and the click opens the parent.
+  - `ST-CARD-NO-INDICATOR`: the card's subtask rows have no `↳` chip.
+- [ ] **Step 2: Run the tests and see them fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run the new harness plus every `run-todo*.js`, `run-task-*.js` and `run-daily-dashboard.js`.**
+- [ ] **Step 5: Commit** as `feat(to-do): subtasks list only on the day they're due, marked as subtasks`.
+
 ### Task 10: Docs, full preflight, release, dry run in the vaults
 
 **Files:**
