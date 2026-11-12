@@ -614,6 +614,10 @@ process.exitCode = 1;
       && css.includes('.is-phone .sauce-task-today-row .sauce-task-due[data-short]::after { content: attr(data-short);')
       && /@media \(max-width: 480px\) \{[^@]*sauce-task-actions \{ margin-left: auto;/.test(css),
     'phone row rules: chips left, actions right, priority steps aside, short due');
+    assert(css.includes('.is-phone .sauce-task-today-row .sauce-task-today-right { justify-content: flex-start !important; flex-wrap: wrap !important;')
+      && /@media \(max-width: 480px\) \{[^@]*sauce-task-today-right \{[^}]*flex-wrap: wrap !important;[^}]*max-width: 100%;/.test(css)
+      && !/sauce-task-today-right \{[^}]*flex-wrap: nowrap/.test(css),
+    'phone: chips and actions wrap inside the row instead of running past a narrow card (Home)');
   });
 
   await ok('RD-ROW-ONDONE onDone fires once after a successful checkbox completion, never on failure', async () => {

@@ -105,6 +105,28 @@ global.window = { matchMedia: () => ({ matches: true }) };
 }
 
 {
+  const mem = { data: {}, getItem(k) { return this.data[k] == null ? null : this.data[k]; }, setItem(k, v) { this.data[k] = String(v); } };
+  const a = View.collapsedStore(mem);
+  a.add('daily|project|live|ERC');
+  a.add('daily|project|live|MCP');
+  a.delete('daily|project|live|MCP');
+  const b = View.collapsedStore(mem);
+  ok('TC-PERSIST a collapsed group is remembered on this device across restarts, an expanded one is forgotten',
+    b.has('daily|project|live|ERC') && !b.has('daily|project|live|MCP')
+    && JSON.parse(mem.data[View.COLLAPSED_KEY]).length === 1);
+  const big = View.collapsedStore(mem);
+  for (let i = 0; i < View.COLLAPSED_MAX + 25; i++) big.add('k' + i);
+  const kept = JSON.parse(mem.data[View.COLLAPSED_KEY]);
+  ok('TC-PERSIST-CAP the store keeps only the newest keys', kept.length === View.COLLAPSED_MAX && kept[kept.length - 1] === 'k' + (View.COLLAPSED_MAX + 24));
+  const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+  const c = View.collapsedStore(broken);
+  c.add('x');
+  ok('TC-PERSIST-BROKEN unreadable storage still collapses for the session', c.has('x'));
+  const junk = { getItem() { return '{not json'; }, setItem() {} };
+  ok('TC-PERSIST-JUNK a corrupt saved value starts empty', View.collapsedStore(junk).has('x') === false);
+}
+
+{
   const src = read('blueprints/to-do/helpers/todo-daily-filter-view.js');
   ok('TC-WIRED every group section in the list gets a rail', /View\.wireCollapsible\(section, list,/.test(src));
   const css = read('mechanisms/styling/assets/snippets/sauce-core.css');

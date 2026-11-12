@@ -993,17 +993,20 @@ class TaskTodayList {
             + ' .sauce-task-today-row .sauce-task-today-chips { flex-wrap: wrap !important; flex-shrink: 1 !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot { width: auto !important; visibility: visible !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot:empty { display: none !important; }';
-        // Phone: one line under the title. Chips sit left, actions right; the
-        // priority chip steps aside (the coloured bar already says it), the
-        // due chip shows its short date, and a long project name ellipsizes.
-        const phone = ' .sauce-task-today-row .sauce-task-today-right { justify-content: flex-start !important; flex-wrap: nowrap; column-gap: 8px; }'
+        // Phone: one line under the title when it fits. Chips sit left, actions
+        // right; the priority chip steps aside (the coloured bar already says
+        // it), the due chip shows its short date, and a long project name
+        // ellipsizes. When chips and actions do not fit the row (a narrow card
+        // like Home's), the actions wrap to their own line, right-aligned,
+        // instead of running past the card's edge.
+        const phone = ' .sauce-task-today-row .sauce-task-today-right { justify-content: flex-start !important; flex-wrap: wrap !important; column-gap: 8px; row-gap: 6px; min-width: 0; max-width: 100%; }'
             + ' .sauce-task-today-row .sauce-task-today-chips { flex-wrap: nowrap !important; flex-shrink: 1 !important; min-width: 0; justify-content: flex-start !important; gap: 6px !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot.is-priority { display: none !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot.is-project { min-width: 0; flex-shrink: 1 !important; }'
             + ' .sauce-task-today-row .sauce-task-meta-slot.is-project > span { max-width: 9em; }'
             + ' .sauce-task-today-row .sauce-task-due[data-short] { font-size: 0 !important; }'
             + ' .sauce-task-today-row .sauce-task-due[data-short]::after { content: attr(data-short); font-size: 12px; }'
-            + ' .sauce-task-today-row .sauce-task-actions { margin-left: auto; height: 28px !important; }'
+            + ' .sauce-task-today-row .sauce-task-actions { margin-left: auto; height: 28px !important; max-width: 100%; }'
             + ' .sauce-task-today-row .sauce-task-actions > button { height: 28px !important; min-height: 28px !important; }';
         const scoped = (prefix, css) => (css || touch).split(' .sauce-task-today-row').join(' ' + prefix + ' .sauce-task-today-row')
             .replace(/^\.sauce-task-today-row/, prefix + ' .sauce-task-today-row');
