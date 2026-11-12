@@ -1158,6 +1158,13 @@ class TaskNoteView {
                                 if (label) label.textContent = 'Mark done';
                                 return;
                             }
+                            if (res && res.ok === false && res.reason === 'cannot-confirm') {
+                                // The open-subtasks question could not be asked (cold load).
+                                doneBtn.disabled = false;
+                                if (label) label.textContent = 'Mark done';
+                                notice("Couldn't ask about its open subtasks — open the task to finish it");
+                                return;
+                            }
                             if (res && res.ok === false) throw new Error(res.reason || 'unknown');
                             // Celebrate, then let Dataview redraw the done card:
                             // the title strikes through and a check pops.

@@ -627,7 +627,8 @@ class TaskDialog {
      * complete never opens the edit modal. When the task still has open
      * subtasks and `opts.completeOpenSubtasks` is not set, it asks first
      * (confirmComplete); No resolves { ok: false, reason: 'cancelled' } with
-     * nothing changed. Returns { ok: true, path? } on success or
+     * nothing changed, and a question that cannot be asked (cold load)
+     * resolves { ok: false, reason: 'cannot-confirm' }, also changing nothing. Returns { ok: true, path? } on success or
      * { ok: false, reason } so the caller can revert its optimistic UI.
      * Never throws.
      */
@@ -784,20 +785,22 @@ class TaskDialog {
     /**
      * CONFIRM-COMPLETE — the yes/no question markDone asks before finishing a
      * task that still has open subtasks: "Also complete its N open subtasks?"
-     * Resolves true for Complete all, false for Cancel / dismiss / cold-load
-     * (no app, no document, no SauceModal). Writes nothing. Never throws.
+     * Resolves true for Complete all, false for Cancel / dismiss, and null
+     * when it cannot ask at all (cold load: no app, no document, no
+     * SauceModal, or the modal failed to open) so the caller can say so
+     * rather than treat it as No. Writes nothing. Never throws.
      */
     async confirmComplete(path) {
         return new Promise((resolve) => {
             let settled = false;
-            const done = (r) => { if (settled) return; settled = true; resolve(!!r); };
+            const done = (r) => { if (settled) return; settled = true; resolve(r === null ? null : r === true); };
             try {
                 const { app, file } = this._resolveFile(path);
-                if (!app || !file) { done(false); return; }
+                if (!app || !file) { done(null); return; }
                 const doc = (typeof document !== 'undefined' && document) ? document : null;
                 const sauceModal = (typeof globalThis !== 'undefined' && globalThis.customJS)
                     ? globalThis.customJS.SauceModal : null;
-                if (!doc || !doc.body || !sauceModal || typeof sauceModal.open !== 'function') { done(false); return; }
+                if (!doc || !doc.body || !sauceModal || typeof sauceModal.open !== 'function') { done(null); return; }
                 const TE = TaskDialog._taskEntity();
                 const n = TE ? TaskDialog._openDescendants(app, TE.taskFolderOf(String(file.path))).length : 0;
                 const handle = sauceModal.open({
@@ -823,7 +826,7 @@ class TaskDialog {
                     ],
                     onClose: () => done(false),
                 });
-                if (!handle) done(false);
+                if (!handle) done(null);
                 else {
                     const cancelBtn = handle.footer && handle.footer.querySelector
                         ? handle.footer.querySelector('.sauce-btn') : null;
@@ -832,7 +835,7 @@ class TaskDialog {
                     if (okBtn) okBtn.className += ' sauce-task-confirm-complete';
                 }
             } catch (_e) {
-                done(false);
+                done(null);
             }
         });
     }
@@ -1462,7 +1465,8 @@ class TaskDialog {
                 try {
                     const res = await this._markDone(app, editFile);
                     if (res && res.ok === false) {
-                        if (res.reason !== 'cancelled') { try { new Notice('Done failed: ' + res.reason, 6000); } catch (_e) {} }
+                        if (res.reason === 'cannot-confirm') { try { new Notice("Couldn't ask about its open subtasks — open the task to finish it", 6000); } catch (_e) {} }
+                        else if (res.reason !== 'cancelled') { try { new Notice('Done failed: ' + res.reason, 6000); } catch (_e) {} }
                         return;
                     }
                     closeOverlay();
@@ -2620,7 +2624,8 @@ class TaskDialog {
      * task rolls its due date forward instead and never moves. A task folder
      * note: its open subtasks are completed too (after confirmComplete unless
      * `opts.completeOpenSubtasks`; No resolves { ok: false, reason:
-     * 'cancelled' } with nothing written); a subtask then stays in place and a
+     * 'cancelled' } and a question that cannot be asked { ok: false, reason:
+     * 'cannot-confirm' }, both with nothing written); a subtask then stays in place and a
      * top-level task's whole folder moves to spice/tasks/_done/YYYY/MM/ by its
      * completion month. A flat note moves alone into spice/tasks/_done/.
      * Resolves { ok: true, path } with the note's final path.
@@ -2679,9 +2684,10 @@ class TaskDialog {
             const folder = TE.taskFolderOf(srcPath);
             const open = TaskDialog._openDescendants(app, folder);
             if (open.length && !(opts && opts.completeOpenSubtasks)) {
-                let yes = false;
-                try { yes = await this.confirmComplete(srcPath); } catch (_e) { yes = false; }
-                if (!yes) return { ok: false, reason: 'cancelled' };
+                let answer = null;
+                try { answer = await this.confirmComplete(srcPath); } catch (_e) { answer = null; }
+                if (answer === null || answer === undefined) return { ok: false, reason: 'cannot-confirm' };
+                if (answer !== true) return { ok: false, reason: 'cancelled' };
             }
             const priors = [];
             const stamp = async (f) => {

@@ -771,7 +771,7 @@ ok('TD1A-NEXT-DAY advances normalized dates across month + year boundaries', () 
 ok('RD-DONE-POLICY classifyOutcome / SILENT_REASONS / doneTimeLabel are reachable through the instance', () => {
   assert(JSON.stringify(TaskTodayList.SILENT_REASONS) === JSON.stringify([
     'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
-    'app unavailable', 'no-fields', 'task-entity-unavailable']));
+    'app unavailable', 'no-fields', 'task-entity-unavailable', 'cannot-confirm']));
   assert(TaskTodayList.classifyOutcome({ ok: true }) === 'ok');
   assert(TaskTodayList.classifyOutcome({ ok: false, no_op: true }) === 'skipped');
   assert(TaskTodayList.classifyOutcome(null) === 'silent');

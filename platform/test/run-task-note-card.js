@@ -213,6 +213,16 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
   }
 
   {
+    const { dv, container, calls } = harness(HENRY, [], { markDone: { ok: false, reason: 'cannot-confirm' } });
+    await new TNV().render(dv);
+    const markBtn = byClass(one(container, 'sauce-tnv-actions'), 'sauce-btn')[0];
+    await markBtn._listeners.click();
+    ok('TNC-MARKDONE-CANNOT-CONFIRM when the subtasks question cannot be asked Mark done comes back and says to open the task',
+      markBtn.textContent === 'Mark done' && !markBtn.disabled && !markBtn.classList.contains('is-completing')
+      && calls.notice === "Couldn't ask about its open subtasks — open the task to finish it", String(calls.notice));
+  }
+
+  {
     const kids = Array.from({ length: 7 }, (_, i) => kid('Done ' + i, 'done', { completed_at: '2026-11-0' + (i + 1) + 'T09:00:00-07:00' }));
     const { dv, container } = harness(HENRY, kids);
     await new TNV().render(dv);

@@ -217,6 +217,22 @@ const fmOf = (app, p) => (app._files.get(p) || {})._fm || null;
         r3 && r3.ok === true && asked3 === 0
         && fmOf(app3, 'spice/tasks/_done/2026/11/A/B/C/C.md').status === 'done');
 
+      const app5 = makeApp(seed);
+      const s5 = setup(app5);
+      const cold = await s5.TD.confirmComplete('spice/tasks/A/A.md');
+      const r5 = await s5.TD.markDone('spice/tasks/A/A.md');
+      ok('TF-DONE-CANNOT-CONFIRM with no way to ask (no SauceModal) confirmComplete resolves null and markDone refuses with cannot-confirm, writing nothing',
+        cold === null && r5 && r5.ok === false && r5.reason === 'cannot-confirm'
+        && app5._log.fmWrites.length === 0 && app5._log.renames.length === 0
+        && fmOf(app5, 'spice/tasks/A/A.md').status === 'open');
+
+      const app6 = makeApp(seed);
+      const s6 = setup(app6);
+      s6.TD.confirmComplete = async () => { throw new Error('modal broke'); };
+      const r6 = await s6.TD.markDone('spice/tasks/A/A.md');
+      ok('TF-DONE-CANNOT-CONFIRM a question that throws is cannot-confirm, not No',
+        r6 && r6.ok === false && r6.reason === 'cannot-confirm' && app6._log.fmWrites.length === 0);
+
       const app4 = makeApp(seed);
       const s4 = setup(app4);
       let asked4 = 0;

@@ -157,7 +157,7 @@ class TaskTodayList {
     static get SILENT_REASONS() {
         return [
             'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
-            'app unavailable', 'no-fields', 'task-entity-unavailable',
+            'app unavailable', 'no-fields', 'task-entity-unavailable', 'cannot-confirm',
         ];
     }
 
@@ -1154,7 +1154,10 @@ class TaskTodayList {
                 if (res && res.ok === false) {
                     revert();
                     // 'cancelled' = the user said No to completing open subtasks: quiet.
-                    if (res.reason !== 'cancelled') {
+                    // 'cannot-confirm' = the question could not be asked (cold load).
+                    if (res.reason === 'cannot-confirm') {
+                        try { new Notice("Couldn't ask about its open subtasks — open the task to finish it", 6000); } catch (_e) {}
+                    } else if (res.reason !== 'cancelled') {
                         try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
                     }
                 } else {
