@@ -163,12 +163,14 @@ class ProjectMeetingsList {
   static _openTaskCountsBySource(dv) {
     const out = {};
     try {
+      const cjs = (typeof globalThis !== 'undefined' && globalThis.customJS)
+        || (typeof window !== 'undefined' && window.customJS) || null;
+      const TE = cjs && cjs.TaskEntity;
       const raw = dv.pages('"spice/tasks"').where(p =>
-        p && p.type === 'task' && p.status === 'open'
+        p && p.type === 'task'
         && String(p.source == null ? '' : p.source).trim().toLowerCase() === 'meeting'
         && p.file && p.file.path
-        && !p.file.path.includes('/_trash/')
-        && !p.file.path.includes('/_done/'));
+        && (TE && typeof TE.isOpenTask === 'function' ? TE.isOpenTask(p) : p.status === 'open'));
       const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
       for (const p of arr) {
         const base = ProjectMeetingsList._sourceBasename(p && p.source_note);

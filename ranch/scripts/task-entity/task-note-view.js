@@ -409,13 +409,12 @@ class TaskNoteView {
 
     /**
      * The card's footer buttons for a status and note path: an open task gets
-     * Mark done + Edit; a done task archived under spice/tasks/_done/ gets
-     * Reopen + Edit; anything else gets Edit alone. Pure.
+     * Mark done + Edit; a done task gets Reopen + Edit; anything else gets Edit alone. Pure.
      */
     static _actionsFor(status, path) {
         const s = String(status || 'open').trim().toLowerCase();
         if (s === 'open') return ['done', 'edit'];
-        if (s === 'done' && String(path || '').indexOf('spice/tasks/_done/') === 0) return ['reopen', 'edit'];
+        if (s === 'done') return ['reopen', 'edit'];
         return ['edit'];
     }
 
@@ -428,10 +427,13 @@ class TaskNoteView {
     }
 
     /**
-     * Index parsed tasks for the card: { children, byName } where children
-     * maps a parent's basename to its subtasks (open and done) and byName
-     * maps a basename to its task. `linkText` turns a parent_task value into
-     * a basename. Pure; never throws.
+     * Index parsed tasks for the card: { children, byName }. children maps a
+     * parent to its subtasks (open and done): by the parent note's PATH when
+     * the task carries a parent_path (folder-derived), by the parent's
+     * basename otherwise (a flat note's parent_task link), so two parents
+     * that share a name never share children. byName maps a basename to its
+     * task. `linkText` turns a parent_task value into a basename. Read a
+     * node's children with _kidsOf. Pure; never throws.
      */
     static _taskIndex(tasks, linkText) {
         const children = new Map();
@@ -442,12 +444,38 @@ class TaskNoteView {
             const name = TaskNoteView._baseOf(t.path);
             if (name && !byName.has(name)) byName.set(name, t);
             let parent = '';
-            try { parent = String(toName(t.parent_task) || '').trim(); } catch (_e) { parent = ''; }
-            if (!parent || parent === name) continue;
+            const parentPath = String(t.parent_path == null ? '' : t.parent_path).trim();
+            if (parentPath) {
+                parent = parentPath;
+            } else {
+                try { parent = String(toName(t.parent_task) || '').trim(); } catch (_e) { parent = ''; }
+            }
+            if (!parent || parent === name || parent === t.path) continue;
             if (!children.has(parent)) children.set(parent, []);
             children.get(parent).push(t);
         }
         return { children, byName };
+    }
+
+    /**
+     * The subtasks of the note at `path`: its path-keyed (folder) children,
+     * then its basename-keyed (flat) children, each once by path. Both kinds
+     * can hang under one parent until the migration runs. Pure; never throws.
+     */
+    static _kidsOf(index, path) {
+        const kids = index && index.children;
+        if (!kids || typeof kids.get !== 'function' || !path) return [];
+        const out = [];
+        const seen = new Set();
+        for (const list of [kids.get(path), kids.get(TaskNoteView._baseOf(path))]) {
+            for (const t of Array.isArray(list) ? list : []) {
+                const key = t && t.path ? t.path : t;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                out.push(t);
+            }
+        }
+        return out;
     }
 
     /**
@@ -744,7 +772,7 @@ class TaskNoteView {
             if (filePath) {
                 try {
                     const raw = dv.pages('"spice/tasks"').where(p => !!(p && p.type === 'task' && p.file && p.file.path
-                        && !p.file.path.includes('/_trash/')));
+                        && (TE && typeof TE.taskState === 'function' ? TE.taskState(p) !== 'deleted' : p.status !== 'deleted')));
                     const arr = (raw && typeof raw.array === 'function') ? raw.array() : Array.from(raw || []);
                     const parsedAll = [];
                     if (TE && typeof TE.parseNote === 'function') {
@@ -835,7 +863,7 @@ class TaskNoteView {
             let syncReady = () => {};
             if (filePath) {
                 try {
-                    const allSubtasks = index.children.get(thisBasename) || [];
+                    const allSubtasks = TaskNoteView._kidsOf(index, filePath);
                     subtaskList = allSubtasks;
                     const TTL = window.customJS && window.customJS.TaskTodayList;
 
@@ -875,9 +903,9 @@ class TaskNoteView {
                         } catch (_e) {}
                     };
                     const isOpenTask = (t) => {
-                        if (!t || t.status !== 'open') return false;
-                        const p = String(t.path || '');
-                        return !p.includes('/_done/') && !p.includes('/_trash/');
+                        if (!t) return false;
+                        if (TE && typeof TE.isOpenTask === 'function') return TE.isOpenTask(t);
+                        return t.status === 'open';
                     };
                     let rowIndex = 0;
                     const markDoneLocally = (doneTask) => {
@@ -889,12 +917,12 @@ class TaskNoteView {
                     // One open subtask row, then its own open subtasks nested
                     // under it. `trail` stops a parent loop; depth caps at three.
                     const drawRow = (host, st, depth, first, trail) => {
-                        const key = TaskNoteView._baseOf(st.path);
-                        const kids = (key && index.children.get(key)) || [];
+                        const key = st.path || '';
+                        const kids = TaskNoteView._kidsOf(index, key);
                         st.subtask_count = kids.length
                             ? { done: kids.filter((k) => k && k.status === 'done').length, total: kids.length }
                             : null;
-                        const row = TTL.renderTaskRow(host, st, null, { showProject: false, todayStr, onDone: markDoneLocally });
+                        const row = TTL.renderTaskRow(host, st, null, { showProject: false, showParent: false, todayStr, onDone: markDoneLocally });
                         if (row && first) {
                             try {
                                 row.classList.add('sauce-tnv-row-in');
@@ -903,7 +931,7 @@ class TaskNoteView {
                         }
                         const next = new Set(trail);
                         if (key) next.add(key);
-                        const openKids = kids.filter((k) => isOpenTask(k) && !next.has(TaskNoteView._baseOf(k.path)));
+                        const openKids = kids.filter((k) => isOpenTask(k) && !next.has(k.path));
                         if (openKids.length && depth < 3 && key && !trail.has(key)) {
                             const nest = host.createEl('div', { cls: 'sauce-tnv-nest' });
                             for (const kid of openKids) {
@@ -933,21 +961,17 @@ class TaskNoteView {
                         while (subList.firstChild) subList.removeChild(subList.firstChild);
                         while (doneHost.firstChild) doneHost.removeChild(doneHost.firstChild);
                         // Only OPEN subtasks are rendered as rows. Without this
-                        // filter, a just-completed subtask (moved to _done/, but
-                        // still under spice/tasks/ so still fetched above)
+                        // filter, a just-completed subtask (still under spice/tasks/
+                        // so still fetched above)
                         // reappears unchecked on Dataview's next auto-refresh, and
                         // a second click calls markDone on the now-stale path —
                         // "task file not found". allSubtasks (open + done) still
                         // feeds the progress count.
-                        const openSubtasks = allSubtasks.filter(t => {
-                            if (!t || t.status !== 'open') return false;
-                            const childPath = String(t.path || '');
-                            return !childPath.includes('/_done/') && !childPath.includes('/_trash/');
-                        });
+                        const openSubtasks = allSubtasks.filter(t => isOpenTask(t));
                         if (TTL && typeof TTL.renderTaskRow === 'function') {
                             rowIndex = 0;
                             for (const st of openSubtasks) {
-                                try { drawRow(subList, st, 1, first, new Set([thisBasename])); } catch (_e) {}
+                                try { drawRow(subList, st, 1, first, new Set([filePath])); } catch (_e) {}
                             }
                         }
                         if (!allSubtasks.length) {
@@ -1037,7 +1061,7 @@ class TaskNoteView {
                                         };
                                         let node = null;
                                         try {
-                                            node = TTL.renderTaskRow(subList, optimisticTask, null, { showProject: false, todayStr });
+                                            node = TTL.renderTaskRow(subList, optimisticTask, null, { showProject: false, showParent: false, todayStr });
                                             if (!node || node.parentNode !== subList) {
                                                 throw new Error('subtask row render did not return an attached row');
                                             }
@@ -1128,6 +1152,19 @@ class TaskNoteView {
                         if (label) label.textContent = 'Marking done…';
                         try {
                             const res = await TD.markDone(filePath);
+                            if (res && res.ok === false && res.reason === 'cancelled') {
+                                // The user kept the task open (said No to its open subtasks).
+                                doneBtn.disabled = false;
+                                if (label) label.textContent = 'Mark done';
+                                return;
+                            }
+                            if (res && res.ok === false && res.reason === 'cannot-confirm') {
+                                // The open-subtasks question could not be asked (cold load).
+                                doneBtn.disabled = false;
+                                if (label) label.textContent = 'Mark done';
+                                notice("Couldn't ask about its open subtasks — open the task to finish it");
+                                return;
+                            }
                             if (res && res.ok === false) throw new Error(res.reason || 'unknown');
                             // Celebrate, then let Dataview redraw the done card:
                             // the title strikes through and a check pops.

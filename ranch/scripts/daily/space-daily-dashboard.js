@@ -237,12 +237,14 @@ class SpaceDailyDashboard {
       } catch (_e) { return []; }
     };
 
-    // Open task-notes — all sources, excluding the _done/ + _trash/ archives.
+    // Open task-notes — all sources; status decides open, not the path.
+    const allTasks = toArr('"spice/tasks"');
     const openParsed = [];
-    for (const p of toArr('"spice/tasks"')) {
-      if (!p || p.type !== "task" || p.status !== "open") continue;
+    for (const p of allTasks) {
+      if (!p || p.type !== "task") continue;
       const path = p.file && p.file.path;
-      if (!path || path.includes("/_trash/") || path.includes("/_done/")) continue;
+      if (!path) continue;
+      if (typeof TE.isOpenTask === "function" ? !TE.isOpenTask(p) : p.status !== "open") continue;
       openParsed.push(TE.parseNote(p));
     }
     // LIST = today only (due == today) + the late band (due before today), which
@@ -265,13 +267,16 @@ class SpaceDailyDashboard {
       }
     }
 
-    // Done today — _done/ notes with completed_at date == today.
+    // Done today — done notes wherever they live, with completed_at date == today.
     let done = 0;
     const doneToday = [];
-    for (const p of toArr('"spice/tasks/_done"')) {
+    for (const p of allTasks) {
       if (!p || p.type !== "task") continue;
       const path = p.file && p.file.path;
-      if (!path || path.includes("/_trash/")) continue;
+      if (!path) continue;
+      if (typeof TE.taskState === "function"
+        ? TE.taskState(p) !== "done"
+        : (p.status !== "done" || path.indexOf("spice/tasks/_trash/") === 0)) continue;
       // Compare the RAW page field: parseNote does not date-coerce completed_at
       // (it blankToNulls it but keeps the raw string/Luxon), so route it through
       // _toDateStr here (handles string / datetime-with-offset / Luxon → YYYY-MM-DD).

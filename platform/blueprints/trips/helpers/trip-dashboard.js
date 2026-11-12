@@ -82,11 +82,14 @@ class TripDashboard {
     return (Array.isArray(stays)?stays:[]).filter(s=>s&&s.name).map(s=>({name:String(s.name), check_in:s.check_in||"", check_out:s.check_out||""}));
   }
   // Open trip tasks = task-entity notes in spice/tasks keyed on trip_slug
-  // (parity with TaskTripList._matches: open, non-meeting, not trashed/done).
+  // (parity with TaskTripList._matches: open by status, non-meeting).
   static _countOpenTasks(dv, tripSlug){
     const slug=String(tripSlug||"").trim(); if(!slug) return 0;
     try {
-      const rows=dv.pages('"spice/tasks"').where(p=>p&&p.type==="task"&&p.status==="open"&&String(p.trip_slug||"").trim()===slug&&String(p.source||"").trim()!=="meeting"&&p.file&&!String(p.file.path).includes("/_trash/")&&!String(p.file.path).includes("/_done/"));
+      const cjs=(typeof globalThis!=="undefined"&&globalThis.customJS)||(typeof window!=="undefined"&&window.customJS)||null;
+      const TE=cjs&&cjs.TaskEntity;
+      const isOpen=(p)=>(TE&&typeof TE.isOpenTask==="function")?TE.isOpenTask(p):p.status==="open";
+      const rows=dv.pages('"spice/tasks"').where(p=>p&&p.type==="task"&&isOpen(p)&&String(p.trip_slug||"").trim()===slug&&String(p.source||"").trim()!=="meeting"&&p.file);
       return rows?(rows.length||0):0;
     } catch(_e){ return 0; }
   }

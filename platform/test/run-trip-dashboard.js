@@ -64,7 +64,7 @@ const TripDashboard = loadClass('platform/blueprints/trips/helpers/trip-dashboar
         { type: "task", status: "open", trip_slug: "other",  source: "", file: { path: "spice/tasks/b.md" } },
         { type: "task", status: "open", trip_slug: "bussin", source: "meeting", file: { path: "spice/tasks/c.md" } },
         { type: "task", status: "done", trip_slug: "bussin", source: "", file: { path: "spice/tasks/d.md" } },
-        { type: "task", status: "open", trip_slug: "bussin", source: "", file: { path: "spice/tasks/_trash/e.md" } },
+        { type: "task", status: "deleted", trip_slug: "bussin", source: "", file: { path: "spice/tasks/_trash/e.md" } },
     ];
     const mkArr = (a) => { a.where = (fn) => mkArr(a.filter(fn)); return a; };
     const dv = { pages: () => mkArr(rows.slice()) };

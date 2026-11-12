@@ -396,6 +396,70 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-core",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-core.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-read",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-read.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-create",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-create.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-lifecycle",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-lifecycle.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-edit",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-edit.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-installer",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-installer.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-plan",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-plan.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "task-folders-apply",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-apply.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",
@@ -1070,6 +1134,14 @@
       "cmd": [
         "node",
         "platform/test/run-todo-phone-fit.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "todo-subtask-rows",
+      "cmd": [
+        "node",
+        "platform/test/run-todo-subtask-rows.js"
       ],
       "lane": "parallel"
     },

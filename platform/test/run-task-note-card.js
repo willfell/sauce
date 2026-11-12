@@ -85,10 +85,10 @@ ok('TNC-LINK-META a web link names its site without www; a note link is a note',
   TNV._linkMeta('[PR](https://www.github.com/a/b/pull/1)').host === 'github.com'
   && TNV._linkMeta('https://teams.microsoft.com/l/x').host === 'teams.microsoft.com'
   && TNV._linkMeta('[[Retro Notes]]').kind === 'note');
-ok('TNC-ACTIONS open → Mark done + Edit; archived done → Reopen + Edit; otherwise Edit alone',
+ok('TNC-ACTIONS open → Mark done + Edit; done at any path → Reopen + Edit; deleted → Edit alone',
   TNV._actionsFor('open', 'spice/tasks/A.md').join() === 'done,edit'
   && TNV._actionsFor('done', 'spice/tasks/_done/A.md').join() === 'reopen,edit'
-  && TNV._actionsFor('done', 'spice/tasks/A.md').join() === 'edit'
+  && TNV._actionsFor('done', 'spice/tasks/A.md').join() === 'reopen,edit'
   && TNV._actionsFor('deleted', 'spice/tasks/_trash/A.md').join() === 'edit');
 
 const css = TNV._CSS;
@@ -203,6 +203,26 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
   }
 
   {
+    const { dv, container, calls } = harness(HENRY, [], { markDone: { ok: false, reason: 'cancelled' } });
+    await new TNV().render(dv);
+    const markBtn = byClass(one(container, 'sauce-tnv-actions'), 'sauce-btn')[0];
+    await markBtn._listeners.click();
+    ok('TNC-MARKDONE-CANCEL a declined subtasks question puts Mark done back without a notice or a celebration',
+      markBtn.textContent === 'Mark done' && !markBtn.disabled && calls.notice === undefined
+      && !markBtn.classList.contains('is-completing'));
+  }
+
+  {
+    const { dv, container, calls } = harness(HENRY, [], { markDone: { ok: false, reason: 'cannot-confirm' } });
+    await new TNV().render(dv);
+    const markBtn = byClass(one(container, 'sauce-tnv-actions'), 'sauce-btn')[0];
+    await markBtn._listeners.click();
+    ok('TNC-MARKDONE-CANNOT-CONFIRM when the subtasks question cannot be asked Mark done comes back and says to open the task',
+      markBtn.textContent === 'Mark done' && !markBtn.disabled && !markBtn.classList.contains('is-completing')
+      && calls.notice === "Couldn't ask about its open subtasks — open the task to finish it", String(calls.notice));
+  }
+
+  {
     const kids = Array.from({ length: 7 }, (_, i) => kid('Done ' + i, 'done', { completed_at: '2026-11-0' + (i + 1) + 'T09:00:00-07:00' }));
     const { dv, container } = harness(HENRY, kids);
     await new TNV().render(dv);
@@ -302,6 +322,58 @@ const kid = (title, status, extra) => Object.assign({ type: 'task', title, statu
     ok('TNC-LOOP a parent loop draws once and stops, never nesting the note inside its own card',
       calls.rows.map((r) => r.task.title).join() === 'Loop B' && !one(container, 'sauce-tnv-nest')
       && byClass(container, 'sauce-tnv-parent-name').map((a) => a.textContent).join() === 'Loop B');
+  }
+
+  {
+    const note = (p, extra) => Object.assign({ type: 'task', status: 'open', source: 'manual', title: p.split('/').pop(), file: { path: 'spice/tasks/' + p + '/' + p.split('/').pop() + '.md', name: p.split('/').pop() } }, extra || {});
+    const TOP = note('Top');
+    const kids = [TOP, note('Top/A'), note('Top/A/A1'), note('Top/B', { status: 'done', completed_at: '2026-11-10T09:00:00-07:00' })];
+    const { dv, container, calls } = harness(TOP, kids);
+    await new TNV().render(dv);
+    ok('TNC-FOLDER-TREE children given as folder-note paths, with no parent_task, still nest',
+      calls.rows.map((r) => r.task.title).join() === 'A,A1' && byClass(container, 'sauce-tnv-nest').length === 1
+      && one(container, 'sauce-tnv-count').textContent === '1 of 2 done');
+  }
+
+  {
+    const note = (p, extra) => Object.assign({ type: 'task', status: 'open', source: 'manual', title: p.split('/').pop(), file: { path: 'spice/tasks/' + p + '/' + p.split('/').pop() + '.md', name: p.split('/').pop() } }, extra || {});
+    const P1 = note('P1');
+    const kids = [P1, note('P1/Notes'), note('P1/Notes/X1'), note('P2'), note('P2/Notes'), note('P2/Notes/X2')];
+    const { dv, container, calls } = harness(P1, kids);
+    await new TNV().render(dv);
+    ok('TNC-FOLDER-SAME-NAME two parents each with a child named Notes do not share children',
+      calls.rows.map((r) => r.task.title).join() === 'Notes,X1' && !calls.rows.some((r) => r.task.title === 'X2'));
+    const idx = TNV._taskIndex([
+      { path: 'spice/tasks/P1/Notes/Notes.md', parent_task: 'P1', parent_path: 'spice/tasks/P1/P1.md' },
+      { path: 'spice/tasks/P1/Notes/X1/X1.md', parent_task: 'Notes', parent_path: 'spice/tasks/P1/Notes/Notes.md' },
+      { path: 'spice/tasks/P2/Notes/X2/X2.md', parent_task: 'Notes', parent_path: 'spice/tasks/P2/Notes/Notes.md' },
+      { path: 'spice/tasks/Flat child.md', parent_task: 'Flat', parent_path: '' },
+    ], null);
+    const titles = (k) => (idx.children.get(k) || []).map((t) => TNV._baseOf(t.path)).join();
+    ok('TNC-INDEX-PATH-KEY a child with a parent path is keyed under that path; one without, under the parent basename',
+      titles('spice/tasks/P1/Notes/Notes.md') === 'X1' && titles('spice/tasks/P2/Notes/Notes.md') === 'X2'
+      && titles('Notes') === '' && titles('Flat') === 'Flat child'
+      && TNV._kidsOf(idx, 'spice/tasks/P1/Notes/Notes.md').length === 1 && TNV._kidsOf(idx, 'spice/tasks/Flat.md').length === 1);
+  }
+
+  {
+    const HH = { type: 'task', title: 'Help Henry', status: 'open', source: 'manual', file: { path: 'spice/tasks/Help Henry/Help Henry.md', name: 'Help Henry' } };
+    const NESTED = { type: 'task', title: 'Review PR', status: 'open', source: 'manual', parent_task: '[[Help Henry]]', file: { path: 'spice/tasks/Help Henry/Review PR/Review PR.md', name: 'Review PR' } };
+    const FLAT = { type: 'task', title: 'Old flat task', status: 'open', source: 'manual', parent_task: '[[Help Henry]]', file: { path: 'spice/tasks/Old flat task.md', name: 'Old flat task' } };
+    const { dv, calls } = harness(HH, [HH, NESTED, FLAT]);
+    await new TNV().render(dv);
+    ok('TNC-KIDS-MIXED a folder parent shows its nested child and its flat child (re-parented, still flat) together',
+      calls.rows.map((r) => r.task.title).sort().join() === 'Old flat task,Review PR', calls.rows.map((r) => r.task.title).join());
+    const idx = TNV._taskIndex([
+      { path: 'spice/tasks/Help Henry/Review PR/Review PR.md', parent_task: 'Help Henry', parent_path: 'spice/tasks/Help Henry/Help Henry.md' },
+      { path: 'spice/tasks/Old flat task.md', parent_task: 'Help Henry', parent_path: '' },
+    ], null);
+    const merged = TNV._kidsOf(idx, 'spice/tasks/Help Henry/Help Henry.md').map((t) => t.path);
+    ok('TNC-KIDS-MERGE _kidsOf merges the path-keyed and name-keyed children, each once',
+      merged.join('|') === 'spice/tasks/Help Henry/Review PR/Review PR.md|spice/tasks/Old flat task.md', merged.join('|'));
+    const dup = { path: 'spice/tasks/Same.md' };
+    const twice = { children: new Map([['spice/tasks/P/P.md', [dup]], ['P', [dup]]]) };
+    ok('TNC-KIDS-DEDUP a child under both keys is listed once', TNV._kidsOf(twice, 'spice/tasks/P/P.md').length === 1);
   }
 
   {

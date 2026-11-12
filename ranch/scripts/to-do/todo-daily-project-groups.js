@@ -112,19 +112,18 @@ class ToDoDailyProjectGroups {
     }
 
     /**
-     * Live-query OPEN task-notes under spice/tasks/ (excluding _trash/ + _done/),
+     * Live-query OPEN task-notes under spice/tasks/ (status decides open),
      * returning parseNote() output. Shared by both scopes. Never throws — a bad
      * query yields [].
      */
     _openProjectTaskNotes(dv, TE) {
         try {
             // The archives are excluded in the SOURCE so Dataview never builds a page
-            // object for a finished or trashed task; the path checks below stay as a guard.
+            // object for a finished or trashed task; the status check below decides the rest.
             const raw = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
-                p && p.type === 'task' && p.status === 'open'
+                p && p.type === 'task'
                 && p.file && p.file.path
-                && !p.file.path.includes('/_trash/')
-                && !p.file.path.includes('/_done/'));
+                && (typeof TE.isOpenTask === 'function' ? TE.isOpenTask(p) : p.status === 'open'));
             // Parse each task once (the old feature test mapped the whole list twice).
             const mapped = raw.map(p => TE.parseNote(p));
             return typeof mapped.array === 'function' ? mapped.array() : Array.from(mapped);

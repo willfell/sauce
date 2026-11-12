@@ -28,6 +28,59 @@ completed_at:           # set when done
 Absent `scheduled` / `due` / `completed_at` are written as **empty strings**
 (not omitted) so setting a date later is a simple in-place field write.
 
+## Task folders
+
+Each task is a folder holding its note, and a subtask's folder sits inside its
+parent's. Design and rulings:
+[`Docs/superpowers/specs/2026-11-10-task-folders-design.md`](../../../Docs/superpowers/specs/2026-11-10-task-folders-design.md).
+
+```
+spice/tasks/
+  Help Henry out with Routes/
+    Help Henry out with Routes.md      ← the task note (type: task)
+    Review the routes PR/
+      Review the routes PR.md          ← subtask (stays here when done)
+  _done/2026/11/Pay Bills/Pay Bills.md ← a finished top-level task, whole tree
+  _trash/Old idea/Old idea.md
+```
+
+- **Layout.** A folder and its note share one name: `<Name>/<Name>.md`. Other
+  files in the folder are that task's attachments. A task's parent is the task
+  note in the folder directly above it; `parent_task: "[[<Parent Name>]]"` is
+  kept in step as a mirror, and the folder wins if they disagree.
+- **Naming.** `TaskEntity.taskName(title, ctx)` gives the note and folder name:
+  the sanitized title while no other markdown file anywhere in the vault has
+  that basename (case-insensitive). On a clash a subtask adds its parent's
+  title (`Review PR (Help Henry)`) and a top-level task its creation date
+  (`Pay Bills (Nov 10)`), then ` 2`, ` 3`, … Names are fixed once given: a task
+  whose name is unique is never renamed, and renames never cascade.
+- **Status is truth.** `status: done` / `deleted` decides what is open, done or
+  trashed on every list, count and Reopen gate; the path only decides where the
+  note lives. A finished subtask stays in place; a finished top-level task
+  moves its whole folder to `_done/YYYY/MM/` (completion month); a deleted task
+  moves its folder to `_trash/`. An open task whose parent is done, deleted or
+  missing (a promoted task) lists as a root, so it never drops out of the open
+  lists.
+- **Both layouts until Apply.** A note in a task folder takes its parent from
+  the folder; a flat `spice/tasks/<Title>.md` note falls back to `parent_task`.
+  New tasks are always written in the folder layout, so a half-migrated vault
+  works. A task card lists its folder children and its flat children together.
+- **Migration: dry run, then Apply on the desktop.** The installer heal
+  `applyTaskFoldersHeal` only plans. It writes
+  `ranch/reports/task-folders-YYYY-MM-DD.md` (every move, rename, parent pick,
+  promoted task, ambiguous link and unresolved item, plus the plan as a
+  ```` ```json ```` block) and moves nothing. The report's Apply button
+  (`TaskFolders`, `task-folders.js`) runs the moves inside Obsidian through
+  `app.fileManager.renameFile`, so Obsidian rewrites the links and Sync sees
+  every move. It refuses on a phone (`app.isMobile`) and says to run it on the
+  desktop, and refuses while "Automatically update internal links" is off. A
+  run that moved at least one note appends `<!-- task-folders:applied -->` and
+  an `## Applied <ISO>` section; a run that moved nothing appends an
+  `## Apply attempt <ISO>` section without the anchor, so Apply stays
+  available. Re-running the installer never overwrites an applied report.
+- **Undo.** There is no undo button: Obsidian Sync's version history is the
+  undo for a move.
+
 ## API (`customJS.TaskEntity`)
 
 All methods are static (with instance delegators, so cross-class calls via

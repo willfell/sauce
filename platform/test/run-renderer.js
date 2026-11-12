@@ -3544,9 +3544,11 @@ async function testSelectTasksNotePerTask() {
       { type: "task", status: "done", completed_at: "2026-07-02",                title: "done today date", file: { path: "spice/tasks/_done/b.md" } },
       { type: "task", status: "done", completed_at: "2026-07-01T23:00:00-06:00", title: "done yesterday",  file: { path: "spice/tasks/_done/c.md" } },
       { type: "task", status: "done", completed_at: "",                          title: "done no date",    file: { path: "spice/tasks/_done/d.md" } },
-      { type: "task", status: "done", completed_at: "2026-07-02",                title: "trashed done",    file: { path: "spice/tasks/_done/_trash/e.md" } },
+      { type: "task", status: "deleted", completed_at: "2026-07-02",              title: "trashed done",    file: { path: "spice/tasks/_trash/e.md" } },
     ],
   };
+  pagesByQuery['"spice/tasks"'] = pagesByQuery['"spice/tasks"'].concat(pagesByQuery['"spice/tasks/_done"']);
+  delete pagesByQuery['"spice/tasks/_done"'];
   const fakeDv = { pages: (q) => pagesByQuery[q] || [] };
 
   let ok = true;
@@ -3659,6 +3661,8 @@ async function testComputeCounts() {
       { file: { name: "Old-2026-07-01",     path: "spice/meetings/notes/Old-2026-07-01.md" } },
     ],
   };
+  pagesByQuery['"spice/tasks"'] = pagesByQuery['"spice/tasks"'].concat(pagesByQuery['"spice/tasks/_done"']);
+  delete pagesByQuery['"spice/tasks/_done"'];
   const fakeDv = { pages: (q) => pagesByQuery[q] || [] };
 
   let ok = true;
@@ -3791,9 +3795,9 @@ async function runDashboardRender({ params, fileName }) {
           },
         };
       }
-      // Task queries (spice/tasks, _done) — return [] so no task rows (TE is a
+      // Task queries (spice/tasks) — return [] so no task rows (TE is a
       // real stub below); activity queries iterate this array in _getActivityCount.
-      if (query === '"spice/tasks"' || query === '"spice/tasks/_done"') return [];
+      if (query === '"spice/tasks"') return [];
       // _getActivityCount calls dv.pages() with no query.
       if (query === undefined) return activityPages;
       return [];
@@ -4255,9 +4259,9 @@ async function testRendHasNotes() {
       /static\s+selectTasks\s*\(/.test(sddSrc) && /return\s*\{\s*open\s*,\s*done\s*,\s*overdue\s*[,}]/.test(sddSrc),
       "selectTasks must select task-notes and return a today-only open list + a done count + an overdue count (pills read openTasks.length + overdueCount + doneCount)");
 
-    assertTrue("HC-V0843-A1b selectTasks queries spice/tasks (open) + _done (done-today) via queryToday",
-      /"spice\/tasks"/.test(sddSrc) && /"spice\/tasks\/_done"/.test(sddSrc) && /queryToday/.test(sddSrc),
-      "selectTasks must query spice/tasks + spice/tasks/_done and partition open tasks via the source-agnostic TaskEntity.queryToday");
+    assertTrue("HC-V0843-A1b selectTasks queries spice/tasks (open + done-today by status) via queryToday",
+      /"spice\/tasks"/.test(sddSrc) && !/"spice\/tasks\/_done"/.test(sddSrc) && /queryToday/.test(sddSrc),
+      "selectTasks must query spice/tasks once (open and done by status, wherever they live) and partition open tasks via the source-agnostic TaskEntity.queryToday");
 
     assertTrue("HC-V0843-A1c task rows render via TaskTodayList.renderInlineLinks + open the note",
       /renderInlineLinks/.test(sddSrc) && /openLinkText\(task\.path/.test(sddSrc),

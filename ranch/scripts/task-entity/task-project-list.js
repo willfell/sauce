@@ -145,12 +145,11 @@ class TaskProjectList {
         let parsed = [];
         try {
             // The archives are excluded in the SOURCE so Dataview never builds a page
-            // object for a finished or trashed task; the path checks below stay as a guard.
+            // object for a finished or trashed task; the status check below decides the rest.
             const raw = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
-                p && p.type === 'task' && p.status === 'open'
+                p && p.type === 'task'
                 && p.file && p.file.path
-                && !p.file.path.includes('/_trash/')
-                && !p.file.path.includes('/_done/')
+                && (typeof TE.isOpenTask === 'function' ? TE.isOpenTask(p) : p.status === 'open')
                 && String(p.project_slug == null ? '' : p.project_slug).trim() === ourSlug
                 && String(p.source == null ? '' : p.source).trim() !== 'meeting');
             // Parse each task once (the old feature test mapped the whole list twice).

@@ -157,21 +157,22 @@ class TaskTodayList {
     static get SILENT_REASONS() {
         return [
             'in-flight', 'render-safe-unavailable', 'not-done', 'task file not found',
-            'app unavailable', 'no-fields', 'task-entity-unavailable',
+            'app unavailable', 'no-fields', 'task-entity-unavailable', 'cannot-confirm',
         ];
     }
 
     /**
      * Today-surface failure policy. Returns:
      *   'ok'      - succeeded
-     *   'skipped' - a no_op refusal (cold load, in flight, task no longer open)
+     *   'skipped' - a no_op refusal (cold load, in flight, task no longer open),
+     *               or the user declined a question (reason 'cancelled')
      *   'silent'  - refused before writing with no Notice (see SILENT_REASONS),
      *               or the call itself threw past its own guard (null result)
      *   'noticed' - the write failed and its rail already told the user
      */
     static classifyOutcome(res) {
         if (res && res.ok === true) return 'ok';
-        if (res && res.no_op) return 'skipped';
+        if (res && (res.no_op || res.reason === 'cancelled')) return 'skipped';
         if (!res) return 'silent';
         const reason = String(res.reason || '');
         return TaskTodayList.SILENT_REASONS.includes(reason) ? 'silent' : 'noticed';
@@ -317,7 +318,7 @@ class TaskTodayList {
 
     /**
      * One Done-today row: struck title (click opens the note), completion HH:mm
-     * and, for a task archived under spice/tasks/_done/, an Undo button
+     * and, for a done task, an Undo button
      * (aria-label "Undo: <title>") that hands the reopen flow to
      * options.onUndo(task, button). options.undoLabel renames the button and
      * its aria-label prefix (default "Undo"); options.showProject adds the
@@ -364,7 +365,7 @@ class TaskTodayList {
         try {
             TD = opts.TD || (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog) || null;
         } catch (_e) { TD = null; }
-        const canUndo = String(task.path || '').indexOf('spice/tasks/_done/') === 0
+        const canUndo = task.status === 'done'
             && !!TD && typeof TD.reopen === 'function' && typeof opts.onUndo === 'function';
         if (canUndo) {
             const undo = row.createEl('button', { cls: 'sauce-today-undo' });
@@ -813,18 +814,16 @@ class TaskTodayList {
             : '';
 
         // ----- Live query -----
-        // Open tasks under spice/tasks/, excluding the recoverable _trash/ and
-        // completed _done/ archives. Guard each predicate against half-indexed
+        // Open tasks under spice/tasks/; status (not the path) decides open. Guard each predicate against half-indexed
         // pages (p / p.file may be undefined on cold load).
         let parsed = [];
         try {
             // The archives are excluded in the SOURCE so Dataview never builds a page
-            // object for a finished or trashed task; the path checks below stay as a guard.
+            // object for a finished or trashed task; the status check below decides the rest.
             const raw = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
-                p && p.type === 'task' && p.status === 'open'
+                p && p.type === 'task'
                 && p.file && p.file.path
-                && !p.file.path.includes('/_trash/')
-                && !p.file.path.includes('/_done/'));
+                && (typeof TE.isOpenTask === 'function' ? TE.isOpenTask(p) : p.status === 'open'));
             // Parse each task once (the old feature test mapped the whole list twice).
             const mapped = raw.map(p => TE.parseNote(p));
             parsed = typeof mapped.array === 'function' ? mapped.array() : Array.from(mapped);
@@ -1154,7 +1153,13 @@ class TaskTodayList {
                 const res = await TD.markDone(path);
                 if (res && res.ok === false) {
                     revert();
-                    try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
+                    // 'cancelled' = the user said No to completing open subtasks: quiet.
+                    // 'cannot-confirm' = the question could not be asked (cold load).
+                    if (res.reason === 'cannot-confirm') {
+                        try { new Notice("Couldn't ask about its open subtasks — open the task to finish it", 6000); } catch (_e) {}
+                    } else if (res.reason !== 'cancelled') {
+                        try { new Notice('Could not complete task: ' + (res.reason || 'unknown'), 6000); } catch (_e) {}
+                    }
                 } else {
                     // On success the file moves to _done/; the row is already
                     // gone. options.onDone lets the host repaint its counts.
@@ -1170,6 +1175,30 @@ class TaskTodayList {
         const prioBar = titleGroup.createEl('span', { cls: 'sauce-task-prio-bar is-' + prioLevel });
         prioBar.style.cssText = 'width: 3px; align-self: stretch; min-height: 1.5em; border-radius: 2px; flex-shrink: 0; background: ' + TaskTodayList._PRIO_BAR_COLOR[prioLevel] + ';';
         try { prioBar.setAttribute('aria-hidden', 'true'); } catch (_e) {}
+
+        // Subtask marker: a muted "↳ Parent" chip before the title on any row
+        // whose task has a parent, so a subtask listed on its own due day reads
+        // as one. The parent's own card passes showParent:false (its subtask
+        // rows already sit under it). Click opens the parent note.
+        const parentName = task && task.parent_task ? String(task.parent_task).trim() : '';
+        if (parentName && opts.showParent !== false) {
+            const MAX = 22;
+            const shown = parentName.length > MAX ? parentName.slice(0, MAX - 1) + '\u2026' : parentName;
+            const parentChip = titleGroup.createEl('span', { cls: 'sauce-task-parent-chip', text: '\u21b3 ' + shown });
+            parentChip.style.cssText = 'flex: 0 1 auto; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75em; line-height: 2; color: var(--text-muted); cursor: pointer;';
+            try { parentChip.setAttribute('title', parentName); } catch (_e) {}
+            parentChip.addEventListener('click', (ev) => {
+                try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try {
+                    const appRef = (typeof window !== 'undefined' && window.app)
+                        || (typeof app !== 'undefined' && app)
+                        || null;
+                    if (appRef && appRef.workspace && typeof appRef.workspace.openLinkText === 'function') {
+                        appRef.workspace.openLinkText(parentName, (task && task.path) || '', false);
+                    }
+                } catch (_e) {}
+            });
+        }
 
         // Title — clicking the title (not the checkbox) opens the task NOTE. The
         // text is rendered via renderInlineLinks so `[label](url)`, `[[wikilink]]`,

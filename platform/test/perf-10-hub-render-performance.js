@@ -111,7 +111,7 @@ function fixture() {
   for (let i = 0; i < 360; i++) add('spice/tasks', { type: 'task', status: 'open', title: `Task ${i}`,
     scheduled: i % 3 === 0 ? today : '2026-08-02', project_slug: `project-${i % 120}`, source: 'manual',
     priority: ['high', 'medium', 'low'][i % 3], file: { name: `Task ${i}`, path: `spice/tasks/task-${i}.md`, mtime: { ts: 1_900_000_000_000 - i } } });
-  for (let i = 0; i < 80; i++) add('spice/tasks/_done', { type: 'task', completed_at: `${today}T12:00:00`, file: { name: `Done ${i}`, path: `spice/tasks/_done/done-${i}.md` } });
+  for (let i = 0; i < 80; i++) add('spice/tasks', { type: 'task', status: 'done', completed_at: `${today}T12:00:00`, file: { name: `Done ${i}`, path: `spice/tasks/_done/done-${i}.md` } });
   for (let i = 0; i < 180; i++) add('spice/meetings/notes', { type: 'meeting', project: `[[Project ${i % 120}]]`, attendees: ['[[Ada]]', '[[Lin]]'],
     file: { name: `${today} Meeting ${i}`, path: `spice/meetings/notes/${today} Meeting ${i}.md`, mtime: { ts: 1_900_000_000_000 - i } } });
   for (let i = 0; i < 140; i++) add('spice/reader', { type: 'reader-article', status: i < 12 ? 'reading' : 'queued', captured_at: `${today}T10:00:00`, file: { name: `Article ${i}`, path: `spice/reader/article-${i}.md` } });
@@ -164,8 +164,7 @@ async function samples(label, makeRun, count = 7) {
   const fx = fixture();
   const exactScopes = {
     'spice/projects': 120,
-    'spice/tasks': 360,
-    'spice/tasks/_done': 80,
+    'spice/tasks': 440,
     'spice/meetings/notes': 180,
     'spice/reader': 140,
     'spice/trips': 40,
@@ -255,8 +254,8 @@ async function samples(label, makeRun, count = 7) {
     requireMeasurement(Boolean(dv.container.querySelector('.space-daily-dashboard')), 'Daily dashboard root was not rendered');
     requireMeasurement(nodeCount(dv.container) > 100, 'Daily dashboard did not construct its large-fixture sections');
     requireMeasurement((dv._queryCounts.get('spice/meetings/notes') || 0) === 1, 'Daily dashboard must query meetings exactly once');
-    requireMeasurement((dv._queryCounts.get('spice/tasks') || 0) === 1 && (dv._queryCounts.get('spice/tasks/_done') || 0) === 1,
-      'Daily dashboard must query open and completed task scopes exactly once');
+    requireMeasurement((dv._queryCounts.get('spice/tasks') || 0) === 1 && (dv._queryCounts.get('spice/tasks/_done') || 0) === 0,
+      'Daily dashboard must query the task scope exactly once, for open and done alike');
     requireMeasurement((dv._queryCounts.get('spice/reader') || 0) === 1 && (dv._queryCounts.get('spice/trips') || 0) === 2,
       'Daily dashboard must query reader once and trips for gating plus rendering');
     requireMeasurement(metrics.beaconEmitted === 180, `Daily dashboard emitted ${metrics.beaconEmitted}, expected 180 meeting cards`);

@@ -34,7 +34,8 @@
     "TaskProjectList",
     "TaskTripList",
     "TaskDoneTodayList",
-    "TaskChromeBar"
+    "TaskChromeBar",
+    "TaskFolders"
   ],
   "files": [
     {
@@ -72,6 +73,10 @@
     {
       "source": "task-chrome-bar.js",
       "dest": "{{scripts_path}}/task-entity/task-chrome-bar.js"
+    },
+    {
+      "source": "task-folders.js",
+      "dest": "{{scripts_path}}/task-entity/task-folders.js"
     }
   ],
   "post_install": [],
@@ -88,7 +93,7 @@
               "fm:parent_task": "present"
             },
             "label": "fm:parent_task",
-            "link": "spice/tasks/{fm:parent_task}.md"
+            "link": "{fm:parent_task}"
           }
         ],
         "current": {

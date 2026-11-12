@@ -75,10 +75,14 @@ class MeetingsHubCards {
     try {
       const data = dv.pages('"spice/tasks"');
       const tasks = data && typeof data.array === "function" ? data.array() : Array.from(data || []);
+      const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
+        || (typeof window !== "undefined" && window.customJS) || null;
+      const TE = cjs && cjs.TaskEntity;
       for (const task of tasks) {
         const path = task && task.file && task.file.path;
         const taskSource = String(task && task.source != null ? task.source : "").trim().toLowerCase();
-        if (!task || task.type !== "task" || taskSource !== "meeting" || !path || path.includes("/_trash/")) continue;
+        if (!task || task.type !== "task" || taskSource !== "meeting" || !path) continue;
+        if (TE && typeof TE.taskState === "function" ? TE.taskState(task) === "deleted" : String(task.status || "").toLowerCase() === "deleted") continue;
         const source = MeetingsHubCards._sourceBasename(task.source_note);
         if (!source) continue;
         const row = counts[source] || (counts[source] = { open: 0, done: 0 });
