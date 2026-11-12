@@ -2657,12 +2657,66 @@ class TaskDialog {
                 return { ok: false, reason: 'move-failed' };
             }
         }
+        let renamedKids = 0;
+        const prevTitle = prior && prior.title != null ? String(prior.title).trim() : '';
+        const nextTitle = String(payload.title == null ? '' : payload.title).trim();
+        if (prevTitle && nextTitle && prevTitle !== nextTitle) {
+            const TEk = TaskDialog._taskEntity();
+            if (TEk && TEk.isFolderNote(finalPath)) {
+                renamedKids = await this._renameStaleSubtasks(app, TEk.taskFolderOf(finalPath), prevTitle, nextTitle);
+            }
+        }
         try {
-            new Notice(inheritedDue
+            const kids = renamedKids ? ' ' + renamedKids + (renamedKids === 1 ? ' subtask' : ' subtasks') + ' renamed to match.' : '';
+            new Notice((inheritedDue
                 ? 'Task saved. It is a top-level task now, due ' + inheritedDue + ' like its old parent.'
-                : 'Task saved');
+                : (kids ? 'Task saved.' : 'Task saved')) + kids);
         } catch (_e) {}
-        return inheritedDue ? { ok: true, path: finalPath, due: inheritedDue } : { ok: true, path: finalPath };
+        const out = { ok: true, path: finalPath };
+        if (inheritedDue) out.due = inheritedDue;
+        if (renamedKids) out.renamedSubtasks = renamedKids;
+        return out;
+    }
+
+    /**
+     * After a task is retitled from `oldTitle` to `newTitle`, rename each
+     * direct subtask in `folder` whose name still carries the old title as
+     * its clash qualifier — `Child (Old Title)` or `Child (Old Title) 2` — to
+     * the name TaskEntity.taskName now gives it under `newTitle` (vault
+     * unique; the plain title when that is free). Other subtasks are left
+     * alone. Each rename goes through _renameTaskFolder so links follow.
+     * Resolves how many were renamed; a failed rename is skipped.
+     */
+    async _renameStaleSubtasks(app, folder, oldTitle, newTitle) {
+        const TE = TaskDialog._taskEntity();
+        if (!TE || !app || !app.vault || typeof app.vault.getMarkdownFiles !== 'function') return 0;
+        const oldQual = ' (' + TE._sanitizeTitle(oldTitle) + ')';
+        const prefix = String(folder) + '/';
+        let n = 0;
+        const kids = app.vault.getMarkdownFiles().filter((f) => {
+            const p = String((f && f.path) || '');
+            if (p.indexOf(prefix) !== 0) return false;
+            const rest = p.slice(prefix.length).split('/');
+            return rest.length === 2 && TE.isFolderNote(p);
+        });
+        for (const f of kids) {
+            const base = String(f.basename != null ? f.basename : f.path.split('/').pop().replace(/\.md$/i, ''));
+            const fm = TaskDialog._fmOf(app, f) || {};
+            const title = fm.title != null && String(fm.title).trim() !== '' ? String(fm.title).trim() : '';
+            if (!title) continue;
+            const stem = TE._sanitizeTitle(title) + oldQual;
+            if (!(base === stem || new RegExp('^' + stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\d+$').test(base))) continue;
+            const own = base.toLowerCase();
+            const taken = TaskDialog._takenNames(app);
+            const name = TE.taskName(title, { parentTitle: newTitle, createdAt: fm.created_at, taken: (x) => x !== own && taken(x) });
+            if (!name || name === base) continue;
+            const oldFolder = prefix + base;
+            try {
+                await this._renameTaskFolder(app, oldFolder, prefix + name, name);
+                n += 1;
+            } catch (_e) { /* leave this one as it was */ }
+        }
+        return n;
     }
 
     /**

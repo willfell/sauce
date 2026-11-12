@@ -236,6 +236,50 @@ const CAPTURE_DAILY = [
     ok('TF-INST-CAPTURE-FOLDER the recurring heal sees tasks in both layouts', notes.length === 2, notes.join(', '));
   });
 
+  const CHROME = '\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "TaskNoteView" });\n```\n\n<!-- TASK_NOTES -->\n';
+  await withVault({
+    'spice/tasks/Std Naming/Std Naming.md': '---\ntype: task\ntitle: Std Naming\nstatus: open\n---\n' + CHROME + 'real notes\n',
+    'spice/tasks/Std Naming.md': CHROME + 'notes a session wrote to the old flat path\n',
+    'spice/tasks/Fix Redis/Fix Redis.md': '---\ntype: task\ntitle: Fix Redis\nstatus: open\n---\n',
+    'spice/tasks/Fix Redis/Stage Env (Fix Redis)/Stage Env (Fix Redis).md': '---\ntype: task\ntitle: Stage Env\nstatus: open\nparent_task: "[[Fix Redis]]"\n---\n',
+    'spice/tasks/Stage Env.md': CHROME + 'old copy\n',
+    'spice/tasks/Mint Token.md': CHROME + '# Mint Token\nsteps\n',
+    'spice/tasks/PR Review.md': '---\ntype: doc-note\ntitle: PR Review\nproject_slug: hemi\n---\nreview\n',
+    'spice/tasks/Orphan Doc.md': '---\ntype: doc-note\ntitle: Orphan Doc\nproject_slug: gone\n---\nx\n',
+    'spice/tasks/Scratch.md': 'just some text\n',
+    'spice/tasks/Real Flat.md': '---\ntype: task\ntitle: Real Flat\nstatus: open\n---\n',
+    'spice/projects/hemi/Hemi.md': '---\ntype: project\n---\n',
+  }, async ({ tp, read, has, mdBelow }) => {
+    const history = [];
+    await install.applyTaskStraysHeal(tp, history, {});
+    const today = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+    ok('TF-STRAY-PARK a frontmatter-less copy of a task with a folder moves into that folder, not listed twice',
+      !has('spice/tasks/Std Naming.md') && /old flat path/.test(read(`spice/tasks/Std Naming/Recovered - Std Naming - ${today}.md`))
+      && /real notes/.test(read('spice/tasks/Std Naming/Std Naming.md')));
+    ok('TF-STRAY-PARK-QUALIFIED a twin named with a clash qualifier counts too',
+      !has('spice/tasks/Stage Env.md') && has(`spice/tasks/Fix Redis/Stage Env (Fix Redis)/Recovered - Stage Env - ${today}.md`));
+    const mint = read('spice/tasks/Mint Token.md');
+    ok('TF-STRAY-MAKE-TASK task chrome with no frontmatter and no twin becomes an open task in place, body kept',
+      /^---\ntype: task\ntitle: "Mint Token"\nstatus: open\n/.test(mint) && /# Mint Token\nsteps/.test(mint) && /created_at: \d{4}-/.test(mint));
+    ok('TF-STRAY-TO-DOCS a doc-note for a known project moves to its docs folder; an unknown project stays',
+      !has('spice/tasks/PR Review.md') && /review/.test(read('spice/projects/hemi/docs/PR Review.md')) && has('spice/tasks/Orphan Doc.md'));
+    ok('TF-STRAY-LEAVE plain text and real tasks are left alone',
+      has('spice/tasks/Scratch.md') && read('spice/tasks/Real Flat.md') === '---\ntype: task\ntitle: Real Flat\nstatus: open\n---\n');
+    const report = read(`ranch/reports/task-strays-${today}.md`);
+    ok('TF-STRAY-REPORT the report lists each action and the reason',
+      /Moved into its task's folder \(2\)/.test(report) && /Made a task \(1\)/.test(report) && /Moved to project docs \(1\)/.test(report)
+      && /Left in place \(2\)/.test(report) && history.some((h) => h.step === 'task_strays_heal' && h.action === 'report_written'));
+    const odd = install.planTaskStrays([{ path: 'spice/tasks/a|b\\c.md', body: 'x' }], [], [], today);
+    ok('TF-STRAY-REPORT-ESCAPE pipes and backslashes in a name cannot break the table',
+      /\| `spice\/tasks\/a\\\|b\\\\c\.md` \|/.test(install.renderTaskStraysReport(odd, today)));
+    const before = mdBelow('ranch/reports');
+    const h2 = [];
+    await install.applyTaskStraysHeal(tp, h2, {});
+    ok('TF-STRAY-IDEMPOTENT a second run with only left-in-place notes changes nothing and writes no report',
+      JSON.stringify(mdBelow('ranch/reports')) === JSON.stringify(before) && read(`ranch/reports/task-strays-${today}.md`) === report
+      && h2.some((h) => h.action === 'nothing_applied'));
+  });
+
   const failed = results.filter(([, c]) => !c).length;
   console.log(`\nrun-task-folders-installer: ${results.length - failed} pass · ${failed} fail`);
   process.exit(failed ? 1 : 0);

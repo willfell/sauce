@@ -634,6 +634,12 @@ module.exports = async function (tp) {
     // it plans their output. Never moves a note; the moves are applied inside
     // Obsidian from the report's Apply button (TaskFolders). Ungated,
     // idempotent, never throws.
+    // 6a8a'. task-entity — notes directly in spice/tasks/ that no list can see
+    // (a session writing the old flat path, lost frontmatter, stray doc-notes):
+    // park copies inside their task's folder, give task chrome its frontmatter
+    // back, move project doc-notes to the project's docs/, and report. Runs
+    // first so a note made a task is planned by the folder dry run below.
+    await applyTaskStraysHeal(tp, installedNow.history, git);
     await applyTaskFoldersHeal(tp, installedNow.history, git);
 
     // 6a9. to-do — inject ToDoDailyTripGroups block into existing daily notes.
@@ -14034,6 +14040,196 @@ function _tfLocalDate(d) {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
+// planTaskStrays — what to do with each note sitting directly in spice/tasks/
+// that no task list can see. Pure. `strays` are { path, body, mtime? } for the
+// .md files directly in spice/tasks/; `allMd` is every markdown path in the
+// vault; `projectSlugs` the folder names under spice/projects/. Returns
+// { actions: [{ kind, from, to?, reason }] } where kind is:
+//   "park"      — no frontmatter, and a task folder note with the same name
+//                 (or that name plus a clash qualifier) exists: a copy written
+//                 to the old flat path. It moves into that task's folder as
+//                 "Recovered - <name> - <today>.md" so nothing is lost or
+//                 listed twice.
+//   "make-task" — no frontmatter, task chrome present, no twin: it gets task
+//                 frontmatter in place (open, undated) and lists again.
+//   "to-docs"   — a doc-note whose project_slug names a project: it moves to
+//                 that project's docs/ folder, where the project shows it.
+//   "leave"     — anything else without type: task, reported only.
+// Notes with `type: task` are not strays and get no action.
+function planTaskStrays(strays, allMd, projectSlugs, today) {
+  const actions = [];
+  const taken = new Set((allMd || []).map((p) => String(p).toLowerCase()));
+  const free = (p) => !taken.has(String(p).toLowerCase());
+  const claim = (p) => { taken.add(String(p).toLowerCase()); return p; };
+  const slugs = new Set(projectSlugs || []);
+  const folderNotes = (allMd || []).filter((p) => {
+    if (p.indexOf(_TF_ROOT + "/") !== 0) return false;
+    if (p.indexOf(_TF_ROOT + "/_trash/") === 0) return false;
+    const parts = p.split("/");
+    return parts.length >= 4 && parts[parts.length - 2] === parts[parts.length - 1].replace(/\.md$/i, "");
+  });
+  for (const s of strays || []) {
+    const path = String(s.path);
+    const rel = path.slice(_TF_ROOT.length + 1);
+    if (path.indexOf(_TF_ROOT + "/") !== 0 || rel.indexOf("/") >= 0 || !/\.md$/i.test(rel)) continue;
+    const base = rel.replace(/\.md$/i, "");
+    const body = String(s.body || "");
+    const hasFm = /^---\r?\n[\s\S]*?\r?\n---/.test(body);
+    const fm = _tfReadFm(body);
+    if (fm.type === "task") continue;
+    if (fm.type === "doc-note") {
+      const slug = String(fm.project_slug || "").trim();
+      const to = slug && slugs.has(slug) ? `spice/projects/${slug}/docs/${base}.md` : "";
+      if (to && free(to)) actions.push({ kind: "to-docs", from: path, to: claim(to), reason: `doc-note for project ${slug}` });
+      else actions.push({ kind: "leave", from: path, reason: to ? `doc-note; ${to} already exists` : "doc-note with no known project" });
+      continue;
+    }
+    if (hasFm) { actions.push({ kind: "leave", from: path, reason: `type ${fm.type ? JSON.stringify(fm.type) : "missing"}` }); continue; }
+    const lower = base.toLowerCase();
+    const twin = folderNotes.find((p) => {
+      const name = p.split("/").pop().replace(/\.md$/i, "").toLowerCase();
+      return name === lower || name.indexOf(lower + " (") === 0 || name.indexOf(lower + " - ") === 0;
+    });
+    if (twin) {
+      const dir = twin.slice(0, twin.lastIndexOf("/"));
+      let to = `${dir}/Recovered - ${base} - ${today}.md`;
+      for (let n = 2; !free(to) && n < 1000; n++) to = `${dir}/Recovered - ${base} - ${today} ${n}.md`;
+      actions.push({ kind: "park", from: path, to: claim(to), reason: `no frontmatter; the task lives at ${twin}` });
+      continue;
+    }
+    if (/class:\s*"TaskNoteView"/.test(body) || /<!-- TASK_NOTES -->/.test(body)) {
+      actions.push({ kind: "make-task", from: path, reason: "task chrome with no frontmatter" });
+      continue;
+    }
+    actions.push({ kind: "leave", from: path, reason: "no frontmatter and no task chrome" });
+  }
+  return { actions };
+}
+
+function _taskStrayFrontmatter(title, createdAt) {
+  return ["---", "type: task", `title: ${JSON.stringify(String(title))}`, "status: open", 'due: ""',
+    'recurrence: ""', 'priority: ""', 'project: ""', 'project_slug: ""', 'trip: ""', 'trip_slug: ""',
+    'source: ""', "source_note:", 'parent_task: ""', "links: []", `created_at: ${createdAt}`, "completed_at:",
+    "---", ""].join("\n");
+}
+
+// One markdown table cell: backslashes, then pipes, escaped and newlines
+// flattened; `code` wraps it in backticks (a backtick inside becomes ').
+function _taskStrayCell(value, code) {
+  let s = String(value == null ? "" : value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  if (code) s = "`" + s.replace(/`/g, "'") + "`";
+  return s;
+}
+
+function renderTaskStraysReport(plan, today) {
+  const label = { park: "Moved into its task's folder", "make-task": "Made a task", "to-docs": "Moved to project docs", leave: "Left in place" };
+  const lines = ["---", "type: report", `title: Task strays ${today}`, "---", "", `# Task strays ${today}`, "",
+    "> [!info] Notes found directly in `spice/tasks/` that no task list could see, and what the installer did with each.", "", "---", ""];
+  for (const kind of ["park", "make-task", "to-docs", "leave"]) {
+    const rows = plan.actions.filter((a) => a.kind === kind);
+    if (!rows.length) continue;
+    lines.push(`## ${label[kind]} (${rows.length})`, "", "| From | To | Why |", "| :---- | :---- | :---- |");
+    for (const a of rows) lines.push(`| ${_taskStrayCell(a.from, true)} | ${a.to ? _taskStrayCell(a.to, true) : "—"} | ${_taskStrayCell(a.reason, false)} |`);
+    lines.push("", "---", "");
+  }
+  return lines.join("\n");
+}
+
+// applyTaskStraysHeal — finds notes directly in spice/tasks/ without task
+// frontmatter (see planTaskStrays), applies each action through the adapter
+// (write the new file, then remove the old), and writes
+// ranch/reports/task-strays-YYYY-MM-DD.md when anything was found. A stray
+// whose move fails stays where it was. Never throws.
+async function applyTaskStraysHeal(tp, history, git) {
+  const stamp = () => ({ git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty });
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    if (!(await adapter.exists(_TF_ROOT).catch(() => false))) return;
+    let rootListing;
+    try { rootListing = await adapter.list(_TF_ROOT); } catch (_e) { return; }
+    const rootMd = (rootListing.files || []).map((f) => String(f).replace(/^\/+/, "")).filter((f) => /\.md$/i.test(f));
+    const strays = [];
+    for (const p of rootMd) {
+      let body;
+      try { body = await adapter.read(p); } catch (_e) { continue; }
+      if (_tfReadFm(body).type === "task") continue;
+      const s = { path: p, body };
+      if (typeof adapter.stat === "function") {
+        try { const st = await adapter.stat(p); if (st && typeof st.mtime === "number") s.mtime = st.mtime; } catch (_e) { /* no mtime */ }
+      }
+      strays.push(s);
+    }
+    if (!strays.length) return;
+
+    const allMd = [];
+    const walk = async (dir, depth) => {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return; }
+      for (const raw of (listing.files || [])) { const f = String(raw).replace(/^\/+/, ""); if (/\.md$/i.test(f)) allMd.push(f); }
+      if (depth >= 32) return;
+      for (const raw of (listing.folders || [])) {
+        const sub = String(raw).replace(/^\/+/, "");
+        if (!sub.substring(sub.lastIndexOf("/") + 1).startsWith(".")) await walk(sub, depth + 1);
+      }
+    };
+    await walk(_TF_ROOT, 0);
+    let projectSlugs = [];
+    try {
+      const pl = await adapter.list("spice/projects");
+      projectSlugs = (pl.folders || []).map((f) => String(f).replace(/^\/+/, "").split("/").pop());
+    } catch (_e) { projectSlugs = []; }
+    for (const slug of projectSlugs) {
+      try { const docs = await adapter.list(`spice/projects/${slug}/docs`); for (const f of docs.files || []) allMd.push(String(f).replace(/^\/+/, "")); } catch (_e) { /* no docs */ }
+    }
+
+    const today = _tfLocalDate(new Date());
+    const plan = planTaskStrays(strays, allMd, projectSlugs, today);
+    const byPath = new Map(strays.map((s) => [s.path, s]));
+    for (const a of plan.actions) {
+      const s = byPath.get(a.from);
+      try {
+        if (a.kind === "make-task") {
+          const created = typeof s.mtime === "number" ? new Date(s.mtime).toISOString() : new Date().toISOString();
+          await adapter.write(a.from, _taskStrayFrontmatter(a.from.split("/").pop().replace(/\.md$/i, ""), created) + String(s.body).replace(/^\s*\n/, ""));
+          a.done = true;
+        } else if (a.kind === "park" || a.kind === "to-docs") {
+          const dir = a.to.slice(0, a.to.lastIndexOf("/"));
+          try { await adapter.mkdir(dir); } catch (_e) { /* exists */ }
+          if (await adapter.exists(a.to).catch(() => false)) throw new Error("destination exists");
+          await adapter.write(a.to, String(s.body));
+          await adapter.remove(a.from);
+          a.done = true;
+        }
+      } catch (e) {
+        a.reason = `${a.reason}; not applied: ${e && e.message ? e.message : String(e)}`;
+        a.kind = "leave";
+      }
+    }
+    const count = (k) => plan.actions.filter((a) => a.kind === k).length;
+    if (!plan.actions.some((a) => a.done)) {
+      history?.push({ event: "info", step: "task_strays_heal", name: "task-entity", action: "nothing_applied",
+        reason: `${count("leave")} note(s) in ${_TF_ROOT}/ without task frontmatter left in place`,
+        ...stamp(), attempted_at: new Date().toISOString() });
+      return;
+    }
+    const reportPath = `ranch/reports/task-strays-${today}.md`;
+    try { await adapter.mkdir("ranch"); } catch (_e) { /* exists */ }
+    try { await adapter.mkdir("ranch/reports"); } catch (_e) { /* exists */ }
+    let prior = "";
+    try { if (await adapter.exists(reportPath)) prior = await adapter.read(reportPath); } catch (_e) { prior = ""; }
+    const fresh = renderTaskStraysReport(plan, today);
+    await adapter.write(reportPath, prior ? prior.replace(/\s*$/, "\n\n") + fresh.replace(/^---[\s\S]*?\n---\n/, "") : fresh);
+    history?.push({ event: "info", step: "task_strays_heal", name: "task-entity", action: "report_written", target: reportPath,
+      summary: { parked: count("park"), made_tasks: count("make-task"), to_docs: count("to-docs"), left: count("leave") },
+      ...stamp(), attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "task_strays_heal", name: "task-entity",
+      reason: `stray scan failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      ...stamp(), attempted_at: new Date().toISOString() });
+  }
+}
+
 // applyTaskFoldersHeal — ungated dry run of the task folder migration. Reads
 // every task note under spice/tasks (any depth), plans, and writes
 // ranch/reports/task-folders-YYYY-MM-DD.md when anything would move. A re-run
@@ -23653,6 +23849,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.planTaskFolders = planTaskFolders;
     module.exports.renderTaskFoldersReport = renderTaskFoldersReport;
     module.exports.applyTaskFoldersHeal = applyTaskFoldersHeal;
+    module.exports.planTaskStrays = planTaskStrays;
+    module.exports.renderTaskStraysReport = renderTaskStraysReport;
+    module.exports.applyTaskStraysHeal = applyTaskStraysHeal;
     module.exports.applyRecurringTasksMigrationHeal = applyRecurringTasksMigrationHeal;
     module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
     module.exports._parseRecurringRegistry = _parseRecurringRegistry;

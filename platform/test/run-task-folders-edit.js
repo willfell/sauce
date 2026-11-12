@@ -353,6 +353,36 @@ const base = (extra) => Object.assign({
     }
 
     {
+      const app = makeApp({
+        'spice/tasks/Errands/Errands.md': { status: 'open', title: 'Errands', created_at: '2026-11-01T08:00:00-07:00' },
+        'spice/tasks/Errands/Milk (Errands)/Milk (Errands).md': { status: 'open', title: 'Milk', parent_task: '[[Errands]]' },
+        'spice/tasks/Errands/Eggs (Errands) 2/Eggs (Errands) 2.md': { status: 'open', title: 'Eggs', parent_task: '[[Errands]]' },
+        'spice/tasks/Errands/Bread/Bread.md': { status: 'open', title: 'Bread', parent_task: '[[Errands]]' },
+        'spice/tasks/Errands/Milk (Errands)/Oat (Milk (Errands))/Oat (Milk (Errands)).md': { status: 'open', title: 'Oat', parent_task: '[[Milk (Errands)]]' },
+        'spice/tasks/Milk/Milk.md': { status: 'open', title: 'Milk' },
+        'spice/tasks/Eggs/Eggs.md': { status: 'open', title: 'Eggs' },
+      });
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, app._files.get('spice/tasks/Errands/Errands.md'), { title: 'Groceries', parent_task: '' }, null);
+      const has = (p) => app._files.has(p);
+      ok('TF-EDIT-STALE-NAMES renaming a task renames subtasks still named after its old title, and only those',
+        r && r.ok === true && r.path === 'spice/tasks/Groceries/Groceries.md' && r.renamedSubtasks === 2
+        && has('spice/tasks/Groceries/Milk (Groceries)/Milk (Groceries).md')
+        && has('spice/tasks/Groceries/Eggs (Groceries)/Eggs (Groceries).md')
+        && has('spice/tasks/Groceries/Bread/Bread.md')
+        && has('spice/tasks/Groceries/Milk (Groceries)/Oat (Milk (Errands))/Oat (Milk (Errands)).md')
+        && app._log.notices.some((n) => /2 subtasks renamed to match/.test(n)), JSON.stringify(Array.from(app._files.keys())));
+    }
+
+    {
+      const app = makeApp(base());
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, app._files.get('spice/tasks/A/A.md'), { title: 'A', parent_task: '', priority: 'high' }, null);
+      ok('TF-EDIT-STALE-NAMES-NONE an edit that keeps the title renames no subtask', r && r.ok === true && !r.renamedSubtasks
+        && app._files.has('spice/tasks/A/B/B.md') && app._log.notices.includes('Task saved'));
+    }
+
+    {
       const app = makeApp(base());
       const inst = typeof setup(app).TD._planEditMove === 'function';
       const stat = typeof TDClass(window, function () {}, undefined, {})._planEditMove === 'function';

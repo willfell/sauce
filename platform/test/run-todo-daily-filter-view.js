@@ -825,7 +825,7 @@ process.exitCode = 1;
     select(env, 'Today high');
     assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '1 selected');
     assert.deepStrictEqual(buttonsOf(bulkBar(root)).map((b) => b.textContent),
-      ['→ Tomorrow', '→ Next Mon', 'Priority ▾', 'Project ▾', 'Backlog', 'Mark done']);
+      ['→ Today', '→ Tomorrow', '→ Next Mon', 'Priority ▾', 'Project ▾', 'Backlog', 'Mark done']);
 
     await findButton(controlsOf(root), 'All open').fire('click');
     assert.strictEqual(byClass(bulkBar(root), 'sauce-todo-bulk-count')[0].textContent, '1 selected');
@@ -846,6 +846,19 @@ process.exitCode = 1;
     await selectBtn.fire('click');
     assert.strictEqual(lastRow(env, 'Friday item').options.selected, false, 'exiting Select cleared the set');
     assert.strictEqual(bulkBar(root), null);
+  });
+
+  await okAsync('RD-DV-SEL-BULK-TODAY 2 selected -> Today: each is rescheduled to today', async () => {
+    const env = makeRenderHarness({ async reschedule(taskPath, newDue) { return { ok: true, due: newDue }; } });
+    const { root } = await mount(env);
+    await findButton(controlsOf(root), 'All open').fire('click');
+    await findButton(controlsOf(root), 'Select').fire('click');
+    select(env, 'Friday item', 'Backlog item');
+    await bulkButton(root, '→ Today').fire('click');
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue]), [
+      ['spice/tasks/Friday item.md', TODAY],
+      ['spice/tasks/Backlog item.md', TODAY],
+    ]);
   });
 
   await okAsync('RD-DV-SEL-BULK 3 selected -> Next Mon: 3 sequential reschedules; the rejected one stays selected', async () => {

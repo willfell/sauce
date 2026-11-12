@@ -488,9 +488,41 @@ class ToDoDailyFilterView {
      * colour shows only as the dot on its rows' chips. "No project" is plain
      * text, not a link. Returns the heading element.
      */
-    /** The keys of the groups collapsed this session, kept across repaints. */
+    static get COLLAPSED_KEY() { return 'sauce-todo-filter:collapsed:v1'; }
+    static get COLLAPSED_MAX() { return 200; }
+
+    /**
+     * The keys of the collapsed groups, kept across repaints and, through
+     * `storage` (default View.storage(), this device's localStorage), across
+     * restarts. Holds the newest COLLAPSED_MAX keys. A store that cannot be
+     * read or written still works for the session.
+     */
+    static collapsedStore(storage) {
+        const S = storage !== undefined ? storage : ToDoDailyFilterView.storage();
+        const KEY = ToDoDailyFilterView.COLLAPSED_KEY;
+        let keys = [];
+        try {
+            const raw = S && typeof S.getItem === 'function' ? S.getItem(KEY) : null;
+            const parsed = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(parsed)) keys = parsed.filter((k) => typeof k === 'string');
+        } catch (_e) { keys = []; }
+        const set = new Set(keys);
+        const save = () => {
+            try {
+                const list = Array.from(set).slice(-ToDoDailyFilterView.COLLAPSED_MAX);
+                if (S && typeof S.setItem === 'function') S.setItem(KEY, JSON.stringify(list));
+            } catch (_e) { /* the session copy still works */ }
+        };
+        return {
+            has: (k) => set.has(k),
+            add: (k) => { set.delete(k); set.add(k); save(); },
+            delete: (k) => { const had = set.delete(k); if (had) save(); return had; },
+        };
+    }
+
+    /** This device's collapsed-group store, read once per session. */
     static get collapsedGroups() {
-        if (!ToDoDailyFilterView._collapsedSet) ToDoDailyFilterView._collapsedSet = new Set();
+        if (!ToDoDailyFilterView._collapsedSet) ToDoDailyFilterView._collapsedSet = ToDoDailyFilterView.collapsedStore();
         return ToDoDailyFilterView._collapsedSet;
     }
 
@@ -1448,6 +1480,7 @@ class ToDoDailyFilterView {
                 button.addEventListener('click', onClick(() => handler(button)));
                 return button;
             };
+            action('→ Today', () => bulkReschedule(todayStr)).setAttribute('title', 'Move the selected tasks to today');
             action('→ Tomorrow', () => bulkTomorrow());
             action('→ Next Mon', () => bulkReschedule(TE.nextMonday(todayStr)));
             action('Priority ▾', (button) => openPicker(button, priorityEntries())).setAttribute('aria-haspopup', 'menu');
