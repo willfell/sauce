@@ -4,7 +4,9 @@
  * TaskEntity, TaskDialog, TaskTodayList). Without it a `type: task` note opens
  * bare; TaskNoteView turns the note into a real page:
  *
- *   - a HEADER: "Part of <parent>" on a subtask, the title, and one wrapping
+ *   - a HEADER: on a subtask, "Part of To-Do › <ancestors>" with each
+ *     ancestor's done/total and a row stepping to the previous and next
+ *     subtask of the same parent; then the title and one wrapping
  *     row of chips (status, due as "Due today" / "Overdue · N days", priority,
  *     repeats, a clickable project). The card's left edge carries the
  *     priority colour, as task rows do.
@@ -500,6 +502,51 @@ class TaskNoteView {
     }
 
     /**
+     * The subtasks of `parent` in the order its own card lists them: open ones
+     * first, as the index holds them, then finished ones newest first. Status
+     * alone decides, never the folder. Deleted tasks are left out. Pure; never
+     * throws.
+     */
+    static _orderedChildren(parent, children) {
+        const list = (children && children.get ? children.get(String(parent || '').trim()) : null) || [];
+        const live = list.filter((t) => t && t.status !== 'deleted');
+        const isOpen = (t) => t.status === 'open';
+        const open = live.filter(isOpen);
+        const done = live.filter((t) => !isOpen(t))
+            .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
+        return open.concat(done);
+    }
+
+    /**
+     * Where a subtask sits among its parent's subtasks: { pos, total, prev,
+     * next }, pos counting from 1 and prev/next the neighbouring tasks (null at
+     * either end). Null when `self` is not among them. Pure.
+     */
+    static _siblings(parent, children, self) {
+        const list = TaskNoteView._orderedChildren(parent, children);
+        const i = list.findIndex((t) => TaskNoteView._baseOf(t.path) === self);
+        if (i < 0) return null;
+        return { pos: i + 1, total: list.length, prev: i > 0 ? list[i - 1] : null, next: i < list.length - 1 ? list[i + 1] : null };
+    }
+
+    /**
+     * The "Part of" trail with each level's own subtask progress:
+     * [{ name, done, total }], outermost first. Pure.
+     */
+    static _chainProgress(chain, children) {
+        return (Array.isArray(chain) ? chain : []).map((name) => {
+            const p = TaskNoteView._progress(TaskNoteView._orderedChildren(name, children));
+            return { name, done: p.done, total: p.total };
+        });
+    }
+
+    /** A task's display name: its title, else its file's basename. Pure. */
+    static _taskLabel(t) {
+        const title = t && t.title != null ? String(t.title).trim() : '';
+        return title || TaskNoteView._baseOf(t && t.path);
+    }
+
+    /**
      * Draw or update the header ring for a subtask progress. The first call
      * (applyValue false) builds the ring empty and sets its label; the second
      * sets the arc, so the arc sweeps in. Hidden with no subtasks. Never throws.
@@ -535,6 +582,8 @@ class TaskNoteView {
             edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
             reopen: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
             up: svg('<path d="m18 15-6-6-6 6"/>'),
+            prev: svg('<path d="m15 18-6-6 6-6"/>'),
+            next: svg('<path d="m9 18 6-6-6-6"/>'),
             web: svg('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>'),
             note: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>'),
             repeat: svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
@@ -565,8 +614,17 @@ class TaskNoteView {
             '.sauce-tnv-head-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }',
             '.sauce-tnv-parent { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; max-width: 100%; font-size: 0.8em; color: var(--text-muted); }',
             '.sauce-tnv-parent > svg { flex-shrink: 0; }',
-            '.sauce-tnv-parent-name { max-width: 16em; color: var(--text-accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }',
+            '.sauce-tnv-parent-name, .sauce-tnv-parent-root { max-width: 16em; color: var(--text-accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }',
             '.sauce-tnv-parent-sep { color: var(--text-faint); }',
+            '.sauce-tnv-parent-prog { color: var(--text-faint); font-variant-numeric: tabular-nums; }',
+            '.sauce-tnv-parent-prog.is-complete { color: var(--color-green, #4c9a5a); }',
+            '.sauce-tnv-siblings { display: flex; align-items: center; gap: 6px; max-width: 100%; font-size: 0.8em; color: var(--text-muted); }',
+            '.sauce-tnv-sib { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 40%; color: var(--text-accent); text-decoration: none; cursor: pointer; }',
+            '.sauce-tnv-sib > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+            '.sauce-tnv-sib > svg { flex-shrink: 0; }',
+            '.sauce-tnv-sib.is-done > span { text-decoration: line-through; color: var(--text-faint); }',
+            '.sauce-tnv-sib-pos { flex: 0 0 auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }',
+            '.sauce-tnv-sib.is-next { margin-left: auto; }',
             '.sauce-tnv-title { margin: 0; font-size: 1.35em; font-weight: 700; line-height: 1.25; color: var(--text-normal); overflow-wrap: anywhere; }',
             '.sauce-tnv-title-text { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat; background-position: 0 58%; background-size: 0 2px; }',
             '.sauce-task-note-view[data-status="done"] .sauce-tnv-title, .sauce-task-note-view[data-status="deleted"] .sauce-tnv-title { color: var(--text-muted); }',
@@ -796,11 +854,47 @@ class TaskNoteView {
                     const partOf = headMain.createEl('div', { cls: 'sauce-tnv-parent' });
                     icon(partOf, 'up');
                     partOf.createEl('span', { text: 'Part of' });
-                    chain.forEach((name, i) => {
-                        if (i) partOf.createEl('span', { cls: 'sauce-tnv-parent-sep', text: '›' });
-                        const a = partOf.createEl('a', { cls: 'sauce-tnv-parent-name', text: name, href: '#' });
-                        a.addEventListener('click', openLink(name));
-                    });
+                    // The trail starts at the to-do the task lives on: today's
+                    // To-Do when it exists, else All To-Dos.
+                    let rootPath = 'spice/to-do/All-ToDos.md';
+                    try {
+                        const m = window.moment && window.moment();
+                        const today = m ? 'spice/to-do/' + m.format('YYYY/MM-MMMM') + '/ToDo-' + m.format('YYYY-MM-DD') + '.md' : '';
+                        if (today && window.app && window.app.vault && window.app.vault.getAbstractFileByPath(today)) rootPath = today;
+                    } catch (_e) {}
+                    const root = partOf.createEl('a', { cls: 'sauce-tnv-parent-root', text: 'To-Do', href: '#' });
+                    root.addEventListener('click', openLink(rootPath));
+                    for (const level of TaskNoteView._chainProgress(chain, index.children)) {
+                        partOf.createEl('span', { cls: 'sauce-tnv-parent-sep', text: '›' });
+                        const a = partOf.createEl('a', { cls: 'sauce-tnv-parent-name', text: level.name, href: '#' });
+                        a.addEventListener('click', openLink(level.name));
+                        if (level.total) {
+                            const prog = partOf.createEl('span', {
+                                cls: 'sauce-tnv-parent-prog' + (level.done === level.total ? ' is-complete' : ''),
+                                text: level.done + '/' + level.total,
+                            });
+                            try { prog.setAttribute('title', level.done + ' of ' + level.total + ' subtasks done'); } catch (_e) {}
+                        }
+                    }
+
+                    // Step to the previous or next subtask of the same parent,
+                    // in the order the parent's card lists them.
+                    const sib = TaskNoteView._siblings(parentName, index.children, thisBasename);
+                    if (sib && sib.total > 1) {
+                        const row = headMain.createEl('div', { cls: 'sauce-tnv-siblings' });
+                        const jump = (t, cls, iconName) => {
+                            const a = row.createEl('a', { cls: 'sauce-tnv-sib ' + cls + (t.status === 'done' ? ' is-done' : ''), href: '#' });
+                            const label = TaskNoteView._taskLabel(t);
+                            if (iconName === 'prev') icon(a, 'prev');
+                            a.createEl('span', { text: label });
+                            if (iconName === 'next') a.insertAdjacentHTML('beforeend', ICON.next);
+                            try { a.setAttribute('title', (cls === 'is-prev' ? 'Previous: ' : 'Next: ') + label); } catch (_e) {}
+                            a.addEventListener('click', openLink(t.path || label));
+                        };
+                        if (sib.prev) jump(sib.prev, 'is-prev', 'prev');
+                        row.createEl('span', { cls: 'sauce-tnv-sib-pos', text: sib.pos + ' of ' + sib.total });
+                        if (sib.next) jump(sib.next, 'is-next', 'next');
+                    }
                 } catch (_e) { /* part-of link best-effort */ }
             }
             const titleEl = headMain.createEl('div', { cls: 'sauce-tnv-title' });

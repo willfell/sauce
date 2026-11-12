@@ -29,6 +29,11 @@ class CodeFenceButton {
   // editable-with-selection is lit. Disabled opacity is 0.55 (not 0.35) so the
   // greyed button is still discoverable in the header.
   buttonState(mode, hasSelection, kind) {
+    // The copy-path button never depends on a selection or the mode, and is
+    // not tinted: accent colour means "a selection is ready to wrap".
+    if (kind === "path") {
+      return { enabled: true, opacity: 1, label: "Copy full path of this note", accent: false };
+    }
     const phrase = kind === "inline" ? "wrap in inline code" : "wrap in a code fence";
     const litLabel = kind === "inline" ? "Wrap selection in inline code" : "Wrap selection in code fence";
     if (mode === "preview") {
@@ -38,6 +43,48 @@ class CodeFenceButton {
       return { enabled: false, opacity: 0.55, label: "Select text to " + phrase };
     }
     return { enabled: true, opacity: 1, label: litLabel };
+  }
+
+  // Full filesystem path of a note: the vault's folder on disk joined to the
+  // note's vault-relative path. `basePath` is empty where the vault has no
+  // folder on disk (mobile), and then the vault-relative path is returned with
+  // `absolute: false`. Windows base paths keep their backslashes. Pure.
+  fullNotePath(basePath, filePath) {
+    const rel = String(filePath == null ? "" : filePath).replace(/^[\\/]+/, "");
+    const base = String(basePath == null ? "" : basePath).replace(/[\\/]+$/, "");
+    if (!rel) return { path: "", absolute: false };
+    if (!base) return { path: rel, absolute: false };
+    const windows = /^[A-Za-z]:\\/.test(base) || (base.includes("\\") && !base.includes("/"));
+    return windows
+      ? { path: base + "\\" + rel.replace(/\//g, "\\"), absolute: true }
+      : { path: base + "/" + rel, absolute: true };
+  }
+
+  // App-facing: copy the full path of the note in `view` to the clipboard and
+  // say so in a Notice. Never-throw. Resolves true when something was copied.
+  async copyActivePath(view) {
+    const say = (msg) => { try { if (typeof Notice === "function") new Notice(msg, 4000); } catch (_e) {} };
+    try {
+      const file = view && view.file;
+      if (!file || !file.path) { say("Open a note first."); return false; }
+      const a = (view && view.app) || (typeof app !== "undefined" ? app : null);
+      const adapter = a && a.vault && a.vault.adapter;
+      let base = "";
+      try {
+        if (adapter && typeof adapter.getBasePath === "function") base = adapter.getBasePath() || "";
+        else if (adapter && typeof adapter.basePath === "string") base = adapter.basePath;
+      } catch (_e) { base = ""; }
+      const out = this.fullNotePath(base, file.path);
+      const clip = typeof navigator !== "undefined" && navigator.clipboard;
+      if (!clip || typeof clip.writeText !== "function") { say("Clipboard unavailable: " + out.path); return false; }
+      await clip.writeText(out.path);
+      say(out.absolute ? "Copied full path: " + out.path : "Copied vault path (no folder on disk here): " + out.path);
+      return true;
+    } catch (e) {
+      if (typeof console !== "undefined") console.error("[CodeFenceButton.copyActivePath]", e);
+      say("Could not copy the note's path.");
+      return false;
+    }
   }
 
   wrapSelection(selection, opts) {

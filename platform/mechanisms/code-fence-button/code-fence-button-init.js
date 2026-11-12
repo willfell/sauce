@@ -74,10 +74,11 @@ class CodeFenceButtonInit {
     return out;
   }
 
-  // The two view-header buttons this mechanism injects. `method` is the
-  // CodeFenceButton instance method the click delegates to; `kind` feeds
+  // The view-header buttons this mechanism injects, left to right. `method` is
+  // the CodeFenceButton instance method the click delegates to; `kind` feeds
   // buttonState for the correct tooltip; `cmdId`/`cmdName` register the mirror
-  // command.
+  // command. `needsSelection` is false for the copy-path button, which works in
+  // either mode with nothing selected.
   _buttonSpecs() {
     return [
       { cls: "sauce-code-fence-action", icon: "code-2", kind: "fence",
@@ -86,6 +87,9 @@ class CodeFenceButtonInit {
       { cls: "sauce-inline-code-action", icon: "braces", kind: "inline",
         method: "wrapActiveEditorInline",
         cmdId: "code-fence-button:wrap-inline-code", cmdName: "Sauce: Wrap selection in inline code" },
+      { cls: "sauce-copy-path-action", icon: "clipboard-copy", kind: "path",
+        method: "copyActivePath", needsSelection: false,
+        cmdId: "code-fence-button:copy-note-path", cmdName: "Sauce: Copy full path of note" },
     ];
   }
 
@@ -96,7 +100,8 @@ class CodeFenceButtonInit {
     try { return !!(typeof app !== "undefined" && app.isMobile); } catch (_e) { return false; }
   }
 
-  // Ensure every markdown view carries the code-fence + inline-code actions.
+  // Ensure every markdown view carries the code-fence, inline-code and
+  // copy-path actions.
   _syncButtons() {
     const mobile = this._isMobile();
     for (const view of this._markdownViews()) {
@@ -157,7 +162,7 @@ class CodeFenceButtonInit {
             : { enabled: hasSel, opacity: hasSel ? 1 : 0.55, label: spec.cmdName.replace("Sauce: ", "") };
           el.classList.toggle("is-disabled", !st.enabled);
           el.style.opacity = String(st.opacity);
-          el.style.color = st.enabled ? "var(--text-accent)" : "";
+          el.style.color = st.enabled && st.accent !== false ? "var(--text-accent)" : "";
           el.style.cursor = st.enabled ? "" : "default";
           el.setAttribute("aria-disabled", st.enabled ? "false" : "true");
           el.setAttribute("aria-label", st.label);
@@ -168,8 +173,11 @@ class CodeFenceButtonInit {
 
   _onClick(view, spec) {
     try {
-      if (!view || !view.editor) return;
-      if (!view.editor.somethingSelected || !view.editor.somethingSelected()) return; // greyed → no-op
+      if (!view) return;
+      if (spec.needsSelection !== false) {
+        if (!view.editor) return;
+        if (!view.editor.somethingSelected || !view.editor.somethingSelected()) return; // greyed → no-op
+      }
       const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
       if (!CFB || typeof CFB[spec.method] !== "function") {
         if (typeof Notice === "function") new Notice("CodeFenceButton unavailable — reinstall the mechanism.", 6000);
@@ -190,10 +198,11 @@ class CodeFenceButtonInit {
           try {
             const leaf = app.workspace && app.workspace.activeLeaf;
             const view = leaf && this._isMarkdownView(leaf.view) ? leaf.view : null;
-            if (!view) { if (typeof Notice === "function") new Notice("Select text in a note first.", 4000); return; }
+            if (!view) { if (typeof Notice === "function") new Notice(spec.needsSelection === false ? "Open a note first." : "Select text in a note first.", 4000); return; }
             const CFB = (typeof customJS !== "undefined") && customJS.CodeFenceButton;
             if (!CFB || typeof CFB[spec.method] !== "function") { if (typeof Notice === "function") new Notice("CodeFenceButton unavailable.", 6000); return; }
             const did = CFB[spec.method](view);
+            if (spec.needsSelection === false) return;
             if (!did && typeof Notice === "function") new Notice("Select text in a note first.", 4000);
           } catch (_e) {}
         },

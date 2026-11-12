@@ -2,7 +2,7 @@
   "name": "code-fence-button",
   "version": "0.3.0",
   "kind": "mechanism",
-  "description": "Always-present view-header button (far-right, code icon) that greys out until text is selected, then wraps the selection in a fence long enough to survive inner backticks. Ships an equivalent 'Sauce: Wrap selection in code fence' command.",
+  "description": "Always-present view-header button (far-right, code icon) that greys out until text is selected, then wraps the selection in a fence long enough to survive inner backticks. Also injects a copy-path button that copies the note's full filesystem path. Ships an equivalent palette command for each button.",
   "depends_on": [
     {
       "name": "customjs-guard",
