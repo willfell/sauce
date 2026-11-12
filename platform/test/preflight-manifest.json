@@ -436,6 +436,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-folders-installer",
+      "cmd": [
+        "node",
+        "platform/test/run-task-folders-installer.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "v0127-project-hub-heal",
       "cmd": [
         "node",

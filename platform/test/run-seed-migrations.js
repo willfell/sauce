@@ -1269,16 +1269,15 @@ withTempVault((vault) => {
     // (single task-note per unique title) also proves the migration is idempotent —
     // the sentinel + TaskTodayList block short-circuit the second install.
     {
-        // Enumerate task-notes under spice/tasks/ and parse each one's frontmatter.
+        // Enumerate task-notes under spice/tasks/ (flat and folder notes, any
+        // depth) and parse each one's frontmatter.
         const tasksDir = path.join(vault, "spice/tasks");
         const taskNotes = [];
-        if (fs.existsSync(tasksDir)) {
-            for (const f of fs.readdirSync(tasksDir)) {
-                if (!f.endsWith(".md")) continue;
-                const body = fs.readFileSync(path.join(tasksDir, f), "utf8");
-                const { frontmatter } = helpers.parseFrontmatter(body);
-                taskNotes.push({ file: f, fm: frontmatter, body });
-            }
+        for (const f of filesBelow(tasksDir)) {
+            if (!f.endsWith(".md")) continue;
+            const body = fs.readFileSync(f, "utf8");
+            const { frontmatter } = helpers.parseFrontmatter(body);
+            taskNotes.push({ file: path.relative(vault, f).split(path.sep).join("/"), fm: frontmatter, body });
         }
         const byTitle = (t) => taskNotes.filter((n) => String(n.fm.title || "") === t);
 
@@ -1286,6 +1285,9 @@ withTempVault((vault) => {
         const credit = byTitle("Apply for Credit card");
         ok("HC-DAILYTASK-SEED-1 task-note created for 'Apply for Credit card'",
            credit.length === 1, `found ${credit.length}`);
+        ok("HC-DAILYTASK-SEED-1g the new task is a folder note at spice/tasks/<Name>/<Name>.md",
+           credit.length === 1 && credit[0].file === "spice/tasks/Apply for Credit card/Apply for Credit card.md",
+           credit.map((n) => n.file).join(", "));
         const creditFm = credit.length ? credit[0].fm : {};
         ok("HC-DAILYTASK-SEED-1b 'Apply for Credit card' scheduled == due (2026-06-30)",
            String(creditFm.scheduled || "") === "2026-06-30", `scheduled=${creditFm.scheduled}`);
@@ -1564,11 +1566,11 @@ withTempVault((vault) => {
     // The seed's spice/to-do/Recurring Tasks.md registry carries two entries in its
     // Recurring Tasks section: an UNCHECKED line ("Water the plants", the live shape)
     // and a CHECKED line ("Take out trash", the checkbox-kills-recurrence bug shape).
-    // The ungated, idempotent heal reads BOTH and materializes a real spice/tasks/*.md
+    // The ungated, idempotent heal reads BOTH and materializes a real spice/tasks/<Name>/<Name>.md
     // note per entry, leaving the original registry untouched.
     {
         let waterTask = null;
-        try { waterTask = helpers.readNote(vault, "spice/tasks/Water the plants.md"); } catch (e) {}
+        try { waterTask = helpers.readNote(vault, "spice/tasks/Water the plants/Water the plants.md"); } catch (e) {}
         ok(
             "HC-V0202-SEED-MIGRATE-RECURRING-1 unchecked registry entry migrated to a task note",
             waterTask != null
@@ -1588,7 +1590,7 @@ withTempVault((vault) => {
         }
 
         let trashTask = null;
-        try { trashTask = helpers.readNote(vault, "spice/tasks/Take out trash.md"); } catch (e) {}
+        try { trashTask = helpers.readNote(vault, "spice/tasks/Take out trash/Take out trash.md"); } catch (e) {}
         ok(
             "HC-V0202-SEED-MIGRATE-RECURRING-4 CHECKED registry entry ALSO migrated (the checkbox-kills-recurrence bug fix)",
             trashTask != null
@@ -3452,10 +3454,9 @@ async function runTaskEntitySurfacesFamily() {
         fs.writeFileSync(f, content);
     };
     const readVault = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
-    const listTasks = () => {
-        const d = path.join(root, "spice/tasks");
-        return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith(".md")) : [];
-    };
+    const listTasks = () => filesBelow(path.join(root, "spice/tasks"))
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => path.relative(path.join(root, "spice/tasks"), f).split(path.sep).join("/"));
     const taskByTitle = (title) => {
         const out = [];
         for (const f of listTasks()) {
@@ -3553,6 +3554,9 @@ async function runTaskEntitySurfacesFamily() {
         ok("HC-TE-SURF-1e meeting task due/priority carried",
            fmVal(mFm, "due") === "2026-06-25" && fmVal(mFm, "priority") === "high",
            `due=${fmVal(mFm, "due")} prio=${fmVal(mFm, "priority")}`);
+        ok("HC-TE-SURF-1j meeting task written as a folder note",
+           meetTasks.length === 1 && meetTasks[0].file === "Email the vendor/Email the vendor.md",
+           meetTasks.map((t) => t.file).join(", "));
         ok("HC-TE-SURF-1f done line 'Already done item' NOT converted",
            taskByTitle("Already done item").length === 0);
         const healedMeeting = readVault(MEETING);
@@ -3575,6 +3579,9 @@ async function runTaskEntitySurfacesFamily() {
            fmVal(pFm, "project_slug") === "global-k8s", `slug=${fmVal(pFm, "project_slug")}`);
         ok("HC-TE-SURF-2d project task project == [[Global K8s]]",
            fmVal(pFm, "project") === "[[Global K8s]]", `project=${fmVal(pFm, "project")}`);
+        ok("HC-TE-SURF-2h project task written as a folder note",
+           projTasks.length === 1 && projTasks[0].file === "Provision the cluster/Provision the cluster.md",
+           projTasks.map((t) => t.file).join(", "));
         const healedProj = readVault(PROJ_TODO);
         ok("HC-TE-SURF-2e project-todo has <!-- project-tasks-migrated --> sentinel",
            healedProj.includes("<!-- project-tasks-migrated -->"));

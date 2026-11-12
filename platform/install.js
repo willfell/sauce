@@ -595,7 +595,7 @@ module.exports = async function (tp) {
     await applyMeetingTasksToEntityMigration(tp, installedNow.history, git);
     await applyProjectTasksToEntityMigration(tp, installedNow.history, git);
 
-    // 6a5. task-entity — heal EXISTING task notes under spice/tasks/ (top level):
+    // 6a5. task-entity — heal EXISTING task notes under spice/tasks/ (flat + folder notes):
     // rename ugly `task-YYYYMMDD-HHmmss-hhhh.md` files to the readable
     // `<title>.md`, and inject the standard chrome (TaskChromeBar + TaskNoteView
     // + <!-- TASK_NOTES --> marker) into bare notes (preserving user body below the
@@ -11113,12 +11113,28 @@ async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history
   let migrated = 0;
   let skipped = 0;
 
+  // An entry is already migrated when its open task note exists flat
+  // (spice/tasks/<Title>.md), as a folder note (spice/tasks/<Title>/<Title>.md),
+  // or under the qualified name a vault-wide clash gave it — found by its
+  // `source: migrated-from-registry` title.
+  const migratedTitles = new Set();
+  for (const f of await _listTaskNotes(adapter, tasksRoot, ["_done", "_trash"])) {
+    let body;
+    try { body = await adapter.read(f); } catch (_e) { continue; }
+    const fm = _parseFrontmatterStrict(body) || {};
+    if (String(fm.source == null ? "" : fm.source).trim() !== "migrated-from-registry") continue;
+    migratedTitles.add(String(fm.title == null ? "" : fm.title).replace(/^"(.*)"$/, "$1").trim());
+  }
+  const getTaken = _lazyVaultTakenTaskNames(adapter);
+
   for (const entry of entries) {
     if (entry.invalid) { skipped++; continue; }
-    const filename = _sanitizeRecurringTitle(entry.title) + ".md";
-    const path = tasksRoot + "/" + filename;
-    let alreadyExists = false;
-    try { alreadyExists = await adapter.exists(path); } catch (_e) { alreadyExists = false; }
+    const stem = _sanitizeRecurringTitle(entry.title);
+    let alreadyExists = migratedTitles.has(String(entry.title).trim());
+    for (const candidate of [tasksRoot + "/" + stem + ".md", tasksRoot + "/" + stem + "/" + stem + ".md"]) {
+      if (alreadyExists) break;
+      try { alreadyExists = await adapter.exists(candidate); } catch (_e) { alreadyExists = false; }
+    }
     if (alreadyExists) { skipped++; continue; }
 
     const scheduled = _nextOccurrenceForHeal(entry.recurrence);
@@ -11156,8 +11172,9 @@ async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history
       "",
     ];
     try {
-      await adapter.write(path, lines.join("\n"));
-      migrated++;
+      const written = await _writeNewTaskFolderNote(adapter, entry.title, nowIso, await getTaken(), lines.join("\n"));
+      if (written) { migrated++; migratedTitles.add(String(entry.title).trim()); }
+      else skipped++;
     } catch (e) {
       errors.push({ title: entry.title, error: e && e.message });
     }
@@ -11311,7 +11328,8 @@ function _nextOccurrenceForHeal(recurrence) {
 // TaskEntity's schema retired the separate `scheduled` field (queryToday /
 // buildBands / groupByDate now all bucket Today/Overdue by `due` alone).
 // This heal walks every note under spice/tasks/ (open root + _done/ +
-// _trash/ — a task can live in any of the three) and, where a `scheduled:`
+// _trash/ — a task can live in any of the three — flat or as a folder note at
+// any depth) and, where a `scheduled:`
 // key is present, copies its value into `due:` ONLY IF `due` is currently
 // blank (never clobber a value someone already had in `due` under the old
 // dual-field system), then removes the `scheduled` key entirely. Ungated
@@ -11330,11 +11348,8 @@ async function applyTaskDueScheduledRenameMigration(tp, manifest, variables, his
   for (const root of roots) {
     const exists = await adapter.exists(root).catch(() => false);
     if (!exists) continue;
-    let listing;
-    try { listing = await adapter.list(root); } catch (_e) { continue; }
-    for (const f of (listing.files || [])) {
-      if (/\.md$/i.test(f)) files.push(f);
-    }
+    const skip = root === "spice/tasks" ? ["_done", "_trash"] : [];
+    for (const f of await _listTaskNotes(adapter, root, skip)) files.push(f);
   }
 
   if (!files.length) {
@@ -12083,6 +12098,7 @@ async function applyDailyTasksToEntityMigration(tp, history, git) {
     const nowIso = _localIsoNoMillis(now);
 
     try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
+    const taken = await _vaultTakenTaskNames(adapter);
 
     let created = 0;
     const createdTitles = [];
@@ -12092,10 +12108,10 @@ async function applyDailyTasksToEntityMigration(tp, history, git) {
         // Extra idempotency safety: skip if an equivalent task-note (same title +
         // due, source: daily) already exists ANYWHERE under spice/tasks/.
         if (await _dailyTaskNoteExists(adapter, parsed)) { continue; }
-        const { path: taskPath, body } = _composeDailyTaskNote(parsed, noteDateStr, nowIso, ymd, hms, k);
-        // Do not clobber an existing file at the deterministic path.
-        if (await adapter.exists(taskPath).catch(() => false)) { continue; }
-        await adapter.write(taskPath, body);
+        const { body } = _composeDailyTaskNote(parsed, noteDateStr, nowIso, ymd, hms, k);
+        // A new task is written as spice/tasks/<Name>/<Name>.md (never clobbers).
+        const taskPath = await _writeNewTaskFolderNote(adapter, parsed.title, nowIso, taken, body);
+        if (!taskPath) { continue; }
         created += 1;
         createdTitles.push(parsed.title);
       } catch (e) {
@@ -12272,23 +12288,14 @@ async function _surfaceTaskNoteExists(adapter, wantTitle, wantSource, wantSlug) 
 
 // _createSurfaceTaskNotes — shared writer for the meeting + project migrations.
 // For each uniqueParsed line, compose a task-note (frontmatter + chrome body)
-// with a READABLE filename (<sanitized title>.md, deduped via _uniqueName against
-// the vault — matching dialog-created notes). Skips a line whose equivalent
-// task-note already exists (idempotency). Returns { created, createdTitles } and
-// grows `existingNames` so intra-run dedupe is correct. Never throws per-line —
-// records a warning + preserves the raw line (caller only strips created titles).
-async function _createSurfaceTaskNotes(adapter, uniqueParsed, common, existingNames, history, git, step) {
-  const _uniqueName = (baseFilename) => {
-    if (!existingNames.has(baseFilename)) return baseFilename;
-    const dot = baseFilename.lastIndexOf(".");
-    const stem = dot > 0 ? baseFilename.slice(0, dot) : baseFilename;
-    const ext = dot > 0 ? baseFilename.slice(dot) : "";
-    for (let n = 2; n < 10000; n++) {
-      const cand = stem + " " + n + ext;
-      if (!existingNames.has(cand)) return cand;
-    }
-    return stem + " " + Date.now() + ext;
-  };
+// and write it as spice/tasks/<Name>/<Name>.md, <Name> from _taskFolderName
+// against the vault's lowercased note basenames (`getTaken()`, read once on the
+// first write — matching dialog-created notes). Skips a line whose equivalent
+// task-note already exists in either layout (idempotency). Returns
+// { created, createdTitles }; the shared set grows with each write so
+// intra-run dedupe is correct. Never throws per-line — records a warning +
+// preserves the raw line (caller only strips created titles).
+async function _createSurfaceTaskNotes(adapter, uniqueParsed, common, getTaken, history, git, step) {
   let created = 0;
   const createdTitles = [];
   for (const parsed of uniqueParsed) {
@@ -12315,12 +12322,8 @@ async function _createSurfaceTaskNotes(adapter, uniqueParsed, common, existingNa
         nowIso: common.nowIso,
       });
       const body = fmBlock + _taskNoteChromeBody();
-      const base = _sanitizeTaskTitleForFilename(parsed.title) + ".md";
-      const finalName = _uniqueName(base);
-      const taskPath = `spice/tasks/${finalName}`;
-      if (await adapter.exists(taskPath).catch(() => false)) { continue; }
-      await adapter.write(taskPath, body);
-      existingNames.add(finalName);
+      const taskPath = await _writeNewTaskFolderNote(adapter, parsed.title, common.nowIso, await getTaken(), body);
+      if (!taskPath) { continue; }
       created += 1;
       createdTitles.push(parsed.title);
     } catch (e) {
@@ -12490,12 +12493,9 @@ async function applyMeetingTasksToEntityMigration(tp, history, git) {
     const nowIso = _localIsoNoMillis(now);
     try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
 
-    // Live set of top-level task-note basenames for intra-run dedupe.
-    let taskListing;
-    try { taskListing = await adapter.list("spice/tasks"); } catch (_e) { taskListing = { files: [] }; }
-    const existingNames = new Set((taskListing.files || [])
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => f.substring(f.lastIndexOf("/") + 1)));
+    // Vault-wide lowercased note basenames for the new tasks' names, read on
+    // the first write only.
+    const getTaken = _lazyVaultTakenTaskNames(adapter);
 
     let totalConverted = 0, notesTouched = 0;
     for (const fp of meetings) {
@@ -12525,7 +12525,7 @@ async function applyMeetingTasksToEntityMigration(tp, history, git) {
         const { created, createdTitles } = await _createSurfaceTaskNotes(
           adapter, uniqueParsed,
           { source: "meeting", project: projectName, projectSlug, sourceNote, nowIso },
-          existingNames, history, git, STEP);
+          getTaken, history, git, STEP);
         totalConverted += created;
 
         // Strip only the migrated open lines (those whose task-note exists now).
@@ -12631,11 +12631,7 @@ async function applyProjectTasksToEntityMigration(tp, history, git) {
     const nowIso = _localIsoNoMillis(now);
     try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
 
-    let taskListing;
-    try { taskListing = await adapter.list("spice/tasks"); } catch (_e) { taskListing = { files: [] }; }
-    const existingNames = new Set((taskListing.files || [])
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => f.substring(f.lastIndexOf("/") + 1)));
+    const getTaken = _lazyVaultTakenTaskNames(adapter);
 
     let totalConverted = 0, notesTouched = 0;
     for (const fp of targets) {
@@ -12675,7 +12671,7 @@ async function applyProjectTasksToEntityMigration(tp, history, git) {
         const { created, createdTitles } = await _createSurfaceTaskNotes(
           adapter, uniqueParsed,
           { source: "project", project: projectName, projectSlug, sourceNote: "", nowIso },
-          existingNames, history, git, STEP);
+          getTaken, history, git, STEP);
         totalConverted += created;
 
         const strippable = new Set();
@@ -12756,10 +12752,135 @@ function _sanitizeTaskTitleForFilename(title) {
   return s === "" ? "Task" : s;
 }
 
+// _taskFolderName — the installer's copy of TaskEntity.taskName
+// (mechanisms/task-entity/task-entity.js): the note and folder name for a new
+// task. The heal can't require the customJS class, so the rule is replicated
+// here and run-task-folders-installer.js (TF-INST-PARITY) holds the two equal
+// over a shared case table — change both together. The sanitized title while
+// `ctx.taken(lowerName)` says it is free, else `Title (Parent Title)` for a
+// subtask or `Title (Mon D)` from ctx.createdAt for a top-level task, else that
+// plus " 2", " 3", …; the whole name stays within 120 characters, trimming the
+// qualifier before the title.
+function _taskFolderName(title, ctx) {
+  const c = ctx || {};
+  const taken = (name) => {
+    try { return typeof c.taken === "function" ? !!c.taken(String(name).toLowerCase()) : false; }
+    catch (_e) { return false; }
+  };
+  const MAX = 120;
+  const fit = (t, inner, num) => {
+    let qual = "";
+    if (inner) {
+      const room = MAX - t.length - num.length - 3;
+      const cut = room >= 1 ? inner.slice(0, room).trimEnd() : "";
+      if (cut) qual = " (" + cut + ")";
+    }
+    const room = MAX - qual.length - num.length;
+    return (t.length > room ? t.slice(0, room).trimEnd() : t) + qual + num;
+  };
+  const base = _sanitizeTaskTitleForFilename(title);
+  if (!taken(fit(base, "", ""))) return fit(base, "", "");
+  let qual = "";
+  if (c.parentTitle != null && String(c.parentTitle).trim() !== "") {
+    qual = _sanitizeTaskTitleForFilename(c.parentTitle);
+  } else {
+    const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(c.createdAt == null ? "" : c.createdAt));
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const mon = m ? MONTHS[parseInt(m[2], 10) - 1] : null;
+    if (mon) qual = mon + " " + parseInt(m[3], 10);
+  }
+  if (qual && !taken(fit(base, qual, ""))) return fit(base, qual, "");
+  for (let n = 2; n < 10000; n++) {
+    const candidate = fit(base, qual, " " + n);
+    if (!taken(candidate)) return candidate;
+  }
+  return fit(base, qual, " " + Date.now());
+}
+
+// _listTaskNotes — the task notes under `root`: the flat `.md` files directly
+// in it plus every folder note (`<Name>/<Name>.md`) at any depth below.
+// `skip` names root-level subfolders that are not walked (the open-task heals
+// pass ["_done", "_trash"], the same two folders they skipped when they only
+// read the top level). Other files inside task folders are not task notes.
+async function _listTaskNotes(adapter, root, skip) {
+  const skipped = new Set((skip || []).map((s) => root + "/" + s));
+  const out = [];
+  const walk = async (dir, depth) => {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return; }
+    const folderName = dir.substring(dir.lastIndexOf("/") + 1);
+    for (const f of (listing.files || [])) {
+      if (!f.endsWith(".md")) continue;
+      if (depth === 0) { out.push(f); continue; }
+      const base = f.substring(f.lastIndexOf("/") + 1).replace(/\.md$/, "");
+      if (base === folderName) out.push(f);
+    }
+    if (depth >= 32) return;
+    for (const sub of (listing.folders || [])) {
+      if (depth === 0 && skipped.has(sub)) continue;
+      await walk(sub, depth + 1);
+    }
+  };
+  await walk(root, 0);
+  return out;
+}
+
+// _vaultTakenTaskNames — the lowercased basenames (no `.md`) of every markdown
+// file in the vault, for _taskFolderName's vault-wide clash check. Dot folders
+// (.obsidian, .sauce-backup, .trash, …) are not vault notes and are skipped —
+// backups hold copies of task notes and would otherwise claim every name.
+async function _vaultTakenTaskNames(adapter) {
+  const names = new Set();
+  const walk = async (dir, depth) => {
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return; }
+    for (const f of (listing.files || [])) {
+      if (!f.endsWith(".md")) continue;
+      names.add(f.substring(f.lastIndexOf("/") + 1).replace(/\.md$/, "").toLowerCase());
+    }
+    if (depth >= 32) return;
+    for (const sub of (listing.folders || [])) {
+      const seg = sub.substring(sub.lastIndexOf("/") + 1);
+      if (seg.startsWith(".")) continue;
+      await walk(sub, depth + 1);
+    }
+  };
+  await walk("", 0);
+  return names;
+}
+
+// _lazyVaultTakenTaskNames — a memoized getter for _vaultTakenTaskNames, so a
+// heal that ends up writing nothing never walks the vault.
+function _lazyVaultTakenTaskNames(adapter) {
+  let pending = null;
+  return () => {
+    if (!pending) pending = _vaultTakenTaskNames(adapter);
+    return pending;
+  };
+}
+
+// _writeNewTaskFolderNote — create a new top-level task as
+// spice/tasks/<Name>/<Name>.md, naming it with _taskFolderName against
+// `taken` (a _vaultTakenTaskNames set, grown with the new name so one run never
+// hands out a name twice). Returns the written path, or "" when a note is
+// already at that path (never clobbers).
+async function _writeNewTaskFolderNote(adapter, title, createdAt, taken, body) {
+  const name = _taskFolderName(title, { createdAt, taken: (n) => taken.has(n) });
+  const folder = "spice/tasks/" + name;
+  const notePath = folder + "/" + name + ".md";
+  if (await adapter.exists(notePath).catch(() => false)) return "";
+  try { await adapter.mkdir("spice/tasks"); } catch (_e) { /* already exists */ }
+  try { await adapter.mkdir(folder); } catch (_e) { /* already exists */ }
+  await adapter.write(notePath, body);
+  taken.add(name.toLowerCase());
+  return notePath;
+}
+
 // applyTaskNoteHeal — ungated, idempotent, failure-loud-per-file heal for task
-// notes under spice/tasks/ (TOP LEVEL only; skips _trash/ and _done/). Three jobs:
+// notes under spice/tasks/: the flat top-level notes plus folder notes
+// (<Name>/<Name>.md) at any depth, skipping _trash/ and _done/. Three jobs:
 //
-//   1. RENAME ugly-named notes: a basename matching the old deterministic form
+//   1. RENAME ugly-named FLAT notes: a basename matching the old deterministic form
 //      `task-YYYYMMDD-HHmmss-hhhh` is renamed to the readable
 //      `<sanitized title>.md`, deduped against existing top-level task notes
 //      (" 2", " 3", …). copy-content-to-new-path + remove-old (backlinks to task
@@ -12789,11 +12910,8 @@ async function applyTaskNoteHeal(tp, history, git) {
     const ROOT = "spice/tasks";
     if (!(await adapter.exists(ROOT).catch(() => false))) return;
 
-    // Enumerate TOP-LEVEL task notes only (skip _trash/ + _done/ subfolders).
-    let listing;
-    try { listing = await adapter.list(ROOT); }
-    catch (_e) { return; }
-    const topLevel = (listing.files || []).filter((f) => f.endsWith(".md"));
+    // Flat top-level notes + folder notes at any depth (skip _trash/ + _done/).
+    const topLevel = await _listTaskNotes(adapter, ROOT, ["_done", "_trash"]);
     if (!topLevel.length) return;
 
     const OLD_NAME_RE = /^task-\d{8}-\d{6}-[0-9a-f]{4}$/;
@@ -12872,7 +12990,10 @@ async function applyTaskNoteHeal(tp, history, git) {
 
         const needsTitleCleanup = rawTitle !== _stripCompletionEmojiSuffix(rawTitle);
         const cleanTitle = needsTitleCleanup ? _stripCompletionEmojiSuffix(rawTitle) : rawTitle;
-        const needsRename = OLD_NAME_RE.test(stemNoExt) || needsTitleCleanup;
+        // Renames only touch flat notes: a folder note's name is its folder's,
+        // and the adapter has no folder rename.
+        const isFlat = fp.lastIndexOf("/") === ROOT.length;
+        const needsRename = isFlat && (OLD_NAME_RE.test(stemNoExt) || needsTitleCleanup);
         const needsChrome = !before.includes(MARKER);
         // Old-chrome upgrade: the note HAS the marker but its above-marker region
         // is a LEGACY chrome — either the v0.178 shape that still carries a
@@ -12886,7 +13007,7 @@ async function applyTaskNoteHeal(tp, history, git) {
         const _hasToDoNav = /class:\s*"TaskNoteToDoNav"/.test(_aboveMarker);
         const _hasStaleHr = /\n---[ \t]*\r?\n\s*$/.test(_aboveMarker);
         const needsChromeUpgrade = !needsChrome && (_hasToDoNav || _hasStaleHr);
-        if (!needsRename && !needsChrome && !needsChromeUpgrade) continue;  // idempotent no-op
+        if (!needsRename && !needsChrome && !needsChromeUpgrade && !needsTitleCleanup) continue;  // idempotent no-op
 
         // Compute the healed CONTENT: inject chrome if bare, else UPGRADE the
         // old chrome region (drop TaskNoteToDoNav, add the second `---` HR)
@@ -12937,6 +13058,14 @@ async function applyTaskNoteHeal(tp, history, git) {
           chromed += 1;
           history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
             action: "chrome-upgraded", target: fp,
+            git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
+            attempted_at: new Date().toISOString() });
+        } else if (needsTitleCleanup) {
+          // A folder note's corrupted title is cleaned in place (no rename).
+          await _backup(fp, before);
+          await adapter.write(fp, content);
+          history?.push({ event: "info", step: "task_note_heal", name: "task-entity",
+            action: "title-cleaned", target: fp,
             git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty,
             attempted_at: new Date().toISOString() });
         }
@@ -13048,9 +13177,10 @@ function _sanitizeProjectSlug(name) {
 }
 
 // applyTaskNoteProjectSlugHeal — B1 heal. Ungated, idempotent, .sauce-backup,
-// per-note try/catch. For each TOP-LEVEL task-note under spice/tasks/ (skip
-// _trash/ + _done/): when its `project`/`project_slug` looks MANGLED (a resolved
-// PATH inside `[[...]]`, or a `-md-` / `spice-projects-` path-slug), re-derive:
+// per-note try/catch. For each task-note under spice/tasks/ — flat top-level
+// notes and folder notes at any depth, skipping _trash/ + _done/: when its
+// `project`/`project_slug` looks MANGLED (a resolved PATH inside `[[...]]`, or
+// a `-md-` / `spice-projects-` path-slug), re-derive:
 //   - cleanName = basename of the project link (path + `.md` + `|alias` stripped)
 //   - slug      = the REAL project slug (looked up in the vault's type: project
 //                 notes by cleanName), else the sanitized cleanName
@@ -13065,9 +13195,7 @@ async function applyTaskNoteProjectSlugHeal(tp, history, git) {
     const ROOT = "spice/tasks";
     if (!(await adapter.exists(ROOT).catch(() => false))) return;
 
-    let listing;
-    try { listing = await adapter.list(ROOT); } catch (_e) { return; }
-    const topLevel = (listing.files || []).filter((f) => f.endsWith(".md"));
+    const topLevel = await _listTaskNotes(adapter, ROOT, ["_done", "_trash"]);
     if (!topLevel.length) return;
 
     let scanned = 0, healed = 0, warned = 0;
@@ -13339,9 +13467,7 @@ async function applyTaskNoteChromeHrHeal(tp, history, git) {
     const ROOT = 'spice/tasks';
     if (!(await adapter.exists(ROOT))) return;
 
-    const listing = await adapter.list(ROOT);
-    const files = (listing.files || []).filter(f =>
-      f.endsWith('.md') && !f.includes('/_trash/') && !f.includes('/_done/'));
+    const files = await _listTaskNotes(adapter, ROOT, ['_done', '_trash']);
     if (!files.length) return;
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -13564,9 +13690,9 @@ async function _dailyTaskNoteExists(adapter, parsed) {
   for (const f of files) {
     let body;
     try { body = await adapter.read(f); } catch (_e) { continue; }
-    const tm = body.match(/^title:\s*(.*)$/m);
-    const sm = body.match(/^source:\s*(.*)$/m);
-    const dm = body.match(/^due:\s*(.*)$/m);
+    const tm = body.match(/^title:[ \t]*(.*)$/m);
+    const sm = body.match(/^source:[ \t]*(.*)$/m);
+    const dm = body.match(/^due:[ \t]*(.*)$/m);
     const title = tm ? tm[1].trim().replace(/^"(.*)"$/, "$1") : "";
     const source = sm ? sm[1].trim().replace(/^"(.*)"$/, "$1") : "";
     const due = dm ? dm[1].trim().replace(/^"(.*)"$/, "$1") : "";
@@ -22898,6 +23024,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._isMangledProjectField = _isMangledProjectField;
     module.exports._taskNoteChromeBody = _taskNoteChromeBody;
     module.exports._sanitizeTaskTitleForFilename = _sanitizeTaskTitleForFilename;
+    module.exports._taskFolderName = _taskFolderName;
+    module.exports.applyRecurringTasksMigrationHeal = applyRecurringTasksMigrationHeal;
     module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
     module.exports._parseRecurringRegistry = _parseRecurringRegistry;
     module.exports._parseDailyTaskLine = _parseDailyTaskLine;
