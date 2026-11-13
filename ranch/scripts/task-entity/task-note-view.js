@@ -58,6 +58,9 @@ class TaskNoteView {
     _linkEntries(task) { return TaskNoteView._linkEntries(task); }
     _renderInlineMarkdown(el, mdText, sourcePath) { return TaskNoteView._renderInlineMarkdown(el, mdText, sourcePath); }
     _renderInlineLinksLocal(el, mdText, sourcePath) { return TaskNoteView._renderInlineLinksLocal(el, mdText, sourcePath); }
+    _rankOrder(list) { return TaskNoteView._rankOrder(list); }
+    _applyMove(index, fromPath, toPath, newPath) { return TaskNoteView._applyMove(index, fromPath, toPath, newPath); }
+    _orderedChildren(parent, children) { return TaskNoteView._orderedChildren(parent, children); }
 
     // ---------- Static pure helpers ----------
 
@@ -502,16 +505,100 @@ class TaskNoteView {
     }
 
     /**
+     * `list` ordered by `sibling_rank` (the place among its siblings on the
+     * parent's card; `rank` is the Today order and plays no part): ranked
+     * tasks first, lowest first, then the unranked ones in the order they
+     * came. Stable; the input is not changed. Pure.
+     */
+    static _rankOrder(list) {
+        const rankOf = (t) => {
+            const v = t ? t.sibling_rank : null;
+            if (typeof v === 'number') return isFinite(v) ? v : null;
+            if (typeof v !== 'string' || v.trim() === '') return null;
+            const n = Number(v);
+            return isFinite(n) ? n : null;
+        };
+        return (Array.isArray(list) ? list : []).map((t, i) => ({ t, i, r: rankOf(t) }))
+            .sort((a, b) => {
+                if (a.r == null && b.r == null) return a.i - b.i;
+                if (a.r == null) return 1;
+                if (b.r == null) return -1;
+                return (a.r - b.r) || (a.i - b.i);
+            })
+            .map((x) => x.t);
+    }
+
+    /**
+     * Apply a finished move to the card's index (_taskIndex), so the card
+     * repaints at once: the task at `fromPath` leaves its parent's list,
+     * lands at `newPath` under `toPath` (null: top level, so it leaves the
+     * card) unranked, and every task inside its folder follows to the new
+     * folder. Returns the moved task, or null when it is not in the index.
+     * Pure apart from the index it updates.
+     */
+    static _applyMove(index, fromPath, toPath, newPath) {
+        const kids = index && index.children;
+        if (!kids || typeof kids.forEach !== 'function' || !fromPath) return null;
+        let moved = null;
+        kids.forEach((list, key) => {
+            const i = list.findIndex((t) => t && t.path === fromPath);
+            if (i < 0) return;
+            moved = moved || list[i];
+            list.splice(i, 1);
+            if (!list.length) kids.delete(key);
+        });
+        if (!moved) return null;
+        const folderOf = (p) => {
+            const parts = String(p || '').split('/');
+            return parts.length > 2 && parts[parts.length - 1].replace(/\.md$/i, '') === parts[parts.length - 2]
+                ? parts.slice(0, -1).join('/') : '';
+        };
+        const dest = String(newPath || fromPath);
+        const oldDir = folderOf(fromPath);
+        const newDir = folderOf(dest);
+        if (oldDir && newDir && oldDir !== newDir) {
+            const swap = (p) => {
+                if (p === fromPath) return dest;
+                return String(p || '').indexOf(oldDir + '/') === 0 ? newDir + String(p).slice(oldDir.length) : p;
+            };
+            const rekeyed = [];
+            kids.forEach((list, key) => {
+                for (const t of list) {
+                    if (!t) continue;
+                    t.path = swap(t.path);
+                    if (t.parent_path) t.parent_path = swap(t.parent_path);
+                }
+                const nk = swap(key);
+                if (nk !== key) rekeyed.push([key, nk]);
+            });
+            for (const [from, to] of rekeyed) {
+                const list = kids.get(from);
+                kids.delete(from);
+                kids.set(to, (kids.get(to) || []).concat(list));
+            }
+        }
+        moved.path = dest;
+        moved.sibling_rank = null;
+        moved.parent_path = toPath && folderOf(toPath) ? String(toPath) : '';
+        moved.parent_task = toPath ? TaskNoteView._baseOf(toPath) : '';
+        if (toPath) {
+            if (!kids.has(String(toPath))) kids.set(String(toPath), []);
+            kids.get(String(toPath)).push(moved);
+        }
+        return moved;
+    }
+
+    /**
      * The subtasks of `parent` in the order its own card lists them: open ones
-     * first, as the index holds them, then finished ones newest first. Status
-     * alone decides, never the folder. Deleted tasks are left out. Pure; never
-     * throws.
+     * first by `sibling_rank` (unranked last, in the index's
+     * order), then finished ones newest first. Status alone decides, never
+     * the folder. Deleted tasks are left out. Pure; never throws.
      */
     static _orderedChildren(parent, children) {
         const list = (children && children.get ? children.get(String(parent || '').trim()) : null) || [];
         const live = list.filter((t) => t && t.status !== 'deleted');
         const isOpen = (t) => t.status === 'open';
-        const open = live.filter(isOpen);
+        const open = TaskNoteView._rankOrder(live.filter(isOpen));
         const done = live.filter((t) => !isOpen(t))
             .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
         return open.concat(done);
@@ -587,6 +674,7 @@ class TaskNoteView {
             web: svg('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>'),
             note: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>'),
             repeat: svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+            more: svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>'),
         };
     }
 
@@ -696,6 +784,9 @@ class TaskNoteView {
             'body.is-phone .sauce-tnv-chip { min-height: 26px; }',
             'body.is-phone .sauce-tnv-ring { width: 46px; height: 46px; }',
             'body.is-phone .sauce-tnv-nest { margin-left: 8px; padding-left: 8px; }',
+            'body .sauce-tnv-doc-more.sauce-tnv-doc-more { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: none; border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-faint); cursor: pointer; }',
+            '@media (hover: hover) { body .sauce-tnv-doc-more.sauce-tnv-doc-more:hover { color: var(--text-normal); background: var(--background-modifier-hover); } }',
+            'body.is-phone .sauce-tnv-doc-more.sauce-tnv-doc-more { width: 36px; height: 36px; }',
             '@media (max-width: 480px) { .sauce-tnv-actions > .sauce-btn { flex: 1 1 0; } .sauce-tnv-nest { margin-left: 8px; padding-left: 8px; } }',
             '@media (prefers-reduced-motion: reduce) { .sauce-tnv-progress > span, .sauce-tnv-progress > span::after, .sauce-tnv-link, .sauce-tnv-add, .sauce-task-note-view.sauce-anim-reveal, .sauce-tnv-done, .sauce-tnv-done > svg, .sauce-tnv-row-in, .sauce-tnv-ring-arc, .sauce-tnv-ring > svg, .sauce-tnv-title-text, .sauce-tnv-burst-mark, .sauce-tnv-burst-mark::after { transition: none !important; animation: none !important; } .sauce-task-note-view.is-completing .sauce-tnv-title-text { background-size: 100% 2px; } }',
         ].join('\n');
@@ -960,9 +1051,10 @@ class TaskNoteView {
             // Reopen. The bar and the header ring fill as they close.
             let subtaskList = [];
             let syncReady = () => {};
+            let notesSection = null;
             if (filePath) {
                 try {
-                    const allSubtasks = TaskNoteView._kidsOf(index, filePath);
+                    let allSubtasks = TaskNoteView._kidsOf(index, filePath);
                     subtaskList = allSubtasks;
                     const TTL = window.customJS && window.customJS.TaskTodayList;
 
@@ -974,6 +1066,42 @@ class TaskNoteView {
                     const fill = bar.createEl('span');
                     try { bar.setAttribute('role', 'progressbar'); bar.setAttribute('aria-label', 'Subtasks done'); } catch (_e) {}
                     const subList = section.createEl('div', { cls: 'sauce-tnv-subtasks' });
+                    // Drag and drop (desktop) and the ⋯ menu (every device):
+                    // reorder subtasks by rank among their siblings, drop a
+                    // subtask onto a sibling to nest it, onto the Make
+                    // top-level strip to lift it out, and a Notes row onto a
+                    // subtask to move the note there.
+                    const isMobile = !!(TTL && typeof TTL._isMobile === 'function' && TTL._isMobile(window.app));
+                    let groupRows = new Map();
+                    let groupOrder = new Map();
+                    const locks = TaskNoteView._locks || (TaskNoteView._locks = new Set());
+                    const orderOf = (pk) => (TTL && typeof TTL.manualOrder === 'function' ? TTL.manualOrder({
+                        order: () => groupOrder.get(pk) || [],
+                        rows: groupRows.get(pk) || new Map(),
+                        setFields: (p, fields) => {
+                            const D = window.customJS && window.customJS.TaskDialog;
+                            return D && typeof D.setFields === 'function' ? D.setFields(p, fields) : { ok: false, reason: 'render-safe-unavailable' };
+                        },
+                        renumber: (paths, ranks) => (TE && typeof TE.renumber === 'function' ? TE.renumber(paths, ranks) : []),
+                        classify: (res) => TTL.classifyOutcome(res),
+                        repaint: () => paintSubtasks(),
+                        notice: (m) => notice(m),
+                        lock: { set: locks, key: String(filePath) + ':subtasks' },
+                        field: 'sibling_rank',
+                    }) : null);
+                    const afterMove = (res, fromPath) => {
+                        if (!res || res.ok !== true || !res.path || !fromPath) return;
+                        let toPath = null;
+                        try { toPath = TE && typeof TE.parentNotePathOf === 'function' ? TE.parentNotePathOf(res.path) || null : null; } catch (_e) { toPath = null; }
+                        TaskNoteView._applyMove(index, fromPath, toPath, res.path);
+                        paintSubtasks();
+                    };
+                    const afterNoteMove = () => {
+                        try { if (notesSection && typeof notesSection.__repaint === 'function') notesSection.__repaint(); } catch (_e) {}
+                    };
+                    if (TTL && typeof TTL.wireTopLevelStrip === 'function') {
+                        TTL.wireTopLevelStrip(section, { isMobile, before: subList, onMoved: afterMove });
+                    }
                     const addInput = section.createEl('input', { cls: 'sauce-tnv-add', type: 'text' });
                     addInput.placeholder = '+ Add subtask…';
                     try { addInput.setAttribute('aria-label', 'Add subtask'); addInput.setAttribute('enterkeyhint', 'done'); } catch (_e) {}
@@ -1015,13 +1143,32 @@ class TaskNoteView {
                     };
                     // One open subtask row, then its own open subtasks nested
                     // under it. `trail` stops a parent loop; depth caps at three.
-                    const drawRow = (host, st, depth, first, trail) => {
+                    const drawRow = (host, st, depth, first, trail, pk) => {
                         const key = st.path || '';
                         const kids = TaskNoteView._kidsOf(index, key);
                         st.subtask_count = kids.length
                             ? { done: kids.filter((k) => k && k.status === 'done').length, total: kids.length }
                             : null;
-                        const row = TTL.renderTaskRow(host, st, null, { showProject: false, showParent: false, copyPath: true, todayStr, onDone: markDoneLocally });
+                        const moveOpts = {
+                            onMove: (t, dir) => { const c = orderOf(pk); return c ? c.move(t, dir) : undefined; },
+                            onMoved: (t, res) => { if (res && !res.fields) afterMove(res, t && t.path); },
+                        };
+                        if (!isMobile) moveOpts.dragHandle = 'Drag to reorder, or onto a subtask';
+                        const row = TTL.renderTaskRow(host, st, null, Object.assign({ showProject: false, showParent: false, copyPath: true, todayStr, onDone: markDoneLocally }, moveOpts));
+                        if (row && key) {
+                            if (!groupRows.has(pk)) groupRows.set(pk, new Map());
+                            groupRows.get(pk).set(key, row);
+                            if (typeof TTL.wireRowDrag === 'function') {
+                                TTL.wireRowDrag(row, st, {
+                                    isMobile,
+                                    reorder: (from, to, place) => { const c = orderOf(pk); return c ? c.reorder(from, to, place) : undefined; },
+                                    canReorder: (from) => (groupOrder.get(pk) || []).some((t) => t && t.path === from),
+                                    acceptNotes: true,
+                                    onMoved: (res, from) => afterMove(res, from),
+                                    onNoteMoved: afterNoteMove,
+                                });
+                            }
+                        }
                         if (row && first) {
                             try {
                                 row.classList.add('sauce-tnv-row-in');
@@ -1030,11 +1177,12 @@ class TaskNoteView {
                         }
                         const next = new Set(trail);
                         if (key) next.add(key);
-                        const openKids = kids.filter((k) => isOpenTask(k) && !next.has(k.path));
+                        const openKids = TaskNoteView._rankOrder(kids.filter((k) => isOpenTask(k) && !next.has(k.path)));
                         if (openKids.length && depth < 3 && key && !trail.has(key)) {
+                            groupOrder.set(key, openKids);
                             const nest = host.createEl('div', { cls: 'sauce-tnv-nest' });
                             for (const kid of openKids) {
-                                try { drawRow(nest, kid, depth + 1, first, next); } catch (_e) {}
+                                try { drawRow(nest, kid, depth + 1, first, next, key); } catch (_e) {}
                             }
                         }
                     };
@@ -1057,6 +1205,10 @@ class TaskNoteView {
                         notice('Could not reopen subtask: ' + ((res && res.reason) || 'unknown'));
                     };
                     const paintSubtasks = (first) => {
+                        allSubtasks = TaskNoteView._kidsOf(index, filePath);
+                        subtaskList = allSubtasks;
+                        groupRows = new Map();
+                        groupOrder = new Map();
                         while (subList.firstChild) subList.removeChild(subList.firstChild);
                         while (doneHost.firstChild) doneHost.removeChild(doneHost.firstChild);
                         // Only OPEN subtasks are rendered as rows. Without this
@@ -1066,11 +1218,13 @@ class TaskNoteView {
                         // a second click calls markDone on the now-stale path —
                         // "task file not found". allSubtasks (open + done) still
                         // feeds the progress count.
-                        const openSubtasks = allSubtasks.filter(t => isOpenTask(t));
+                        let openSubtasks = allSubtasks.filter(t => isOpenTask(t));
+                        openSubtasks = TaskNoteView._rankOrder(openSubtasks);
+                        groupOrder.set(filePath, openSubtasks);
                         if (TTL && typeof TTL.renderTaskRow === 'function') {
                             rowIndex = 0;
                             for (const st of openSubtasks) {
-                                try { drawRow(subList, st, 1, first, new Set([filePath])); } catch (_e) {}
+                                try { drawRow(subList, st, 1, first, new Set([filePath]), filePath); } catch (_e) {}
                             }
                         }
                         if (!allSubtasks.length) {
@@ -1229,7 +1383,24 @@ class TaskNoteView {
                 try {
                     const TDocs = window.customJS && window.customJS.TaskDocs;
                     const appRef = (typeof window !== 'undefined' && window.app) || (typeof app !== 'undefined' ? app : null);
-                    if (TDocs && typeof TDocs.render === 'function') TDocs.render(card, { app: appRef, taskPath: filePath });
+                    const TTLn = window.customJS && window.customJS.TaskTodayList;
+                    const phone = !!(TTLn && typeof TTLn._isMobile === 'function' && TTLn._isMobile(appRef));
+                    // Each Notes row gets a ⋮⋮ handle (desktop: drag it onto a
+                    // subtask) and a ⋯ menu with Move note to task… (every device).
+                    const decorateRow = (row, doc, repaint) => {
+                        if (TTLn && typeof TTLn.wireNoteDrag === 'function') TTLn.wireNoteDrag(row, doc, { isMobile: phone, taskPath: filePath });
+                        const TM = window.customJS && window.customJS.TaskMove;
+                        const MP = window.customJS && window.customJS.MenuPopover;
+                        if (!TM || typeof TM.noteMenuEntries !== 'function' || !MP || typeof MP.open !== 'function') return;
+                        const more = row.createEl('button', { cls: 'sauce-tnv-doc-more' });
+                        try { more.setAttribute('type', 'button'); more.setAttribute('aria-label', 'More for ' + doc.title); more.setAttribute('title', 'More'); more.setAttribute('aria-haspopup', 'menu'); } catch (_e) {}
+                        icon(more, 'more');
+                        more.addEventListener('click', (ev) => {
+                            try { ev.stopPropagation(); } catch (_e) {}
+                            MP.open(TM.noteMenuEntries(doc, { app: appRef, onDone: () => { try { repaint(); } catch (_e) {} } }), { anchor: more });
+                        });
+                    };
+                    if (TDocs && typeof TDocs.render === 'function') notesSection = TDocs.render(card, { app: appRef, taskPath: filePath, decorateRow });
                 } catch (_e) { /* NOTES section best-effort — never break the card */ }
             }
 

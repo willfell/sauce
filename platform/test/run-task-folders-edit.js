@@ -382,6 +382,49 @@ const base = (extra) => Object.assign({
         && app._files.has('spice/tasks/A/B/B.md') && app._log.notices.includes('Task saved'));
     }
 
+    // Old versus new: before the shared re-parent, a save whose parent field
+    // still held the value on file wrote nothing to parent_task and moved
+    // nothing. These parent values are not `[[Name]]` text, so the shared
+    // path must keep the parent (not resolve it, rewrite it, or fail).
+    for (const [label, stored, field] of [
+      ['plain text', 'A', 'A'],
+      ['unquoted [[A]] (YAML nested array)', [['A']], 'A'],
+      ['path-qualified link', '[[spice/tasks/A/A|A]]', '[[spice/tasks/A/A|A]]'],
+    ]) {
+      const app = makeApp(base());
+      const b = app._files.get('spice/tasks/A/B/B.md');
+      b._fm.parent_task = stored;
+      b._fm.rank = 5;
+      b._fm.sibling_rank = 2;
+      b._fm.due = '2026-11-20';
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, b, { title: 'B', parent_task: field, priority: 'high', due: '2026-11-20' }, null);
+      const fm = fmOf(app, 'spice/tasks/A/B/B.md');
+      ok('TF-EDIT-KEEP-PARENT ' + label + ' parent with an unrelated edit saves like before: same parent value, no move, rank and sibling_rank kept',
+        r && r.ok === true && r.path === 'spice/tasks/A/B/B.md' && app._log.renames.length === 0
+        && JSON.stringify(fm.parent_task) === JSON.stringify(stored) && fm.priority === 'high' && fm.rank === 5 && fm.sibling_rank === 2,
+        JSON.stringify([r, fm]));
+    }
+
+    {
+      const app = makeApp(base());
+      const { TD } = setup(app);
+      ok('TF-PARENT-LINK-FORMS a plain name or a YAML-nested value becomes [[name]]; a missing .md path is null',
+        TD._parentLinkOf(app, 'A') === '[[A]]' && TD._parentLinkOf(app, [['A']]) === '[[A]]'
+        && TD._parentLinkOf(app, '[[A]]') === '[[A]]' && TD._parentLinkOf(app, 'spice/tasks/A/A.md') === '[[A]]'
+        && TD._parentLinkOf(app, 'spice/tasks/Nope/Nope.md') === null && TD._parentLinkOf(app, null) === '');
+    }
+
+    {
+      const app = makeApp(base());
+      const b = app._files.get('spice/tasks/A/B/B.md');
+      b._fm.parent_task = [['A']];
+      const { TD } = setup(app);
+      const r = await TD._saveEdit(app, b, { title: 'B', parent_task: '[[C]]' }, null);
+      ok('TF-EDIT-NESTED-TO-NEW a YAML-nested parent changed in the dialog still moves to the new parent',
+        r && r.ok === true && r.path === 'spice/tasks/C/B/B.md' && fmOf(app, r.path).parent_task === '[[C]]', JSON.stringify(r));
+    }
+
     {
       const app = makeApp(base());
       const inst = typeof setup(app).TD._planEditMove === 'function';

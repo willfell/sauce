@@ -804,6 +804,9 @@ class TaskEntity {
             created_at: p.created_at != null ? p.created_at : null,
             completed_at: (p.status || 'open') === 'open' ? null : blankToNull(p.completed_at),
             rank: TaskEntity._rankOf(p.rank),
+            // A subtask's place among its siblings on the parent's card; `rank`
+            // stays the Today manual order.
+            sibling_rank: TaskEntity._rankOf(p.sibling_rank),
             mtime: TaskEntity._msOf(p.file && p.file.mtime),
             path: path,
         };
