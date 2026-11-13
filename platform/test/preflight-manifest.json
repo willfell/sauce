@@ -1072,6 +1072,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-jump",
+      "cmd": [
+        "node",
+        "platform/test/run-task-jump.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-collapse",
       "cmd": [
         "node",
