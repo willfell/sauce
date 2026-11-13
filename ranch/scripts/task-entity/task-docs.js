@@ -23,6 +23,7 @@ class TaskDocs {
     convert(app, taskPath, items) { return TaskDocs.convert(app, taskPath, items); }
     openReview(app, taskPath, cands) { return TaskDocs.openReview(app, taskPath, cands); }
     renderHeader(dv, opts) { return TaskDocs.renderHeader(dv, opts); }
+    rename(app, docPath, title) { return TaskDocs.rename(app, docPath, title); }
     withHeader(text) { return TaskDocs.withHeader(text); }
     taskPathOf(docPath) { return TaskDocs.taskPathOf(docPath); }
 
@@ -315,6 +316,74 @@ class TaskDocs {
         }
     }
 
+    /**
+     * Rename the note at `docPath` to `title`: its frontmatter title, and its
+     * file name by the rule create uses (the plain title while it is unique
+     * in the vault, else `Title (Task)`), moved with fileManager.renameFile
+     * so links to it follow. The note stays in its notes folder. Resolves
+     * { ok, path } or { ok: false, reason }.
+     */
+    static async rename(app, docPath, title) {
+        const t = String(title == null ? '' : title).replace(/\s+/g, ' ').trim();
+        if (!t) return { ok: false, reason: 'a note needs a name' };
+        const file = app && app.vault ? app.vault.getAbstractFileByPath(docPath) : null;
+        if (!file || Array.isArray(file.children)) return { ok: false, reason: 'note not found' };
+        const TE = TaskDocs._te();
+        const taskPath = TaskDocs.taskPathOf(docPath);
+        let taskTitle = taskPath ? taskPath.split('/').pop().replace(/\.md$/i, '') : '';
+        try {
+            const tf = taskPath ? app.vault.getAbstractFileByPath(taskPath) : null;
+            const tfm = tf ? TaskDocs._fmOf(app, tf) : null;
+            if (tfm && tfm.title != null && String(tfm.title).trim()) taskTitle = String(tfm.title).trim();
+        } catch (_e) {}
+        const own = String(file.basename || '').toLowerCase();
+        const taken = TaskDocs._takenNames(app);
+        const name = TE && typeof TE.taskName === 'function'
+            ? TE.taskName(t, { parentTitle: taskTitle, taken: (n) => String(n).toLowerCase() !== own && taken(n) })
+            : t.replace(/[\\/:*?"<>|#^[\]]/g, '').trim() || 'Note';
+        const to = String(docPath).slice(0, String(docPath).lastIndexOf('/') + 1) + name + '.md';
+        try {
+            await app.fileManager.processFrontMatter(file, (fm) => { fm.title = t; });
+            if (to !== String(docPath)) await app.fileManager.renameFile(file, to);
+            return { ok: true, path: to };
+        } catch (e) {
+            return { ok: false, reason: String((e && e.message) || e) };
+        }
+    }
+
+    /**
+     * Swap `textEl` for a text input holding `current`; Enter or leaving the
+     * field saves through `save(newTitle)` when the name changed, Escape
+     * cancels. Clicks in the field never reach the row under it.
+     */
+    static _editTitle(host, textEl, current, save) {
+        const input = host.createEl('input', { cls: 'sauce-tdv-rename-input', type: 'text' });
+        input.value = current;
+        try { input.setAttribute('aria-label', 'Note name'); input.setAttribute('enterkeyhint', 'done'); } catch (_e) {}
+        textEl.style.display = 'none';
+        host.classList.add('is-renaming');
+        let done = false;
+        const finish = async (commit) => {
+            if (done) return;
+            done = true;
+            const v = String(input.value || '').replace(/\s+/g, ' ').trim();
+            try { if (input.remove) input.remove(); else if (host.removeChild) host.removeChild(input); } catch (_e) {}
+            textEl.style.display = '';
+            host.classList.remove('is-renaming');
+            if (commit && v && v !== current) await save(v);
+        };
+        const stop = (ev) => { try { ev.stopPropagation(); } catch (_e) {} };
+        input.addEventListener('click', stop);
+        input.addEventListener('mousedown', stop);
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') { try { ev.preventDefault(); } catch (_e) {} finish(true); }
+            else if (ev.key === 'Escape') { try { ev.preventDefault(); } catch (_e) {} finish(false); }
+        });
+        input.addEventListener('blur', () => { finish(true); });
+        try { input.focus(); input.select(); } catch (_e) {}
+        return { input, finish };
+    }
+
     // ----- Converting note-like subtasks -----
 
     /**
@@ -580,6 +649,15 @@ class TaskDocs {
             '.sauce-tdv-sib > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
             '.sauce-tdv-sib > svg { flex-shrink: 0; }',
             '.sauce-tdv-pos { flex-shrink: 0; font-variant-numeric: tabular-nums; }',
+            '.sauce-tdv-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }',
+            'body .sauce-tdv-rename.sauce-tdv-rename, body .sauce-tnv-doc-rename.sauce-tnv-doc-rename { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: none; border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-faint); cursor: pointer; }',
+            '@media (hover: hover) { body .sauce-tdv-rename.sauce-tdv-rename:hover, body .sauce-tnv-doc-rename.sauce-tnv-doc-rename:hover { color: var(--text-normal); background: var(--background-modifier-hover); } }',
+            '.sauce-tdv-title-row.is-renaming .sauce-tdv-rename { display: none; }',
+            '@media (hover: hover) { .sauce-tnv-doc .sauce-tnv-doc-rename { opacity: 0; transition: opacity 120ms ease; } .sauce-tnv-doc:hover .sauce-tnv-doc-rename, .sauce-tnv-doc .sauce-tnv-doc-rename:focus-visible { opacity: 1; } }',
+            'body.is-mobile .sauce-tnv-doc .sauce-tnv-doc-rename { opacity: 1; }',
+            'body .sauce-tdv-rename-input.sauce-tdv-rename-input { box-sizing: border-box; width: 100%; min-width: 0; height: auto; min-height: 32px; padding: 4px 8px; border: 1px solid var(--interactive-accent); border-radius: var(--radius-s, 6px); background: var(--background-primary); color: var(--text-normal); font: inherit; }',
+            'body .sauce-tdv-title-row .sauce-tdv-rename-input.sauce-tdv-rename-input { font-size: 1.2em; font-weight: 700; }',
+            'body.is-phone .sauce-tdv-rename-input.sauce-tdv-rename-input { font-size: 16px; }',
             '.sauce-tdv-title { margin: 0; font-size: 1.35em; font-weight: 700; line-height: 1.25; color: var(--text-normal); overflow-wrap: anywhere; }',
             '.sauce-tdv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }',
             '.sauce-tdv-chip { box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; min-height: 24px; max-width: 100%; padding: 2px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: var(--background-primary); color: var(--text-muted); font-size: 0.78em; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }',
@@ -673,6 +751,7 @@ class TaskDocs {
             next: svg('<path d="m9 18 6-6-6-6"/>', 12),
             copy: svg('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 15),
             task: svg('<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>', 15),
+            pencil: svg('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>', 14),
         };
     }
 
@@ -809,7 +888,33 @@ class TaskDocs {
                 if (at < docs.length - 1) jump(docs[at + 1], 'is-next');
             }
 
-            card.createEl('div', { cls: 'sauce-tdv-title', text: title(file, fm) || '(untitled)' });
+            const titleRow = card.createEl('div', { cls: 'sauce-tdv-title-row' });
+            const titleEl = titleRow.createEl('div', { cls: 'sauce-tdv-title', text: title(file, fm) || '(untitled)' });
+            const renameBtn = titleRow.createEl('button', { cls: 'sauce-tdv-rename' });
+            try { renameBtn.setAttribute('type', 'button'); renameBtn.setAttribute('aria-label', 'Rename note'); renameBtn.setAttribute('title', 'Rename note'); } catch (_e) {}
+            renameBtn.innerHTML = ICON.pencil;
+            const startRename = () => {
+                if (titleRow.classList.contains && titleRow.classList.contains('is-renaming')) return;
+                const prior = titleEl.textContent;
+                TaskDocs._editTitle(titleRow, titleEl, prior, async (next) => {
+                    const RenderSafe = window.customJS && window.customJS.RenderSafe;
+                    if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not rename the note right now', 4000); return; }
+                    await RenderSafe.mutate({
+                        app,
+                        path,
+                        failureMessage: 'Could not rename the note',
+                        optimistic: () => { titleEl.textContent = next; },
+                        write: async () => {
+                            const res = await TaskDocs.rename(app, path, next);
+                            if (!res.ok) throw new Error(res.reason);
+                            return res;
+                        },
+                        revert: () => { titleEl.textContent = prior; },
+                    });
+                });
+            };
+            renameBtn.addEventListener('click', startRename);
+            titleEl.addEventListener('dblclick', startRename);
 
             if (taskFile) {
                 const chips = card.createEl('div', { cls: 'sauce-tdv-chips' });
@@ -931,11 +1036,35 @@ class TaskDocs {
                     const ic = row.createEl('span', { cls: 'sauce-tnv-doc-icon' });
                     ic.innerHTML = meta.icon;
                     const main = row.createEl('div', { cls: 'sauce-tnv-doc-main' });
-                    main.createEl('span', { cls: 'sauce-tnv-doc-title', text: d.title });
+                    const titleSpan = main.createEl('span', { cls: 'sauce-tnv-doc-title', text: d.title });
                     const ago = TaskDocs._ago(d.mtime, now);
                     main.createEl('span', { cls: 'sauce-tnv-doc-meta', text: meta.label + (ago ? ' · ' + ago : '') });
                     main.addEventListener('click', () => open(d.path));
                     try { main.setAttribute('title', 'Open ' + d.title); } catch (_e) {}
+                    const ren = row.createEl('button', { cls: 'sauce-tnv-doc-rename' });
+                    try { ren.setAttribute('type', 'button'); ren.setAttribute('aria-label', 'Rename ' + d.title); ren.setAttribute('title', 'Rename'); } catch (_e) {}
+                    ren.innerHTML = TaskDocs._ICONS.pencil;
+                    ren.addEventListener('click', (ev) => {
+                        try { ev.stopPropagation(); } catch (_e) {}
+                        if (main.classList.contains && main.classList.contains('is-renaming')) return;
+                        TaskDocs._editTitle(main, titleSpan, d.title, async (next) => {
+                            const RenderSafe = window.customJS && window.customJS.RenderSafe;
+                            if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not rename the note right now', 4000); return; }
+                            const res = await RenderSafe.mutate({
+                                app,
+                                path: taskPath,
+                                failureMessage: 'Could not rename the note',
+                                optimistic: () => { titleSpan.textContent = next; },
+                                write: async () => {
+                                    const r = await TaskDocs.rename(app, d.path, next);
+                                    if (!r.ok) throw new Error(r.reason);
+                                    return r;
+                                },
+                                revert: () => { titleSpan.textContent = d.title; },
+                            });
+                            if (res && res.ok) paint();
+                        });
+                    });
                     if (meta.copy) {
                         const btn = row.createEl('button', { cls: 'sauce-tnv-doc-copy', text: meta.copyLabel });
                         try { btn.setAttribute('type', 'button'); } catch (_e) {}
