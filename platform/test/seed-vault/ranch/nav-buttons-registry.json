@@ -137,18 +137,6 @@
         }
       }
     ],
-    "finance": [
-      {
-        "id": "finance-hub",
-        "label": "Finance",
-        "icon": "finance",
-        "order": 120,
-        "action": {
-          "type": "openLink",
-          "target": "spice/finance/Finance.md"
-        }
-      }
-    ],
     "scratch": [
       {
         "id": "scratch-day-hub",

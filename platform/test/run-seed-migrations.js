@@ -158,9 +158,7 @@ withTempVault((vault) => {
     ok("HC-V01100-SEED-SHAPE-3 .claude/ exists", helpers.dirExists(vault, ".claude"));
     ok("HC-V01100-SEED-SHAPE-4 .obsidian/ exists", helpers.dirExists(vault, ".obsidian"));
     ok("HC-V01100-SEED-SHAPE-5 spice/cowork/ exists", helpers.dirExists(vault, "spice/cowork"));
-    ok("HC-V01100-SEED-SHAPE-6 spice/finance/ exists", helpers.dirExists(vault, "spice/finance"));
     ok("HC-V01100-SEED-SHAPE-7 spice/projects/ exists", helpers.dirExists(vault, "spice/projects"));
-    ok("HC-V01100-SEED-SHAPE-8 spice/finance/debts/ exists", helpers.dirExists(vault, "spice/finance/debts"));
     ok("HC-V01100-SEED-SHAPE-9 ranch/scripts/ exists", helpers.dirExists(vault, "ranch/scripts"));
     ok("HC-V01100-SEED-SHAPE-10 ranch/templates/ exists", helpers.dirExists(vault, "ranch/templates"));
     ok("HC-V01100-SEED-SHAPE-11 .claude/commands/ exists", helpers.dirExists(vault, ".claude/commands"));
@@ -186,9 +184,6 @@ withTempVault((vault) => {
     const hubChecks = [
         ["spice/cowork/Cowork.md", "cowork-hub", "FM-1"],
         ["spice/cowork/Daily Hub.md", "cowork-daily-hub", "FM-2"],
-        ["spice/finance/Finance.md", "finance-hub", "FM-3"],
-        ["spice/finance/debts/Debts.md", "debts-hub", "FM-4"],
-        ["spice/finance/Budget Defaults.md", "budget-defaults", "FM-5"],
         ["spice/projects/Projects.md", "projects-hub", "FM-6"],
         ["spice/sticky-notes/Sticky.md", "sticky-hub", "FM-7"],
         ["spice/to-do/All-ToDos.md", "to-do-hub", "FM-8"],
@@ -292,14 +287,6 @@ withTempVault((vault) => {
     // a real workshop rename), update the table here in lockstep with the
     // rebaseline commit so the harness fails-fast on a stale assertion target.
     const bodyChecks = [
-        ["spice/finance/Finance.md", "FinanceHubSummary", "BODY-1"],
-        ["spice/finance/Budget Defaults.md", "BudgetDefaultsEditor", "BODY-2"],
-        ["spice/finance/Debt Defaults.md", "DebtDefaultsEditor", "BODY-3"],
-        ["spice/finance/Paycheck Defaults.md", "PaycheckDefaultsEditor", "BODY-4"],
-        ["spice/finance/budgets/Budgets.md", "BudgetsCards", "BODY-5"],
-        ["spice/finance/debts/Debts.md", "DebtsHubSummary", "BODY-6"],
-        ["spice/finance/paychecks/Paychecks.md", "PaychecksCards", "BODY-7"],
-        ["spice/finance/invoices/Invoices.md", "InvoicesCards", "BODY-8"],
         ["spice/cowork/Cowork.md", "CoworkHubNav", "BODY-9"],
         ["spice/cowork/Daily Hub.md", "CoworkDailyHubCards", "BODY-10"],
         ["spice/cowork/Weekly Hub.md", "CoworkWeeklyHubCards", "BODY-11"],
@@ -321,161 +308,6 @@ withTempVault((vault) => {
             `HC-V01100-SEED-${tag} ${relPath} body refs ${classSubstr}`,
             exists && body.includes(classSubstr),
             exists ? "class missing" : "note missing"
-        );
-    }
-
-    // ===== HC-V0128-SEED-MIGRATE-PLAN-* — finance v0.10.0 planning layer =====
-    // applyFinancePlanScaffolding + applyFinanceSavingsScaffolding + applyFinancePlanBandInjection.
-    {
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-1 Finance Plan.md scaffolded",
-            helpers.fileExists(vault, "spice/finance/Finance Plan.md")
-        );
-        let planFm = {};
-        try { planFm = helpers.parseFrontmatter(helpers.readNote(vault, "spice/finance/Finance Plan.md")).frontmatter; } catch (e) {}
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-2 Finance Plan type=finance-plan",
-            planFm.type === "finance-plan"
-        );
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-3 savings/ + Savings.md hub scaffolded",
-            helpers.dirExists(vault, "spice/finance/savings") && helpers.fileExists(vault, "spice/finance/savings/Savings.md")
-        );
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-4 Savings-Emergency-Fund.md scaffolded",
-            helpers.fileExists(vault, "spice/finance/savings/Savings-Emergency-Fund.md")
-        );
-        let savFm = {};
-        try { savFm = helpers.parseFrontmatter(helpers.readNote(vault, "spice/finance/savings/Savings-Emergency-Fund.md")).frontmatter; } catch (e) {}
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-5 Emergency Fund type=savings-account",
-            savFm.type === "savings-account"
-        );
-        let budgetBody = "";
-        try { budgetBody = helpers.readNote(vault, "spice/finance/budgets/2026-05/Budget-2026-05.md"); } catch (e) {}
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-6 PlanBand marker injected into existing Budget",
-            budgetBody.includes("<!-- plan-band-v0.10.0 -->") && budgetBody.includes('class: "PlanBand"')
-        );
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-7 PlanBand lands above MonthlyOverview",
-            budgetBody.indexOf("plan-band-v0.10.0") !== -1 &&
-            budgetBody.indexOf("plan-band-v0.10.0") < budgetBody.indexOf("monthly-overview-v0.6.3")
-        );
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-8 .sauce-backup snapshot written for the injected Budget",
-            helpers.dirExists(vault, ".sauce-backup")
-        );
-        // v0.10.2: scaffolded created_at must match the canonical-vocab pattern (no millis) —
-        // new Date().toISOString() emits ".SSSZ" which the validator rejects; templates strip it.
-        const CANON_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$/;
-        ok(
-            "HC-V0128-SEED-MIGRATE-PLAN-9 scaffolded created_at matches canonical pattern (no millis)",
-            CANON_TS.test(String(planFm.created_at || "")) && CANON_TS.test(String(savFm.created_at || "")),
-            `plan=${planFm.created_at} ef=${savFm.created_at}`
-        );
-    }
-
-    // ===== HC-V0149-SEED-MIGRATE-BUDGET-ALLOC-* — applyFinanceBudgetAllocationsBandInjection =====
-    // Ungated body injection: adds the BudgetAllocationsEditor dataviewjs block
-    // (after BudgetCategoriesEditor) to existing budgets lacking it. (The
-    // V0149 prefix is a cosmetic label — the release pipeline computes the real
-    // shipping version; this is not a version gate.)
-    {
-        let allocBody = "";
-        try { allocBody = helpers.readNote(vault, "spice/finance/budgets/2026-05/Budget-2026-05.md"); } catch (e) {}
-        ok(
-            "HC-V0149-SEED-MIGRATE-BUDGET-ALLOC-1 BudgetAllocationsEditor block injected into existing budget",
-            allocBody.includes('class: "BudgetAllocationsEditor"')
-        );
-        ok(
-            "HC-V0149-SEED-MIGRATE-BUDGET-ALLOC-2 BudgetAllocationsEditor lands after BudgetCategoriesEditor",
-            allocBody.indexOf('class: "BudgetCategoriesEditor"') !== -1 &&
-            allocBody.indexOf('class: "BudgetAllocationsEditor"') > allocBody.indexOf('class: "BudgetCategoriesEditor"')
-        );
-    }
-
-    // ===== HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-* — applyFinanceBudgetMalformedGroupRepair =====
-    // The seed's Budget-2026-05.md is committed with the pre-fix CORRUPTION: an
-    // inline flow-mapping category row (which already carries `group` inside the
-    // braces) followed by a stray `    group: Unassigned` continuation line that
-    // the old group-backfill spliced in. The repair heal must strip ONLY that
-    // stray line while (a) preserving the flow-map row and (b) NOT re-injecting a
-    // fresh stray line (the D1 flow-map skip). (The V0160 prefix is a cosmetic
-    // label — the release pipeline computes the real shipping version; this is
-    // not a version gate.)
-    {
-        let repairBody = "";
-        try { repairBody = helpers.readNote(vault, "spice/finance/budgets/2026-05/Budget-2026-05.md"); } catch (e) {}
-        ok(
-            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-1 stray 'group: Unassigned' line stripped from flow-map row",
-            !/\n    group: Unassigned/.test(repairBody)
-        );
-        ok(
-            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-2 flow-map Golf row preserved (group inside braces)",
-            /\{"group":"Lifestyle","name":"Golf"/.test(repairBody)
-        );
-        ok(
-            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-3 repair marker appended",
-            repairBody.includes("__budget_malformed_group_repaired:")
-        );
-        ok(
-            "HC-V0160-SEED-MIGRATE-BUDGET-GROUP-REPAIR-4 original clean block Groceries row untouched",
-            /group: Discretionary, name: Groceries/.test(repairBody)
-        );
-    }
-
-    // ===== HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-* — hub Months.md uses FinanceChromeBar =====
-    // Hub templates no longer carry a FinanceNav block or inline entity-create
-    // marker — FinanceChromeBar handles entity-create for all finance hubs.
-    {
-        let monthsBody = "";
-        try { monthsBody = helpers.readNote(vault, "spice/finance/months/Months.md"); } catch (e) {}
-        ok(
-            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-1 months/Months.md has FinanceChromeBar",
-            monthsBody.includes('class: "FinanceChromeBar"')
-        );
-        ok(
-            "HC-V0151-SEED-MIGRATE-MONTHS-SENTINEL-2 months/Months.md has NO FinanceNav block (hubs use ChromeBar)",
-            !monthsBody.includes('class: "FinanceNav"')
-        );
-    }
-
-    // ===== HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-* — applyFinancePaycheckArchiveLegacy =====
-    // The seed carries a LEGACY per-check paycheck note at
-    // spice/finance/paychecks/2026-05/Paycheck-2026-05-01.md (type: paycheck,
-    // pay_period_start present, NO deposits[] array). The month rollup only reads
-    // the NEW month-keyed notes (deposits[]) and excludes _archive/, so the
-    // clean-cutover heal MOVES every legacy per-check note into
-    // spice/finance/paychecks/_archive/ (copy + remove — nothing is deleted).
-    // Asserts run AFTER the idempotency phase's first install; the move happens on
-    // the FIRST install only (second install finds it already archived → no-op),
-    // so this is inherently idempotent against the IDEMP snapshot below.
-    // (The V0151 prefix is a cosmetic label; the release pipeline computes the
-    // real shipping version — this is not a version gate.)
-    {
-        ok(
-            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-1 legacy per-check note GONE from its original path",
-            !helpers.fileExists(vault, "spice/finance/paychecks/2026-05/Paycheck-2026-05-01.md")
-        );
-        ok(
-            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-2 legacy per-check note PRESENT under paychecks/_archive/",
-            helpers.fileExists(vault, "spice/finance/paychecks/_archive/Paycheck-2026-05-01.md")
-        );
-        // Archived copy preserves the original body byte-for-byte.
-        let archivedOk = false;
-        try {
-            const orig = helpers.readNote(SEED_DIR, "spice/finance/paychecks/2026-05/Paycheck-2026-05-01.md");
-            const archived = helpers.readNote(vault, "spice/finance/paychecks/_archive/Paycheck-2026-05-01.md");
-            archivedOk = orig === archived;
-        } catch (e) {}
-        ok(
-            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-3 archived copy preserves the original body byte-for-byte",
-            archivedOk
-        );
-        ok(
-            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-4 .sauce-backup snapshot exists",
-            helpers.dirExists(vault, ".sauce-backup")
         );
     }
 
@@ -2657,407 +2489,6 @@ async function runDocSectionBackfillFamily() {
     }
 }
 
-// ===== HC-V01190-FIN-SEED-MIGRATE-* — finance blueprint installer migrations =====
-//
-// Direct-invocation pattern (mirrors HC-V01190-PROJ family). See impl-2 design doc.
-// 19 finance apply* fns covered via the Legacy Finance fixture at
-// platform/test/seed-vault/spice/finance-legacy/.
-//
-// Production install order (install.js applyFinanceMigrations): defaults-scaff ->
-// debt-scaff -> months-scaff -> categories-group-backfill -> budget-group-seed ->
-// budget-body -> budget-monthly-band -> paycheck-body -> paycheck-debt-band ->
-// paycheck-defaults-debt-linking -> paycheck-defaults-debt-backfill -> nav-row ->
-// nav-row-guard-form -> hub-frontmatter-heal -> invoice-workspace-nav-injection ->
-// hubs-repair -> top-hub-nav-row-dedup -> defaults-nav-row-injection -> unified-nav
-// (unified-nav runs AFTER hubs-repair in production via the platform sweep). The
-// test invokes these in production order and asserts each contract. Idempotency
-// tested by invoking twice.
-//
-// The finance-legacy fixture is staged at spice/finance-legacy/ in the seed but
-// gets copied INTO the tmp vault at spice/finance/ (canonical install path).
-async function runFinanceMigrateFamily() {
-    const install = require("../install.js");
-
-    const finRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-fin-mig-"));
-    try {
-        const SEED_LEGACY = path.join(SEED_DIR, "spice/finance-legacy");
-        // Copy fixture into the tmp vault at the canonical spice/finance/ path.
-        helpers.copyDir(SEED_LEGACY, path.join(finRoot, "spice/finance"));
-
-        const LEGACY_FIN_DIR = "spice/finance";  // path inside the tmp vault
-        const adapter = makeFsAdapter(finRoot);
-        const tp = { app: { vault: { adapter } } };
-        const git = { commit: "test", tag: "test", dirty: false };
-        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
-        const manifest = { name: "finance" };
-        const history = [];
-
-        // Pass 1: invoke each finance migration in production order.
-        await install.applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
-        await install.applyFinanceDebtScaffolding(tp, manifest, variables, history, git);
-        await install.applyFinanceMonthsScaffolding(tp, manifest, variables, history, git);
-        await install.applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
-        await install.applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);
-        await install.applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
-        await install.applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);
-        await install.applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);
-        await install.applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);
-        await install.applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);
-        await install.applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history, git);
-        await install.applyFinanceNavRowMigration(tp, manifest, variables, history, git);
-        await install.applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);
-        await install.applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, git);
-        await install.applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history, git);
-        await install.applyFinanceHubsRepair(tp, manifest, variables, history, git);
-        await install.applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);
-        // cockpit #3 — RETIREMENT replaces the old FinanceNavRow injection (which
-        // ungated-re-injected the superseded second nav row on every install).
-        await install.applyFinanceDefaultsNavRowRetirement(tp, manifest, variables, history, git);
-        await install.applyFinanceMonthChecklistInjection(tp, manifest, variables, history, git);
-        await install.applyFinanceEditScopeBannerInjection(tp, manifest, variables, history, git);
-        // Unified-nav is the FinanceHubActions/FinanceNavRow -> FinanceNav vault-wide
-        // sweep; runs LAST so it sees the canonical post-repair shapes.
-        await install.applyFinanceUnifiedNavMigration(tp, manifest, variables, history, git);
-
-        // Helpers for assert blocks below.
-        const readFin = (rel) => fs.readFileSync(path.join(finRoot, LEGACY_FIN_DIR, rel), "utf8");
-        const existsFin = (rel) => fs.existsSync(path.join(finRoot, LEGACY_FIN_DIR, rel));
-
-        // ===== A: hub/defaults scaffolding (#14 + #15 + #19) =====
-        const a1FinBody = readFin("Finance.md");
-        const a1FinFm = helpers.parseFrontmatter(a1FinBody).frontmatter;
-        const a1Tags = Array.isArray(a1FinFm.tags) ? a1FinFm.tags : [];
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A1 Finance.md hub frontmatter healed (no 'finance-hub-hub' mangled tag)",
-            !a1Tags.some(t => /finance-hub-hub/.test(String(t)))
-                && a1Tags.some(t => String(t) === "finance-hub"),
-            `got tags=${JSON.stringify(a1Tags)}`
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A2 Finance.md body strips FinanceHubActions (top-hub dedup + hubs-repair + unified-nav)",
-            !a1FinBody.includes("FinanceHubActions")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A3 Finance.md body has FinanceChromeBar reference (hubs use ChromeBar)",
-            /class:\s*"FinanceChromeBar"/.test(a1FinBody)
-        );
-        const a4BudgetsBody = readFin("budgets/Budgets.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A4 Budgets.md body has FinanceChromeBar reference (hubs use ChromeBar)",
-            /class:\s*"FinanceChromeBar"/.test(a4BudgetsBody)
-        );
-        const a5DebtsBody = readFin("debts/Debts.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A5 Debts.md body has FinanceChromeBar reference (hubs use ChromeBar)",
-            /class:\s*"FinanceChromeBar"/.test(a5DebtsBody)
-        );
-        const a6PaychecksBody = readFin("paychecks/Paychecks.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-A6 Paychecks.md body has FinanceChromeBar reference (hubs use ChromeBar)",
-            /class:\s*"FinanceChromeBar"/.test(a6PaychecksBody)
-        );
-
-        // ===== B: debt (#2 + #10 + #11) =====
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B1 debts/Debt-Discover-it.md exists (auto-scaffolded by #2 from Debt Defaults)",
-            existsFin("debts/Debt-Discover-it.md")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B2 debts/Debt-Apple-Card.md still exists (existing entity preserved by #2)",
-            existsFin("debts/Debt-Apple-Card.md")
-        );
-        const bPaycheckDefaultsBody = readFin("Paycheck Defaults.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B3 Paycheck Defaults expenses block contains [[Debt-Apple-Card]] wikilink (post #10 linking)",
-            /debt:\s*"\[\[Debt-Apple-Card\]\]"/.test(bPaycheckDefaultsBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B4 Paycheck Defaults original url line stripped (post #10 url removal)",
-            !/^\s*url:\s*["']?https:\/\/example\.com\/applecard["']?\s*$/m.test(bPaycheckDefaultsBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B5 Paycheck Defaults frontmatter has __debt_links_migrated: v0.108.0 marker",
-            /__debt_links_migrated:\s*v0\.108\.0/.test(bPaycheckDefaultsBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B6 Paycheck Defaults expenses contains Discover-it entry (post #11 phase-2 orphan append)",
-            /debt:\s*"\[\[Debt-Discover-it\]\]"/.test(bPaycheckDefaultsBody)
-        );
-        const bDebtDefaultsBody = readFin("Debt Defaults.md");
-        const bAppleCardEntries = (bDebtDefaultsBody.match(/^\s+-\s+name:\s*Apple Card\b/gm) || []).length;
-        const bDiscoverItEntries = (bDebtDefaultsBody.match(/^\s+-\s+name:\s*Discover it\b/gm) || []).length;
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B7 Debt Defaults debts[] unchanged (still exactly 1 Apple Card + 1 Discover it; #2 reads but never mutates)",
-            bAppleCardEntries === 1 && bDiscoverItEntries === 1,
-            `got apple=${bAppleCardEntries} discover=${bDiscoverItEntries}`
-        );
-        const bDiscoverItBody = readFin("debts/Debt-Discover-it.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B8 Debt-Discover-it.md has kind: credit-card (from Debt Defaults entry)",
-            /^kind:\s*credit-card\s*$/m.test(bDiscoverItBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-B9 Debt-Discover-it.md has planned_monthly_payment: 150 (from Debt Defaults entry)",
-            /^planned_monthly_payment:\s*150\s*$/m.test(bDiscoverItBody)
-        );
-
-        // ===== C: budget (#4 + #5 + #6 + #7 + #12) =====
-        const cBudget01Body = readFin("budgets/2026-01/Budget-2026-01.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C1 Budget-2026-01.md groups[] seeded from Budget Defaults (Essentials + Discretionary)",
-            /^\s+-\s+Essentials\s*$/m.test(cBudget01Body)
-                && /^\s+-\s+Discretionary\s*$/m.test(cBudget01Body)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C2 Budget-2026-01.md frontmatter has __group_seed_migrated: v0.108.0 marker",
-            /__group_seed_migrated:\s*v0\.108\.0/.test(cBudget01Body)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C3 Budget-2026-01.md body has <!-- budget-summary- marker (post #6 inject)",
-            /<!--\s*budget-summary-v[\d.]+\s*-->/.test(cBudget01Body)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C4 Budget-2026-01.md body has <!-- monthly-overview- marker (post #7 inject)",
-            /<!--\s*monthly-overview-v[\d.]+\s*-->/.test(cBudget01Body)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C5 Budget-2026-01.md body no longer has '## Categories' heading (#6 strip)",
-            !/^## Categories\s*$/m.test(cBudget01Body)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C6 Budget-2026-01.md categories[0].group reassigned from Unassigned (#5 name-match to Essentials)",
-            /^\s+group:\s*Essentials\s*$/m.test(cBudget01Body)
-                && !/^\s+group:\s*Unassigned\s*$/m.test(cBudget01Body)
-        );
-        const cBudget02Body = readFin("budgets/2026-02/Budget-2026-02.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C7 Budget-2026-02.md body no longer has customJS.BudgetNavButtons direct call (#12 rewrite)",
-            !cBudget02Body.includes("customJS.BudgetNavButtons")
-                && !cBudget02Body.includes('class: "BudgetNavButtons"')
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-C8 Budget-2026-02.md body has FinanceNav reference (#12 rewrite + #17 unification chain)",
-            /class:\s*"FinanceNav"/.test(cBudget02Body)
-        );
-
-        // ===== D: paycheck (#8 + #9) =====
-        const dPaycheckBody = readFin("paychecks/2026-01/Paycheck-2026-01-15.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-D1 Paycheck-2026-01-15.md body has <!-- paycheck-summary- marker (post #8 inject)",
-            /<!--\s*paycheck-summary-v[\d.]+\s*-->/.test(dPaycheckBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-D2 Paycheck-2026-01-15.md body has <!-- paycheck-debt-band- marker (post #9 inject)",
-            /<!--\s*paycheck-debt-band-v[\d.]+\s*-->/.test(dPaycheckBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-D3 Paycheck-2026-01-15.md body no longer has '## Expenses' heading (#8 strip)",
-            !/^## Expenses\s*$/m.test(dPaycheckBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-D4 Paycheck-2026-01-15.md body still has title heading '# Paycheck 2026-01-15' (no over-stripping)",
-            /^#\s+Paycheck 2026-01-15\s*$/m.test(dPaycheckBody)
-        );
-
-        // ===== E: months (#3) =====
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-E1 spice/finance/months/ directory exists post #3 (applyFinanceMonthsScaffolding)",
-            fs.existsSync(path.join(finRoot, LEGACY_FIN_DIR, "months"))
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-E2 spice/finance/months/Months.md exists post #3 (hub scaffold)",
-            existsFin("months/Months.md")
-        );
-
-        // ===== F: nav (#12 + #13 + #17 + #18 + #19) =====
-        // Walk every .md under spice/finance/ to perform vault-wide assertions.
-        function _walkMd(root) {
-            const out = [];
-            function recur(dir) {
-                if (!fs.existsSync(dir)) return;
-                for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-                    const abs = path.join(dir, ent.name);
-                    if (ent.isDirectory()) recur(abs);
-                    else if (ent.isFile() && ent.name.endsWith(".md")) out.push(abs);
-                }
-            }
-            recur(root);
-            return out;
-        }
-        const fAllMd = _walkMd(path.join(finRoot, LEGACY_FIN_DIR));
-        const fAllBodies = fAllMd.map(p => fs.readFileSync(p, "utf8")).join("\n\n---FILE---\n\n");
-
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F1 Budget-2026-02.md no longer has 'BudgetNavButtons' anywhere (#12 + #13)",
-            !cBudget02Body.includes("BudgetNavButtons")
-        );
-        const fInvoiceBody = readFin("invoices/2026-01/Invoice-2026-01.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F2 Invoice-2026-01.md no longer has 'InvoiceNavButtons' anywhere (#12 + #13 + #16)",
-            !fInvoiceBody.includes("InvoiceNavButtons")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F3 no file under spice/finance/ contains 'FinanceHubActions' (#17 + #19)",
-            !fAllBodies.includes("FinanceHubActions")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F4 no file under spice/finance/ contains 'class: \"FinanceNavRow\"' (#17 collapses all to FinanceNav)",
-            !/class:\s*"FinanceNavRow"/.test(fAllBodies)
-        );
-        // cockpit #3 — the dead FinanceNavRow INJECTION is RETIRED. F4 already
-        // asserts no FinanceNavRow survives vault-wide; F5-F7 now assert the
-        // Defaults notes carry NO dead second nav row AND gained the edit-scope
-        // banner block (injected after FinanceNav, or after frontmatter when the
-        // legacy Defaults fixture has no nav block).
-        const fBudgetDefaultsBody = readFin("Budget Defaults.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F5 Budget Defaults has NO dead FinanceNavRow (retired) + gained FinanceEditScopeBanner",
-            !/class:\s*"FinanceNavRow"/.test(fBudgetDefaultsBody)
-                && /class:\s*"FinanceEditScopeBanner"/.test(fBudgetDefaultsBody)
-        );
-        const fPaycheckDefaultsBody = readFin("Paycheck Defaults.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F6 Paycheck Defaults has NO dead FinanceNavRow (retired) + gained FinanceEditScopeBanner",
-            !/class:\s*"FinanceNavRow"/.test(fPaycheckDefaultsBody)
-                && /class:\s*"FinanceEditScopeBanner"/.test(fPaycheckDefaultsBody)
-        );
-        const fDebtDefaultsBody = readFin("Debt Defaults.md");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F7 Debt Defaults has NO dead FinanceNavRow (retired) + gained FinanceEditScopeBanner",
-            !/class:\s*"FinanceNavRow"/.test(fDebtDefaultsBody)
-                && /class:\s*"FinanceEditScopeBanner"/.test(fDebtDefaultsBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F8 Finance.md body has NO FinanceHubActions (#19 top-hub dedup + #17)",
-            !a1FinBody.includes("FinanceHubActions")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F9 Finance.md body has FinanceChromeBar reference (hubs use ChromeBar)",
-            /class:\s*"FinanceChromeBar"/.test(a1FinBody)
-        );
-        // F10: no file vault-wide contains any of the deleted NavButtons class
-        // names in either form (customJS.<X>NavButtons.render OR class: "<X>NavButtons").
-        const fNoDeletedClasses =
-            !/customJS\.(Budget|Paycheck|Invoice)NavButtons/.test(fAllBodies)
-            && !/class:\s*"(Budget|Paycheck|Invoice)NavButtons"/.test(fAllBodies);
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-F10 no file has any deleted NavButtons class (BudgetNavButtons/PaycheckNavButtons/InvoiceNavButtons) in direct OR guard form",
-            fNoDeletedClasses
-        );
-
-        // ===== G: invoice + orchestration history (#16) =====
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-G1 Invoice-2026-01.md body has <!-- invoice-workspace-nav- marker (post #16 inject)",
-            /<!--\s*invoice-workspace-nav-v[\d.]+\s*-->/.test(fInvoiceBody)
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-G2 Invoice-2026-01.md body has InvoiceWorkspaceNav class reference (#16 canonical)",
-            /class:\s*"InvoiceWorkspaceNav"/.test(fInvoiceBody)
-        );
-        // G3: history accumulator records events from each invoked migration.
-        const gSteps = new Set(history.map(h => h && h.step).filter(Boolean));
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-G3 history accumulated >= 15 distinct step values (audit-trail contract across 19 invocations)",
-            gSteps.size >= 15,
-            `got steps=${JSON.stringify([...gSteps])} (count=${gSteps.size})`
-        );
-
-        // ===== H: idempotency on a SECOND full invocation pass =====
-        // Snapshot key files BEFORE the second pass, then run all 19 migrations
-        // again, then compare byte-identity.
-        const hBudget01Before = readFin("budgets/2026-01/Budget-2026-01.md");
-        const hPaycheckBefore = readFin("paychecks/2026-01/Paycheck-2026-01-15.md");
-        const hFinanceBefore = readFin("Finance.md");
-        const hPaycheckDefaultsBefore = readFin("Paycheck Defaults.md");
-        const hDebtDefaultsBefore = readFin("Debt Defaults.md");
-        const hAppleCardBefore = readFin("debts/Debt-Apple-Card.md");
-
-        const history2 = [];
-        await install.applyFinanceDefaultsScaffolding(tp, manifest, variables, history2, git);
-        await install.applyFinanceDebtScaffolding(tp, manifest, variables, history2, git);
-        await install.applyFinanceMonthsScaffolding(tp, manifest, variables, history2, git);
-        await install.applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history2, git);
-        await install.applyFinanceBudgetGroupSeed(tp, manifest, variables, history2, git);
-        await install.applyFinanceBudgetBodyMigration(tp, manifest, variables, history2, git);
-        await install.applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history2, git);
-        await install.applyFinancePaycheckBodyMigration(tp, manifest, variables, history2, git);
-        await install.applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history2, git);
-        await install.applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history2, git);
-        await install.applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history2, git);
-        await install.applyFinanceNavRowMigration(tp, manifest, variables, history2, git);
-        await install.applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history2, git);
-        await install.applyFinanceHubFrontmatterHeal(tp, manifest, variables, history2, git);
-        await install.applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history2, git);
-        await install.applyFinanceHubsRepair(tp, manifest, variables, history2, git);
-        await install.applyFinanceTopHubNavRowDedup(tp, manifest, variables, history2, git);
-        await install.applyFinanceDefaultsNavRowRetirement(tp, manifest, variables, history2, git);
-        await install.applyFinanceMonthChecklistInjection(tp, manifest, variables, history2, git);
-        await install.applyFinanceEditScopeBannerInjection(tp, manifest, variables, history2, git);
-        await install.applyFinanceUnifiedNavMigration(tp, manifest, variables, history2, git);
-
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-H1 second invocation: Budget-2026-01.md byte-identical (group-seed + body + monthly-band idempotent)",
-            hBudget01Before === readFin("budgets/2026-01/Budget-2026-01.md")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-H2 second invocation: Paycheck-2026-01-15.md byte-identical (paycheck body + debt-band idempotent)",
-            hPaycheckBefore === readFin("paychecks/2026-01/Paycheck-2026-01-15.md")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-H3 second invocation: Finance.md byte-identical (hub-heal + hubs-repair + dedup + unified-nav idempotent)",
-            hFinanceBefore === readFin("Finance.md")
-        );
-        // H4 deviation: Paycheck Defaults is NOT byte-identical on pass 2.
-        // applyFinancePaycheckDefaultsDebtLinking short-circuits via the
-        // __debt_links_migrated marker. But applyFinancePaycheckDefaultsDebt
-        // Backfill phase-1 RE-runs on the mangled-by-pass-1 state: the orphan-
-        // append from phase-2 split the Apple Card item's debt: continuation
-        // off, leaving the bare "  - item: Apple Card payment" line looking
-        // again like a debt-less item. Phase-1 re-injects debt:. This is real
-        // production behavior — we test the weaker invariant: the marker is
-        // present exactly once (linking idempotent) and no NEW Discover-it
-        // orphan rows are appended (phase-2 idempotent — its check uses
-        // _pcdReferencedDebtSlugs which scans the WHOLE block, including the
-        // misplaced debt: line, so Discover-it is correctly flagged as already
-        // referenced).
-        const hPaycheckDefaultsAfter = readFin("Paycheck Defaults.md");
-        const hMarkerCount = (hPaycheckDefaultsAfter.match(/__debt_links_migrated:\s*v0\.108\.0/g) || []).length;
-        const hDiscoverItRefCount = (hPaycheckDefaultsAfter.match(/debt:\s*"\[\[Debt-Discover-it\]\]"/g) || []).length;
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-H4 second invocation: Paycheck Defaults linking marker stays exactly 1x (idempotent) + phase-2 didn't re-append Discover-it",
-            hMarkerCount === 1 && hDiscoverItRefCount === 1,
-            `markers=${hMarkerCount} discover-refs=${hDiscoverItRefCount}`
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-H5 second invocation: Debt Defaults.md byte-identical (no scaffolding mutation; nav inject idempotent)",
-            hDebtDefaultsBefore === readFin("Debt Defaults.md")
-        );
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-H6 second invocation: Debt-Apple-Card.md byte-identical (#2 skip-if-exists; #17 already canonical)",
-            hAppleCardBefore === readFin("debts/Debt-Apple-Card.md")
-        );
-
-        // ===== I: history audit-trail contract =====
-        const iNoErrors = history.every(h => !h.errors || (Array.isArray(h.errors) && h.errors.length === 0));
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-I1 every pass-1 history event has empty errors[] (audit-trail contract)",
-            iNoErrors
-        );
-        const iWarnings = history.filter(h => h && h.event === "warning");
-        ok(
-            "HC-V01190-FIN-SEED-MIGRATE-I2 zero warning events in pass-1 history (all 19 migrations succeeded loud)",
-            iWarnings.length === 0,
-            `got ${iWarnings.length} warnings — first: ${iWarnings[0] ? JSON.stringify(iWarnings[0]).slice(0, 200) : "(none)"}`
-        );
-    } finally {
-        if (KEEP) {
-            console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
-        } else {
-            try { fs.rmSync(finRoot, { recursive: true, force: true }); } catch (e) {}
-        }
-    }
-}
-
 // ===== HC-V01190-EC-SEED-MIGRATE-* — entity-create mechanism installer migrations =====
 //
 // Direct-invocation pattern (mirrors HC-V01190-PROJ + HC-V01190-FIN). See impl-3 design.
@@ -3382,73 +2813,121 @@ async function runSectionHubCleanupFamily() {
     }
 }
 
-// ===== HC-V0151-MONTHS-SENTINEL-HEAL-* — applyFinanceMonthsEntityCreateSentinel =====
+// =============================================================================
+// HC-RETIRE-FINANCE-SEED-* — applyRetiredBlueprintsHeal through the real installer.
 //
-// Hub Months.md now uses FinanceChromeBar (no FinanceNav block). The heal
-// early-returns when no FinanceNav is present, so it's a no-op on modern hubs.
-// We also test the legacy repair path with an inline malformed fixture.
-async function runMonthsSentinelHealFamily() {
-    const install = require("../install.js");
-    const MARKER = "// entity-create:month";
-    const HUB = "spice/finance/months/Months.md";
-
-    const healRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-months-sentinel-"));
+// The finance blueprint was removed and the current seed is finance-free. The
+// previous seed (seed-vault-prev/) still carries what a consumer vault had
+// before the removal: the `finance` subscription pin, the platform-owned
+// plumbing (ranch/scripts/finance/, ranch/rules/finance.json), finance's
+// nav-buttons + entity-create registry contributions and installed-ledger
+// entry, and the user's spice/finance/ notes. This family layers that state
+// onto a copy of the current seed, runs the real installer twice, and asserts
+// the retire path end to end. Edge cases (unsafe paths refused, snapshot
+// failure, no-op vault) live in run-retired-blueprints.js.
+// =============================================================================
+async function runRetireFinanceFamily() {
+    console.log("\n=== HC-RETIRE-FINANCE-SEED — prev seed's finance state through the real installer ===");
+    const PREV_DIR = path.join(REPO_ROOT, "platform/test/seed-vault-prev");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-seed-retire-"));
+    const readJsonAbs = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
+    const writeJsonAbs = (p, j) => fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+    const relFiles = (dir) => filesBelow(dir).map((f) => path.relative(dir, f)).sort();
+    const sameTree = (a, b) => {
+        const fa = relFiles(a), fb = relFiles(b);
+        return fa.length > 0 && JSON.stringify(fa) === JSON.stringify(fb)
+            && fa.every((rel) => fs.readFileSync(path.join(a, rel)).equals(fs.readFileSync(path.join(b, rel))));
+    };
     try {
-        // --- Case 1: ChromeBar-only hub (current shape) → heal is a no-op ---
-        const seedBody = fs.readFileSync(path.join(SEED_DIR, HUB), "utf8");
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-1 seed fixture has FinanceChromeBar (no FinanceNav)",
-            seedBody.includes('class: "FinanceChromeBar"') && !seedBody.includes('class: "FinanceNav"')
-        );
+        helpers.copyDir(SEED_DIR, root);
+        const cfgPath = path.join(root, "ranch/platform-config.json");
+        const cfg = readJsonAbs(cfgPath);
+        cfg.workshop_relative_path = REPO_ROOT;
+        writeJsonAbs(cfgPath, cfg);
 
-        const adapter = makeFsAdapter(healRoot);
-        await adapter.write(HUB, seedBody);
-        const tp = { app: { vault: { adapter } } };
-        const git = { commit: "test", tag: "test", dirty: false };
-        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
-        const manifest = { name: "finance" };
-        const history = [];
+        ok("HC-RETIRE-FINANCE-SEED-0 the current seed carries no finance blueprint plumbing",
+            !helpers.dirExists(root, "spice/finance") && !helpers.dirExists(root, "ranch/scripts/finance")
+                && !helpers.fileExists(root, "ranch/rules/finance.json")
+                && !readJsonAbs(path.join(root, "ranch/platform-subscription.json")).blueprints.some((b) => b.name === "finance"));
 
-        await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
-        const afterHeal = await adapter.read(HUB);
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-2 heal is a no-op on ChromeBar-only hub (byte-identical)",
-            afterHeal === seedBody
-        );
+        const prevSub = helpers.readJson(PREV_DIR, "ranch/platform-subscription.json");
+        const prevPin = prevSub.blueprints.find((b) => b.name === "finance");
+        const prevNav = helpers.readJson(PREV_DIR, "ranch/nav-buttons-registry.json").contributions.finance;
+        const prevEc = helpers.readJson(PREV_DIR, "ranch/entity-create-registry.json").contributions.finance;
+        const prevLedger = helpers.readJson(PREV_DIR, "ranch/platform-installed.json").blueprints.find((b) => b.name === "finance");
+        ok("HC-RETIRE-FINANCE-SEED-1 prev seed still holds the pre-removal finance state (fixture guard)",
+            !!prevPin && Array.isArray(prevNav) && Array.isArray(prevEc) && !!prevLedger
+                && relFiles(path.join(PREV_DIR, "spice/finance")).length > 0
+                && relFiles(path.join(PREV_DIR, "ranch/scripts/finance")).length > 0
+                && helpers.fileExists(PREV_DIR, "ranch/rules/finance.json"));
 
-        // --- Case 2: legacy malformed fixture (trailing marker) → healed ---
-        const malformed = [
-            "---", "type: months-hub", "---", "",
-            "```dataviewjs",
-            'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
-            "// entity-create:month — installer-managed; do not delete this comment",
-            "```", "",
-            "```dataviewjs",
-            'await dv.view("ranch/views/customjs-guard", { class: "MonthsCards" });',
-            "```", ""
-        ].join("\n");
-        await adapter.write(HUB, malformed);
-        await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
-        const healed = await adapter.read(HUB);
-        const navIdx = healed.indexOf('class: "FinanceNav"');
-        const markerIdx = healed.indexOf(MARKER);
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-3 heal moves trailing marker to LEAD the FinanceNav call",
-            markerIdx !== -1 && navIdx !== -1 && markerIdx < navIdx
-        );
+        helpers.copyDir(path.join(PREV_DIR, "spice/finance"), path.join(root, "spice/finance"));
+        helpers.copyDir(path.join(PREV_DIR, "ranch/scripts/finance"), path.join(root, "ranch/scripts/finance"));
+        fs.copyFileSync(path.join(PREV_DIR, "ranch/rules/finance.json"), path.join(root, "ranch/rules/finance.json"));
+        const subPath = path.join(root, "ranch/platform-subscription.json");
+        const sub = readJsonAbs(subPath);
+        sub.blueprints.push({ name: "finance", version: prevPin.version });
+        writeJsonAbs(subPath, sub);
+        const navPath = path.join(root, "ranch/nav-buttons-registry.json");
+        const nav = readJsonAbs(navPath);
+        nav.contributions.finance = prevNav;
+        writeJsonAbs(navPath, nav);
+        const ecPath = path.join(root, "ranch/entity-create-registry.json");
+        const ec = readJsonAbs(ecPath);
+        ec.contributions.finance = prevEc;
+        ec.entries = Object.values(ec.contributions).flat();
+        writeJsonAbs(ecPath, ec);
+        const ledgerPath = path.join(root, "ranch/platform-installed.json");
+        const ledger = readJsonAbs(ledgerPath);
+        ledger.blueprints.push(prevLedger);
+        writeJsonAbs(ledgerPath, ledger);
+        const historyBefore = ledger.history.length;
 
-        // --- Case 3: idempotency ---
-        await install.applyFinanceMonthsEntityCreateSentinel(tp, manifest, variables, history, git);
-        const healedTwice = await adapter.read(HUB);
-        ok(
-            "HC-V0151-MONTHS-SENTINEL-HEAL-4 heal is idempotent (second pass byte-identical)",
-            healedTwice === healed
-        );
+        const r1 = helpers.runInstall(root, REPO_ROOT);
+        ok("HC-RETIRE-FINANCE-SEED-2 install exit code 0 (no `workshop has no item named \"finance\"` skip)",
+            r1.code === 0, `code=${r1.code} stderr=${(r1.stderr || "").slice(-200)}`);
+        const inst = helpers.readJson(root, "ranch/platform-installed.json");
+        const newHistory = (inst.history || []).slice(historyBefore);
+        const subAfter = helpers.readJson(root, "ranch/platform-subscription.json");
+        ok("HC-RETIRE-FINANCE-SEED-3 finance dropped from the subscription; every other blueprint kept",
+            !subAfter.blueprints.some((b) => b.name === "finance")
+                && sub.blueprints.filter((b) => b.name !== "finance").every((b) => subAfter.blueprints.some((x) => x.name === b.name)));
+        ok("HC-RETIRE-FINANCE-SEED-4 ranch/scripts/finance/ and ranch/rules/finance.json deleted",
+            !helpers.dirExists(root, "ranch/scripts/finance") && !helpers.fileExists(root, "ranch/rules/finance.json"));
+        ok("HC-RETIRE-FINANCE-SEED-5 spice/finance/ survives byte-identical to the prev seed",
+            sameTree(path.join(PREV_DIR, "spice/finance"), path.join(root, "spice/finance")));
+        ok("HC-RETIRE-FINANCE-SEED-6 finance pruned from the nav-buttons + entity-create registries and the installed ledger",
+            !("finance" in helpers.readJson(root, "ranch/nav-buttons-registry.json").contributions)
+                && !("finance" in helpers.readJson(root, "ranch/entity-create-registry.json").contributions)
+                && !helpers.readJson(root, "ranch/entity-create-registry.json").entries.some((e) => e && e.blueprint === "finance")
+                && !(inst.blueprints || []).some((b) => b.name === "finance"));
+        const heals = newHistory.filter((h) => h.step === "retired_blueprint" && h.event === "heal");
+        ok("HC-RETIRE-FINANCE-SEED-7 history records the unsubscribe and both plumbing removals with snapshots",
+            heals.some((h) => h.action === "unsubscribed")
+                && heals.filter((h) => h.action === "removed_plumbing" && h.snapshot).length === 2,
+            JSON.stringify(heals.map((h) => [h.action, h.path])));
+        const snapDir = heals.find((h) => h.path === "ranch/scripts/finance")?.snapshot;
+        ok("HC-RETIRE-FINANCE-SEED-8 the .sauce-backup snapshot holds every deleted finance script",
+            !!snapDir && sameTree(path.join(PREV_DIR, "ranch/scripts/finance"), path.join(root, snapDir)));
+        ok("HC-RETIRE-FINANCE-SEED-9 no skip, warning or error names finance",
+            !newHistory.some((h) => ["skip", "warning", "error"].includes(h.event)
+                && (h.name === "finance" || h.step === "retired_blueprint")));
+        ok("HC-RETIRE-FINANCE-SEED-10 cowork's retired finance skills are pruned from the vault",
+            ["gather-finance-yesterday", "gather-finance-cc-today", "write-run-note-finance"]
+                .every((s) => !helpers.fileExists(root, `.claude/skills/cowork/skills/${s}/SKILL.md`)));
+
+        const healsBefore = heals.length;
+        const r2 = helpers.runInstall(root, REPO_ROOT);
+        const inst2 = helpers.readJson(root, "ranch/platform-installed.json");
+        ok("HC-RETIRE-FINANCE-SEED-11 second install exits 0 and records no further retire heals",
+            r2.code === 0 && (inst2.history || []).filter((h) => h.step === "retired_blueprint" && h.event === "heal").length === healsBefore);
+        ok("HC-RETIRE-FINANCE-SEED-12 spice/finance/ still byte-identical after the second install",
+            sameTree(path.join(PREV_DIR, "spice/finance"), path.join(root, "spice/finance")));
     } finally {
         if (KEEP) {
-            console.log(`  KEEP_SEED_VAULT=1: ${healRoot}`);
+            console.log(`  KEEP_SEED_VAULT=1: ${root}`);
         } else {
-            try { fs.rmSync(healRoot, { recursive: true, force: true }); } catch (e) {}
+            try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
         }
     }
 }
@@ -4781,11 +4260,11 @@ runMigrateFamily()
         fail++;
         failures.push("HC-SEHEAL-FAMILY");
     })
-    .then(() => runFinanceMigrateFamily())
+    .then(() => runRetireFinanceFamily())
     .catch((e) => {
-        console.log(`  FAIL HC-V01190-FIN-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
+        console.log(`  FAIL HC-RETIRE-FINANCE-SEED-FAMILY threw — ${e && e.message}`);
         fail++;
-        failures.push("HC-V01190-FIN-SEED-MIGRATE-FAMILY");
+        failures.push("HC-RETIRE-FINANCE-SEED-FAMILY");
     })
     .then(() => runEntityCreateMigrateFamily())
     .catch((e) => {
@@ -4798,12 +4277,6 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01241-SEED-SECHUB-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01241-SEED-SECHUB-FAMILY");
-    })
-    .then(() => runMonthsSentinelHealFamily())
-    .catch((e) => {
-        console.log(`  FAIL HC-V0151-MONTHS-SENTINEL-HEAL-FAMILY threw — ${e && e.message}`);
-        fail++;
-        failures.push("HC-V0151-MONTHS-SENTINEL-HEAL-FAMILY");
     })
     .then(() => runTaskEntitySurfacesFamily())
     .catch((e) => {

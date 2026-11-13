@@ -36,7 +36,7 @@ Usage:
   node scripts/scaffold-behavioral-harness.js <cycle-id> <topic-slug> [flags]
 
   <cycle-id>    Pattern: v\\d+   e.g. v01200 / v01200-CF1
-  <topic-slug>  Pattern: [a-z][a-z0-9-]*   e.g. workshop-tooling / finance-overhaul
+  <topic-slug>  Pattern: [a-z][a-z0-9-]*   e.g. workshop-tooling / project-overhaul
 
 Flags:
   --force       overwrite an existing target file
@@ -72,9 +72,8 @@ if (exists && !FORCE && !DRY_RUN) {
 const today = process.env.SAUCE_SCAFFOLD_DATE || "YYYY-MM-DD";
 
 // ---------------------------------------------------------------------------
-// Template — distilled from platform/test/run-v01103-monthly-overview.js.
-// Kept intentionally identical in structure so future cycles get the canonical
-// shape without copy-paste drift.
+// Template — the canonical zero-dep behavioral harness shape, kept in one
+// place so future cycles get it without copy-paste drift.
 // ---------------------------------------------------------------------------
 
 const template = `// ${fileName} — ${cycleId} behavioral test harness (scaffolded ${today}).
@@ -83,16 +82,14 @@ const template = `// ${fileName} — ${cycleId} behavioral test harness (scaffol
 //   Section 1 — <topic> behavioral cases     → MAIN-1..N
 //   Section 2 — <topic> contract / migration → CONTRACT-1..M
 //
-// Pattern matches run-v01103-monthly-overview.js (zero-dep; inline DOM stub;
-// Dataview-proxy stub; verdict footer). Add to platform/test/preflight-manifest.json after this file is populated with cases.
+// Pattern: zero-dep; inline DOM stub; Dataview-proxy stub; verdict footer. Add to platform/test/preflight-manifest.json after this file is populated with cases.
 
 const fs = require("fs");
 const path = require("path");
 
 const WORKSHOP = path.resolve(__dirname, "../..");
-const FIN_HELPERS = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
-// Adjust the helper dir to match the surface this cycle exercises:
-//   const PROJ_HELPERS = path.join(WORKSHOP, "platform/blueprints/project/helpers");
+const HELPERS = path.join(WORKSHOP, "platform/blueprints/project/helpers");
+// Adjust the helper dir to match the surface this cycle exercises, e.g.:
 //   const MECH_HELPERS = path.join(WORKSHOP, "platform/mechanisms/<name>");
 
 let passed = 0;
@@ -262,7 +259,7 @@ function makeStrictDv(opts = {}) {
 // ---------------------------------------------------------------------------
 
 function loadClass(filename, className, helperDir) {
-  const dir = helperDir || FIN_HELPERS;
+  const dir = helperDir || HELPERS;
   const src = fs.readFileSync(path.join(dir, filename), "utf8");
   const wrapper = \`\${src}\\n; return \${className};\`;
   return new Function(wrapper)();

@@ -2,7 +2,6 @@
   "boards":                 { "tier": "low",  "rationale": "Single consumer uses kanban occasionally; one external plugin coupling." },
   "cowork":                 { "tier": "high", "rationale": "Active arc with cross-machine state; recent migrations every cycle." },
   "daily":                  { "tier": "high", "rationale": "Every consumer hits daily notes; touched by carryover + recurring." },
-  "finance":                { "tier": "high", "rationale": "v0.108-v0.115 rapid evolution; load-bearing schemas + measured-debt math." },
   "journal":                { "tier": "med",  "rationale": "Used by both consumers; relatively static lately." },
   "meetings":               { "tier": "high", "rationale": "Linked from project + cowork; recent project-link migration." },
   "people":                 { "tier": "med",  "rationale": "Cross-cutting via people-identity; stable shape." },

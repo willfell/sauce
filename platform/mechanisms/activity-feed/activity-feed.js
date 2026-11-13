@@ -1010,7 +1010,7 @@ class ActivityFeed {
    * Grounded in landmine #11 (every blueprint owns exactly one directory at
    * spice/<module>/) plus the shipped templates that stamp each `type:`.
    * Multi-folder entries exist where one type is emitted by several
-   * blueprints (`kanban` boards ship from project, boards, and finance).
+   * blueprints (`kanban` boards ship from project and boards).
    * cowork-daily maps to spice/daily — the daily-note template stamps
    * `type: cowork-daily` on notes in the daily module directory.
    */
@@ -1030,10 +1030,7 @@ class ActivityFeed {
       "team": ["spice/teams"],
       "product": ["spice/products"],
       "trip": ["spice/trips"],
-      "budget": ["spice/finance"],
-      "paycheck": ["spice/finance"],
-      "invoice": ["spice/finance"],
-      "kanban": ["spice/projects", "spice/boards", "spice/finance"],
+      "kanban": ["spice/projects", "spice/boards"],
       "board-card": ["spice/boards"],
       "wiki-page": ["spice/wiki"],
       "wiki-section": ["spice/wiki"],
@@ -1044,7 +1041,6 @@ class ActivityFeed {
       "cowork-morning-briefing": ["spice/cowork"],
       "cowork-midday-tripwire": ["spice/cowork"],
       "cowork-eod-review": ["spice/cowork"],
-      "cowork-finance-snapshot": ["spice/cowork"],
       "cowork-weekly-review": ["spice/cowork"],
       "cowork-monthly-review": ["spice/cowork"],
       "cowork-morning-briefing-cold": ["spice/cowork"],
@@ -1068,14 +1064,10 @@ class ActivityFeed {
       "team",
       "product",
       "trip",
-      "budget",
-      "paycheck",
-      "invoice",
-      // v0.2.0 (v0.65.0 cowork-scheduling-cycle): 6 cowork run-note types
+      // v0.2.0 (v0.65.0 cowork-scheduling-cycle): cowork run-note types
       "cowork-morning-briefing",
       "cowork-midday-tripwire",
       "cowork-eod-review",
-      "cowork-finance-snapshot",
       "cowork-weekly-review",
       "cowork-monthly-review",
       // v0.95.1 cowork-anti-echo Knob 3 (lens_shift cadence): cold-MB variant

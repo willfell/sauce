@@ -5,7 +5,7 @@
 // Workshop convention: classes loaded via the customJS plugin are stored as
 // INSTANCES (`customJS.X = new X()`). Methods called via `customJS.X.method(...)`
 // must therefore be on the prototype (non-static). Static-only utility classes
-// (e.g., FinanceMath) are tolerated when ALL members are static — detected by
+// are tolerated when ALL members are static — detected by
 // shape, not by allowlist.
 //
 // Algorithm: scan platform/ for class definitions, scan platform/+ranch/+commands/+spice/+.claude/

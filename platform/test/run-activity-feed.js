@@ -423,16 +423,20 @@ try {
   );
 }
 
-// AF-V065: _DEFAULT_BLUEPRINTS widening for 6 cowork run-note types
+// AF-V065: _DEFAULT_BLUEPRINTS widening for the cowork run-note types
 {
   const src = fs.readFileSync("platform/mechanisms/activity-feed/activity-feed.js", "utf8");
   const types = [
     "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-    "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+    "cowork-weekly-review", "cowork-monthly-review",
   ];
   for (const t of types) {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
+  for (const t of ["cowork-finance-snapshot", "budget", "paycheck", "invoice"]) {
+    assertTrue(`AF-RETIRED: retired finance type "${t}" no longer listed`, !src.includes(`"${t}"`));
+  }
+  assertTrue("AF-RETIRED: no type maps to the retired spice/finance folder", !src.includes("spice/finance"));
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
   assertEq("AF-V065: activity-feed manifest version matches snapshot", manifest.version, VERSION_SNAPSHOT.components["activity-feed"]);
   assertTrue("AF-V065: activity-feed description mentions latest shipping version",

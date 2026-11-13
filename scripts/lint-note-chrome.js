@@ -8,7 +8,7 @@
 // key. Today that is exactly { project, meetings, sticky-notes, to-do }; later
 // adoption waves widen the set by adding a `breadcrumb` block, and this gate
 // starts enforcing the new blueprint automatically. Un-adopted blueprints
-// (daily, journal, finance, trips, people, products, teams, cowork, …) still
+// (daily, journal, trips, people, products, teams, cowork, …) still
 // legitimately use `## H2` and MUST NOT be flagged. (Kanban boards are not a
 // blueprint of their own — they live inside the `project` blueprint.)
 //

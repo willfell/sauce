@@ -1599,7 +1599,7 @@ ok('PERF-0-LEDGER code guide pins structural receipt protocol and every audited 
       while ((match = invocation.exec(source))) surfaces.add(match[1]);
     }
   }
-  assert(surfaces.size === 112, 'baseline inventory contains all 112 production Dataview entry classes');
+  assert(surfaces.size === 86, 'baseline inventory contains all 86 production Dataview entry classes');
   for (const surface of surfaces) {
     assert(guide.includes('`' + surface + '`'), 'ledger enumerates ' + surface);
   }
@@ -1607,8 +1607,7 @@ ok('PERF-0-LEDGER code guide pins structural receipt protocol and every audited 
 });
 
 // GA-P3 sweep contract: every audited active-note gesture delegates its write
-// through RenderSafe.mutate, while Finance's authoritative self-renders capture
-// scroll first. These source-bound cases are intentionally one-per surface so a
+// through RenderSafe.mutate. These source-bound cases are intentionally one-per surface so a
 // future helper can neither bypass the lifecycle nor hide in an aggregate count.
 function helperSource(rel) {
   return fs.readFileSync(path.join(__dirname, '..', 'blueprints', rel), 'utf8');
@@ -1660,40 +1659,6 @@ ok('GA-P3-JOURNAL title rename routes through mutate with banner rollback', () =
 ok('GA-P3-TODAY-CAPTURE native checkbox routes through mutate capture and revert', () => {
   const src = helperSource('to-do/helpers/today-capture-editable-list.js');
   assert(/addEventListener\('change'[\s\S]*renderSafe\.mutate\(\{[\s\S]*optimistic:[\s\S]*revert:[\s\S]*replaceTaskAt/.test(src), 'today capture mutation lifecycle');
-});
-
-for (const financeEditor of [
-  'budget-allocations-editor.js', 'budget-categories-editor.js', 'budget-defaults-editor.js',
-  'debt-defaults-editor.js', 'invoice-controls.js', 'invoice-time-log-editor.js',
-  'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js', 'finance-plan-dashboard.js',
-]) {
-  ok(`GA-P3-FINANCE-SCROLL ${financeEditor} captures before authoritative self-render`, () => {
-    const src = helperSource('finance/helpers/' + financeEditor);
-    const start = src.indexOf('async _rerender');
-    const rerender = src.slice(start, src.indexOf('\n    }', start) + 6);
-    assert(start >= 0 && /captureScroll[\s\S]*this\.render\(dv/.test(rerender),
-      'capture precedes the centralized self-render');
-    const outside = src.slice(0, start) + src.slice(start + rerender.length);
-    assert(!/this\.render\(dv/.test(outside), 'all direct self-renders are centralized');
-  });
-}
-
-for (const financeEditor of [
-  'budget-allocations-editor.js', 'budget-categories-editor.js', 'budget-defaults-editor.js',
-  'debt-defaults-editor.js', 'invoice-controls.js', 'invoice-time-log-editor.js',
-  'paycheck-defaults-editor.js', 'paycheck-expenses-editor.js',
-]) {
-  ok(`PERF-3-FINANCE-LIFECYCLE ${financeEditor} uses the shared optimistic receipt seam`, () => {
-    const src = helperSource('finance/helpers/' + financeEditor);
-    assert(/FinanceFrontmatter\.mutateRendered\(/.test(src), 'mutable Finance repaint delegates through mutateRendered');
-  });
-}
-
-ok('PERF-3-FINANCE-PLAN applies through RenderSafe and captures before its self-render', () => {
-  const src = helperSource('finance/helpers/finance-plan-dashboard.js');
-  assert(/RenderSafe\.mutate\(\{[\s\S]*write: \(\) => this\._writeAll\(diffs,\s*page\?\.file\?\.path\)/.test(src), 'plan Apply delegates through RenderSafe with its shared transaction key');
-  assert(/async _writeAll\([^)]*planPath[\s\S]*_serializePlanApply\(path,[\s\S]*async _serializePlanApply/.test(src), 'plan Apply serializes the full write and compensation transaction');
-  assert(/async _rerender[\s\S]*captureScroll[\s\S]*this\.render\(dv\)/.test(src), 'plan repaint captures scroll');
 });
 
 function makeGestureFacade(calls) {

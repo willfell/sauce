@@ -386,7 +386,6 @@ test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter sna
   const surfaces = {
     project: (variant) => `pcb-btn pcb-btn-${variant}`,
     wiki: (variant) => `wiki-chrome-btn wiki-chrome-btn-${variant}`,
-    finance: (variant) => `finance-chrome-btn finance-chrome-btn-${variant}`,
   };
   const expected = {
     project: [
@@ -400,12 +399,6 @@ test("CSS1 ChromeBar buttons use sauce-core classes with byte-stable adopter sna
       ["wiki-chrome-btn wiki-chrome-btn-go", "<svg data-icon=\"go\"/>"],
       ["wiki-chrome-btn wiki-chrome-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
       ["wiki-chrome-btn wiki-chrome-btn-dots", "<svg data-icon=\"dots\"/>"],
-    ],
-    finance: [
-      ["finance-chrome-btn finance-chrome-btn-home", "<svg data-icon=\"home\"/>"],
-      ["finance-chrome-btn finance-chrome-btn-go", "<svg data-icon=\"go\"/>"],
-      ["finance-chrome-btn finance-chrome-btn-primary", "<svg data-icon=\"plus\"/><span style=\"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;\">New</span>"],
-      ["finance-chrome-btn finance-chrome-btn-dots", "<svg data-icon=\"dots\"/>"],
     ],
   };
   for (const [surface, btnClass] of Object.entries(surfaces)) {

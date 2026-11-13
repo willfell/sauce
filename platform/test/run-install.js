@@ -888,9 +888,9 @@ async function caseV0790F1PerMcpMicroscopePreserved() {
 
         // The user runs cowork:edit-microscope, which writes a per-mcp contract
         // the blueprint never declares in files[].
-        const microscopeRel = path.join("spice", "permcp", "prompts", "per-mcp", "finance", "microscope.md");
+        const microscopeRel = path.join("spice", "permcp", "prompts", "per-mcp", "calendar", "microscope.md");
         const microscopeAbs = path.join(vaultDir, microscopeRel);
-        const SENTINEL = "## What matters\nSENTINEL-V0790 deep finance contract.\n";
+        const SENTINEL = "## What matters\nSENTINEL-V0790 deep calendar contract.\n";
         fs.mkdirSync(path.dirname(microscopeAbs), { recursive: true });
         fs.writeFileSync(microscopeAbs, SENTINEL, "utf8");
 
