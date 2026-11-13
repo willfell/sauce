@@ -454,7 +454,44 @@ async function cbFactoryCases() {
     entries[0] && entries[0].section === 'This wiki' && entries.some((e) => e && e.label === 'Wiki'));
 }
 
+// ── CB-ICON-1..3 — spec.iconActions renders icon-only, labelled buttons after
+// quick-add and before the primary, each dispatching its id.
+async function cbIconActionCases() {
+  const prevApp = global.app, prevCJS = global.customJS, prevAD = global.activeDocument;
+  global.activeDocument = { body: makeEl('body'), createElement: (t) => makeEl(t), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [] };
+  global.app = { isMobile: true, workspace: { openLinkText() {}, getLeaf: () => ({ openFile() {} }) } };
+  global.customJS = {
+    RenderSafe: { page: (dv) => (dv && dv.current ? dv.current() : null) },
+    Breadcrumb: { buildSegments: async () => ([]) },
+    MenuPopover: { open: () => makeEl('div') },
+  };
+  const dispatched = [];
+  const adapter = {
+    resolve: () => ({ ctx: { context: 'x' }, spec: { primary: { id: 'new', label: 'New', icon: '<svg/>' }, overflow: [], iconActions: [{ id: 'jump', label: 'Jump to task or note', icon: '<svg class="s"/>' }, null, { label: 'no id' }] } }),
+    navEntries: async () => ([]),
+    dispatch: (dv, ctx, id) => dispatched.push(id),
+    openNavTarget: () => {},
+    rootClass: 'ia-root',
+    btnClass: (v) => `ia-btn ia-btn-${v}`,
+  };
+  const container = makeEl('div');
+  await inst.render({ container, current: () => ({ file: { path: 'spice/x/y.md', name: 'y' } }) }, adapter);
+  const desc = allDescendants(container);
+  const buttons = desc.filter((e) => e.tag === 'button');
+  const jump = buttons.find((e) => String(e.className).includes('ia-btn-jump'));
+  ok('CB-ICON-1 an icon action renders one icon-only button labelled for touch and screen readers',
+    !!jump && String(jump.className).includes('sauce-btn-icon') && jump.innerHTML === '<svg class="s"/>'
+    && jump.getAttribute('aria-label') === 'Jump to task or note' && jump.getAttribute('title') === 'Jump to task or note'
+    && buttons.filter((e) => /ia-btn-(jump|undefined)/.test(String(e.className))).length === 1);
+  const order = buttons.map((e) => (String(e.className).match(/ia-btn-(\w+)/) || [])[1]);
+  ok('CB-ICON-2 it sits after quick-add and before the primary', order.indexOf('add') < order.indexOf('jump') && order.indexOf('jump') < order.indexOf('primary'));
+  if (jump && typeof jump.onclick === 'function') jump.onclick();
+  ok('CB-ICON-3 a click dispatches its id', JSON.stringify(dispatched) === JSON.stringify(['jump']));
+  global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD;
+}
+
 (async () => {
+  await cbIconActionCases();
   await cbVaultCases();
   await cbVaultEmpty();
   await cbRenderCases();

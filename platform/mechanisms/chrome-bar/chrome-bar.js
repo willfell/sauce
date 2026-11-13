@@ -374,6 +374,24 @@ class ChromeBar {
       try { addBtn.setAttribute("aria-label", "Quick add"); addBtn.setAttribute("title", "Quick add"); } catch (_e) { /* never throw */ }
     }
 
+    // 2b. Icon actions — icon-only buttons a surface declares in
+    // spec.iconActions ([{ id, label, icon }]), e.g. To-Do's and Home's Jump
+    // search. The label is the button's tooltip and aria-label; a click
+    // dispatches the id like the primary and ⋯ entries.
+    if (Array.isArray(spec.iconActions)) {
+      for (const a of spec.iconActions) {
+        if (!a || !a.id) continue;
+        const btn = this.renderChromeButton(right, {
+          cls: adapter.btnClass(a.id),
+          icon: a.icon,
+          onClick: () => adapter.dispatch(dv, ctx, a.id),
+        });
+        try {
+          if (a.label) { btn.setAttribute("aria-label", a.label); btn.setAttribute("title", a.label); }
+        } catch (_e) { /* never throw */ }
+      }
+    }
+
     // 3. Primary button — rendered whenever the surface declares one.
     if (spec.primary) {
       const p = spec.primary;

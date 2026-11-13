@@ -36,7 +36,12 @@
     "TaskDoneTodayList",
     "TaskChromeBar",
     "TaskFolders",
-    "TaskDocs"
+    "TaskDocs",
+    "TaskJump",
+    "TaskJumpInit"
+  ],
+  "customjs_startup_scripts": [
+    "TaskJumpInit"
   ],
   "files": [
     {
@@ -82,6 +87,14 @@
     {
       "source": "task-docs.js",
       "dest": "{{scripts_path}}/task-entity/task-docs.js"
+    },
+    {
+      "source": "task-jump.js",
+      "dest": "{{scripts_path}}/task-entity/task-jump.js"
+    },
+    {
+      "source": "task-jump-init.js",
+      "dest": "{{scripts_path}}/task-entity/task-jump-init.js"
     }
   ],
   "post_install": [],

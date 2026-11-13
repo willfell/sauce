@@ -118,6 +118,28 @@ without being steps of it, so they are notes, not subtasks (`TaskDocs`,
 - **Agents.** The vault's CLAUDE.md directory map names this folder, so a
   session writes its prompts, handoffs and findings here.
 
+## Jump to task or note
+
+`TaskJump` (`task-jump.js`; spec: `Docs/superpowers/specs/2026-11-13-task-flow-design.md` §8)
+is a fuzzy picker over every task and task note.
+
+- **Opening it.** The command `Sauce: Jump to task or note` (`sauce:jump-to-task`,
+  registered by the `TaskJumpInit` startup script), and the search button on
+  every To-Do chrome bar and on Home (`iconActions` in the bar's spec).
+- **Rows.** Open tasks, then done, then trashed, then task notes, read from the
+  metadata cache (`type: task` / `type: task-doc` under `spice/tasks/`, never
+  `spice/tasks/_sets/`). Status decides the group; a note under `_trash/` is
+  trashed, and one with no status under `_done/` is done. Each row shows a
+  checkbox glyph (task) or the kind icon (note), the title, the parent trail
+  (from the task folders, else `parent_task` / `task:`), and the due date,
+  Open, Done, Trashed or the note's kind.
+- **Ranking.** `TaskJump.rank`: exact title, then title starts with the query,
+  a title word starts with it, the title contains it, every word is in the
+  title, every word is in the title or trail, and last the letters in order.
+  Equal matches keep the open, done, trashed, notes order.
+- **Keys.** Enter opens the note; Mod+Enter (or Cmd/Ctrl-click) opens it in a
+  new tab. On the phone a tap opens it.
+
 ## API (`customJS.TaskEntity`)
 
 All methods are static (with instance delegators, so cross-class calls via

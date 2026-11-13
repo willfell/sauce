@@ -4,6 +4,7 @@ class ToDoChromeBar {
       plus: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
       repeat: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`,
       list: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
+      search: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
       back: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
     };
   }
@@ -30,6 +31,7 @@ class ToDoChromeBar {
         return null;
       },
       surfaceSpec: (ctx) => {
+        const iconActions = [{ id: "jump", label: "Jump to task or note", icon: ICON.search }];
         if (ctx.context === "to-do") {
           return {
             primary: { id: "new-task", label: "New Task", icon: ICON.plus },
@@ -39,6 +41,7 @@ class ToDoChromeBar {
               { id: "completed-tasks", label: "Completed", icon: ICON.list },
             ],
             leaf: true,
+            iconActions,
           };
         }
         if (ctx.context === "to-do-hub") {
@@ -46,6 +49,7 @@ class ToDoChromeBar {
             primary: null,
             overflow: [{ id: "back-today", label: "Back to Today", icon: ICON.back }],
             leaf: false,
+            iconActions,
           };
         }
         if (ctx.context === "project-todo") {
@@ -53,6 +57,7 @@ class ToDoChromeBar {
             primary: { id: "new-task", label: "New Task", icon: ICON.plus },
             overflow: [{ id: "recurring", label: "Recurring", icon: ICON.repeat }],
             leaf: true,
+            iconActions,
           };
         }
         if (ctx.context === "to-do-recurring") {
@@ -63,6 +68,7 @@ class ToDoChromeBar {
               { id: "completed-tasks", label: "Completed", icon: ICON.list },
             ],
             leaf: true,
+            iconActions,
           };
         }
         if (ctx.context === "to-do-recurring-list") {
@@ -73,11 +79,17 @@ class ToDoChromeBar {
               { id: "completed-tasks", label: "Completed", icon: ICON.list },
             ],
             leaf: true,
+            iconActions,
           };
         }
         return { primary: null, overflow: [], leaf: false };
       },
       dispatch: (dv, ctx, id) => {
+        if (id === "jump") {
+          try { window.customJS.TaskJump.open(); }
+          catch (e) { if (typeof Notice === "function") new Notice("Could not open Jump: " + (e.message || e), 6000); }
+          return;
+        }
         if (id === "new-task") {
           if (ctx.context === "project-todo") {
             try {
