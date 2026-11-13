@@ -2443,7 +2443,11 @@ class TaskDialog {
                 await this._ensureFolder(app, parts.slice(0, i).join('/'));
             }
             const file = await app.vault.create(plan.path, plan.content);
-            try { new Notice('Task created'); } catch (_e) {}
+            // A batch caller (Make tasks on a meeting) passes notice: false and
+            // shows one summary instead of a toast per task.
+            if (!opts || opts.notice !== false) {
+                try { new Notice('Task created'); } catch (_e) {}
+            }
             if (!opts || opts.reconcile !== false) {
                 try { this._reconcileAfterCreate(app, plan.path); } catch (_e) {}
             }

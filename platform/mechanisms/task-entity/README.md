@@ -168,6 +168,34 @@ Reusable starter bundles (`TaskSets`, `task-sets.js`; spec:
   moved to the trash, a notice says "Couldn't create from set; nothing was
   kept", and the dialog reopens with the title filled in.
 
+## Meeting action items
+
+In a meeting note, a line starting with `->` or `→` is an action item
+(`TaskMeetingList`, `task-meeting-list.js`; spec:
+`Docs/superpowers/specs/2026-11-13-task-flow-design.md` § 5).
+
+- **Line format.** `-> thing` is mine; `-> Name: thing` is someone else's
+  only when Name is a `[[link]]` or matches (any case, full or first name)
+  an attendee or a note under `spice/people/`. Anything else before a colon
+  stays part of my item. An optional trailing ` (due Fri)`,
+  ` (due tomorrow)` or ` (due 2026-11-20)` sets the due date, counted from
+  the meeting's `date:` (else today). A weekday is the next such day after
+  that date, rolled forward a week at a time so it is never before today;
+  `tomorrow` from an old meeting is today + 1. An explicit date stays as
+  written. Lines in code fences or indented code are ignored.
+- **Make tasks.** A button on the meeting's task section opens a review
+  modal: one row per unconverted line, with a checkbox, an editable title and
+  an editable due date. Mine becomes a task with `source: meeting` and
+  `source_note: "[[<Meeting>]]"` (and the meeting's project). A title reading
+  `Hear back from <Name>: <thing>` also gets a comms note under the task,
+  `Message to <Name>`, with `to: <Name>` and the thing as its first line.
+- **Converted lines.** Each converted line is rewritten to end with
+  ` ✓ [[<task name>]]`, so it is never offered again. A line edited since the
+  modal opened is skipped. It is all one `RenderSafe.mutate` write; every
+  task that was made has its line marked even if the batch fails part-way,
+  and a second Make tasks on the same meeting is refused while one runs.
+  The summary notice counts comms notes that could not be made.
+
 ## API (`customJS.TaskEntity`)
 
 All methods are static (with instance delegators, so cross-class calls via

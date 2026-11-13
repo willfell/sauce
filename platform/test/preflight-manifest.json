@@ -1088,6 +1088,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-meeting-actions",
+      "cmd": [
+        "node",
+        "platform/test/run-task-meeting-actions.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-collapse",
       "cmd": [
         "node",
