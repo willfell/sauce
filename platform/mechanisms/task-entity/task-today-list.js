@@ -2021,12 +2021,6 @@ class TaskTodayList {
                     entries.push({ label: 'Move up', onSelect: () => { try { opts.onMove(task, -1); } catch (_e) {} } });
                     entries.push({ label: 'Move down', onSelect: () => { try { opts.onMove(task, 1); } catch (_e) {} } });
                 }
-                // Pin as Now / Unpin (TaskDayPlan, spec §4), once it has loaded.
-                try {
-                    const DP = window.customJS && window.customJS.TaskDayPlan;
-                    const pin = DP && typeof DP.menuEntry === 'function' ? DP.menuEntry(task) : null;
-                    if (pin) entries.push(pin);
-                } catch (_e) {}
                 // Make subtask of… / Make top-level / Move to project…: the
                 // menu side of drag and drop, on every device (TaskMove).
                 const TM = TaskTodayList._taskMove();
@@ -2034,6 +2028,12 @@ class TaskTodayList {
                     const moveOpts = typeof opts.onMoved === 'function' ? { onDone: (res) => { try { opts.onMoved(task, res); } catch (_e) {} } } : {};
                     try { for (const e of TM.menuEntries(task, moveOpts) || []) entries.push(e); } catch (_e) { /* the rest of the menu still opens */ }
                 }
+                // Pin as Now / Unpin (TaskDayPlan, spec §4), once it has loaded.
+                try {
+                    const DP = window.customJS && window.customJS.TaskDayPlan;
+                    const pin = DP && typeof DP.menuEntry === 'function' ? DP.menuEntry(task) : null;
+                    if (pin) entries.push(pin);
+                } catch (_e) {}
                 entries.push({ label: 'Delete', danger: true, onSelect: () => doDelete() });
                 MP.open(entries, { anchor: moreBtn || (ev && ev.currentTarget) || undefined });
             } catch (e) {
