@@ -44,12 +44,12 @@ A mechanism lives at `platform/mechanisms/<name>/` with:
 - A `manifest.json` declaring its version, the files it ships, where they go in the consumer (with `{{template_variables}}`), and any approval-gated post-install steps.
 
 ### Blueprint
-A bundle defining a *note type*. 16 ship today: `boards`, `cowork`, `daily`, `finance`, `home`, `journal`, `meetings`, `people`, `products`, `project`, `reader`, `sticky-notes`, `teams`, `to-do`, `trips`, `wiki`. Examples:
+A bundle defining a *note type*. 15 ship today: `boards`, `cowork`, `daily`, `home`, `journal`, `meetings`, `people`, `products`, `project`, `reader`, `sticky-notes`, `teams`, `to-do`, `trips`, `wiki`. Examples:
 - `project`: atlas + map + Kanban board + task notes under `spice/projects/<slug>/`.
 - `daily`: daily notes with the right tags, frontmatter, and nav blocks.
 - `meetings`: a per-day meetings hub plus individual meeting notes with attendees.
 
-Every blueprint works by hand in Obsidian. 11 of the 16 also declare an agent surface (`claude_surface[]`: a slash command, skills, and a `CLAUDE.md` router row). `boards`, `finance`, `people`, `to-do`, and `trips` do not yet.
+Every blueprint works by hand in Obsidian. 11 of the 15 also declare an agent surface (`claude_surface[]`: a slash command, skills, and a `CLAUDE.md` router row). `boards`, `people`, `to-do`, and `trips` do not yet.
 
 A blueprint lives at `platform/blueprints/<name>/` with:
 - `manifest.json`: version, install steps, and `rule_fragments[]` (what makes a note of this type "correct").
@@ -67,7 +67,7 @@ Every **blueprint** owns ONE directory at `spice/<module_directory>/` in the con
 
 The `spice/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers keep any other top-level structure they want (e.g., `Timestamps/`, `Resources/`) — `spice/` is the contract boundary.
 
-Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/spice/<module_directory>/`. Examples: `spice/boards/` for the boards blueprint, `spice/to-do/`, `spice/projects/` (the project blueprint), `spice/trips/`, `spice/finance/`.
+Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/spice/<module_directory>/`. Examples: `spice/boards/` for the boards blueprint, `spice/to-do/`, `spice/projects/` (the project blueprint), `spice/trips/`.
 
 **Why:**
 - Install / update / uninstall a blueprint = touch one directory at `spice/<module>/`. Predictable.
@@ -222,7 +222,7 @@ Load-bearing operational lessons not yet codified elsewhere. Most surfaced acros
 
 6. **YAML date auto-parsing + frontmatter parser variance** — frontmatter values matching `YYYY-MM-DD` or `YYYY-MM` auto-parse to Date|Luxon objects; quote on write (`"${month}"`) + tolerant `_toMoment(val)` on read (accepts Luxon/Date/string). Inline-flow booleans may parse as strings; centralize coercion via `isPaid()`-style helpers. Surfaced: v0.16.0.
 
-7. **NBSP gotcha — widgets are the canonical fix** — manual frontmatter editing introduces U+00A0 NBSPs through chat / markdown copy-paste, corrupting inline-flow YAML arrays. Editor widgets (e.g., BudgetCategoriesEditor / PaycheckExpensesEditor / InvoiceTimeLogEditor) bypass every YAML edge case at the source by mutating frontmatter via `app.fileManager.processFrontMatter`. Surfaced: v0.16.0 → fixed in v0.17.0.
+7. **NBSP gotcha — widgets are the canonical fix** — manual frontmatter editing introduces U+00A0 NBSPs through chat / markdown copy-paste, corrupting inline-flow YAML arrays. Editor widgets (e.g., ProjectStatusWidget / ProjectWorkstreamManager) bypass every YAML edge case at the source by mutating frontmatter via `app.fileManager.processFrontMatter`. Surfaced: v0.16.0 → fixed in v0.17.0.
 
 8. **Two backup-suffix conventions** — `.bak` for file-content overwrite (vendored themes; v0.2.0 boards Option B precedent), `.sauce-backup` for plugin-data additive merge. Mixing them is confusing; codified in landmine #12 mechanic #2. Surfaced: v0.19.0.
 

@@ -13,12 +13,12 @@ This guide is the answer to the recurring "what's the schema for X?" question. A
 |---|---|---|---|
 | Sidecar JSON Schema | `platform/blueprints/cowork/data/schemas/*.json` | Yes — `properties.schema_version.enum` | eod-review sidecar v1.0..1.4 |
 | Contract | `platform/blueprints/<bp>/data/*-contract.json` | Yes — `contract_version` field; mirror blueprint version per landmine #20 | scheduled-job-contract.json |
-| rule_fragments[] | Blueprint manifests | No (implicit) | finance budget / paycheck / debt / invoice |
+| rule_fragments[] | Blueprint manifests | No (implicit) | reader / trips / project / cowork |
 | Data file (implicit schema) | `platform/blueprints/<bp>/data/*.json` | Sometimes | kind-titles.json / kind-patterns.json |
 | Workshop manifest | `platform/manifest.json` / `ranch/platform-subscription.json` | Yes — `workshop_version` + per-blueprint pins | the canonical workshop pin map |
 | Learned-state schema | Encoded in helpers (e.g. `normalizeLearnedWeightsV5`) | Yes — schema N | learned_weights schema 5 |
-| Entity-create prompts | `new_entity_buttons[].prompts` in blueprint manifests | No | finance `+ New Budget` form |
-| Helper read-contract | Implicit in helper source | No | `MonthlyOverview` reads `page.month` + `categories[*].actual` |
+| Entity-create prompts | `new_entity_buttons[].prompts` in blueprint manifests | No | meetings `New Meeting` form |
+| Helper read-contract | Implicit in helper source | No | cowork `read-user-preferences-helper` reads the engagement shape from `vault-config.md` |
 
 ## The registry — `platform/schemas-index.json`
 
@@ -87,7 +87,7 @@ Soft warnings (exit 0, printed to stderr):
 
 ## Adding a new entry — checklist
 
-- [ ] Pick an `id` — kebab-case, unique. Convention: `<owner>-<surface>-<role>` (e.g. `cowork-eod-review-sidecar`, `finance-monthly-overview-page-read`).
+- [ ] Pick an `id` — kebab-case, unique. Convention: `<owner>-<surface>-<role>` (e.g. `cowork-eod-review-sidecar`, `cowork-vault-config-engagement`).
 - [ ] Choose `kind` from the enum above.
 - [ ] Set `owner.type` + `owner.name`. For blueprints/mechanisms, `name` must exactly match the workshop manifest's blueprint/mechanism entry name.
 - [ ] `source` is the workshop-relative path to the schema doc OR the closest schema-shaped artifact (the helper for read-contracts; the manifest for rule_fragments).

@@ -104,7 +104,7 @@ The `install.sh` curl|bash flow was the install entry point from v0.22.0 through
 
 ## Using a vault by hand and by agent
 
-An installed vault has two doors. Every blueprint works by hand in Obsidian: hubs, nav buttons, "New X" buttons, templates, and Kanban boards. 11 of the 16 blueprints also ship a slash command and skills, so Claude Code can work on the same notes. The other five (`boards`, `finance`, `people`, `to-do`, `trips`) have no dedicated command yet, but their notes are plain Markdown that an agent can read and write.
+An installed vault has two doors. Every blueprint works by hand in Obsidian: hubs, nav buttons, "New X" buttons, templates, and Kanban boards. 11 of the 15 blueprints also ship a slash command and skills, so Claude Code can work on the same notes. The other four (`boards`, `people`, `to-do`, `trips`) have no dedicated command yet, but their notes are plain Markdown that an agent can read and write.
 
 | Blueprint | What you get by hand in Obsidian | Agent command |
 |---|---|---|
@@ -121,7 +121,6 @@ An installed vault has two doors. Every blueprint works by hand in Obsidian: hub
 | `wiki` | A knowledge base of any depth where the folder path is the hierarchy | `/wiki` |
 | `reader` | A flat reading queue for clipped web articles | `/reader` |
 | `trips` | A folder per trip: atlas, flights, stay, packing list, to-do, notes | |
-| `finance` | A finance hub over budgets, paychecks, invoices, and debts | |
 | `cowork` | Daily, weekly, and monthly hubs fed by scheduled agent briefings | `/cowork`, `/weekly`, `/monthly` |
 
 The installer writes a router table into the vault's `CLAUDE.md`, so an agent knows where each kind of note lives and which command owns it. The [README](../README.md#two-doors-into-the-same-vault) shows the two doors side by side.
@@ -162,7 +161,7 @@ To keep the current pins and only re-materialize, run `sauce update` (or `sauce 
 
 ## Known flow changes (v0.46.0+)
 
-### Entity creation moved to declarative AccentButtons (meetings · people · project · scratch · finance)
+### Entity creation moved to declarative AccentButtons (meetings · people · project · scratch)
 
 v0.46.0 extracted the "create a new entity" pattern into the `entity-create` mechanism. Each affected blueprint now declares a `new_entity_buttons[]` entry in its manifest; the installer injects an AccentButton fence into the entry's hub note, and the `EntityCreate` CustomJS class drives prompts → frontmatter → file create → open at click time.
 
@@ -187,7 +186,7 @@ This is documented posture, not a bug. Project's templates were token-translated
 
 ## Adding a new blueprint
 
-16 blueprints ship today, so an existing one under `platform/blueprints/` is the best model. Sketch:
+15 blueprints ship today, so an existing one under `platform/blueprints/` is the best model. Sketch:
 
 1. In `workshop/platform/blueprints/<name>/`:
    - `manifest.json`: version, `module_directory`, `files[]`, and `rule_fragments[]` (required tags, frontmatter, naming).

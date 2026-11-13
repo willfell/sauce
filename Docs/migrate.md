@@ -96,7 +96,6 @@ Atomic per-phase. Failure-loud abort + restore-from-backup on phase 2-4 errors. 
 **Coverage gaps** (v0.28.x / v0.29.x carries):
 - `journal` migrator (Headspace + Ero have `Timestamps/Journal/<file>.md` non-Sauce filename pattern; currently fall to verbatim) — v0.28.x
 - `meetings-hub` for Ero / Headspace (source pattern differs from `Timestamps/MeetingHubs/<YYYY-MM-DD>-Meetings.md`) — v0.28.x
-- `finance` migrator (no Accuris/Ero/Headspace source has Sauce-shape finance content) — v0.29.x
 - Full Sauce-shape project ecosystem (Atlas / Map / Board / tasks subdir generation; current project migrator is path-translation only) — v0.29.x
 
 ---
@@ -181,7 +180,6 @@ Per-file restore: copy individual files from the backup sibling to the vault pat
 | headspace source-detection | ✅ shipped v0.28.0 CF-7..CF-9 | — |
 | journal (Headspace + Ero `Timestamps/Journal/<file>.md`) | DEFERRED | v0.28.x |
 | meetings-hub (Ero + Headspace patterns differ from Accuris) | DEFERRED | v0.28.x |
-| finance | DEFERRED (no source content in any vault) | v0.29.x |
 | Full Sauce project shape (Atlas/Map/Board/tasks) | DEFERRED | v0.29.x |
 
 ---
