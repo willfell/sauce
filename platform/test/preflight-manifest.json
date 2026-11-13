@@ -1122,6 +1122,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-docs",
+      "cmd": [
+        "node",
+        "platform/test/run-task-docs.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-collapse",
       "cmd": [
         "node",

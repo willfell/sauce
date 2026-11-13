@@ -35,7 +35,8 @@
     "TaskTripList",
     "TaskDoneTodayList",
     "TaskChromeBar",
-    "TaskFolders"
+    "TaskFolders",
+    "TaskDocs"
   ],
   "files": [
     {
@@ -77,6 +78,10 @@
     {
       "source": "task-folders.js",
       "dest": "{{scripts_path}}/task-entity/task-folders.js"
+    },
+    {
+      "source": "task-docs.js",
+      "dest": "{{scripts_path}}/task-entity/task-docs.js"
     }
   ],
   "post_install": [],
@@ -99,7 +104,44 @@
         "current": {
           "label": "fm:title|file:basename"
         }
+      },
+      "task-doc": {
+        "ancestors": [
+          {
+            "label": "lit:To-Do"
+          },
+          {
+            "when": {
+              "fm:task": "present"
+            },
+            "label": "fm:task",
+            "link": "{fm:task}"
+          }
+        ],
+        "current": {
+          "label": "fm:title|file:basename"
+        }
       }
     }
-  }
+  },
+  "claude_surface": [
+    {
+      "kind": "claude_md_row",
+      "table": "directory-map",
+      "row": {
+        "path": "spice/tasks/<Task>/<Task>.md",
+        "owner": "task-entity",
+        "purpose": "A task (type: task). Subtasks nest as <Task>/<Sub>/<Sub>.md. Never write a flat spice/tasks/<Title>.md."
+      }
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "directory-map",
+      "row": {
+        "path": "spice/tasks/<Task>/notes/",
+        "owner": "task-entity",
+        "purpose": "Notes for a task (type: task-doc, kind: prompt|handoff|plan|context|findings|questions|note, task: \"[[<Task>]]\"). Write prompts, handoffs, plans and findings here, not as subtasks."
+      }
+    }
+  ]
 }

@@ -81,6 +81,28 @@ spice/tasks/
 - **Undo.** There is no undo button: Obsidian Sync's version history is the
   undo for a move.
 
+## Task notes
+
+Prompts, handoffs, plans, context, findings and questions belong to a task
+without being steps of it, so they are notes, not subtasks (`TaskDocs`,
+`task-docs.js`; spec: `Docs/superpowers/specs/2026-11-12-task-notes-design.md`).
+
+- **Where.** `spice/tasks/<Task>/notes/<Name>.md`, only under a task in the
+  folder layout. They move with the task's folder to `_done/` or `_trash/`.
+- **Frontmatter.** `type: task-doc`, `kind:` one of prompt, handoff, plan,
+  context, findings, questions, note (anything else reads as note),
+  `title`, `task: "[[<Task>]]"`, `created_at`. No `status`: a note never
+  counts toward the task's progress and never lists as a to-do.
+- **Names.** `TaskEntity.taskName(title, { parentTitle })`: the plain title
+  while unique in the vault, else `Title (Task)`.
+- **Card.** The task card's Notes section lists them in kind order, newest
+  first; Copy prompt on prompt and handoff notes copies the prompt
+  (`TaskDocs.extractPrompt`: a fenced block under a heading or callout titled
+  "prompt", else the first text fence, else the body); + Note creates one
+  from its kind's template and opens it.
+- **Agents.** The vault's CLAUDE.md directory map names this folder, so a
+  session writes its prompts, handoffs and findings here.
+
 ## API (`customJS.TaskEntity`)
 
 All methods are static (with instance delegators, so cross-class calls via

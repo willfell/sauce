@@ -1217,6 +1217,17 @@ class TaskNoteView {
                 } catch (_e) { /* SUBTASKS section best-effort — never break the card */ }
             }
 
+            // ----- NOTES — the task's prompts, handoffs, plans, context and
+            // findings (TaskDocs, spice/tasks/<Task>/notes/). Not steps: no
+            // checkbox, no part of the progress above.
+            if (filePath) {
+                try {
+                    const TDocs = window.customJS && window.customJS.TaskDocs;
+                    const appRef = (typeof window !== 'undefined' && window.app) || (typeof app !== 'undefined' ? app : null);
+                    if (TDocs && typeof TDocs.render === 'function') TDocs.render(card, { app: appRef, taskPath: filePath });
+                } catch (_e) { /* NOTES section best-effort — never break the card */ }
+            }
+
             // ----- Footer: Mark done / Reopen + Edit on one row -----
             const actions = card.createEl('div', { cls: 'sauce-tnv-actions' });
             const button = (cls, text, iconName) => {
