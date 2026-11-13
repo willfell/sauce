@@ -17,6 +17,10 @@ class TaskDocs {
     notesFolder(taskPath) { return TaskDocs.notesFolder(taskPath); }
     compose(kind, title, taskName, createdAt) { return TaskDocs.compose(kind, title, taskName, createdAt); }
     isDoc(fm) { return TaskDocs.isDoc(fm); }
+    titleKind(title) { return TaskDocs.titleKind(title); }
+    candidates(app, taskPath) { return TaskDocs.candidates(app, taskPath); }
+    convert(app, taskPath, items) { return TaskDocs.convert(app, taskPath, items); }
+    openReview(app, taskPath, cands) { return TaskDocs.openReview(app, taskPath, cands); }
 
     static get TYPE() { return 'task-doc'; }
     static get FOLDER() { return 'notes'; }
@@ -250,6 +254,234 @@ class TaskDocs {
         }
     }
 
+    // ----- Converting note-like subtasks -----
+
+    /**
+     * The kind a subtask titled `title` reads as when it is really a note,
+     * or '' when it reads as a step. A trailing "(…)" clash qualifier is
+     * ignored. Conservative on purpose: the user reviews every match.
+     */
+    static titleKind(title) {
+        const t = String(title == null ? '' : title).replace(/\s*\([^()]*\)\s*(\d+)?\s*$/, '').trim().toLowerCase();
+        if (!t) return '';
+        if (/^hand-?off( prompt)?$/.test(t) || /^hand-?off prompt\b/.test(t) || /\bhand-?off$/.test(t)) return 'handoff';
+        if (/^(the |initial |kickoff |major theme initial )?prompt\b/.test(t) || /\bprompt$/.test(t)) return 'prompt';
+        if (/^(proposed |the |initial )?plan$/.test(t)) return 'plan';
+        if (/^questions?$/.test(t)) return 'questions';
+        if (/^(context|explanation|background|summary)$/.test(t)) return 'context';
+        if (/\b(impact|findings|analysis)$/.test(t)) return 'findings';
+        return '';
+    }
+
+    static _fmOf(app, f) {
+        try { return (app.metadataCache.getFileCache(f) || {}).frontmatter || null; } catch (_e) { return null; }
+    }
+
+    /** The task folder notes directly under the folder `dir` (not notes/). */
+    static _childTasks(app, dir) {
+        const folder = app.vault.getAbstractFileByPath(dir);
+        const out = [];
+        for (const c of (folder && folder.children) || []) {
+            if (!Array.isArray(c.children)) continue;
+            const name = String(c.path).split('/').pop();
+            if (name === TaskDocs.FOLDER) continue;
+            const note = app.vault.getAbstractFileByPath(c.path + '/' + name + '.md');
+            const fm = note ? TaskDocs._fmOf(app, note) : null;
+            if (note && fm && String(fm.type || '') === 'task') out.push({ file: note, folder: c, fm });
+        }
+        return out;
+    }
+
+    /**
+     * Whether the subtask `node` ({ file, folder, fm }) can become a note:
+     * its title reads as a note, its folder holds only its own note and
+     * subtasks that can become notes too (no steps, no attachments, no notes
+     * folder of its own), and it is not recurring.
+     */
+    static _convertible(app, node) {
+        const title = node.fm.title != null && String(node.fm.title).trim() !== '' ? String(node.fm.title) : node.file.basename;
+        if (!TaskDocs.titleKind(title) || String(node.fm.recurrence || '').trim()) return false;
+        const name = String(node.folder.path).split('/').pop();
+        for (const c of node.folder.children || []) {
+            if (Array.isArray(c.children)) {
+                const cname = String(c.path).split('/').pop();
+                if (cname === TaskDocs.FOLDER) return false;
+                const kid = TaskDocs._childTasks(app, node.folder.path).find((k) => k.folder === c);
+                if (!kid || !TaskDocs._convertible(app, kid)) return false;
+            } else if (c.path !== node.folder.path + '/' + name + '.md') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The subtasks of the task at `taskPath` that read as notes, with the
+     * convertible subtasks under them, deepest last:
+     * [{ path, title, kind, depth }]. Only for a live task in the folder
+     * layout; [] otherwise. Never throws.
+     */
+    static candidates(app, taskPath) {
+        try {
+            const notesDir = TaskDocs.notesFolder(taskPath);
+            if (!notesDir || !app || !app.vault) return [];
+            const dir = notesDir.slice(0, -('/' + TaskDocs.FOLDER).length);
+            const TE = TaskDocs._te();
+            const parentPath = TE && typeof TE.parentNotePathOf === 'function' ? TE.parentNotePathOf(taskPath) : '';
+            if (parentPath) {
+                const self = TaskDocs._childTasks(app, parentPath.slice(0, parentPath.lastIndexOf('/'))).find((k) => k.file.path === taskPath);
+                if (self && TaskDocs._convertible(app, self)) return [];
+            }
+            const out = [];
+            const walk = (folderPath, depth) => {
+                for (const kid of TaskDocs._childTasks(app, folderPath)) {
+                    if (!TaskDocs._convertible(app, kid)) continue;
+                    const title = kid.fm.title != null && String(kid.fm.title).trim() !== '' ? String(kid.fm.title).trim() : kid.file.basename;
+                    out.push({ path: kid.file.path, title, kind: TaskDocs.titleKind(title), depth });
+                    walk(kid.folder.path, depth + 1);
+                }
+            };
+            walk(dir, 1);
+            return out;
+        } catch (_e) { return []; }
+    }
+
+    /** `text` with the task chrome taken out and the note header put in. */
+    static _docBody(text, kind, taskName) {
+        const s = String(text == null ? '' : text).replace(/\r\n/g, '\n');
+        const m = /^---\n[\s\S]*?\n---\n?/.exec(s);
+        const fm = m ? m[0] : '';
+        let body = s.slice(fm.length);
+        body = body.replace(/```dataviewjs\n[^`]*?class:\s*"(TaskChromeBar|TaskNoteView)"[^`]*?\n```\n?/g, '');
+        body = body.replace(/^[ \t]*<!-- TASK_NOTES -->[ \t]*\n?/m, '');
+        body = body.replace(/^\s+/, '');
+        const header = '> [!info] ' + TaskDocs._kind(kind).label + ' for [[' + taskName + ']]\n\n';
+        return (fm.endsWith('\n') || !fm ? fm : fm + '\n') + '\n' + header + body;
+    }
+
+    static get _TASK_KEYS() {
+        return ['status', 'due', 'recurrence', 'priority', 'project', 'project_slug', 'trip', 'trip_slug', 'source',
+            'source_note', 'parent_task', 'links', 'completed_at', 'rank', 'scheduled'];
+    }
+
+    /**
+     * Turn the subtasks `items` ([{ path, kind }], from candidates) into
+     * notes of the task at `taskPath`: each note's frontmatter becomes a
+     * task-doc (task-only keys dropped, title and created_at kept), its task
+     * chrome is replaced by the note header, and it moves into the task's
+     * notes folder with fileManager.renameFile so links follow. Deepest
+     * first; emptied subtask folders are removed after. Resolves
+     * { converted: [{ from, to }], failed: [{ path, reason }] }.
+     */
+    static async convert(app, taskPath, items) {
+        const out = { converted: [], failed: [] };
+        const notesDir = TaskDocs.notesFolder(taskPath);
+        if (!notesDir) { out.failed.push({ path: taskPath, reason: 'not a task in the folder layout' }); return out; }
+        const TE = TaskDocs._te();
+        const taskFile = app.vault.getAbstractFileByPath(taskPath);
+        const taskFm = taskFile ? TaskDocs._fmOf(app, taskFile) : null;
+        const taskName = String(taskPath).split('/').pop().replace(/\.md$/i, '');
+        const taskTitle = taskFm && taskFm.title != null && String(taskFm.title).trim() ? String(taskFm.title).trim() : taskName;
+        const list = (items || []).slice().sort((a, b) => String(b.path).split('/').length - String(a.path).split('/').length);
+        const emptied = [];
+        if (!app.vault.getAbstractFileByPath(notesDir)) {
+            try { await app.vault.createFolder(notesDir); } catch (_e) { /* exists */ }
+        }
+        for (const item of list) {
+            const file = app.vault.getAbstractFileByPath(item.path);
+            if (!file || Array.isArray(file.children)) { out.failed.push({ path: item.path, reason: 'not found' }); continue; }
+            const kind = TaskDocs.kindOf(item.kind);
+            try {
+                await app.fileManager.processFrontMatter(file, (fm) => {
+                    for (const k of TaskDocs._TASK_KEYS) delete fm[k];
+                    fm.type = TaskDocs.TYPE;
+                    fm.kind = kind;
+                    if (fm.title == null || String(fm.title).trim() === '') fm.title = file.basename;
+                    fm.task = '[[' + taskName + ']]';
+                });
+                await app.vault.process(file, (text) => TaskDocs._docBody(text, kind, taskName));
+                const fm = TaskDocs._fmOf(app, file) || {};
+                const title = fm.title != null && String(fm.title).trim() ? String(fm.title).trim() : file.basename;
+                const own = String(file.basename).toLowerCase();
+                const taken = TaskDocs._takenNames(app);
+                const name = TE && typeof TE.taskName === 'function'
+                    ? TE.taskName(title, { parentTitle: taskTitle, taken: (n) => n !== own && taken(n) })
+                    : file.basename;
+                const from = file.path;
+                const oldDir = from.slice(0, from.lastIndexOf('/'));
+                const to = notesDir + '/' + name + '.md';
+                await app.fileManager.renameFile(file, to);
+                emptied.push(oldDir);
+                out.converted.push({ from, to });
+            } catch (e) {
+                out.failed.push({ path: item.path, reason: String((e && e.message) || e) });
+            }
+        }
+        for (const dir of emptied) {
+            try {
+                const folder = app.vault.getAbstractFileByPath(dir);
+                if (folder && Array.isArray(folder.children) && folder.children.length === 0) await app.vault.delete(folder);
+            } catch (_e) { /* an emptied folder left behind is harmless */ }
+        }
+        return out;
+    }
+
+    /** The Review dialog: tick, pick a kind, Convert. Resolves the convert result or null. */
+    static openReview(app, taskPath, cands) {
+        return new Promise((resolve) => {
+            const SM = window.customJS && window.customJS.SauceModal;
+            const doc = typeof document !== 'undefined' ? document : null;
+            if (!SM || typeof SM.open !== 'function' || !doc) { resolve(null); return; }
+            const picks = cands.map((c) => ({ path: c.path, kind: c.kind, on: true }));
+            let settled = false;
+            const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
+            const handle = SM.open({
+                doc,
+                title: 'Turn subtasks into notes',
+                body: (body) => {
+                    body.createEl('div', { cls: 'sauce-tnv-review-copy', text: 'These subtasks read like notes. Converted ones move into this task\'s notes, stop counting as steps, and keep their links.' });
+                    const list = body.createEl('div', { cls: 'sauce-tnv-review' });
+                    cands.forEach((c, i) => {
+                        const row = list.createEl('label', { cls: 'sauce-tnv-review-row' });
+                        row.style.paddingLeft = (8 + (c.depth - 1) * 18) + 'px';
+                        const box = row.createEl('input', { type: 'checkbox' });
+                        box.checked = true;
+                        box.addEventListener('change', () => { picks[i].on = !!box.checked; });
+                        row.createEl('span', { cls: 'sauce-tnv-review-title', text: c.title });
+                        const sel = row.createEl('select', { cls: 'sauce-tnv-review-kind dropdown' });
+                        for (const k of TaskDocs.KINDS) {
+                            const opt = sel.createEl('option', { text: k.label });
+                            opt.value = k.key;
+                            if (k.key === c.kind) opt.selected = true;
+                        }
+                        sel.addEventListener('change', () => { picks[i].kind = sel.value; });
+                    });
+                },
+                buttons: [
+                    { label: 'Cancel', action: 'cancel' },
+                    {
+                        label: 'Convert',
+                        tone: 'primary',
+                        close: false,
+                        onClick: async (api, event) => {
+                            const button = event && (event.currentTarget || event.target);
+                            try { if (button) button.disabled = true; } catch (_e) {}
+                            const chosen = picks.filter((p) => p.on).map((p) => ({ path: p.path, kind: p.kind }));
+                            const res = chosen.length ? await TaskDocs.convert(app, taskPath, chosen) : { converted: [], failed: [] };
+                            const n = res.converted.length;
+                            TaskDocs._notice(n ? 'Converted ' + n + (n === 1 ? ' subtask' : ' subtasks') + ' into notes'
+                                + (res.failed.length ? '; ' + res.failed.length + ' could not be converted' : '') : 'Nothing converted', 5000);
+                            finish(res);
+                            api.close('convert');
+                        },
+                    },
+                ],
+                onClose: () => finish(null),
+            });
+            if (!handle) finish(null);
+        });
+    }
+
     static _ago(mtime, now) {
         const ms = Math.max(0, (now || Date.now()) - (mtime || 0));
         const min = Math.floor(ms / 60000);
@@ -278,6 +510,14 @@ class TaskDocs {
             'body .sauce-tnv-doc-copy.sauce-tnv-doc-copy.is-copied { color: var(--color-green, #4c9a5a); border-color: var(--color-green, #4c9a5a); }',
             'body .sauce-tnv-doc-add.sauce-tnv-doc-add { align-self: flex-start; height: 30px; min-height: 30px; padding: 0 12px; margin-top: 4px; font-size: 0.85em; border: 1px dashed var(--background-modifier-border-hover, var(--background-modifier-border)); border-radius: var(--radius-m, 8px); background: transparent; color: var(--text-muted); box-shadow: none; cursor: pointer; }',
             '.sauce-tnv-notes-empty { color: var(--text-faint, var(--text-muted)); font-size: 0.85em; padding: 2px 8px; }',
+            '.sauce-tnv-notes-hint { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 8px; border-radius: var(--radius-s, 6px); background: var(--background-secondary); color: var(--text-muted); font-size: 0.85em; }',
+            'body .sauce-tnv-doc-review.sauce-tnv-doc-review { height: 26px; min-height: 26px; padding: 0 10px; font-size: 0.85em; border-radius: var(--radius-s, 6px); border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-normal); box-shadow: none; cursor: pointer; }',
+            '.sauce-tnv-review-copy { color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px; }',
+            '.sauce-tnv-review { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }',
+            '.sauce-tnv-review-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-s, 6px); cursor: pointer; }',
+            '@media (hover: hover) { .sauce-tnv-review-row:hover { background: var(--background-modifier-hover); } }',
+            '.sauce-tnv-review-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+            '.sauce-tnv-review-kind { flex-shrink: 0; }',
         ].join('\n');
     }
 
@@ -367,6 +607,21 @@ class TaskDocs {
                 }
             };
             paint();
+            const hint = section.createEl('div', { cls: 'sauce-tnv-notes-hint' });
+            const paintHint = () => {
+                while (hint.firstChild) hint.removeChild(hint.firstChild);
+                const cands = TaskDocs.candidates(app, taskPath);
+                hint.style.display = cands.length ? '' : 'none';
+                if (!cands.length) return;
+                hint.createEl('span', { text: cands.length + (cands.length === 1 ? ' subtask reads like a note' : ' subtasks read like notes') });
+                const review = hint.createEl('button', { cls: 'sauce-tnv-doc-review', text: 'Review' });
+                try { review.setAttribute('type', 'button'); } catch (_e) {}
+                review.addEventListener('click', async () => {
+                    const res = await TaskDocs.openReview(app, taskPath, cands);
+                    if (res && res.converted.length) { paint(); paintHint(); }
+                });
+            };
+            paintHint();
             const add = section.createEl('button', { cls: 'sauce-tnv-doc-add', text: '+ Note' });
             try { add.setAttribute('type', 'button'); add.setAttribute('aria-haspopup', 'menu'); } catch (_e) {}
             add.addEventListener('click', () => {
