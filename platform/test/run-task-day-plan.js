@@ -136,7 +136,12 @@ function setup(opts) {
   win.customJS.TaskEntity = TE;
   const TDocsC = TDocsClass(win, function () {});
   const TDocs = new TDocsC();
-  if (o.waiting) {
+  if (o.noWaiting) {
+    TDocs.waiting = undefined;
+  } else if (o.spyWaiting) {
+    const real = TDocs.waiting.bind(TDocs);
+    TDocs.waiting = (items, tasks, today) => { win._waitingCall = { items, tasks, today }; return real(items, tasks, today); };
+  } else if (o.waiting) {
     TDocs.waiting = (items, tasks, today) => { win._waitingCall = { items, tasks, today }; return o.waiting(items, tasks, today); };
     TDocs.waitingText = (d) => (d > 0 ? 'Waiting ' + d + 'd' : 'Waiting');
   }
@@ -261,7 +266,7 @@ function setup(opts) {
 
   // ---------- build: Waiting only when TaskDocs.waiting exists ----------
   {
-    const { DP } = setup();
+    const { DP } = setup({ noWaiting: true });
     const m = DP.build({ today: TODAY });
     ok('DP-WAIT-1 without TaskDocs.waiting the panel leaves Waiting out', m.hasWaiting === false && m.waiting.length === 0 && m.counts.waiting === 0);
   }
@@ -273,6 +278,21 @@ function setup(opts) {
       m.hasWaiting === true && m.waiting.length === 1 && m.waiting[0].title === 'Sent update'
       && Array.isArray(call.items) && call.items.length === 2 && call.items.every((i) => i.kind === 'comms')
       && Array.isArray(call.tasks) && call.tasks.some((t) => t.status === 'done') && call.today === TODAY);
+  }
+
+  {
+    const { DP, win } = setup({ spyWaiting: true });
+    const m = DP.build({ today: TODAY });
+    const host = el('div');
+    DP.renderDay(host, { today: TODAY, model: m, surface: 'home', open: true });
+    const group = host.all('sauce-dp-group').find((g) => g.getAttribute('data-group') === 'waiting');
+    const row = group && group.one('sauce-dp-row');
+    ok('DP-WAIT-3 Plan the day calls the real TaskDocs.waiting and renders its entries: the sent, unanswered comms note, how long, to whom, via what and the task',
+      !!win._waitingCall && m.hasWaiting === true && m.counts.waiting === 1
+      && row && row.getAttribute('data-path') === 'spice/tasks/Ship routes/notes/Sent update.md'
+      && row.textContent === 'Sent updateWaiting 2d · to Jason · Slack · Ship routes'
+      && host.one('sauce-dp-plan-head').all('sauce-dp-count').some((c) => c.textContent === '1 waiting'),
+      row && row.textContent);
   }
 
   // ---------- pin / unpin ----------
@@ -370,7 +390,7 @@ function setup(opts) {
   }
   {
     const files = FILES.filter((f) => !/pinned_at/.test(JSON.stringify(f.fm || {})));
-    const { DP } = setup({ files });
+    const { DP } = setup({ files, noWaiting: true });
     const host = el('div');
     DP.renderDay(host, { today: '2026-11-25', surface: 'home', open: true });
     ok('DP-RENDER-15 with nothing pinned there is no Now card and no Waiting group',
@@ -414,9 +434,9 @@ function setup(opts) {
         ['done', 'spice/tasks/Pay rent/Pay rent.md'],
       ]), JSON.stringify(order));
     const body = app._byPath.get('spice/daily/2026/11-November/Friday-2026-11-13.md').body;
-    ok('DP-SHUT-2 the summary lands in today\'s daily note through app.vault.process',
+    ok('DP-SHUT-2 the summary lands in today\'s daily note through app.vault.process (Still waiting from TaskDocs.waiting)',
       res.written === true && app._writes.some((w) => w.kind === 'process')
-      && /\n## Shutdown\n%% shutdown:start %%\n\nDone: 3\n- \[\[Write tests\]\]\n- \[\[Finished pin\]\]\n- \[\[Pay rent\]\]\n\nMoved: 3\n- \[\[Old pin\]\] → Sat Nov 14\n- \[\[Call bank\]\] → Mon Nov 16\n- \[\[Ship routes\]\] → Fri Nov 20\n\nStill waiting: 0\n%% shutdown:end %%\n$/.test(body), body);
+      && /\n## Shutdown\n%% shutdown:start %%\n\nDone: 3\n- \[\[Write tests\]\]\n- \[\[Finished pin\]\]\n- \[\[Pay rent\]\]\n\nMoved: 3\n- \[\[Old pin\]\] → Sat Nov 14\n- \[\[Call bank\]\] → Mon Nov 16\n- \[\[Ship routes\]\] → Fri Nov 20\n\nStill waiting: 1\n%% shutdown:end %%\n$/.test(body), body);
     ok('DP-SHUT-3 a notice sums it up', notices.some((n) => n === 'Day shut down: 1 done, 3 moved'), JSON.stringify(notices));
     const dailyFile = app._byPath.get('spice/daily/2026/11-November/Friday-2026-11-13.md');
     dailyFile.body += '\nWrapped up early.\n';
