@@ -417,6 +417,95 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
       label === 'Copy message' && copied[0] === 'Hi all, the fix ships today.', JSON.stringify([label, copied]));
   }
 
+
+  {
+    const R = 'spice/tasks/Redis';
+    const rApp = makeApp({
+      [`${R}/Redis.md`]: { fm: { type: 'task', title: 'Fix Redis' } },
+      [`${R}/notes/Prompt (Redis).md`]: { fm: { type: 'task-doc', kind: 'prompt', title: 'Prompt' }, body: 'one', mtime: 9 },
+      [`${R}/notes/Prompt 2.md`]: { fm: { type: 'task-doc', kind: 'prompt', title: 'Prompt' }, body: 'two', mtime: 8 },
+      'spice/tasks/Other/notes/Taken name.md': { fm: { type: 'task-doc', title: 'Taken name' } },
+    });
+    const renames = [];
+    rApp.fileManager = {
+      processFrontMatter: async (f, fn) => { fn(f._fm); },
+      renameFile: async (f, to) => { renames.push([f.path, to]); rApp._files.delete(f.path); f.path = to; f.basename = to.split('/').pop().replace(/\.md$/, ''); rApp._files.set(to, f); rApp._relink(); },
+    };
+    const a = await TD.rename(rApp, `${R}/notes/Prompt (Redis).md`, '  Prompt   for the  failover ');
+    ok('TD-RENAME a note takes the new name as its title and file name, moved with renameFile so links follow',
+      a.ok && a.path === `${R}/notes/Prompt for the failover.md` && rApp._files.get(a.path)._fm.title === 'Prompt for the failover'
+      && renames[0][0] === `${R}/notes/Prompt (Redis).md`, JSON.stringify(a));
+    const b = await TD.rename(rApp, `${R}/notes/Prompt 2.md`, 'Taken name');
+    ok('TD-RENAME-CLASH a name used elsewhere in the vault gets the task after it, the way new notes do',
+      b.ok && b.path === `${R}/notes/Taken name (Fix Redis).md` && rApp._files.get(b.path)._fm.title === 'Taken name', JSON.stringify(b));
+    renames.length = 0;
+    const c = await TD.rename(rApp, `${R}/notes/Taken name (Fix Redis).md`, 'Taken name');
+    ok('TD-RENAME-SAME renaming to its own name keeps the file where it is', c.ok && c.path === `${R}/notes/Taken name (Fix Redis).md` && renames.length === 0, JSON.stringify(c));
+    const d = await TD.rename(rApp, `${R}/notes/Prompt for the failover.md`, '   ');
+    const e = await TD.rename(rApp, `${R}/notes/Gone.md`, 'x');
+    ok('TD-RENAME-INVALID an empty name or a missing note is refused', d.ok === false && e.ok === false && rApp._files.has(`${R}/notes/Prompt for the failover.md`));
+
+    const mutations = [];
+    win.customJS.RenderSafe = { mutate: async (o) => { mutations.push(o); try { await o.optimistic(); const value = await o.write(); return { ok: true, value }; } catch (err) { await o.revert(err); return { ok: false, error: err }; } } };
+    const mk = (tag, cls) => {
+      const el = { tag, className: cls || '', children: [], style: {}, _attrs: {}, _l: {}, textContent: '', _html: '', value: '', classes: new Set(String(cls || '').split(/\s+/).filter(Boolean)) };
+      el.classList = { add: (x) => el.classes.add(x), remove: (x) => el.classes.delete(x), contains: (x) => el.classes.has(x) };
+      Object.defineProperty(el, 'innerHTML', { get: () => el._html, set: (v) => { el._html = v; el.children = []; } });
+      el.createEl = (t, o) => { const ch = mk(t, (o && o.cls) || ''); if (o && o.text != null) ch.textContent = o.text; ch.parentNode = el; el.children.push(ch); return ch; };
+      el.setAttribute = (k, v) => { el._attrs[k] = v; };
+      el.addEventListener = (k, fn) => { el._l[k] = fn; };
+      el.insertAdjacentHTML = (w, h) => { el._html += h; };
+      el.removeChild = (ch) => { el.children.splice(el.children.indexOf(ch), 1); };
+      el.remove = () => { if (el.parentNode) el.parentNode.removeChild(el); };
+      el.focus = () => {}; el.select = () => {};
+      Object.defineProperty(el, 'firstChild', { get: () => el.children[0] || null });
+      return el;
+    };
+    const all = (n) => (n.children || []).flatMap((x) => [x, ...all(x)]);
+    const by = (root, cls) => all(root).filter((n) => String(n.className).split(/\s+/).includes(cls));
+    const key = (k) => ({ key: k, preventDefault() {} });
+
+    const sec = TD.render(mk('div'), { app: rApp, taskPath: `${R}/Redis.md` });
+    const row0 = by(sec, 'sauce-tnv-doc')[0];
+    const before = by(row0, 'sauce-tnv-doc-title')[0].textContent;
+    by(row0, 'sauce-tnv-doc-rename')[0]._l.click({ stopPropagation() {} });
+    const rowInput = by(row0, 'sauce-tdv-rename-input')[0];
+    ok('TD-RENAME-ROW each note on the task card has Rename, which turns its name into a field holding the current name',
+      rowInput && rowInput.value === before && by(row0, 'sauce-tnv-doc-title')[0].style.display === 'none', before);
+    rowInput.value = 'Failover prompt';
+    await rowInput._l.keydown(key('Enter'));
+    await new Promise((r) => setTimeout(r, 0));
+    ok('TD-RENAME-ROW-SAVE Enter renames the note through RenderSafe.mutate and the list redraws with the new name',
+      mutations.length === 1 && rApp._files.has(`${R}/notes/Failover prompt.md`)
+      && by(sec, 'sauce-tnv-doc-title').map((n) => n.textContent).includes('Failover prompt'), JSON.stringify(by(sec, 'sauce-tnv-doc-title').map((n) => n.textContent)));
+    const row1 = by(sec, 'sauce-tnv-doc')[1];
+    by(row1, 'sauce-tnv-doc-rename')[0]._l.click({ stopPropagation() {} });
+    const esc = by(row1, 'sauce-tdv-rename-input')[0];
+    esc.value = 'Should not stick';
+    await esc._l.keydown(key('Escape'));
+    ok('TD-RENAME-ESCAPE Escape puts the name back and writes nothing', mutations.length === 1 && by(row1, 'sauce-tdv-rename-input').length === 0
+      && by(row1, 'sauce-tnv-doc-title')[0].style.display === '');
+
+    const P = `${R}/notes/Failover prompt.md`;
+    const dv = { container: mk('div'), current: () => ({ file: { path: P } }) };
+    const card = TD.renderHeader(dv, { app: rApp });
+    by(card, 'sauce-tdv-rename')[0]._l.click();
+    const hIn = by(card, 'sauce-tdv-rename-input')[0];
+    ok('TD-RENAME-HEADER the header card has Rename next to the title', hIn && hIn.value === 'Failover prompt' && by(card, 'sauce-tdv-title-row')[0].classes.has('is-renaming'));
+    hIn.value = 'Redis failover prompt';
+    await hIn._l.blur();
+    await new Promise((r) => setTimeout(r, 0));
+    ok('TD-RENAME-HEADER-SAVE leaving the field saves: the title shows the new name and the file is renamed',
+      by(card, 'sauce-tdv-title')[0].textContent === 'Redis failover prompt' && rApp._files.has(`${R}/notes/Redis failover prompt.md`) && mutations[1].failureMessage === 'Could not rename the note');
+    rApp.fileManager.processFrontMatter = async () => { throw new Error('locked'); };
+    by(card, 'sauce-tdv-rename')[0]._l.click();
+    const hIn2 = by(card, 'sauce-tdv-rename-input')[0];
+    hIn2.value = 'Never';
+    await hIn2._l.keydown(key('Enter'));
+    await new Promise((r) => setTimeout(r, 0));
+    ok('TD-RENAME-REVERT a failed rename puts the old name back on the card', by(card, 'sauce-tdv-title')[0].textContent === 'Redis failover prompt');
+  }
+
   const failed = results.filter(([, c]) => !c).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);
   process.exit(failed ? 1 : 0);

@@ -107,8 +107,14 @@ without being steps of it, so they are notes, not subtasks (`TaskDocs`,
   shows the trail up to the task, the kind badge (click to change the kind),
   the previous and next notes of the task, the title, the task's status, due
   date, priority and project, and Copy prompt (prompt and handoff) or Copy
-  message (comms: the message to send others about the task) and Open task. The installer's `applyTaskDocHeaderHeal` adds the header to notes made
+  message (comms: the message to send others about the task) and Open task.
+  The installer's `applyTaskDocHeaderHeal` adds the header to notes made
   before it, replacing their one-line `> [!info] <Kind> for [[Task]]` header.
+- **Rename.** The pencil next to the header card's title (or a double-click
+  on it) and the pencil on each Notes row turn the name into a field; Enter
+  or leaving the field saves, Escape cancels. `TaskDocs.rename` sets the
+  `title` and renames the file by the Names rule above with
+  `fileManager.renameFile`, so links follow; the note stays in `notes/`.
 - **Agents.** The vault's CLAUDE.md directory map names this folder, so a
   session writes its prompts, handoffs and findings here.
 
