@@ -2536,7 +2536,8 @@ class TaskDialog {
      * the caller's re-render. `app` is grabbed from the runtime global (as
      * open()/_render do). A blank / whitespace-only title, or a cold-load with no
      * app, is a silent no-op. Returns a Promise (the caller awaits before it
-     * re-renders). Never touches any surface note.
+     * re-renders). Never touches any surface note. opts.source and
+     * opts.source_note pass through (a comms follow-up sets both).
      */
     prepareQuick(opts) {
         const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;
@@ -2546,6 +2547,7 @@ class TaskDialog {
             title,
             due: (opts && opts.today) || '',
             source: (opts && opts.source) || 'daily',
+            source_note: (opts && opts.source_note) || '',
             parent_task: (opts && opts.parent_task) || '',
             links: [],
         };

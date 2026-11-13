@@ -19,7 +19,7 @@ due: 2026-06-30         # optional
 priority: high          # optional: low | medium | high | highest
 project: "[[Sauce]]"    # optional wikilink
 project_slug: sauce     # optional denormalized slug
-source: daily           # daily | project | meeting | manual
+source: daily           # daily | project | meeting | manual | comms
 source_note: "[[...]]"  # optional backlink
 created_at: 2026-07-01T14:22:33-06:00
 completed_at:           # set when done
@@ -116,7 +116,42 @@ without being steps of it, so they are notes, not subtasks (`TaskDocs`,
   `title` and renames the file by the Names rule above with
   `fileManager.renameFile`, so links follow; the note stays in `notes/`.
 - **Agents.** The vault's CLAUDE.md directory map names this folder, so a
-  session writes its prompts, handoffs and findings here.
+  session writes its prompts, handoffs and findings here, and sets
+  `session:` on a handoff.
+
+Comms follow-ups and the Claude loop (spec:
+`Docs/superpowers/specs/2026-11-13-task-flow-design.md` §1-2):
+
+- **Mark sent.** An unsent comms note's header card has Mark sent: a small
+  panel (a sheet on a phone) with To (from `to:`), Via (Slack, Email, Teams,
+  Other) and Follow up (None, Tomorrow, In 2 work days, Next Monday, or a
+  date). Saving writes `to`, `via`, `sent_at` and a blank `replied_at`, and
+  for a follow-up creates a subtask of the note's task through
+  `TaskDialog.createQuick`: `Hear back from <first names>: <note title>`, due
+  that day, `source: comms`, `source_note: "[[<note>]]"`.
+- **Waiting.** A comms note is waiting while `sent_at` is set, `replied_at`
+  is blank and no follow-up task naming it is done (`TaskDocs.waiting`), so
+  finishing the follow-up counts as a reply. Its card shows
+  `Sent Nov 13 · Slack · waiting 2d` and Got reply (sets `replied_at` and
+  marks the open follow-up done); its Notes row shows `Waiting 2d` or
+  `Sent Nov 13`. To-Do's Waiting tab lists waiting notes oldest first, with
+  Got reply on each row. The card, the Notes rows and the tab all match a
+  follow-up anywhere in the vault by `source_note`, so they agree. Notes
+  under `_done/` or `_trash/` never wait and have no Mark sent or Got
+  reply. A follow-up Got reply cannot close leaves the reply saved and
+  says how many are still open.
+- **Copy for Claude.** A prompt note's card copies the prompt, a `---` line,
+  and a short block: the task and its path, the notes folder, and how to
+  write results there as `type: task-doc` notes.
+- **New.** A note changed since this device last opened it (its header card
+  last rendered; `localStorage` key `sauce-taskdoc-seen`) shows New on the
+  task card, and its task's To-Do row shows `New note` / `2 new notes`,
+  which opens the newest and counts down at once. Edits made here (typing in the open note, rename,
+  Mark sent, Got reply, + Note) count as seen; notes changed more than 14
+  days ago are never new.
+- **Resume.** A handoff with `session:` has Resume: an `http(s)://` or
+  `claude.ai/` link opens; an id of letters, digits, `_` and `-` is copied
+  as `claude --resume <id>`; anything else copies nothing and says so.
 
 ## Jump to task or note
 

@@ -67,6 +67,7 @@ class TaskTodayList {
     projectHue(name) { return TaskTodayList.projectHue(name); }
     projectTint(name) { return TaskTodayList.projectTint(name); }
     renderSubtaskMeter(slot, count) { return TaskTodayList.renderSubtaskMeter(slot, count); }
+    renderNewNotesChip(slot, taskPath, appRef, now) { return TaskTodayList.renderNewNotesChip(slot, taskPath, appRef, now); }
     get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
     classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
     moveInOrder(list, path, dir) { return TaskTodayList.moveInOrder(list, path, dir); }
@@ -1053,7 +1054,9 @@ class TaskTodayList {
             + ' @media (hover: none) { ' + touch + ' }'
             + ' @media (max-width: 560px) { ' + touch + ' }'
             + ' ' + scoped('.is-phone', phone.trim())
-            + ' @media (max-width: 480px) { ' + phone + ' }';
+            + ' @media (max-width: 480px) { ' + phone + ' }'
+            + ' .sauce-task-today-row .sauce-task-new-notes { position: relative; }'
+            + ' body.is-mobile .sauce-task-today-row .sauce-task-new-notes::after { content: ""; position: absolute; left: -4px; right: -4px; top: -9px; bottom: -9px; }';
     }
 
     static get _PRIO_BAR_COLOR() {
@@ -1356,6 +1359,7 @@ class TaskTodayList {
         if (task && task.subtask_count && task.subtask_count.total > 0) {
             TaskTodayList.renderSubtaskMeter(extras, task.subtask_count);
         }
+        if (path && opts.showNewNotes !== false) TaskTodayList.renderNewNotesChip(extras, path);
         if (opts.showAge !== false) {
             const age = TaskTodayList._ageChip(task, todayStr, TE);
             if (age) {
@@ -1858,6 +1862,48 @@ class TaskTodayList {
             chip.createEl('span', { text: done + '/' + total });
             const label = done + ' of ' + total + ' subtasks done';
             try { chip.setAttribute('title', label); chip.setAttribute('aria-label', label); } catch (_e) {}
+            return chip;
+        } catch (_e) { return null; }
+    }
+
+    /**
+     * The `New note` / `2 new notes` chip on a task row: the task's notes
+     * changed since this device last opened them (TaskDocs.newNotes). Click
+     * opens the newest and counts the chip down at once; it goes after the
+     * last. On a phone an invisible ::after widens the tap target without
+     * changing the row's height. Draws nothing without TaskDocs or new
+     * notes. `appRef` defaults to the global app and `now` to the clock.
+     * Never throws.
+     */
+    static renderNewNotesChip(slot, taskPath, appRef, now) {
+        try {
+            const TDocs = typeof window !== 'undefined' && window.customJS ? window.customJS.TaskDocs : null;
+            if (!slot || typeof slot.createEl !== 'function' || !TDocs || typeof TDocs.newNotes !== 'function') return null;
+            const a = appRef !== undefined ? appRef : ((typeof window !== 'undefined' && window.app) || null);
+            const fresh = TDocs.newNotes(a, taskPath, Number.isFinite(now) ? now : Date.now());
+            if (!fresh || !fresh.length) return null;
+            const chip = slot.createEl('button', { cls: 'sauce-task-new-notes' });
+            chip.style.cssText = 'display: inline-flex; align-items: center; box-sizing: border-box; height: auto; min-height: 0; margin: 0; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent); border-radius: 5px; background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); box-shadow: none; color: var(--text-accent); font: inherit; line-height: 1.4; white-space: nowrap; cursor: pointer;';
+            try { chip.setAttribute('type', 'button'); } catch (_e) {}
+            let left = fresh.slice();
+            const paint = () => {
+                const n = left.length;
+                chip.textContent = n === 1 ? 'New note' : n + ' new notes';
+                try {
+                    chip.setAttribute('title', 'Open ' + left[0].title);
+                    chip.setAttribute('aria-label', chip.textContent + ': open ' + left[0].title);
+                } catch (_e) {}
+            };
+            paint();
+            chip.addEventListener('click', (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                const target = left[0];
+                if (!target) return;
+                try { if (a && a.workspace) a.workspace.openLinkText(target.path, String(taskPath), false); } catch (_e) {}
+                left = left.slice(1);
+                if (left.length) paint();
+                else { try { chip.remove(); } catch (_e) { try { if (chip.parentNode) chip.parentNode.removeChild(chip); } catch (_e2) {} } }
+            });
             return chip;
         } catch (_e) { return null; }
     }

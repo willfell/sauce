@@ -1,8 +1,11 @@
 /**
  * ToDoDailyFilterView (CustomJS) — the daily To-Do view: a tab bar (Today /
- * This week / Overdue / Backlog / All open), Sort and Group menus, one flat
- * live task-note list and, on the Today tab, a Done today section. Tab, sort
- * and group persist under one device-wide prefs key (not keyed by note date).
+ * This week / Overdue / Backlog / All open / Waiting), Sort and Group menus,
+ * one flat live task-note list and, on the Today tab, a Done today section.
+ * Waiting lists the comms notes sent and not yet answered (TaskDocs.waiting),
+ * oldest first, each with Got reply; it shows only while TaskDocs is loaded.
+ * Tab, sort and group persist under one device-wide prefs key (not keyed by
+ * note date).
  * TV-4 mounts this helper in the daily template; TV-3 keeps it independently
  * renderable for behavioral coverage.
  *
@@ -50,11 +53,12 @@ class ToDoDailyFilterView {
             daily: {
                 key: 'daily',
                 prefsKey: ToDoDailyFilterView.PREFS_KEY,
-                tabs: ToDoDailyFilterView.TABS,
+                tabs: [...ToDoDailyFilterView.TABS, 'waiting'],
                 defaults: { tab: 'today', sort: 'smart', group: 'none' },
-                counted: ['overdue', 'backlog'],
+                counted: ['overdue', 'backlog', 'waiting'],
                 labels: {},
                 strip: true, search: false, done: true, reorder: true, recurringOnly: false,
+                waiting: true,
                 emptyText: 'No tasks in this view.',
             },
             all: {
@@ -121,7 +125,7 @@ class ToDoDailyFilterView {
     }
 
     /** Every tab key selectTab knows; a surface shows a subset of these. */
-    static get TAB_KEYS() { return [...ToDoDailyFilterView.TABS, 'undated']; }
+    static get TAB_KEYS() { return [...ToDoDailyFilterView.TABS, 'undated', 'waiting']; }
 
     /** Shown alone, with no pills, when a scoped note has no tasks at all. */
     static get BLANK_SCOPE_TEXT() { return 'No tasks yet. Use + New Task above.'; }
@@ -325,6 +329,8 @@ class ToDoDailyFilterView {
         const root = (task) => !ToDoDailyFilterView.isSubtask(task, index);
         const key = ToDoDailyFilterView.TAB_KEYS.includes(tab) ? tab : 'today';
         switch (key) {
+            case 'waiting':
+                return [];
             case 'all':
                 return open.filter(root);
             case 'undated':
@@ -869,16 +875,22 @@ class ToDoDailyFilterView {
         if (!todayStr) return;
         const viewedDay = View.viewedDay(page, todayStr);
 
+        // The Waiting tab's comms notes come from the same query as the tasks.
+        const TDocs = S.waiting && CJS.TaskDocs && typeof CJS.TaskDocs.waiting === 'function'
+            && typeof CJS.TaskDocs.renderWaitingRow === 'function' ? CJS.TaskDocs : null;
         let tasks = [];
+        let comms = [];
         try {
-            const raw = dv.pages('"spice/tasks"').where((candidate) =>
-                candidate && candidate.type === 'task'
+            const isTask = (candidate) => candidate.type === 'task'
                 && (candidate.status === 'open' || candidate.status === 'done')
-                && candidate.file && candidate.file.path
-                && (typeof TE.taskState === 'function' ? TE.taskState(candidate) !== 'deleted' : true));
+                && (typeof TE.taskState === 'function' ? TE.taskState(candidate) !== 'deleted' : true);
+            const raw = dv.pages('"spice/tasks"').where((candidate) =>
+                candidate && candidate.file && candidate.file.path
+                && (isTask(candidate) || (!!TDocs && candidate.type === 'task-doc')));
             const pages = raw && typeof raw.array === 'function' ? raw.array() : Array.from(raw || []);
-            tasks = pages.map((candidate) => TE.parseNote(candidate));
-        } catch (_e) { tasks = []; }
+            tasks = pages.filter((candidate) => isTask(candidate)).map((candidate) => TE.parseNote(candidate));
+            if (TDocs) comms = pages.filter((candidate) => candidate.type === 'task-doc').map((candidate) => TDocs.commsItem(candidate));
+        } catch (_e) { tasks = []; comms = []; }
         // Whether a task is a subtask depends on its parent being open and
         // loaded, so it is decided over every loaded task (before the scope
         // and the search narrow them) at each paint: a row's own write
@@ -977,12 +989,17 @@ class ToDoDailyFilterView {
             return list;
         };
 
-        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open', undated: 'No date', ...S.labels };
+        const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open', undated: 'No date', waiting: 'Waiting', ...S.labels };
+        const tabKeys = S.tabs.filter((key) => key !== 'waiting' || !!TDocs);
+        // A saved Waiting tab with TaskDocs missing falls back to the default
+        // for this render only; the saved choice returns once TaskDocs loads.
+        if (!tabKeys.includes(prefs.tab)) prefs = { ...prefs, tab: S.defaults.tab };
+        const waitingItems = () => (TDocs ? TDocs.waiting(comms, loaded, todayStr) : []);
         const tools = Array.isArray(S.tools) ? S.tools : ['sort', 'group', 'select'];
         const tabButtons = {};
         const tabText = (key) => {
             if (!S.counted.includes(key)) return TAB_LABELS[key];
-            const n = View.selectTab(pool(), key, todayStr, TE, parents()).length;
+            const n = key === 'waiting' ? waitingItems().length : View.selectTab(pool(), key, todayStr, TE, parents()).length;
             return n > 0 ? `${TAB_LABELS[key]} · ${n}` : TAB_LABELS[key];
         };
         const setPill = (button, active) => {
@@ -1017,7 +1034,8 @@ class ToDoDailyFilterView {
         };
         const updateControls = () => {
             updateDayPill();
-            for (const key of S.tabs) {
+            rightSide.style.display = !state.day && prefs.tab === 'waiting' ? 'none' : '';
+            for (const key of tabKeys) {
                 const button = tabButtons[key];
                 const active = !state.day && prefs.tab === key;
                 button.textContent = tabText(key);
@@ -1233,6 +1251,7 @@ class ToDoDailyFilterView {
                 paintRows(listHost, rows, false);
                 return;
             }
+            if (prefs.tab === 'waiting') { paintWaiting(); return; }
             if (prefs.tab === 'overdue') {
                 const split = View.splitOverdue(pool(), todayStr, TE);
                 if (!split.overdue.length && !split.stale.length) { paintEmpty(searching ? 'No tasks match.' : ''); return; }
@@ -1257,6 +1276,35 @@ class ToDoDailyFilterView {
                 return;
             }
             paintRows(listHost, rows, false);
+        };
+        // Waiting: comms notes sent and not yet answered, oldest first. Got
+        // reply on a row writes through TaskDocs and patches this render's
+        // copy, so the row and the tab count go at once.
+        const paintWaiting = () => {
+            const items = waitingItems();
+            if (!items.length) { paintEmpty('Nothing waiting on a reply.'); return; }
+            const list = makeList(listHost);
+            const appRef = typeof window !== 'undefined' ? window.app : null;
+            for (const item of items) {
+                try {
+                    TDocs.renderWaitingRow(list, item, {
+                        app: appRef,
+                        today: todayStr,
+                        onReplied: (done, stamp) => {
+                            const note = comms.find((c) => c && c.path === done.path);
+                            if (note) note.replied_at = stamp || 'replied';
+                            const name = String(done.path).split('/').pop().replace(/\.md$/i, '');
+                            for (const task of loaded) {
+                                if (task && String(task.source || '') === 'comms'
+                                    && String(task.source_note || '').replace(/^\[\[|\]\]$/g, '') === name
+                                    && String(task.status || 'open') === 'open') task.status = 'done';
+                            }
+                            updateControls();
+                            if (!list.firstChild) paintList();
+                        },
+                    });
+                } catch (_e) { /* one bad row never blanks the tab */ }
+            }
         };
         const paintEmpty = (text) => {
             const list = makeList(listHost);
@@ -1530,7 +1578,7 @@ class ToDoDailyFilterView {
             commit({ [key]: options[(index + 1) % options.length].key });
         };
 
-        for (const key of S.tabs) {
+        for (const key of tabKeys) {
             const button = tabGroup.createEl('button', { text: TAB_LABELS[key] });
             tabButtons[key] = button;
             button.setAttribute('type', 'button');
