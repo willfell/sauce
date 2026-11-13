@@ -231,17 +231,22 @@
 .sauce-home .sauce-home-capture-icon svg { display: block; }
 .sauce-home .sauce-home-capture-label { white-space: nowrap; }
 
-/* "New task" leads the dropdown: accent icon, a touch heavier, and a hairline
- * separating it from the other captures. */
-.sauce-home .sauce-home-add-item.sauce-home-new-task {
+/* "New task" (and "New from set" when task sets are loaded) lead the dropdown:
+ * accent icon, a touch heavier, and a hairline after the last of them
+ * (.sauce-home-lead-end) separating them from the other captures. */
+.sauce-home .sauce-home-add-item.sauce-home-new-task,
+.sauce-home .sauce-home-add-item.sauce-home-new-from-set {
   font-weight: 650;
   color: var(--text-normal);
-  margin-bottom: 4px;
 }
-.sauce-home .sauce-home-add-item.sauce-home-new-task .sauce-home-capture-icon {
+.sauce-home .sauce-home-add-item.sauce-home-new-task .sauce-home-capture-icon,
+.sauce-home .sauce-home-add-item.sauce-home-new-from-set .sauce-home-capture-icon {
   color: var(--interactive-accent);
 }
-.sauce-home .sauce-home-add-item.sauce-home-new-task::after {
+.sauce-home .sauce-home-add-item.sauce-home-lead-end {
+  margin-bottom: 4px;
+}
+.sauce-home .sauce-home-add-item.sauce-home-lead-end::after {
   content: "";
   position: absolute;
   left: 10px;

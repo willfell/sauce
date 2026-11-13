@@ -630,7 +630,17 @@ function descendants(el) {
       assertTrue("HOME-SET-3 choosing it closes the menu and opens TaskSets with { surface:'home', today }",
         menuS && !isOpen(menuS) && setOpens.length === 1 && deepEq(setOpens[0], { surface: "home", today: "2026-07-02" }),
         JSON.stringify(setOpens));
+      assertTrue("HOME-SET-4 the hairline moves after New from set: it carries .sauce-home-lead-end and New task does not",
+        hasCls(itemsS[1], "sauce-home-lead-end") && !hasCls(itemsS[0], "sauce-home-lead-end"));
       delete global.customJS.TaskSets;
+      const dvN = makeDv();
+      await home_.render(dvN, {});
+      const homeN = dvN.container.querySelector(".sauce-home");
+      const newTaskN = homeN ? descendants(homeN).find((n) => n.tag === "button" && hasCls(n, "sauce-home-new-task")) : null;
+      assertTrue("HOME-SET-5 without TaskSets the hairline stays after New task", !!newTaskN && hasCls(newTaskN, "sauce-home-lead-end"));
+      const cssHome = fs.readFileSync(path.join(__dirname, "..", "blueprints", "home", "helpers", "sauce-home.css"), "utf8");
+      assertTrue("HOME-SET-6 the hairline rule hangs off .sauce-home-lead-end, not .sauce-home-new-task",
+        /\.sauce-home-add-item\.sauce-home-lead-end::after\s*\{[^}]*border-bottom/.test(cssHome) && !/sauce-home-new-task::after/.test(cssHome));
     }
 
     delete global.customJS;

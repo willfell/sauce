@@ -584,8 +584,14 @@ class SpaceHome {
 
     // Menu, first entry — "New task": a single button (the old title-only
     // "Jot a task…" input is gone) that closes the menu and opens the full
-    // task dialog. The dialog's When defaults to No date.
-    const newTaskBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-task" });
+    // task dialog. The dialog's When defaults to No date. The last of the
+    // lead entries (New task, then New from set when TaskSets has loaded)
+    // carries .sauce-home-lead-end, the hairline above the other captures.
+    const cjsSets = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const hasSets = !!(cjsSets && cjsSets.TaskSets && typeof cjsSets.TaskSets.open === "function");
+    const newTaskBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-task" + (hasSets ? "" : " sauce-home-lead-end") });
     newTaskBtn.setAttribute("type", "button");
     newTaskBtn.dataset.captureKey = "task";
     const newTaskIcon = newTaskBtn.createEl("span", { cls: "sauce-home-capture-icon" });
@@ -610,11 +616,8 @@ class SpaceHome {
 
     // Menu, second entry — "New from set": a task with its subtasks and notes
     // from a set in spice/tasks/_sets/ (TaskSets). Shown once TaskSets loads.
-    const cjsSets = (typeof customJS !== "undefined" && customJS)
-      || (typeof window !== "undefined" && window.customJS)
-      || null;
-    if (cjsSets && cjsSets.TaskSets && typeof cjsSets.TaskSets.open === "function") {
-      const setBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-from-set" });
+    if (hasSets) {
+      const setBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-from-set sauce-home-lead-end" });
       setBtn.setAttribute("type", "button");
       setBtn.dataset.captureKey = "task-set";
       const setIcon = setBtn.createEl("span", { cls: "sauce-home-capture-icon" });

@@ -16,14 +16,17 @@ class TaskSets {
     addWorkDays(dateStr, n) { return TaskSets.addWorkDays(dateStr, n); }
     plan(text, opts) { return TaskSets.plan(text, opts); }
     apply(app, plan) { return TaskSets.apply(app, plan); }
+    rollback(app, made) { return TaskSets.rollback(app, made); }
     appendBody(noteText, text) { return TaskSets.appendBody(noteText, text); }
     isSetPath(path) { return TaskSets.isSetPath(path); }
     summary(parsed) { return TaskSets.summary(parsed); }
     open(opts) { return TaskSets.open(opts); }
     get ROOT() { return TaskSets.ROOT; }
     get TYPE() { return TaskSets.TYPE; }
+    get FAILED() { return TaskSets.FAILED; }
 
     static get ROOT() { return 'spice/tasks/_sets'; }
+    static get FAILED() { return "Couldn't create from set; nothing was kept"; }
     static get TYPE() { return 'task-set'; }
 
     static _cjs() {
@@ -72,11 +75,15 @@ class TaskSets {
     /**
      * Read a set note. → { steps, prompt, comms }
      *   steps  [{ title, depth, parent, dueOffset }] in file order: one per
-     *          `- [ ]` line outside the Prompt and Comms sections and outside
-     *          code fences. Indentation nests a line under the nearest line
+     *          checkbox line (`- [ ]`, `- [x]` or `- [X]`; every step is
+     *          created open) outside the Prompt and Comms sections and outside
+     *          code fences. Indentation nests a line under the nearest step
      *          above it with less indentation (`parent` is that step's index,
-     *          -1 for a direct subtask of the new task). A trailing
-     *          `(due +N)` sets dueOffset N (work days); otherwise null.
+     *          -1 for a direct subtask of the new task). A list item that is
+     *          not a checkbox is skipped, and so is everything indented under
+     *          it. A trailing `(due +N)` sets dueOffset N (work days);
+     *          otherwise null. `{{task}}` is left as written (plan fills it
+     *          in after parsing, so a title cannot change the structure).
      *   prompt the text of the Prompt section (a level 2 heading named Prompt),
      *          up to the next level 1 or 2 heading.
      *   comms  the text of the Comms section, the same way.
@@ -91,11 +98,14 @@ class TaskSets {
         const stack = [];
         let section = '';
         let fence = null;
+        let skipIndent = null;
+        const width = (ws) => ws.replace(/\t/g, '    ').length;
         for (const line of s.split('\n')) {
             const heading = fence === null ? /^(#{1,2})\s+(.*?)\s*#*\s*$/.exec(line) : null;
             if (heading) {
                 const name = heading[2].trim().toLowerCase();
                 section = name === 'prompt' || name === 'comms' ? name : '';
+                skipIndent = null;
                 continue;
             }
             const fenceMark = /^\s*(`{3,}|~{3,})/.exec(line);
@@ -113,10 +123,23 @@ class TaskSets {
                 continue;
             }
             if (fence !== null) continue;
-            const m = /^([ \t]*)[-*+] \[ \][ \t]+(.*)$/.exec(line);
-            if (!m) continue;
-            const indent = m[1].replace(/\t/g, '    ').length;
-            let title = m[2];
+            const item = /^([ \t]*)(?:[-*+]|\d+[.)])[ \t]+(.*)$/.exec(line);
+            if (!item) {
+                const lead = /^([ \t]*)\S/.exec(line);
+                if (lead && skipIndent !== null && width(lead[1]) <= skipIndent) skipIndent = null;
+                continue;
+            }
+            const indent = width(item[1]);
+            if (skipIndent !== null) {
+                if (indent > skipIndent) continue;
+                skipIndent = null;
+            }
+            const m = /^(?:[-*+]|\d+[.)])[ \t]+\[[ xX]\][ \t]+(.*)$/.exec(line.slice(item[1].length));
+            if (!m) {
+                skipIndent = indent;
+                continue;
+            }
+            let title = m[1];
             let dueOffset = null;
             const due = /\s*\(\s*due\s*\+\s*(\d{1,3})\s*\)\s*$/i.exec(title);
             if (due) { dueOffset = Number(due[1]); title = title.slice(0, due.index); }
@@ -198,7 +221,7 @@ class TaskSets {
         const due = String(o.due == null ? '' : o.due).trim();
         const check = TE.validatePayload({ title, due });
         if (!check.valid) return { ok: false, reason: check.reason };
-        const parsed = TaskSets.parse(TaskSets.fill(text, title));
+        const parsed = TaskSets.parse(text);
         const createdAt = String(o.createdAt || '');
         const source = String(o.source || 'manual');
         const reserved = new Set();
@@ -235,13 +258,13 @@ class TaskSets {
         for (const step of parsed.steps) {
             const parent = step.parent >= 0 ? byStep[step.parent] : root;
             const stepDue = step.dueOffset != null ? (TaskSets.addWorkDays(o.today, step.dueOffset) || '') : '';
-            const t = make(step.title, stepDue, parent);
+            const t = make(TaskSets.fill(step.title, title).replace(/\s+/g, ' ').trim() || step.title, stepDue, parent);
             byStep.push(t);
             tasks.push(t);
         }
         const docs = [];
-        if (parsed.prompt) docs.push({ kind: 'prompt', text: parsed.prompt });
-        if (parsed.comms) docs.push({ kind: 'comms', text: parsed.comms });
+        if (parsed.prompt) docs.push({ kind: 'prompt', text: TaskSets.fill(parsed.prompt, title) });
+        if (parsed.comms) docs.push({ kind: 'comms', text: TaskSets.fill(parsed.comms, title) });
         return { ok: true, root: { path: root.path, name: root.name, title }, folders, tasks, docs };
     }
 
@@ -254,30 +277,69 @@ class TaskSets {
     /**
      * Write a plan: the folders, then the task and each subtask (parents
      * first), then each note through TaskDocs.create with the set's text
-     * added below its header. Throws on the first failure. Called from
-     * RenderSafe.mutate; resolves { path, tasks, notes }.
+     * added below its header. All or nothing: when any write fails, every
+     * file and folder this run made is moved to the trash, newest first
+     * (rollback), and the error is rethrown with `kept` listing anything
+     * that could not be removed. Called from RenderSafe.mutate; resolves
+     * { path, tasks, notes }.
      */
     static async apply(app, plan) {
         if (!app || !app.vault || !plan || !plan.ok) throw new Error('nothing to create');
-        for (const folder of plan.folders) {
-            if (app.vault.getAbstractFileByPath(folder)) continue;
-            try { await app.vault.createFolder(folder); } catch (_e) { /* made meanwhile */ }
+        const made = [];
+        const exists = (p) => !!app.vault.getAbstractFileByPath(p);
+        try {
+            for (const folder of plan.folders) {
+                if (exists(folder)) continue;
+                try { await app.vault.createFolder(folder); } catch (_e) { /* made meanwhile */ }
+                if (exists(folder)) made.push(folder);
+            }
+            for (const t of plan.tasks) {
+                await app.vault.create(t.path, t.content);
+                made.push(t.path);
+            }
+            const TDocs = TaskSets._cjs().TaskDocs;
+            let notes = 0;
+            for (const d of plan.docs) {
+                if (!TDocs || typeof TDocs.create !== 'function') throw new Error('task notes are still loading');
+                const label = d.kind === 'comms' ? 'Comms' : 'Prompt';
+                const folder = typeof TDocs.notesFolder === 'function' ? TDocs.notesFolder(plan.root.path) : '';
+                const hadFolder = !folder || exists(folder);
+                const res = await TDocs.create(app, plan.root.path, d.kind, label);
+                if (!hadFolder && exists(folder)) made.push(folder);
+                if (!res || !res.ok) throw new Error('could not create the ' + label.toLowerCase() + ' note: ' + ((res && res.reason) || 'unknown'));
+                made.push(res.path);
+                const file = app.vault.getAbstractFileByPath(res.path);
+                if (!file) throw new Error('could not find the ' + label.toLowerCase() + ' note');
+                if (typeof app.vault.process === 'function') await app.vault.process(file, (data) => TaskSets.appendBody(data, d.text));
+                else await app.vault.modify(file, TaskSets.appendBody(await app.vault.read(file), d.text));
+                notes += 1;
+            }
+            return { path: plan.root.path, tasks: plan.tasks.length, notes };
+        } catch (e) {
+            const kept = await TaskSets.rollback(app, made);
+            const err = e instanceof Error ? e : new Error(String(e));
+            err.kept = kept;
+            throw err;
         }
-        for (const t of plan.tasks) await app.vault.create(t.path, t.content);
-        const TDocs = TaskSets._cjs().TaskDocs;
-        let notes = 0;
-        for (const d of plan.docs) {
-            if (!TDocs || typeof TDocs.create !== 'function') throw new Error('task notes are still loading');
-            const label = d.kind === 'comms' ? 'Comms' : 'Prompt';
-            const res = await TDocs.create(app, plan.root.path, d.kind, label);
-            if (!res || !res.ok) throw new Error('could not create the ' + label.toLowerCase() + ' note: ' + ((res && res.reason) || 'unknown'));
-            const file = app.vault.getAbstractFileByPath(res.path);
-            if (!file) throw new Error('could not find the ' + label.toLowerCase() + ' note');
-            if (typeof app.vault.process === 'function') await app.vault.process(file, (data) => TaskSets.appendBody(data, d.text));
-            else await app.vault.modify(file, TaskSets.appendBody(await app.vault.read(file), d.text));
-            notes += 1;
+    }
+
+    /**
+     * Move the paths one apply made to the trash, newest first (notes, then
+     * subtasks, then their parents, then folders), through
+     * fileManager.trashFile when there is one, else vault.trash(file, true).
+     * Resolves the paths that could not be removed.
+     */
+    static async rollback(app, made) {
+        const kept = [];
+        for (const p of (made || []).slice().reverse()) {
+            const f = app.vault.getAbstractFileByPath(p);
+            if (!f) continue;
+            try {
+                if (app.fileManager && typeof app.fileManager.trashFile === 'function') await app.fileManager.trashFile(f);
+                else await app.vault.trash(f, true);
+            } catch (_e) { kept.push(p); }
         }
-        return { path: plan.root.path, tasks: plan.tasks.length, notes };
+        return kept;
     }
 
     static get SET_CSS() {
@@ -309,8 +371,9 @@ class TaskSets {
 
     /**
      * The New from set dialog: pick a set, type the title, optionally a due
-     * date, then Create task. opts { surface, today }. Returns true when the
-     * dialog opened.
+     * date, then Create task. opts { surface, today, title?, setPath?, due? };
+     * the last three prefill the dialog (it reopens with them after a failed
+     * create). Returns true when the dialog opened.
      */
     static open(opts) {
         try { return TaskSets._open(opts || {}); } catch (_e) { return false; }
@@ -333,7 +396,12 @@ class TaskSets {
         const today = (opts.today && /^\d{4}-\d{2}-\d{2}$/.test(opts.today)) ? opts.today : (now ? now.format('YYYY-MM-DD') : '');
         const createdAt = now ? now.format('YYYY-MM-DDTHH:mm:ssZ') : '';
         const source = (typeof TD.defaultsForSurface === 'function' && (TD.defaultsForSurface({ surface: opts.surface }) || {}).source) || 'manual';
-        const state = { set: sets.length === 1 ? sets[0] : null, title: '', due: '' };
+        const preset = sets.find((s) => s.path === opts.setPath) || null;
+        const state = {
+            set: preset || (sets.length === 1 ? sets[0] : null),
+            title: String(opts.title == null ? '' : opts.title),
+            due: /^\d{4}-\d{2}-\d{2}$/.test(String(opts.due || '')) ? String(opts.due) : '',
+        };
         const doc = (typeof document !== 'undefined') ? document : null;
 
         let titleInput = null;
@@ -367,13 +435,17 @@ class TaskSets {
                 app,
                 path: plan.root.path,
                 mode: 'create',
-                failureMessage: 'Could not finish the task from ' + setName,
+                failureMessage: TaskSets.FAILED,
                 write: () => TaskSets.apply(app, plan),
             });
             if (res && res.ok) {
                 TaskSets._notice('Created ' + plan.root.title + ' from ' + setName, 3000);
                 try { app.workspace.openLinkText(plan.root.path, '', false); } catch (_e) {}
+                return true;
             }
+            const kept = (res && res.error && Array.isArray(res.error.kept)) ? res.error.kept : [];
+            if (kept.length) TaskSets._notice('Could not remove ' + kept.length + ' file(s): ' + kept.join(', '), 8000);
+            TaskSets.open({ surface: opts.surface, today, title: state.title, setPath: state.set.path, due: state.due });
             return true;
         };
 
@@ -422,8 +494,9 @@ class TaskSets {
         titleInput = titleSec.createEl('input', { type: 'text', cls: 'sauce-task-title sauce-task-set-title' });
         titleInput.placeholder = 'Task title';
         try { titleInput.setAttribute('aria-label', 'Task title'); } catch (_e) {}
+        titleInput.value = state.title;
         titleInput.oninput = () => { state.title = titleInput.value; updateSubmit(); };
-        setTimeout(() => { try { titleInput.focus(); } catch (_e) {} }, 50);
+        if (!(app.isMobile && !state.set)) setTimeout(() => { try { titleInput.focus(); } catch (_e) {} }, 50);
 
         const dueSec = left.createDiv({ cls: 'sauce-task-section sauce-task-set-field' });
         TD.sectionLabel(dueSec, 'Due');
@@ -433,6 +506,7 @@ class TaskSets {
         dueInput.style.cssText = TD.DATE_CSS;
         const clearBtn = TD.pill(dueRow, 'sauce-task-quiet sauce-task-set-clear', 'Clear');
         dueSec.createDiv({ cls: 'sauce-task-caption', text: 'Optional. A (due +N) line counts N work days from today.' });
+        dueInput.value = state.due;
         const renderDue = () => { clearBtn.style.display = state.due ? '' : 'none'; };
         dueInput.onchange = () => { state.due = dueInput.value || ''; renderDue(); };
         dueInput.oninput = dueInput.onchange;

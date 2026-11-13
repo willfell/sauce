@@ -150,9 +150,11 @@ Reusable starter bundles (`TaskSets`, `task-sets.js`; spec:
 `Docs/superpowers/specs/2026-11-13-task-flow-design.md`, section 7).
 
 - **Where.** `spice/tasks/_sets/<Name>.md` with `type: task-set`. Each `- [ ]`
-  line is a subtask (indent to nest; a trailing `(due +2)` makes it due two
-  work days after the day the set is used), `## Prompt` holds a prompt note's
-  text and `## Comms` a comms note's. `{{task}}` is replaced with the title.
+  (or `- [x]`) line is a subtask, always created open (indent to nest; a
+  trailing `(due +2)` makes it due two work days after the day the set is
+  used); a plain bullet and everything under it is ignored. `## Prompt` holds
+  a prompt note's text and `## Comms` a comms note's. `{{task}}` is replaced
+  with the title after the set is read, so a title cannot change its shape.
 - **New from set.** In the + menus (Home and every chrome bar) and the
   `Sauce: New task from set` command: pick a set, type a title and an optional
   due date; the task, its subtasks (each folder inside its parent's) and its
@@ -161,6 +163,10 @@ Reusable starter bundles (`TaskSets`, `task-sets.js`; spec:
   note-header heal all skip `_sets/`, like `_done/` and `_trash/`.
 - **Seeds.** The installer's `applyTaskSetsSeedHeal` writes `PR rollout` and
   `Incident` only when `_sets/` does not exist, and never overwrites.
+  Delete the sets you don't want; an empty `_sets/` folder is never refilled.
+- **All or nothing.** If any write fails, everything that create made is
+  moved to the trash, a notice says "Couldn't create from set; nothing was
+  kept", and the dialog reopens with the title filled in.
 
 ## API (`customJS.TaskEntity`)
 

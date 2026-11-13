@@ -50,9 +50,16 @@ function makeApp(seed) {
   for (const [p, text] of Object.entries(seed || {})) { addFolder(dirOf(p)); put(p, text); }
   const opened = [];
   const createdFolders = [];
+  const trashed = [];
+  const fail = { on: null };
+  const drop = (p) => {
+    for (const k of Array.from(files.keys())) if (k === p || k.indexOf(p + '/') === 0) files.delete(k);
+    for (const k of Array.from(folders.keys())) if (k === p || k.indexOf(p + '/') === 0) folders.delete(k);
+  };
   return {
-    _files: files, _folders: folders, _opened: opened, _createdFolders: createdFolders,
+    _files: files, _folders: folders, _opened: opened, _createdFolders: createdFolders, _trashed: trashed, _fail: fail,
     vault: {
+      trash: async (f, system) => { trashed.push([f.path, system]); drop(f.path); },
       getAbstractFileByPath: (p) => files.get(p) || folders.get(p) || null,
       getMarkdownFiles: () => Array.from(files.values()),
       createFolder: async (p) => {
@@ -61,6 +68,7 @@ function makeApp(seed) {
         folders.set(p, { path: p, children: [] });
       },
       create: async (p, text) => {
+        if (fail.on && fail.on.test(p)) throw new Error('disk full: ' + p);
         if (files.has(p)) throw new Error('exists: ' + p);
         if (!folders.has(dirOf(p))) throw new Error('no folder: ' + dirOf(p));
         put(p, text);
@@ -85,7 +93,9 @@ const SET = [
   '- [ ] CI green',
   '\t- [ ] Fix flaky test (due +1)',
   '\t\t- [ ] Rerun',
-  '- [x] Already done, not a step',
+  '- Notes, a plain bullet: not a step',
+  '\t- [ ] under a plain bullet, not a step',
+  '\t\t- [ ] deeper under it, not a step',
   '- [ ] Review (due +2)',
   '    - [ ] Address comments',
   '- [ ] Deploy   ( due + 3 )',
@@ -130,6 +140,26 @@ const SET = [
   ok('TS-PARSE-BARE a set with no frontmatter or sections still lists its steps and has no notes',
     bare.steps.length === 1 && bare.steps[0].title === 'Only step' && bare.prompt === '' && bare.comms === '');
   ok('TS-PARSE-EMPTY nothing in, nothing out', TS.parse(null).steps.length === 0 && TS.parse('').prompt === '');
+  const checked = TS.parse('- [x] Tag it\n- [X] Ship it (due +1)\n\t- [ ] Smoke test\n- [ ] Announce\n');
+  ok('TS-PARSE-CHECKED `- [x]` and `- [X]` lines are steps like `- [ ]`, nesting and due included',
+    JSON.stringify(checked.steps.map((s) => [s.title, s.parent, s.dueOffset])) === JSON.stringify([['Tag it', -1, null], ['Ship it', -1, 1], ['Smoke test', 1, null], ['Announce', -1, null]]),
+    JSON.stringify(checked.steps));
+  const plain = TS.parse([
+    '- [ ] Build',
+    '  - a note about the build',
+    '    - [ ] not a step: under the note',
+    '  - [ ] Lint',
+    '- Context',
+    '  - [ ] not a step either',
+    'Some paragraph.',
+    '- [ ] Release',
+    '1. numbered, plain',
+    '   - [ ] not a step: under the numbered item',
+    '2. [ ] Numbered checkbox',
+  ].join('\n'));
+  ok('TS-PARSE-PLAIN a plain bullet and everything indented under it are skipped, and the next step keeps its real parent',
+    JSON.stringify(plain.steps.map((s) => [s.title, s.parent])) === JSON.stringify([['Build', -1], ['Lint', 0], ['Release', -1], ['Numbered checkbox', -1]]),
+    JSON.stringify(plain.steps.map((s) => [s.title, s.parent])));
   ok('TS-SUMMARY the picker line counts subtasks and names the notes',
     TS.summary(p) === '8 subtasks · prompt · comms' && TS.summary(bare) === '1 subtask');
 }
@@ -187,6 +217,17 @@ ok('TS-WORKDAYS-BAD an unreadable date gives null', TS.addWorkDays('', 1) === nu
     JSON.stringify(twice.tasks.map((t) => t.path)) === JSON.stringify([
       'spice/tasks/X/X.md', 'spice/tasks/X/Step/Step.md', 'spice/tasks/X/Step/Step (Step)/Step (Step).md', 'spice/tasks/X/Step (X)/Step (X).md',
     ]), JSON.stringify(twice.tasks.map((t) => t.path)));
+  const fmOf = (content) => { const o = {}; for (const l of /^---\n([\s\S]*?)\n---/.exec(content)[1].split('\n')) { const kv = /^(\w+):[ ]?(.*)$/.exec(l); if (kv) o[kv[1]] = kv[2].replace(/^"|"$/g, ''); } return o; };
+  const dueTitle = TS.plan('- [ ] {{task}}\n- [ ] Ship {{task}}\n', { title: 'Hotfix (due +3)', today: '2026-11-13', createdAt: '2026-11-13T09:00:00Z' });
+  ok('TS-FILL-AFTER-PARSE a title with "(due +3)" in it is just text in each subtask title: no due date is set',
+    dueTitle.ok && JSON.stringify(dueTitle.tasks.slice(1).map((t) => [fmOf(t.content).title, fmOf(t.content).due])) === JSON.stringify([['Hotfix (due +3)', ''], ['Ship Hotfix (due +3)', '']]),
+    JSON.stringify(dueTitle.tasks && dueTitle.tasks.map((t) => fmOf(t.content).title)));
+  const headTitle = TS.plan('- [ ] Step\n{{task}}\n- [ ] After\n\n## Comms\n\nHi {{task}}\n', { title: '## Prompt', today: '2026-11-13', createdAt: '2026-11-13T09:00:00Z' });
+  ok('TS-FILL-AFTER-PARSE a title that reads as a heading cannot start a section: the steps and the notes keep their shape',
+    headTitle.ok && headTitle.tasks.length === 3 && fmOf(headTitle.tasks[2].content).title === 'After'
+    && JSON.stringify(headTitle.docs) === JSON.stringify([{ kind: 'comms', text: 'Hi ## Prompt' }]), JSON.stringify(headTitle.docs));
+  const checkedPlan = TS.plan('- [x] Already ticked\n', { title: 'Y', today: '2026-11-13', createdAt: '2026-11-13T09:00:00Z' });
+  ok('TS-PLAN-CHECKED a `- [x]` step is still created open', fmOf(checkedPlan.tasks[1].content).status === 'open' && fmOf(checkedPlan.tasks[1].content).completed_at === '');
   ok('TS-PLAN-INVALID a blank title or a bad due date is refused before anything is written',
     TS.plan(SET, { title: '  ' }).ok === false && TS.plan(SET, { title: 'A', due: '11/20' }).ok === false);
   const saved = win.customJS.TaskEntity;
@@ -242,7 +283,45 @@ ok('TS-IS-SET-PATH only paths inside spice/tasks/_sets/ are set paths',
       && !/dataviewjs|renderHeader/.test(copiedText), copiedText);
     let threw = '';
     try { await TS.apply(app, plan); } catch (e) { threw = e.message; }
-    ok('TS-APPLY-FAIL a write that fails throws, so RenderSafe.mutate reports it', /exists/.test(threw), threw);
+    ok('TS-APPLY-FAIL a write that fails throws, so RenderSafe.mutate reports it, and files it did not make are never touched',
+      /exists/.test(threw) && app._trashed.length === 0 && plan.tasks.every((t) => app._files.has(t.path)), threw);
+  }
+
+  {
+    const app = makeApp({ 'spice/tasks/Other/Other.md': '---\ntype: task\ntitle: Other\n---\n' });
+    const before = JSON.stringify([Array.from(app._files.keys()).sort(), Array.from(app._folders.keys()).sort()]);
+    const plan = TS.plan(SET, { title: 'Ship Auth', today: '2026-11-13', createdAt: '2026-11-13T09:00:00-07:00', taken: win.customJS.TaskDialog._takenNames(app) });
+    app._fail.on = /\/Rerun\.md$/;
+    let err = null;
+    try { await TS.apply(app, plan); } catch (e) { err = e; }
+    const after = JSON.stringify([Array.from(app._files.keys()).sort(), Array.from(app._folders.keys()).sort()]);
+    ok('TS-ROLLBACK-TASK a failed subtask write trashes every file and folder that run made, newest first, and rethrows',
+      err && /disk full/.test(err.message) && Array.isArray(err.kept) && err.kept.length === 0 && after === before
+      && app._trashed[0][0] === 'spice/tasks/Ship Auth/CI green/Fix flaky test/Fix flaky test.md'
+      && app._trashed[app._trashed.length - 1][0] === 'spice/tasks/Ship Auth' && app._trashed.every((t) => t[1] === true),
+      JSON.stringify(app._trashed));
+
+    const app2 = makeApp({ 'spice/tasks/Other/Other.md': '---\ntype: task\ntitle: Other\n---\n' });
+    const before2 = JSON.stringify(Array.from(app2._files.keys()).sort());
+    const plan2 = TS.plan(SET, { title: 'Ship Auth', today: '2026-11-13', createdAt: '2026-11-13T09:00:00-07:00', taken: win.customJS.TaskDialog._takenNames(app2) });
+    app2._fail.on = /\/notes\/Comms\.md$/;
+    const viaManager = [];
+    app2.fileManager = { trashFile: async (f) => { viaManager.push(f.path); app2._trashed.push([f.path, 'fm']); } };
+    let err2 = null;
+    try { await TS.apply(app2, plan2); } catch (e) { err2 = e; }
+    ok('TS-ROLLBACK-NOTE a failed note removes the note already made and the notes folder too, through fileManager.trashFile when there is one',
+      err2 && viaManager[0] === 'spice/tasks/Ship Auth/notes/Prompt.md' && viaManager[1] === 'spice/tasks/Ship Auth/notes'
+      && viaManager.includes('spice/tasks/Ship Auth/Ship Auth.md') && viaManager[viaManager.length - 1] === 'spice/tasks/Ship Auth'
+      && !viaManager.includes('spice/tasks') && before2.length > 0, JSON.stringify(viaManager));
+
+    const app3 = makeApp({});
+    const plan3 = TS.plan('- [ ] A\n', { title: 'Z', today: '2026-11-13', createdAt: 'x' });
+    app3._fail.on = /\/A\.md$/;
+    app3.vault.trash = async (f) => { if (/Z\.md$/.test(f.path)) throw new Error('locked'); };
+    let err3 = null;
+    try { await TS.apply(app3, plan3); } catch (e) { err3 = e; }
+    ok('TS-ROLLBACK-KEPT a file the rollback cannot remove is listed on the error as kept',
+      err3 && JSON.stringify(err3.kept) === JSON.stringify(['spice/tasks/Z/Z.md']), JSON.stringify(err3 && err3.kept));
   }
 
   {
@@ -253,18 +332,22 @@ ok('TS-IS-SET-PATH only paths inside spice/tasks/_sets/ are set paths',
       el.createDiv = (o) => el.createEl('div', o);
       el.createSpan = (o) => el.createEl('span', o);
       el.setAttribute = (k, v) => { el._attrs[k] = v; };
-      el.focus = () => {};
+      el.focus = () => { focused.push(el); };
       return el;
     };
+    const focused = [];
     const all = (n) => (n.children || []).flatMap((c) => [c, ...all(c)]);
     const byCls = (root, cls) => all(root).filter((x) => String(x.className).split(/\s+/).includes(cls));
     let shellOpts = null;
     let closed = 0;
-    const left = makeEl('div');
-    const footer = makeEl('div');
+    let shells = 0;
+    let left = makeEl('div');
+    let footer = makeEl('div');
     const td = new TDClass();
     td.openShell = (o) => {
       shellOpts = o;
+      shells += 1;
+      if (shells > 1) { left = makeEl('div'); footer = makeEl('div'); }
       const handle = { isOpen: true, submit: (ev) => o.onSubmit(handle, ev) };
       return { handle, modal: makeEl('div'), body: makeEl('div'), footer, left, right: null, close: () => { closed++; handle.isOpen = false; }, doc };
     };
@@ -311,6 +394,49 @@ ok('TS-IS-SET-PATH only paths inside spice/tasks/_sets/ are set paths',
     ok('TS-DIALOG-OPEN the new task opens and a notice names the set',
       app._opened[0] === `${R}/Roll out SSO.md` && notices.some((n) => n === 'Created Roll out SSO from PR rollout'), notices.join(' | '));
 
+    {
+      const keysBefore = JSON.stringify(Array.from(app._files.keys()).sort());
+      TS.open({ surface: 'home', today: '2026-11-13' });
+      byCls(left, 'sauce-task-set-pill')[0].onclick();
+      const t2 = byCls(left, 'sauce-task-set-title')[0];
+      t2.value = 'DB failover';
+      t2.oninput();
+      const due2 = all(left).find((n) => n.type === 'date');
+      due2.value = '2026-11-20';
+      due2.onchange();
+      app._fail.on = /\/Mitigate\.md$/;
+      const firstLeft = left;
+      const c2 = byCls(footer, 'sauce-task-set-create')[0];
+      await c2.onclick({ currentTarget: c2 });
+      app._fail.on = null;
+      const reTitle = byCls(left, 'sauce-task-set-title')[0];
+      const rePills = byCls(left, 'sauce-task-set-pill');
+      ok('TS-DIALOG-FAILED a failed create keeps nothing, says so, and reopens the dialog with the title, set and due date filled in',
+        mutations[mutations.length - 1].failureMessage === "Couldn't create from set; nothing was kept" && TS.FAILED === mutations[mutations.length - 1].failureMessage
+        && JSON.stringify(Array.from(app._files.keys()).sort()) === keysBefore
+        && left !== firstLeft && reTitle && reTitle.value === 'DB failover' && /is-selected/.test(rePills[0].className)
+        && all(left).find((n) => n.type === 'date').value === '2026-11-20' && byCls(footer, 'sauce-task-set-create')[0].disabled === false,
+        JSON.stringify([reTitle && reTitle.value, Array.from(app._files.keys()).length]));
+    }
+
+    {
+      app.isMobile = true;
+      focused.length = 0;
+      TS.open({ surface: 'home', today: '2026-11-13' });
+      const phoneTitle = byCls(left, 'sauce-task-set-title')[0];
+      await new Promise((r) => setTimeout(r, 80));
+      const noFocus = !focused.includes(phoneTitle);
+      TS.open({ surface: 'home', today: '2026-11-13', setPath: 'spice/tasks/_sets/Incident.md' });
+      const phoneTitle2 = byCls(left, 'sauce-task-set-title')[0];
+      await new Promise((r) => setTimeout(r, 80));
+      app.isMobile = false;
+      TS.open({ surface: 'home', today: '2026-11-13' });
+      const deskTitle = byCls(left, 'sauce-task-set-title')[0];
+      await new Promise((r) => setTimeout(r, 80));
+      ok('TS-DIALOG-PHONE on a phone with no set picked yet the title is not focused (no keyboard over the set pills); with a set, or on desktop, it is',
+        noFocus && focused.includes(phoneTitle2) && focused.includes(deskTitle));
+    }
+
     win.app = makeApp({});
     const none = TS.open({});
     ok('TS-DIALOG-NONE with no sets the dialog does not open and a notice says where sets go',
@@ -338,6 +464,8 @@ ok('TS-IS-SET-PATH only paths inside spice/tasks/_sets/ are set paths',
       manifest.customjs_classes.includes('TaskSets') && manifest.files.some((f) => f.source === 'task-sets.js' && /task-entity\/task-sets\.js$/.test(f.dest)));
     const mirror = path.resolve(__dirname, '../../ranch/scripts/task-entity/task-sets.js');
     ok('TS-MIRROR the ranch mirror equals the platform source', fs.existsSync(mirror) && fs.readFileSync(mirror, 'utf8') === read('mechanisms/task-entity/task-sets.js'));
+    ok('TS-README the README tells the user to delete unwanted sets and that an empty _sets/ is never refilled',
+      read('mechanisms/task-entity/README.md').includes("Delete the sets you don't want; an empty `_sets/` folder is never refilled."));
     const init = read('blueprints/to-do/helpers/todo-create-task-init.js');
     ok('TS-COMMAND Sauce: New task from set opens the dialog', /id: 'sauce:new-task-from-set'/.test(init) && /name: 'Sauce: New task from set'/.test(init) && /TS\.open\(/.test(init));
   }
