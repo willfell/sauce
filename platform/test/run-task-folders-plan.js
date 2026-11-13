@@ -422,6 +422,76 @@ function localToday() {
     ok('TF-HEAL-NO-MOVE the heal never throws, with or without spice/tasks', !threw);
   });
 
+  const SEED = install._TASK_SETS_SEED || {};
+  const TE_MANIFEST = { name: 'task-entity' };
+  await withVault({ [`${T}/Live/Live.md`]: task({ title: 'Live', status: 'open' }) }, async ({ root, tp, calls }) => {
+    const history = [];
+    await install.applyTaskSetsSeedHeal(tp, TE_MANIFEST, history, {});
+    const after = snapshot(root);
+    ok('TS-SEED-HEAL with no _sets folder the installer writes PR rollout and Incident, exactly as shipped',
+      after[`${T}/_sets/PR rollout.md`] === SEED['PR rollout.md'] && after[`${T}/_sets/Incident.md`] === SEED['Incident.md']
+      && Object.keys(SEED).length === 2 && history.some((h) => h.step === 'task_sets_seed' && h.action === 'seeded'),
+      Object.keys(after).join(', '));
+    fs.writeFileSync(path.join(root, `${T}/_sets/PR rollout.md`), 'my edited set\n');
+    fs.unlinkSync(path.join(root, `${T}/_sets/Incident.md`));
+    calls.length = 0;
+    await install.applyTaskSetsSeedHeal(tp, TE_MANIFEST, [], {});
+    const again = snapshot(root);
+    ok('TS-SEED-NEVER-OVERWRITE once _sets exists nothing in it is written again: an edited set stays, a deleted one stays gone',
+      again[`${T}/_sets/PR rollout.md`] === 'my edited set\n' && !(`${T}/_sets/Incident.md` in again)
+      && !calls.some((c) => c[0] === 'write' || c[0] === 'mkdir'), JSON.stringify(calls));
+  });
+
+  await withVault({ [`${T}/_sets/.keep`]: '' }, async ({ root, tp }) => {
+    await install.applyTaskSetsSeedHeal(tp, TE_MANIFEST, [], {});
+    ok('TS-SEED-EMPTY-FOLDER an empty _sets folder the user kept is not refilled', !fs.existsSync(path.join(root, `${T}/_sets/PR rollout.md`)));
+  });
+
+  await withVault({}, async ({ root, tp }) => {
+    await install.applyTaskSetsSeedHeal(tp, { name: 'to-do' }, [], {});
+    const other = fs.existsSync(path.join(root, `${T}/_sets`));
+    let threw = false;
+    try { await install.applyTaskSetsSeedHeal({}, TE_MANIFEST, [], {}); await install.applyTaskSetsSeedHeal(null, null, null, null); }
+    catch (_e) { threw = true; }
+    await install.applyTaskSetsSeedHeal(tp, TE_MANIFEST, [], {});
+    ok('TS-SEED-GATED only the task-entity install seeds; a fresh vault gets the folder; it never throws',
+      !other && !threw && fs.existsSync(path.join(root, `${T}/_sets/Incident.md`)));
+  });
+
+  {
+    const files = Object.assign({}, FIXTURE, {
+      [`${T}/_sets/Odd/Odd.md`]: task({ title: 'Odd', status: 'done', parent_task: '"[[Plan trip]]"' }),
+      [`${T}/_sets/Flat Typed.md`]: task({ title: 'Flat Typed', status: 'deleted' }),
+    });
+    const withSets = plan(files);
+    const json = JSON.stringify(withSets);
+    ok('TS-FOLDERS-PLAN a task-shaped note inside _sets is never planned, moved, renamed, picked as a parent or reported',
+      !/_sets/.test(json) && JSON.stringify(withSets.moves) === JSON.stringify(plan(FIXTURE).moves), json.slice(0, 300));
+  }
+
+  await withVault({
+    [`${T}/_sets/PR rollout.md`]: SEED['PR rollout.md'] || '',
+    [`${T}/_sets/Typed/Typed.md`]: task({ title: 'Typed', status: 'done' }),
+    [`${T}/_sets/Typed/notes/Old.md`]: '---\ntype: task-doc\nkind: prompt\n---\n\n> [!info] Prompt for [[Typed]]\n',
+    [`${T}/Live/Live.md`]: task({ title: 'Live', status: 'open' }),
+  }, async ({ root, tp, calls }) => {
+    const before = snapshot(root);
+    const history = [];
+    await install.applyTaskFoldersHeal(tp, history, {});
+    await install.applyTaskDocHeaderHeal(tp, history, {});
+    const after = snapshot(root);
+    ok('TS-HEALS-SKIP-SETS the folder dry run and the note-header heal leave _sets alone: no report, no write',
+      JSON.stringify(after) === JSON.stringify(before) && !calls.some((c) => c[0] === 'write')
+      && history.some((h) => h.step === 'task_folders_heal' && h.action === 'no_moves'), JSON.stringify(calls));
+  });
+
+  {
+    const today = '2026-11-13';
+    const strays = install.planTaskStrays([{ path: `${T}/Typed.md`, body: 'old flat copy' }], [`${T}/_sets/Typed/Typed.md`], [], today);
+    ok('TS-STRAYS a stray whose only twin sits in _sets is left in place, never parked in a set',
+      strays.actions.length === 1 && strays.actions[0].kind === 'leave', JSON.stringify(strays.actions));
+  }
+
   const failed = results.filter(([, c]) => !c).length;
   console.log(`\nrun-task-folders-plan: ${results.length - failed} pass · ${failed} fail`);
   process.exit(failed ? 1 : 0);

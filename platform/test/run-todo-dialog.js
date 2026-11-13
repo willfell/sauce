@@ -173,13 +173,13 @@ ok('DLG-13b destinationPath today (with stub moment)',
     let invokeThrew = false;
     try { init2.invoke(); } catch (_e) { invokeThrew = true; }
     ok('DLG-14b invoke() registers commands without throwing', !invokeThrew);
-    ok('DLG-14c registers sauce:new-task + sauce:new-recurring-task',
-        registered.includes('sauce:new-task') && registered.includes('sauce:new-recurring-task'),
+    ok('DLG-14c registers sauce:new-task + sauce:new-task-from-set + sauce:new-recurring-task',
+        registered.includes('sauce:new-task') && registered.includes('sauce:new-task-from-set') && registered.includes('sauce:new-recurring-task'),
         `got ${JSON.stringify(registered)}`);
 
     // Idempotency: a second invoke() on the same instance does not re-register.
     init2.invoke();
-    ok('DLG-14d second invoke() is idempotent', registered.length === 2, `got ${registered.length}`);
+    ok('DLG-14d second invoke() is idempotent', registered.length === 3, `got ${registered.length}`);
     sharedWindow.app = undefined;
 })();
 

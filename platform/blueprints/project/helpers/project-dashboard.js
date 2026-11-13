@@ -289,7 +289,7 @@ class ProjectDashboard {
     // in `<ProjectName> To-Do.md`.
     try {
       counts.todo += ProjectDashboard.openTaskCount(
-        this._scan(dv, ctx, '"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"'),
+        this._scan(dv, ctx, '"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash" and -"spice/tasks/_sets"'),
         String((ctx.currentPage && ctx.currentPage.project_slug) || ctx.slug || "").trim(),
         ProjectDashboard._taskEntity());
     } catch (_e) {}
@@ -380,7 +380,7 @@ class ProjectDashboard {
       const cjs = (typeof globalThis !== "undefined" && globalThis.customJS)
         || (typeof window !== "undefined" && window.customJS) || null;
       const TE = cjs && cjs.TaskEntity;
-      const rows = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
+      const rows = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash" and -"spice/tasks/_sets"').where(p =>
         p && p.type === "task"
         && p.file && p.file.path
         && (TE && typeof TE.isOpenTask === "function" ? TE.isOpenTask(p) : p.status === "open")

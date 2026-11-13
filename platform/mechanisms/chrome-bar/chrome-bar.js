@@ -86,6 +86,16 @@ class ChromeBar {
         } catch (_e) { /* never throw */ }
       },
     }];
+    // "New from set" (TaskSets) follows New task once task-entity has loaded it.
+    if (cjs && cjs.TaskSets && typeof cjs.TaskSets.open === "function") {
+      entries.push({
+        label: "New from set",
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="13" x="8" y="8" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/><path d="m12 14 2 2 3-3"/></svg>`,
+        onSelect: () => {
+          try { cjs.TaskSets.open({ surface: "home", today }); } catch (_e) { /* never throw */ }
+        },
+      });
+    }
 
     let SH = null;
     try {

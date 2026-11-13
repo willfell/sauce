@@ -63,11 +63,12 @@ class TaskFolders {
     }
 
     // Mirror of TaskEntity's task-folder rule: a folder under spice/tasks other
-    // than _done, _done/YYYY(/MM) and _trash.
+    // than _done, _done/YYYY(/MM), _trash and _sets (task sets) and its folders.
     static _isTaskFolder(dir) {
         const root = TaskFolders._root();
         if (dir.indexOf(root + '/') !== 0) return false;
         if (dir === root + '/_done' || dir === root + '/_trash') return false;
+        if (dir === root + '/_sets' || dir.indexOf(root + '/_sets/') === 0) return false;
         if (/^spice\/tasks\/_done\/\d{4}(\/\d{2})?$/.test(dir)) return false;
         return true;
     }
@@ -332,7 +333,7 @@ class TaskFolders {
 
             // 5. Source folders (and unused new ones) left empty, deepest first,
             // only under spice/tasks and never the task roots themselves.
-            const keep = new Set([root, root + '/_done', root + '/_trash']);
+            const keep = new Set([root, root + '/_done', root + '/_trash', root + '/_sets']);
             const sweep = new Set();
             const addUp = (d) => {
                 for (let x = d; x && x.indexOf(root + '/') === 0 && !keep.has(x); x = TaskFolders._dirOf(x)) sweep.add(x);

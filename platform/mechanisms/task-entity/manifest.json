@@ -38,7 +38,8 @@
     "TaskFolders",
     "TaskDocs",
     "TaskJump",
-    "TaskJumpInit"
+    "TaskJumpInit",
+    "TaskSets"
   ],
   "customjs_startup_scripts": [
     "TaskJumpInit"
@@ -95,6 +96,10 @@
     {
       "source": "task-jump-init.js",
       "dest": "{{scripts_path}}/task-entity/task-jump-init.js"
+    },
+    {
+      "source": "task-sets.js",
+      "dest": "{{scripts_path}}/task-entity/task-sets.js"
     }
   ],
   "post_install": [],

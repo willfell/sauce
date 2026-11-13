@@ -454,6 +454,20 @@
       "notes": "A note that belongs to a task without being a step of it, at spice/tasks/<Task>/notes/<Name>.md. Keys: type: task-doc; kind: prompt|handoff|comms|plan|context|findings|questions|note (any other value reads as note); title (display name); task: \"[[<Task note name>]]\"; created_at. No status: a task doc is never open or done, never counts toward the task's progress and never lists as a to-do. The file name is TaskEntity.taskName(title, { parentTitle: task title }). Written by TaskDocs.compose; read by TaskDocs.list (kind order, newest first) and TaskDocs.extractPrompt (Copy prompt)."
     },
     {
+      "id": "task-set-note",
+      "kind": "contract",
+      "owner": {
+        "type": "mechanism",
+        "name": "task-entity"
+      },
+      "source": "platform/mechanisms/task-entity/task-sets.js",
+      "consumers": [
+        "platform/mechanisms/task-entity/task-sets.js",
+        "platform/install.js"
+      ],
+      "notes": "A reusable starter bundle at spice/tasks/_sets/<Name>.md. Frontmatter: type: task-set (a note in _sets/ with no type also counts; any other type is ignored). Body: each `- [ ]` line outside the Prompt and Comms sections is a subtask; indentation nests it under the nearest less-indented line above; a trailing `(due +N)` makes it due N work days (Mon-Fri) after the day the set is used. `## Prompt` and `## Comms` hold the text of a prompt note and a comms note, up to the next level 1 or 2 heading. `{{task}}` anywhere is replaced with the new task's title. Read by TaskSets.parse; New from set writes the task and subtasks in the folder layout (TaskEntity.composeNote) and the notes through TaskDocs.create. Nothing under _sets/ is a task: task lists, the task-folder heals and the stray scans skip it. install.js seeds `PR rollout` and `Incident` only when _sets/ does not exist."
+    },
+    {
       "id": "trips-rule-fragments",
       "kind": "rule-fragment-bundle",
       "owner": {

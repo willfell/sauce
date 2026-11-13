@@ -584,8 +584,14 @@ class SpaceHome {
 
     // Menu, first entry — "New task": a single button (the old title-only
     // "Jot a task…" input is gone) that closes the menu and opens the full
-    // task dialog. The dialog's When defaults to No date.
-    const newTaskBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-task" });
+    // task dialog. The dialog's When defaults to No date. The last of the
+    // lead entries (New task, then New from set when TaskSets has loaded)
+    // carries .sauce-home-lead-end, the hairline above the other captures.
+    const cjsSets = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    const hasSets = !!(cjsSets && cjsSets.TaskSets && typeof cjsSets.TaskSets.open === "function");
+    const newTaskBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-task" + (hasSets ? "" : " sauce-home-lead-end") });
     newTaskBtn.setAttribute("type", "button");
     newTaskBtn.dataset.captureKey = "task";
     const newTaskIcon = newTaskBtn.createEl("span", { cls: "sauce-home-capture-icon" });
@@ -607,6 +613,23 @@ class SpaceHome {
         td.open({ surface: "home", today });
       } catch (_e) { /* never throw out of a click handler */ }
     };
+
+    // Menu, second entry — "New from set": a task with its subtasks and notes
+    // from a set in spice/tasks/_sets/ (TaskSets). Shown once TaskSets loads.
+    if (hasSets) {
+      const setBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-from-set sauce-home-lead-end" });
+      setBtn.setAttribute("type", "button");
+      setBtn.dataset.captureKey = "task-set";
+      const setIcon = setBtn.createEl("span", { cls: "sauce-home-capture-icon" });
+      setIcon.innerHTML =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="13" x="8" y="8" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/><path d="m12 14 2 2 3-3"/></svg>`;
+      const setLabel = setBtn.createEl("span", { cls: "sauce-home-capture-label" });
+      setLabel.textContent = "New from set";
+      setBtn.onclick = () => {
+        setMenu(false);
+        try { cjsSets.TaskSets.open({ surface: "home", today }); } catch (_e) { /* never throw out of a click handler */ }
+      };
+    }
 
     // Menu, remaining entries — the other capture actions: Meeting, Sticky Note, Article,
     // Journal, Trip — gated on what this vault has installed (_availableCaptures).
