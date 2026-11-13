@@ -1096,6 +1096,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-day-plan",
+      "cmd": [
+        "node",
+        "platform/test/run-task-day-plan.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-collapse",
       "cmd": [
         "node",

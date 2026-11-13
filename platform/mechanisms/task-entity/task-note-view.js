@@ -902,6 +902,11 @@ class TaskNoteView {
             const ring = head.createEl('div', { cls: 'sauce-tnv-ring' });
             ring.style.display = 'none';
             try { ring.setAttribute('role', 'img'); } catch (_e) {}
+            // Pin as Now (TaskDayPlan, spec §4): open tasks only, once it has loaded.
+            try {
+                const DP = window.customJS && window.customJS.TaskDayPlan;
+                if (DP && typeof DP.renderPinButton === 'function' && filePath) DP.renderPinButton(head, { path: filePath, status });
+            } catch (_e) {}
 
             const chips = headMain.createEl('div', { cls: 'sauce-tnv-chips' });
             chips.createEl('span', { cls: 'sauce-tnv-chip is-status is-' + status, text: this._statusLabel(task.status) });

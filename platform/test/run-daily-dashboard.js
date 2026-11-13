@@ -1188,6 +1188,7 @@ process.exitCode = 1;
       MenuPopover: { open: (entries, opts) => { calls.menus.push({ entries, opts }); } },
       ActivityFeed: { query: () => ({ total: 0, pages: [] }), render: async () => {} },
       BeaconCards: { render: async () => {} },
+      ...(o.extraCJS || {}),
     };
     windowShim.customJS = customJS;
     global.window = windowShim;
@@ -1210,7 +1211,7 @@ process.exitCode = 1;
     };
     const Dash = loadDashboard(windowShim, customJS);
     const dash = new Dash();
-    await dash.render(dv, o.asOf ? Object.assign({ asOf: o.asOf, live: true }, o.compact ? { compact: true } : {}) : undefined);
+    await dash.render(dv, o.asOf ? Object.assign({ asOf: o.asOf, live: true }, o.compact ? { compact: true } : {}, o.extraParams || {}) : undefined);
     const sections = () => root.querySelectorAll('.sauce-today-section');
     const section = (name) => sections().find((s) => s.dataset.section === name) || null;
     const labels = () => sections().map((s) => {
@@ -1354,6 +1355,28 @@ process.exitCode = 1;
       assert(cold.sections().length === 0 && cold.root.querySelectorAll('.sauce-daily-task-today-list').length === 1,
         'missing TaskTodayList falls back to the legacy bullet panel');
     } finally { cold.cleanup(); }
+  });
+
+  await ok('RD-DAYPLAN today\'s daily note leads with the day plan, collapsed; past days and Home (dayPlan: false) do not', async () => {
+    const calls = [];
+    const DP = { renderDay: (host, opts) => { calls.push({ host, opts }); host.createEl('div', { cls: 'sauce-dp-plan' }); return {}; } };
+    const today = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone, extraCJS: { TaskDayPlan: DP } });
+    try {
+      const dash = today.root.querySelector('.space-daily-dashboard');
+      assert(calls.length === 1 && calls[0].host === dash, 'renderDay draws into the dashboard container');
+      assert(calls[0].opts.surface === 'daily' && calls[0].opts.open === false && calls[0].opts.today === P_TODAY,
+        'collapsed, for the daily note, for today: ' + JSON.stringify({ surface: calls[0].opts.surface, open: calls[0].opts.open }));
+      assert(Array.isArray(calls[0].opts.meetingPages), 'the dashboard hands over its meetings');
+      assert(dash._children[0] && /sauce-dp-plan/.test(dash._children[0].className), 'the day plan is the first thing in the dashboard');
+    } finally { today.cleanup(); }
+    const past = await renderLivePanel({ viewedDay: '2026-06-01', taskPages: sectionPages, donePages: sectionDone, extraCJS: { TaskDayPlan: DP } });
+    try { assert(calls.length === 1, 'a past daily note has no day plan'); } finally { past.cleanup(); }
+    const home = await renderLivePanel({ viewedDay: 'Home', asOf: P_TODAY, compact: true, extraParams: { dayPlan: false }, taskPages: sectionPages, donePages: sectionDone, extraCJS: { TaskDayPlan: DP } });
+    try { assert(calls.length === 1, 'Home passes dayPlan: false and draws its own'); } finally { home.cleanup(); }
+    const homeDefault = await renderLivePanel({ viewedDay: 'Home', asOf: P_TODAY, taskPages: sectionPages, donePages: sectionDone, extraCJS: { TaskDayPlan: DP } });
+    try { assert(calls.length === 2, 'asOf today without dayPlan: false draws it'); } finally { homeDefault.cleanup(); }
+    const cold = await renderLivePanel({ taskPages: sectionPages, donePages: sectionDone });
+    try { assert(cold.root.querySelector('.space-daily-dashboard'), 'without TaskDayPlan the dashboard still draws'); } finally { cold.cleanup(); }
   });
 
   await ok('RD-P-SECTIONS labels, counts, order and per-section sorting', async () => {

@@ -7,6 +7,9 @@
  *   2. a quick-add "+"     — a dropdown whose first entry, "New task", opens
  *                            the full task dialog, followed by Meeting, Sticky
  *                            Note, Article, Journal, Trip,
+ *   2b. NOW + PLAN THE DAY — customJS.TaskDayPlan's pinned Now card and open
+ *                            Plan the day panel, as their own top-level node
+ *                            (absent until TaskDayPlan loads),
  *   3. the DAILY DASHBOARD — the exact SpaceDailyDashboard renderer, injected with
  *                            `asOf: today` so it always shows THIS calendar day's
  *                            agenda (the DRY seam; no params ⇒ dashboard's own note
@@ -375,6 +378,20 @@ class SpaceHome {
       }
     } catch (_e) { /* cold load / bad dv → zeros; never abort render */ }
 
+    // Day rhythm (task-entity TaskDayPlan): the pinned Now card and an open
+    // Plan the day panel, drawn as their own top-level node between the head
+    // and the dashboard (which is told not to draw them again). Built here so
+    // its signature joins the no-op check below. Absent until TaskDayPlan loads.
+    const DP = cjs && cjs.TaskDayPlan;
+    let dayModel = null;
+    try {
+      if (DP && typeof DP.build === "function" && typeof DP.renderDay === "function") {
+        dayModel = DP.build({ dv, today });
+      }
+    } catch (_e) { dayModel = null; }
+    let daySig = "";
+    try { daySig = dayModel && typeof DP.signature === "function" ? DP.signature(dayModel) : ""; } catch (_e) { daySig = ""; }
+
     // Surface-owned state survives CustomJS helper replacement and Dataview
     // re-execution because the container, rather than this render closure or
     // class identity, owns mutation and nested-mount authority.
@@ -427,7 +444,7 @@ class SpaceHome {
           await dv.view("ranch/views/customjs-guard", {
             class: "SpaceDailyDashboard",
             guardReceipt: token.guardReceipt,
-            args: [{ asOf: today, live: true, compact: true, mountReceipt: token.receipt }],
+            args: [{ asOf: today, live: true, compact: true, dayPlan: false, mountReceipt: token.receipt }],
           });
           if (dashboard.token === token) {
             const mountedNode = token.receipt.ok === true && children().includes(token.receipt.node)
@@ -472,7 +489,7 @@ class SpaceHome {
     // short-circuits redundant work WE would otherwise do within one still-
     // live container. A failed or unavailable nested dashboard is deliberately
     // retried before returning from an otherwise identical render.
-    const sig = today + "|" + JSON.stringify(counts);
+    const sig = today + "|" + JSON.stringify(counts) + "|" + daySig;
     const prior = dv.container.querySelector(".sauce-home");
     if (prior && surface.signature === sig) {
       await mountDashboard();
@@ -494,6 +511,10 @@ class SpaceHome {
     // Idempotent re-render: drop any prior .sauce-home so a Dataview re-exec
     // doesn't stack duplicate homes.
     if (prior) prior.remove();
+    try {
+      const priorDay = dv.container.querySelector(".sauce-day-plan");
+      if (priorDay) priorDay.remove();
+    } catch (_e) { /* never throw */ }
 
     const home = dv.el("div", "", { cls: "sauce-home" });
 
@@ -642,6 +663,19 @@ class SpaceHome {
       const labelSpan = mi.createEl("span", { cls: "sauce-home-capture-label" });
       labelSpan.textContent = item.label;
       mi.onclick = () => { SpaceHome._dispatch(item.key, dv, today); setMenu(false); };
+    }
+
+    // 2) Now + Plan the day ─────────────────────────────────────────────────────
+    // Right after the head, so a rebuilt head never lands below it.
+    if (dayModel) {
+      try {
+        const day = dv.el("div", "", { cls: "sauce-day-plan" });
+        const parent = home.parentNode || home.parent || null;
+        if (parent && typeof parent.insertBefore === "function" && home.nextSibling !== day) {
+          parent.insertBefore(day, home.nextSibling || null);
+        }
+        DP.renderDay(day, { dv, today, model: dayModel, surface: "home", open: true });
+      } catch (_e) { /* the day plan is best-effort; Home still draws */ }
     }
 
     // 3) Daily dashboard (asOf = today) ───────────────────────────────────────

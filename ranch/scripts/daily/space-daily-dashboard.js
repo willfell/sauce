@@ -795,6 +795,18 @@ class SpaceDailyDashboard {
       overflow-x: hidden;
     `;
 
+    // Day rhythm (task-entity TaskDayPlan): on today's daily note only, the
+    // pinned Now card and a collapsed Plan the day panel lead the dashboard.
+    // Home draws its own (open) and passes dayPlan: false.
+    try {
+      const DP = liveCjs && liveCjs.TaskDayPlan;
+      if (DP && typeof DP.renderDay === "function"
+        && !(params && params.dayPlan === false)
+        && SpaceDailyDashboard.isLivePanel(today, wallToday)) {
+        DP.renderDay(container, { today, dv, meetingPages: meetings, surface: "daily", open: false });
+      }
+    } catch (_e) { /* the day plan is best-effort; the dashboard still draws */ }
+
     // v0.10.3 (sauce v0.70.3): render a polished empty-state panel when
     // the day has no tasks, meetings, or activity. Replaces the prior
     // silent early-return so the user always gets a visible signal.

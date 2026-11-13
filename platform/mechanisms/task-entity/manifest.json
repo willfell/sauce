@@ -39,10 +39,13 @@
     "TaskDocs",
     "TaskJump",
     "TaskJumpInit",
-    "TaskSets"
+    "TaskSets",
+    "TaskDayPlan",
+    "TaskDayPlanInit"
   ],
   "customjs_startup_scripts": [
-    "TaskJumpInit"
+    "TaskJumpInit",
+    "TaskDayPlanInit"
   ],
   "files": [
     {
@@ -100,6 +103,14 @@
     {
       "source": "task-sets.js",
       "dest": "{{scripts_path}}/task-entity/task-sets.js"
+    },
+    {
+      "source": "task-day-plan.js",
+      "dest": "{{scripts_path}}/task-entity/task-day-plan.js"
+    },
+    {
+      "source": "task-day-plan-init.js",
+      "dest": "{{scripts_path}}/task-entity/task-day-plan-init.js"
     }
   ],
   "post_install": [],
