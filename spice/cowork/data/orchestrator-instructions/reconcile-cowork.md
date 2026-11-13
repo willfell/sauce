@@ -39,7 +39,7 @@ cadence: reconcile-cowork
 6. For each `.md` file in yesterday's directory:
    a. Check if companion `.cowork.json` exists at same dirpath.
    b. If MISSING: read the `.md` via `obsidian_get_file_contents`. Parse frontmatter (`type:` + `engagement_id:`). If `engagement_id != "{{$engagement_id}}"`, skip (not our engagement's note).
-   c. Extract `surfaced_kinds[]` from `> [!example]+` and `> [!warning]+` callout headers via heuristic kind-inference (calendar/email/chat/messages/finance/projects/threads/github/ado).
+   c. Extract `surfaced_kinds[]` from `> [!example]+` and `> [!warning]+` callout headers via heuristic kind-inference (calendar/email/chat/messages/projects/threads/github/ado).
    d. Compose sidecar JSON: `generated_by: "<orig generator> (reconciler-backfill@0.97.1)"`, `cadence` per `CADENCE_BY_TYPE`, `frontmatter` mirror, `surfaced_kinds[]` as computed, `surfaced_items: []`, `plan_dispatch.mode: "reconciler-backfill"`.
    e. Write sidecar via `obsidian_put_content`.
 

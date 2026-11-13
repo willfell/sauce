@@ -14,7 +14,7 @@
   },
   "surfaced_kinds": [],
   "surfaced_items": [],
-  "render_aspects_applied": ["finance_block:skip", "lens_shift:include"],
+  "render_aspects_applied": ["kanban_projects:include", "lens_shift:include"],
   "memory_used": {
     "yesterday_present": false,
     "drift_warning_present": false,

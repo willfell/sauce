@@ -28,8 +28,7 @@ First-of-month deep pass for one engagement. Reviews the PREVIOUS month. Tone:
 longest-arc view — month's wins/misses, projects landed, next-month board. Writes
 ONE atomic note at `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md` per
 scheduled invocation. Frontmatter uses `month: "<YYYY-MM>"` instead of `day:`.
-Anti-echo NOT eligible per v0.95.1 §3.4. For finance-tracking engagements, this
-is the authoritative Credit Debt Payoff reconciliation moment.
+Anti-echo NOT eligible per v0.95.1 §3.4.
 
 ## Substitution tokens
 
@@ -136,17 +135,11 @@ this is unexpected.`
     `callout_type: prefs.mcps[entry.kind_name].callout_type`. Push results into
     `ordered_blocks[]`.
 
-2c. **Forward-look stressors (inline scan).** Scan `spice/trips/` (next 30-45 days),
-    `spice/finance/budgets/` (annual bills next month), explicit "planned purchase"
-    notes. Assemble the Forward look list. (Currently inline; planned
+2c. **Forward-look stressors (inline scan).** Scan `spice/trips/` (next 30-45 days)
+    and explicit "planned purchase" notes. Assemble the Forward look list. (Currently inline; planned
     `cowork:gather-forward-stressors` sub-skill carry.)
 
-2d. **Invoice prep / FTE status** (engagement-type-gated). When
-    `plan.render_aspects.invoice_prep == "include"` AND
-    `engagement.invoice_cadence == "monthly"`: READ write-summary-invoice-prep SKILL.md
-    with `{ engagement, date_today: context.today, mode: "monthly", month_range }`.
-    Capture `invoice_block`. When
-    `plan.render_aspects.invoice_prep == "skip"` AND `engagement.type == "w2-fte"`:
+2d. **FTE status** (engagement-type-gated). When `engagement.type == "w2-fte"`:
     READ write-summary-fte-status SKILL.md with mode `"monthly"`; capture
     `fte_status_block`.
 
@@ -301,7 +294,7 @@ cross-day.
 ### Step 9: State updates (active-threads, weekly-snapshot)
 
 9a. READ update-active-threads SKILL.md with
-    `{ engagement_id, phase: "monthly-refresh", date_today: context.today, writer: "cowork:monthly-review", changes: { archive_resolved_older_than_days: 14, audit_full: true, financial_state_refresh } }`.
+    `{ engagement_id, phase: "monthly-refresh", date_today: context.today, writer: "cowork:monthly-review", changes: { archive_resolved_older_than_days: 14, audit_full: true } }`.
 
 9b. READ update-weekly-snapshot SKILL.md with
     `{ engagement_id, phase: "monthly-reset", date_today: context.today, writer: "cowork:monthly-review", snapshot_data: { archive_previous_month: true, prev_month_yyyymm: context.prev_month_yyyymm } }`.
@@ -348,4 +341,4 @@ Compose the paragraph per the following rules. Voice contract (vibe, personality
 
 ### Per-kind callout default-expand
 
-Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
+Every per-kind callout (chat, calendar, email, github, ado, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.

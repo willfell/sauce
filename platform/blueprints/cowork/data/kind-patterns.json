@@ -29,13 +29,6 @@
       "default_priority": 40,
       "default_features": ["sender_or_organizer_inner_circle", "is_group_chat", "recency_bucket", "message_count_bucket"]
     },
-    "finance": {
-      "tool_name_patterns": ["*expense*", "*transaction*", "*account*", "*card*", "*budget*", "list_bills", "list_vendors"],
-      "namespace_patterns": ["*Brex*", "*Copilot*", "*Quickbooks*", "*Plaid*"],
-      "callout_type": "example",
-      "default_priority": 50,
-      "default_features": ["amount_bucket", "recurring_merchant", "category"]
-    },
     "docs": {
       "tool_name_patterns": ["*drive*", "*doc*", "*sheet*", "*file*", "list_recent_files", "search_files"],
       "namespace_patterns": ["*Drive*", "*Docs*", "*Notion*", "*Confluence*"],

@@ -60,7 +60,6 @@ function composeEffectiveHardRules({ no_emojis, hard_rules } = {}) {
 // Users can override per-kind via mcps.<kind>.callout_type in user-preferences.md.
 const DEFAULT_CALLOUT_TYPE_BY_KIND = {
     chat: "info",          // blue — conversational signals
-    finance: "warning",    // amber — money matters
     calendar: "tip",       // green — anchors / conflicts
     email: "quote",        // gray — quiet / filtered
     ado: "example",        // purple — board state

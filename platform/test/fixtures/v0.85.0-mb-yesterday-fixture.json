@@ -6,10 +6,10 @@
     "day_synthesis": {
         "engagement_id": "personal",
         "day": "2026-06-01",
-        "summary": "Quiet morning; 1 finance event; calendar light",
-        "synthesis_paragraph": "Yesterday was a measured day. Calendar held two short stand-ups and a focus block; email queue stayed at 3 in inbox with one finance receipt to file. No tripwires fired.",
+        "summary": "Quiet morning; 1 inbox follow-up; calendar light",
+        "synthesis_paragraph": "Yesterday was a measured day. Calendar held two short stand-ups and a focus block; email queue stayed at 3 in inbox with one travel form to file. No tripwires fired.",
         "carry_forward_bullets": [
-            "Follow up on the Brex receipt with vendor by EOD today",
+            "Follow up on the travel form with the vendor by EOD today",
             "Inner-circle: ping Jason re: kanban context"
         ],
         "tick_count": 12,

@@ -51,7 +51,6 @@ When absent or invalid, the helper falls back to a default per-kind mapping for 
 | Kind | Default callout type | Why |
 |---|---|---|
 | `chat` | `info` | Blue — conversational signals |
-| `finance` | `warning` | Amber — money matters |
 | `calendar` | `tip` | Green — anchors / conflicts |
 | `email` | `quote` | Gray — quiet / filtered |
 | `ado` | `example` | Purple — board state |

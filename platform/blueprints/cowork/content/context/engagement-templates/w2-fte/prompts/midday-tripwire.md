@@ -10,11 +10,11 @@ updated_by: cowork@0.11.0 installer
 
 > [!note]
 > The w2-fte engagement type does NOT enable midday-tripwire by default
-> (`default_cadences.midday: false`) and the engagement-type's `render_aspects.finance_block` is `skip`, so the standard
-> personal-finance tripwire logic doesn't apply here. The orchestrator
-> will early-exit silently for w2-fte engagements. This default body exists
-> only as a placeholder if you customize the engagement to enable midday
-> for a non-finance purpose (e.g., a mid-day stakeholder pulse-check).
+> (`default_cadences.midday: false`). When you enable it, the orchestrator
+> checks the engagement's `tripwire_aspects` (`calendar_drift`,
+> `queue_growth`) and writes a note only when one trips. This default body
+> exists as a placeholder if you customize the engagement for something
+> more specific (e.g., a mid-day stakeholder pulse-check).
 
 Customize for your use case. Suggested shape:
 

@@ -11,8 +11,6 @@ type: scheduled-context
 
 - Email: {{email}}
 - Availability: {{availability}}
-- Rate: {{hourly_rate_usd}}/hr
-- Invoicing: submit to {{ap_email}}
 
 **Working style:** {{working_style_paragraph}}
 

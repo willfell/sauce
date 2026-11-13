@@ -28,7 +28,6 @@ Each entry in `vault-config.md` `engagements[]` gets a subdirectory at `<engagem
 | `mcp-integrations.md`          | all              | All `gather-*` sub-skills + `check-vault-routing`.                 |
 | `stakeholders.md`              | w2-fte, consulting | Morning + weekly orchestrators.                                  |
 | `client-context.md`            | consulting       | Consulting orchestrators.                                          |
-| `finance-guide.md`             | personal, consulting | `gather-finance-*` + `write-callout-finance` + `write-summary-invoice-prep`. |
 | `people.md`                    | personal         | `gather-gmail` + `gather-imessage` + `write-callout-*`.            |
 | `brand-voice.md`               | personal         | All write-callout + write-summary sub-skills.                      |
 | `project-management.md`        | personal         | `gather-projects` + project-aware summaries.                       |
@@ -51,9 +50,9 @@ The exact file set per engagement is determined by the engagement-type's templat
 
 When `cowork:bootstrap-vault` runs, it materializes per-engagement context from the workshop's engagement-type template directories:
 
-- `engagement-templates/personal/` — life-scope templates (about, finance-guide, brand-voice, working-style, people, mcp-integrations, project-management, whatsapp-integration).
+- `engagement-templates/personal/` — life-scope templates (about, brand-voice, working-style, people, mcp-integrations, project-management, whatsapp-integration).
 - `engagement-templates/w2-fte/` — W2 FTE templates (about, stakeholders, working-style, mcp-integrations).
-- `engagement-templates/consulting/` — consulting / contract templates (about, client-context, stakeholders, finance-guide, working-style, mcp-integrations).
+- `engagement-templates/consulting/` — consulting / contract templates (about, client-context, stakeholders, working-style, mcp-integrations).
 - `engagement-shared-templates/` — vault-wide seeds materialized at this directory's root: `active-threads.md`, `weekly-snapshot.md`, `vault-config.md`.
 
 The bootstrap interview picks the engagement type per engagement; the resulting directory shape is fixed by the engagement-type's manifest under `engagement-types/<type>.json`.

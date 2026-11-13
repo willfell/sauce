@@ -88,7 +88,7 @@ const FIXTURES = [
       home_city: "Evergreen, CO",
     },
     expected_templates: [
-      "about.md", "brand-voice.md", "finance-guide.md", "mcp-integrations.md",
+      "about.md", "brand-voice.md", "mcp-integrations.md",
       "people.md", "project-management.md", "whatsapp-integration.md", "working-style.md",
     ],
     expected_shape_marker: "### personal shape",
@@ -116,12 +116,9 @@ const FIXTURES = [
       label: "ClientCo",
       role: "Staff Engineer (contract)",
       primary_client: "ClientCo",
-      hourly_rate_usd: 200,
-      ap_email: "ap@clientco.example",
-      invoice_cadence: "monthly",
     },
     expected_templates: [
-      "about.md", "client-context.md", "finance-guide.md", "mcp-integrations.md",
+      "about.md", "client-context.md", "mcp-integrations.md",
       "stakeholders.md", "working-style.md",
     ],
     expected_shape_marker: "### consulting shape",
@@ -167,6 +164,20 @@ function checkSharedContracts() {
       `S3: manifest no longer references skills/${sub}`);
   }
 
+  const removedFinanceSubs = [
+    "gather-finance-yesterday", "gather-finance-cc-today", "gather-cc-debt-snapshot",
+    "write-run-note-finance", "write-summary-invoice-prep",
+  ];
+  for (const sub of removedFinanceSubs) {
+    assertTrue(!skillSources.some(s => s.endsWith(`/${sub}/SKILL.md`)),
+      `S3b: manifest no longer references the removed finance sub-skill skills/${sub}`);
+    assertTrue(!fs.existsSync(path.join(BP, "skills/skills", sub)),
+      `S3b: removed finance sub-skill directory skills/skills/${sub} is absent`);
+  }
+  const manifestFiles = Array.isArray(manifest.files) ? manifest.files.map(f => f && f.source).filter(Boolean) : [];
+  assertTrue(!manifestFiles.some(s => s.endsWith("/finance-guide.md")),
+    "S3b: manifest files[] no longer ships engagement-template finance-guide.md");
+
   // S4 — engagement-type registry present
   assertTrue(Array.isArray(manifest.engagement_types) && manifest.engagement_types.length === 3,
     "S4: manifest declares 3 engagement_types");
@@ -189,8 +200,7 @@ function checkSharedContracts() {
   // S7 — every gather sub-skill referenced by orchestrators declares engagement_id
   const gathers = [
     "gather-weather", "gather-calendar", "gather-gmail", "gather-imessage",
-    "gather-finance-yesterday", "gather-cc-debt-snapshot", "gather-projects", "gather-threads",
-    "gather-finance-cc-today",
+    "gather-projects", "gather-threads",
   ];
   for (const g of gathers) {
     const body = readSkill(`skills/skills/${g}/SKILL.md`);
@@ -239,25 +249,15 @@ function checkFixture(fix) {
 
   // F5 — render_aspects-driven gating predicates expected for this type
   const ra = typeManifest.render_aspects;
+  assertTrue(!("finance_block" in ra) && !("invoice_prep" in ra),
+    `F5[${fix.engagement.type}]: render_aspects carries no finance_block / invoice_prep aspect`);
   if (fix.engagement.type === "personal") {
-    assertTrue(ra.finance_block === "include",
-      "F5[personal]: render_aspects.finance_block == include");
     assertTrue(ra.inner_circle_imessage === "include",
       "F5[personal]: render_aspects.inner_circle_imessage == include");
-    assertTrue(ra.invoice_prep === "skip",
-      "F5[personal]: render_aspects.invoice_prep == skip");
   } else if (fix.engagement.type === "w2-fte") {
-    assertTrue(ra.finance_block === "skip",
-      "F5[w2-fte]: render_aspects.finance_block == skip");
-    assertTrue(ra.invoice_prep === "skip",
-      "F5[w2-fte]: render_aspects.invoice_prep == skip");
     assertTrue(ra.inner_circle_imessage === "skip",
       "F5[w2-fte]: render_aspects.inner_circle_imessage == skip");
   } else if (fix.engagement.type === "consulting") {
-    assertTrue(ra.finance_block === "include",
-      "F5[consulting]: render_aspects.finance_block == include");
-    assertTrue(ra.invoice_prep === "include",
-      "F5[consulting]: render_aspects.invoice_prep == include");
     assertTrue(ra.inner_circle_imessage === "skip",
       "F5[consulting]: render_aspects.inner_circle_imessage == skip");
   }
@@ -366,7 +366,7 @@ function assertCoworkV044Shape() {
     assertContains(about, "type: cowork-about", "v0.44.0: About Cowork frontmatter type");
     assertContains(about, "What is cowork?", "v0.44.0: About Cowork holds the abstract");
     assertContains(about, "Orchestrators (5)", "v0.44.0: About Cowork holds orchestrators table");
-    assertContains(about, "Sub-skills (27)", "v0.44.0: About Cowork holds sub-skills table");
+    assertContains(about, "Sub-skills (22)", "v0.44.0: About Cowork holds sub-skills table");
     assertContains(about, "## Getting started", "v0.44.0: About Cowork holds getting-started section");
   }
   // --- Cowork.md hub stripped of docs ---
@@ -590,12 +590,11 @@ function assertCoworkV065Shape() {
   console.log("--- v0.65.0 cowork-scheduling-cycle: write-run-note + onboard + readiness ---");
   const cowork = BP;
 
-  // S2: 6 write-run-note-* sub-skill bodies present
+  // S2: 5 write-run-note-* sub-skill bodies present
   const subSkills = [
     "write-run-note-morning-briefing",
     "write-run-note-midday-tripwire",
     "write-run-note-eod-review",
-    "write-run-note-finance",
     "write-run-note-weekly-review",
     "write-run-note-monthly-review",
   ];
@@ -659,17 +658,19 @@ function assertCoworkV065Shape() {
   assertTrue(Array.isArray(manifest.customjs_classes) && manifest.customjs_classes.includes("CoworkReadiness"),
     `v065-S6.2: manifest.customjs_classes includes CoworkReadiness`);
 
-  // S1.2 + S6.5.3 Manifest: 6 run-note rule_fragments + 1 scheduled-jobs rule_fragment
+  // S1.2 + S6.5.3 Manifest: 5 run-note rule_fragments + 1 scheduled-jobs rule_fragment
   const rfTypes = (manifest.rule_fragments || [])
     .map(rf => rf?.fragment?.required_frontmatter?.type?.equals)
     .filter(Boolean);
   for (const t of [
     "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-    "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+    "cowork-weekly-review", "cowork-monthly-review",
     "cowork-scheduled-jobs",
   ]) {
     assertTrue(rfTypes.includes(t), `v065-S1.2/S6.5.3: rule_fragment for type ${t} registered`);
   }
+  assertTrue(!rfTypes.includes("cowork-finance-snapshot"),
+    `v065-S1.2: retired cowork-finance-snapshot rule_fragment is no longer registered`);
 
   // S6.5.1: cowork:onboard-scheduled-jobs orchestrator present
   const onboardSkill = path.join(cowork, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
@@ -1444,7 +1445,7 @@ function assertCoworkV068Shape() {
     // out-of-scope list above documents the deliberate narrowing for S7.
     const FOCUSED_USER_PATHS = [
         "spice/cowork/context/user-preferences.md",   // v0.76.0 NEW — S13 wires materialize_once: true
-        "spice/cowork/prompts/per-mcp/finance/microscope.md",  // v0.79.0 NEW — cowork:edit-microscope writes on demand; NOT in files[] by construction
+        "spice/cowork/prompts/per-mcp/calendar/microscope.md",  // v0.79.0 NEW — cowork:edit-microscope writes on demand; NOT in files[] by construction
     ];
 
     const manifest = loadManifest();
@@ -3509,7 +3510,6 @@ function assertCoworkV068Shape() {
             "updated_by: cowork:context-builder",
             "priorities:",
             "  - chat",
-            "  - finance",
             "  - calendar",
             "  - email",
             "  - ado",
@@ -3519,9 +3519,6 @@ function assertCoworkV068Shape() {
             "mcps:",
             "  chat:",
             "    served_by: \"a\"",
-            "    connected: true",
-            "  finance:",
-            "    served_by: \"b\"",
             "    connected: true",
             "  calendar:",
             "    served_by: \"c\"",
@@ -3543,7 +3540,6 @@ function assertCoworkV068Shape() {
         const out = h.readUserPreferences({ vaultRoot: tmpDir });
         assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status} (${out.reason || ""})`);
         assertTrue(out.prefs.mcps.chat.callout_type === "info",      `${label}: chat default expected info, got ${out.prefs.mcps.chat.callout_type}`);
-        assertTrue(out.prefs.mcps.finance.callout_type === "warning", `${label}: finance default expected warning, got ${out.prefs.mcps.finance.callout_type}`);
         assertTrue(out.prefs.mcps.calendar.callout_type === "tip",   `${label}: calendar default expected tip, got ${out.prefs.mcps.calendar.callout_type}`);
         assertTrue(out.prefs.mcps.email.callout_type === "quote",    `${label}: email default expected quote, got ${out.prefs.mcps.email.callout_type}`);
         assertTrue(out.prefs.mcps.ado.callout_type === "example",    `${label}: ado default expected example, got ${out.prefs.mcps.ado.callout_type}`);
@@ -4858,9 +4854,10 @@ const CLASSIFIER_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/c
                 tools_by_namespace: fixture.tools_by_namespace,
                 vault_root: tmpVault,
             });
-            // The classifier must map each of the 5 canonical namespaces to its
-            // canonical kind. Accept either object-keyed { Gmail: { kind } } or
-            // string-valued { Gmail: "email" } shape.
+            // The classifier must map each of the 4 canonical namespaces to its
+            // canonical kind, and leave Brex unclassified (no finance kind).
+            // Accept either object-keyed { Gmail: { kind } } or string-valued
+            // { Gmail: "email" } shape.
             function getKind(ns) {
                 const c = result && result.classified;
                 if (!c) return null;
@@ -4872,7 +4869,7 @@ const CLASSIFIER_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/c
                 getKind("Gmail") === "email"
                 && getKind("Google_Calendar") === "calendar"
                 && getKind("apple-mcp") === "messages"
-                && getKind("Brex") === "finance"
+                && getKind("Brex") === null
                 && getKind("Google_Drive") === "docs",
                 `${label}: classifier did not produce the canonical kind mapping for one or more namespaces (got ${JSON.stringify(result && result.classified)})`,
             );
@@ -5148,7 +5145,7 @@ function _smokeParseFixtureYaml(text) {
 // ============================================================================
 // v0.96.1 — Rail H (cron heartbeat) smoke scenarios
 // ============================================================================
-//   * smoke-H-1: walkCadenceSidecars finds 5 cadences in all-fresh fixture
+//   * smoke-H-1: walkCadenceSidecars finds 4 cadences in all-fresh fixture
 //   * smoke-H-2: evaluateFreshness flags morning-briefing missed in missing-morning fixture
 //
 // RED until S2.1 lands check-heartbeat-helper.js. Fixtures at
@@ -5156,18 +5153,18 @@ function _smokeParseFixtureYaml(text) {
 
 const HEARTBEAT_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/heartbeat");
 
-// smoke-H-1: walkCadenceSidecars finds 5 cadences in all-fresh fixture
+// smoke-H-1: walkCadenceSidecars finds 4 cadences in all-fresh fixture
 {
-    const label = "smoke-H-1 walkCadenceSidecars finds 5 cadences in all-fresh fixture";
+    const label = "smoke-H-1 walkCadenceSidecars finds 4 cadences in all-fresh fixture";
     try {
         const helperPath = path.join(COWORK_HELPERS_DIR, "check-heartbeat-helper.js");
         delete require.cache[require.resolve(helperPath)];
         const cbh = require(helperPath);
         const vault_root = path.join(HEARTBEAT_FIXTURES_DIR, "all-fresh");
         const out = cbh.walkCadenceSidecars({ vault_root, engagement_id: "test-personal", days: 7 });
-        const expected = ["morning-briefing", "midday-tripwire", "eod-review", "lens-shift", "finance"];
+        const expected = ["morning-briefing", "midday-tripwire", "eod-review", "lens-shift"];
         const allPresent = expected.every((k) => out && out[k] && out[k].last_fire_at);
-        assertTrue(allPresent, `${label}: walkCadenceSidecars did not surface all 5 cadences (got keys ${out ? Object.keys(out).join(",") : "none"})`);
+        assertTrue(allPresent, `${label}: walkCadenceSidecars did not surface all 4 cadences (got keys ${out ? Object.keys(out).join(",") : "none"})`);
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 

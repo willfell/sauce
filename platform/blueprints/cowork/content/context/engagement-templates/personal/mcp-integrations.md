@@ -19,7 +19,6 @@ Mark each row as connected or not. Skills check connectivity at runtime; a `not 
 | Google Calendar              | {{mcp_gcal_connected}}  | {{mcp_gcal_purpose}}                           |
 | iMessage (variant A or B)    | {{mcp_imessage_connected}} | {{mcp_imessage_purpose}}                    |
 | WhatsApp                     | {{mcp_whatsapp_connected}} | {{mcp_whatsapp_purpose}}                    |
-| Copilot Money                | {{mcp_copilot_connected}} | {{mcp_copilot_purpose}}                      |
 | Weather                      | {{mcp_weather_connected}} | {{mcp_weather_purpose}}                      |
 | {{mcp_extra_1_name}}         | {{mcp_extra_1_connected}} | {{mcp_extra_1_purpose}}                      |
 
@@ -43,17 +42,6 @@ Two variants exist; check which one is connected at job start.
 - `tool_send_message(recipient, message)`
 
 If neither variant is available, the orchestrator notes "iMessage MCP not connected" in output and skips the Messages section.
-
----
-
-## Copilot Money MCP
-
-Primary source for all personal finance data. Reads from a local SQLite cache that auto-refreshes every 5 minutes. If data seems stale, call `refresh_database` first.
-
-- `exclude_transfers=true` (default) avoids double-counting CC payments + inter-account transfers.
-- Custom categories: see `finance-goals.md` for the owner's category map.
-- Large query results (>50K chars) get saved to a temp file. Use jq/python to parse.
-- Brex (work) accounts are excluded from personal finance totals.
 
 ---
 

@@ -26,6 +26,7 @@ const SENTINEL_V1 = "<!-- cowork:feedback-capture v=1 -->";
 const FREE_TEXT_PLACEHOLDERS = Object.freeze([
   "(Type prose here — anything you want cowork to know.)",
   "(Type prose here — name a section to scope it, e.g. `finance: too long`.)",
+  "(Type prose here — name a section to scope it, e.g. `calendar: too long`.)",
 ]);
 
 const KIND_LABELS = {
@@ -34,7 +35,6 @@ const KIND_LABELS = {
   ado: "ADO",
   calendar: "Calendar",
   email: "Email",
-  finance: "Finance",
   reminders: "Reminders",
 };
 
@@ -206,7 +206,7 @@ function _renderFreeTextBlock(priorState) {
       lines.push(line);
     }
   } else {
-    lines.push(FREE_TEXT_PLACEHOLDERS[1]);
+    lines.push(FREE_TEXT_PLACEHOLDERS[FREE_TEXT_PLACEHOLDERS.length - 1]);
   }
   lines.push("```");
   return lines.join("\n");

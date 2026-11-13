@@ -30,7 +30,6 @@ A short paragraph describing communication style -- direct vs. warm, length tole
 - Obsidian vault ({{vault_id}}) for all notes + tracking
 - {{primary_email_client}} for personal email
 - {{primary_calendar}} for scheduling
-- {{primary_finance_tool}} for transaction tracking
 - {{primary_messaging_tool}} for personal communication
 - {{additional_tool_1}}
 - {{additional_tool_2}}

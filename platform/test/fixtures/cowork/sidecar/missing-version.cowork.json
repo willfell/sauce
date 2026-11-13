@@ -24,7 +24,7 @@
       }
     }
   ],
-  "render_aspects_applied": ["finance_block:skip"],
+  "render_aspects_applied": ["kanban_projects:include"],
   "memory_used": {
     "yesterday_present": true,
     "drift_warning_present": false,

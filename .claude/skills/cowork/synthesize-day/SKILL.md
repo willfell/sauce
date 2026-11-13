@@ -1,6 +1,6 @@
 ---
 name: cowork:synthesize-day
-description: End-of-day synthesis. Reads today's memory.md (all hourly ticks) + today's atomic notes (morning-briefing, midday-tripwire, eod-review, finance) and composes a voice-applied 2-3 paragraph "Today's pattern" synthesis + a Carry-forward block of ≤3 bullets for tomorrow's morning-briefing. REPLACES the placeholder synthesis section at the top of today's memory.md; sets frontmatter `synthesized: true`, `synthesis_at: <now>`. Background memory tier 1 — does NOT write to spice/cowork/daily/, does NOT touch the daily note. Phrasings = "synthesize today's pattern", "compress today's memory", "end-of-day memory synthesis".
+description: End-of-day synthesis. Reads today's memory.md (all hourly ticks) + today's atomic notes (morning-briefing, midday-tripwire, eod-review) and composes a voice-applied 2-3 paragraph "Today's pattern" synthesis + a Carry-forward block of ≤3 bullets for tomorrow's morning-briefing. REPLACES the placeholder synthesis section at the top of today's memory.md; sets frontmatter `synthesized: true`, `synthesis_at: <now>`. Background memory tier 1 — does NOT write to spice/cowork/daily/, does NOT touch the daily note. Phrasings = "synthesize today's pattern", "compress today's memory", "end-of-day memory synthesis".
 schedule: Cron-driven per (engagement, day); typically 15 min after the engagement's eod-review cron slot
 scope: shared
 tags: [cowork, orchestrator, synthesis, memory, eod, background]
@@ -8,7 +8,7 @@ tags: [cowork, orchestrator, synthesis, memory, eod, background]
 
 # cowork:synthesize-day
 
-End-of-day memory synthesis for one engagement. Fires after `cowork:eod-review` completes (typically 15 minutes later, per the engagement's cron schedule); reads today's memory file at `spice/cowork/memory/<engagement_id>/YYYY/MM-MMMM/YYYY-MM-DD/memory.md` (which `cowork:capture-tick` has been appending to all day) plus today's atomic notes at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/{morning-briefing,midday-tripwire,eod-review,finance}.md`, and composes a voice-applied "Today's pattern" synthesis paragraph + a Carry-forward block of ≤3 actionable bullets for tomorrow's morning-briefing.
+End-of-day memory synthesis for one engagement. Fires after `cowork:eod-review` completes (typically 15 minutes later, per the engagement's cron schedule); reads today's memory file at `spice/cowork/memory/<engagement_id>/YYYY/MM-MMMM/YYYY-MM-DD/memory.md` (which `cowork:capture-tick` has been appending to all day) plus today's atomic notes at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/{morning-briefing,midday-tripwire,eod-review}.md`, and composes a voice-applied "Today's pattern" synthesis paragraph + a Carry-forward block of ≤3 actionable bullets for tomorrow's morning-briefing.
 
 The synthesis section at the top of today's memory file (between H1 and `## Ticks`) is REPLACED with the new voice-applied synthesis content. All tick callouts in the `## Ticks` section are preserved byte-identical — this orchestrator never rewrites tick data. Frontmatter `synthesized: true` + `synthesis_at: <now-ISO>` are set so morning-briefing can detect a completed synthesis. If the orchestrator fires again (re-fire or missed-slot retry), it replaces the synthesis section again from the latest available data — idempotent by design. The tick count and all tick bodies remain intact regardless of how many times synthesize-day fires.
 
@@ -68,7 +68,6 @@ The synthesis section at the top of today's memory file (between H1 and `## Tick
    spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md
    spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md
    spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/eod-review.md
-   spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/finance.md
    ```
 
    For each, Read via the Read tool; treat not-found as null. For each file that exists, strip the leading frontmatter block (YAML between `---` markers); capture the body as `<orch>_atomic_md` (or null when the file is absent). Capture as:
@@ -77,8 +76,7 @@ The synthesis section at the top of today's memory file (between H1 and `## Tick
    today_atomic_notes = {
      morning_briefing:  <body string or null>,
      midday_tripwire:   <body string or null>,
-     eod_review:        <body string or null>,
-     finance:           <body string or null>
+     eod_review:        <body string or null>
    }
    ```
 

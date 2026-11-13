@@ -144,11 +144,7 @@ this is unexpected.`
     cap to top 10. Compose the rolled-up `> [!example]+ 🧩 Emergent themes this week`
     callout. When zero aggregated, mark `week_related_status = "skipped:no-hits"`.
 
-2d. **Invoice prep / FTE status** (engagement-type-gated). When
-    `plan.render_aspects.invoice_prep == "include"` AND `engagement.invoice_cadence`
-    indicates weekly invoicing: READ write-summary-invoice-prep SKILL.md with
-    `{ engagement, date_today: context.today, mode: "weekly" }`. Capture `invoice_block`.
-    When `plan.render_aspects.invoice_prep == "skip"` AND `engagement.type == "w2-fte"`:
+2d. **FTE status** (engagement-type-gated). When `engagement.type == "w2-fte"`:
     READ write-summary-fte-status SKILL.md; capture `fte_status_block`.
 
 ### Step 3: Compose run-note body via cowork:compose-body (week-tier synopsis → week-pattern → per-kind → next-week setup)
@@ -308,7 +304,7 @@ cross-day.
 ### Step 9: State updates (active-threads, weekly-snapshot)
 
 9a. READ update-active-threads SKILL.md with
-    `{ engagement_id, phase: "weekly-refresh", date_today: context.today, writer: "cowork:weekly-review", changes: { archive_resolved_older_than_days: 14, stale_recommendations, snoozed_to_open, financial_state_refresh } }`.
+    `{ engagement_id, phase: "weekly-refresh", date_today: context.today, writer: "cowork:weekly-review", changes: { archive_resolved_older_than_days: 14, stale_recommendations, snoozed_to_open } }`.
 
 9b. READ update-weekly-snapshot SKILL.md with
     `{ engagement_id, phase: "weekly-close", date_today: context.today, writer: "cowork:weekly-review", snapshot_data: { week_of: context.week_of, archive_to_previous: true, totals } }`.
@@ -353,6 +349,6 @@ Compose the paragraph per the following rules. Voice contract (vibe, personality
 
 ### Per-kind callout default-expand
 
-Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
+Every per-kind callout (chat, calendar, email, github, ado, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
 
 {{shared.done_block}}

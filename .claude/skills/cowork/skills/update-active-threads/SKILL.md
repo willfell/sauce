@@ -34,7 +34,6 @@ Deterministic state mutator for the active-threads ledger. Read → parse → mu
   - `surface_open` (boolean): on morning-pass, set `Last Surfaced: <date_today>` for all open threads.
   - `audit_full` (boolean): on monthly-refresh, deeper sweep.
   - `stale_recommendations` (list[object]): per-thread close/act/snooze recommendations from gather-threads.
-  - `financial_state_refresh` (object): condensed finance/cc-debt block for the `## Reference` section (life-side weekly/monthly).
   When `phase = "explicit-update"`, `changes` may instead contain `updates: [{ thread, action: "add"|"update"|"archive", body? }]`.
 - `vault_path` (string, optional): absolute vault root override.
 
@@ -54,7 +53,7 @@ For back-compat, the legacy fields `mutation` / `caller` / `surfaced_thread_ids`
 5. Apply mutation per `phase`:
    - `morning-pass`: append `changes.new_threads` under `## Open`; promote `changes.snoozed_to_open` (move from `## Snoozed` to `## Open`); when `changes.surface_open = true`, set `Last Surfaced: <date_today>` on every open thread.
    - `eod-pass`: append `changes.new_threads`; mark `changes.resolved` resolved (move to `## Resolved (last 14 days)`); move `changes.snoozed_to_open` (or fresh snoozes) appropriately.
-   - `weekly-pass` / `weekly-refresh`: walk threads. Archive resolved older than `changes.archive_resolved_older_than_days` days (default 14) by dropping the H3. Apply `changes.snoozed_to_open` promotions. When `changes.validate_open_threads = true`, mark broken-source threads with a warning bullet. Refresh `## Reference` from `changes.financial_state_refresh`.
+   - `weekly-pass` / `weekly-refresh`: walk threads. Archive resolved older than `changes.archive_resolved_older_than_days` days (default 14) by dropping the H3. Apply `changes.snoozed_to_open` promotions. When `changes.validate_open_threads = true`, mark broken-source threads with a warning bullet.
    - `monthly-pass` / `monthly-refresh`: same as weekly-refresh plus `changes.audit_full = true` triggers a deeper open-thread sweep.
    - `explicit-update`: for each entry in `changes.updates[]`:
      - `add`: append a new H3 block `### <thread>` with the four fields from `body`.

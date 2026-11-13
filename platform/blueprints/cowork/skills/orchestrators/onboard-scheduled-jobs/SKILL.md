@@ -151,7 +151,7 @@ Print the per-orchestrator preamble:
   <friendly list from tripwire_aspects>. Only writes a note when there's
   something to flag (green = silent).
   ```
-  (Friendly aspect names: `cc_drift` → "CC overspend"; `calendar_drift` → "calendar drift"; `queue_growth` → "approval queue growth".)
+  (Friendly aspect names: `calendar_drift` → "calendar drift"; `queue_growth` → "approval queue growth". When `tripwire_aspects` is empty, say instead that this engagement type ships with no tripwire aspects, so the job stays silent until `overrides.tripwire_aspects` names one.)
 - **eod-review**:
   ```
   EOD review fires at 17:05 Mon-Fri. Wraps the day: wins, misses, what

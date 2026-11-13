@@ -28,9 +28,8 @@ cold_path_skips: []
 > unchanged: silent on green (no note written), writes only when at least
 > one signal lands at warn or alert.
 
-Real-time mid-day check for credit-card charges / calendar drift / queue growth
-that violate the active payoff plan or stress signal, scoped to a single
-engagement. Tone is short + punchy — only fires when tripwire_aspects trip
+Real-time mid-day check for calendar drift / queue growth that signals stress,
+scoped to a single engagement. Tone is short + punchy — only fires when tripwire_aspects trip
 (otherwise produces a brief "all clear" no-op). Writes ONLY when severity is
 `warn` or `alert`; on `green`, NO atomic note is written.
 
@@ -146,10 +145,6 @@ this is unexpected.`
     `ordered_blocks[]`.
 
 2c. **Per-aspect tripwire gathers** (gated by `plan.tripwire_aspects`):
-    - If `"cc_drift"` in `plan.tripwire_aspects`: READ
-      `<vault>/.claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md` with
-      `{ engagement_id: {{$engagement_id}}, date_today: {{$today_date}}, lookback_start: "06:00", timezone: {{$timezone}}, classify: true, cards: { active, locked, ignore } }`.
-      Capture `cc_signal`.
     - If `"calendar_drift"` in `plan.tripwire_aspects`: READ
       `<vault>/.claude/skills/cowork/skills/gather-calendar/SKILL.md` with
       `{ engagement_id: {{$engagement_id}}, mode: "drift-check", horizon: "today+4h", timezone: {{$timezone}} }`.
@@ -167,10 +162,10 @@ this is unexpected.`
 {{shared.voice_clause}}
 
 3a. **Compute severity** from collected signals:
-    - `alert` if any of: cc_signal contains a RED-class charge OR
-      calendar_signal.drift_minutes >= 60 OR queue_signal.new_count >= 10.
-    - `warn` if any of: cc_signal contains only YELLOW-class charges OR
-      calendar_signal.drift_minutes in [30, 59] OR queue_signal.new_count in [3, 9].
+    - `alert` if any of: calendar_signal.drift_minutes >= 60 OR
+      queue_signal.new_count >= 10.
+    - `warn` if any of: calendar_signal.drift_minutes in [30, 59] OR
+      queue_signal.new_count in [3, 9].
     - `green` if none of the above → **EXIT SILENTLY**. Do NOT write a "nothing flagged"
       note (atomic-note absence = green; presence = something to flag).
 
@@ -375,4 +370,4 @@ Compose the paragraph per the following rules. Voice contract (vibe, personality
 
 ### Per-kind callout default-expand
 
-Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
+Every per-kind callout (chat, calendar, email, github, ado, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.

@@ -36,7 +36,7 @@ Use this sub-skill to convert structured gather/memory/closing inputs into the c
   Empty/null fields are omitted cleanly (no orphan blank lines). yesterday/overnight/echoes render BETWEEN synopsis and ordered_blocks (the "top memory cluster"); backlink renders at the very END of body (after closing).
 
 - `ordered_blocks` (array, required, may be empty): each entry `{ kind, callout_type, title, body_md }`. composeBody wraps each in `> [!<callout_type>]+ <title>` with body lines `> ` prefixed. `callout_type` MUST be one of `info|tip|quote|note|example|warning` (per v0.82.0 mapping; sourced by orchestrator from `prefs.mcps[kind].callout_type`).
-- `engagement_type_blocks` (array, required, may be empty): same per-entry shape as ordered_blocks. Used for semantic_related / finance / future engagement-type-aspect blocks. Rendered AFTER all ordered_blocks.
+- `engagement_type_blocks` (array, required, may be empty): same per-entry shape as ordered_blocks. Used for semantic_related / future engagement-type-aspect blocks. Rendered AFTER all ordered_blocks.
 - `closing_md` (string, required): pre-rendered `> [!tip] <title>` callout from orchestrator.
 
 **Asymmetry note.** synopsis_md + closing_md arrive PRE-WRAPPED (orchestrator owns those callout shapes — they're one-offs whose prose comes from prompt body + voice contract); ordered_blocks + engagement_type_blocks arrive as raw `{kind, callout_type, title, body_md}` quadruples that composeBody wraps. Rationale: ordered_blocks are N-ary and prefs-driven, so composeBody enforces shape correctness across all N entries.

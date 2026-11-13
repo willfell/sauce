@@ -34,7 +34,7 @@ These are the entry points fired by cron — each takes `engagement_id` and disp
 | Skill                       | Cadences supported per engagement type                                |
 |:----------------------------|:----------------------------------------------------------------------|
 | `cowork:morning-briefing`   | personal, w2-fte, consulting                                          |
-| `cowork:midday-tripwire`    | personal (finance-tracking engagements only)                          |
+| `cowork:midday-tripwire`    | w2-fte, consulting (opt-in; fires on `tripwire_aspects`)              |
 | `cowork:eod-review`         | personal, w2-fte, consulting                                          |
 | `cowork:weekly-review`      | personal, w2-fte, consulting                                          |
 | `cowork:monthly-review`     | personal, consulting (skipped by default for w2-fte)                  |
@@ -45,7 +45,7 @@ Plus the one-time entry point:
 |:----------------------------|:----------------------------------------------------------------------|
 | `cowork:bootstrap-vault`    | User-invoked. First-run interview + per-engagement context materialization + nav-button table rendering + audit-receipt embed. |
 
-### Sub-skills (27)
+### Sub-skills (22)
 
 Sub-skills are composable building blocks. Orchestrators call them in sequence; they never schedule themselves.
 
@@ -58,19 +58,14 @@ Sub-skills are composable building blocks. Orchestrators call them in sequence; 
 | `cowork:skills/gather-calendar`             | Gather          | Pulls events from `engagement.calendar_id` (or primary).               |
 | `cowork:skills/gather-gmail`                | Gather          | Pulls threads scoped by `engagement.gmail_label`.                      |
 | `cowork:skills/gather-imessage`             | Gather          | Personal-engagement-only iMessage pull.                                |
-| `cowork:skills/gather-finance-yesterday`    | Gather          | Pulls yesterday's transactions; gated by `render_aspects.finance_block`. |
-| `cowork:skills/gather-finance-cc-today`     | Gather          | Pulls today's new CC charges + locked-card alerts.                     |
-| `cowork:skills/gather-cc-debt-snapshot`     | Gather          | Pulls CC balances + utilization + APR per account.                     |
 | `cowork:skills/gather-projects`             | Gather          | Scans `spice/projects/*/` kanban; filters by `engagement_id` tag.      |
 | `cowork:skills/gather-threads`              | Gather          | Reads `active-threads.md`; filters by `engagement_id` tag.             |
 | `cowork:skills/write-callout-morning-briefing` | Write-callout | Engagement-aware morning callout; type-branches the section layout.    |
-| `cowork:skills/write-callout-finance`               | Write-callout | Renders the Finance callout (personal + consulting).             |
 | `cowork:skills/write-callout-tripwire-red`          | Write-callout | Renders a red (action-required) midday tripwire callout.         |
 | `cowork:skills/write-callout-tripwire-yellow`       | Write-callout | Renders a yellow (watch-list) midday tripwire callout.           |
 | `cowork:skills/write-callout-eod-review`            | Write-callout | Engagement-aware EOD callout; type-branches the layout.          |
 | `cowork:skills/write-summary-weekly`                | Write-summary | Engagement-aware weekly summary at `summaries/weekly/<engagement.id>/`. |
 | `cowork:skills/write-summary-monthly`               | Write-summary | Engagement-aware monthly summary at `summaries/monthly/<engagement.id>/`. |
-| `cowork:skills/write-summary-invoice-prep`          | Write-summary | Consulting-only invoice prep (RENAMED from invoice-prep@0.30.0). |
 | `cowork:skills/write-summary-fte-status`            | Write-summary | NEW: w2-fte weekly + monthly status block.                       |
 | `cowork:skills/update-active-threads`               | State         | Patches `active-threads.md` (open/resolve/snooze + engagement_id tag). |
 | `cowork:skills/update-active-projects`              | State         | (legacy — orphaned in v0.31.0; deprecation TBD)                  |
@@ -101,5 +96,5 @@ Per-engagement files (e.g. `spice/cowork/context/<engagement.id>/about.md`, `wor
 > 1. Install or update the cowork blueprint: `sauce update` from the workshop, or accept the new blueprint at the next sync.
 > 2. Run `cowork:bootstrap-vault` to interview yourself (one question at a time): pick engagement types, fill in required fields per type, enable cadences, choose cron drop mode.
 > 3. Bootstrap writes `vault-config.md` + per-engagement context dirs + the Cowork hub's engagement nav-button table + an audit-receipt report.
-> 4. Verify your MCP servers are connected (Obsidian + at least one of Gmail / Google Calendar / Copilot Money / iMessage depending on engagement types). See each engagement's `mcp-integrations.md`.
+> 4. Verify your MCP servers are connected (Obsidian + at least one of Gmail / Google Calendar / iMessage depending on engagement types). See each engagement's `mcp-integrations.md`.
 > 5. Paste the bootstrap-emitted cron blocks into your cron infrastructure for whichever `(engagement, cadence)` pairs you enabled. Re-run bootstrap any time to add / drop engagements or change cadence enablement.

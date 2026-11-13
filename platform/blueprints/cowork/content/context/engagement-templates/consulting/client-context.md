@@ -22,8 +22,6 @@ One paragraph describing the client: industry, what the owner does for them, the
 
 ## Engagement Details
 
-- **Billing:** {{hourly_rate_usd}}/hr, invoiced {{invoice_cadence}}.
-- **Accounts payable:** {{ap_email}}.
 - **Recurring meetings:** {{recurring_meetings_summary}}.
 
 ---

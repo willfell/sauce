@@ -23,7 +23,6 @@ const CANONICAL_TITLES = {
     calendar: "Calendar",
     email:    "Email",
     chat:     "Chat",
-    finance:  "Finance",
 };
 
 function titleCase(s) {

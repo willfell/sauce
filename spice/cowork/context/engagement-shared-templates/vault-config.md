@@ -11,7 +11,6 @@ mcp_map:
   gcal:     missing
   imessage: missing
   whatsapp: missing
-  finance:  missing
 ---
 
 # Cowork vault config — schema seed
