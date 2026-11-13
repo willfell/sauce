@@ -1140,8 +1140,8 @@ class ToDoDailyFilterView {
                 if (res.path) t.path = res.path;
                 t.parent_path = parentPath || null;
                 t.parent_task = parentPath ? parentPath.split('/').pop().replace(/\.md$/i, '') : '';
-                t.rank = null;
-                if (res.due) t.due = res.due;
+                t.sibling_rank = null;
+                if (res.due) { t.due = res.due; t.rank = null; }
             });
             repaintLive();
         };
@@ -1489,6 +1489,8 @@ class ToDoDailyFilterView {
                     button.style.background = rest;
                     const from = droppedPath(event);
                     dragPath = null;
+                    // The shared drag (nest / Make top-level) ends here too.
+                    try { if (typeof TTL.endDrag === 'function') TTL.endDrag(); } catch (_e) { /* nothing to clear */ }
                     if (!from) return undefined;
                     return dropOnDay(from, cell.date);
                 });

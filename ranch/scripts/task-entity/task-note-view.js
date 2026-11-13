@@ -505,13 +505,14 @@ class TaskNoteView {
     }
 
     /**
-     * `list` ordered by `rank` among siblings: ranked tasks first, lowest
-     * rank first, then the unranked ones in the order they came. Stable; the
-     * input is not changed. Pure.
+     * `list` ordered by `sibling_rank` (the place among its siblings on the
+     * parent's card; `rank` is the Today order and plays no part): ranked
+     * tasks first, lowest first, then the unranked ones in the order they
+     * came. Stable; the input is not changed. Pure.
      */
     static _rankOrder(list) {
         const rankOf = (t) => {
-            const v = t ? t.rank : null;
+            const v = t ? t.sibling_rank : null;
             if (typeof v === 'number') return isFinite(v) ? v : null;
             if (typeof v !== 'string' || v.trim() === '') return null;
             const n = Number(v);
@@ -577,7 +578,7 @@ class TaskNoteView {
             }
         }
         moved.path = dest;
-        moved.rank = null;
+        moved.sibling_rank = null;
         moved.parent_path = toPath && folderOf(toPath) ? String(toPath) : '';
         moved.parent_task = toPath ? TaskNoteView._baseOf(toPath) : '';
         if (toPath) {
@@ -589,7 +590,7 @@ class TaskNoteView {
 
     /**
      * The subtasks of `parent` in the order its own card lists them: open ones
-     * first by `rank` among the siblings (unranked last, in the index's
+     * first by `sibling_rank` (unranked last, in the index's
      * order), then finished ones newest first. Status alone decides, never
      * the folder. Deleted tasks are left out. Pure; never throws.
      */
@@ -1086,6 +1087,7 @@ class TaskNoteView {
                         repaint: () => paintSubtasks(),
                         notice: (m) => notice(m),
                         lock: { set: locks, key: String(filePath) + ':subtasks' },
+                        field: 'sibling_rank',
                     }) : null);
                     const afterMove = (res, fromPath) => {
                         if (!res || res.ok !== true || !res.path || !fromPath) return;

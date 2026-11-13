@@ -1097,7 +1097,7 @@ process.exitCode = 1;
   await okAsync('RD-DV-DRAG dropping a Today row on another renumbers; any row dropped on a strip cell reschedules', async () => {
     const env = makeRenderHarness();
     const { root } = await mount(env);
-    const dt = { setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
     const handleOf = (row) => byClass(row, 'sauce-task-drag')[0];
     const lowRow = lastRow(env, 'Today low').row;
     const highRow = lastRow(env, 'Today high').row;
@@ -1360,7 +1360,7 @@ process.exitCode = 1;
     assert.deepStrictEqual(types, [['application/x-sauce-task-path', 'spice/tasks/Today low.md']],
       'only the custom type is set, never text/plain');
     const high = lastRow(env, 'Today high').row;
-    await high.fire('drop', { dataTransfer: { getData: (type) => (type === 'application/x-sauce-task-path' ? 'spice/tasks/Today low.md' : '') } });
+    await high.fire('drop', { dataTransfer: { types: ['application/x-sauce-task-path'], getData: (type) => (type === 'application/x-sauce-task-path' ? 'spice/tasks/Today low.md' : '') } });
     await flush();
     assert.deepStrictEqual(env.calls.setFields.map((c) => c.path), ['spice/tasks/Today low.md', 'spice/tasks/Today high.md'],
       'the drop reads the custom type');

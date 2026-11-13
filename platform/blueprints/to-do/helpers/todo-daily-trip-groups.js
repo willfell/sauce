@@ -70,7 +70,10 @@ class ToDoDailyTripGroups {
                 const trip = { name: label, slug };
                 TTL.wireGroupDrop(dv.container.lastElementChild, {
                     label: 'Move to ' + label,
-                    refuse: (p) => (tripTasks.some((t) => t && t.path === p) ? 'Already in ' + label : ''),
+                    refuse: (p, drag) => {
+                        if (drag && drag.hasProject) return 'This task is under a project; remove the project first';
+                        return tripTasks.some((t) => t && t.path === p) ? 'Already in ' + label : '';
+                    },
                     apply: (p) => TM.setTrip(p, trip),
                 });
             }

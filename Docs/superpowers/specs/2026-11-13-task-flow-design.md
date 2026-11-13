@@ -127,14 +127,20 @@ Moving tasks around also means opening the edit dialog. Each feature below close
 - **Task onto task makes a subtask.**
   - Dropping on a row's middle third nests it. The edges keep their current reorder meaning where reorder exists.
   - It uses the same re-parent path as the edit dialog's parent field (`TaskDialog`), moved into a shared static that both call.
-  - Loops are refused (a task into its own descendant).
+  - Loops are refused (a task into its own descendant), by folder and by the `parent_task` chain.
+  - The current parent is both `parent_task` and the folder the task sits in, so Make top-level and re-nesting work for a folder-nested task whose `parent_task` is empty or stale.
+  - When the target is a known file (a drag or a picker), that file is used as it is; the link written is path-qualified (`[[spice/tasks/…/Name|Name]]`) when another note shares its name.
+  - A save in the edit dialog whose parent field still holds the value on file (plain text, an unquoted `[[A]]` that YAML reads as a nested list, or a path-qualified link) keeps the parent untouched.
+  - A drop on the row itself stays quiet in every zone. A drop into its own subtask or onto its current parent is refused with red dashes and a label.
+  - Only a drag that carries the task (or note) drag type is accepted; the drop reads its path from the event first, and a document-level `dragend` / `drop` listener clears the shared drag state.
   - It works on: the To-Do lists; the task card's subtask list (dropping onto a sibling); and the daily dashboard task panel.
-- **Make top-level.** While a subtask is dragged, a `Make top-level` drop strip appears at the top of the list.
-- **Reorder subtasks on the task card.**
-  - Subtasks get `rank` among their siblings.
-  - `_orderedChildren` orders open subtasks by rank, unranked last in their current order; done subtasks keep newest-first.
-  - Drag on desktop; ⋯ Move up / down on all devices.
-- **Group headers.** Dropping on a project group header sets `project` and `project_slug`. Dropping on a trip group header sets `trip` and `trip_slug`. Both use the same writers the edit dialog uses.
+- **Make top-level.** While a subtask is dragged, a `Make top-level` drop strip appears at the top of the list (only where something can make the move).
+- **Reorder subtasks on the task card.** (Ruling, 2026-11-13: subtask order has its own field.)
+  - Subtasks get `sibling_rank` among their siblings. `rank` stays the Today manual order only.
+  - `_orderedChildren` orders open subtasks by `sibling_rank`, unranked last in their current order; done subtasks keep newest-first.
+  - Drag on desktop; ⋯ Move up / down on all devices. Both renumber `sibling_rank`.
+  - A re-parent clears `sibling_rank` and leaves `rank` alone (except that an undated subtask made top-level takes its old parent's due, which clears `rank` as any date change does). Date changes never touch `sibling_rank`.
+- **Group headers.** Dropping on a project group header sets `project` and `project_slug`. Dropping on a trip group header sets `trip` and `trip_slug`. Both use the same writers the edit dialog uses. A task with a project is refused on a trip header: "This task is under a project; remove the project first".
 - **Notes.** Dropping a Notes row on a subtask row of the card moves the note into that subtask's `notes/` folder, sets `task:`, and renames it by the usual rule.
 - **Menu equivalents** (⋯ on rows, all devices):
   - Make subtask of… (a fuzzy picker of open tasks);

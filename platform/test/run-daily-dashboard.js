@@ -1543,7 +1543,7 @@ process.exitCode = 1;
       assert(JSON.stringify(before) === JSON.stringify(rankedPages.map((p) => p.file.path)), 'smart sort honours rank: ' + before);
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       assert(rows.every((r) => r.querySelector('.sauce-task-drag')), 'Up next rows carry drag handles');
-      const dt = { setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+      const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
       await rows[3].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('dragover', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
@@ -1565,7 +1565,7 @@ process.exitCode = 1;
     try {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
       rows[1].remove();
-      const dt = { setData() {}, setDragImage() {} };
+      const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {} };
       await rows[4].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(!f.calls.setFields.some((c) => c.path === 'spice/tasks/bravo.md'), 'detached row never written');
@@ -1583,7 +1583,7 @@ process.exitCode = 1;
     });
     try {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
-      const dt = { setData() {}, setDragImage() {} };
+      const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {} };
       await rows[3].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(f.notices.length === 1, 'exactly one panel notice for the silent refusal: ' + JSON.stringify(f.notices));
@@ -1623,7 +1623,7 @@ process.exitCode = 1;
     const f = await renderLivePanel({ taskPages: rankedPages, realTD: true });
     try {
       const rows = f.section('upnext').querySelectorAll('.sauce-task-today-row');
-      const dt = { setData() {}, setDragImage() {} };
+      const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {} };
       await rows[3].querySelector('.sauce-task-drag')._fire('dragstart', { dataTransfer: dt });
       await rows[0]._fire('drop', { dataTransfer: dt });
       assert(f.calls.setFields.length === 4, 'four rank writes attempted: ' + f.calls.setFields.length);
@@ -1801,7 +1801,7 @@ process.exitCode = 1;
       });
       assert(JSON.stringify(types) === JSON.stringify([['application/x-sauce-task-path', 'spice/tasks/delta.md']]),
         'only the custom type is set: ' + JSON.stringify(types));
-      await rows[0]._fire('drop', { dataTransfer: { getData: (t) => (t === 'application/x-sauce-task-path' ? 'spice/tasks/delta.md' : '') } });
+      await rows[0]._fire('drop', { dataTransfer: { types: ['application/x-sauce-task-path'], getData: (t) => (t === 'application/x-sauce-task-path' ? 'spice/tasks/delta.md' : '') } });
       assert(f.calls.setFields.length === 4 && f.calls.setFields[0].path === 'spice/tasks/delta.md',
         'the drop reads the custom type: ' + JSON.stringify(f.calls.setFields));
     } finally { f.cleanup(); }

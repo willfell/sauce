@@ -24,6 +24,7 @@ class TaskMove {
     parentChoices(app, path, currentParent) { return TaskMove.parentChoices(app, path, currentParent); }
     refusalText(reason) { return TaskMove.refusalText(reason); }
     hasParent(task) { return TaskMove.hasParent(task); }
+    get UNDER_PROJECT() { return TaskMove.UNDER_PROJECT; }
 
     static _cjs() {
         try { return (typeof window !== 'undefined' && window.customJS) || null; } catch (_e) { return null; }
@@ -125,11 +126,29 @@ class TaskMove {
         return TaskMove._writeFields(path, TD.projectFields(project), project ? 'Could not move the task to the project' : 'Could not clear the project', opts);
     }
 
-    /** Set or clear the task's trip with the dialog's writer (TaskDialog.tripFields). */
+    static get UNDER_PROJECT() { return 'This task is under a project; remove the project first'; }
+
+    /**
+     * Set or clear the task's trip with the dialog's writer
+     * (TaskDialog.tripFields). A task with a project is refused with a
+     * Notice: trip lists show only tasks with no project.
+     */
     static async setTrip(path, trip, opts) {
         const cjs = TaskMove._cjs();
         const TD = cjs && cjs.TaskDialog;
         if (!TD || typeof TD.tripFields !== 'function') { TaskMove._notice('Could not move the task right now'); return { ok: false, reason: 'unavailable' }; }
+        if (trip) {
+            const app = TaskMove._app(opts);
+            let fm = null;
+            try {
+                const f = app && app.vault ? app.vault.getAbstractFileByPath(String(path)) : null;
+                fm = f ? (app.metadataCache.getFileCache(f) || {}).frontmatter || null : null;
+            } catch (_e) { fm = null; }
+            if (fm && String(fm.project_slug || fm.project || '').trim()) {
+                TaskMove._notice(TaskMove.UNDER_PROJECT);
+                return { ok: false, reason: 'under-project' };
+            }
+        }
         return TaskMove._writeFields(path, TD.tripFields(trip), 'Could not move the task to the trip', opts);
     }
 
@@ -203,7 +222,20 @@ class TaskMove {
         let names = [];
         try { names = TD && typeof TD._parentCandidates === 'function' ? TD._parentCandidates(app, path) || [] : []; } catch (_e) { names = []; }
         const current = TaskMove._unlink(currentParent).toLowerCase();
-        return names.filter((n) => String(n).toLowerCase() !== current).map((n) => ({ label: String(n), value: '[[' + n + ']]' }));
+        // Each choice carries its task's path, so the move uses that file
+        // even when another note shares its name.
+        const pathOf = new Map();
+        try {
+            for (const f of (app && app.vault && app.vault.getMarkdownFiles()) || []) {
+                const p = String((f && f.path) || '');
+                if (p.indexOf('spice/tasks/') !== 0 || /^spice\/tasks\/(_done|_trash|_sets)\//.test(p)) continue;
+                const fm = (app.metadataCache.getFileCache(f) || {}).frontmatter || null;
+                const name = String(f.basename != null ? f.basename : TaskMove._base(p));
+                if (fm && fm.type === 'task' && !pathOf.has(name)) pathOf.set(name, p);
+            }
+        } catch (_e) { /* fall back to links */ }
+        return names.filter((n) => String(n).toLowerCase() !== current)
+            .map((n) => ({ label: String(n), value: pathOf.get(String(n)) || '[[' + n + ']]' }));
     }
 
     /**

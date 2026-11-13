@@ -287,25 +287,36 @@ never fires on touch, so the phone has the menu only (no long-press drag).
 - **One re-parent.** `TaskDialog.reparent(app, task, parent)` is the move both
   the edit dialog's Subtask of… field and every gesture run: a loop (the task
   itself, its own subtask by folder, or a `parent_task` chain that reaches it)
-  is refused before anything is written; `parent_task` is written and `rank`
-  cleared; the folder moves under the new parent (or to `spice/tasks/` for the
-  top level) by the Task folders rules; an undated subtask made top-level takes
-  its old parent's due. `parent = null` is Make top-level.
+  is refused before anything is written; `parent_task` is written and
+  `sibling_rank` cleared (`rank` is left alone); the folder moves under the new
+  parent (or to `spice/tasks/` for the top level) by the Task folders rules; an
+  undated subtask made top-level takes its old parent's due. `parent = null` is
+  Make top-level. The current parent is `parent_task` and the folder together,
+  so a folder-nested task with an empty or stale `parent_task` still moves. A
+  known target file (drag, picker) is used as it is, and its link is
+  path-qualified (`[[spice/tasks/…/A|A]]`) when another note shares the name.
+  A dialog save whose parent field holds the value on file (plain `A`, an
+  unquoted `[[A]]`, a path-qualified link) keeps the parent untouched.
 - **Drop on a task.** The ⋮⋮ handle drags a row. On the To-Do lists, the
   task card's subtasks and the daily dashboard panel, a row's middle third
   nests the dragged task under it (an outline); its top and bottom thirds
-  reorder (a line) where manual order applies. A drop on itself, into its own
-  subtask or onto the parent it already has shows red dashes and a label and
-  does nothing.
+  reorder (a line) where manual order applies. A drop into its own subtask or
+  onto the parent it already has shows red dashes and a label and does nothing;
+  a row over itself stays quiet. Only a drag carrying the task (or note) drag
+  type is accepted, the drop reads its path from the event, and a
+  document-level `dragend` / `drop` listener clears the shared drag state.
 - **Make top-level.** While a subtask is dragged, a Make top-level strip shows
-  above the list.
-- **Subtask order.** Open subtasks on the task card sort by `rank` among their
-  siblings, unranked last in their current order; done ones stay newest first.
-  Drag to reorder, or Move up / Move down in the ⋯ menu.
+  above the list (only where something can make the move).
+- **Subtask order.** Open subtasks on the task card sort by `sibling_rank`
+  among their siblings, unranked last in their current order; done ones stay
+  newest first. Drag to reorder, or Move up / Move down in the ⋯ menu; both
+  renumber `sibling_rank`. `rank` is the Today manual order only, and a date
+  change never touches `sibling_rank`.
 - **Group headers.** A task dropped on a project header (To-Do grouped by
   project, the project groups) gets `project` / `project_slug`; on a trip
   header, `trip` / `trip_slug` (`TaskDialog.projectFields` / `tripFields`, the
-  dialog's writers). "No project" clears it.
+  dialog's writers). "No project" clears it. A task with a project is refused
+  on a trip header: "This task is under a project; remove the project first".
 - **Notes.** A Notes row's handle drags it onto a subtask row of the card;
   `TaskDocs.moveTo` moves it into that task's `notes/` with `renameFile`, sets
   `task:` and renames it by the Names rule.

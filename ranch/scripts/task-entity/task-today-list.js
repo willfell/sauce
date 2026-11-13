@@ -242,6 +242,8 @@ class TaskTodayList {
      *   notice(message)                     one Notice for silent failures
      *   lock: { set, key }                  refuses while `set` holds `key`
      *   classify(res)                       default TaskTodayList.classifyOutcome
+     *   field                               the order field, default 'rank'
+     *                                       (the task card's subtasks use 'sibling_rank')
      * Ranks apply optimistically (one repaint); a failed write restores that
      * task's prior rank and repaints once more. The lock is released in
      * `finally`. Resolves { written, failed } or null when refused / unchanged.
@@ -254,31 +256,32 @@ class TaskTodayList {
         if (lockSet && lockSet.has(lockKey)) return null;
         if (typeof d.setFields !== 'function' || typeof d.renumber !== 'function') return null;
         const classify = typeof d.classify === 'function' ? d.classify : (res) => TaskTodayList.classifyOutcome(res);
+        const field = typeof d.field === 'string' && d.field ? d.field : 'rank';
         const repaint = () => { try { if (typeof d.repaint === 'function') d.repaint(); } catch (_e) {} };
         if (lockSet) lockSet.add(lockKey);
         try {
             const rankByPath = {};
-            for (const t of list) rankByPath[t.path] = t.rank;
+            for (const t of list) rankByPath[t.path] = t[field];
             let changes = [];
             try { changes = d.renumber(list.map((t) => t.path), rankByPath) || []; } catch (_e) { changes = []; }
             if (!changes.length) return null;
-            const prior = new Map(list.map((t) => [t.path, t.rank]));
+            const prior = new Map(list.map((t) => [t.path, t[field]]));
             const byPath = new Map(list.map((t) => [t.path, t]));
-            list.forEach((t, i) => { t.rank = i + 1; });
+            list.forEach((t, i) => { t[field] = i + 1; });
             repaint();
             const written = [];
             const failed = [];
             let silent = 0;
             for (const change of changes) {
                 let res = null;
-                try { res = await d.setFields(change.path, { rank: change.rank }); } catch (_e) { res = null; }
+                try { res = await d.setFields(change.path, { [field]: change.rank }); } catch (_e) { res = null; }
                 let outcome = 'silent';
                 try { outcome = classify(res); } catch (_e) { outcome = 'silent'; }
                 if (outcome === 'ok') { written.push(change.path); continue; }
                 failed.push(change.path);
                 if (outcome === 'silent') silent += 1;
                 const t = byPath.get(change.path);
-                if (t) t.rank = prior.get(change.path);
+                if (t) t[field] = prior.get(change.path);
             }
             if (failed.length) repaint();
             if (silent > 0 && typeof d.notice === 'function') {
@@ -394,11 +397,71 @@ class TaskTodayList {
     /** Begin a drag ({ kind: 'task' | 'note', path, ... }); shows the Make top-level strips for a subtask. */
     static startDrag(state) {
         TaskTodayList._drag = state || null;
+        TaskTodayList._ensureDocEnd();
         const show = !!(state && state.kind === 'task' && state.hasParent);
         for (const strip of Array.from(TaskTodayList._strips || [])) {
             if (!strip || !strip.parentNode) { TaskTodayList._strips.delete(strip); continue; }
-            TaskTodayList._setClass(strip, 'is-active', show);
+            let lift = true;
+            try { lift = typeof strip.__canLift === 'function' ? !!strip.__canLift() : true; } catch (_e) { lift = false; }
+            TaskTodayList._setClass(strip, 'is-active', show && lift);
         }
+    }
+
+    /**
+     * One document-level dragend / drop listener, registered once per
+     * document (the flag lives on the document, so re-renders and a reloaded
+     * class never add another). A drag that ends anywhere - outside every
+     * row, or on a surface that was redrawn mid-drag - clears the shared
+     * state, so a stale drag can never land later. It reaches the live
+     * TaskTodayList through customJS.
+     */
+    static _ensureDocEnd() {
+        try {
+            if (typeof document === 'undefined' || !document || typeof document.addEventListener !== 'function') return;
+            if (document.__sauceTaskDragEnd) return;
+            const end = () => {
+                try {
+                    const live = (typeof window !== 'undefined' && window.customJS && window.customJS.TaskTodayList) || null;
+                    if (live && typeof live.endDrag === 'function') live.endDrag();
+                    else TaskTodayList.endDrag();
+                } catch (_e) { /* nothing to clear */ }
+            };
+            document.addEventListener('dragend', end);
+            document.addEventListener('drop', end);
+            document.__sauceTaskDragEnd = true;
+        } catch (_e) { /* rows still clear on their own dragend */ }
+    }
+
+    /**
+     * The custom types a drag event carries (dataTransfer.types), or [] when
+     * it carries none. Only a drag whose types include DRAG_MIME or
+     * DOC_DRAG_MIME is ever accepted.
+     */
+    static _types(event) {
+        try {
+            const t = event && event.dataTransfer && event.dataTransfer.types;
+            if (!t) return [];
+            return Array.from(t).map(String);
+        } catch (_e) { return []; }
+    }
+
+    /**
+     * What a drag event is: { kind: 'task' | 'note', path, ... } from its
+     * types, its readable path (on drop) and the drag in flight; null when it
+     * carries neither custom type. The event wins over the shared state: a
+     * state of the other kind, or naming another path, is replaced.
+     */
+    static _dragOf(event) {
+        const types = TaskTodayList._types(event);
+        const isTask = types.includes(String(TaskTodayList.DRAG_MIME));
+        const isNote = types.includes(String(TaskTodayList.DOC_DRAG_MIME));
+        if (!isTask && !isNote) return null;
+        const kind = isTask ? 'task' : 'note';
+        const carried = TaskTodayList._carried(event, kind === 'task' ? String(TaskTodayList.DRAG_MIME) : String(TaskTodayList.DOC_DRAG_MIME));
+        const st = TaskTodayList.dragState();
+        if (st && st.kind === kind && (!carried || st.path === carried)) return st;
+        if (!carried) return null;
+        return { kind, path: carried, parentPath: '', hasParent: false };
     }
 
     /** End the drag: clears its state, every highlight and the strips. */
@@ -478,7 +541,7 @@ class TaskTodayList {
         ].join('\n');
     }
 
-    /** The path a drop carries: the custom type when readable, else the drag in flight. */
+    /** The path a drop carries under `mime`, when readable (only on drop); else ''. */
     static _carried(event, mime) {
         try {
             const dt = event && event.dataTransfer;
@@ -504,8 +567,11 @@ class TaskTodayList {
      * (deps.reorder(from, to, 'before' | 'after'), when deps.canReorder(from)
      * allows), on its middle third - or anywhere when it cannot reorder - it
      * nests the dragged task under this one (deps.nest(from, task), default
-     * TaskMove.nest). A drop on itself, into its own subtask or onto the
-     * parent it already has is refused visibly: red dashes, a label, no drop.
+     * TaskMove.nest). A drop into its own subtask or onto the parent it
+     * already has is refused visibly: red dashes, a label, no drop; a row
+     * over itself stays quiet. Only a drag carrying DRAG_MIME (or, with
+     * acceptNotes, DOC_DRAG_MIME) is accepted, and the drop reads its path
+     * from the event first.
      * deps.acceptNotes lets a Notes row drop here (deps.moveNote(docPath,
      * task), default TaskMove.moveNote). deps.onStart(path) / deps.onEnd()
      * mirror the drag for the host; deps.onMoved(result, from, task) runs
@@ -533,6 +599,7 @@ class TaskTodayList {
                 TaskTodayList.startDrag({
                     kind: 'task', path, parentPath,
                     hasParent: !!(parentPath || String(task.parent_task == null ? '' : task.parent_task).trim()),
+                    hasProject: !!String(task.project_slug || task.project || '').trim(),
                 });
                 hook('onStart', path);
                 try {
@@ -564,11 +631,7 @@ class TaskTodayList {
                 ? (docPath, target) => TM.moveNote(docPath, target.path, { onDone: (res) => hook('onNoteMoved', res, docPath, target) }) : null;
         };
         const judge = (event) => {
-            let st = TaskTodayList.dragState();
-            if (!st) {
-                const carried = TaskTodayList._carried(event, mime);
-                if (carried) st = { kind: 'task', path: carried, parentPath: '' };
-            }
+            const st = TaskTodayList._dragOf(event);
             if (!st) return null;
             if (st.kind === 'note') {
                 if (!noteFn()) return null;
@@ -581,7 +644,9 @@ class TaskTodayList {
             try { rect = typeof row.getBoundingClientRect === 'function' ? row.getBoundingClientRect() : null; } catch (_e) { rect = null; }
             const zone = TaskTodayList.dropZone(rect, event && event.clientY, canReorder, !!nestFn());
             if (!zone) return null;
-            if (zone !== 'nest') return { st, zone, refusal: '', quiet: st.path === path };
+            // A task over its own row says nothing in any zone.
+            if (st.path === path) return { st, zone, refusal: '', quiet: true };
+            if (zone !== 'nest') return { st, zone, refusal: '' };
             return { st, zone, refusal: TaskTodayList.nestRefusal(st.path, path, st.parentPath) };
         };
         row.addEventListener('dragover', (event) => {
@@ -611,8 +676,7 @@ class TaskTodayList {
             hook('onEnd');
             if (!j || j.quiet) return undefined;
             if (j.refusal) { TaskTodayList._dropNotice(j.refusal); return undefined; }
-            const from = (j.zone === 'note' ? TaskTodayList._carried(event, TaskTodayList.DOC_DRAG_MIME) : TaskTodayList._carried(event, mime))
-                || j.st.path;
+            const from = j.st.path;
             if (!from) return undefined;
             if (j.zone === 'note' || j.zone === 'nest') {
                 const fn = j.zone === 'note' ? noteFn() : nestFn();
@@ -625,9 +689,10 @@ class TaskTodayList {
 
     /**
      * A "Make top-level" drop strip at the top of `host` (desktop only),
-     * hidden until a subtask is dragged. Dropping the subtask on it moves it
-     * to the top level (deps.makeTopLevel(path), default TaskMove.nest(path,
-     * null)); deps.onMoved(result, path, null) runs after. deps.before puts
+     * hidden until a subtask is dragged, and only while it can act (a
+     * deps.makeTopLevel(path), else TaskMove.nest(path, null) loaded).
+     * Dropping the subtask on it moves it to the top level;
+     * deps.onMoved(result, path, null) runs after. deps.before puts
      * it in front of that child of `host` instead of first. Returns the
      * strip, or null.
      */
@@ -639,16 +704,23 @@ class TaskTodayList {
         const anchor = d.before && d.before.parentNode === host ? d.before : host.firstChild;
         try { if (anchor && anchor !== strip && typeof host.insertBefore === 'function') host.insertBefore(strip, anchor); } catch (_e) {}
         try { strip.setAttribute('aria-hidden', 'true'); } catch (_e) {}
+        const lift = () => {
+            if (typeof d.makeTopLevel === 'function') return d.makeTopLevel;
+            const TM = TaskTodayList._taskMove();
+            if (!TM || typeof TM.nest !== 'function') return null;
+            return (from) => TM.nest(from, null, { onDone: (res) => { try { if (typeof d.onMoved === 'function') d.onMoved(res, from, null); } catch (_e) {} } });
+        };
+        strip.__canLift = () => !!lift();
         const strips = TaskTodayList._strips || (TaskTodayList._strips = new Set());
         strips.add(strip);
         const st = TaskTodayList.dragState();
-        if (st && st.kind === 'task' && st.hasParent) TaskTodayList._setClass(strip, 'is-active', true);
-        const live = () => {
-            const s = TaskTodayList.dragState();
-            return s && s.kind === 'task' && s.hasParent ? s : null;
+        if (st && st.kind === 'task' && st.hasParent && lift()) TaskTodayList._setClass(strip, 'is-active', true);
+        const live = (event) => {
+            const s = TaskTodayList._dragOf(event);
+            return s && s.kind === 'task' && s.hasParent && lift() ? s : null;
         };
         strip.addEventListener('dragover', (event) => {
-            if (!live()) return;
+            if (!live(event)) return;
             TaskTodayList._setClass(strip, 'is-over', true);
             try {
                 event.preventDefault();
@@ -658,14 +730,11 @@ class TaskTodayList {
         strip.addEventListener('dragleave', () => { TaskTodayList._setClass(strip, 'is-over', false); });
         strip.addEventListener('drop', (event) => {
             try { event.preventDefault(); } catch (_e) {}
-            const s = live();
-            const from = TaskTodayList._carried(event, String(TaskTodayList.DRAG_MIME)) || (s && s.path) || '';
+            const s = live(event);
+            const fn = lift();
             TaskTodayList.endDrag();
-            if (!s || !from) return undefined;
-            if (typeof d.makeTopLevel === 'function') return d.makeTopLevel(from);
-            const TM = TaskTodayList._taskMove();
-            if (!TM || typeof TM.nest !== 'function') return undefined;
-            return TM.nest(from, null, { onDone: (res) => { try { if (typeof d.onMoved === 'function') d.onMoved(res, from, null); } catch (_e) {} } });
+            if (!s || !s.path || !fn) return undefined;
+            return fn(s.path);
         });
         return strip;
     }
@@ -674,22 +743,23 @@ class TaskTodayList {
      * Make a group header a drop target (desktop only): a task dropped on it
      * gets the group's value through deps.apply(path) - a project or trip
      * header sets project / trip. deps.label names the move ('Move to
-     * Atlas'); deps.refuse(path) may return a refusal. Returns true when wired.
+     * Atlas'); deps.refuse(path, drag) may return a refusal (drag carries
+     * hasProject from the row that started it). Returns true when wired.
      */
     static wireGroupDrop(el, deps) {
         const d = deps || {};
         if (d.isMobile || !el || typeof el.addEventListener !== 'function' || typeof d.apply !== 'function') return false;
         TaskTodayList._injectDragCss();
         TaskTodayList._setClass(el, 'sauce-task-group-drop', true);
-        const judge = () => {
-            const st = TaskTodayList.dragState();
+        const judge = (event) => {
+            const st = TaskTodayList._dragOf(event);
             if (!st || st.kind !== 'task') return null;
             let refusal = '';
-            try { refusal = typeof d.refuse === 'function' ? String(d.refuse(st.path) || '') : ''; } catch (_e) { refusal = ''; }
+            try { refusal = typeof d.refuse === 'function' ? String(d.refuse(st.path, st) || '') : ''; } catch (_e) { refusal = ''; }
             return { st, refusal };
         };
         el.addEventListener('dragover', (event) => {
-            const j = judge();
+            const j = judge(event);
             if (!j) return;
             TaskTodayList._paintDrop(el, 'nest', j.refusal, d.label || 'Move here');
             if (j.refusal) return;
@@ -705,13 +775,12 @@ class TaskTodayList {
         });
         el.addEventListener('drop', (event) => {
             try { event.preventDefault(); } catch (_e) {}
-            const j = judge();
+            const j = judge(event);
             TaskTodayList._clearDrop(el);
             TaskTodayList.endDrag();
             if (!j) return undefined;
             if (j.refusal) { TaskTodayList._dropNotice(j.refusal); return undefined; }
-            const from = TaskTodayList._carried(event, String(TaskTodayList.DRAG_MIME)) || j.st.path;
-            return from ? d.apply(from) : undefined;
+            return j.st.path ? d.apply(j.st.path) : undefined;
         });
         return true;
     }
