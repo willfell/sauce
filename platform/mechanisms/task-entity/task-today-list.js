@@ -67,6 +67,7 @@ class TaskTodayList {
     projectHue(name) { return TaskTodayList.projectHue(name); }
     projectTint(name) { return TaskTodayList.projectTint(name); }
     renderSubtaskMeter(slot, count) { return TaskTodayList.renderSubtaskMeter(slot, count); }
+    renderNewNotesChip(slot, taskPath, appRef, now) { return TaskTodayList.renderNewNotesChip(slot, taskPath, appRef, now); }
     get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
     classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
     moveInOrder(list, path, dir) { return TaskTodayList.moveInOrder(list, path, dir); }
@@ -1053,7 +1054,8 @@ class TaskTodayList {
             + ' @media (hover: none) { ' + touch + ' }'
             + ' @media (max-width: 560px) { ' + touch + ' }'
             + ' ' + scoped('.is-phone', phone.trim())
-            + ' @media (max-width: 480px) { ' + phone + ' }';
+            + ' @media (max-width: 480px) { ' + phone + ' }'
+            + ' body.is-mobile .sauce-task-today-row .sauce-task-new-notes { min-height: 36px !important; }';
     }
 
     static get _PRIO_BAR_COLOR() {
@@ -1356,6 +1358,7 @@ class TaskTodayList {
         if (task && task.subtask_count && task.subtask_count.total > 0) {
             TaskTodayList.renderSubtaskMeter(extras, task.subtask_count);
         }
+        if (path && opts.showNewNotes !== false) TaskTodayList.renderNewNotesChip(extras, path);
         if (opts.showAge !== false) {
             const age = TaskTodayList._ageChip(task, todayStr, TE);
             if (age) {
@@ -1841,6 +1844,35 @@ class TaskTodayList {
      * full count is in its title and aria-label. Returns the chip; never
      * throws.
      */
+    /**
+     * The `New note` / `2 new notes` chip on a task row: the task's notes
+     * changed since this device last opened them (TaskDocs.newNotes). Click
+     * opens the newest. Draws nothing without TaskDocs or new notes. `appRef`
+     * defaults to the global app and `now` to the clock. Never throws.
+     */
+    static renderNewNotesChip(slot, taskPath, appRef, now) {
+        try {
+            const TDocs = typeof window !== 'undefined' && window.customJS ? window.customJS.TaskDocs : null;
+            if (!slot || typeof slot.createEl !== 'function' || !TDocs || typeof TDocs.newNotes !== 'function') return null;
+            const a = appRef !== undefined ? appRef : ((typeof window !== 'undefined' && window.app) || null);
+            const fresh = TDocs.newNotes(a, taskPath, Number.isFinite(now) ? now : Date.now());
+            if (!fresh || !fresh.length) return null;
+            const label = fresh.length === 1 ? 'New note' : fresh.length + ' new notes';
+            const chip = slot.createEl('button', { cls: 'sauce-task-new-notes', text: label });
+            chip.style.cssText = 'display: inline-flex; align-items: center; box-sizing: border-box; height: auto; min-height: 0; margin: 0; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--interactive-accent) 45%, transparent); border-radius: 5px; background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); box-shadow: none; color: var(--text-accent); font: inherit; line-height: 1.4; white-space: nowrap; cursor: pointer;';
+            try {
+                chip.setAttribute('type', 'button');
+                chip.setAttribute('title', 'Open ' + fresh[0].title);
+                chip.setAttribute('aria-label', label + ': open ' + fresh[0].title);
+            } catch (_e) {}
+            chip.addEventListener('click', (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try { if (a && a.workspace) a.workspace.openLinkText(fresh[0].path, String(taskPath), false); } catch (_e) {}
+            });
+            return chip;
+        } catch (_e) { return null; }
+    }
+
     static renderSubtaskMeter(slot, count) {
         try {
             const done = Math.max(0, Number(count && count.done) || 0);

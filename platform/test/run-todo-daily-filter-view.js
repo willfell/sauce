@@ -1441,6 +1441,60 @@ process.exitCode = 1;
     assert.strictEqual(env.calls.setFields.length, 2, 'the first reorder finished its writes');
   });
 
+  await okAsync('FL1-WAITING-TAB the daily To-Do has a Waiting tab: sent comms notes oldest first, and Got reply takes one off at once', async () => {
+    const env = makeRenderHarness();
+    const TaskDocsClass = new Function('window', 'Notice', `${fs.readFileSync(
+      path.join(ROOT, 'platform/mechanisms/task-entity/task-docs.js'), 'utf8')}\nreturn TaskDocs;`)(env.windowShim, function () {});
+    env.customJS.TaskDocs = new TaskDocsClass();
+    const mutations = [];
+    env.customJS.RenderSafe.mutate = async (o) => {
+      mutations.push(o);
+      try { await o.optimistic(); const value = await o.write(); return { ok: true, value }; }
+      catch (error) { await o.revert(error); return { ok: false, error }; }
+    };
+    const written = {};
+    env.appStub.vault.getAbstractFileByPath = (p) => (String(p).includes('/notes/')
+      ? { path: p, basename: String(p).split('/').pop().replace(/\.md$/, '') } : null);
+    env.appStub.fileManager = { processFrontMatter: async (f, fn) => { const fm = {}; fn(fm); written[f.path] = fm; } };
+    const doc = (title, fields) => ({
+      type: 'task-doc', kind: 'comms', title, file: { path: `spice/tasks/Ship/notes/${title}.md` }, ...fields,
+    });
+    const pages = [
+      ...PAGES,
+      page('Ship it', { file: { path: 'spice/tasks/Ship/Ship.md' } }),
+      doc('Older ping', { to: 'Jason', via: 'Slack', sent_at: '2026-11-05T09:00:00-06:00' }),
+      doc('Newer ping', { to: 'Matt', via: 'Email', sent_at: '2026-11-08T09:00:00-06:00', replied_at: '' }),
+      doc('Answered', { sent_at: '2026-11-04', replied_at: '2026-11-06' }),
+      doc('Draft', {}),
+      { type: 'task-doc', kind: 'prompt', title: 'Prompt', file: { path: 'spice/tasks/Ship/notes/Prompt.md' }, sent_at: '2026-11-01' },
+    ];
+    const { root } = await mount(env, pages);
+    const tab = findButton(root, 'Waiting · 2');
+    assert(tab, 'the Waiting tab counts the waiting notes: ' + buttonsOf(root).map((b) => b.textContent).join('|'));
+    await tab.fire('click');
+    const rows = byClass(root, 'sauce-tdv-wait');
+    assert.deepStrictEqual(rows.map((r) => byClass(r, 'sauce-tdv-wait-title')[0].textContent), ['Older ping', 'Newer ping']);
+    assert.strictEqual(byClass(rows[0], 'sauce-tdv-wait-meta')[0].children[0].textContent, 'To Jason · Slack · Sent 4d ago');
+    assert.strictEqual(byClass(rows[0], 'sauce-tdv-wait-task')[0].textContent, '↳ Ship it');
+    assert.strictEqual(listTitles(root).length, 0, 'no task rows on the Waiting tab');
+    assert.strictEqual(byClass(root, 'sauce-todo-filter-right')[0].style.display, 'none', 'Sort, Group and Select step aside');
+    assert.strictEqual(env.rows.filter((r) => r.title === 'Older ping').length, 0);
+    await byClass(rows[0], 'sauce-tdv-wait-reply')[0].fire('click');
+    assert.strictEqual(mutations.length, 1, 'Got reply writes through RenderSafe.mutate');
+    assert(written['spice/tasks/Ship/notes/Older ping.md'] && written['spice/tasks/Ship/notes/Older ping.md'].replied_at, 'replied_at written');
+    assert(findButton(root, 'Waiting · 1'), 'the count drops at once');
+    assert.deepStrictEqual(byClass(root, 'sauce-tdv-wait').map((r) => byClass(r, 'sauce-tdv-wait-title')[0].textContent), ['Newer ping']);
+    await findButton(root, 'Today').fire('click');
+    assert.notStrictEqual(byClass(root, 'sauce-todo-filter-right')[0].style.display, 'none', 'the tools come back on a task tab');
+  });
+
+  await okAsync('FL1-WAITING-TAB-COLD without TaskDocs there is no Waiting tab and the query reads tasks only', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env, [...PAGES, { type: 'task-doc', kind: 'comms', title: 'Ping', file: { path: 'spice/tasks/A/notes/Ping.md' }, sent_at: '2026-11-05' }]);
+    assert(!buttonsOf(root).some((b) => /^Waiting/.test(b.textContent)), 'no Waiting tab');
+    assert(!env.rows.some((r) => r.title === 'Ping'), 'a note never draws as a task row');
+  });
+
   await okAsync('RD-DV-GUARD a throwing TaskEntity during paint warns and never throws out of render', async () => {
     const env = makeRenderHarness();
     const broken = Object.create(TE);

@@ -449,9 +449,11 @@
       "source": "platform/mechanisms/task-entity/task-docs.js",
       "consumers": [
         "platform/mechanisms/task-entity/task-docs.js",
-        "platform/mechanisms/task-entity/task-note-view.js"
+        "platform/mechanisms/task-entity/task-note-view.js",
+        "platform/mechanisms/task-entity/task-today-list.js",
+        "platform/blueprints/to-do/helpers/todo-daily-filter-view.js"
       ],
-      "notes": "A note that belongs to a task without being a step of it, at spice/tasks/<Task>/notes/<Name>.md. Keys: type: task-doc; kind: prompt|handoff|comms|plan|context|findings|questions|note (any other value reads as note); title (display name); task: \"[[<Task note name>]]\"; created_at. No status: a task doc is never open or done, never counts toward the task's progress and never lists as a to-do. The file name is TaskEntity.taskName(title, { parentTitle: task title }). Written by TaskDocs.compose; read by TaskDocs.list (kind order, newest first) and TaskDocs.extractPrompt (Copy prompt)."
+      "notes": "A note that belongs to a task without being a step of it, at spice/tasks/<Task>/notes/<Name>.md. Keys: type: task-doc; kind: prompt|handoff|comms|plan|context|findings|questions|note (any other value reads as note); title (display name); task: \"[[<Task note name>]]\"; created_at. A comms note may add to (free text), via (Slack|Email|Teams|Other), sent_at (ISO, set by Mark sent) and replied_at (ISO, blank until answered); it is waiting while sent_at is set, replied_at is blank and no task with source: comms and source_note naming it is done (TaskDocs.waiting). A handoff may add session (a Claude session URL or id; Resume). No status: a task doc is never open or done, never counts toward the task's progress and never lists as a to-do. The file name is TaskEntity.taskName(title, { parentTitle: task title }). Written by TaskDocs.compose and TaskDocs.markSent / gotReply; read by TaskDocs.list (kind order, newest first), TaskDocs.extractPrompt (Copy prompt), TaskDocs.commsItem / waiting (To-Do Waiting tab) and TaskDocs.resumeAction."
     },
     {
       "id": "task-set-note",

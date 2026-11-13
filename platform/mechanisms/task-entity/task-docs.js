@@ -9,6 +9,11 @@ class TaskDocs {
     // comms notes (the message to send others about the task), and a + Note
     // menu that creates one, blank under its header.
     // Spec: Docs/superpowers/specs/2026-11-12-task-notes-design.md.
+    // A comms note is marked sent from its header card and waits for a reply
+    // (To-Do's Waiting tab); a prompt note copies with its task context for
+    // a Claude session; a note changed since this device last opened it shows
+    // New; a handoff with session: offers Resume.
+    // Spec: Docs/superpowers/specs/2026-11-13-task-flow-design.md §1-2.
 
     render(container, opts) { return TaskDocs.render(container, opts); }
     create(app, taskPath, kind, title) { return TaskDocs.create(app, taskPath, kind, title); }
@@ -26,6 +31,27 @@ class TaskDocs {
     rename(app, docPath, title) { return TaskDocs.rename(app, docPath, title); }
     withHeader(text) { return TaskDocs.withHeader(text); }
     taskPathOf(docPath) { return TaskDocs.taskPathOf(docPath); }
+    commsState(fm, followUps, today) { return TaskDocs.commsState(fm, followUps, today); }
+    commsChip(st) { return TaskDocs.commsChip(st); }
+    waitingText(days) { return TaskDocs.waitingText(days); }
+    commsItem(page) { return TaskDocs.commsItem(page); }
+    waiting(items, tasks, today) { return TaskDocs.waiting(items, tasks, today); }
+    followUps(app, docPath) { return TaskDocs.followUps(app, docPath); }
+    followUpDate(choice, today) { return TaskDocs.followUpDate(choice, today); }
+    followUpTitle(to, noteTitle) { return TaskDocs.followUpTitle(to, noteTitle); }
+    firstNames(to) { return TaskDocs.firstNames(to); }
+    addWorkDays(day, n) { return TaskDocs.addWorkDays(day, n); }
+    markSent(app, docPath, opts) { return TaskDocs.markSent(app, docPath, opts); }
+    gotReply(app, docPath, stamp) { return TaskDocs.gotReply(app, docPath, stamp); }
+    openSendPanel(opts) { return TaskDocs.openSendPanel(opts); }
+    renderWaitingRow(container, item, opts) { return TaskDocs.renderWaitingRow(container, item, opts); }
+    claudeContext(info) { return TaskDocs.claudeContext(info); }
+    forClaude(prompt, info) { return TaskDocs.forClaude(prompt, info); }
+    resumeAction(session) { return TaskDocs.resumeAction(session); }
+    isNew(mtime, seenAt, now) { return TaskDocs.isNew(mtime, seenAt, now); }
+    readSeen(storage) { return TaskDocs.readSeen(storage); }
+    markSeen(path, at, storage) { return TaskDocs.markSeen(path, at, storage); }
+    newNotes(app, taskPath, now, seen) { return TaskDocs.newNotes(app, taskPath, now, seen); }
 
     static get TYPE() { return 'task-doc'; }
     static get FOLDER() { return 'notes'; }
@@ -210,7 +236,7 @@ class TaskDocs {
             const kind = TaskDocs.kindOf(fm && fm.kind);
             const base = String(f.basename != null ? f.basename : f.path.split('/').pop().replace(/\.md$/i, ''));
             const title = fm && fm.title != null && String(fm.title).trim() !== '' ? String(fm.title).trim() : base;
-            out.push({ path: f.path, file: f, kind, title, mtime: (f.stat && f.stat.mtime) || 0 });
+            out.push({ path: f.path, file: f, kind, title, mtime: (f.stat && f.stat.mtime) || 0, fm: fm || {} });
         }
         out.sort((a, b) => (order.indexOf(a.kind) - order.indexOf(b.kind)) || (b.mtime - a.mtime) || a.title.localeCompare(b.title));
         return out;
@@ -561,6 +587,684 @@ class TaskDocs {
         });
     }
 
+    // ----- Comms: Mark sent, follow-up, Waiting -----
+    // Spec: Docs/superpowers/specs/2026-11-13-task-flow-design.md §1.
+    // A comms note carries to, via, sent_at and replied_at. It is waiting
+    // while sent_at is set, replied_at is blank and no follow-up task linked
+    // to it (source: comms, source_note: [[note]]) is done, so finishing the
+    // follow-up in To-Do counts as a reply without writing to the note.
+
+    static get VIAS() { return ['Slack', 'Email', 'Teams', 'Other']; }
+
+    static get FOLLOW_UPS() {
+        return [
+            { key: 'none', label: 'None' },
+            { key: 'tomorrow', label: 'Tomorrow' },
+            { key: 'two', label: 'In 2 work days' },
+            { key: 'monday', label: 'Next Monday' },
+        ];
+    }
+
+    /** One of VIAS for `value` (any case), or '' when it is none of them. */
+    static _via(value) {
+        const v = String(value == null ? '' : value).trim().toLowerCase();
+        return TaskDocs.VIAS.find((x) => x.toLowerCase() === v) || '';
+    }
+
+    /** A frontmatter date (string, Luxon DateTime or Date) as its ISO text; '' when blank. */
+    static _isoOf(v) {
+        if (v == null) return '';
+        if (typeof v === 'string') return v.trim();
+        try { if (typeof v.toISO === 'function') return String(v.toISO() || ''); } catch (_e) {}
+        try { if (typeof v.toISOString === 'function') return String(v.toISOString()); } catch (_e) {}
+        return String(v).trim();
+    }
+
+    static _dayOf(v) {
+        const m = /^(\d{4}-\d{2}-\d{2})/.exec(TaskDocs._isoOf(v));
+        return m ? m[1] : '';
+    }
+
+    static _daysBetween(from, to) {
+        const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(from || ''));
+        const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(to || ''));
+        if (!a || !b) return null;
+        return Math.round((Date.UTC(+b[1], +b[2] - 1, +b[3]) - Date.UTC(+a[1], +a[2] - 1, +a[3])) / 86400000);
+    }
+
+    static _shortDay(day) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+        return m ? TaskDocs._MONTHS[+m[2] - 1] + ' ' + (+m[3]) : '';
+    }
+
+    static _weekdayDay(day) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+        if (!m) return '';
+        const dow = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+        return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dow] + ' ' + TaskDocs._shortDay(day);
+    }
+
+    static _linkBase(v) {
+        let s = String(v == null ? '' : (typeof v === 'object' && v.path ? v.path : v)).trim();
+        s = s.replace(/^\[\[|\]\]$/g, '').split('|')[0];
+        return s.split('/').pop().replace(/\.md$/i, '').trim();
+    }
+
+    /**
+     * Where a comms note stands: { state: 'unsent' } before Mark sent, else
+     * { state: 'waiting' | 'answered', sentDay, sentLabel, via, to, days,
+     * repliedDay }. `followUps` are its follow-up tasks ([{ status }]); one
+     * that is done answers it. `days` counts calendar days from the sent day
+     * to `today` (null without a today). Pure.
+     */
+    static commsState(fm, followUps, today) {
+        const f = fm || {};
+        const sentAt = TaskDocs._isoOf(f.sent_at);
+        if (!sentAt) return { state: 'unsent' };
+        const sentDay = TaskDocs._dayOf(sentAt);
+        const repliedDay = TaskDocs._dayOf(f.replied_at);
+        const answered = !!TaskDocs._isoOf(f.replied_at)
+            || (Array.isArray(followUps) && followUps.some((t) => t && String(t.status || '').toLowerCase() === 'done'));
+        const diff = TaskDocs._daysBetween(sentDay, today);
+        return {
+            state: answered ? 'answered' : 'waiting',
+            sentDay,
+            sentLabel: sentDay ? 'Sent ' + TaskDocs._shortDay(sentDay) : 'Sent',
+            via: String(f.via == null ? '' : f.via).trim(),
+            to: Array.isArray(f.to) ? f.to.join(', ') : String(f.to == null ? '' : f.to).trim(),
+            days: diff == null ? null : Math.max(0, diff),
+            repliedDay,
+        };
+    }
+
+    /** `Waiting 2d`, or `Waiting` on the day it was sent or with no day. Pure. */
+    static waitingText(days) {
+        return Number.isFinite(days) && days > 0 ? 'Waiting ' + days + 'd' : 'Waiting';
+    }
+
+    /** The header card chip: `Sent Nov 13 · Slack · waiting 2d` (or `· replied …`). '' when unsent. Pure. */
+    static commsChip(st) {
+        if (!st || st.state === 'unsent') return '';
+        const tail = st.state === 'waiting'
+            ? TaskDocs.waitingText(st.days).toLowerCase()
+            : 'replied' + (st.repliedDay ? ' ' + TaskDocs._shortDay(st.repliedDay) : '');
+        return [st.sentLabel, st.via, tail].filter(Boolean).join(' · ');
+    }
+
+    /** A Dataview page of a comms note as the plain item `waiting` reads. */
+    static commsItem(page) {
+        const p = page || {};
+        const path = String((p.file && p.file.path) || p.path || '');
+        const name = path.split('/').pop().replace(/\.md$/i, '');
+        const str = (v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean).join(', ') : String(v == null ? '' : v).trim());
+        return {
+            path,
+            kind: TaskDocs.kindOf(p.kind),
+            title: str(p.title) || name,
+            to: str(p.to),
+            via: str(p.via),
+            sent_at: TaskDocs._isoOf(p.sent_at),
+            replied_at: TaskDocs._isoOf(p.replied_at),
+        };
+    }
+
+    /**
+     * The comms notes in `items` (commsItem shape) that are waiting, oldest
+     * sent first, each with its task: { …item, taskPath, taskTitle, days }.
+     * `tasks` are parsed task notes; a done one with source: comms and a
+     * source_note naming the note answers it. Notes under _done/ or _trash/
+     * are skipped: their task is finished. Pure.
+     */
+    static waiting(items, tasks, today) {
+        const list = Array.isArray(tasks) ? tasks : [];
+        const answered = new Set();
+        const byPath = new Map();
+        for (const t of list) {
+            if (!t) continue;
+            if (t.path) byPath.set(String(t.path), t);
+            if (String(t.source || '') === 'comms' && String(t.status || '').toLowerCase() === 'done') {
+                const base = TaskDocs._linkBase(t.source_note);
+                if (base) answered.add(base.toLowerCase());
+            }
+        }
+        const out = [];
+        for (const item of Array.isArray(items) ? items : []) {
+            if (!item || TaskDocs.kindOf(item.kind) !== 'comms') continue;
+            const path = String(item.path || '');
+            if (!path || /(^|\/)_(done|trash)\//.test(path)) continue;
+            const base = path.split('/').pop().replace(/\.md$/i, '').toLowerCase();
+            const st = TaskDocs.commsState(item, answered.has(base) ? [{ status: 'done' }] : [], today);
+            if (st.state !== 'waiting') continue;
+            const taskPath = TaskDocs.taskPathOf(path);
+            const task = taskPath ? byPath.get(taskPath) : null;
+            const taskTitle = task && task.title ? String(task.title) : (taskPath ? taskPath.split('/').pop().replace(/\.md$/i, '') : '');
+            out.push(Object.assign({}, item, { taskPath, taskTitle, days: st.days, sentDay: st.sentDay }));
+        }
+        const when = (x) => { const t = Date.parse(x.sent_at); return Number.isFinite(t) ? t : Infinity; };
+        out.sort((a, b) => (when(a) - when(b)) || String(a.sent_at).localeCompare(String(b.sent_at)) || a.title.localeCompare(b.title));
+        return out;
+    }
+
+    static _followUpsIn(kids, noteName) {
+        const want = String(noteName || '').toLowerCase();
+        if (!want) return [];
+        return (kids || [])
+            .filter((k) => k && k.fm && String(k.fm.source || '') === 'comms' && TaskDocs._linkBase(k.fm.source_note).toLowerCase() === want)
+            .map((k) => ({ path: k.file.path, status: String(k.fm.status || 'open').trim().toLowerCase() || 'open' }));
+    }
+
+    /** The follow-up tasks of the comms note at `docPath`: subtasks of its task naming it in source_note. */
+    static followUps(app, docPath) {
+        try {
+            const taskPath = TaskDocs.taskPathOf(docPath);
+            if (!taskPath || !app || !app.vault) return [];
+            const kids = TaskDocs._childTasks(app, taskPath.slice(0, taskPath.lastIndexOf('/')));
+            return TaskDocs._followUpsIn(kids, String(docPath).split('/').pop().replace(/\.md$/i, ''));
+        } catch (_e) { return []; }
+    }
+
+    /** `day` plus `n` working days (Saturday and Sunday skipped). Pure. */
+    static addWorkDays(day, n) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+        if (!m) return '';
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+        let left = Math.max(0, Number(n) || 0);
+        while (left > 0) {
+            d.setUTCDate(d.getUTCDate() + 1);
+            const dow = d.getUTCDay();
+            if (dow !== 0 && dow !== 6) left -= 1;
+        }
+        const p = (x) => String(x).padStart(2, '0');
+        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+    }
+
+    /**
+     * The follow-up task's due date for a Follow up choice: 'none' → '',
+     * 'tomorrow', 'two' (in 2 work days), 'monday' (next Monday, a week on
+     * from a Monday), or a YYYY-MM-DD date as itself. Pure.
+     */
+    static followUpDate(choice, today) {
+        const c = String(choice == null ? '' : choice).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(c)) return c;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(today || ''))) return '';
+        if (c === 'tomorrow') return TaskDocs._plusDays(today, 1);
+        if (c === 'two') return TaskDocs.addWorkDays(today, 2);
+        if (c === 'monday') {
+            const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
+            const dow = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+            return TaskDocs._plusDays(today, ((1 - dow + 7) % 7) || 7);
+        }
+        return '';
+    }
+
+    static _plusDays(day, n) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+        if (!m) return '';
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + (Number(n) || 0)));
+        const p = (x) => String(x).padStart(2, '0');
+        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+    }
+
+    /** The first names in a `to:` value: `Jason Batai, Matt Hemingway` → `Jason and Matt`. Pure. */
+    static firstNames(to) {
+        const names = String(to == null ? '' : to)
+            .split(/\s*(?:,|;|&|\+|\/|\band\b)\s*/i)
+            .map((part) => part.trim().split(/\s+/)[0] || '')
+            .map((word) => word.replace(/^@/, '').replace(/@.*$/, ''))
+            .filter(Boolean);
+        if (names.length <= 1) return names[0] || '';
+        return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    }
+
+    /** `Hear back from <first name(s)>: <note title>`; `Hear back: <note title>` with no one named. Pure. */
+    static followUpTitle(to, noteTitle) {
+        const who = TaskDocs.firstNames(to);
+        const what = String(noteTitle == null ? '' : noteTitle).trim() || 'Comms';
+        return (who ? 'Hear back from ' + who : 'Hear back') + ': ' + what;
+    }
+
+    static _td() {
+        try { return (typeof window !== 'undefined' && window.customJS && window.customJS.TaskDialog) || null; }
+        catch (_e) { return null; }
+    }
+
+    /**
+     * Mark the comms note at `docPath` sent: writes to, via, sent_at (opts.stamp)
+     * and a blank replied_at, then, when opts.due is set, creates the
+     * follow-up subtask of the note's task through TaskDialog.createQuick
+     * (the + subtask path): `Hear back from …: <title>`, due opts.due,
+     * source: comms, source_note: [[note]]. Resolves { ok, followUp } where
+     * followUp is the new task's path, '' when none was asked for, or null
+     * when it could not be made; { ok: false, reason } when the note could
+     * not be written.
+     */
+    static async markSent(app, docPath, opts) {
+        const o = opts || {};
+        const file = app && app.vault ? app.vault.getAbstractFileByPath(docPath) : null;
+        if (!file || Array.isArray(file.children)) return { ok: false, reason: 'note not found' };
+        const to = String(o.to == null ? '' : o.to).replace(/\s+/g, ' ').trim();
+        const via = TaskDocs._via(o.via) || String(o.via || '').trim();
+        const stamp = String(o.stamp || TaskDocs._stamp());
+        let title = String(file.basename || '');
+        try {
+            await app.fileManager.processFrontMatter(file, (fm) => {
+                if (fm.title != null && String(fm.title).trim()) title = String(fm.title).trim();
+                fm.to = to;
+                fm.via = via;
+                fm.sent_at = stamp;
+                fm.replied_at = '';
+            });
+        } catch (e) {
+            return { ok: false, reason: String((e && e.message) || e) };
+        }
+        const due = String(o.due || '').trim();
+        if (!due) return { ok: true, followUp: '' };
+        const taskPath = TaskDocs.taskPathOf(docPath);
+        const TD = TaskDocs._td();
+        if (!taskPath || !TD || typeof TD.createQuick !== 'function') return { ok: true, followUp: null };
+        try {
+            const res = await TD.createQuick({
+                title: TaskDocs.followUpTitle(to, title),
+                today: due,
+                source: 'comms',
+                source_note: '[[' + file.basename + ']]',
+                parent_task: '[[' + taskPath.split('/').pop().replace(/\.md$/i, '') + ']]',
+            });
+            return { ok: true, followUp: res && res.ok && res.path ? res.path : null };
+        } catch (_e) {
+            return { ok: true, followUp: null };
+        }
+    }
+
+    /**
+     * Got reply on the comms note at `docPath`: sets replied_at to `stamp`
+     * and marks each of its open follow-up tasks done (TaskDialog.markDone).
+     * Resolves { ok, closed, failed } or { ok: false, reason }.
+     */
+    static async gotReply(app, docPath, stamp) {
+        const file = app && app.vault ? app.vault.getAbstractFileByPath(docPath) : null;
+        if (!file || Array.isArray(file.children)) return { ok: false, reason: 'note not found' };
+        try {
+            await app.fileManager.processFrontMatter(file, (fm) => { fm.replied_at = String(stamp || TaskDocs._stamp()); });
+        } catch (e) {
+            return { ok: false, reason: String((e && e.message) || e) };
+        }
+        const TD = TaskDocs._td();
+        let closed = 0;
+        let failed = 0;
+        for (const t of TaskDocs.followUps(app, docPath)) {
+            if (t.status !== 'open') continue;
+            let res = null;
+            try { res = TD && typeof TD.markDone === 'function' ? await TD.markDone(t.path) : null; } catch (_e) { res = null; }
+            if (res && res.ok !== false) closed += 1; else failed += 1;
+        }
+        return { ok: true, closed, failed };
+    }
+
+    static _isPhone(app) {
+        try {
+            if (app && app.isMobile) return true;
+            return typeof document !== 'undefined' && !!document.body && !!document.body.classList && document.body.classList.contains('is-phone');
+        } catch (_e) { return false; }
+    }
+
+    /**
+     * A small panel anchored under `opts.anchor` (a bottom sheet on a phone),
+     * built by opts.build(body, close). Escape, a click outside it, or close()
+     * dismisses it; one is open at a time. Returns { panel, body, close } or
+     * null with no document.
+     */
+    static _openPanel(opts) {
+        const o = opts || {};
+        const doc = o.doc || (typeof document !== 'undefined' ? document : null);
+        if (!doc || !doc.body || typeof doc.body.createEl !== 'function') return null;
+        TaskDocs._injectCss();
+        try { if (TaskDocs._panel) TaskDocs._panel.close(); } catch (_e) {}
+        const sheet = TaskDocs._isPhone(o.app);
+        const overlay = doc.body.createEl('div', { cls: 'sauce-tdv-pop-overlay' + (sheet ? ' is-sheet' : '') });
+        const panel = overlay.createEl('div', { cls: 'sauce-tdv-pop' + (o.cls ? ' ' + o.cls : '') });
+        try { panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', o.title || 'Panel'); } catch (_e) {}
+        if (o.title) panel.createEl('div', { cls: 'sauce-tdv-pop-title', text: o.title });
+        const body = panel.createEl('div', { cls: 'sauce-tdv-pop-body' });
+        let closed = false;
+        const onKey = (ev) => { if (ev && ev.key === 'Escape') { try { ev.preventDefault(); } catch (_e) {} close(); } };
+        const close = () => {
+            if (closed) return;
+            closed = true;
+            try { doc.removeEventListener('keydown', onKey, true); } catch (_e) {}
+            try { overlay.remove(); } catch (_e) {}
+            if (TaskDocs._panel && TaskDocs._panel.panel === panel) TaskDocs._panel = null;
+        };
+        try { doc.addEventListener('keydown', onKey, true); } catch (_e) {}
+        overlay.addEventListener('mousedown', (ev) => { if (ev && ev.target === overlay) close(); });
+        overlay.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (_e) {} });
+        if (typeof o.build === 'function') o.build(body, close);
+        if (!sheet) {
+            try {
+                const r = o.anchor && typeof o.anchor.getBoundingClientRect === 'function' ? o.anchor.getBoundingClientRect() : null;
+                const vw = (typeof window !== 'undefined' && window.innerWidth) || 1024;
+                const vh = (typeof window !== 'undefined' && window.innerHeight) || 768;
+                const w = Math.min(320, vw - 16);
+                const h = panel.offsetHeight || 0;
+                const left = r ? Math.max(8, Math.min(r.left, vw - w - 8)) : (vw - w) / 2;
+                let top = r ? r.bottom + 6 : 80;
+                if (r && h && top + h > vh - 8) top = Math.max(8, r.top - h - 6);
+                panel.style.left = left + 'px';
+                panel.style.top = top + 'px';
+            } catch (_e) {}
+        }
+        const handle = { panel, body, close };
+        TaskDocs._panel = handle;
+        return handle;
+    }
+
+    /**
+     * The Mark sent panel: To (prefilled), Via (four choices) and Follow up
+     * (None, Tomorrow, In 2 work days, Next Monday, or a date). Saving closes
+     * it and calls opts.onSave({ to, via, due }) with due '' for no follow-up.
+     * Returns the panel handle, or null.
+     */
+    static openSendPanel(opts) {
+        const o = opts || {};
+        const today = String(o.today || '');
+        const state = { to: String(o.to == null ? '' : o.to).trim(), via: TaskDocs._via(o.via) || 'Slack', follow: 'two', date: '' };
+        return TaskDocs._openPanel({
+            app: o.app, anchor: o.anchor, doc: o.doc, title: 'Mark sent', cls: 'is-send',
+            build: (body, close) => {
+                const field = (label) => {
+                    const wrap = body.createEl('div', { cls: 'sauce-tdv-pop-field' });
+                    wrap.createEl('div', { cls: 'sauce-tdv-pop-label', text: label });
+                    return wrap;
+                };
+                const toInput = field('To').createEl('input', { cls: 'sauce-tdv-pop-input', type: 'text' });
+                toInput.value = state.to;
+                try { toInput.setAttribute('placeholder', 'Who it went to'); toInput.setAttribute('aria-label', 'To'); toInput.setAttribute('enterkeyhint', 'done'); } catch (_e) {}
+                toInput.addEventListener('input', () => { state.to = String(toInput.value || ''); });
+                const pills = (host, items, isOn, pick) => {
+                    const group = host.createEl('div', { cls: 'sauce-tdv-pop-pills' });
+                    const buttons = items.map((it) => {
+                        const b = group.createEl('button', { cls: 'sauce-tdv-pill', text: it.label });
+                        try { b.setAttribute('type', 'button'); } catch (_e) {}
+                        b.addEventListener('click', () => { pick(it.key); paint(); });
+                        return { b, key: it.key };
+                    });
+                    const paint = () => {
+                        for (const x of buttons) {
+                            const on = isOn(x.key);
+                            x.b.className = 'sauce-tdv-pill' + (on ? ' is-on' : '');
+                            try { x.b.setAttribute('aria-pressed', on ? 'true' : 'false'); } catch (_e) {}
+                        }
+                    };
+                    paint();
+                    return { group, paint };
+                };
+                pills(field('Via'), TaskDocs.VIAS.map((v) => ({ key: v, label: v })), (k) => state.via === k, (k) => { state.via = k; });
+                const followField = field('Follow up');
+                let hint = null;
+                let dateInput = null;
+                const paintHint = () => {
+                    const due = TaskDocs.followUpDate(state.follow === 'date' ? state.date : state.follow, today);
+                    if (hint) hint.textContent = state.follow === 'none' ? 'No follow-up task' : (due ? 'Follow-up task due ' + TaskDocs._weekdayDay(due) : 'Pick a date');
+                };
+                const follow = pills(followField, TaskDocs.FOLLOW_UPS, (k) => state.follow === k, (k) => {
+                    state.follow = k;
+                    if (dateInput) dateInput.value = '';
+                    state.date = '';
+                    paintHint();
+                });
+                dateInput = follow.group.createEl('input', { cls: 'sauce-tdv-pop-date', type: 'date' });
+                try { dateInput.setAttribute('aria-label', 'Follow up on a date'); } catch (_e) {}
+                const onDate = () => {
+                    state.date = String(dateInput.value || '');
+                    state.follow = state.date ? 'date' : 'two';
+                    follow.paint();
+                    paintHint();
+                };
+                dateInput.addEventListener('change', onDate);
+                dateInput.addEventListener('input', onDate);
+                hint = followField.createEl('div', { cls: 'sauce-tdv-pop-hint' });
+                paintHint();
+                const foot = body.createEl('div', { cls: 'sauce-tdv-pop-foot' });
+                const cancel = foot.createEl('button', { cls: 'sauce-btn', text: 'Cancel' });
+                const save = foot.createEl('button', { cls: 'sauce-btn sauce-btn-accent sauce-tdv-pop-save', text: 'Mark sent' });
+                try { cancel.setAttribute('type', 'button'); save.setAttribute('type', 'button'); } catch (_e) {}
+                cancel.addEventListener('click', () => close());
+                let saving = false;
+                const submit = async () => {
+                    if (saving) return;
+                    const due = state.follow === 'none' ? '' : TaskDocs.followUpDate(state.follow === 'date' ? state.date : state.follow, today);
+                    if (state.follow !== 'none' && !due) { paintHint(); return; }
+                    saving = true;
+                    close();
+                    if (typeof o.onSave === 'function') await o.onSave({ to: String(state.to || '').replace(/\s+/g, ' ').trim(), via: state.via, due });
+                };
+                save.addEventListener('click', submit);
+                toInput.addEventListener('keydown', (ev) => {
+                    if (ev && ev.key === 'Enter' && !ev.isComposing) { try { ev.preventDefault(); } catch (_e) {} submit(); }
+                });
+                if (!TaskDocs._isPhone(o.app)) { try { toInput.focus(); } catch (_e) {} }
+            },
+        });
+    }
+
+    /**
+     * One row of To-Do's Waiting tab for `item` (from waiting): the comms
+     * icon and title (opens the note), to whom and via what, how long ago it
+     * was sent, the parent task (opens it), and Got reply, which writes
+     * through RenderSafe.mutate, takes the row out at once and puts it back
+     * if the write fails. opts.onReplied(item, stamp) runs after a reply is
+     * saved. Returns the row.
+     */
+    static renderWaitingRow(container, item, opts) {
+        if (!container || typeof container.createEl !== 'function' || !item) return null;
+        const o = opts || {};
+        const app = o.app || (typeof window !== 'undefined' ? window.app : null);
+        TaskDocs._injectCss();
+        const open = (target) => (ev) => {
+            try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+            try { app.workspace.openLinkText(target, '', false); } catch (_e) {}
+        };
+        const row = container.createEl('div', { cls: 'sauce-tdv-wait' });
+        try { if (row.dataset) row.dataset.path = String(item.path || ''); } catch (_e) {}
+        const ic = row.createEl('span', { cls: 'sauce-tdv-wait-icon' });
+        ic.innerHTML = TaskDocs._kind('comms').icon;
+        const main = row.createEl('div', { cls: 'sauce-tdv-wait-main' });
+        const titleEl = main.createEl('a', { cls: 'sauce-tdv-wait-title', text: item.title || 'Comms', href: '#' });
+        titleEl.addEventListener('click', open(item.path));
+        const meta = main.createEl('div', { cls: 'sauce-tdv-wait-meta' });
+        const sent = Number.isFinite(item.days) ? (item.days > 0 ? 'Sent ' + item.days + 'd ago' : 'Sent today') : 'Sent';
+        const parts = [item.to ? 'To ' + item.to : '', item.via, sent].filter(Boolean);
+        meta.createEl('span', { text: parts.join(' · ') });
+        if (item.taskPath) {
+            meta.createEl('span', { cls: 'sauce-tdv-sep', text: '·' });
+            const t = meta.createEl('a', { cls: 'sauce-tdv-wait-task', text: '↳ ' + (item.taskTitle || 'Task'), href: '#' });
+            t.addEventListener('click', open(item.taskPath));
+        }
+        const reply = row.createEl('button', { cls: 'sauce-tdv-wait-reply', text: 'Got reply' });
+        try { reply.setAttribute('type', 'button'); reply.setAttribute('aria-label', 'Got reply: ' + (item.title || 'Comms')); } catch (_e) {}
+        reply.addEventListener('click', async (ev) => {
+            try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+            const RenderSafe = typeof window !== 'undefined' && window.customJS ? window.customJS.RenderSafe : null;
+            if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not mark the reply right now', 4000); return; }
+            const stamp = TaskDocs._stamp();
+            const parent = row.parentNode;
+            const next = row.nextSibling;
+            const res = await RenderSafe.mutate({
+                app,
+                path: item.path,
+                failureMessage: 'Could not mark the reply',
+                optimistic: () => { try { row.remove(); } catch (_e) {} },
+                write: async () => {
+                    const r = await TaskDocs.gotReply(app, item.path, stamp);
+                    if (!r.ok) throw new Error(r.reason);
+                    return r;
+                },
+                revert: () => { try { if (parent) parent.insertBefore(row, next || null); } catch (_e) {} },
+            });
+            if (res && res.ok) {
+                TaskDocs.markSeen(item.path);
+                try { if (typeof o.onReplied === 'function') o.onReplied(item, stamp); } catch (_e) {}
+            }
+        });
+        return row;
+    }
+
+    // ----- Claude loop: Copy for Claude, New notes, Resume -----
+    // Spec: Docs/superpowers/specs/2026-11-13-task-flow-design.md §2.
+
+    /**
+     * The context block Copy for Claude adds after a prompt: where the task
+     * is, where its notes go, and how to write results there. info =
+     * { taskTitle, taskName, taskPath, notesPath }. Pure.
+     */
+    static claudeContext(info) {
+        const i = info || {};
+        const name = String(i.taskName || i.taskTitle || '').trim();
+        const notes = String(i.notesPath || '').replace(/[\\/]+$/, '');
+        return [
+            '---',
+            'Task: ' + String(i.taskTitle || name).trim() + ' (' + String(i.taskPath || '').trim() + ')',
+            'Notes folder: ' + notes + '/',
+            'Write results there as new notes with frontmatter type: task-doc, kind: findings, comms or handoff, title:, task: "[[' + name + ']]" and created_at: (ISO), then the two dataviewjs header blocks the other notes in that folder start with.',
+            'On a handoff, also set session: to this session\'s URL or id.',
+        ].join('\n');
+    }
+
+    /** `prompt`, a blank line, then claudeContext(info). Pure. */
+    static forClaude(prompt, info) {
+        return String(prompt == null ? '' : prompt).replace(/\s+$/, '') + '\n\n' + TaskDocs.claudeContext(info);
+    }
+
+    /**
+     * What Resume does with a handoff's `session:` value: { kind: 'url', url }
+     * for a link, { kind: 'id', id, command: 'claude --resume <id>' } for an
+     * id, null when blank. Pure.
+     */
+    static resumeAction(session) {
+        const s = String(session == null ? '' : session).trim();
+        if (!s) return null;
+        if (/^https?:\/\//i.test(s)) return { kind: 'url', url: s };
+        return { kind: 'id', id: s, command: 'claude --resume ' + s };
+    }
+
+    static get SEEN_KEY() { return 'sauce-taskdoc-seen'; }
+    static get NEW_DAYS() { return 14; }
+
+    static _storage() {
+        try { return typeof window !== 'undefined' ? window.localStorage : null; } catch (_e) { return null; }
+    }
+
+    /** This device's { path: epochMs } of when each note was last viewed. Never throws. */
+    static readSeen(storage) {
+        const S = storage !== undefined ? storage : TaskDocs._storage();
+        let raw = null;
+        try { raw = S && typeof S.getItem === 'function' ? S.getItem(TaskDocs.SEEN_KEY) : null; } catch (_e) { raw = null; }
+        const memo = TaskDocs._seenMemo;
+        if (memo && memo.store === S && memo.raw === raw) return memo.map;
+        const map = {};
+        try {
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                for (const [k, v] of Object.entries(parsed)) if (Number.isFinite(v)) map[k] = v;
+            }
+        } catch (_e) {}
+        TaskDocs._seenMemo = { store: S, raw, map };
+        return map;
+    }
+
+    /**
+     * Record that the note at `path` was viewed at `at` (default now), and
+     * drop records older than NEW_DAYS: a note changed before then is never
+     * new, seen or not. Best effort; never throws.
+     */
+    static markSeen(path, at, storage) {
+        const p = String(path == null ? '' : path);
+        if (!p) return;
+        const S = storage !== undefined ? storage : TaskDocs._storage();
+        const when = Number.isFinite(at) ? at : Date.now();
+        const map = Object.assign({}, TaskDocs.readSeen(S));
+        map[p] = Math.max(when, map[p] || 0);
+        const keep = TaskDocs.NEW_DAYS * 86400000;
+        for (const k of Object.keys(map)) if (when - map[k] > keep) delete map[k];
+        try { if (S && typeof S.setItem === 'function') S.setItem(TaskDocs.SEEN_KEY, JSON.stringify(map)); } catch (_e) {}
+    }
+
+    static _moveSeen(from, to, storage) {
+        const S = storage !== undefined ? storage : TaskDocs._storage();
+        const map = Object.assign({}, TaskDocs.readSeen(S));
+        if (!from || !to || !map[from]) return;
+        map[to] = Math.max(map[to] || 0, map[from]);
+        delete map[from];
+        try { if (S && typeof S.setItem === 'function') S.setItem(TaskDocs.SEEN_KEY, JSON.stringify(map)); } catch (_e) {}
+    }
+
+    /** Whether a note changed at `mtime` is new: later than `seenAt` and within NEW_DAYS of `now`. Pure. */
+    static isNew(mtime, seenAt, now) {
+        const m = Number(mtime) || 0;
+        const n = Number(now) || 0;
+        if (!m || !n || n - m > TaskDocs.NEW_DAYS * 86400000) return false;
+        return m > (Number(seenAt) || 0);
+    }
+
+    /** The task's new notes ([{ path, title, mtime }], newest first) on this device. Never throws. */
+    static newNotes(app, taskPath, now, seen) {
+        try {
+            const folder = TaskDocs.notesFolder(taskPath);
+            if (!folder || !app || !app.vault || typeof app.vault.getAbstractFileByPath !== 'function') return [];
+            const dir = app.vault.getAbstractFileByPath(folder);
+            if (!dir || !Array.isArray(dir.children)) return [];
+            const map = seen || TaskDocs.readSeen();
+            const out = [];
+            for (const f of dir.children) {
+                if (!f || Array.isArray(f.children) || !/\.md$/i.test(String(f.path || ''))) continue;
+                const mtime = (f.stat && f.stat.mtime) || 0;
+                if (!TaskDocs.isNew(mtime, map[f.path], now)) continue;
+                const fm = TaskDocs._fmOf(app, f);
+                if (fm && String(fm.type || '') === 'task') continue;
+                const base = String(f.basename != null ? f.basename : f.path.split('/').pop().replace(/\.md$/i, ''));
+                out.push({ path: f.path, title: fm && fm.title != null && String(fm.title).trim() ? String(fm.title).trim() : base, mtime });
+            }
+            out.sort((a, b) => b.mtime - a.mtime);
+            return out;
+        } catch (_e) { return []; }
+    }
+
+    /**
+     * Keep the seen record in step with what happens on this device: an edit
+     * to a note while it is the open file counts as seeing it (your own
+     * typing never marks it new), and a renamed note keeps its record.
+     * Installed once per app; a reloaded class replaces the old listeners.
+     */
+    static _installSeenHook(app) {
+        try {
+            if (typeof window === 'undefined' || !app || !app.vault || typeof app.vault.on !== 'function') return;
+            const prior = window.__sauceTaskDocSeenHook;
+            if (prior && prior.cls === TaskDocs && prior.app === app) return;
+            if (prior && prior.app && prior.app.vault && typeof prior.app.vault.offref === 'function') {
+                for (const ref of prior.refs || []) { try { prior.app.vault.offref(ref); } catch (_e) {} }
+            }
+            const isNote = (p) => /^spice\/tasks\/.*\/notes\/[^/]+\.md$/i.test(String(p || ''));
+            const refs = [
+                app.vault.on('modify', (f) => {
+                    try {
+                        if (!f || !isNote(f.path)) return;
+                        const active = app.workspace && typeof app.workspace.getActiveFile === 'function' ? app.workspace.getActiveFile() : null;
+                        if (active && active.path === f.path) TaskDocs.markSeen(f.path);
+                    } catch (_e) {}
+                }),
+                app.vault.on('rename', (f, oldPath) => {
+                    try { if (f && isNote(f.path)) TaskDocs._moveSeen(oldPath, f.path); } catch (_e) {}
+                }),
+            ];
+            window.__sauceTaskDocSeenHook = { cls: TaskDocs, app, refs };
+        } catch (_e) {}
+    }
+
+    static _today() {
+        try { return typeof window !== 'undefined' && typeof window.moment === 'function' ? window.moment().format('YYYY-MM-DD') : ''; }
+        catch (_e) { return ''; }
+    }
+
     static _ago(mtime, now) {
         const ms = Math.max(0, (now || Date.now()) - (mtime || 0));
         const min = Math.floor(ms / 60000);
@@ -649,6 +1353,37 @@ class TaskDocs {
             '@media (hover: hover) { .sauce-tnv-review-row:hover { background: var(--background-modifier-hover); } }',
             '.sauce-tnv-review-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
             '.sauce-tnv-review-kind { flex-shrink: 0; }',
+            '.sauce-tnv-doc-new { flex-shrink: 0; display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--interactive-accent) 16%, transparent); color: var(--text-accent); font-size: 0.72em; font-weight: 700; letter-spacing: 0.04em; }',
+            '.sauce-tdv-chip.is-sent.is-waiting { border-color: color-mix(in srgb, var(--tdv-accent) 50%, transparent); color: var(--tdv-accent); background: color-mix(in srgb, var(--tdv-accent) 10%, transparent); }',
+            '.sauce-tdv-chip.is-sent.is-answered::before { content: "✓"; color: var(--color-green, #4c9a5a); }',
+            '.sauce-tdv-pop-overlay { position: fixed; inset: 0; z-index: var(--layer-menu, 65); }',
+            '.sauce-tdv-pop { position: fixed; box-sizing: border-box; width: 320px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-l, 12px); background: var(--background-primary); box-shadow: var(--shadow-l, 0 10px 30px rgba(0, 0, 0, 0.25)); }',
+            '.sauce-tdv-pop-overlay.is-sheet { background: rgba(0, 0, 0, 0.35); }',
+            '.sauce-tdv-pop-overlay.is-sheet .sauce-tdv-pop { left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-width: none; border-radius: 14px 14px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }',
+            '.sauce-tdv-pop-title { font-weight: 700; font-size: 0.95em; color: var(--text-normal); }',
+            '.sauce-tdv-pop-body { display: flex; flex-direction: column; gap: 12px; }',
+            '.sauce-tdv-pop-field { display: flex; flex-direction: column; gap: 6px; }',
+            '.sauce-tdv-pop-label { font-size: 0.72em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }',
+            'body .sauce-tdv-pop-input.sauce-tdv-pop-input, body .sauce-tdv-pop-date.sauce-tdv-pop-date { box-sizing: border-box; width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 6px); background: var(--background-primary); color: var(--text-normal); font: inherit; }',
+            'body .sauce-tdv-pop-date.sauce-tdv-pop-date { width: auto; flex: 1 1 9em; min-width: 9em; }',
+            '.sauce-tdv-pop-pills { display: flex; flex-wrap: wrap; gap: 6px; }',
+            'body .sauce-tdv-pill.sauce-tdv-pill { height: auto; min-height: 30px; padding: 3px 11px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: transparent; box-shadow: none; color: var(--text-muted); font-size: 0.85em; cursor: pointer; }',
+            '@media (hover: hover) { body .sauce-tdv-pill.sauce-tdv-pill:hover { color: var(--text-normal); background: var(--background-modifier-hover); } }',
+            'body .sauce-tdv-pill.sauce-tdv-pill.is-on { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 16%, transparent); color: var(--text-accent); font-weight: 600; }',
+            '.sauce-tdv-pop-hint { font-size: 0.8em; color: var(--text-faint, var(--text-muted)); }',
+            '.sauce-tdv-pop-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }',
+            'body.is-mobile .sauce-tdv-pill.sauce-tdv-pill, body.is-mobile .sauce-tdv-pop-foot > .sauce-btn, body.is-mobile .sauce-tdv-pop-input.sauce-tdv-pop-input, body.is-mobile .sauce-tdv-pop-date.sauce-tdv-pop-date { min-height: 40px; font-size: 16px; }',
+            'body.is-mobile .sauce-tdv-pop-foot > .sauce-btn { flex: 1 1 0; }',
+            '.sauce-tdv-wait { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--background-modifier-border); min-width: 0; }',
+            '.sauce-tdv-wait:last-child { border-bottom: none; }',
+            '.sauce-tdv-wait-icon { display: inline-flex; flex-shrink: 0; color: ' + TaskDocs.TONES.comms + '; }',
+            '.sauce-tdv-wait-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }',
+            '.sauce-tdv-wait-title { color: var(--text-normal); text-decoration: none; overflow-wrap: anywhere; cursor: pointer; }',
+            '.sauce-tdv-wait-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 0.78em; color: var(--text-muted); min-width: 0; }',
+            '.sauce-tdv-wait-task { color: var(--text-accent); text-decoration: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 18em; }',
+            'body .sauce-tdv-wait-reply.sauce-tdv-wait-reply { flex-shrink: 0; height: auto; min-height: 28px; padding: 2px 11px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-muted); font-size: 0.82em; cursor: pointer; }',
+            '@media (hover: hover) { body .sauce-tdv-wait-reply.sauce-tdv-wait-reply:hover { color: var(--text-normal); border-color: var(--background-modifier-border-hover); } }',
+            'body.is-mobile .sauce-tdv-wait-reply.sauce-tdv-wait-reply { min-height: 36px; }',
         ].join('\n');
     }
 
@@ -701,6 +1436,10 @@ class TaskDocs {
             copy: svg('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 15),
             task: svg('<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>', 15),
             pencil: svg('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>', 14),
+            send: svg('<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>', 15),
+            reply: svg('<path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>', 15),
+            claude: svg('<path d="M12 3v3"/><path d="M12 18v3"/><path d="m5.6 5.6 2.1 2.1"/><path d="m16.3 16.3 2.1 2.1"/><path d="M3 12h3"/><path d="M18 12h3"/><path d="m5.6 18.4 2.1-2.1"/><path d="m16.3 7.7 2.1-2.1"/>', 15),
+            resume: svg('<polygon points="6 3 20 12 6 21 6 3"/>', 15),
         };
     }
 
@@ -733,7 +1472,11 @@ class TaskDocs {
      * task, the title, the task's status, due date, priority and project,
      * and Copy prompt (prompt and handoff) or Copy message (comms) and Open
      * task. The card is
-     * tinted in the kind's colour (TONES). opts.app overrides window.app.
+     * tinted in the kind's colour (TONES). A prompt note also has Copy for
+     * Claude (the prompt plus its task context); a comms note has Mark sent
+     * before it is sent, then a `Sent Nov 13 · Slack · waiting 2d` chip and
+     * Got reply; a handoff with session: has Resume. Drawing the card records
+     * the note as seen on this device. opts.app overrides window.app.
      * Returns the card, or null. Never throws.
      */
     static renderHeader(dv, opts) {
@@ -781,6 +1524,8 @@ class TaskDocs {
             card.setAttribute('data-kind', kind);
             const seen = TaskDocs._seen || (TaskDocs._seen = new Set());
             if (!seen.has(path)) { seen.add(path); card.classList.add('is-reveal'); }
+            TaskDocs.markSeen(path);
+            TaskDocs._installSeenHook(app);
 
             if (taskFile) {
                 const trail = card.createEl('div', { cls: 'sauce-tdv-for' });
@@ -848,7 +1593,7 @@ class TaskDocs {
                 TaskDocs._editTitle(titleRow, titleEl, prior, async (next) => {
                     const RenderSafe = window.customJS && window.customJS.RenderSafe;
                     if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not rename the note right now', 4000); return; }
-                    await RenderSafe.mutate({
+                    const done = await RenderSafe.mutate({
                         app,
                         path,
                         failureMessage: 'Could not rename the note',
@@ -860,6 +1605,7 @@ class TaskDocs {
                         },
                         revert: () => { titleEl.textContent = prior; },
                     });
+                    if (done && done.ok && done.value && done.value.path) TaskDocs.markSeen(done.value.path);
                 });
             };
             renameBtn.addEventListener('click', startRename);
@@ -887,6 +1633,12 @@ class TaskDocs {
             const metaText = [made ? 'Created ' + TaskDocs._MONTHS[+made[2] - 1] + ' ' + (+made[3]) : '', ago ? 'Edited ' + ago : ''].filter(Boolean).join(' · ');
             if (metaText) card.createEl('div', { cls: 'sauce-tdv-meta', text: metaText });
 
+            const today = TaskDocs._today();
+            const sent = { to: fm.to, via: fm.via, sent_at: fm.sent_at, replied_at: fm.replied_at };
+            const follow = TaskDocs.followUps(app, path);
+            const commsRow = card.createEl('div', { cls: 'sauce-tdv-chips is-comms' });
+            let commsChip = null;
+
             const actions = card.createEl('div', { cls: 'sauce-tdv-actions' });
             const copyBtn = actions.createEl('button', { cls: 'sauce-btn sauce-tdv-copy' });
             try { copyBtn.setAttribute('type', 'button'); } catch (_e) {}
@@ -910,6 +1662,120 @@ class TaskDocs {
                     setTimeout(() => { try { copyBtn.classList.remove('is-copied'); paintCopy(); } catch (_e) {} }, 1400);
                 } catch (_e) {}
             });
+
+            const extraBtn = (cls, icon, label) => {
+                const b = actions.createEl('button', { cls: 'sauce-btn ' + cls });
+                try { b.setAttribute('type', 'button'); } catch (_e) {}
+                b.innerHTML = icon;
+                b.createEl('span', { text: label });
+                return b;
+            };
+            const claudeBtn = extraBtn('sauce-tdv-claude', ICON.claude, 'Copy for Claude');
+            try { claudeBtn.setAttribute('title', 'Copy the prompt with where this task\'s notes go'); } catch (_e) {}
+            const sentBtn = extraBtn('sauce-tdv-sent', ICON.send, 'Mark sent');
+            try { sentBtn.setAttribute('aria-haspopup', 'dialog'); } catch (_e) {}
+            const replyBtn = extraBtn('sauce-tdv-reply', ICON.reply, 'Got reply');
+            const resumeBtn = extraBtn('sauce-tdv-resume', ICON.resume, 'Resume');
+            const paintExtras = () => {
+                const st = kind === 'comms' ? TaskDocs.commsState(sent, follow, today) : null;
+                const chip = TaskDocs.commsChip(st);
+                if (chip && !commsChip) commsChip = commsRow.createEl('span', { cls: 'sauce-tdv-chip is-sent' });
+                if (commsChip) {
+                    commsChip.textContent = chip;
+                    commsChip.className = 'sauce-tdv-chip is-sent' + (st && st.state !== 'unsent' ? ' is-' + st.state : '');
+                }
+                commsRow.style.display = chip ? '' : 'none';
+                claudeBtn.style.display = kind === 'prompt' && taskFile ? '' : 'none';
+                sentBtn.style.display = st && st.state === 'unsent' ? '' : 'none';
+                replyBtn.style.display = st && st.state === 'waiting' ? '' : 'none';
+                const ra = kind === 'handoff' ? TaskDocs.resumeAction(fm.session) : null;
+                resumeBtn.style.display = ra ? '' : 'none';
+                try { resumeBtn.setAttribute('title', ra ? (ra.kind === 'url' ? 'Open the session' : 'Copy ' + ra.command) : ''); } catch (_e) {}
+            };
+            paintExtras();
+
+            claudeBtn.addEventListener('click', async () => {
+                let text = '';
+                try { text = TaskDocs.extractPrompt(await app.vault.read(file)); } catch (_e) { text = ''; }
+                if (!text) { TaskDocs._notice('This note has nothing to copy yet', 4000); return; }
+                if (!taskFile) return;
+                const TTL = window.customJS && window.customJS.TaskTodayList;
+                const full = (p) => (TTL && typeof TTL.fullPath === 'function' ? TTL.fullPath(p, app) : p);
+                const taskName = String(taskFile.basename || taskFile.path.split('/').pop().replace(/\.md$/i, ''));
+                const all = TaskDocs.forClaude(text, {
+                    taskTitle: title(taskFile, taskFm),
+                    taskName,
+                    taskPath: full(taskFile.path),
+                    notesPath: full(TaskDocs.notesFolder(taskFile.path) || path.slice(0, path.lastIndexOf('/'))),
+                });
+                const ok = await TaskDocs._copyText(all);
+                TaskDocs._notice(ok ? 'Prompt and task context copied (' + all.length + ' characters)' : 'Could not copy the prompt', ok ? 2500 : 5000);
+            });
+
+            resumeBtn.addEventListener('click', async () => {
+                const ra = TaskDocs.resumeAction(fm.session);
+                if (!ra) return;
+                if (ra.kind === 'url') {
+                    try { window.open(ra.url); } catch (_e) { TaskDocs._notice('Could not open the session', 4000); }
+                    return;
+                }
+                const ok = await TaskDocs._copyText(ra.command);
+                TaskDocs._notice(ok ? 'Copied: ' + ra.command : 'Could not copy the resume command', ok ? 3500 : 5000);
+            });
+
+            sentBtn.addEventListener('click', () => {
+                TaskDocs.openSendPanel({
+                    app,
+                    anchor: sentBtn,
+                    to: sent.to,
+                    via: sent.via,
+                    today,
+                    onSave: async (v) => {
+                        const RenderSafe = window.customJS && window.customJS.RenderSafe;
+                        if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not mark it sent right now', 4000); return; }
+                        const prior = Object.assign({}, sent);
+                        const stamp = TaskDocs._stamp();
+                        const res = await RenderSafe.mutate({
+                            app,
+                            path,
+                            failureMessage: 'Could not mark the message sent',
+                            optimistic: () => { Object.assign(sent, { to: v.to, via: v.via, sent_at: stamp, replied_at: '' }); paintExtras(); },
+                            write: async () => {
+                                const r = await TaskDocs.markSent(app, path, { to: v.to, via: v.via, due: v.due, stamp });
+                                if (!r.ok) throw new Error(r.reason);
+                                return r;
+                            },
+                            revert: () => { Object.assign(sent, prior); paintExtras(); },
+                        });
+                        if (!res || !res.ok) return;
+                        TaskDocs.markSeen(path);
+                        const out = res.value || {};
+                        if (v.due && !out.followUp) TaskDocs._notice('Marked sent, but the follow-up task could not be made', 6000);
+                        else TaskDocs._notice(v.due ? 'Marked sent. Follow up ' + TaskDocs._weekdayDay(v.due) : 'Marked sent', 3000);
+                    },
+                });
+            });
+
+            replyBtn.addEventListener('click', async () => {
+                const RenderSafe = window.customJS && window.customJS.RenderSafe;
+                if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not mark the reply right now', 4000); return; }
+                const prior = sent.replied_at;
+                const stamp = TaskDocs._stamp();
+                const res = await RenderSafe.mutate({
+                    app,
+                    path,
+                    failureMessage: 'Could not mark the reply',
+                    optimistic: () => { sent.replied_at = stamp; paintExtras(); },
+                    write: async () => {
+                        const r = await TaskDocs.gotReply(app, path, stamp);
+                        if (!r.ok) throw new Error(r.reason);
+                        return r;
+                    },
+                    revert: () => { sent.replied_at = prior; paintExtras(); },
+                });
+                if (res && res.ok) TaskDocs.markSeen(path);
+            });
+
             if (taskFile) {
                 const taskBtn = actions.createEl('button', { cls: 'sauce-btn sauce-tdv-task' });
                 try { taskBtn.setAttribute('type', 'button'); } catch (_e) {}
@@ -929,8 +1795,8 @@ class TaskDocs {
                         const RenderSafe = window.customJS && window.customJS.RenderSafe;
                         if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not change the kind right now', 4000); return; }
                         const prior = kind;
-                        const repaint = (to) => { kind = to; paintBadge(); paintCopy(); };
-                        await RenderSafe.mutate({
+                        const repaint = (to) => { kind = to; paintBadge(); paintCopy(); paintExtras(); };
+                        const done = await RenderSafe.mutate({
                             app,
                             path,
                             failureMessage: 'Could not change the kind',
@@ -938,6 +1804,7 @@ class TaskDocs {
                             write: () => app.fileManager.processFrontMatter(file, (f) => { f.kind = k.key; }),
                             revert: () => repaint(prior),
                         });
+                        if (done && done.ok) TaskDocs.markSeen(path);
                     },
                 }));
                 MP.open(entries, { anchor: badge, title: 'Kind of note', animate: true });
@@ -950,8 +1817,10 @@ class TaskDocs {
 
     /**
      * Draw the Notes section of the task at opts.taskPath into `container`
-     * (the task card): one row per note (kind icon, title, kind and age;
-     * click opens it), Copy prompt on prompt and handoff notes, and + Note,
+     * (the task card): one row per note (kind icon, title, kind and age, or
+     * Sent Nov 13 / Waiting 2d on a sent comms note, and a New pill when it
+     * changed since this device last opened it; click opens it), Copy prompt
+     * on prompt and handoff notes, and + Note,
      * which picks a kind, creates the note and opens it. Nothing for a flat
      * task. Returns the section, or null. Never throws.
      */
@@ -979,6 +1848,9 @@ class TaskDocs {
                     return;
                 }
                 const now = Date.now();
+                const today = TaskDocs._today();
+                const seenAt = TaskDocs.readSeen();
+                let kids = null;
                 for (const d of docs) {
                     const meta = TaskDocs._kind(d.kind);
                     const row = listEl.createEl('div', { cls: 'sauce-tnv-doc is-' + d.kind });
@@ -986,10 +1858,21 @@ class TaskDocs {
                     ic.innerHTML = meta.icon;
                     const main = row.createEl('div', { cls: 'sauce-tnv-doc-main' });
                     const titleSpan = main.createEl('span', { cls: 'sauce-tnv-doc-title', text: d.title });
-                    const ago = TaskDocs._ago(d.mtime, now);
-                    main.createEl('span', { cls: 'sauce-tnv-doc-meta', text: meta.label + (ago ? ' · ' + ago : '') });
+                    let status = TaskDocs._ago(d.mtime, now);
+                    if (d.kind === 'comms') {
+                        if (!kids) kids = TaskDocs._childTasks(app, taskPath.slice(0, taskPath.lastIndexOf('/')));
+                        const name = String(d.path).split('/').pop().replace(/\.md$/i, '');
+                        const st = TaskDocs.commsState(d.fm, TaskDocs._followUpsIn(kids, name), today);
+                        if (st.state === 'waiting') status = TaskDocs.waitingText(st.days);
+                        else if (st.state === 'answered') status = st.sentLabel;
+                    }
+                    main.createEl('span', { cls: 'sauce-tnv-doc-meta', text: meta.label + (status ? ' · ' + status : '') });
                     main.addEventListener('click', () => open(d.path));
                     try { main.setAttribute('title', 'Open ' + d.title); } catch (_e) {}
+                    if (TaskDocs.isNew(d.mtime, seenAt[d.path], now)) {
+                        const pill = row.createEl('span', { cls: 'sauce-tnv-doc-new', text: 'New' });
+                        try { pill.setAttribute('title', 'Changed since you last opened it on this device'); } catch (_e) {}
+                    }
                     const ren = row.createEl('button', { cls: 'sauce-tnv-doc-rename' });
                     try { ren.setAttribute('type', 'button'); ren.setAttribute('aria-label', 'Rename ' + d.title); ren.setAttribute('title', 'Rename'); } catch (_e) {}
                     ren.innerHTML = TaskDocs._ICONS.pencil;
@@ -1011,7 +1894,10 @@ class TaskDocs {
                                 },
                                 revert: () => { titleSpan.textContent = d.title; },
                             });
-                            if (res && res.ok) paint();
+                            if (res && res.ok) {
+                                if (!TaskDocs.isNew(d.mtime, seenAt[d.path], now) && res.value && res.value.path) TaskDocs.markSeen(res.value.path);
+                                paint();
+                            }
                         });
                     });
                     if (meta.copy) {
@@ -1057,6 +1943,7 @@ class TaskDocs {
                 const make = async (kind) => {
                     const res = await TaskDocs.create(app, taskPath, kind, TaskDocs._kind(kind).label);
                     if (!res.ok) { TaskDocs._notice('Could not create the note: ' + res.reason, 6000); return; }
+                    TaskDocs.markSeen(res.path);
                     open(res.path);
                 };
                 const entries = TaskDocs.KINDS.map((k) => ({ label: k.label, icon: k.icon, onSelect: () => { make(k.key); } }));
