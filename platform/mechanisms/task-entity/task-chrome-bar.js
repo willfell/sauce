@@ -38,13 +38,15 @@ class TaskChromeBar {
      * any `type: task` page (both top-level tasks and subtasks — they're
      * indistinguishable at this layer; the breadcrumb registry is what draws
      * the extra ancestor for a subtask, via its own parent_task predicate).
+     * It also matches `type: task-doc` notes (a task's prompts, handoffs and
+     * other notes), whose breadcrumb is To-Do › task › note.
      * Pure; never throws.
      */
     static _config() {
         return {
             detect: (dv, page) => {
-                if (page && page.type === 'task') {
-                    return { context: 'task', path: (page.file && page.file.path) || '' };
+                if (page && (page.type === 'task' || page.type === 'task-doc')) {
+                    return { context: page.type, path: (page.file && page.file.path) || '' };
                 }
                 return null;
             },
