@@ -325,6 +325,13 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     const menus = [];
     win.customJS.TaskTodayList = { copyText: async (t) => { copied.push(t); return true; } };
     win.customJS.MenuPopover = { open: (entries, o) => menus.push({ entries, o }) };
+    const mutations = [];
+    win.customJS.RenderSafe = {
+      mutate: async (o) => {
+        mutations.push(o);
+        try { await o.optimistic(); await o.write(); return { ok: true }; } catch (e) { await o.revert(e); return { ok: false, error: e }; }
+      },
+    };
     win.moment = () => ({ format: (f) => (f === 'YYYY-MM-DD' ? '2026-11-12' : f === 'YYYY/MM-MMMM' ? '2026/11-November' : '') });
     const mk = (tag, cls) => {
       const el = { tag, className: cls || '', children: [], style: {}, _attrs: {}, _l: {}, textContent: '', _html: '', classes: new Set(String(cls || '').split(/\s+/).filter(Boolean)) };
@@ -358,8 +365,14 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     const menu = menus[menus.length - 1];
     ok('TD-HEADER-KIND-MENU the kind badge offers every kind, the current one ticked', menu && menu.entries.length === 7 && /✓/.test(menu.entries[0].label));
     await menu.entries.find((e) => e.label === 'Plan').onSelect();
-    ok('TD-HEADER-KIND-CHANGE picking a kind writes it and recolours the card; Copy prompt hides for a plan',
-      fmCalls[0] === P && hApp._files.get(P)._fm.kind === 'plan' && card._attrs['data-kind'] === 'plan' && by(card, 'sauce-tdv-copy')[0].style.display === 'none');
+    ok('TD-HEADER-KIND-CHANGE picking a kind writes it through RenderSafe.mutate and recolours the card; Copy prompt hides for a plan',
+      mutations.length === 1 && mutations[0].path === P && fmCalls[0] === P && hApp._files.get(P)._fm.kind === 'plan'
+      && card._attrs['data-kind'] === 'plan' && by(card, 'sauce-tdv-copy')[0].style.display === 'none');
+    hApp.fileManager.processFrontMatter = async () => { throw new Error('locked'); };
+    by(card, 'sauce-tdv-kind')[0]._l.click();
+    await menus[menus.length - 1].entries.find((e) => e.label === 'Handoff').onSelect();
+    ok('TD-HEADER-KIND-REVERT a failed write puts the card back to the kind on disk',
+      card._attrs['data-kind'] === 'plan' && by(card, 'sauce-tdv-kind')[0].children[0].textContent === 'Plan' && mutations[1].failureMessage === 'Could not change the kind');
     ok('TD-HEADER-NONE a note that is not in a vault file, or inside an embed, draws nothing',
       TD.renderHeader({ container: mk('div'), current: () => ({ file: { path: 'nope.md' } }) }, { app: hApp }) === null
       && TD.renderHeader({ container: Object.assign(mk('div'), { closest: () => ({}) }), current: () => ({ file: { path: P } }) }, { app: hApp }) === null);

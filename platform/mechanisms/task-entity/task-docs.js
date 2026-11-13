@@ -851,12 +851,18 @@ class TaskDocs {
                     icon: k.icon,
                     onSelect: async () => {
                         if (k.key === kind) return;
-                        try {
-                            await app.fileManager.processFrontMatter(file, (f) => { f.kind = k.key; });
-                            kind = k.key;
-                            paintBadge();
-                            paintCopy();
-                        } catch (e) { TaskDocs._notice('Could not change the kind: ' + String((e && e.message) || e), 5000); }
+                        const RenderSafe = window.customJS && window.customJS.RenderSafe;
+                        if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not change the kind right now', 4000); return; }
+                        const prior = kind;
+                        const repaint = (to) => { kind = to; paintBadge(); paintCopy(); };
+                        await RenderSafe.mutate({
+                            app,
+                            path,
+                            failureMessage: 'Could not change the kind',
+                            optimistic: () => repaint(k.key),
+                            write: () => app.fileManager.processFrontMatter(file, (f) => { f.kind = k.key; }),
+                            revert: () => repaint(prior),
+                        });
                     },
                 }));
                 MP.open(entries, { anchor: badge, title: 'Kind of note', animate: true });
