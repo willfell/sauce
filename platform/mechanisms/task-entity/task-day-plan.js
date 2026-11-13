@@ -39,9 +39,13 @@ class TaskDayPlan {
     meetingItems(pages) { return TaskDayPlan.meetingItems(pages); }
     doneToday(tasks, today) { return TaskDayPlan.doneToday(tasks, today); }
     signature(model) { return TaskDayPlan.signature(model); }
-    collect(app) { return TaskDayPlan.collect(app); }
+    collect(app, opts) { return TaskDayPlan.collect(app, opts); }
     build(opts) { return TaskDayPlan.build(opts); }
     isPinned(app, path) { return TaskDayPlan.isPinned(app, path); }
+    isNow(app, path) { return TaskDayPlan.isNow(app, path); }
+    nowPath(app) { return TaskDayPlan.nowPath(app); }
+    parseMoved(content) { return TaskDayPlan.parseMoved(content); }
+    mergeMoved(earlier, fresh) { return TaskDayPlan.mergeMoved(earlier, fresh); }
     pin(app, path, iso) { return TaskDayPlan.pin(app, path, iso); }
     unpin(app, path) { return TaskDayPlan.unpin(app, path); }
     togglePin(app, path, opts) { return TaskDayPlan.togglePin(app, path, opts); }
@@ -52,7 +56,8 @@ class TaskDayPlan {
     renderDay(host, opts) { return TaskDayPlan.renderDay(host, opts); }
     openShutdown(opts) { return TaskDayPlan.openShutdown(opts); }
     finishShutdown(ctx) { return TaskDayPlan.finishShutdown(ctx); }
-    writeShutdown(app, today, section) { return TaskDayPlan.writeShutdown(app, today, section); }
+    missingDates(choices) { return TaskDayPlan.missingDates(choices); }
+    writeShutdown(app, today, summary) { return TaskDayPlan.writeShutdown(app, today, summary); }
     get CHOICES() { return TaskDayPlan.CHOICES; }
 
     static get ROOT() { return 'spice/tasks'; }
@@ -286,60 +291,166 @@ class TaskDayPlan {
         return t && t !== n ? '[[' + n + '|' + t + ']]' : '[[' + n + ']]';
     }
 
+    /** The hidden markers around the generated part of the Shutdown section. */
+    static get MARK_START() { return '%% shutdown:start %%'; }
+    static get MARK_END() { return '%% shutdown:end %%'; }
+
     /**
-     * The Shutdown section (a level 2 heading): `Done: N` with the titles as links,
-     * `Moved: N` as `title → date`, and `Still waiting: N`. `done` and `moved`
-     * are [{ path, title, date? }].
+     * The Shutdown section (a level 2 heading): the hidden start marker,
+     * `Done: N` with the titles as links, `Moved: N` as `title → date`,
+     * `Still waiting: N`, then the end marker. `done` is [{ path, title }];
+     * `moved` is [{ path, title, date }] or, for items kept from an earlier
+     * run, [{ link, label }].
      */
     static shutdownSection(summary) {
         const s = summary || {};
         const done = Array.isArray(s.done) ? s.done : [];
         const moved = Array.isArray(s.moved) ? s.moved : [];
         const waiting = Number.isFinite(s.waiting) ? s.waiting : 0;
-        const lines = ['## Shutdown', '']; // lint-display-markers:allow spec section 3 names this heading as the section Shut down writes and replaces
+        const lines = ['## Shutdown', TaskDayPlan.MARK_START, '']; // lint-display-markers:allow spec section 3 names this heading as the section Shut down writes and replaces
         lines.push('Done: ' + done.length);
         for (const d of done) lines.push('- ' + TaskDayPlan._link(TaskDayPlan._base(d.path), d.title));
         lines.push('');
         lines.push('Moved: ' + moved.length);
-        for (const m of moved) lines.push('- ' + TaskDayPlan._link(TaskDayPlan._base(m.path), m.title) + ' → ' + (TaskDayPlan.dayLabel(m.date) || m.date || ''));
+        for (const m of moved) {
+            const link = m.link || TaskDayPlan._link(TaskDayPlan._base(m.path), m.title);
+            const label = m.label || TaskDayPlan.dayLabel(m.date) || m.date || '';
+            lines.push('- ' + link + ' → ' + label);
+        }
         lines.push('');
         lines.push('Still waiting: ' + waiting);
+        lines.push(TaskDayPlan.MARK_END);
         return lines.join('\n') + '\n';
     }
 
+    /** `text` as [{ t, eol }], each line with its own ending ('' on a last line with none). */
+    static _lines(text) {
+        const out = [];
+        const re = /([^\r\n]*)(\r\n|\n|\r|$)/g;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+            if (m[0] === '') break;
+            out.push({ t: m[1], eol: m[2] });
+            if (!m[2]) break;
+        }
+        return out;
+    }
+
+    static _isGenerated(t) {
+        const l = String(t).trim();
+        return l === '' || l === TaskDayPlan.MARK_START
+            || /^(Done|Moved|Still waiting): \d+$/.test(l)
+            || /^- \[\[[^\]]+\]\]( → .*)?$/.test(l);
+    }
+
     /**
-     * `content` with its Shutdown section replaced by `section`: from the
-     * Shutdown heading line up to the next level 2 heading or the end of the file.
-     * With no such section, `section` is appended after a blank line. Fenced
-     * code is never matched.
+     * Where the Shutdown section's generated part sits in `lines`:
+     * { start, end, marked } (end exclusive), or null with no section.
+     * With markers it runs from the heading through the end marker; an
+     * older section without them stops at the first line Shut down would
+     * not have written. Fenced code is never matched.
      */
-    static replaceShutdown(content, section) {
-        const text = String(content == null ? '' : content).replace(/\r\n/g, '\n');
-        const sec = String(section == null ? '' : section).replace(/\s+$/, '');
-        const lines = text.split('\n');
+    static _findSection(lines) {
         const isFence = (l) => /^\s*(`{3,}|~{3,})/.test(l);
         const isShutdown = (l) => /^##\s+Shutdown\s*$/.test(l); // lint-display-markers:allow spec section 3 makes this heading the section boundary
-        const isH2 = (l) => /^##\s/.test(l); // lint-display-markers:allow spec section 3 ends the section at the next level 2 heading
+        const isH2 = (l) => /^##\s/.test(l); // lint-display-markers:allow the generated part never runs past the next level 2 heading
         let start = -1;
         let fenced = false;
         for (let i = 0; i < lines.length; i++) {
-            if (isFence(lines[i])) { fenced = !fenced; continue; }
-            if (!fenced && isShutdown(lines[i])) { start = i; break; }
+            if (isFence(lines[i].t)) { fenced = !fenced; continue; }
+            if (!fenced && isShutdown(lines[i].t)) { start = i; break; }
         }
-        if (start < 0) {
-            const body = text.replace(/\s+$/, '');
-            return (body ? body + '\n\n' : '') + sec + '\n';
-        }
-        let end = lines.length;
+        if (start < 0) return null;
+        let limit = lines.length;
         fenced = false;
         for (let j = start + 1; j < lines.length; j++) {
-            if (isFence(lines[j])) { fenced = !fenced; continue; }
-            if (!fenced && isH2(lines[j])) { end = j; break; }
+            if (isFence(lines[j].t)) { fenced = !fenced; continue; }
+            if (!fenced && isH2(lines[j].t)) { limit = j; break; }
         }
-        const before = lines.slice(0, start);
-        const after = lines.slice(end);
-        if (!after.length) return before.concat(sec.split('\n')).join('\n') + '\n';
-        return before.concat(sec.split('\n'), [''], after).join('\n');
+        let open = -1;
+        for (let j = start + 1; j < limit; j++) {
+            const l = lines[j].t.trim();
+            if (open < 0 && l === TaskDayPlan.MARK_START) open = j;
+            else if (open >= 0 && l === TaskDayPlan.MARK_END) return { start, end: j + 1, marked: true };
+        }
+        let end = start + 1;
+        while (end < limit && TaskDayPlan._isGenerated(lines[end].t)) end++;
+        while (end > start + 1 && lines[end - 1].t.trim() === '') end--;
+        return { start, end, marked: false };
+    }
+
+    /** The Moved items already in `content`'s Shutdown section: [{ link, label, key }]. */
+    static parseMoved(content) {
+        const lines = TaskDayPlan._lines(String(content == null ? '' : content));
+        const found = TaskDayPlan._findSection(lines);
+        if (!found) return [];
+        const out = [];
+        let inMoved = false;
+        for (let i = found.start + 1; i < found.end; i++) {
+            const l = lines[i].t.trim();
+            if (/^Moved: \d+$/.test(l)) { inMoved = true; continue; }
+            if (!inMoved) continue;
+            const m = /^- (\[\[([^\]|]+)(?:\|[^\]]*)?\]\]) → (.*)$/.exec(l);
+            if (!m) { inMoved = false; continue; }
+            out.push({ link: m[1], label: m[3].trim(), key: m[2].trim().toLowerCase() });
+        }
+        return out;
+    }
+
+    /**
+     * Earlier Moved items with this run's, one per task (by its link); this
+     * run's move wins, being the task's latest date.
+     */
+    static mergeMoved(earlier, fresh) {
+        const now = (Array.isArray(fresh) ? fresh : []).map((m) => Object.assign({}, m, {
+            key: (m.key || TaskDayPlan._base(m.path)).toLowerCase(),
+        }));
+        const keys = new Set(now.map((m) => m.key));
+        const kept = [];
+        const seen = new Set();
+        for (const m of Array.isArray(earlier) ? earlier : []) {
+            const key = String(m.key || '').toLowerCase();
+            if (!key || keys.has(key) || seen.has(key)) continue;
+            seen.add(key);
+            kept.push(m);
+        }
+        return kept.concat(now);
+    }
+
+    /**
+     * `content` with the generated part of its Shutdown section replaced by
+     * `section`. With the hidden markers that is the heading through the end
+     * marker, so text written below them stays; an older section without
+     * markers is replaced up to the first line Shut down would not have
+     * written. With no section, `section` is appended after a blank line.
+     * Lines keep their own endings; new lines take the heading's (or the
+     * note's first) ending.
+     */
+    static replaceShutdown(content, section) {
+        const text = String(content == null ? '' : content);
+        const lines = TaskDayPlan._lines(text);
+        const first = lines.find((l) => l.eol);
+        const noteEol = first ? first.eol : '\n';
+        const sec = String(section == null ? '' : section).replace(/\s+$/, '').split('\n');
+        const join = (arr) => arr.map((l) => l.t + l.eol).join('');
+        const found = TaskDayPlan._findSection(lines);
+        if (!found) {
+            let n = lines.length;
+            while (n > 0 && lines[n - 1].t.trim() === '') n--;
+            const kept = lines.slice(0, n).map((l) => ({ t: l.t, eol: l.eol }));
+            const mid = sec.map((t) => ({ t, eol: noteEol }));
+            if (!kept.length) return join(mid);
+            if (!kept[kept.length - 1].eol) kept[kept.length - 1].eol = noteEol;
+            return join(kept.concat([{ t: '', eol: noteEol }], mid));
+        }
+        const eol = lines[found.start].eol || noteEol;
+        const before = lines.slice(0, found.start);
+        const after = lines.slice(found.end);
+        const mid = sec.map((t) => ({ t, eol }));
+        const lastEol = lines[found.end - 1].eol;
+        mid[mid.length - 1].eol = after.length ? (lastEol || eol) : lastEol;
+        if (!found.marked && after.length && after[0].t.trim() !== '') mid.push({ t: '', eol });
+        return join(before.concat(mid, after));
     }
 
     /** Today's daily note path from the core Daily notes settings ({ folder, format }). */
@@ -466,8 +577,14 @@ class TaskDayPlan {
 
     static _notice(msg, ms) { try { new Notice(msg, ms); } catch (_e) {} }
 
-    /** Metadata-cache records for every markdown file under spice/tasks except _sets/: { path, basename, mtime, fm }. */
-    static collect(app) {
+    /**
+     * Metadata-cache records for every markdown file under spice/tasks except
+     * _sets/: { path, basename, mtime, fm }. With opts.today, a note under
+     * _done/ is kept only when it is still open or was finished that day.
+     */
+    static collect(app, opts) {
+        const today = opts && opts.today ? String(opts.today) : '';
+        const doneRoot = TaskDayPlan.ROOT + '/_done/';
         const out = [];
         try {
             const files = app && app.vault && typeof app.vault.getMarkdownFiles === 'function' ? app.vault.getMarkdownFiles() : [];
@@ -478,6 +595,11 @@ class TaskDayPlan {
                 let fm = null;
                 try { fm = (app.metadataCache.getFileCache(f) || {}).frontmatter || null; } catch (_e) { fm = null; }
                 if (!fm) continue;
+                if (today && p.indexOf(doneRoot) === 0) {
+                    const status = TaskDayPlan._str(fm.status).toLowerCase();
+                    const open = TaskDayPlan._str(fm.type) === 'task' && (status === '' || status === 'open');
+                    if (!open && TaskDayPlan._str(fm.completed_at).indexOf(today) !== 0) continue;
+                }
                 out.push({ path: p, basename: f.basename || TaskDayPlan._base(p), mtime: (f.stat && f.stat.mtime) || 0, fm });
             }
         } catch (_e) {}
@@ -508,7 +630,7 @@ class TaskDayPlan {
         const o = opts || {};
         const app = TaskDayPlan._app(o);
         const today = String(o.today || TaskDayPlan._today());
-        const records = TaskDayPlan.collect(app);
+        const records = TaskDayPlan.collect(app, { today });
         const tasks = TaskDayPlan.tasksFrom(records);
         let pages = Array.isArray(o.meetingPages) ? o.meetingPages : null;
         if (!pages && o.dv) {
@@ -526,29 +648,55 @@ class TaskDayPlan {
         return model;
     }
 
-    static isPinned(app, path) {
+    /** The path of the Now task (the open task with the newest pinned_at), or ''. */
+    static nowPath(app) {
         try {
-            const f = app && app.vault && app.vault.getAbstractFileByPath(path);
-            const fm = f ? ((app.metadataCache.getFileCache(f) || {}).frontmatter || null) : null;
-            return !!(fm && TaskDayPlan._str(fm[TaskDayPlan.FIELD]));
-        } catch (_e) { return false; }
+            const now = TaskDayPlan.nowTask(TaskDayPlan.tasksFrom(TaskDayPlan.collect(app)));
+            return now ? String(now.path) : '';
+        } catch (_e) { return ''; }
     }
 
-    /** Set pinned_at on `path`, then clear it on every other task that has it. */
+    /** Whether the task at `path` IS the Now task (not merely carrying a pinned_at). */
+    static isNow(app, path) { return !!path && TaskDayPlan.nowPath(app) === String(path); }
+
+    static isPinned(app, path) { return TaskDayPlan.isNow(app, path); }
+
+    static _fmAt(app, path) {
+        try {
+            const f = app && app.vault && app.vault.getAbstractFileByPath(path);
+            return f ? ((app.metadataCache.getFileCache(f) || {}).frontmatter || null) : null;
+        } catch (_e) { return null; }
+    }
+
+    static _isOpenAt(app, path) {
+        const fm = TaskDayPlan._fmAt(app, path);
+        return !!fm && TaskDayPlan._state({ path, status: fm.status }) === 'open';
+    }
+
+    /**
+     * Set pinned_at on `path` (that write is the pin), then clear it on every
+     * other task that has it, each on its own; a clear that fails is counted
+     * and named in one notice. Refuses a task that is not open.
+     */
     static async pin(app, path, iso) {
         const file = app && app.vault && app.vault.getAbstractFileByPath(path);
         if (!file) throw new Error('task not found');
+        if (!TaskDayPlan._isOpenAt(app, path)) throw new Error('Only an open task can be Now');
         const stamp = String(iso || TaskDayPlan._stamp());
         if (!stamp) throw new Error('no clock');
         await app.fileManager.processFrontMatter(file, (fm) => { fm[TaskDayPlan.FIELD] = stamp; });
+        let failed = 0;
         for (const r of TaskDayPlan.collect(app)) {
             if (r.path === path || TaskDayPlan._str(r.fm && r.fm.type) !== 'task') continue;
             if (!TaskDayPlan._str(r.fm[TaskDayPlan.FIELD])) continue;
-            const other = app.vault.getAbstractFileByPath(r.path);
-            if (!other) continue;
-            await app.fileManager.processFrontMatter(other, (fm) => { delete fm[TaskDayPlan.FIELD]; });
+            try {
+                const other = app.vault.getAbstractFileByPath(r.path);
+                if (!other) continue;
+                await app.fileManager.processFrontMatter(other, (fm) => { delete fm[TaskDayPlan.FIELD]; });
+            } catch (_e) { failed += 1; }
         }
-        return { ok: true, pinned: true };
+        if (failed) TaskDayPlan._notice("Pinned; couldn't clear " + failed + ' other pin' + (failed === 1 ? '' : 's'), 6000);
+        return { ok: true, pinned: true, uncleared: failed };
     }
 
     static async unpin(app, path) {
@@ -572,7 +720,11 @@ class TaskDayPlan {
             TaskDayPlan._notice('Tasks are still loading. Try again in a moment.', 4000);
             return { ok: false, error: new Error('not ready') };
         }
-        const pinned = typeof o.pinned === 'boolean' ? o.pinned : TaskDayPlan.isPinned(appRef, path);
+        const pinned = typeof o.pinned === 'boolean' ? o.pinned : TaskDayPlan.isNow(appRef, path);
+        if (!pinned && !TaskDayPlan._isOpenAt(appRef, path)) {
+            TaskDayPlan._notice('Only an open task can be Now', 4000);
+            return { ok: false, error: new Error('not open') };
+        }
         const iso = TaskDayPlan._stamp();
         return RenderSafe.mutate({
             app: appRef,
@@ -584,14 +736,14 @@ class TaskDayPlan {
         });
     }
 
-    /** The To-Do row ⋯ menu entry: Pin as Now, or Unpin when the task is Now's pin. Null for a task that is not open. */
+    /** The To-Do row ⋯ menu entry: Unpin when the task is Now, else Pin as Now. Null for a task that is not open. */
     static menuEntry(task) {
         try {
             const path = task && task.path;
             if (!path || TaskDayPlan._state(task) !== 'open') return null;
             const app = TaskDayPlan._app();
             if (!app) return null;
-            const pinned = TaskDayPlan.isPinned(app, path);
+            const pinned = TaskDayPlan.isNow(app, path);
             return {
                 label: pinned ? 'Unpin' : 'Pin as Now',
                 icon: pinned ? TaskDayPlan.ICON.unpin : TaskDayPlan.ICON.pin,
@@ -613,7 +765,7 @@ class TaskDayPlan {
             TaskDayPlan._injectCss();
             const btn = host.createEl('button', { cls: 'sauce-dp-pin' });
             try { btn.setAttribute('type', 'button'); } catch (_e) {}
-            let pinned = TaskDayPlan.isPinned(app, path);
+            let pinned = TaskDayPlan.isNow(app, path);
             const paint = (on) => {
                 pinned = !!on;
                 btn.innerHTML = TaskDayPlan.ICON.pin;
@@ -860,9 +1012,17 @@ class TaskDayPlan {
 
     // ---------- Shut down ----------
 
-    /** Open the Shut down modal. opts: { app, today }. Returns the modal handle, or null. */
+    /**
+     * Open the Shut down modal. opts: { app, today }. Returns the modal
+     * handle, or null. While an earlier Finish is still writing it only says
+     * so.
+     */
     static openShutdown(opts) {
         try {
+            if (TaskDayPlan._finishing) {
+                TaskDayPlan._notice('Shut down is still finishing', 4000);
+                return null;
+            }
             const o = opts || {};
             const app = TaskDayPlan._app(o);
             const today = String(o.today || TaskDayPlan._today());
@@ -874,12 +1034,13 @@ class TaskDayPlan {
                 return null;
             }
             TaskDayPlan._injectCss();
-            const tasks = TaskDayPlan.tasksFrom(TaskDayPlan.collect(app));
+            const tasks = TaskDayPlan.tasksFrom(TaskDayPlan.collect(app, { today }));
             const model = TaskDayPlan.planModel({ tasks, today });
             const still = model.overdue.concat(model.dueToday);
             const done = TaskDayPlan.doneToday(tasks, today);
             const choices = new Map();
             const rows = new Map();
+            let refreshFinish = () => {};
             const handle = SM.open({
                 doc,
                 title: 'Shut down the day',
@@ -922,6 +1083,7 @@ class TaskDayPlan {
                                 } catch (_e) {}
                             }
                             try { date.style.display = cur.key === 'pick' ? '' : 'none'; } catch (_e) {}
+                            refreshFinish();
                         };
                         for (const ch of TaskDayPlan.CHOICES) {
                             const b = seg.createEl('button', { cls: 'sauce-dp-sd-choice', text: ch.label });
@@ -942,21 +1104,27 @@ class TaskDayPlan {
                         paint();
                     }
                 },
-                buttons: [
-                    { label: 'Cancel', action: 'cancel' },
-                    {
-                        label: 'Finish',
-                        tone: 'accent',
-                        close: false,
-                        className: 'sauce-dp-finish',
-                        onClick: (api) => {
-                            const picked = new Map(choices);
-                            try { api.close('finish'); } catch (_e) {}
-                            TaskDayPlan.finishShutdown({ app, today, tasks: still, done, choices: picked, rows })
-                                .catch((e) => TaskDayPlan._notice('Shut down stopped: ' + ((e && e.message) || e), 6000));
-                        },
-                    },
-                ],
+                footer: (footer, api) => {
+                    const cancel = footer.createEl('button', { cls: 'sauce-btn sauce-dp-cancel', text: 'Cancel' });
+                    try { cancel.setAttribute('type', 'button'); } catch (_e) {}
+                    cancel.addEventListener('click', () => { try { api.close('cancel'); } catch (_e) {} });
+                    const hint = footer.createEl('span', { cls: 'sauce-dp-sd-hint', text: 'Pick a date for each Pick date' });
+                    const finish = footer.createEl('button', { cls: 'sauce-btn sauce-btn-accent sauce-dp-finish', text: 'Finish' });
+                    try { finish.setAttribute('type', 'button'); } catch (_e) {}
+                    refreshFinish = () => {
+                        const missing = TaskDayPlan.missingDates(choices);
+                        finish.disabled = missing > 0;
+                        try { hint.style.display = missing > 0 ? '' : 'none'; } catch (_e) {}
+                    };
+                    refreshFinish();
+                    finish.addEventListener('click', () => {
+                        if (finish.disabled || TaskDayPlan.missingDates(choices) > 0) return;
+                        const picked = new Map(choices);
+                        try { api.close('finish'); } catch (_e) {}
+                        TaskDayPlan.finishShutdown({ app, today, tasks: still, done, choices: picked, rows })
+                            .catch((e) => TaskDayPlan._notice('Shut down stopped: ' + ((e && e.message) || e), 6000));
+                    });
+                },
             });
             return handle || null;
         } catch (e) {
@@ -965,14 +1133,57 @@ class TaskDayPlan {
         }
     }
 
+    /** How many Pick date choices still have no date. */
+    static missingDates(choices) {
+        let n = 0;
+        for (const c of choices instanceof Map ? choices.values() : []) {
+            if (c && c.key === 'pick' && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.date || ''))) n += 1;
+        }
+        return n;
+    }
+
+    /**
+     * The current path of a task that may have moved since the modal opened:
+     * its own path while that file exists, else the task note under
+     * spice/tasks with the same name (names are unique in the vault).
+     */
+    static _resolvePath(app, path) {
+        try {
+            if (app.vault.getAbstractFileByPath(path)) return path;
+            const name = TaskDayPlan._base(path).toLowerCase();
+            const root = TaskDayPlan.ROOT + '/';
+            for (const f of app.vault.getMarkdownFiles() || []) {
+                const p = String((f && f.path) || '');
+                if (p.indexOf(root) !== 0 || TaskDayPlan.SKIP.some((x) => p.indexOf(x) === 0)) continue;
+                if (String(f.basename || TaskDayPlan._base(p)).toLowerCase() === name) return p;
+            }
+        } catch (_e) {}
+        return path;
+    }
+
     /**
      * Apply the Shut down choices one task at a time, through
      * TaskTodayList.reschedule (Tomorrow, Next work day, Pick date) and
-     * TaskDialog.markDone (Done), then write the Shutdown section to today's
-     * daily note. ctx: { app, today, tasks, done, choices: Map(path →
-     * { key, date }), rows }. Resolves { done, moved, failed, waiting, written }.
+     * TaskDialog.markDone (Done), moves first and Done last, each at the
+     * task's current path, then write the Shutdown section to today's daily
+     * note. ctx: { app, today, tasks, done, choices: Map(path → { key, date }),
+     * rows }. Resolves { done, moved, failed, waiting, written }. While it
+     * runs, openShutdown refuses a second Shut down.
      */
     static async finishShutdown(ctx) {
+        if (TaskDayPlan._finishing) {
+            TaskDayPlan._notice('Shut down is still finishing', 4000);
+            return { busy: true };
+        }
+        TaskDayPlan._finishing = true;
+        try {
+            return await TaskDayPlan._finish(ctx);
+        } finally {
+            TaskDayPlan._finishing = false;
+        }
+    }
+
+    static async _finish(ctx) {
         const o = ctx || {};
         const app = TaskDayPlan._app(o);
         const today = String(o.today || '');
@@ -984,28 +1195,32 @@ class TaskDayPlan {
         const doneNow = [];
         const moved = [];
         let failed = 0;
-        for (const t of Array.isArray(o.tasks) ? o.tasks : []) {
-            const choice = choices.get(t.path) || { key: 'leave' };
-            if (choice.key === 'leave') continue;
-            if (choice.key === 'done') {
-                let res = null;
-                try { res = TD && typeof TD.markDone === 'function' ? await TD.markDone(t.path) : { ok: false, reason: 'not ready' }; }
-                catch (e) { res = { ok: false, reason: (e && e.message) || 'failed' }; }
-                if (res && res.ok) doneNow.push({ path: (res && res.path) || t.path, title: t.title });
-                else if (!res || res.reason !== 'cancelled') failed += 1;
-                continue;
-            }
+        const list = Array.isArray(o.tasks) ? o.tasks : [];
+        const choiceOf = (t) => choices.get(t.path) || { key: 'leave' };
+        for (const t of list) {
+            const choice = choiceOf(t);
+            if (choice.key === 'leave' || choice.key === 'done') continue;
             const date = TaskDayPlan.targetDate(choice, today);
             if (!date) continue;
+            const path = TaskDayPlan._resolvePath(app, t.path);
             let res = null;
             try {
                 const row = rows.get(t.path) || { dataset: {}, parentNode: null, remove() {} };
                 res = TTL && typeof TTL.reschedule === 'function'
-                    ? await TTL.reschedule(row, Object.assign({}, t, { status: 'open' }), date, today, TD)
+                    ? await TTL.reschedule(row, Object.assign({}, t, { path, status: 'open' }), date, today, TD)
                     : { ok: false };
             } catch (_e) { res = { ok: false }; }
-            if (res && res.ok) moved.push({ path: t.path, title: t.title, date });
+            if (res && res.ok) moved.push({ path, title: t.title, date });
             else failed += 1;
+        }
+        for (const t of list) {
+            if (choiceOf(t).key !== 'done') continue;
+            const path = TaskDayPlan._resolvePath(app, t.path);
+            let res = null;
+            try { res = TD && typeof TD.markDone === 'function' ? await TD.markDone(path) : { ok: false, reason: 'not ready' }; }
+            catch (e) { res = { ok: false, reason: (e && e.message) || 'failed' }; }
+            if (res && res.ok) doneNow.push({ path: (res && res.path) || path, title: t.title });
+            else if (!res || res.reason !== 'cancelled') failed += 1;
         }
         const seen = new Set();
         const done = [];
@@ -1021,8 +1236,7 @@ class TaskDayPlan {
             const w = TaskDayPlan._waiting(records, TaskDayPlan.tasksFrom(records), today);
             waiting = Array.isArray(w) ? w.length : 0;
         } catch (_e) { waiting = 0; }
-        const section = TaskDayPlan.shutdownSection({ done, moved, waiting });
-        const res = await TaskDayPlan.writeShutdown(app, today, section);
+        const res = await TaskDayPlan.writeShutdown(app, today, { done, moved, waiting });
         const parts = [doneNow.length + ' done', moved.length + ' moved'];
         if (failed) parts.push(failed + ' not changed');
         TaskDayPlan._notice('Day shut down: ' + parts.join(', '), 4000);
@@ -1037,11 +1251,19 @@ class TaskDayPlan {
     }
 
     /**
-     * Write `section` into today's daily note with app.vault.process inside
-     * RenderSafe.mutate, replacing that day's Shutdown section. Resolves
-     * RenderSafe's result, or { ok: false, reason } when there is no note.
+     * Write the Shutdown section for `summary` ({ done, moved, waiting }, or
+     * a finished section string) into today's daily note with
+     * app.vault.process inside RenderSafe.mutate. Inside that one write the
+     * Moved items already in today's section are merged with this run's
+     * (mergeMoved) and the generated part is replaced (replaceShutdown).
+     * Resolves RenderSafe's result, or { ok: false, reason } with no note.
      */
-    static async writeShutdown(app, today, section) {
+    static async writeShutdown(app, today, summary) {
+        const build = (data) => {
+            if (typeof summary === 'string') return summary;
+            const s = summary || {};
+            return TaskDayPlan.shutdownSection(Object.assign({}, s, { moved: TaskDayPlan.mergeMoved(TaskDayPlan.parseMoved(data), s.moved) }));
+        };
         const c = TaskDayPlan._cjs() || {};
         const RenderSafe = c.RenderSafe;
         const cfg = app ? await TaskDayPlan._dailyConfig(app) : null;
@@ -1059,7 +1281,7 @@ class TaskDayPlan {
             app,
             path,
             failureMessage: "Couldn't save the summary to today's daily note",
-            write: () => app.vault.process(file, (data) => TaskDayPlan.replaceShutdown(data, section)),
+            write: () => app.vault.process(file, (data) => TaskDayPlan.replaceShutdown(data, build(data))),
         });
     }
 
@@ -1120,6 +1342,8 @@ class TaskDayPlan {
             'body .sauce-dp-sd-choice.sauce-dp-sd-choice { height: auto; min-height: 30px; padding: 0 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: transparent; box-shadow: none; color: var(--text-muted); font-size: 0.8em; cursor: pointer; }',
             'body .sauce-dp-sd-choice.sauce-dp-sd-choice.is-active { border-color: var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent, #fff); }',
             '.sauce-dp-sd-date { align-self: flex-start; min-height: 30px; }',
+            '.sauce-dp-sd-hint { margin-right: auto; color: var(--text-muted); font-size: 0.82em; }',
+            'body .sauce-btn.sauce-dp-finish[disabled] { opacity: 0.5; cursor: not-allowed; }',
             'body .sauce-dp-pin.sauce-dp-pin { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 0; padding: 0; border: 1px solid transparent; border-radius: var(--radius-s, 6px); background: transparent; box-shadow: none; color: var(--text-faint); cursor: pointer; }',
             '@media (hover: hover) { body .sauce-dp-pin.sauce-dp-pin:hover { color: var(--text-normal); background: var(--background-modifier-hover); } }',
             'body .sauce-dp-pin.sauce-dp-pin.is-pinned { color: var(--interactive-accent); border-color: color-mix(in srgb, var(--interactive-accent) 45%, transparent); background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); }',

@@ -198,9 +198,9 @@ function setup(opts) {
       moved: [{ path: 'spice/tasks/Call bank/Call bank.md', title: 'Call bank', date: '2026-11-16' }],
       waiting: 3,
     });
-    const want = '## Shutdown\n\nDone: 2\n- [[Write tests]]\n- [[Pay Bills - 11-10-26|Pay the Bills]]\n\nMoved: 1\n- [[Call bank]] → Mon Nov 16\n\nStill waiting: 3\n';
-    ok('DP-SECTION-1 Done: N with links, Moved: N as title → date, Still waiting: N', section === want, JSON.stringify(section));
-    ok('DP-SECTION-2 an empty day still writes the three counts', DPC.shutdownSection({}) === '## Shutdown\n\nDone: 0\n\nMoved: 0\n\nStill waiting: 0\n');
+    const want = '## Shutdown\n%% shutdown:start %%\n\nDone: 2\n- [[Write tests]]\n- [[Pay Bills - 11-10-26|Pay the Bills]]\n\nMoved: 1\n- [[Call bank]] → Mon Nov 16\n\nStill waiting: 3\n%% shutdown:end %%\n';
+    ok('DP-SECTION-1 Done: N with links, Moved: N as title → date, Still waiting: N, between hidden markers', section === want, JSON.stringify(section));
+    ok('DP-SECTION-2 an empty day still writes the three counts', DPC.shutdownSection({}) === '## Shutdown\n%% shutdown:start %%\n\nDone: 0\n\nMoved: 0\n\nStill waiting: 0\n%% shutdown:end %%\n');
 
     const note = '---\ntype: cowork-daily\n---\n\nmy notes\n';
     const s1 = DPC.shutdownSection({ waiting: 1 });
@@ -210,9 +210,38 @@ function setup(opts) {
     const twice = DPC.replaceShutdown(once, s2);
     ok('DP-REPLACE-2 a second run the same day replaces the section, never adds a second one',
       twice === note + '\n' + s2 && (twice.match(/## Shutdown/g) || []).length === 1, JSON.stringify(twice));
-    const middle = '# Day\n\n## Shutdown\n\nDone: 9\n### detail\nold\n\n## Notes\n\nkeep me\n';
+    const middle = '# Day\n\n## Shutdown\n\nDone: 9\n- [[Old]]\n\nMoved: 0\n\nStill waiting: 4\n### detail\nold\n\n## Notes\n\nkeep me\n';
     const mid = DPC.replaceShutdown(middle, s1);
-    ok('DP-REPLACE-3 replaces only up to the next ## heading', mid === '# Day\n\n' + s1 + '\n## Notes\n\nkeep me\n', JSON.stringify(mid));
+    ok('DP-REPLACE-3 an old section without markers is replaced up to the first line Shut down did not write',
+      mid === '# Day\n\n' + s1 + '\n### detail\nold\n\n## Notes\n\nkeep me\n', JSON.stringify(mid));
+    const withUser = once + '\nMy own thoughts on the day.\n- [[Someone]] said hi\n';
+    const rerun = DPC.replaceShutdown(withUser, s2);
+    ok('DP-REPLACE-6 a re-run replaces only the text between the markers; what the person wrote below stays',
+      rerun === note + '\n' + s2 + '\nMy own thoughts on the day.\n- [[Someone]] said hi\n', JSON.stringify(rerun));
+    const crlf = '---\r\ntype: cowork-daily\r\n---\r\n\r\nmy notes\r\n';
+    const c1 = DPC.replaceShutdown(crlf, s1);
+    const c2 = DPC.replaceShutdown(c1 + 'later\r\n', s2);
+    ok('DP-REPLACE-7 CRLF notes keep CRLF on every line, old and new',
+      c1 === crlf + '\r\n' + s1.replace(/\n/g, '\r\n') && c2 === crlf + '\r\n' + s2.replace(/\n/g, '\r\n') + 'later\r\n'
+      && !/[^\r]\n/.test(c2), JSON.stringify(c2));
+    const mixed = 'a\r\nb\n\n## Shutdown\n%% shutdown:start %%\nDone: 0\n%% shutdown:end %%\nc\r\n';
+    const m2 = DPC.replaceShutdown(mixed, s1);
+    ok('DP-REPLACE-8 untouched lines keep their own endings in a mixed note',
+      m2.indexOf('a\r\nb\n\n') === 0 && m2.endsWith('%% shutdown:end %%\nc\r\n'), JSON.stringify(m2));
+    const prior = DPC.replaceShutdown(note, DPC.shutdownSection({ moved: [
+      { path: 'spice/tasks/Call bank/Call bank.md', title: 'Call bank', date: '2026-11-16' },
+      { path: 'spice/tasks/Pay Bills - 11-10-26/Pay Bills - 11-10-26.md', title: 'Pay Bills', date: '2026-11-17' },
+    ] }));
+    const parsed = DPC.parseMoved(prior);
+    ok('DP-MOVED-1 the Moved items already in the section are read back',
+      JSON.stringify(parsed) === JSON.stringify([
+        { link: '[[Call bank]]', label: 'Mon Nov 16', key: 'call bank' },
+        { link: '[[Pay Bills - 11-10-26|Pay Bills]]', label: 'Tue Nov 17', key: 'pay bills - 11-10-26' },
+      ]), JSON.stringify(parsed));
+    const merged = DPC.mergeMoved(parsed, [{ path: 'spice/tasks/Call bank/Call bank.md', title: 'Call bank', date: '2026-11-20' }, { path: 'spice/tasks/Gym/Gym.md', title: 'Gym', date: '2026-11-14' }]);
+    const mergedSec = DPC.shutdownSection({ moved: merged });
+    ok('DP-MOVED-2 a re-run keeps earlier moves and adds this run\'s, one line per task, this run\'s date winning',
+      /Moved: 3\n- \[\[Pay Bills - 11-10-26\|Pay Bills\]\] → Tue Nov 17\n- \[\[Call bank\]\] → Fri Nov 20\n- \[\[Gym\]\] → Sat Nov 14\n/.test(mergedSec), mergedSec);
     const fenced = '```\n## Shutdown\n```\n';
     ok('DP-REPLACE-4 a ## Shutdown inside fenced code is not the section', DPC.replaceShutdown(fenced, s1) === fenced + '\n' + s1);
     ok('DP-REPLACE-5 replacing is idempotent', DPC.replaceShutdown(DPC.replaceShutdown(mid, s2), s2) === DPC.replaceShutdown(mid, s2));
@@ -377,22 +406,27 @@ function setup(opts) {
       ['spice/tasks/Ship routes/Ship routes.md', { key: 'pick', date: '2026-11-20' }],
     ]);
     const res = await DP.finishShutdown({ app, today: TODAY, tasks: still, done: DP.doneToday(tasks, TODAY), choices });
-    ok('DP-SHUT-1 Finish applies the choices one at a time through reschedule and markDone',
+    ok('DP-SHUT-1 Finish applies the choices one at a time through reschedule and markDone, Done last',
       maxActive === 1 && JSON.stringify(order) === JSON.stringify([
         ['move', 'spice/tasks/Old pin/Old pin.md', '2026-11-14', TODAY, true],
         ['move', 'spice/tasks/Call bank/Call bank.md', '2026-11-16', TODAY, true],
-        ['done', 'spice/tasks/Pay rent/Pay rent.md'],
         ['move', 'spice/tasks/Ship routes/Ship routes.md', '2026-11-20', TODAY, true],
+        ['done', 'spice/tasks/Pay rent/Pay rent.md'],
       ]), JSON.stringify(order));
     const body = app._byPath.get('spice/daily/2026/11-November/Friday-2026-11-13.md').body;
     ok('DP-SHUT-2 the summary lands in today\'s daily note through app.vault.process',
       res.written === true && app._writes.some((w) => w.kind === 'process')
-      && /\n## Shutdown\n\nDone: 3\n- \[\[Write tests\]\]\n- \[\[Finished pin\]\]\n- \[\[Pay rent\]\]\n\nMoved: 3\n- \[\[Old pin\]\] → Sat Nov 14\n- \[\[Call bank\]\] → Mon Nov 16\n- \[\[Ship routes\]\] → Fri Nov 20\n\nStill waiting: 0\n$/.test(body), body);
+      && /\n## Shutdown\n%% shutdown:start %%\n\nDone: 3\n- \[\[Write tests\]\]\n- \[\[Finished pin\]\]\n- \[\[Pay rent\]\]\n\nMoved: 3\n- \[\[Old pin\]\] → Sat Nov 14\n- \[\[Call bank\]\] → Mon Nov 16\n- \[\[Ship routes\]\] → Fri Nov 20\n\nStill waiting: 0\n%% shutdown:end %%\n$/.test(body), body);
     ok('DP-SHUT-3 a notice sums it up', notices.some((n) => n === 'Day shut down: 1 done, 3 moved'), JSON.stringify(notices));
-    await DP.finishShutdown({ app, today: TODAY, tasks: [], done: [], choices: new Map() });
-    const body2 = app._byPath.get('spice/daily/2026/11-November/Friday-2026-11-13.md').body;
-    ok('DP-SHUT-4 running it again the same day replaces that day\'s section',
-      (body2.match(/## Shutdown/g) || []).length === 1 && /Done: 0\n\nMoved: 0\n\nStill waiting: 0\n$/.test(body2) && body2.indexOf('my notes') > 0, body2);
+    const dailyFile = app._byPath.get('spice/daily/2026/11-November/Friday-2026-11-13.md');
+    dailyFile.body += '\nWrapped up early.\n';
+    await DP.finishShutdown({ app, today: TODAY, tasks: [{ path: 'spice/tasks/Later/Later.md', title: 'Later', status: 'open' }], done: [],
+      choices: new Map([['spice/tasks/Later/Later.md', { key: 'tomorrow' }]]) });
+    const body2 = dailyFile.body;
+    ok('DP-SHUT-4 running it again the same day replaces that day\'s section, keeps the earlier moves and the text below it',
+      (body2.match(/## Shutdown/g) || []).length === 1 && body2.indexOf('my notes') > 0
+      && /Moved: 4\n- \[\[Old pin\]\] → Sat Nov 14\n- \[\[Call bank\]\] → Mon Nov 16\n- \[\[Ship routes\]\] → Fri Nov 20\n- \[\[Later\]\] → Sat Nov 14\n/.test(body2)
+      && /%% shutdown:end %%\n\nWrapped up early\.\n$/.test(body2), body2);
   }
   {
     const { DP, app, win, notices } = setup({ app: { dailyConfig: { folder: 'spice/journal', format: 'YYYY-MM-DD' } } });
@@ -406,7 +440,7 @@ function setup(opts) {
   {
     const opened = [];
     const doc = { body: {}, head: null };
-    const fakeModal = { open: (o) => { opened.push(o); return { close() {} }; } };
+    const fakeModal = { open: (o) => { opened.push(o); const h = { close() {} }; if (o.footer) o._footerLater = true; return h; } };
     const { DP, app, win } = setup({ doc });
     win.customJS.SauceModal = fakeModal;
     let finished = null;
@@ -428,17 +462,143 @@ function setup(opts) {
     await rows[2].all('sauce-dp-sd-choice')[3].fire('click');
     await rows[3].all('sauce-dp-sd-choice')[2].fire('click');
     const date = rows[3].one('sauce-dp-sd-date');
+    let closed = false;
+    const footer = el('div');
+    spec.footer(footer, { close: () => { closed = true; } });
+    const finishBtn = footer.one('sauce-dp-finish');
+    const hint = footer.one('sauce-dp-sd-hint');
+    ok('DP-SHUT-9 Finish is disabled with a hint while a Pick date has no date',
+      finishBtn && finishBtn.disabled === true && hint && hint.style.display === '' && /Pick a date/.test(hint.textContent) && !finished);
+    await finishBtn.fire('click');
+    ok('DP-SHUT-10 a click on the disabled Finish does nothing', !closed && !finished);
     date.value = '2026-11-25';
     await date.fire('change');
-    let closed = false;
-    spec.buttons[1].onClick({ close: () => { closed = true; } });
+    ok('DP-SHUT-11 picking the date enables Finish and hides the hint', finishBtn.disabled === false && hint.style.display === 'none');
+    await finishBtn.fire('click');
     await new Promise((r) => setTimeout(r, 0));
-    ok('DP-SHUT-8 Finish closes the modal first, then runs with the picked choices',
-      closed && finished && finished.choices.get('spice/tasks/Old pin/Old pin.md').key === 'tomorrow'
-      && finished.choices.get('spice/tasks/Pay rent/Pay rent.md').key === 'done'
-      && JSON.stringify(finished.choices.get('spice/tasks/Ship routes/Ship routes.md')) === JSON.stringify({ key: 'pick', date: '2026-11-25' })
-      && finished.choices.get('spice/tasks/Call bank/Call bank.md').key === 'leave' && date.style.display === '');
     DPC.finishShutdown = orig;
+  }
+
+  // ---------- review fixes: pin clears, Now by path, done refused, twice, _done skip, moved subtask ----------
+  {
+    const { DP, app, notices } = setup();
+    const realPfm = app.fileManager.processFrontMatter;
+    app.fileManager.processFrontMatter = async (f, fn) => {
+      if (f.path === 'spice/tasks/Old pin/Old pin.md') throw new Error('locked');
+      return realPfm(f, fn);
+    };
+    const res = await DP.togglePin(app, 'spice/tasks/Call bank/Call bank.md');
+    const fm = (p) => app._byPath.get(p).fm;
+    ok('DP-PIN-7 the target write is the pin; a failed clear is counted and named in one notice',
+      res.ok === true && res.value && res.value.uncleared === 1 && fm('spice/tasks/Call bank/Call bank.md').pinned_at
+      && !('pinned_at' in fm('spice/tasks/Ship routes/Ship routes.md')) && fm('spice/tasks/Old pin/Old pin.md').pinned_at
+      && notices.filter((n) => /^Pinned; couldn't clear 1 other pin$/.test(n)).length === 1, JSON.stringify(notices));
+    ok('DP-PIN-8 Now is still the task just pinned', DP.nowPath(app) === 'spice/tasks/Call bank/Call bank.md');
+  }
+  {
+    const { DP, app } = setup();
+    const head = el('div');
+    const btn = DP.renderPinButton(head, { path: 'spice/tasks/Old pin/Old pin.md', status: 'open' });
+    const entry = DP.menuEntry({ path: 'spice/tasks/Old pin/Old pin.md', status: 'open' });
+    ok('DP-PIN-9 a task with an older pinned_at that is not Now reads Pin as Now, on the button and in the menu',
+      btn.getAttribute('aria-label') === 'Pin as Now' && entry.label === 'Pin as Now' && DP.isNow(app, 'spice/tasks/Old pin/Old pin.md') === false);
+    await entry.onSelect();
+    await new Promise((r) => setTimeout(r, 0));
+    ok('DP-PIN-10 choosing it makes it Now (it pins, it does not unpin)', DP.nowPath(app) === 'spice/tasks/Old pin/Old pin.md'
+      && app._byPath.get('spice/tasks/Old pin/Old pin.md').fm.pinned_at === TODAY + 'T17:30:00-06:00');
+  }
+  {
+    const { DP, app, notices } = setup();
+    const before = app._writes.length;
+    const res = await DP.togglePin(app, 'spice/tasks/Ship routes/Write tests/Write tests.md');
+    let threw = false;
+    try { await DP.constructor.pin(app, 'spice/tasks/Ship routes/Write tests/Write tests.md', 'x'); } catch (_e) { threw = true; }
+    ok('DP-PIN-11 pinning a done task is refused with a notice and writes nothing',
+      res.ok === false && threw && app._writes.length === before && notices.some((n) => n === 'Only an open task can be Now'), JSON.stringify(notices));
+  }
+  {
+    const { DP, app, win, notices } = setup({ doc: { body: {}, head: null } });
+    const opened = [];
+    win.customJS.SauceModal = { open: (o) => { opened.push(o); return { close() {} }; } };
+    let release;
+    win.customJS.TaskTodayList = { reschedule: () => new Promise((r) => { release = () => r({ ok: true }); }) };
+    win.customJS.TaskDialog = { open() {}, markDone: async () => ({ ok: true }) };
+    const run = DP.finishShutdown({ app, today: TODAY, tasks: [{ path: 'spice/tasks/Call bank/Call bank.md', title: 'Call bank', status: 'open' }], done: [],
+      choices: new Map([['spice/tasks/Call bank/Call bank.md', { key: 'tomorrow' }]]) });
+    const second = DP.openShutdown({ app, today: TODAY });
+    ok('DP-SHUT-12 while Finish is still writing, Shut down will not open again',
+      second === null && opened.length === 0 && notices.includes('Shut down is still finishing'), JSON.stringify(notices));
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await run;
+    const third = DP.openShutdown({ app, today: TODAY });
+    ok('DP-SHUT-13 once it is done Shut down opens again', third !== null && opened.length === 1);
+    win.customJS.TaskTodayList = { reschedule: async () => { throw new Error('boom'); } };
+    win.customJS.TaskDialog = { open() {}, markDone: async () => { throw new Error('boom'); } };
+    app.vault.adapter.read = async () => { throw new Error('boom'); };
+    await DP.finishShutdown({ app, today: TODAY, tasks: [], done: [], choices: new Map() });
+    ok('DP-SHUT-14 the flag clears even when a run fails', DP.openShutdown({ app, today: TODAY }) !== null);
+  }
+  {
+    const files = FILES.concat([
+      TASK('spice/tasks/_done/2026/10/Ancient/Ancient.md', { title: 'Ancient', status: 'done', completed_at: '2026-10-01T09:00:00-06:00' }),
+      TASK('spice/tasks/_done/2026/11/Today done/Today done.md', { title: 'Today done', status: 'done', completed_at: '2026-11-13T07:00:00-06:00' }),
+      TASK('spice/tasks/_done/2026/11/Today done/Open child/Open child.md', { title: 'Open child', status: 'open', due: '2026-11-12' }),
+    ]);
+    const { DP, app } = setup({ files });
+    let reads = 0;
+    const real = app.metadataCache.getFileCache;
+    app.metadataCache.getFileCache = (f) => { reads++; return real(f); };
+    const recs = DP.collect(app, { today: TODAY }).map((r) => r.basename);
+    const m = DP.build({ today: TODAY });
+    ok('DP-PERF-1 build skips _done/ notes unless they were finished today (an open one stays)',
+      !recs.includes('Ancient') && recs.includes('Today done') && recs.includes('Open child')
+      && !m.tasks.some((t) => t.title === 'Ancient') && m.overdue.some((t) => t.title === 'Open child') && reads > 0, JSON.stringify(recs));
+    ok('DP-PERF-2 without a day, collect keeps everything (pin clearing sees every task)', DP.collect(app).some((r) => r.basename === 'Ancient'));
+  }
+  {
+    const { DP, app, win } = setup({ app: { dailyConfig: { folder: 'spice/daily', format: 'YYYY/MM-MMMM/dddd-YYYY-MM-DD' } } });
+    const calls = [];
+    const move = (from, to) => {
+      const f = app._byPath.get(from);
+      app._byPath.delete(from);
+      f.path = to;
+      app._byPath.set(to, f);
+    };
+    win.customJS.TaskTodayList = { reschedule: async (row, task, due) => { calls.push(['move', task.path, due]); return app._byPath.has(task.path) ? { ok: true, due } : { ok: false }; } };
+    win.customJS.TaskDialog = {
+      open() {},
+      markDone: async (p) => {
+        calls.push(['done', p]);
+        if (!app._byPath.has(p)) return { ok: false, reason: 'task file not found' };
+        if (p === 'spice/tasks/Ship routes/Ship routes.md') {
+          for (const q of [...app._byPath.keys()].filter((k) => k.indexOf('spice/tasks/Ship routes/') === 0)) move(q, q.replace('spice/tasks/', 'spice/tasks/_done/2026/11/'));
+          return { ok: true, path: 'spice/tasks/_done/2026/11/Ship routes/Ship routes.md' };
+        }
+        return { ok: true, path: p };
+      },
+    };
+    move('spice/tasks/Call bank/Call bank.md', 'spice/tasks/Errands/Call bank/Call bank.md');
+    const res = await DP.finishShutdown({ app, today: TODAY, done: [],
+      tasks: [
+        { path: 'spice/tasks/Ship routes/Ship routes.md', title: 'Ship routes', status: 'open' },
+        { path: 'spice/tasks/Ship routes/Deploy/Deploy.md', title: 'Deploy', status: 'open' },
+        { path: 'spice/tasks/Ship routes/Write tests/Write tests.md', title: 'Write tests', status: 'open' },
+        { path: 'spice/tasks/Call bank/Call bank.md', title: 'Call bank', status: 'open' },
+      ],
+      choices: new Map([
+        ['spice/tasks/Ship routes/Ship routes.md', { key: 'done' }],
+        ['spice/tasks/Ship routes/Deploy/Deploy.md', { key: 'tomorrow' }],
+        ['spice/tasks/Ship routes/Write tests/Write tests.md', { key: 'done' }],
+        ['spice/tasks/Call bank/Call bank.md', { key: 'next' }],
+      ]) });
+    ok('DP-SHUT-15 a parent and its subtask in one run: moves go first, Done last, each at the task\'s current path',
+      JSON.stringify(calls) === JSON.stringify([
+        ['move', 'spice/tasks/Ship routes/Deploy/Deploy.md', '2026-11-14'],
+        ['move', 'spice/tasks/Errands/Call bank/Call bank.md', '2026-11-16'],
+        ['done', 'spice/tasks/Ship routes/Ship routes.md'],
+        ['done', 'spice/tasks/_done/2026/11/Ship routes/Write tests/Write tests.md'],
+      ]) && res.failed === 0 && res.moved.length === 2, JSON.stringify(calls));
   }
 
   // ---------- command ----------
@@ -474,7 +634,7 @@ function setup(opts) {
       /dayPlan: false/.test(home) && /surface: "home", open: true/.test(home));
     ok('DP-WIRE-6 pin, unpin and the shutdown write sit inside RenderSafe.mutate',
       /return RenderSafe\.mutate\(\{[\s\S]{0,300}write: \(\) => \(pinned \? TaskDayPlan\.unpin/.test(DP_SRC)
-      && /return RenderSafe\.mutate\(\{[\s\S]{0,200}write: \(\) => app\.vault\.process\(file/.test(DP_SRC)
+      && /return RenderSafe\.mutate\(\{[\s\S]{0,200}write: \(\) => app\.vault\.process\(file, \(data\) => TaskDayPlan\.replaceShutdown\(data, build\(data\)\)\)/.test(DP_SRC)
       && (DP_SRC.match(/app\.vault\.process\(/g) || []).length === 1);
     ok('DP-WIRE-7 no wall clock in the class (moment only, through window)', !/Date\.now\(|new Date\(|Math\.random/.test(DP_SRC));
     for (const rel of ['task-entity/task-day-plan.js', 'task-entity/task-day-plan-init.js', 'task-entity/task-today-list.js', 'task-entity/task-note-view.js']) {

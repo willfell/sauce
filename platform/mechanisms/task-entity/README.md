@@ -239,9 +239,12 @@ The day rhythm (`TaskDayPlan`, `task-day-plan.js`; spec:
 - **Now.** A task may carry `pinned_at:` (ISO). The open task with the newest
   `pinned_at` is Now; a done or trashed one drops out with no write. Pin from
   the pin button on the task card header or Pin as Now in a To-Do row's ⋯
-  menu. Pinning sets `pinned_at` on that task first, then removes it from
-  every other task that has it; Unpin removes it. Both go through
-  `RenderSafe.mutate`.
+  menu. The button and the menu read Unpin only on the task that IS Now
+  (worked out by path), else Pin as Now. Pinning sets `pinned_at` on that
+  task (that write is the pin), then removes it from every other task that
+  has it, one at a time; any it can't clear are named in one notice
+  ("Pinned; couldn't clear N other pins"). A task that is not open is
+  refused. Unpin removes it. Both go through `RenderSafe.mutate`.
 - **Now card.** At the top of Home and of today's daily note: the title, the
   due chip, subtask progress, Copy prompt (newest prompt note), Copy message
   (newest comms note with no `sent_at`), Open and Unpin. A copy button shows
@@ -257,14 +260,22 @@ The day rhythm (`TaskDayPlan`, `task-day-plan.js`; spec:
   `Sauce: Shut down the day` (`sauce:shut-down-day`, `TaskDayPlanInit`).
   The modal lists Done today (read only) and Still open (overdue and due
   today), each with Tomorrow, Next work day (Mon–Fri), Pick date, Done or
-  Leave (the default). Finish closes the modal, applies the choices one task
-  at a time through `TaskTodayList.reschedule` and `TaskDialog.markDone`, and
-  writes a `## Shutdown` section to today's daily note (`Done: N` with links,
-  `Moved: N` as `title → date`, `Still waiting: N`) with `app.vault.process`
-  inside `RenderSafe.mutate`. A second run the same day replaces that
-  section, from its heading to the next `## ` heading or the end of the note.
-  With no daily note for today the choices still apply and a notice says the
-  summary was not saved.
+  Leave (the default). Finish stays disabled, with a hint, while a Pick date
+  has no date. Finish closes the modal, applies the moves and then the Done
+  choices one task at a time through `TaskTodayList.reschedule` and
+  `TaskDialog.markDone`, each at the task's current path (found again by
+  name if a parent's Done moved it), and writes a `## Shutdown` section to
+  today's daily note (`Done: N` with links, `Moved: N` as `title → date`,
+  `Still waiting: N`) with `app.vault.process` inside `RenderSafe.mutate`.
+  The generated part sits between hidden `%% shutdown:start %%` and
+  `%% shutdown:end %%` markers; a second run the same day replaces only
+  that part, keeps the earlier Moved items (one per task, this run's date
+  winning) and leaves anything written below the markers. Lines keep their
+  own endings (CRLF stays CRLF). While a Finish is still writing, Shut down
+  only says "Shut down is still finishing". With no daily note for today the
+  choices still apply and a notice says the summary was not saved. Home and
+  the daily note skip `_done/` notes unless they are open or were finished
+  today.
 
 ## API (`customJS.TaskEntity`)
 
