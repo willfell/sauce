@@ -72,14 +72,32 @@ class ToDoDailyProjectGroups {
         if (!blocks.length) return;
 
         const TD = window.customJS && window.customJS.TaskDialog;
+        // Desktop drag and drop (TaskMove loaded): a row's handle drags it
+        // onto another task (nest) or onto a project label, which sets its
+        // project with the edit dialog's writer. The phone uses the row's ⋯ menu.
+        const TM = window.customJS && window.customJS.TaskMove;
+        const mobile = typeof TTL._isMobile === 'function' && TTL._isMobile(window.app);
+        const canDrag = !mobile && !!TM && typeof TM.nest === 'function' && typeof TM.setProject === 'function'
+            && typeof TTL.wireRowDrag === 'function' && typeof TTL.wireGroupDrop === 'function';
         // No "Open Project Tasks" umbrella label on the daily (FIX 3) — each project
         // renders its own name/section label below, so the umbrella was redundant.
         for (const blk of blocks) {
             const anchor = document.createComment(` project-group-anchor-${blk.projSlug} `);
             dv.container.appendChild(anchor);
             this._renderLabel(dv, blk.projName, { link: blk.projPath });
+            if (canDrag) {
+                const project = { name: blk.projName, slug: blk.projSlug };
+                TTL.wireGroupDrop(dv.container.lastElementChild, {
+                    label: `Move to ${blk.projName}`,
+                    refuse: (p) => (blk.tasks.some((t) => t && t.path === p) ? `Already in ${blk.projName}` : ''),
+                    apply: (p) => TM.setProject(p, project),
+                });
+            }
             for (const t of blk.tasks) {
-                try { TTL.renderTaskRow(dv.container, t, TD); } catch (_e) { /* one bad note */ }
+                try {
+                    const row = TTL.renderTaskRow(dv.container, t, TD, canDrag ? { dragHandle: 'Drag onto a task or project' } : undefined);
+                    if (canDrag) TTL.wireRowDrag(row, t, {});
+                } catch (_e) { /* one bad note */ }
             }
         }
     }

@@ -106,6 +106,13 @@ class TaskDialog {
     _resolveTaskParent(app, parentLink) { return TaskDialog._resolveTaskParent(app, parentLink); }
     _parentFolderFor(app, parentLink) { return TaskDialog._parentFolderFor(app, parentLink); }
     _planEditMove(app, file, payload, prior) { return TaskDialog._planEditMove(app, file, payload, prior); }
+    reparent(app, task, parent, opts) { return TaskDialog.reparent(app, task, parent, opts); }
+    reparentRefusal(app, task, parent) { return TaskDialog.reparentRefusal(app, task, parent); }
+    _parentLinkOf(app, parent) { return TaskDialog._parentLinkOf(app, parent); }
+    _renameTaskFolder(app, oldFolder, newFolder, newName) { return TaskDialog._renameTaskFolder(app, oldFolder, newFolder, newName); }
+    projectFields(project) { return TaskDialog.projectFields(project); }
+    tripFields(trip) { return TaskDialog.tripFields(trip); }
+    get CYCLE_REASON() { return TaskDialog.CYCLE_REASON; }
 
     // ---------- Static pure helpers ----------
 
@@ -2292,7 +2299,7 @@ class TaskDialog {
      * move fails the note gets its old name back. Either both steps land or
      * neither does, so folder and note never disagree. Throws on failure.
      */
-    async _renameTaskFolder(app, oldFolder, newFolder, newName) {
+    static async _renameTaskFolder(app, oldFolder, newFolder, newName) {
         const get = (p) => app.vault.getAbstractFileByPath(p);
         const oldName = oldFolder.slice(oldFolder.lastIndexOf('/') + 1);
         const folderFile = get(oldFolder);
@@ -2376,6 +2383,167 @@ class TaskDialog {
         }
         if (destParent === currentParent && name === oldName) return { ok: true };
         return { ok: true, folder, oldName, destParent, name };
+    }
+
+    static get CYCLE_REASON() { return 'a task cannot be a subtask of itself or of its own subtask'; }
+
+    /** A task file from a TFile or a vault path; null when it does not resolve. */
+    static _taskFileOf(app, task) {
+        if (task && typeof task === 'object' && task.path) return task;
+        try {
+            return app && app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                ? app.vault.getAbstractFileByPath(String(task == null ? '' : task)) || null : null;
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    /**
+     * The parent_task value for `parent`: '' for null or '' (top level), the
+     * link itself for a `[[link]]`, `[[<basename>]]` for a task note path or
+     * file. Null for a path that is no note.
+     */
+    static _parentLinkOf(app, parent) {
+        if (parent == null) return '';
+        if (typeof parent === 'object') return parent.path ? '[[' + String(parent.basename || TaskDialog._linkBasename(parent.path)) + ']]' : null;
+        const s = String(parent).trim();
+        if (!s) return '';
+        if (/^\[\[.*\]\]$/.test(s)) return s;
+        const file = TaskDialog._taskFileOf(app, s);
+        if (!file) return null;
+        return '[[' + String(file.basename != null ? file.basename : TaskDialog._linkBasename(file.path)) + ']]';
+    }
+
+    /**
+     * Why `task` cannot move under `parent`, or '' when it can. Refused: a
+     * parent path that is no note, and a loop - the task itself, anything
+     * inside its own folder, or a task whose chain of parents (folder first,
+     * then parent_task, at most 20 levels) reaches it. Never throws.
+     */
+    static reparentRefusal(app, task, parent) {
+        try {
+            const file = TaskDialog._taskFileOf(app, task);
+            if (!file) return 'task file not found';
+            const link = TaskDialog._parentLinkOf(app, parent);
+            if (link === null) return 'parent task not found';
+            if (!link) return '';
+            const info = TaskDialog._resolveTaskParent(app, link);
+            if (!info) return '';
+            const self = String(file.path);
+            const TE = TaskDialog._taskEntity();
+            const ownTree = TE && TE.isFolderNote(self) && TE.rootFolderOf(self) ? TE.taskFolderOf(self) + '/' : '';
+            const byPath = (p) => (p && app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+                ? app.vault.getAbstractFileByPath(p) : null);
+            const seen = new Set();
+            let cur = info.file;
+            for (let i = 0; cur && i < 20 && !seen.has(String(cur.path)); i++) {
+                const p = String(cur.path);
+                if (p === self || (ownTree && p.indexOf(ownTree) === 0)) return TaskDialog.CYCLE_REASON;
+                seen.add(p);
+                const viaFolder = TE && typeof TE.parentNotePathOf === 'function' ? byPath(TE.parentNotePathOf(p)) : null;
+                if (viaFolder) { cur = viaFolder; continue; }
+                const fm = TaskDialog._fmOf(app, cur) || {};
+                const up = fm.parent_task == null ? '' : String(fm.parent_task).trim();
+                const next = up ? TaskDialog._resolveTaskParent(app, up) : null;
+                cur = next ? next.file : null;
+            }
+        } catch (_e) { /* an unreadable chain refuses nothing */ }
+        return '';
+    }
+
+    /**
+     * Move a task under a new parent: the one re-parent that the edit
+     * dialog's Subtask of… field and the drag and menu gestures all run.
+     * `task` is a task note path or file. `parent` is a task note path or
+     * file, a `[[link]]`, null or '' for the top level, or undefined to keep
+     * the parent (a dialog save that only renames).
+     *
+     * Before anything is written it refuses a loop (reparentRefusal) and
+     * plans the move (_planEditMove). Then one processFrontMatter writes
+     * parent_task, clears `rank` (the task starts unranked among its new
+     * siblings) and, for an undated task detached from a dated parent, the
+     * nearest ancestor's due (_detachDue). A task folder then moves under the
+     * new parent's folder, or to spice/tasks/ when it has none, with one
+     * renameFile on the folder, so links follow; a done or trashed task stays
+     * where it is. Names follow the Task folders rules (_planEditMove and
+     * _moveTaskFolder). A failed move puts title, parent_task, due and rank
+     * back.
+     *
+     * opts (the dialog): { title, due, prior, write(fm, { inheritedDue }),
+     * beforeMove() }: `title` and `due` are the edited values, `prior` the
+     * frontmatter before the save, `write` adds the dialog's other fields to
+     * the same frontmatter write and `beforeMove` runs between that write and
+     * the move. Resolves { ok: true, path, changed, due? } or { ok: false,
+     * reason, error? }. Not a gesture lifecycle: a gesture wraps this in
+     * RenderSafe.mutate (TaskMove).
+     */
+    static async reparent(app, task, parent, opts) {
+        const o = opts || {};
+        const file = TaskDialog._taskFileOf(app, task);
+        if (!app || !file) return { ok: false, reason: 'task file not found' };
+        const prior = o.prior || Object.assign({}, TaskDialog._fmOf(app, file) || {});
+        const keep = parent === undefined;
+        const link = keep ? undefined : TaskDialog._parentLinkOf(app, parent);
+        if (!keep && link === null) return { ok: false, reason: 'parent task not found' };
+        const oldLink = prior.parent_task == null ? '' : String(prior.parent_task);
+        const changed = !keep && oldLink !== link;
+        if (changed) {
+            const refusal = TaskDialog.reparentRefusal(app, file, link);
+            if (refusal) return { ok: false, reason: refusal };
+        }
+        const priorTitle = prior.title != null && String(prior.title).trim() !== '' ? prior.title : file.basename;
+        const payload = { title: o.title != null ? o.title : priorTitle };
+        if (!keep) payload.parent_task = link;
+        const plan = TaskDialog._planEditMove(app, file, payload, prior);
+        if (!plan.ok) return { ok: false, reason: plan.reason };
+        const inheritedDue = keep ? '' : TaskDialog._detachDue(app, file,
+            Object.assign({ due: o.due !== undefined ? o.due : prior.due }, payload), prior);
+        if (!changed && !plan.folder && typeof o.write !== 'function') {
+            return { ok: true, path: String(file.path), changed: false };
+        }
+        await app.fileManager.processFrontMatter(file, (fm) => {
+            if (typeof o.write === 'function') o.write(fm, { inheritedDue });
+            else if (inheritedDue) { fm.due = inheritedDue; fm.rank = ''; }
+            if (changed) { fm.parent_task = link; fm.rank = ''; }
+        });
+        if (typeof o.beforeMove === 'function') await o.beforeMove();
+        let finalPath = String(file.path || '');
+        if (plan.folder) {
+            const newFolder = plan.destParent + '/' + plan.name;
+            try {
+                await TaskDialog._renameTaskFolder(app, plan.folder, newFolder, plan.name);
+                finalPath = newFolder + '/' + plan.name + '.md';
+            } catch (e) {
+                const fields = { title: prior.title, parent_task: prior.parent_task };
+                if (changed || inheritedDue) fields.rank = prior.rank;
+                if (inheritedDue) fields.due = prior.due;
+                await TaskDialog._restoreFields(app, [{ file, fields }]);
+                return { ok: false, reason: 'move-failed', error: e };
+            }
+        }
+        const out = { ok: true, path: finalPath, changed: changed || !!plan.folder };
+        if (inheritedDue) out.due = inheritedDue;
+        return out;
+    }
+
+    /**
+     * The project fields a task carries for `project` ({ name, slug? } or a
+     * name), as the edit dialog writes them: `project: "[[Name]]"` and
+     * `project_slug`; both '' for no project.
+     */
+    static projectFields(project) {
+        const name = project && typeof project === 'object' ? String(project.name || '').trim() : String(project == null ? '' : project).trim();
+        if (!name) return { project: '', project_slug: '' };
+        const slug = project && typeof project === 'object' && project.slug ? String(project.slug) : TaskDialog._slugify(name);
+        return { project: '[[' + name + ']]', project_slug: slug };
+    }
+
+    /** The trip fields for `trip` ({ name?, slug? } or a name), as the dialog writes them. */
+    static tripFields(trip) {
+        const t = trip && typeof trip === 'object' ? trip : { name: trip };
+        const name = String(t.name || t.slug || '').trim();
+        if (!name) return { trip: '', trip_slug: '' };
+        return { trip: '[[' + name + ']]', trip_slug: t.slug ? String(t.slug) : TaskDialog._slugify(name) };
     }
 
     /** Where a note at `path` landed after `_moveTaskFolder` returned `moved`. */
@@ -2598,71 +2766,58 @@ class TaskDialog {
         const v = TE ? TE.validatePayload(payload) : { valid: !!(payload.title && String(payload.title).trim()) };
         if (!v.valid) { try { new Notice('Invalid task: ' + v.reason); } catch (_e) {} return; }
         const prior = Object.assign({}, TaskDialog._fmOf(app, file) || {});
-        const plan = TaskDialog._planEditMove(app, file, payload, prior);
-        if (!plan.ok) { try { new Notice('Cannot save: ' + plan.reason); } catch (_e) {} return { ok: false, reason: plan.reason }; }
-        const inheritedDue = TaskDialog._detachDue(app, file, payload, prior);
-        await app.fileManager.processFrontMatter(file, (fm) => {
-            fm.title = payload.title;
-            const prevDue = fm.due == null ? '' : String(fm.due);
-            fm.due = payload.due || inheritedDue || '';
-            if (prevDue !== String(fm.due)) fm.rank = '';
-            fm.priority = payload.priority || '';
-            fm.recurrence = payload.recurrence || '';
-            if (payload.project && payload.project.name) {
-                fm.project = '[[' + payload.project.name + ']]';
-                fm.project_slug = payload.project.slug || TaskDialog._slugify(payload.project.name);
-            } else {
-                fm.project = '';
-                fm.project_slug = '';
-            }
-            // trip linkage — parallel to project. Persist on edit so a trip task
-            // keeps its trip / trip_slug (else it drops out of TaskTripList).
-            if (payload.trip && (payload.trip.name || payload.trip.slug)) {
-                const tName = payload.trip.name || payload.trip.slug;
-                fm.trip = '[[' + tName + ']]';
-                fm.trip_slug = payload.trip.slug || TaskDialog._slugify(tName);
-            } else {
-                fm.trip = '';
-                fm.trip_slug = '';
-            }
-            // Structured card links (FIX 5) — a single-file frontmatter write,
-            // preserving the one-file-write invariant. Always set (even to []) so
-            // removing every chip persists as an empty list, not a stale value.
-            fm.links = Array.isArray(payload.links) ? payload.links.slice() : [];
-            // Subtask of… — written only when the dialog carried a parent and
-            // it differs, so a save never adds an empty key to an older note.
-            if (Object.prototype.hasOwnProperty.call(payload, 'parent_task')
-                && String(fm.parent_task == null ? '' : fm.parent_task) !== String(payload.parent_task || '')) {
-                fm.parent_task = payload.parent_task || '';
-            }
+        // Subtask of… changes only when the dialog carried a parent, so a
+        // save never adds an empty key to an older note. The move, the loop
+        // check and the folder rules are TaskDialog.reparent, shared with the
+        // drag and menu gestures; the dialog adds its own fields to the same
+        // frontmatter write and saves the Notes body before the move.
+        const parent = Object.prototype.hasOwnProperty.call(payload, 'parent_task')
+            ? String(payload.parent_task || '') : undefined;
+        let inheritedDue = '';
+        const moved = await TaskDialog.reparent(app, file, parent, {
+            title: payload.title,
+            due: payload.due || '',
+            prior,
+            write: (fm, ctx) => {
+                inheritedDue = (ctx && ctx.inheritedDue) || '';
+                fm.title = payload.title;
+                const prevDue = fm.due == null ? '' : String(fm.due);
+                fm.due = payload.due || inheritedDue || '';
+                if (prevDue !== String(fm.due)) fm.rank = '';
+                fm.priority = payload.priority || '';
+                fm.recurrence = payload.recurrence || '';
+                Object.assign(fm, TaskDialog.projectFields(payload.project && payload.project.name ? payload.project : null));
+                // trip linkage — parallel to project. Persist on edit so a trip task
+                // keeps its trip / trip_slug (else it drops out of TaskTripList).
+                Object.assign(fm, TaskDialog.tripFields(payload.trip && (payload.trip.name || payload.trip.slug) ? payload.trip : null));
+                // Structured card links (FIX 5) — a single-file frontmatter write,
+                // preserving the one-file-write invariant. Always set (even to []) so
+                // removing every chip persists as an empty list, not a stale value.
+                fm.links = Array.isArray(payload.links) ? payload.links.slice() : [];
+            },
+            // Persist the Notes body back into THIS file only. Prefer vault.process
+            // (atomic read-modify-write of the single file); fall back to read+modify.
+            beforeMove: async () => {
+                if (notes == null) return;
+                const body = String(notes);
+                try {
+                    if (app.vault && typeof app.vault.process === 'function') {
+                        await app.vault.process(file, (data) => TaskDialog._replaceBody(data, body));
+                    } else if (app.vault && typeof app.vault.read === 'function' && typeof app.vault.modify === 'function') {
+                        const data = await app.vault.read(file);
+                        await app.vault.modify(file, TaskDialog._replaceBody(data, body));
+                    }
+                } catch (_e) { /* frontmatter already saved; body write best-effort */ }
+            },
         });
-        // Persist the Notes body back into THIS file only. Prefer vault.process
-        // (atomic read-modify-write of the single file); fall back to read+modify.
-        if (notes != null) {
-            const body = String(notes);
-            try {
-                if (app.vault && typeof app.vault.process === 'function') {
-                    await app.vault.process(file, (data) => TaskDialog._replaceBody(data, body));
-                } else if (app.vault && typeof app.vault.read === 'function' && typeof app.vault.modify === 'function') {
-                    const data = await app.vault.read(file);
-                    await app.vault.modify(file, TaskDialog._replaceBody(data, body));
-                }
-            } catch (_e) { /* frontmatter already saved; body write best-effort */ }
+        if (!moved.ok) {
+            const msg = moved.reason === 'move-failed'
+                ? 'Could not move or rename the task: ' + ((moved.error && moved.error.message) || moved.error)
+                : 'Cannot save: ' + moved.reason;
+            try { new Notice(msg); } catch (_e) {}
+            return { ok: false, reason: moved.reason };
         }
-        let finalPath = String(file.path || '');
-        if (plan.folder) {
-            const newFolder = plan.destParent + '/' + plan.name;
-            try {
-                await this._renameTaskFolder(app, plan.folder, newFolder, plan.name);
-                finalPath = newFolder + '/' + plan.name + '.md';
-            } catch (e) {
-                const fields = { title: prior.title, parent_task: prior.parent_task };
-                if (inheritedDue) { fields.due = prior.due; fields.rank = prior.rank; }
-                await TaskDialog._restoreFields(app, [{ file, fields }]);
-                try { new Notice('Could not move or rename the task: ' + ((e && e.message) || e)); } catch (_e) {}
-                return { ok: false, reason: 'move-failed' };
-            }
-        }
+        const finalPath = String(moved.path || file.path || '');
         let renamedKids = 0;
         const prevTitle = prior && prior.title != null ? String(prior.title).trim() : '';
         const nextTitle = String(payload.title == null ? '' : payload.title).trim();

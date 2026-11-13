@@ -71,7 +71,7 @@ class TaskTodayList {
     get SILENT_REASONS() { return TaskTodayList.SILENT_REASONS; }
     classifyOutcome(res) { return TaskTodayList.classifyOutcome(res); }
     moveInOrder(list, path, dir) { return TaskTodayList.moveInOrder(list, path, dir); }
-    reorderInOrder(list, fromPath, toPath) { return TaskTodayList.reorderInOrder(list, fromPath, toPath); }
+    reorderInOrder(list, fromPath, toPath, place) { return TaskTodayList.reorderInOrder(list, fromPath, toPath, place); }
     applyManualOrder(next, deps) { return TaskTodayList.applyManualOrder(next, deps); }
     manualOrder(deps) { return TaskTodayList.manualOrder(deps); }
     doneTimeLabel(task) { return TaskTodayList.doneTimeLabel(task); }
@@ -85,6 +85,17 @@ class TaskTodayList {
     fullPath(path, appRef) { return TaskTodayList.fullPath(path, appRef); }
     _fromFormField(event) { return TaskTodayList._fromFormField(event); }
     clearDateLabel(task) { return TaskTodayList.clearDateLabel(task); }
+    get DOC_DRAG_MIME() { return TaskTodayList.DOC_DRAG_MIME; }
+    dropZone(rect, clientY, canReorder, canNest) { return TaskTodayList.dropZone(rect, clientY, canReorder, canNest); }
+    nestRefusal(fromPath, toPath, fromParentPath) { return TaskTodayList.nestRefusal(fromPath, toPath, fromParentPath); }
+    dragState() { return TaskTodayList.dragState(); }
+    startDrag(state) { return TaskTodayList.startDrag(state); }
+    endDrag() { return TaskTodayList.endDrag(); }
+    wireRowDrag(row, task, deps) { return TaskTodayList.wireRowDrag(row, task, deps); }
+    wireTopLevelStrip(host, deps) { return TaskTodayList.wireTopLevelStrip(host, deps); }
+    wireGroupDrop(el, deps) { return TaskTodayList.wireGroupDrop(el, deps); }
+    wireNoteDrag(row, doc, deps) { return TaskTodayList.wireNoteDrag(row, doc, deps); }
+    get _DRAG_CSS() { return TaskTodayList._DRAG_CSS; }
 
     // ---------- Static pure helper ----------
 
@@ -204,14 +215,21 @@ class TaskTodayList {
      * `list` with the task at `fromPath` taken out and inserted at the index
      * `toPath` held; null when either is missing or they are the same. Pure.
      */
-    static reorderInOrder(list, fromPath, toPath) {
+    static reorderInOrder(list, fromPath, toPath, place) {
         const current = Array.isArray(list) ? list : [];
         const paths = current.map((t) => t && t.path);
         const from = paths.indexOf(fromPath);
         const to = paths.indexOf(toPath);
         if (from < 0 || to < 0 || from === to) return null;
         const next = current.slice();
-        next.splice(to, 0, next.splice(from, 1)[0]);
+        const moved = next.splice(from, 1)[0];
+        if (place === 'before' || place === 'after') {
+            // `place` names the side of the target row the line was drawn on.
+            const at = next.indexOf(current[to]) + (place === 'after' ? 1 : 0);
+            next.splice(at, 0, moved);
+            return next.every((t, i) => t === current[i]) ? null : next;
+        }
+        next.splice(to, 0, moved);
         return next;
     }
 
@@ -277,7 +295,7 @@ class TaskTodayList {
      * plus order() -> the painted tasks top to bottom and rows: Map(path ->
      * row). Only rows still attached take part: a row completed or rescheduled
      * by its own controls has already left the list. Returns
-     * { move(task, dir), reorder(fromPath, toPath) }, each resolving like
+     * { move(task, dir), reorder(fromPath, toPath, place?) }, each resolving like
      * applyManualOrder (undefined when the gesture is not a move).
      */
     static manualOrder(deps) {
@@ -295,11 +313,438 @@ class TaskTodayList {
                 const next = TaskTodayList.moveInOrder(visible(), task && task.path, dir);
                 return next ? TaskTodayList.applyManualOrder(next, d) : undefined;
             },
-            reorder: (fromPath, toPath) => {
-                const next = TaskTodayList.reorderInOrder(visible(), fromPath, toPath);
+            reorder: (fromPath, toPath, place) => {
+                const next = TaskTodayList.reorderInOrder(visible(), fromPath, toPath, place);
                 return next ? TaskTodayList.applyManualOrder(next, d) : undefined;
             },
         };
+    }
+
+    // ---------- Drag and drop: reorder, nest, move (desktop only) ----------
+    //
+    // HTML5 drag never fires on touch, so none of this runs on the phone;
+    // there the row's ⋯ menu carries the same moves (TaskMove.menuEntries,
+    // Move up / Move down). One drag is in flight at a time, so its state is
+    // kept here, shared by every surface: a row's handle starts it, and any
+    // row, Make top-level strip or group header on any task surface can take
+    // the drop. Spec: Docs/superpowers/specs/2026-11-13-task-flow-design.md §6.
+
+    /** Drag payload type for a Notes row (a task note, not a task). */
+    static get DOC_DRAG_MIME() { return 'application/x-sauce-task-doc-path'; }
+
+    /**
+     * Where a drag over a row lands. With both reorder and nest: the top
+     * third is 'before', the bottom third 'after' (a line), the middle third
+     * 'nest' (an outline). With nest alone the whole row nests; with reorder
+     * alone the upper half is 'before' and the lower half 'after'. Without a
+     * layout box (rect) a reorder row keeps its whole-row meaning,
+     * 'reorder'. Null when the row takes neither. Pure.
+     */
+    static dropZone(rect, clientY, canReorder, canNest) {
+        const nest = canNest !== false;
+        if (!canReorder) return nest ? 'nest' : null;
+        const h = rect ? Number(rect.height) : NaN;
+        const y = Number(clientY);
+        if (!(h > 0) || !isFinite(y)) return 'reorder';
+        const off = y - Number(rect.top || 0);
+        if (!nest) return off < h / 2 ? 'before' : 'after';
+        if (off < h / 3) return 'before';
+        if (off > (2 * h) / 3) return 'after';
+        return 'nest';
+    }
+
+    /**
+     * Why the task at `fromPath` cannot nest under the task at `toPath`, or
+     * '' when it can: the same task, a task inside its own folder (its own
+     * subtask), or the parent it already has. Pure; TaskDialog.reparent
+     * checks the parent_task chain again when the drop lands.
+     */
+    static nestRefusal(fromPath, toPath, fromParentPath) {
+        const from = String(fromPath == null ? '' : fromPath);
+        const to = String(toPath == null ? '' : toPath);
+        if (!from || !to) return 'Nothing to move';
+        if (from === to) return "Can't drop a task on itself";
+        const folder = TaskTodayList._taskFolderOf(from);
+        if (folder && to.indexOf(folder + '/') === 0) return "Can't go inside its own subtask";
+        if (fromParentPath && String(fromParentPath) === to) return 'Already a subtask here';
+        return '';
+    }
+
+    /** The folder of a task folder note (`a/B/B.md` -> `a/B`); '' for a flat note. Pure. */
+    static _taskFolderOf(path) {
+        const parts = String(path == null ? '' : path).split('/');
+        if (parts.length < 3) return '';
+        const base = parts[parts.length - 1].replace(/\.md$/i, '');
+        return base && base === parts[parts.length - 2] ? parts.slice(0, -1).join('/') : '';
+    }
+
+    /** The folder parent's note path of a task (`a/B/C/C.md` -> `a/B/B.md`); '' when none. */
+    static _parentPathOf(task) {
+        const own = task && task.parent_path ? String(task.parent_path) : '';
+        if (own) return own;
+        try {
+            const TE = TaskTodayList._rowTaskEntity();
+            if (TE && typeof TE.parentNotePathOf === 'function') return String(TE.parentNotePathOf(String((task && task.path) || '')) || '');
+        } catch (_e) { /* no parent */ }
+        return '';
+    }
+
+    static dragState() { return TaskTodayList._drag || null; }
+
+    /** Begin a drag ({ kind: 'task' | 'note', path, ... }); shows the Make top-level strips for a subtask. */
+    static startDrag(state) {
+        TaskTodayList._drag = state || null;
+        const show = !!(state && state.kind === 'task' && state.hasParent);
+        for (const strip of Array.from(TaskTodayList._strips || [])) {
+            if (!strip || !strip.parentNode) { TaskTodayList._strips.delete(strip); continue; }
+            TaskTodayList._setClass(strip, 'is-active', show);
+        }
+    }
+
+    /** End the drag: clears its state, every highlight and the strips. */
+    static endDrag() {
+        TaskTodayList._drag = null;
+        for (const el of Array.from(TaskTodayList._lit || [])) TaskTodayList._clearDrop(el);
+        for (const strip of Array.from(TaskTodayList._strips || [])) {
+            TaskTodayList._setClass(strip, 'is-active', false);
+            TaskTodayList._setClass(strip, 'is-over', false);
+        }
+    }
+
+    static _setClass(el, cls, on) {
+        if (!el) return;
+        try {
+            if (el.classList && typeof el.classList.add === 'function') {
+                if (on) el.classList.add(cls); else el.classList.remove(cls);
+                return;
+            }
+            const parts = String(el.className || '').split(/\s+/).filter((c) => c && c !== cls);
+            if (on) parts.push(cls);
+            el.className = parts.join(' ');
+        } catch (_e) { /* decoration */ }
+    }
+
+    /** Show where a drop lands: a line (before / after), an outline (nest) or a refusal, with a label. */
+    static _paintDrop(el, zone, refusal, label) {
+        if (!el) return;
+        const lit = TaskTodayList._lit || (TaskTodayList._lit = new Set());
+        lit.add(el);
+        const want = refusal ? 'refused' : (zone === 'reorder' ? 'after' : zone);
+        for (const z of ['before', 'after', 'nest', 'refused']) TaskTodayList._setClass(el, 'sauce-drop-' + z, z === want);
+        try {
+            const text = refusal || (want === 'nest' ? (label || 'Make subtask') : '');
+            if (el.dataset) { if (text) el.dataset.dropLabel = text; else delete el.dataset.dropLabel; }
+        } catch (_e) {}
+    }
+
+    static _clearDrop(el) {
+        if (!el) return;
+        for (const z of ['before', 'after', 'nest', 'refused']) TaskTodayList._setClass(el, 'sauce-drop-' + z, false);
+        try { if (el.dataset) delete el.dataset.dropLabel; } catch (_e) {}
+        if (TaskTodayList._lit) TaskTodayList._lit.delete(el);
+    }
+
+    static _injectDragCss() {
+        try {
+            if (typeof document === 'undefined' || !document || !document.head || typeof document.createElement !== 'function') return;
+            const ID = 'sauce-task-drag-css';
+            let el = typeof document.getElementById === 'function' ? document.getElementById(ID) : null;
+            if (!el) {
+                el = document.createElement('style');
+                el.id = ID;
+                document.head.appendChild(el);
+            }
+            if (el.textContent !== TaskTodayList._DRAG_CSS) el.textContent = TaskTodayList._DRAG_CSS;
+        } catch (_e) { /* unstyled drops still work */ }
+    }
+
+    /** Drop feedback: a line for reorder, an outline for nest, red dashes for a refusal. */
+    static get _DRAG_CSS() {
+        return [
+            '.sauce-drop-before, .sauce-drop-after, .sauce-drop-nest, .sauce-drop-refused { position: relative; }',
+            '.sauce-drop-before { box-shadow: inset 0 3px 0 0 var(--interactive-accent); }',
+            '.sauce-drop-after { box-shadow: inset 0 -3px 0 0 var(--interactive-accent); }',
+            '.sauce-drop-nest { outline: 2px solid var(--interactive-accent); outline-offset: -2px; background: color-mix(in srgb, var(--interactive-accent) 12%, transparent) !important; }',
+            '.sauce-drop-refused { outline: 2px dashed var(--text-error, #e05561); outline-offset: -2px; background: color-mix(in srgb, var(--text-error, #e05561) 8%, transparent) !important; cursor: not-allowed; }',
+            '.sauce-drop-nest[data-drop-label]::after, .sauce-drop-refused[data-drop-label]::after { content: attr(data-drop-label); position: absolute; right: 8px; top: 50%; transform: translateY(-50%); z-index: 5; padding: 1px 8px; border-radius: 999px; background: var(--interactive-accent); color: var(--text-on-accent, #fff); font-size: 0.75em; font-weight: 600; line-height: 1.6; white-space: nowrap; pointer-events: none; }',
+            '.sauce-drop-refused[data-drop-label]::after { background: var(--text-error, #e05561); color: #fff; }',
+            '.sauce-task-dragging { opacity: 0.45; }',
+            '.sauce-task-toplevel-strip { display: none; align-items: center; justify-content: center; box-sizing: border-box; min-height: 36px; margin: 0 0 6px; padding: 6px 10px; border: 2px dashed var(--background-modifier-border-hover, var(--background-modifier-border)); border-radius: var(--radius-m, 8px); color: var(--text-muted); font-size: 0.85em; font-weight: 600; }',
+            '.sauce-task-toplevel-strip.is-active { display: flex; }',
+            '.sauce-task-toplevel-strip.is-over { border-style: solid; border-color: var(--interactive-accent); color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); }',
+            '.sauce-task-group-drop { border-radius: var(--radius-s, 6px); }',
+            '.sauce-tnv-doc-drag { display: inline-flex; align-items: center; flex-shrink: 0; cursor: grab; color: var(--text-faint); user-select: none; font-size: 0.85em; }',
+            '@media (prefers-reduced-motion: no-preference) { .sauce-drop-before, .sauce-drop-after { transition: box-shadow 80ms ease; } }',
+        ].join('\n');
+    }
+
+    /** The path a drop carries: the custom type when readable, else the drag in flight. */
+    static _carried(event, mime) {
+        try {
+            const dt = event && event.dataTransfer;
+            const v = dt && typeof dt.getData === 'function' ? String(dt.getData(mime) || '') : '';
+            if (v) return v;
+        } catch (_e) { /* protected during dragover */ }
+        return '';
+    }
+
+    static _taskMove() {
+        try { return (typeof window !== 'undefined' && window.customJS && window.customJS.TaskMove) || null; } catch (_e) { return null; }
+    }
+
+    static _dropNotice(msg) {
+        try { new Notice(msg, 4000); } catch (_e) { /* no Notice in tests */ }
+    }
+
+    /**
+     * Wire one task row for drag and drop on the desktop (a no-op on mobile).
+     * The row's ⋮⋮ handle starts the drag, carrying the path under DRAG_MIME
+     * (never text/plain); a drag that starts in a form field is cancelled.
+     * The row takes drops: on its top or bottom third it reorders
+     * (deps.reorder(from, to, 'before' | 'after'), when deps.canReorder(from)
+     * allows), on its middle third - or anywhere when it cannot reorder - it
+     * nests the dragged task under this one (deps.nest(from, task), default
+     * TaskMove.nest). A drop on itself, into its own subtask or onto the
+     * parent it already has is refused visibly: red dashes, a label, no drop.
+     * deps.acceptNotes lets a Notes row drop here (deps.moveNote(docPath,
+     * task), default TaskMove.moveNote). deps.onStart(path) / deps.onEnd()
+     * mirror the drag for the host; deps.onMoved(result, from, task) runs
+     * after a nest and deps.onNoteMoved(result, docPath, task) after a note
+     * move. Returns true when wired.
+     */
+    static wireRowDrag(row, task, deps) {
+        const d = deps || {};
+        if (d.isMobile || !row || typeof row.addEventListener !== 'function' || !task || !task.path) return false;
+        TaskTodayList._injectDragCss();
+        const path = String(task.path);
+        const mime = String(TaskTodayList.DRAG_MIME);
+        let handle = null;
+        try { handle = typeof row.querySelector === 'function' ? row.querySelector('.sauce-task-drag') : null; } catch (_e) { handle = null; }
+        const hook = (name, ...args) => { try { if (typeof d[name] === 'function') return d[name](...args); } catch (_e) {} return undefined; };
+        if (handle && typeof handle.addEventListener === 'function') {
+            handle.addEventListener('dragstart', (event) => {
+                if (TaskTodayList._fromFormField(event)) {
+                    try { event.preventDefault(); } catch (_e) { /* the drag is cancelled either way */ }
+                    TaskTodayList.endDrag();
+                    hook('onEnd');
+                    return;
+                }
+                const parentPath = TaskTodayList._parentPathOf(task);
+                TaskTodayList.startDrag({
+                    kind: 'task', path, parentPath,
+                    hasParent: !!(parentPath || String(task.parent_task == null ? '' : task.parent_task).trim()),
+                });
+                hook('onStart', path);
+                try {
+                    if (event && event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData(mime, path);
+                        if (typeof event.dataTransfer.setDragImage === 'function') event.dataTransfer.setDragImage(row, 12, 12);
+                    }
+                } catch (_e) { /* drag data is advisory */ }
+                TaskTodayList._setClass(row, 'sauce-task-dragging', true);
+            });
+            handle.addEventListener('dragend', () => {
+                TaskTodayList._setClass(row, 'sauce-task-dragging', false);
+                TaskTodayList.endDrag();
+                hook('onEnd');
+            });
+        }
+        const nestFn = () => {
+            if (typeof d.nest === 'function') return d.nest;
+            const TM = TaskTodayList._taskMove();
+            return TM && typeof TM.nest === 'function'
+                ? (from, target) => TM.nest(from, target.path, { onDone: (res) => hook('onMoved', res, from, target) }) : null;
+        };
+        const noteFn = () => {
+            if (!d.acceptNotes) return null;
+            if (typeof d.moveNote === 'function') return d.moveNote;
+            const TM = TaskTodayList._taskMove();
+            return TM && typeof TM.moveNote === 'function'
+                ? (docPath, target) => TM.moveNote(docPath, target.path, { onDone: (res) => hook('onNoteMoved', res, docPath, target) }) : null;
+        };
+        const judge = (event) => {
+            let st = TaskTodayList.dragState();
+            if (!st) {
+                const carried = TaskTodayList._carried(event, mime);
+                if (carried) st = { kind: 'task', path: carried, parentPath: '' };
+            }
+            if (!st) return null;
+            if (st.kind === 'note') {
+                if (!noteFn()) return null;
+                return { st, zone: 'note', refusal: st.taskPath && st.taskPath === path ? 'Already here' : '' };
+            }
+            if (st.kind !== 'task') return null;
+            const canReorder = typeof d.reorder === 'function'
+                && (typeof d.canReorder !== 'function' || !!d.canReorder(st.path));
+            let rect = null;
+            try { rect = typeof row.getBoundingClientRect === 'function' ? row.getBoundingClientRect() : null; } catch (_e) { rect = null; }
+            const zone = TaskTodayList.dropZone(rect, event && event.clientY, canReorder, !!nestFn());
+            if (!zone) return null;
+            if (zone !== 'nest') return { st, zone, refusal: '', quiet: st.path === path };
+            return { st, zone, refusal: TaskTodayList.nestRefusal(st.path, path, st.parentPath) };
+        };
+        row.addEventListener('dragover', (event) => {
+            const j = judge(event);
+            if (!j) return;
+            if (j.quiet) { TaskTodayList._clearDrop(row); return; }
+            TaskTodayList._paintDrop(row, j.zone === 'note' ? 'nest' : j.zone, j.refusal, j.zone === 'note' ? 'Move note here' : '');
+            if (j.refusal) {
+                try { if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'; } catch (_e) {}
+                return;
+            }
+            try {
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            } catch (_e) { /* the drop still works without dropEffect */ }
+        });
+        row.addEventListener('dragleave', (event) => {
+            const to = event && event.relatedTarget;
+            try { if (to && typeof row.contains === 'function' && row.contains(to)) return; } catch (_e) {}
+            TaskTodayList._clearDrop(row);
+        });
+        row.addEventListener('drop', (event) => {
+            try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
+            const j = judge(event);
+            TaskTodayList._clearDrop(row);
+            TaskTodayList.endDrag();
+            hook('onEnd');
+            if (!j || j.quiet) return undefined;
+            if (j.refusal) { TaskTodayList._dropNotice(j.refusal); return undefined; }
+            const from = (j.zone === 'note' ? TaskTodayList._carried(event, TaskTodayList.DOC_DRAG_MIME) : TaskTodayList._carried(event, mime))
+                || j.st.path;
+            if (!from) return undefined;
+            if (j.zone === 'note' || j.zone === 'nest') {
+                const fn = j.zone === 'note' ? noteFn() : nestFn();
+                return fn ? fn(from, task) : undefined;
+            }
+            return d.reorder(from, path, j.zone === 'reorder' ? undefined : j.zone);
+        });
+        return true;
+    }
+
+    /**
+     * A "Make top-level" drop strip at the top of `host` (desktop only),
+     * hidden until a subtask is dragged. Dropping the subtask on it moves it
+     * to the top level (deps.makeTopLevel(path), default TaskMove.nest(path,
+     * null)); deps.onMoved(result, path, null) runs after. deps.before puts
+     * it in front of that child of `host` instead of first. Returns the
+     * strip, or null.
+     */
+    static wireTopLevelStrip(host, deps) {
+        const d = deps || {};
+        if (d.isMobile || !host || typeof host.createEl !== 'function') return null;
+        TaskTodayList._injectDragCss();
+        const strip = host.createEl('div', { cls: 'sauce-task-toplevel-strip', text: 'Make top-level' });
+        const anchor = d.before && d.before.parentNode === host ? d.before : host.firstChild;
+        try { if (anchor && anchor !== strip && typeof host.insertBefore === 'function') host.insertBefore(strip, anchor); } catch (_e) {}
+        try { strip.setAttribute('aria-hidden', 'true'); } catch (_e) {}
+        const strips = TaskTodayList._strips || (TaskTodayList._strips = new Set());
+        strips.add(strip);
+        const st = TaskTodayList.dragState();
+        if (st && st.kind === 'task' && st.hasParent) TaskTodayList._setClass(strip, 'is-active', true);
+        const live = () => {
+            const s = TaskTodayList.dragState();
+            return s && s.kind === 'task' && s.hasParent ? s : null;
+        };
+        strip.addEventListener('dragover', (event) => {
+            if (!live()) return;
+            TaskTodayList._setClass(strip, 'is-over', true);
+            try {
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            } catch (_e) {}
+        });
+        strip.addEventListener('dragleave', () => { TaskTodayList._setClass(strip, 'is-over', false); });
+        strip.addEventListener('drop', (event) => {
+            try { event.preventDefault(); } catch (_e) {}
+            const s = live();
+            const from = TaskTodayList._carried(event, String(TaskTodayList.DRAG_MIME)) || (s && s.path) || '';
+            TaskTodayList.endDrag();
+            if (!s || !from) return undefined;
+            if (typeof d.makeTopLevel === 'function') return d.makeTopLevel(from);
+            const TM = TaskTodayList._taskMove();
+            if (!TM || typeof TM.nest !== 'function') return undefined;
+            return TM.nest(from, null, { onDone: (res) => { try { if (typeof d.onMoved === 'function') d.onMoved(res, from, null); } catch (_e) {} } });
+        });
+        return strip;
+    }
+
+    /**
+     * Make a group header a drop target (desktop only): a task dropped on it
+     * gets the group's value through deps.apply(path) - a project or trip
+     * header sets project / trip. deps.label names the move ('Move to
+     * Atlas'); deps.refuse(path) may return a refusal. Returns true when wired.
+     */
+    static wireGroupDrop(el, deps) {
+        const d = deps || {};
+        if (d.isMobile || !el || typeof el.addEventListener !== 'function' || typeof d.apply !== 'function') return false;
+        TaskTodayList._injectDragCss();
+        TaskTodayList._setClass(el, 'sauce-task-group-drop', true);
+        const judge = () => {
+            const st = TaskTodayList.dragState();
+            if (!st || st.kind !== 'task') return null;
+            let refusal = '';
+            try { refusal = typeof d.refuse === 'function' ? String(d.refuse(st.path) || '') : ''; } catch (_e) { refusal = ''; }
+            return { st, refusal };
+        };
+        el.addEventListener('dragover', (event) => {
+            const j = judge();
+            if (!j) return;
+            TaskTodayList._paintDrop(el, 'nest', j.refusal, d.label || 'Move here');
+            if (j.refusal) return;
+            try {
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            } catch (_e) {}
+        });
+        el.addEventListener('dragleave', (event) => {
+            const to = event && event.relatedTarget;
+            try { if (to && typeof el.contains === 'function' && el.contains(to)) return; } catch (_e) {}
+            TaskTodayList._clearDrop(el);
+        });
+        el.addEventListener('drop', (event) => {
+            try { event.preventDefault(); } catch (_e) {}
+            const j = judge();
+            TaskTodayList._clearDrop(el);
+            TaskTodayList.endDrag();
+            if (!j) return undefined;
+            if (j.refusal) { TaskTodayList._dropNotice(j.refusal); return undefined; }
+            const from = TaskTodayList._carried(event, String(TaskTodayList.DRAG_MIME)) || j.st.path;
+            return from ? d.apply(from) : undefined;
+        });
+        return true;
+    }
+
+    /**
+     * Make a Notes row draggable (desktop only) by a ⋮⋮ handle put first in
+     * the row; the payload is the note's path under DOC_DRAG_MIME. A task
+     * row wired with acceptNotes takes the drop. Returns the handle or null.
+     */
+    static wireNoteDrag(row, doc, deps) {
+        const d = deps || {};
+        if (d.isMobile || !row || typeof row.createEl !== 'function' || !doc || !doc.path) return null;
+        TaskTodayList._injectDragCss();
+        const handle = row.createEl('span', { cls: 'sauce-tnv-doc-drag', text: '⋮⋮' });
+        try { if (row.firstChild !== handle && typeof row.insertBefore === 'function') row.insertBefore(handle, row.firstChild); } catch (_e) {}
+        handle.draggable = true;
+        try { handle.setAttribute('draggable', 'true'); handle.setAttribute('aria-label', 'Drag onto a subtask'); handle.setAttribute('title', 'Drag onto a subtask'); } catch (_e) {}
+        handle.addEventListener('dragstart', (event) => {
+            TaskTodayList.startDrag({ kind: 'note', path: String(doc.path), taskPath: String(d.taskPath || '') });
+            try {
+                if (event && event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData(TaskTodayList.DOC_DRAG_MIME, String(doc.path));
+                    if (typeof event.dataTransfer.setDragImage === 'function') event.dataTransfer.setDragImage(row, 12, 12);
+                }
+            } catch (_e) {}
+            TaskTodayList._setClass(row, 'sauce-task-dragging', true);
+        });
+        handle.addEventListener('dragend', () => {
+            TaskTodayList._setClass(row, 'sauce-task-dragging', false);
+            TaskTodayList.endDrag();
+        });
+        return handle;
     }
 
     /**
@@ -1513,6 +1958,13 @@ class TaskTodayList {
                     const pin = DP && typeof DP.menuEntry === 'function' ? DP.menuEntry(task) : null;
                     if (pin) entries.push(pin);
                 } catch (_e) {}
+                // Make subtask of… / Make top-level / Move to project…: the
+                // menu side of drag and drop, on every device (TaskMove).
+                const TM = TaskTodayList._taskMove();
+                if (TM && typeof TM.menuEntries === 'function' && opts.moveMenu !== false) {
+                    const moveOpts = typeof opts.onMoved === 'function' ? { onDone: (res) => { try { opts.onMoved(task, res); } catch (_e) {} } } : {};
+                    try { for (const e of TM.menuEntries(task, moveOpts) || []) entries.push(e); } catch (_e) { /* the rest of the menu still opens */ }
+                }
                 entries.push({ label: 'Delete', danger: true, onSelect: () => doDelete() });
                 MP.open(entries, { anchor: moreBtn || (ev && ev.currentTarget) || undefined });
             } catch (e) {

@@ -1123,6 +1123,28 @@ class ToDoDailyFilterView {
         }) : null;
         const reorder = (fromPath, toPath) => (order ? order.reorder(fromPath, toPath) : undefined);
         const onMove = (task, dir) => (order ? order.move(task, dir) : undefined);
+        // A finished move (nest, Make top-level, Move to project) patches the
+        // task in place, then the view repaints; Dataview's own refresh
+        // reconciles after. res: TaskDialog.reparent's result or TaskMove's
+        // field write ({ fields }).
+        // Shown only while a subtask is dragged; a drop there lifts it out.
+        if (!isMobile && typeof TTL.wireTopLevelStrip === 'function') {
+            TTL.wireTopLevelStrip(root, { isMobile, before: listHost, onMoved: (res, from) => applyMovedResult(from, res) });
+        }
+        const applyMovedResult = (fromPath, res) => {
+            if (!res || res.ok !== true || !fromPath) return;
+            patchTask(fromPath, (t) => {
+                if (res.fields) { Object.assign(t, res.fields); return; }
+                let parentPath = '';
+                try { parentPath = res.path && TE && typeof TE.parentNotePathOf === 'function' ? TE.parentNotePathOf(res.path) || '' : ''; } catch (_e) { parentPath = ''; }
+                if (res.path) t.path = res.path;
+                t.parent_path = parentPath || null;
+                t.parent_task = parentPath ? parentPath.split('/').pop().replace(/\.md$/i, '') : '';
+                t.rank = null;
+                if (res.due) t.due = res.due;
+            });
+            repaintLive();
+        };
 
         const dropOnDay = async (taskPath, date) => {
             const task = taskByPath(taskPath);
@@ -1140,11 +1162,24 @@ class ToDoDailyFilterView {
             }
         };
         // Desktop only: HTML5 drag-and-drop does not run on Obsidian mobile,
-        // where the row menu's Move up / Move down is the equivalent. Only the
-        // row's handle starts a drag, so mouse text selection of a title still
-        // works; the row itself is a drop target only where manual order applies.
+        // where the row menu's Move up / Move down, Make subtask of… and Make
+        // top-level are the equivalent. Only the row's handle starts a drag,
+        // so mouse text selection of a title still works. A row's edges
+        // reorder where manual order applies; its middle (or the whole row
+        // elsewhere) nests the dragged task under it (TaskTodayList.wireRowDrag).
         const wireDrag = (row, task, manual) => {
             if (isMobile || !row || typeof row.addEventListener !== 'function') return;
+            if (typeof TTL.wireRowDrag === 'function') {
+                TTL.wireRowDrag(row, task, {
+                    isMobile,
+                    reorder: manual ? (from, to, place) => (order ? order.reorder(from, to, place) : undefined) : null,
+                    canReorder: (from) => manualOrder.some((t) => t.path === from),
+                    onStart: (p) => { dragPath = p; },
+                    onEnd: () => { dragPath = null; },
+                    onMoved: (res, from) => applyMovedResult(from, res),
+                });
+                return;
+            }
             let handle = null;
             try { handle = typeof row.querySelector === 'function' ? row.querySelector('.sauce-task-drag') : null; }
             catch (_e) { handle = null; }
@@ -1207,9 +1242,15 @@ class ToDoDailyFilterView {
                 };
             }
             if (S.showProject === false) options.showProject = false;
-            // A handle only where a drag lands: manual order, or the week strip.
-            if (!isMobile && (manual || S.strip)) options.dragHandle = manual ? true : 'Drag to a day';
+            // A handle only where a drag lands: another task (nest, with
+            // TaskMove loaded), manual order (reorder) or the week strip.
+            const canNest = !!(CJS.TaskMove && typeof CJS.TaskMove.nest === 'function');
+            if (!isMobile && (manual || S.strip || canNest)) {
+                options.dragHandle = manual ? true
+                    : (S.strip ? (canNest ? 'Drag to a day or onto a task' : 'Drag to a day') : 'Drag onto a task');
+            }
             if (manual) options.onMove = onMove;
+            options.onMoved = (moved, res) => applyMovedResult(moved && moved.path, res);
             let row = null;
             try {
                 row = TTL.renderTaskRow(list, task, TD, options);
@@ -1221,6 +1262,29 @@ class ToDoDailyFilterView {
                 View._addClass(row, 'is-stale');
                 if (row.style) row.style.opacity = '0.6';
             }
+        };
+        // A project group header takes a dropped task (desktop): it sets the
+        // task's project with the edit dialog's writer; "No project" clears it.
+        const wireProjectDrop = (head, group) => {
+            if (isMobile || !head || typeof TTL.wireGroupDrop !== 'function') return;
+            const name = String((group && group.label) || '');
+            const none = !name || name === 'No project';
+            const slugged = ((group && group.tasks) || []).find((t) => t && t.project_slug);
+            const project = none ? null : { name, slug: slugged ? String(slugged.project_slug) : '' };
+            TTL.wireGroupDrop(head, {
+                isMobile,
+                label: none ? 'Clear project' : `Move to ${name}`,
+                refuse: (p) => {
+                    const t = taskByPath(p);
+                    if (!t || View._projectLabel(t) !== (none ? 'No project' : name)) return '';
+                    return none ? 'Has no project' : `Already in ${name}`;
+                },
+                apply: (p) => {
+                    const TM = CJS.TaskMove;
+                    if (!TM || typeof TM.setProject !== 'function') return undefined;
+                    return TM.setProject(p, project, { onDone: (res) => applyMovedResult(p, res) });
+                },
+            });
         };
         const paintRows = (host, rows, stale) => {
             const sorted = View.sortTasks(rows, prefs.sort, todayStr, TE);
@@ -1236,6 +1300,7 @@ class ToDoDailyFilterView {
                 const section = host.createEl('div', { cls: 'sauce-todo-filter-project-group' });
                 if (prefs.group === 'project') View.renderProjectHeader(section, group, { first, todayStr, TE, TTL });
                 else label(section, group.label, first);
+                if (prefs.group === 'project') wireProjectDrop(section.firstChild, group);
                 const list = makeList(section);
                 for (const task of group.tasks) renderRow(list, task, stale);
                 View.wireCollapsible(section, list,

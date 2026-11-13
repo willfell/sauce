@@ -1755,6 +1755,25 @@ class SpaceDailyDashboard {
         if (due === todayStr) model.today.push(Object.assign(task, { due: todayStr, rank: null }));
       };
       const onRescheduled = (task, due) => { applyMoved(task, due); rerender(); };
+      // A finished move (nest, Make top-level, Move to project): the task is
+      // patched in place and the panel redraws; Dataview reconciles after.
+      const onMoved = (task, res) => {
+        if (!task || !task.path || !res || res.ok !== true) return;
+        for (const key of ["today", "overdue", "stale"]) {
+          for (const t of model[key]) {
+            if (!t || t.path !== task.path) continue;
+            if (res.fields) { Object.assign(t, res.fields); continue; }
+            let parentPath = "";
+            try { parentPath = res.path && TE && typeof TE.parentNotePathOf === "function" ? TE.parentNotePathOf(res.path) || "" : ""; } catch (_e) { parentPath = ""; }
+            if (res.path) t.path = res.path;
+            t.parent_path = parentPath || null;
+            t.parent_task = parentPath ? parentPath.split("/").pop().replace(/\.md$/i, "") : "";
+            t.rank = null;
+            if (res.due) t.due = res.due;
+          }
+        }
+        rerender();
+      };
       // A checkbox completion: the row leaves its section and, unless it is a
       // recurring task (which rolls its due date forward instead of reaching
       // _done/), shows up at the top of Done today.
@@ -1843,7 +1862,7 @@ class SpaceDailyDashboard {
         const list = s.createEl("div", { cls: "sauce-today-list" });
         return { s, head, tools, list };
       };
-      const rowOpts = (extra) => Object.assign({ viewedDay: todayStr, todayStr, onRescheduled, onDone }, extra || {});
+      const rowOpts = (extra) => Object.assign({ viewedDay: todayStr, todayStr, onRescheduled, onDone, onMoved }, extra || {});
 
       // 1. Up next — today's tasks (all sources), shared sort, optional group.
       // Any grouping (the To-Do view's rule) turns manual order off.
@@ -1871,16 +1890,31 @@ class SpaceDailyDashboard {
         notice,
         lock: { set: locks, key: reorderKey },
       }) : null;
-      const reorder = (fromPath, toPath) => (order ? order.reorder(fromPath, toPath) : undefined);
+      const reorder = (fromPath, toPath, place) => (order ? order.reorder(fromPath, toPath, place) : undefined);
       const onMove = (task, dir) => (order ? order.move(task, dir) : undefined);
+      // With TaskMove loaded, a row dropped on another row's middle nests it
+      // (any section, any sort); the edges reorder only where manual order runs.
+      const canNest = !isMobile && !!(cjs && cjs.TaskMove && typeof cjs.TaskMove.nest === "function")
+        && typeof TTL.wireRowDrag === "function";
+      const nestOpts = canNest ? { dragHandle: "Drag onto a task" } : null;
 
       // Desktop only (HTML5 drag-and-drop does not run on Obsidian mobile, where
-      // the row menu's Move up / Move down does the same). Only the handle starts
-      // a drag, a drag that starts in a form field is cancelled, and the payload
-      // is a custom type so a row dropped into the editor inserts nothing.
+      // the row menu's Move up / Move down, Make subtask of… and Make top-level
+      // do the same). Only the handle starts a drag, a drag that starts in a
+      // form field is cancelled, and the payload is a custom type so a row
+      // dropped into the editor inserts nothing.
       let dragPath = null;
-      const wireDrag = (row, task) => {
+      const wireDrag = (row, task, manual) => {
         if (isMobile || !row || typeof row.addEventListener !== "function") return;
+        if (typeof TTL.wireRowDrag === "function") {
+          TTL.wireRowDrag(row, task, {
+            isMobile,
+            reorder: manual ? reorder : null,
+            canReorder: (from) => upNext.some((t) => t && t.path === from),
+            onMoved: (res, from) => onMoved({ path: from }, res),
+          });
+          return;
+        }
         const handle = typeof row.querySelector === "function" ? row.querySelector(".sauce-task-drag") : null;
         if (handle && typeof handle.addEventListener === "function") {
           handle.addEventListener("dragstart", (ev) => {
@@ -1918,16 +1952,19 @@ class SpaceDailyDashboard {
         });
       };
 
+      if (canNest && typeof TTL.wireTopLevelStrip === "function") {
+        TTL.wireTopLevelStrip(up.s, { isMobile, before: up.list, onMoved: (res, from) => onMoved({ path: from }, res) });
+      }
       if (upNext.length === 0) {
         const hint = up.list.createEl("div", { cls: "sauce-today-empty" });
         hint.textContent = "Nothing left for today";
         hint.style.cssText = "font-size: 0.85em; color: var(--text-faint); padding: 4px 6px;";
       } else if (groupMode === "none") {
         for (const t of upNext) {
-          const manualOpts = canReorder ? (isMobile ? { onMove } : { dragHandle: true, onMove }) : null;
+          const manualOpts = canReorder ? (isMobile ? { onMove } : { dragHandle: true, onMove }) : nestOpts;
           const row = TTL.renderTaskRow(up.list, t, TD, rowOpts(manualOpts));
           if (row) upRows.set(t.path, row);
-          if (canReorder) wireDrag(row, t);
+          if (canReorder || canNest) wireDrag(row, t, canReorder);
         }
       } else {
         const groups = new Map();
@@ -1970,7 +2007,10 @@ class SpaceDailyDashboard {
             : groupMode === "due" ? dayLabel(key)
             : (key || "No project");
           g.style.cssText = "font-size: 0.8em; color: var(--text-faint); margin: 6px 0 2px 6px;";
-          for (const t of groups.get(key)) TTL.renderTaskRow(up.list, t, TD, rowOpts());
+          for (const t of groups.get(key)) {
+            const row = TTL.renderTaskRow(up.list, t, TD, rowOpts(nestOpts));
+            if (canNest) wireDrag(row, t, false);
+          }
         }
       }
 
@@ -1981,7 +2021,11 @@ class SpaceDailyDashboard {
       if (overdue.length > 0) {
         const od = mkSection("overdue", "Overdue · " + overdue.length);
         const rows = new Map();
-        for (const t of overdue) rows.set(t.path, TTL.renderTaskRow(od.list, t, TD, rowOpts()));
+        for (const t of overdue) {
+          const row = TTL.renderTaskRow(od.list, t, TD, rowOpts(nestOpts));
+          rows.set(t.path, row);
+          if (canNest) wireDrag(row, t, false);
+        }
         const moveAll = mkButton(od.tools, "sauce-today-moveall", "Move all to today");
         const setBusy = (busy) => {
           moveAll.disabled = !!busy;

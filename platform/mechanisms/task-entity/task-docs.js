@@ -29,6 +29,7 @@ class TaskDocs {
     openReview(app, taskPath, cands) { return TaskDocs.openReview(app, taskPath, cands); }
     renderHeader(dv, opts) { return TaskDocs.renderHeader(dv, opts); }
     rename(app, docPath, title) { return TaskDocs.rename(app, docPath, title); }
+    moveTo(app, docPath, taskPath) { return TaskDocs.moveTo(app, docPath, taskPath); }
     withHeader(text) { return TaskDocs.withHeader(text); }
     taskPathOf(docPath) { return TaskDocs.taskPathOf(docPath); }
     commsState(fm, followUps, today) { return TaskDocs.commsState(fm, followUps, today); }
@@ -323,6 +324,57 @@ class TaskDocs {
             if (to !== String(docPath)) await app.fileManager.renameFile(file, to);
             return { ok: true, path: to };
         } catch (e) {
+            return { ok: false, reason: String((e && e.message) || e) };
+        }
+    }
+
+    /**
+     * Move the note at `docPath` to the task at `taskPath`: into that task's
+     * notes/ folder (made when missing) with fileManager.renameFile, so links
+     * follow; `task:` set to the new task; and named by the rule create uses
+     * with the new task as parent (the plain title while unique, else
+     * `Title (Task)`). The task must be in the folder layout. If the move
+     * fails, `task:` is put back. Resolves { ok, path } or { ok: false, reason }.
+     */
+    static async moveTo(app, docPath, taskPath) {
+        const file = app && app.vault ? app.vault.getAbstractFileByPath(docPath) : null;
+        if (!file || Array.isArray(file.children)) return { ok: false, reason: 'note not found' };
+        const folder = TaskDocs.notesFolder(taskPath);
+        if (!folder) return { ok: false, reason: 'notes need a task in the folder layout' };
+        const taskFile = app.vault.getAbstractFileByPath(taskPath);
+        if (!taskFile || Array.isArray(taskFile.children)) return { ok: false, reason: 'task not found' };
+        if (TaskDocs.taskPathOf(docPath) === String(taskPath)) return { ok: true, path: String(docPath), unchanged: true };
+        const TE = TaskDocs._te();
+        const fm = TaskDocs._fmOf(app, file) || {};
+        const base = String(file.basename != null ? file.basename : String(docPath).split('/').pop().replace(/\.md$/i, ''));
+        const title = fm.title != null && String(fm.title).trim() !== '' ? String(fm.title).trim() : base;
+        const taskName = String(taskFile.basename != null ? taskFile.basename : String(taskPath).split('/').pop().replace(/\.md$/i, ''));
+        const tfm = TaskDocs._fmOf(app, taskFile) || {};
+        const taskTitle = tfm.title != null && String(tfm.title).trim() !== '' ? String(tfm.title).trim() : taskName;
+        const own = base.toLowerCase();
+        const taken = TaskDocs._takenNames(app);
+        const name = TE && typeof TE.taskName === 'function'
+            ? TE.taskName(title, { parentTitle: taskTitle, taken: (n) => String(n).toLowerCase() !== own && taken(n) })
+            : title.replace(/[\\/:*?"<>|#^[\]]/g, '').trim() || 'Note';
+        const to = folder + '/' + name + '.md';
+        const priorTask = Object.prototype.hasOwnProperty.call(fm, 'task') ? fm.task : undefined;
+        try {
+            if (!app.vault.getAbstractFileByPath(folder)) {
+                try { await app.vault.createFolder(folder); } catch (_e) { /* exists */ }
+            }
+            await app.fileManager.processFrontMatter(file, (f) => { f.task = '[[' + taskName + ']]'; });
+        } catch (e) {
+            return { ok: false, reason: String((e && e.message) || e) };
+        }
+        try {
+            await app.fileManager.renameFile(file, to);
+            return { ok: true, path: to };
+        } catch (e) {
+            try {
+                await app.fileManager.processFrontMatter(file, (f) => {
+                    if (priorTask === undefined) delete f.task; else f.task = priorTask;
+                });
+            } catch (_e) { /* best effort */ }
             return { ok: false, reason: String((e && e.message) || e) };
         }
     }
@@ -1856,7 +1908,9 @@ class TaskDocs {
      * changed since this device last opened it; click opens it), Copy prompt
      * on prompt and handoff notes, and + Note,
      * which picks a kind, creates the note and opens it. Nothing for a flat
-     * task. Returns the section, or null. Never throws.
+     * task. opts.decorateRow(row, doc, repaint) adds to each row (the task
+     * card's drag handle and ⋯ menu). Returns the section, or null. Never
+     * throws.
      */
     static render(container, opts) {
         try {
@@ -1950,6 +2004,9 @@ class TaskDocs {
                                 setTimeout(() => { try { btn.classList.remove('is-copied'); btn.textContent = meta.copyLabel; } catch (_e) {} }, 1400);
                             } catch (_e) {}
                         });
+                    }
+                    if (typeof o.decorateRow === 'function') {
+                        try { o.decorateRow(row, d, paint); } catch (_e) { /* the row still works */ }
                     }
                 }
             };

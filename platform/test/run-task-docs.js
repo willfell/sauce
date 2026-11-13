@@ -171,7 +171,7 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     rowsMd.some((r) => r.path === 'spice/tasks/<Task>/notes/' && /task-doc/.test(r.purpose) && /not as subtasks/.test(r.purpose))
     && rowsMd.some((r) => r.path === 'spice/tasks/<Task>/<Task>.md' && /Never write a flat/.test(r.purpose)));
   const cardSrc = read('mechanisms/task-entity/task-note-view.js');
-  ok('TD-CARD the task card draws the Notes section after Subtasks', /TDocs\.render\(card, \{ app: appRef, taskPath: filePath \}\)/.test(cardSrc)
+  ok('TD-CARD the task card draws the Notes section after Subtasks', /TDocs\.render\(card, \{ app: appRef, taskPath: filePath[ ,]/.test(cardSrc)
     && cardSrc.indexOf('TDocs.render(card') > cardSrc.indexOf("text: 'Subtasks'"));
 
   ok('TD-TITLE-KIND note-like subtask titles read as their kind; step-like titles do not',

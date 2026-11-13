@@ -46,6 +46,13 @@ class ToDoDailyTripGroups {
 
         const TD = window.customJS && window.customJS.TaskDialog;
         const SL = window.customJS && window.customJS.SectionLabel;
+        // Desktop drag and drop (TaskMove loaded): a row's handle drags it
+        // onto another task (nest) or onto a trip label, which sets its trip
+        // with the edit dialog's writer. The phone uses the row's ⋯ menu.
+        const TM = window.customJS && window.customJS.TaskMove;
+        const mobile = typeof TTL._isMobile === 'function' && TTL._isMobile(window.app);
+        const canDrag = !mobile && !!TM && typeof TM.nest === 'function' && typeof TM.setTrip === 'function'
+            && typeof TTL.wireRowDrag === 'function' && typeof TTL.wireGroupDrop === 'function';
 
         for (const [slug, tripTasks] of byTrip) {
             const label = tripTasks[0] && tripTasks[0].trip
@@ -59,9 +66,20 @@ class ToDoDailyTripGroups {
                 h.textContent = String(label + ' TASKS').toUpperCase();
                 h.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); margin:10px 0 6px; font-weight:600;';
             }
+            if (canDrag) {
+                const trip = { name: label, slug };
+                TTL.wireGroupDrop(dv.container.lastElementChild, {
+                    label: 'Move to ' + label,
+                    refuse: (p) => (tripTasks.some((t) => t && t.path === p) ? 'Already in ' + label : ''),
+                    apply: (p) => TM.setTrip(p, trip),
+                });
+            }
 
             for (const t of tripTasks) {
-                try { TTL.renderTaskRow(dv.container, t, TD); } catch (_e) {}
+                try {
+                    const row = TTL.renderTaskRow(dv.container, t, TD, canDrag ? { dragHandle: 'Drag onto a task or trip' } : undefined);
+                    if (canDrag) TTL.wireRowDrag(row, t, {});
+                } catch (_e) {}
             }
         }
     }

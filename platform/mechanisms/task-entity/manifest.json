@@ -41,7 +41,8 @@
     "TaskJumpInit",
     "TaskSets",
     "TaskDayPlan",
-    "TaskDayPlanInit"
+    "TaskDayPlanInit",
+    "TaskMove"
   ],
   "customjs_startup_scripts": [
     "TaskJumpInit",
@@ -111,6 +112,10 @@
     {
       "source": "task-day-plan-init.js",
       "dest": "{{scripts_path}}/task-entity/task-day-plan-init.js"
+    },
+    {
+      "source": "task-move.js",
+      "dest": "{{scripts_path}}/task-entity/task-move.js"
     }
   ],
   "post_install": [],
