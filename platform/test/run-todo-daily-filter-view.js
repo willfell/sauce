@@ -57,6 +57,7 @@ function makeStorage(seed) {
   };
 }
 
+const focusLog = [];
 function makeElement(tag = 'div', cls = '') {
   const el = {
     tagName: String(tag).toUpperCase(),
@@ -109,6 +110,7 @@ function makeElement(tag = 'div', cls = '') {
       });
     },
     closest() { return null; },
+    focus() { focusLog.push(this); },
     get firstChild() { return this.children[0] || null; },
     get nextSibling() {
       if (!this.parentNode) return null;
@@ -1579,12 +1581,17 @@ process.exitCode = 1;
     const june = View.monthGrid(PARSED, '2026-06', TODAY);
     assert.strictEqual(june[0][0].date, '2026-06-01', 'a Monday 1st starts the first row');
     assert.strictEqual(june[0][0].inMonth, true);
-    assert.strictEqual(june.length, 5);
+    assert.strictEqual(june.length, 6, 'a five-week month still draws six rows');
+    assert(june[5].every((c) => !c.inMonth) && june[5][0].date === '2026-07-06', 'the padding row is dimmed');
 
     const feb27 = View.monthGrid([], '2027-02', TODAY);
-    assert.strictEqual(feb27.length, 5, 'a 28-day February starting on a Monday is padded to five rows');
+    assert.strictEqual(feb27.length, 6, 'a 28-day February starting on a Monday spans four weeks and is padded to six rows');
     assert.deepStrictEqual(feb27[3][6].date, '2027-02-28');
-    assert(feb27[4].every((c) => !c.inMonth) && feb27[4][0].date === '2027-03-01', 'the padding row is the next week, dimmed');
+    assert(feb27[4].concat(feb27[5]).every((c) => !c.inMonth) && feb27[4][0].date === '2027-03-01' && feb27[5][6].date === '2027-03-14',
+      'the two padding rows are the next weeks, dimmed');
+    for (const ym of ['2026-01', '2026-02', '2026-03', '2026-08', '2027-05', '2028-02']) {
+      assert.strictEqual(View.monthGrid([], ym, TODAY).length, 6, ym + ' has six rows');
+    }
 
     const feb28 = flat(View.monthGrid([], '2028-02', TODAY));
     assert.deepStrictEqual(feb28.filter((c) => c.inMonth).map((c) => c.day).slice(-2), [28, 29], 'a leap February has the 29th');
@@ -1592,7 +1599,7 @@ process.exitCode = 1;
     assert.strictEqual(feb28.find((c) => c.date === '2028-03-01').inMonth, false);
 
     const dec = View.monthGrid([], '2026-12', TODAY);
-    assert.deepStrictEqual(dec[dec.length - 1].map((c) => c.date).slice(-3), ['2027-01-01', '2027-01-02', '2027-01-03'],
+    assert.deepStrictEqual(dec[4].map((c) => c.date).slice(-3), ['2027-01-01', '2027-01-02', '2027-01-03'],
       'December runs into the new year');
     const jan = View.monthGrid([], '2027-01', TODAY);
     assert.deepStrictEqual(jan[0].map((c) => c.date).slice(0, 4), ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31'],
@@ -1780,7 +1787,7 @@ process.exitCode = 1;
     assert.deepStrictEqual(head().children.map((c) => c.textContent), ['‹', 'November 2026', 'Today', '›']);
     await byClass(head(), 'is-next')[0].fire('click');
     assert.strictEqual(monthTitle(root), 'December 2026');
-    assert.strictEqual(byClass(root, 'sauce-todo-month-cell').length, 35, 'December 2026 is five rows');
+    assert.strictEqual(byClass(root, 'sauce-todo-month-cell').length, 42, 'December 2026 spans five weeks and still draws six rows');
     assert.strictEqual(monthOf(root).attributes['aria-label'], 'December 2026');
     await byClass(head(), 'is-next')[0].fire('click');
     assert.strictEqual(monthTitle(root), 'January 2027', 'the year rolls over');
@@ -1802,6 +1809,68 @@ process.exitCode = 1;
     for (let i = 0; i < 3; i += 1) await byClass(f.root, 'sauce-todo-week-nav')[1].fire('click');
     await weekCells(f.root).find((c) => c.dataset.date === '2026-12-03').fire('click');
     assert.strictEqual(monthTitle(f.root), 'December 2026', 'with no month chosen, the month is the picked day\'s');
+  });
+
+  await okAsync('RD-DV-MONTH-FOLLOW while open, the calendar follows the strip\'s week and a strip day pick', async () => {
+    const env = makeRenderHarness();
+    env.storage.setItem('sauce-todo-month-open', '1');
+    const { View, root } = await mount(env);
+    const next = () => byClass(root, 'sauce-todo-week-nav')[1];
+    const prev = () => byClass(root, 'sauce-todo-week-nav')[0];
+    for (let i = 0; i < 3; i += 1) await next().fire('click');
+    assert.strictEqual(weekDates(root)[0], '2026-11-30');
+    assert.strictEqual(monthTitle(root), 'November 2026', 'the week of Mon Nov 30 is November\'s');
+    await next().fire('click');
+    assert.strictEqual(monthTitle(root), 'December 2026', 'the arrows carry the month along');
+    await prev().fire('click');
+    assert.strictEqual(monthTitle(root), 'November 2026');
+    await weekCells(root).find((c) => c.dataset.date === '2026-12-03').fire('click');
+    assert.strictEqual(monthTitle(root), 'December 2026', 'a strip day pick shows its month');
+    await byClass(root, 'sauce-todo-week-reset')[0].fire('click');
+    assert.strictEqual(monthTitle(root), 'November 2026', 'This week brings the month back too');
+
+    await byClass(byClass(root, 'sauce-todo-month-head')[0], 'is-next')[0].fire('click');
+    assert.strictEqual(monthTitle(root), 'December 2026');
+    await prev().fire('click');
+    assert.strictEqual(monthTitle(root), 'November 2026', 'a week move after a month move follows the week');
+
+    await byClass(root, 'sauce-todo-month-toggle')[0].fire('click');
+    for (let i = 0; i < 8; i += 1) await next().fire('click');
+    await byClass(root, 'sauce-todo-month-toggle')[0].fire('click');
+    assert.strictEqual(monthTitle(root), 'November 2026', 'a closed calendar does not follow the strip');
+    const again = await mount(env, PAGES, View);
+    assert.strictEqual(monthTitle(again.root), 'November 2026');
+  });
+
+  await okAsync('RD-DV-FOCUS after a strip or month control repaints, focus returns to that control', async () => {
+    const env = makeRenderHarness();
+    env.storage.setItem('sauce-todo-month-open', '1');
+    const { root } = await mount(env);
+    const byNav = (nav) => descendants(root).find((n) => n.dataset && n.dataset.nav === nav);
+    const press = async (nav, expected) => {
+      const before = byNav(nav);
+      assert(before, `${nav} is drawn`);
+      focusLog.length = 0;
+      await before.fire('click');
+      const focused = focusLog[focusLog.length - 1];
+      assert(focused, `${nav}: something takes focus`);
+      assert.strictEqual(focused.dataset.nav, expected || nav, `${nav}: focus goes to ${expected || nav}`);
+      assert(descendants(root).includes(focused), `${nav}: the focused control is the repainted one`);
+      assert.notStrictEqual(focused, before, `${nav}: not the old, removed control`);
+    };
+    await press('next-week');
+    await press('prev-week');
+    await press('next-week');
+    await press('this-week', 'toggle');
+    await press('next-month');
+    await press('prev-month');
+    await press('month-today');
+    await press('toggle');
+    assert.strictEqual(monthOf(root), undefined, 'the toggle closed the month and kept focus');
+    await press('toggle');
+    for (const nav of ['prev-week', 'next-week', 'toggle', 'prev-month', 'next-month', 'month-today']) {
+      assert.strictEqual(byNav(nav).tagName, 'BUTTON', `${nav} is a button`);
+    }
   });
 
   await okAsync('RD-DV-MONTH-DROP desktop: a month day takes a dropped task like a strip day', async () => {
@@ -1848,8 +1917,10 @@ process.exitCode = 1;
       'desktop: ‹ cells › tools on one line');
     const phone = /body\.is-phone \.sauce-todo-strip-row \{[^}]*grid-template-areas: "prev title next tools" "cells cells cells cells";/;
     assert(phone.test(css), 'phone: the controls on a line above, the cells full width');
-    assert(/@media \(max-width: 480px\) \{[^@]*grid-template-areas: "prev title next tools" "cells cells cells cells";/.test(css),
-      'a narrow pane gets the same layout');
+    assert(/@container \(max-width: 480px\) \{[^@]*grid-template-areas: "prev title next tools" "cells cells cells cells";/.test(css),
+      'a narrow pane (a container query on the strip host) gets the same layout');
+    assert(css.includes('.sauce-todo-above-tabs { container-type: inline-size;'), 'the above-tabs host is the size container');
+    assert(!/@media \(max-width/.test(css), 'no viewport media query: a narrow split pane on a wide screen counts');
     assert(/button\.sauce-todo-week-nav, [^{]*\.sauce-todo-month-head button \{[^}]*min-width: 36px; min-height: 36px;/.test(css),
       'every strip and month control is at least 36px');
     assert(/button\.sauce-todo-month-cell \{[^}]*min-width: 0; min-height: 40px;/.test(css), 'month days are at least 36px tall');
