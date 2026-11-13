@@ -510,7 +510,7 @@
         "platform/mechanisms/task-entity/task-docs.js",
         "platform/mechanisms/task-entity/task-note-view.js"
       ],
-      "notes": "A note that belongs to a task without being a step of it, at spice/tasks/<Task>/notes/<Name>.md. Keys: type: task-doc; kind: prompt|handoff|plan|context|findings|questions|note (any other value reads as note); title (display name); task: \"[[<Task note name>]]\"; created_at. No status: a task doc is never open or done, never counts toward the task's progress and never lists as a to-do. The file name is TaskEntity.taskName(title, { parentTitle: task title }). Written by TaskDocs.compose; read by TaskDocs.list (kind order, newest first) and TaskDocs.extractPrompt (Copy prompt)."
+      "notes": "A note that belongs to a task without being a step of it, at spice/tasks/<Task>/notes/<Name>.md. Keys: type: task-doc; kind: prompt|handoff|comms|plan|context|findings|questions|note (any other value reads as note); title (display name); task: \"[[<Task note name>]]\"; created_at. No status: a task doc is never open or done, never counts toward the task's progress and never lists as a to-do. The file name is TaskEntity.taskName(title, { parentTitle: task title }). Written by TaskDocs.compose; read by TaskDocs.list (kind order, newest first) and TaskDocs.extractPrompt (Copy prompt)."
     },
     {
       "id": "trips-rule-fragments",

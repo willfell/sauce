@@ -71,8 +71,8 @@ function makeApp(seed) {
 const win = { customJS: { TaskEntity: new TEClass() }, moment: null };
 const TD = TaskDocs(win, function () {});
 
-ok('TD-KINDS the kinds are prompt, handoff, plan, context, findings, questions, note; anything else reads as note',
-  JSON.stringify(TD.KINDS.map((k) => k.key)) === JSON.stringify(['prompt', 'handoff', 'plan', 'context', 'findings', 'questions', 'note'])
+ok('TD-KINDS the kinds are prompt, handoff, comms, plan, context, findings, questions, note; anything else reads as note',
+  JSON.stringify(TD.KINDS.map((k) => k.key)) === JSON.stringify(['prompt', 'handoff', 'comms', 'plan', 'context', 'findings', 'questions', 'note'])
   && TD.kindOf('Handoff') === 'handoff' && TD.kindOf('runbook') === 'note' && TD.kindOf(null) === 'note');
 ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has none',
   TD.notesFolder('spice/tasks/Backup Script/Backup Script.md') === 'spice/tasks/Backup Script/notes'
@@ -158,7 +158,7 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
   byCls(rows[3], 'sauce-tnv-doc-main')[0]._l.click();
   ok('TD-RENDER-OPEN clicking a row opens the note', app._opened[0] === `${T}/notes/Plan (Backup Script).md`);
   byCls(section, 'sauce-tnv-doc-add')[0]._l.click();
-  ok('TD-RENDER-ADD + Note offers every kind', menus[0] && menus[0].entries.map((e) => e.label).join(',') === 'Prompt,Handoff,Plan,Context,Findings,Questions,Note');
+  ok('TD-RENDER-ADD + Note offers every kind', menus[0] && menus[0].entries.map((e) => e.label).join(',') === 'Prompt,Handoff,Comms,Plan,Context,Findings,Questions,Note');
   const none = TD.render(makeEl('div'), { app, taskPath: 'spice/tasks/Flat.md' });
   const empty = TD.render(makeEl('div'), { app, taskPath: 'spice/tasks/Other/Other.md' });
   ok('TD-RENDER-NONE a flat task draws no Notes section', none === null && empty !== null);
@@ -363,7 +363,7 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     ok('TD-HEADER-OPEN Open task and the trail open the task', hApp._opened.slice(-2).every((p) => p === 'spice/tasks/Infra/Backup Script/Backup Script.md'));
     by(card, 'sauce-tdv-kind')[0]._l.click();
     const menu = menus[menus.length - 1];
-    ok('TD-HEADER-KIND-MENU the kind badge offers every kind, the current one ticked', menu && menu.entries.length === 7 && /✓/.test(menu.entries[0].label));
+    ok('TD-HEADER-KIND-MENU the kind badge offers every kind, the current one ticked', menu && menu.entries.length === 8 && /✓/.test(menu.entries[0].label));
     await menu.entries.find((e) => e.label === 'Plan').onSelect();
     ok('TD-HEADER-KIND-CHANGE picking a kind writes it through RenderSafe.mutate and recolours the card; Copy prompt hides for a plan',
       mutations.length === 1 && mutations[0].path === P && fmCalls[0] === P && hApp._files.get(P)._fm.kind === 'plan'
@@ -379,6 +379,42 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     ok('TD-HEADER-CSS each kind has its own colour, used by the card and the task card\'s note icons',
       Object.keys(TD.TONES).join(',') === TD.KINDS.map((k) => k.key).join(',') && /\.sauce-tdv\[data-kind="prompt"\]/.test(TD._CSS) && /\.sauce-tnv-doc\.is-handoff/.test(TD._CSS));
     win.moment = null;
+  }
+
+
+  {
+    const comms = TD.compose('comms', 'Comms', 'Get SND Alerting', '2026-11-13T09:00:00-06:00');
+    const kind = TD.KINDS.find((k) => k.key === 'comms');
+    ok('TD-COMMS a Comms note has a message-bubble icon, its own colour, and copies its message with Copy message',
+      kind && kind.label === 'Comms' && kind.copy === true && kind.copyLabel === 'Copy message' && /M7\.9 20A9 9 0 1 0 4 16\.1L2 22Z/.test(kind.icon)
+      && /pink/.test(TD.TONES.comms) && /\*\*To:\*\*/.test(comms)
+      && TD.extractPrompt(comms) === 'Hi <name>,\n\n<what is happening with this, what you need from them, and by when>\n\nThanks', TD.extractPrompt(comms));
+    ok('TD-COMMS-TITLE subtasks titled like a message read as comms',
+      TD.titleKind('Comms') === 'comms' && TD.titleKind('Slack message') === 'comms' && TD.titleKind('Customer comms') === 'comms'
+      && TD.titleKind('Message the team about the outage') === '');
+    const C = 'spice/tasks/Outage';
+    const cApp = makeApp({
+      [`${C}/Outage.md`]: { fm: { type: 'task', title: 'Outage' } },
+      [`${C}/notes/Comms (Outage).md`]: { fm: { type: 'task-doc', kind: 'comms', title: 'Comms' }, body: '```text\nHi all, the fix ships today.\n```', mtime: 5 },
+    });
+    const copied = [];
+    win.customJS.TaskTodayList = { copyText: async (t) => { copied.push(t); return true; } };
+    const mkEl = (tag, cls) => {
+      const el = { tag, className: cls || '', children: [], style: {}, _attrs: {}, _l: {}, textContent: '', innerHTML: '', classList: { add() {}, remove() {} } };
+      el.createEl = (t, o) => { const c = mkEl(t, (o && o.cls) || ''); if (o && o.text != null) c.textContent = o.text; el.children.push(c); return c; };
+      el.setAttribute = (k, v) => { el._attrs[k] = v; };
+      el.addEventListener = (k, fn) => { el._l[k] = fn; };
+      el.removeChild = (c) => { el.children.splice(el.children.indexOf(c), 1); };
+      Object.defineProperty(el, 'firstChild', { get: () => el.children[0] || null });
+      return el;
+    };
+    const all = (n) => (n.children || []).flatMap((c) => [c, ...all(c)]);
+    const sec = TD.render(mkEl('div'), { app: cApp, taskPath: `${C}/Outage.md` });
+    const btn = all(sec).find((n) => n.className === 'sauce-tnv-doc-copy');
+    const label = btn.textContent;
+    await btn._l.click({ stopPropagation() {} });
+    ok('TD-COMMS-CARD on the task card a Comms note offers Copy message, which copies the message',
+      label === 'Copy message' && copied[0] === 'Hi all, the fix ships today.', JSON.stringify([label, copied]));
   }
 
   const failed = results.filter(([, c]) => !c).length;

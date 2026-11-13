@@ -140,7 +140,7 @@
       "row": {
         "path": "spice/tasks/<Task>/notes/",
         "owner": "task-entity",
-        "purpose": "Notes for a task (type: task-doc, kind: prompt|handoff|plan|context|findings|questions|note, task: \"[[<Task>]]\"). Write prompts, handoffs, plans and findings here, not as subtasks."
+        "purpose": "Notes for a task (type: task-doc, kind: prompt|handoff|comms|plan|context|findings|questions|note, task: \"[[<Task>]]\"). Write prompts, handoffs, comms (messages to send others), plans and findings here, not as subtasks."
       }
     }
   ]
