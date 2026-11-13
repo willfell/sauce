@@ -409,6 +409,17 @@ async function cbQuickAddCases() {
     try { entries = await inst.quickAddEntries({}); } catch (_e) { entries = null; }
     ok('CB-ADD-12 a throwing SpaceHome degrades to New task alone', !!entries && entries.length === 1);
   }
+
+  {
+    const setOpens = [];
+    global.customJS = Object.assign(baseCJS(), { SpaceHome: SpaceHomeStatics, TaskSets: { open: (o) => setOpens.push(o) } });
+    const entries = await inst.quickAddEntries({});
+    ok('CB-ADD-16 with TaskSets loaded, New from set follows New task, before the captures',
+      JSON.stringify(entries.map((e) => e.label)) === JSON.stringify(['New task', 'New from set', 'Meeting', 'Sticky Note', 'Trip']) && /svg/.test(entries[1].icon));
+    entries[1].onSelect();
+    ok('CB-ADD-17 New from set opens the TaskSets dialog like New task ({surface:"home", today})',
+      setOpens.length === 1 && setOpens[0].surface === 'home' && setOpens[0].today === '2026-11-11');
+  }
   global.app = prevApp; global.customJS = prevCJS; global.activeDocument = prevAD; global.window = prevWin; global.Notice = prevNotice;
 }
 

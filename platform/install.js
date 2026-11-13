@@ -1343,6 +1343,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyRecurringTasksMigrationHeal(tp, mech, variables, history, git);   // NEW recurring-tasks cycle — migrates legacy Recurring Tasks.md registry entries (checked + unchecked) into real rolling spice/tasks/*.md notes; ungated (idempotent via per-title exists-check), never touches/deletes the original registry
   await applyTaskDueScheduledRenameMigration(tp, mech, variables, history, git);   // NEW subtasks-and-dialog-polish cycle — renames scheduled -> due on every existing task note (open + _done/ + _trash/); ungated, idempotent, .sauce-backup before write. MUST run before any consumer relies on TaskEntity.queryToday's due-only bucketing.
+  await applyTaskSetsSeedHeal(tp, mech, history, git);                         // task sets — seeds spice/tasks/_sets/ with PR rollout + Incident only when that folder is absent (gated manifest.name==="task-entity"); never overwrites, never throws.
   await applyProjectLinksHubBackfill(tp, mech, variables, history, git);       // NEW (Project Links Wiring PR3) — creates spice/projects/<slug>/Links Hub.md for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectMeetingsPageBackfill(tp, mech, variables, history, git);   // NEW — creates spice/projects/<slug>/Meetings.md (project-scoped meetings list) for every project lacking one (skip-if-exists); ungated backfill, never overwrites
   await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
@@ -10249,7 +10250,7 @@ async function applyRecurringTasksMigrationHeal(tp, manifest, variables, history
   // or under the qualified name a vault-wide clash gave it — found by its
   // `source: migrated-from-registry` title.
   const migratedTitles = new Set();
-  for (const f of await _listTaskNotes(adapter, tasksRoot, ["_done", "_trash"])) {
+  for (const f of await _listTaskNotes(adapter, tasksRoot, ["_done", "_trash", "_sets"])) {
     let body;
     try { body = await adapter.read(f); } catch (_e) { continue; }
     const fm = _parseFrontmatterStrict(body) || {};
@@ -10479,7 +10480,7 @@ async function applyTaskDueScheduledRenameMigration(tp, manifest, variables, his
   for (const root of roots) {
     const exists = await adapter.exists(root).catch(() => false);
     if (!exists) continue;
-    const skip = root === "spice/tasks" ? ["_done", "_trash"] : [];
+    const skip = root === "spice/tasks" ? ["_done", "_trash", "_sets"] : [];
     for (const f of await _listTaskNotes(adapter, root, skip)) files.push(f);
   }
 
@@ -11929,8 +11930,8 @@ function _taskFolderName(title, ctx) {
 // _listTaskNotes — the task notes under `root`: the flat `.md` files directly
 // in it plus every folder note (`<Name>/<Name>.md`) at any depth below.
 // `skip` names root-level subfolders that are not walked (the open-task heals
-// pass ["_done", "_trash"], the same two folders they skipped when they only
-// read the top level). Other files inside task folders are not task notes.
+// pass ["_done", "_trash", "_sets"]: the two folders they skipped when they only
+// read the top level, and the task sets folder). Other files inside task folders are not task notes.
 async function _listTaskNotes(adapter, root, skip) {
   const skipped = new Set((skip || []).map((s) => root + "/" + s));
   const out = [];
@@ -12040,7 +12041,7 @@ async function applyTaskNoteHeal(tp, history, git) {
     if (!(await adapter.exists(ROOT).catch(() => false))) return;
 
     // Flat top-level notes + folder notes at any depth (skip _trash/ + _done/).
-    const topLevel = await _listTaskNotes(adapter, ROOT, ["_done", "_trash"]);
+    const topLevel = await _listTaskNotes(adapter, ROOT, ["_done", "_trash", "_sets"]);
     if (!topLevel.length) return;
 
     const OLD_NAME_RE = /^task-\d{8}-\d{6}-[0-9a-f]{4}$/;
@@ -12324,7 +12325,7 @@ async function applyTaskNoteProjectSlugHeal(tp, history, git) {
     const ROOT = "spice/tasks";
     if (!(await adapter.exists(ROOT).catch(() => false))) return;
 
-    const topLevel = await _listTaskNotes(adapter, ROOT, ["_done", "_trash"]);
+    const topLevel = await _listTaskNotes(adapter, ROOT, ["_done", "_trash", "_sets"]);
     if (!topLevel.length) return;
 
     let scanned = 0, healed = 0, warned = 0;
@@ -12596,7 +12597,7 @@ async function applyTaskNoteChromeHrHeal(tp, history, git) {
     const ROOT = 'spice/tasks';
     if (!(await adapter.exists(ROOT))) return;
 
-    const files = await _listTaskNotes(adapter, ROOT, ['_done', '_trash']);
+    const files = await _listTaskNotes(adapter, ROOT, ['_done', '_trash', '_sets']);
     if (!files.length) return;
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -12638,6 +12639,10 @@ async function applyTaskNoteChromeHrHeal(tp, history, git) {
 
 const _TF_ROOT = "spice/tasks";
 
+// Task sets (type: task-set notes, TaskSets in task-sets.js) live here. No
+// task heal, plan or scan reads, moves or reports anything inside it.
+const _TF_SETS = _TF_ROOT + "/_sets";
+
 // The hidden line TaskFolders.apply writes above its "Applied" heading; same
 // string as TaskFolders._appliedMark (task-folders.js).
 const _TF_APPLIED_MARK = "<!-- task-folders:applied -->";
@@ -12664,10 +12669,11 @@ function _tfIsFolderNote(p) {
 
 // Mirror of TaskEntity._isTaskFolder / parentNotePathOf: a folder note's
 // parent is the folder note of the folder directly above it, unless that
-// folder is the task root, _done, _done/YYYY(/MM) or _trash.
+// folder is the task root, _done, _done/YYYY(/MM), _trash or inside _sets.
 function _tfIsTaskFolder(dir) {
   if (dir.indexOf(_TF_ROOT + "/") !== 0) return false;
   if (dir === _TF_ROOT + "/_done" || dir === _TF_ROOT + "/_trash") return false;
+  if (dir === _TF_SETS || dir.indexOf(_TF_SETS + "/") === 0) return false;
   if (/^spice\/tasks\/_done\/\d{4}(\/\d{2})?$/.test(dir)) return false;
   return true;
 }
@@ -12779,6 +12785,7 @@ function planTaskFolders(notes, allMdPaths, otherNotes, opts) {
   const byPath = new Map();
   for (const n of (notes || [])) {
     if (!n || typeof n.path !== "string" || n.path.indexOf(_TF_ROOT + "/") !== 0) continue;
+    if (n.path.indexOf(_TF_SETS + "/") === 0) continue;
     const fm = n.fm || {};
     if (fm.type != null && _tfStr(fm.type).trim() !== "task") continue;
     if (byPath.has(n.path)) continue;
@@ -13181,7 +13188,7 @@ function planTaskStrays(strays, allMd, projectSlugs, today) {
   const slugs = new Set(projectSlugs || []);
   const folderNotes = (allMd || []).filter((p) => {
     if (p.indexOf(_TF_ROOT + "/") !== 0) return false;
-    if (p.indexOf(_TF_ROOT + "/_trash/") === 0) return false;
+    if (p.indexOf(_TF_ROOT + "/_trash/") === 0 || p.indexOf(_TF_SETS + "/") === 0) return false;
     const parts = p.split("/");
     return parts.length >= 4 && parts[parts.length - 2] === parts[parts.length - 1].replace(/\.md$/i, "");
   });
@@ -13396,6 +13403,7 @@ async function applyTaskDocHeaderHeal(tp, history, git) {
       if (depth >= 32) return;
       for (const raw of (listing.folders || [])) {
         const sub = String(raw).replace(/^\/+/, "");
+        if (sub === _TF_SETS) continue;
         if (!sub.substring(sub.lastIndexOf("/") + 1).startsWith(".")) await walk(sub, depth + 1);
       }
     };
@@ -13417,6 +13425,93 @@ async function applyTaskDocHeaderHeal(tp, history, git) {
   } catch (e) {
     history?.push({ event: "warning", step: "task_doc_header_heal", name: "task-entity",
       reason: `task note header heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      ...stamp(), attempted_at: new Date().toISOString() });
+  }
+}
+
+// _TASK_SET_HEADER — the callout every seed set starts with, so a set note
+// explains its own format to whoever edits it. TaskSets.parse skips it
+// (a `>` line is never a subtask).
+const _TASK_SET_HEADER = [
+  "> [!info] Task set",
+  "> **+ → New from set** makes a task from this note. Each `- [ ]` line is a subtask: indent a line to nest it under the one above, and end it with `(due +2)` to make it due two work days after the day you use the set. The text under `## Prompt` becomes a prompt note and the text under `## Comms` a comms note. `{{task}}` is replaced with the task's title.",
+].join("\n");
+
+// _TASK_SETS_SEED — the two sets a vault starts with, by file name under
+// spice/tasks/_sets/. run-task-folders-plan.js parses each with TaskSets.parse.
+const _TASK_SETS_SEED = {
+  "PR rollout.md": [
+    "---", "type: task-set", "---", "", _TASK_SET_HEADER, "",
+    "## Subtasks", "",
+    "- [ ] Open the PR",
+    "- [ ] CI green",
+    "- [ ] Review",
+    "\t- [ ] Address review comments",
+    "- [ ] Merge (due +1)",
+    "- [ ] Deploy (due +1)",
+    "- [ ] Verify in production (due +2)",
+    "",
+    "## Comms", "",
+    "Heads up: {{task}} goes out today.",
+    "",
+    "- PR: <link>",
+    "- What changes: <one line>",
+    "- Risk: <low / medium / high>. Rollback: <how>",
+    "",
+    "I'll post here once it's verified in production.",
+    "",
+  ].join("\n"),
+  "Incident.md": [
+    "---", "type: task-set", "---", "", _TASK_SET_HEADER, "",
+    "## Subtasks", "",
+    "- [ ] Triage impact and severity",
+    "\t- [ ] Post a status update",
+    "- [ ] Mitigate",
+    "- [ ] Find the root cause (due +1)",
+    "- [ ] Follow-ups (due +3)",
+    "\t- [ ] Write the postmortem (due +3)",
+    "",
+    "## Prompt", "",
+    "Help me investigate an incident: {{task}}.",
+    "",
+    "What I know so far: <symptoms, when it started, who is affected>",
+    "",
+    "1. Check deploys, config changes and alerts around the start time.",
+    "2. Read the relevant logs and metrics and tell me what changed.",
+    "3. Give me the most likely root cause with evidence, a safe mitigation, and how to verify it worked.",
+    "",
+    "Read only: change nothing in production, and ask before running anything that writes.",
+    "",
+  ].join("\n"),
+};
+
+// applyTaskSetsSeedHeal — gives a vault the seed task sets (PR rollout,
+// Incident) in spice/tasks/_sets/, only when that folder does not exist yet.
+// Once it exists, nothing in it is ever written or overwritten: the sets are
+// the user's to edit or delete. Gated to the task-entity manifest; never throws.
+async function applyTaskSetsSeedHeal(tp, manifest, history, git) {
+  const stamp = () => ({ git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty });
+  if (!manifest || manifest.name !== "task-entity") return;
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    if (await adapter.exists(_TF_SETS).catch(() => false)) return;
+    for (const dir of ["spice", _TF_ROOT, _TF_SETS]) {
+      if (await adapter.exists(dir).catch(() => false)) continue;
+      try { await adapter.mkdir(dir); } catch (_e) { /* made meanwhile */ }
+    }
+    const written = [];
+    for (const [name, body] of Object.entries(_TASK_SETS_SEED)) {
+      const p = `${_TF_SETS}/${name}`;
+      if (await adapter.exists(p).catch(() => false)) continue;
+      await adapter.write(p, body);
+      written.push(p);
+    }
+    history?.push({ event: "info", step: "task_sets_seed", name: "task-entity", action: "seeded",
+      targets: written, ...stamp(), attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "task_sets_seed", name: "task-entity",
+      reason: `task sets seed failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
       ...stamp(), attempted_at: new Date().toISOString() });
   }
 }
@@ -13456,7 +13551,7 @@ async function applyTaskFoldersHeal(tp, history, git) {
 
     const notes = [];
     for (const p of md) {
-      if (p.indexOf(_TF_ROOT + "/") !== 0) continue;
+      if (p.indexOf(_TF_ROOT + "/") !== 0 || p.indexOf(_TF_SETS + "/") === 0) continue;
       let body;
       try { body = await adapter.read(p); } catch (_e) { continue; }
       const fm = _tfReadFm(body);
@@ -20628,6 +20723,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.renderTaskStraysReport = renderTaskStraysReport;
     module.exports.applyTaskStraysHeal = applyTaskStraysHeal;
     module.exports.applyTaskDocHeaderHeal = applyTaskDocHeaderHeal;
+    module.exports.applyTaskSetsSeedHeal = applyTaskSetsSeedHeal;
+    module.exports._TASK_SETS_SEED = _TASK_SETS_SEED;
     module.exports._taskDocWithHeader = _taskDocWithHeader;
     module.exports._TASK_DOC_HEADER = _TASK_DOC_HEADER;
     module.exports.applyRecurringTasksMigrationHeal = applyRecurringTasksMigrationHeal;

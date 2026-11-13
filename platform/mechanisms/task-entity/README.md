@@ -144,6 +144,24 @@ is a fuzzy picker over every task and task note.
 - **Keys.** Enter opens the note; Mod+Enter (or Cmd/Ctrl-click) opens it in a
   new tab. On the phone a tap opens it.
 
+## Task sets
+
+Reusable starter bundles (`TaskSets`, `task-sets.js`; spec:
+`Docs/superpowers/specs/2026-11-13-task-flow-design.md`, section 7).
+
+- **Where.** `spice/tasks/_sets/<Name>.md` with `type: task-set`. Each `- [ ]`
+  line is a subtask (indent to nest; a trailing `(due +2)` makes it due two
+  work days after the day the set is used), `## Prompt` holds a prompt note's
+  text and `## Comms` a comms note's. `{{task}}` is replaced with the title.
+- **New from set.** In the + menus (Home and every chrome bar) and the
+  `Sauce: New task from set` command: pick a set, type a title and an optional
+  due date; the task, its subtasks (each folder inside its parent's) and its
+  notes are created in one step and the task opens.
+- **Not tasks.** Task lists, the task-folder heals, the stray scans and the
+  note-header heal all skip `_sets/`, like `_done/` and `_trash/`.
+- **Seeds.** The installer's `applyTaskSetsSeedHeal` writes `PR rollout` and
+  `Incident` only when `_sets/` does not exist, and never overwrites.
+
 ## API (`customJS.TaskEntity`)
 
 All methods are static (with instance delegators, so cross-class calls via

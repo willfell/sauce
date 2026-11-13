@@ -1080,6 +1080,14 @@
       "lane": "parallel"
     },
     {
+      "id": "task-sets",
+      "cmd": [
+        "node",
+        "platform/test/run-task-sets.js"
+      ],
+      "lane": "parallel"
+    },
+    {
       "id": "todo-collapse",
       "cmd": [
         "node",

@@ -608,6 +608,26 @@ class SpaceHome {
       } catch (_e) { /* never throw out of a click handler */ }
     };
 
+    // Menu, second entry — "New from set": a task with its subtasks and notes
+    // from a set in spice/tasks/_sets/ (TaskSets). Shown once TaskSets loads.
+    const cjsSets = (typeof customJS !== "undefined" && customJS)
+      || (typeof window !== "undefined" && window.customJS)
+      || null;
+    if (cjsSets && cjsSets.TaskSets && typeof cjsSets.TaskSets.open === "function") {
+      const setBtn = menu.createEl("button", { cls: "sauce-home-add-item sauce-home-new-from-set" });
+      setBtn.setAttribute("type", "button");
+      setBtn.dataset.captureKey = "task-set";
+      const setIcon = setBtn.createEl("span", { cls: "sauce-home-capture-icon" });
+      setIcon.innerHTML =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="13" height="13" x="8" y="8" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/><path d="m12 14 2 2 3-3"/></svg>`;
+      const setLabel = setBtn.createEl("span", { cls: "sauce-home-capture-label" });
+      setLabel.textContent = "New from set";
+      setBtn.onclick = () => {
+        setMenu(false);
+        try { cjsSets.TaskSets.open({ surface: "home", today }); } catch (_e) { /* never throw out of a click handler */ }
+      };
+    }
+
     // Menu, remaining entries — the other capture actions: Meeting, Sticky Note, Article,
     // Journal, Trip — gated on what this vault has installed (_availableCaptures).
     for (const item of await SpaceHome._availableCaptures()) {

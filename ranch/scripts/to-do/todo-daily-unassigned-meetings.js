@@ -29,7 +29,7 @@ class ToDoDailyUnassignedMeetings {
         try {
             // The archives are excluded in the SOURCE so Dataview never builds a page
             // object for a finished or trashed task; the status check below decides the rest.
-            const raw = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash"').where(p =>
+            const raw = dv.pages('"spice/tasks" and -"spice/tasks/_done" and -"spice/tasks/_trash" and -"spice/tasks/_sets"').where(p =>
                 p && p.type === 'task'
                 && p.file && p.file.path
                 && (typeof TE.isOpenTask === 'function' ? TE.isOpenTask(p) : p.status === 'open'));

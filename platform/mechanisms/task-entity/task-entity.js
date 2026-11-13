@@ -453,6 +453,7 @@ class TaskEntity {
         const root = TaskEntity.TASK_ROOT;
         if (dir.indexOf(root + '/') !== 0) return false;
         if (dir === root + '/_done' || dir === root + '/_trash') return false;
+        if (dir === root + '/_sets' || dir.indexOf(root + '/_sets/') === 0) return false;
         if (/^spice\/tasks\/_done\/\d{4}(\/\d{2})?$/.test(dir)) return false;
         return true;
     }
@@ -476,6 +477,7 @@ class TaskEntity {
         let take = 1;
         if (segs[0] === '_done') take = 4;
         else if (segs[0] === '_trash') take = 2;
+        else if (segs[0] === '_sets') return '';
         if (segs.length <= take) return '';
         return root + segs.slice(0, take).join('/');
     }

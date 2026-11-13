@@ -1852,7 +1852,7 @@ class TaskDialog {
             for (const f of app.vault.getMarkdownFiles() || []) {
                 try {
                     const fp = String((f && f.path) || '');
-                    if (fp.indexOf('spice/tasks/') !== 0 || fp.indexOf('spice/tasks/_trash/') === 0) continue;
+                    if (fp.indexOf('spice/tasks/') !== 0 || fp.indexOf('spice/tasks/_trash/') === 0 || fp.indexOf('spice/tasks/_sets/') === 0) continue;
                     const ctime = Number(f.stat && f.stat.ctime);
                     if (!(ctime >= cutoff)) continue;
                     const cache = app.metadataCache.getFileCache(f);
@@ -1895,7 +1895,7 @@ class TaskDialog {
                 const parent = TaskDialog._linkBasename(fmx.parent_task);
                 if (name && parent && !parentOf.has(name)) parentOf.set(name, parent);
                 const rest = p.slice(PREFIX.length);
-                if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0) continue;
+                if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0 || rest.indexOf('_sets/') === 0) continue;
                 if (fmx.status && fmx.status !== 'open') continue;
                 cand.push({ name, path: p, mtime: (f.stat && Number(f.stat.mtime)) || 0 });
             }
@@ -2145,7 +2145,7 @@ class TaskDialog {
         const root = TE.TASK_ROOT + '/';
         if (path.indexOf(root) !== 0 || !TE.isFolderNote(path)) return null;
         const rest = path.slice(root.length);
-        if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0) return null;
+        if (rest.indexOf('_done/') === 0 || rest.indexOf('_trash/') === 0 || rest.indexOf('_sets/') === 0) return null;
         return { folder: TE.taskFolderOf(path), title: parent.title };
     }
 
