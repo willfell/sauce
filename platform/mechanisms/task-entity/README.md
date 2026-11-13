@@ -231,6 +231,41 @@ In a meeting note, a line starting with `->` or `→` is an action item
   and a second Make tasks on the same meeting is refused while one runs.
   The summary notice counts comms notes that could not be made.
 
+## Now, Plan the day and Shut down
+
+The day rhythm (`TaskDayPlan`, `task-day-plan.js`; spec:
+`Docs/superpowers/specs/2026-11-13-task-flow-design.md`, sections 3 and 4).
+
+- **Now.** A task may carry `pinned_at:` (ISO). The open task with the newest
+  `pinned_at` is Now; a done or trashed one drops out with no write. Pin from
+  the pin button on the task card header or Pin as Now in a To-Do row's ⋯
+  menu. Pinning sets `pinned_at` on that task first, then removes it from
+  every other task that has it; Unpin removes it. Both go through
+  `RenderSafe.mutate`.
+- **Now card.** At the top of Home and of today's daily note: the title, the
+  due chip, subtask progress, Copy prompt (newest prompt note), Copy message
+  (newest comms note with no `sent_at`), Open and Unpin. A copy button shows
+  only when there is a note to copy from.
+- **Plan the day.** Under the Now card: open on Home, collapsed on today's
+  daily note (never on other days). Now, Overdue (oldest due first), Due
+  today, today's meetings (`SpaceDailyDashboard.selectMeetings`) and Waiting
+  (`TaskDocs.waiting`; left out until that loads), with the counts in the
+  head. Every row opens its note. The panel stays open or closed as you left
+  it for the session. Home draws it as its own block and tells the dashboard
+  not to (`dayPlan: false`).
+- **Shut down.** The button on the panel head and the command
+  `Sauce: Shut down the day` (`sauce:shut-down-day`, `TaskDayPlanInit`).
+  The modal lists Done today (read only) and Still open (overdue and due
+  today), each with Tomorrow, Next work day (Mon–Fri), Pick date, Done or
+  Leave (the default). Finish closes the modal, applies the choices one task
+  at a time through `TaskTodayList.reschedule` and `TaskDialog.markDone`, and
+  writes a `## Shutdown` section to today's daily note (`Done: N` with links,
+  `Moved: N` as `title → date`, `Still waiting: N`) with `app.vault.process`
+  inside `RenderSafe.mutate`. A second run the same day replaces that
+  section, from its heading to the next `## ` heading or the end of the note.
+  With no daily note for today the choices still apply and a notice says the
+  summary was not saved.
+
 ## API (`customJS.TaskEntity`)
 
 All methods are static (with instance delegators, so cross-class calls via

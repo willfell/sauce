@@ -1507,6 +1507,12 @@ class TaskTodayList {
                     entries.push({ label: 'Move up', onSelect: () => { try { opts.onMove(task, -1); } catch (_e) {} } });
                     entries.push({ label: 'Move down', onSelect: () => { try { opts.onMove(task, 1); } catch (_e) {} } });
                 }
+                // Pin as Now / Unpin (TaskDayPlan, spec §4), once it has loaded.
+                try {
+                    const DP = window.customJS && window.customJS.TaskDayPlan;
+                    const pin = DP && typeof DP.menuEntry === 'function' ? DP.menuEntry(task) : null;
+                    if (pin) entries.push(pin);
+                } catch (_e) {}
                 entries.push({ label: 'Delete', danger: true, onSelect: () => doDelete() });
                 MP.open(entries, { anchor: moreBtn || (ev && ev.currentTarget) || undefined });
             } catch (e) {

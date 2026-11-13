@@ -406,6 +406,45 @@ function descendants(el) {
     global.window.customJS = undefined;
   }
 
+  // ── HOME-PLAN: Now + Plan the day (TaskDayPlan) as their own node between the
+  // head and the dashboard, open, and the dashboard told not to draw them.
+  installMoment("2026-07-02", 6);
+  {
+    const dv = makeDv();
+    const calls = [];
+    const model = { today: "2026-07-02", now: { path: "spice/tasks/A/A.md" } };
+    global.customJS = {
+      SpaceDailyDashboard: { computeCounts: () => ({ today: 1, overdue: 0, done: 0, meetings: 0 }) },
+      TaskDayPlan: {
+        build: (o) => { calls.push(["build", o]); return model; },
+        signature: () => "sig-1",
+        renderDay: (host, o) => { calls.push(["render", o]); host.createEl("div", { cls: "sauce-dp-now" }); return model; },
+      },
+    };
+    global.window.customJS = global.customJS;
+    await home_.render(dv, {});
+    const top = dv.container.children.map((k) => k.cls || "");
+    assertTrue("HOME-PLAN-1 the day plan is its own top-level node between the head and the dashboard",
+      JSON.stringify(top) === JSON.stringify(["sauce-home", "sauce-day-plan", "customjs-guard-mount"]), JSON.stringify(top));
+    const render = calls.find((c) => c[0] === "render");
+    assertTrue("HOME-PLAN-2 it draws the built model open, for Home",
+      !!render && render[1].model === model && render[1].surface === "home" && render[1].open === true && render[1].today === "2026-07-02",
+      JSON.stringify(render && render[1] && { surface: render[1].surface, open: render[1].open }));
+    const dash = dv._viewCalls.find((c) => c.input && c.input.class === "SpaceDailyDashboard");
+    assertEq("HOME-PLAN-3 the dashboard is told not to draw the day plan again", dash && dash.input.args[0].dayPlan, false);
+    await home_.render(dv, {});
+    assertEq("HOME-PLAN-4 an unchanged render keeps one day plan node",
+      dv.container.children.filter((k) => k.cls === "sauce-day-plan").length, 1);
+    global.customJS = { SpaceDailyDashboard: { computeCounts: () => ({ today: 1, overdue: 0, done: 0, meetings: 0 }) } };
+    global.window.customJS = global.customJS;
+    const dv2 = makeDv();
+    await home_.render(dv2, {});
+    assertTrue("HOME-PLAN-5 before TaskDayPlan loads there is no day plan node",
+      !dv2.container.children.some((k) => k.cls === "sauce-day-plan"));
+    delete global.customJS;
+    global.window.customJS = undefined;
+  }
+
   // ── HOME-GLANCE render: an empty day renders NO glance element ─────────────
   installMoment("2026-07-02", 6);
   {
