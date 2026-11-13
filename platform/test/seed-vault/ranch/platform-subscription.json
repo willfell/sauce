@@ -55,7 +55,7 @@
     },
     {
       "name": "task-entity",
-      "version": "0.31.0"
+      "version": "0.32.0"
     },
     {
       "name": "modal",
@@ -115,7 +115,7 @@
     },
     {
       "name": "chrome-bar",
-      "version": "0.7.0"
+      "version": "0.8.0"
     },
     {
       "name": "section-explorer",
@@ -153,11 +153,11 @@
     },
     {
       "name": "project",
-      "version": "1.71.0"
+      "version": "1.72.0"
     },
     {
       "name": "to-do",
-      "version": "0.39.0"
+      "version": "0.40.0"
     },
     {
       "name": "journal",
