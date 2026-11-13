@@ -991,6 +991,9 @@ class ToDoDailyFilterView {
 
         const TAB_LABELS = { today: 'Today', week: 'This week', overdue: 'Overdue', backlog: 'Backlog', all: 'All open', undated: 'No date', waiting: 'Waiting', ...S.labels };
         const tabKeys = S.tabs.filter((key) => key !== 'waiting' || !!TDocs);
+        // A saved Waiting tab with TaskDocs missing falls back to the default
+        // for this render only; the saved choice returns once TaskDocs loads.
+        if (!tabKeys.includes(prefs.tab)) prefs = { ...prefs, tab: S.defaults.tab };
         const waitingItems = () => (TDocs ? TDocs.waiting(comms, loaded, todayStr) : []);
         const tools = Array.isArray(S.tools) ? S.tools : ['sort', 'group', 'select'];
         const tabButtons = {};

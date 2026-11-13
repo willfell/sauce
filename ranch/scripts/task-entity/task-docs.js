@@ -36,7 +36,8 @@ class TaskDocs {
     waitingText(days) { return TaskDocs.waitingText(days); }
     commsItem(page) { return TaskDocs.commsItem(page); }
     waiting(items, tasks, today) { return TaskDocs.waiting(items, tasks, today); }
-    followUps(app, docPath) { return TaskDocs.followUps(app, docPath); }
+    followUps(app, docPath, index) { return TaskDocs.followUps(app, docPath, index); }
+    replyNotice(res) { return TaskDocs.replyNotice(res); }
     followUpDate(choice, today) { return TaskDocs.followUpDate(choice, today); }
     followUpTitle(to, noteTitle) { return TaskDocs.followUpTitle(to, noteTitle); }
     firstNames(to) { return TaskDocs.firstNames(to); }
@@ -731,7 +732,7 @@ class TaskDocs {
         for (const item of Array.isArray(items) ? items : []) {
             if (!item || TaskDocs.kindOf(item.kind) !== 'comms') continue;
             const path = String(item.path || '');
-            if (!path || /(^|\/)_(done|trash)\//.test(path)) continue;
+            if (!path || TaskDocs._closed(path)) continue;
             const base = path.split('/').pop().replace(/\.md$/i, '').toLowerCase();
             const st = TaskDocs.commsState(item, answered.has(base) ? [{ status: 'done' }] : [], today);
             if (st.state !== 'waiting') continue;
@@ -745,22 +746,43 @@ class TaskDocs {
         return out;
     }
 
-    static _followUpsIn(kids, noteName) {
-        const want = String(noteName || '').toLowerCase();
-        if (!want) return [];
-        return (kids || [])
-            .filter((k) => k && k.fm && String(k.fm.source || '') === 'comms' && TaskDocs._linkBase(k.fm.source_note).toLowerCase() === want)
-            .map((k) => ({ path: k.file.path, status: String(k.fm.status || 'open').trim().toLowerCase() || 'open' }));
+    /**
+     * Every comms follow-up task in the vault by the note it names: a map of
+     * lower-cased source_note basename to [{ path, status }]. The same match
+     * `waiting` makes over Dataview's tasks, so the header card, the Notes
+     * rows and the Waiting tab always agree. Never throws.
+     */
+    static _followUpIndex(app) {
+        const map = new Map();
+        try {
+            for (const f of app.vault.getMarkdownFiles() || []) {
+                if (!f || !/^spice\/tasks\//.test(String(f.path || ''))) continue;
+                const fm = TaskDocs._fmOf(app, f);
+                if (!fm || String(fm.type || '') !== 'task' || String(fm.source || '') !== 'comms') continue;
+                const base = TaskDocs._linkBase(fm.source_note).toLowerCase();
+                if (!base) continue;
+                if (!map.has(base)) map.set(base, []);
+                map.get(base).push({ path: f.path, status: String(fm.status || 'open').trim().toLowerCase() || 'open' });
+            }
+        } catch (_e) {}
+        return map;
     }
 
-    /** The follow-up tasks of the comms note at `docPath`: subtasks of its task naming it in source_note. */
-    static followUps(app, docPath) {
+    /** The follow-up tasks of the comms note at `docPath`: any task with source: comms naming it in source_note. */
+    static followUps(app, docPath, index) {
         try {
-            const taskPath = TaskDocs.taskPathOf(docPath);
-            if (!taskPath || !app || !app.vault) return [];
-            const kids = TaskDocs._childTasks(app, taskPath.slice(0, taskPath.lastIndexOf('/')));
-            return TaskDocs._followUpsIn(kids, String(docPath).split('/').pop().replace(/\.md$/i, ''));
+            if (!app || !app.vault) return [];
+            const name = String(docPath).split('/').pop().replace(/\.md$/i, '').toLowerCase();
+            return ((index || TaskDocs._followUpIndex(app)).get(name) || []).slice();
         } catch (_e) { return []; }
+    }
+
+    static _closed(path) { return /(^|\/)_(done|trash)\//.test(String(path || '')); }
+
+    /** The notice after Got reply when some follow-up tasks could not be closed; '' when all were. Pure. */
+    static replyNotice(res) {
+        const n = res && Number.isFinite(res.failed) ? res.failed : 0;
+        return n > 0 ? 'Reply saved; ' + n + (n === 1 ? ' follow-up' : ' follow-ups') + ' still open' : '';
     }
 
     /** `day` plus `n` working days (Saturday and Sunday skipped). Pure. */
@@ -1099,10 +1121,12 @@ class TaskDocs {
                     if (!r.ok) throw new Error(r.reason);
                     return r;
                 },
-                revert: () => { try { if (parent) parent.insertBefore(row, next || null); } catch (_e) {} },
+                revert: () => { try { if (parent) parent.insertBefore(row, next && next.parentNode === parent ? next : null); } catch (_e) {} },
             });
             if (res && res.ok) {
                 TaskDocs.markSeen(item.path);
+                const warn = TaskDocs.replyNotice(res.value);
+                if (warn) TaskDocs._notice(warn, 6000);
                 try { if (typeof o.onReplied === 'function') o.onReplied(item, stamp); } catch (_e) {}
             }
         });
@@ -1137,14 +1161,18 @@ class TaskDocs {
 
     /**
      * What Resume does with a handoff's `session:` value: { kind: 'url', url }
-     * for a link, { kind: 'id', id, command: 'claude --resume <id>' } for an
-     * id, null when blank. Pure.
+     * for an http(s) link or a bare claude.ai/ one (https added),
+     * { kind: 'id', id, command: 'claude --resume <id>' } for an id of
+     * letters, digits, _ and -, { kind: 'invalid', value } for anything else,
+     * null when blank. Pure.
      */
     static resumeAction(session) {
         const s = String(session == null ? '' : session).trim();
         if (!s) return null;
         if (/^https?:\/\//i.test(s)) return { kind: 'url', url: s };
-        return { kind: 'id', id: s, command: 'claude --resume ' + s };
+        if (/^claude\.ai\//i.test(s)) return { kind: 'url', url: 'https://' + s };
+        if (/^[A-Za-z0-9_-]+$/.test(s)) return { kind: 'id', id: s, command: 'claude --resume ' + s };
+        return { kind: 'invalid', value: s };
     }
 
     static get SEEN_KEY() { return 'sauce-taskdoc-seen'; }
@@ -1686,11 +1714,12 @@ class TaskDocs {
                 }
                 commsRow.style.display = chip ? '' : 'none';
                 claudeBtn.style.display = kind === 'prompt' && taskFile ? '' : 'none';
-                sentBtn.style.display = st && st.state === 'unsent' ? '' : 'none';
-                replyBtn.style.display = st && st.state === 'waiting' ? '' : 'none';
+                const closed = TaskDocs._closed(path);
+                sentBtn.style.display = st && st.state === 'unsent' && !closed ? '' : 'none';
+                replyBtn.style.display = st && st.state === 'waiting' && !closed ? '' : 'none';
                 const ra = kind === 'handoff' ? TaskDocs.resumeAction(fm.session) : null;
                 resumeBtn.style.display = ra ? '' : 'none';
-                try { resumeBtn.setAttribute('title', ra ? (ra.kind === 'url' ? 'Open the session' : 'Copy ' + ra.command) : ''); } catch (_e) {}
+                try { resumeBtn.setAttribute('title', ra ? (ra.kind === 'url' ? 'Open the session' : ra.kind === 'id' ? 'Copy ' + ra.command : 'Not a session id or link') : ''); } catch (_e) {}
             };
             paintExtras();
 
@@ -1719,6 +1748,7 @@ class TaskDocs {
                     try { window.open(ra.url); } catch (_e) { TaskDocs._notice('Could not open the session', 4000); }
                     return;
                 }
+                if (ra.kind !== 'id') { TaskDocs._notice('This session value isn\'t a session id or link', 5000); return; }
                 const ok = await TaskDocs._copyText(ra.command);
                 TaskDocs._notice(ok ? 'Copied: ' + ra.command : 'Could not copy the resume command', ok ? 3500 : 5000);
             });
@@ -1773,7 +1803,11 @@ class TaskDocs {
                     },
                     revert: () => { sent.replied_at = prior; paintExtras(); },
                 });
-                if (res && res.ok) TaskDocs.markSeen(path);
+                if (res && res.ok) {
+                    TaskDocs.markSeen(path);
+                    const warn = TaskDocs.replyNotice(res.value);
+                    if (warn) TaskDocs._notice(warn, 6000);
+                }
             });
 
             if (taskFile) {
@@ -1850,7 +1884,7 @@ class TaskDocs {
                 const now = Date.now();
                 const today = TaskDocs._today();
                 const seenAt = TaskDocs.readSeen();
-                let kids = null;
+                let followIndex = null;
                 for (const d of docs) {
                     const meta = TaskDocs._kind(d.kind);
                     const row = listEl.createEl('div', { cls: 'sauce-tnv-doc is-' + d.kind });
@@ -1860,9 +1894,8 @@ class TaskDocs {
                     const titleSpan = main.createEl('span', { cls: 'sauce-tnv-doc-title', text: d.title });
                     let status = TaskDocs._ago(d.mtime, now);
                     if (d.kind === 'comms') {
-                        if (!kids) kids = TaskDocs._childTasks(app, taskPath.slice(0, taskPath.lastIndexOf('/')));
-                        const name = String(d.path).split('/').pop().replace(/\.md$/i, '');
-                        const st = TaskDocs.commsState(d.fm, TaskDocs._followUpsIn(kids, name), today);
+                        if (!followIndex) followIndex = TaskDocs._followUpIndex(app);
+                        const st = TaskDocs.commsState(d.fm, TaskDocs.followUps(app, d.path, followIndex), today);
                         if (st.state === 'waiting') status = TaskDocs.waitingText(st.days);
                         else if (st.state === 'answered') status = st.sentLabel;
                     }

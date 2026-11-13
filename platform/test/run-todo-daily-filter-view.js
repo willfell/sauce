@@ -1495,6 +1495,19 @@ process.exitCode = 1;
     assert(!env.rows.some((r) => r.title === 'Ping'), 'a note never draws as a task row');
   });
 
+  await okAsync('FL1-WAITING-TAB-FALLBACK a saved Waiting tab with TaskDocs missing shows the default tab, without losing the saved choice', async () => {
+    const env = makeRenderHarness();
+    const View = loadClass(env.windowShim);
+    env.storage.setItem(View.PREFS_KEY, JSON.stringify({ tab: 'waiting', sort: 'smart', group: 'none' }));
+    const { root } = await mount(env, PAGES, View);
+    assert(!buttonsOf(root).some((b) => /^Waiting/.test(b.textContent)), 'no Waiting tab');
+    const today = buttonsOf(root).find((b) => b.attributes.role === 'tab' && /^Today/.test(b.textContent));
+    assert.strictEqual(today.attributes['aria-selected'], 'true', 'Today is the active tab');
+    assert.deepStrictEqual(listTitles(root).sort(), ['Today high', 'Today low'], 'Today\'s tasks are listed');
+    assert.notStrictEqual(byClass(root, 'sauce-todo-filter-right')[0].style.display, 'none', 'the tools stay');
+    assert.strictEqual(JSON.parse(env.storage.getItem(View.PREFS_KEY)).tab, 'waiting', 'the saved choice is kept for when TaskDocs loads');
+  });
+
   await okAsync('RD-DV-GUARD a throwing TaskEntity during paint warns and never throws out of render', async () => {
     const env = makeRenderHarness();
     const broken = Object.create(TE);

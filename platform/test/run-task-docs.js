@@ -837,9 +837,163 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     const row = (manifest.claude_surface || []).map((s) => s.row).find((r) => r && r.path === 'spice/tasks/<Task>/notes/');
     ok('FL2-AGENTS the vault CLAUDE.md notes row tells sessions to write results into the task\'s notes/ folder and set session: on handoffs',
       row && /session:/.test(row.purpose) && /handoff/.test(row.purpose) && /notes\/ folder/.test(row.purpose) && /not as subtasks/.test(row.purpose), row && row.purpose);
-    const dialog = read('mechanisms/task-entity/task-dialog.js');
-    ok('FL1-QUICK-SOURCE-NOTE the + subtask path carries source_note, so a follow-up links back to its note',
-      /source_note: \(opts && opts\.source_note\) \|\| ''/.test(dialog));
+  }
+
+  {
+    const R = 'spice/tasks/Rollout';
+    const N = `${R}/notes/Rollout note.md`;
+    const app = makeApp({
+      [`${R}/Rollout.md`]: { fm: { type: 'task', title: 'PR rollout', status: 'open' } },
+      [N]: { fm: { type: 'task-doc', kind: 'comms', title: 'Rollout note' } },
+    });
+    app.fileManager = { processFrontMatter: async (f, fn) => { fn(f._fm); } };
+    app.metadataCache.getFirstLinkpathDest = (name) => Array.from(app._files.values()).find((f) => f.basename === name) || null;
+    app.metadataCache.on = () => ({});
+    app.metadataCache.offref = () => {};
+    app._setTimeout = () => 0;
+    const priorApp = win.app;
+    const priorMoment = win.moment;
+    const priorDialog = win.customJS.TaskDialog;
+    win.app = app;
+    win.moment = () => ({ format: (f) => (f === 'YYYY-MM-DDTHH:mm:ssZ' ? '2026-11-13T10:00:00-06:00' : f === 'YYYY-MM-DD' ? '2026-11-13' : '20261113') });
+    const DialogClass = new Function('window', 'Notice', `${read('mechanisms/task-entity/task-dialog.js')}\nreturn TaskDialog;`)(win, function () {});
+    win.customJS.TaskDialog = new DialogClass();
+    const res = await TD.markSent(app, N, { to: 'Jason Batai', via: 'Slack', due: '2026-11-17', stamp: '2026-11-13T10:00:00-06:00' });
+    const made = res.followUp ? app._files.get(res.followUp) : null;
+    ok('FL1-QUICK-SOURCE-NOTE Mark sent makes the follow-up through the real + subtask path: inside the task\'s folder, due that day, linked to its note and its task',
+      made && made.path.indexOf(`${R}/`) === 0 && made._fm.type === 'task' && made._fm.source === 'comms'
+      && made._fm.source_note === '[[Rollout note]]' && made._fm.due === '2026-11-17' && made._fm.parent_task === '[[Rollout]]'
+      && made._fm.title === 'Hear back from Jason: Rollout note'
+      && TD.followUps(app, N).length === 1, JSON.stringify(made && made._fm));
+    win.app = priorApp;
+    win.moment = priorMoment;
+    win.customJS.TaskDialog = priorDialog;
+  }
+
+  {
+    const notices = [];
+    const TDn = TaskDocs(win, function (m) { notices.push(m); });
+    ok('FL1-REPLY-NOTICE-PURE the reply notice names follow-ups still open, and is empty when all closed',
+      TDn.replyNotice({ failed: 1 }) === 'Reply saved; 1 follow-up still open' && TDn.replyNotice({ failed: 2 }) === 'Reply saved; 2 follow-ups still open'
+      && TDn.replyNotice({ failed: 0 }) === '' && TDn.replyNotice(null) === '');
+    const C = 'spice/tasks/Closer';
+    const app = makeApp({
+      [`${C}/Closer.md`]: { fm: { type: 'task', title: 'Closer' } },
+      [`${C}/notes/Ping.md`]: { fm: { type: 'task-doc', kind: 'comms', title: 'Ping', sent_at: '2026-11-10', replied_at: '' } },
+      'spice/tasks/Hear back from Ann/Hear back from Ann.md': { fm: { type: 'task', status: 'open', source: 'comms', source_note: '[[Ping]]' } },
+      'spice/tasks/_done/2026/11/Old/Old.md': { fm: { type: 'task', title: 'Old', status: 'done' } },
+      'spice/tasks/_done/2026/11/Old/notes/Old ping.md': { fm: { type: 'task-doc', kind: 'comms', title: 'Old ping' } },
+      'spice/tasks/_trash/Gone/notes/Gone ping.md': { fm: { type: 'task-doc', kind: 'comms', title: 'Gone ping', sent_at: '2026-11-10', replied_at: '' } },
+      'spice/tasks/Elsewhere/Elsewhere.md': { fm: { type: 'task', status: 'done', source: 'comms', source_note: '[[Answered ping]]' } },
+      [`${C}/notes/Answered ping.md`]: { fm: { type: 'task-doc', kind: 'comms', title: 'Answered ping', via: 'Slack', sent_at: '2026-11-10', replied_at: '' } },
+    });
+    app.fileManager = { processFrontMatter: async (f, fn) => { fn(f._fm); } };
+    const priorDialog = win.customJS.TaskDialog;
+    const priorRS = win.customJS.RenderSafe;
+    win.customJS.TaskDialog = { markDone: async () => ({ ok: false, reason: 'locked' }) };
+    win.customJS.RenderSafe = { mutate: async (o) => { try { await o.optimistic(); const value = await o.write(); return { ok: true, value }; } catch (error) { await o.revert(error); return { ok: false, error }; } } };
+    const mk = (tag, cls) => {
+      const el = { tag, className: cls || '', children: [], style: {}, _attrs: {}, _l: {}, _text: '', innerHTML: '', dataset: {}, parentNode: null };
+      el.classList = { add() {}, remove() {}, contains: () => false };
+      Object.defineProperty(el, 'textContent', { get: () => el._text + el.children.map((c) => c.textContent).join(''), set: (v) => { el._text = String(v); el.children = []; } });
+      Object.defineProperty(el, 'firstChild', { get: () => el.children[0] || null });
+      Object.defineProperty(el, 'nextSibling', { get: () => (el.parentNode ? el.parentNode.children[el.parentNode.children.indexOf(el) + 1] || null : null) });
+      el.createEl = (t, o) => { const c = mk(t, (o && o.cls) || ''); if (o && o.text != null) c._text = String(o.text); c.parentNode = el; el.children.push(c); return c; };
+      el.setAttribute = (k, v) => { el._attrs[k] = v; };
+      el.addEventListener = (k, fn) => { el._l[k] = fn; };
+      el.insertAdjacentHTML = () => {};
+      el.removeChild = (c) => { const i = el.children.indexOf(c); if (i >= 0) el.children.splice(i, 1); c.parentNode = null; };
+      el.insertBefore = (c, ref) => {
+        if (ref && ref.parentNode !== el) throw new Error('NotFoundError: ref is not a child');
+        if (c.parentNode) c.parentNode.removeChild(c);
+        const i = ref ? el.children.indexOf(ref) : el.children.length;
+        el.children.splice(i, 0, c); c.parentNode = el;
+      };
+      el.remove = () => { if (el.parentNode) el.parentNode.removeChild(el); };
+      return el;
+    };
+    const all = (n) => (n.children || []).flatMap((x) => [x, ...all(x)]);
+    const by = (root, cls) => all(root).filter((n) => String(n.className).split(/\s+/).includes(cls));
+    const list = mk('div');
+    const row = TDn.renderWaitingRow(list, { path: `${C}/notes/Ping.md`, title: 'Ping', days: 3, taskPath: `${C}/Closer.md`, taskTitle: 'Closer' }, { app });
+    await by(row, 'sauce-tdv-wait-reply')[0]._l.click({ stopPropagation() {} });
+    ok('FL1-REPLY-NOTICE a follow-up that cannot be closed leaves the reply saved and says so',
+      app._files.get(`${C}/notes/Ping.md`)._fm.replied_at && notices.includes('Reply saved; 1 follow-up still open'), JSON.stringify(notices));
+    const shown = (card, cls) => by(card, cls)[0] && by(card, cls)[0].style.display !== 'none';
+    const header = (p) => TDn.renderHeader({ container: mk('div'), current: () => ({ file: { path: p } }) }, { app });
+    const done = header('spice/tasks/_done/2026/11/Old/notes/Old ping.md');
+    const trashed = header('spice/tasks/_trash/Gone/notes/Gone ping.md');
+    ok('FL1-CLOSED-TASK a comms note under a done or trashed task has no Mark sent and no Got reply',
+      done && !shown(done, 'sauce-tdv-sent') && !shown(done, 'sauce-tdv-reply') && trashed && !shown(trashed, 'sauce-tdv-sent') && !shown(trashed, 'sauce-tdv-reply'));
+    const answered = header(`${C}/notes/Answered ping.md`);
+    const chipText = by(answered, 'sauce-tdv-chip').map((c) => c.textContent).find((t) => /^Sent/.test(t));
+    const items = [`${C}/notes/Answered ping.md`, `${C}/notes/Ping.md`].map((p) => TDn.commsItem({ file: { path: p }, ...app._files.get(p)._fm }));
+    const tasks = Array.from(app._files.values()).filter((f) => f._fm && f._fm.type === 'task').map((f) => ({ path: f.path, title: f._fm.title, status: f._fm.status || 'open', source: f._fm.source, source_note: TDn._linkBase(f._fm.source_note) }));
+    ok('FL1-HEADER-AGREES the header matches follow-ups anywhere in the vault by source_note, as the Waiting tab does',
+      /replied$/.test(chipText || '') && !shown(answered, 'sauce-tdv-reply')
+      && !TDn.waiting(items, tasks, '2026-11-13').some((x) => x.title === 'Answered ping'), JSON.stringify(chipText));
+
+    const list2 = mk('div');
+    const rowA = TDn.renderWaitingRow(list2, { path: `${C}/notes/Missing.md`, title: 'A', days: 1 }, { app });
+    const rowB = TDn.renderWaitingRow(list2, { path: `${C}/notes/Other.md`, title: 'B', days: 1 }, { app });
+    app.vault.getAbstractFileByPath = ((orig) => (p) => { if (p === `${C}/notes/Missing.md`) rowB.remove(); return orig(p); })(app.vault.getAbstractFileByPath);
+    await by(rowA, 'sauce-tdv-wait-reply')[0]._l.click({ stopPropagation() {} });
+    ok('FL1-WAIT-ROW-RESTORE a failed reply puts the row back even when the row after it has gone',
+      list2.children.length === 1 && list2.children[0] === rowA);
+
+    win.customJS.TaskDialog = priorDialog;
+    win.customJS.RenderSafe = priorRS;
+
+    ok('FL2-RESUME-SHAPES a claude.ai/ link opens with https added; only letters, digits, _ and - make an id; anything else is refused',
+      JSON.stringify(TDn.resumeAction('claude.ai/code/session_9')) === JSON.stringify({ kind: 'url', url: 'https://claude.ai/code/session_9' })
+      && TDn.resumeAction('ab_C-12').kind === 'id' && TDn.resumeAction('abc; rm -rf ~').kind === 'invalid' && TDn.resumeAction('two words').kind === 'invalid');
+    const H = 'spice/tasks/Hand';
+    const hApp = makeApp({
+      [`${H}/Hand.md`]: { fm: { type: 'task', title: 'Hand' } },
+      [`${H}/notes/Odd.md`]: { fm: { type: 'task-doc', kind: 'handoff', title: 'Odd', session: 'abc; rm -rf ~' } },
+    });
+    const copied = [];
+    const priorTTL = win.customJS.TaskTodayList;
+    win.customJS.TaskTodayList = { copyText: async (t) => { copied.push(t); return true; } };
+    const odd = TDn.renderHeader({ container: mk('div'), current: () => ({ file: { path: `${H}/notes/Odd.md` } }) }, { app: hApp });
+    notices.length = 0;
+    await by(odd, 'sauce-tdv-resume')[0]._l.click();
+    ok('FL2-RESUME-INVALID a session value that is neither an id nor a link copies nothing and says so',
+      copied.length === 0 && notices.includes('This session value isn\'t a session id or link'), JSON.stringify(notices));
+    win.customJS.TaskTodayList = priorTTL;
+
+    const T2 = 'spice/tasks/Chips';
+    const now = Date.now();
+    const cApp = makeApp({
+      [`${T2}/Chips.md`]: { fm: { type: 'task', title: 'Chips' } },
+      [`${T2}/notes/One.md`]: { fm: { type: 'task-doc', kind: 'findings', title: 'One' }, mtime: now - 1000 },
+      [`${T2}/notes/Two.md`]: { fm: { type: 'task-doc', kind: 'findings', title: 'Two' }, mtime: now - 2000 },
+    });
+    const opened = [];
+    cApp.workspace = { openLinkText: (p) => opened.push(p) };
+    const store = new Map();
+    win.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+    win.customJS.TaskDocs = new (TaskDocs(win, function () {}))();
+    const TTLClass = new Function('window', `${read('mechanisms/task-entity/task-today-list.js')}\nreturn TaskTodayList;`)(win);
+    const slot = mk('span');
+    const chip = TTLClass.renderNewNotesChip(slot, `${T2}/Chips.md`, cApp, now);
+    const before = chip.textContent;
+    chip._l.click({ preventDefault() {}, stopPropagation() {} });
+    const middle = chip.textContent;
+    const stillThere = slot.children.includes(chip);
+    chip._l.click({ preventDefault() {}, stopPropagation() {} });
+    ok('FL2-ROW-CHIP-COUNTDOWN opening a note from the chip counts it down at once, and the chip goes after the last',
+      before === '2 new notes' && middle === 'New note' && stillThere && !slot.children.includes(chip)
+      && JSON.stringify(opened) === JSON.stringify([`${T2}/notes/One.md`, `${T2}/notes/Two.md`]), JSON.stringify([before, middle, opened]));
+    delete win.customJS.TaskDocs;
+    delete win.localStorage;
+
+    const src = read('mechanisms/task-entity/task-today-list.js');
+    ok('FL2-ROW-CHIP-LAYOUT the subtask meter keeps its own doc comment, and on a phone the chip widens its tap target without a min-height',
+      /The subtask progress chip on a row[^]*?\*\/\n    static renderSubtaskMeter\(/.test(src)
+      && !/The subtask progress chip on a row(?:(?!\*\/)[^])*\*\/\n(?:(?!static renderSubtaskMeter)[^])*static renderNewNotesChip[^]*static renderSubtaskMeter/.test(src)
+      && src.indexOf('static renderSubtaskMeter(') < src.indexOf('static renderNewNotesChip(')
+      && !/sauce-task-new-notes \{ min-height/.test(src) && /sauce-task-new-notes::after \{ content: ""; position: absolute;/.test(src));
   }
 
   const failed = results.filter(([, c]) => !c).length;
