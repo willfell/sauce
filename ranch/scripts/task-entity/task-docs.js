@@ -21,6 +21,9 @@ class TaskDocs {
     candidates(app, taskPath) { return TaskDocs.candidates(app, taskPath); }
     convert(app, taskPath, items) { return TaskDocs.convert(app, taskPath, items); }
     openReview(app, taskPath, cands) { return TaskDocs.openReview(app, taskPath, cands); }
+    renderHeader(dv, opts) { return TaskDocs.renderHeader(dv, opts); }
+    withHeader(text) { return TaskDocs.withHeader(text); }
+    taskPathOf(docPath) { return TaskDocs.taskPathOf(docPath); }
 
     static get TYPE() { return 'task-doc'; }
     static get FOLDER() { return 'notes'; }
@@ -122,10 +125,51 @@ class TaskDocs {
             'created_at: ' + (createdAt || ''),
             '---',
             '',
-            '> [!info] ' + TaskDocs._kind(k).label + ' for [[' + task + ']]',
-            '',
+            TaskDocs.HEADER,
             TaskDocs.template(k),
         ].join('\n');
+    }
+
+    /**
+     * The header every note starts with: the breadcrumb bar (TaskChromeBar,
+     * To-Do › task › note) and the note's header card (renderHeader).
+     * The installer adds the same text to notes made before it existed;
+     * run-task-docs.js checks the two copies match.
+     */
+    static get HEADER() {
+        return [
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });',
+            '```',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "TaskDocs", method: "renderHeader" });',
+            '```',
+            '',
+        ].join('\n');
+    }
+
+    /**
+     * `text` (a whole note) with HEADER right after its frontmatter, in place
+     * of the one-line "> [!info] <Kind> for [[Task]]" header older notes
+     * started with. Unchanged when the header is already there. Pure.
+     */
+    static withHeader(text) {
+        const s = String(text == null ? '' : text).replace(/\r\n/g, '\n');
+        if (/method:\s*"renderHeader"/.test(s)) return s;
+        const m = /^---\n[\s\S]*?\n---\n?/.exec(s);
+        const fm = m ? m[0] : '';
+        let body = s.slice(fm.length).replace(/^\s*\n/, '');
+        body = body.replace(/^> \[!info\] [A-Za-z]+ for \[\[[^\]\n]*\]\][ \t]*\n(?:[ \t]*\n)?/, '');
+        return (fm && !fm.endsWith('\n') ? fm + '\n' : fm) + '\n' + TaskDocs.HEADER + '\n' + body;
+    }
+
+    /** The task note a note at `docPath` belongs to, from its folder; '' if none. */
+    static taskPathOf(docPath) {
+        const parts = String(docPath == null ? '' : docPath).split('/');
+        if (parts.length < 4 || parts[parts.length - 2] !== TaskDocs.FOLDER) return '';
+        const dir = parts.slice(0, -2);
+        return dir.join('/') + '/' + dir[dir.length - 1] + '.md';
     }
 
     /**
@@ -355,8 +399,7 @@ class TaskDocs {
         body = body.replace(/```dataviewjs\n[^`]*?class:\s*"(TaskChromeBar|TaskNoteView)"[^`]*?\n```\n?/g, '');
         body = body.replace(/^[ \t]*<!-- TASK_NOTES -->[ \t]*\n?/m, '');
         body = body.replace(/^\s+/, '');
-        const header = '> [!info] ' + TaskDocs._kind(kind).label + ' for [[' + taskName + ']]\n\n';
-        return (fm.endsWith('\n') || !fm ? fm : fm + '\n') + '\n' + header + body;
+        return TaskDocs.withHeader((fm.endsWith('\n') || !fm ? fm : fm + '\n') + '\n' + body);
     }
 
     static get _TASK_KEYS() {
@@ -501,7 +544,50 @@ class TaskDocs {
             '.sauce-tnv-doc { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--radius-s, 6px); min-width: 0; }',
             '@media (hover: hover) { .sauce-tnv-doc:hover { background: var(--background-modifier-hover); } }',
             '.sauce-tnv-doc-icon { display: inline-flex; flex-shrink: 0; color: var(--text-muted); }',
-            '.sauce-tnv-doc.is-prompt .sauce-tnv-doc-icon, .sauce-tnv-doc.is-handoff .sauce-tnv-doc-icon { color: var(--text-accent); }',
+            ...Object.entries(TaskDocs.TONES).map(([k, c]) => '.sauce-tnv-doc.is-' + k + ', .sauce-tdv[data-kind="' + k + '"] { --tdv-accent: ' + c + '; }'),
+            '.sauce-tnv-doc .sauce-tnv-doc-icon { color: var(--tdv-accent, var(--text-muted)); }',
+            '.sauce-tdv { --tdv-accent: var(--text-muted); position: relative; display: flex; flex-direction: column; gap: 12px; width: 100%; box-sizing: border-box; margin: 4px 0 14px; padding: 16px 18px 14px 20px; border: 1px solid color-mix(in srgb, var(--tdv-accent) 34%, var(--background-modifier-border)); border-radius: var(--sauce-radius-modal, 12px); background: linear-gradient(135deg, color-mix(in srgb, var(--tdv-accent) 13%, var(--background-secondary)) 0%, var(--background-secondary) 62%); }',
+            '.sauce-tdv::before { content: ""; position: absolute; left: -1px; top: 16px; bottom: 16px; width: 3px; border-radius: 0 3px 3px 0; background: var(--tdv-accent); pointer-events: none; }',
+            '.sauce-tdv-for { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; min-width: 0; font-size: 0.8em; color: var(--text-muted); }',
+            '.sauce-tdv-for > svg { flex-shrink: 0; }',
+            '.sauce-tdv-crumb { max-width: 16em; color: var(--text-accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }',
+            '.sauce-tdv-crumb.is-task { font-weight: 600; }',
+            '.sauce-tdv-sep { color: var(--text-faint); }',
+            '.sauce-tdv-top { display: flex; align-items: center; gap: 10px; min-width: 0; }',
+            'body .sauce-tdv-kind.sauce-tdv-kind { display: inline-flex; align-items: center; gap: 6px; height: auto; min-height: 24px; padding: 2px 10px 2px 8px; border: 1px solid color-mix(in srgb, var(--tdv-accent) 45%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--tdv-accent) 16%, transparent); box-shadow: none; color: var(--tdv-accent); font-size: 0.72em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }',
+            '@media (hover: hover) { body .sauce-tdv-kind.sauce-tdv-kind:hover { background: color-mix(in srgb, var(--tdv-accent) 24%, transparent); } }',
+            '.sauce-tdv-kind > svg { flex-shrink: 0; }',
+            '.sauce-tdv-sibs { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; font-size: 0.78em; color: var(--text-faint); }',
+            '.sauce-tdv-sib { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 11em; color: var(--text-accent); text-decoration: none; cursor: pointer; }',
+            '.sauce-tdv-sib > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+            '.sauce-tdv-sib > svg { flex-shrink: 0; }',
+            '.sauce-tdv-pos { flex-shrink: 0; font-variant-numeric: tabular-nums; }',
+            '.sauce-tdv-title { margin: 0; font-size: 1.35em; font-weight: 700; line-height: 1.25; color: var(--text-normal); overflow-wrap: anywhere; }',
+            '.sauce-tdv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }',
+            '.sauce-tdv-chip { box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; min-height: 24px; max-width: 100%; padding: 2px 10px; border: 1px solid var(--background-modifier-border); border-radius: 999px; background: var(--background-primary); color: var(--text-muted); font-size: 0.78em; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }',
+            '.sauce-tdv-chip.is-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--interactive-accent); flex-shrink: 0; }',
+            '.sauce-tdv-chip.is-status.is-done::before { background: var(--color-green, #4c9a5a); }',
+            '.sauce-tdv-chip.is-status.is-deleted::before { background: var(--text-faint, #888); }',
+            '.sauce-tdv-chip.is-accent { border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent); color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); }',
+            '.sauce-tdv-chip.is-danger { border-color: color-mix(in srgb, var(--color-red, #dc2626) 55%, transparent); color: var(--color-red, #dc2626); background: color-mix(in srgb, var(--color-red, #dc2626) 12%, transparent); }',
+            '.sauce-tdv-chip.is-prio-highest, .sauce-tdv-chip.is-prio-high { color: var(--color-red, #dc2626); }',
+            '.sauce-tdv-chip.is-prio-medium { color: var(--color-orange, #ea580c); }',
+            'a.sauce-tdv-chip.is-project { color: var(--text-accent); cursor: pointer; }',
+            '.sauce-tdv-meta { font-size: 0.78em; color: var(--text-faint); }',
+            '.sauce-tdv-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--tdv-accent) 22%, var(--background-modifier-border)); }',
+            '.sauce-tdv-actions > .sauce-btn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }',
+            'body .sauce-btn.sauce-btn.sauce-btn.sauce-tdv-copy { flex: 1 1 auto; border-color: var(--tdv-accent); background: var(--tdv-accent); color: var(--text-on-accent, #fff); }',
+            '@media (hover: hover) { body .sauce-btn.sauce-btn.sauce-btn.sauce-tdv-copy:hover { border-color: var(--tdv-accent); background: var(--tdv-accent); color: var(--text-on-accent, #fff); filter: brightness(1.08); } }',
+            'body .sauce-btn.sauce-btn.sauce-btn.sauce-tdv-copy.is-copied { border-color: var(--color-green, #4c9a5a); background: var(--color-green, #4c9a5a); }',
+            '.sauce-tdv-actions > .sauce-btn > svg { flex-shrink: 0; }',
+            '@media (prefers-reduced-motion: no-preference) { .sauce-tdv.is-reveal { animation: sauce-tdv-rise 320ms var(--sauce-ease, ease) both; } }',
+            '@keyframes sauce-tdv-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
+            'body.is-phone .sauce-tdv { padding: 14px 14px 12px 16px; gap: 10px; }',
+            'body.is-phone .sauce-tdv-title { font-size: 1.25em; }',
+            'body.is-phone .sauce-tdv-top { flex-wrap: wrap; }',
+            'body.is-phone .sauce-tdv-sibs { margin-left: 0; width: 100%; }',
+            'body.is-phone .sauce-tdv-actions > .sauce-btn.sauce-btn.sauce-btn.sauce-btn { flex: 1 1 0; height: auto; min-height: 42px; }',
+            '@media (max-width: 480px) { .sauce-tdv-top { flex-wrap: wrap; } .sauce-tdv-sibs { margin-left: 0; width: 100%; } .sauce-tdv-actions > .sauce-btn { flex: 1 1 0; } }',
             '.sauce-tnv-doc-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; cursor: pointer; }',
             '.sauce-tnv-doc-title { color: var(--text-normal); font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
             '.sauce-tnv-doc-meta { color: var(--text-faint, var(--text-muted)); font-size: 0.75em; }',
@@ -523,11 +609,14 @@ class TaskDocs {
 
     static _injectCss() {
         try {
-            if (typeof document === 'undefined' || !document.head || document.getElementById('sauce-task-docs-css')) return;
-            const s = document.createElement('style');
-            s.id = 'sauce-task-docs-css';
-            s.textContent = TaskDocs._CSS;
-            document.head.appendChild(s);
+            if (typeof document === 'undefined' || !document.head) return;
+            let s = document.getElementById('sauce-task-docs-css');
+            if (!s) {
+                s = document.createElement('style');
+                s.id = 'sauce-task-docs-css';
+                document.head.appendChild(s);
+            }
+            if (s.textContent !== TaskDocs._CSS) s.textContent = TaskDocs._CSS;
         } catch (_e) {}
     }
 
@@ -543,6 +632,246 @@ class TaskDocs {
     }
 
     static _notice(msg, ms) { try { new Notice(msg, ms); } catch (_e) {} }
+
+    /** Each kind's colour: the header card's tint and its icon on the task card. */
+    static get TONES() {
+        return {
+            prompt: 'var(--color-purple, #8b5cf6)',
+            handoff: 'var(--color-cyan, #0891b2)',
+            plan: 'var(--color-orange, #ea580c)',
+            context: 'var(--color-blue, #2563eb)',
+            findings: 'var(--color-green, #4c9a5a)',
+            questions: 'var(--color-yellow, #ca8a04)',
+            note: 'var(--text-muted)',
+        };
+    }
+
+    static get _ICONS() {
+        const svg = (d, n) => '<svg viewBox="0 0 24 24" width="' + (n || 14) + '" height="' + (n || 14) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+        return {
+            up: svg('<path d="m18 15-6-6-6 6"/>', 13),
+            prev: svg('<path d="m15 18-6-6 6-6"/>', 12),
+            next: svg('<path d="m9 18 6-6-6-6"/>', 12),
+            copy: svg('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 15),
+            task: svg('<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>', 15),
+        };
+    }
+
+    /**
+     * The due chip for the task a note belongs to, against `today`
+     * (YYYY-MM-DD): { text, tone } with tone 'danger' (open and past),
+     * 'accent' (open and today) or ''; null with no due date. Pure.
+     */
+    static dueChip(due, today, status) {
+        const d = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(due == null ? '' : due).trim());
+        if (!d) return null;
+        const when = Date.UTC(+d[1], +d[2] - 1, +d[3]);
+        const t = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(today || ''));
+        const label = TaskDocs._MONTHS[+d[2] - 1] + ' ' + (+d[3]);
+        const open = String(status || 'open') === 'open';
+        if (!t) return { text: 'Due ' + label, tone: '' };
+        const delta = Math.round((when - Date.UTC(+t[1], +t[2] - 1, +t[3])) / 86400000);
+        if (delta === 0) return { text: 'Due today', tone: open ? 'accent' : '' };
+        if (delta === 1) return { text: 'Due tomorrow', tone: '' };
+        if (delta < 0 && open) return { text: 'Overdue · ' + label, tone: 'danger' };
+        return { text: 'Due ' + label, tone: '' };
+    }
+
+    static get _MONTHS() { return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; }
+
+    /**
+     * Draw the header card at the top of a note (dv.container): the trail
+     * up to its task (To-Do › … › task), the kind as a coloured badge that
+     * changes the kind when clicked, previous and next notes of the same
+     * task, the title, the task's status, due date, priority and project,
+     * and Copy prompt (prompt and handoff notes) and Open task. The card is
+     * tinted in the kind's colour (TONES). opts.app overrides window.app.
+     * Returns the card, or null. Never throws.
+     */
+    static renderHeader(dv, opts) {
+        try {
+            if (!dv || !dv.container || typeof dv.container.createEl !== 'function') return null;
+            const c = dv.container;
+            if (c.closest && c.closest('.markdown-embed')) return null;
+            const app = (opts && opts.app) || (typeof window !== 'undefined' ? window.app : null);
+            if (!app || !app.vault) return null;
+            let page = null;
+            try {
+                const RS = window.customJS && window.customJS.RenderSafe;
+                page = RS && typeof RS.page === 'function' ? RS.page(dv) : (dv.current && dv.current());
+            } catch (_e) { page = null; }
+            const path = String((page && page.file && page.file.path) || '');
+            const file = path ? app.vault.getAbstractFileByPath(path) : null;
+            if (!file) return null;
+            const fm = TaskDocs._fmOf(app, file) || {};
+            const ICON = TaskDocs._ICONS;
+            const TE = TaskDocs._te();
+            const open = (target) => (ev) => {
+                try { if (ev && ev.preventDefault) ev.preventDefault(); if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e) {}
+                try { app.workspace.openLinkText(target, path, false); } catch (_e) {}
+            };
+            const title = (f, m) => (m && m.title != null && String(m.title).trim() !== '' ? String(m.title).trim() : String(f.basename || ''));
+            const unlink = (v) => String(v == null ? '' : v).trim().replace(/^\[\[|\]\]$/g, '');
+
+            let taskPath = TaskDocs.taskPathOf(path);
+            let taskFile = taskPath ? app.vault.getAbstractFileByPath(taskPath) : null;
+            if (!taskFile && fm.task) {
+                try {
+                    taskFile = app.metadataCache.getFirstLinkpathDest(unlink(fm.task).split('|')[0], path) || null;
+                    taskPath = taskFile ? taskFile.path : '';
+                } catch (_e) { taskFile = null; }
+            }
+            const taskFm = taskFile ? TaskDocs._fmOf(app, taskFile) || {} : {};
+
+            TaskDocs._injectCss();
+            try {
+                const stale = c.querySelectorAll ? c.querySelectorAll(':scope > .sauce-tdv') : [];
+                for (const prev of Array.from(stale || [])) { if (prev && prev.remove) prev.remove(); }
+            } catch (_e) {}
+            let kind = TaskDocs.kindOf(fm.kind);
+            const card = c.createEl('div', { cls: 'sauce-tdv' });
+            card.setAttribute('data-kind', kind);
+            const seen = TaskDocs._seen || (TaskDocs._seen = new Set());
+            if (!seen.has(path)) { seen.add(path); card.classList.add('is-reveal'); }
+
+            if (taskFile) {
+                const trail = card.createEl('div', { cls: 'sauce-tdv-for' });
+                trail.insertAdjacentHTML('afterbegin', ICON.up);
+                trail.createEl('span', { text: 'Note for' });
+                let rootPath = 'spice/to-do/All-ToDos.md';
+                try {
+                    const m = window.moment && window.moment();
+                    const today = m ? 'spice/to-do/' + m.format('YYYY/MM-MMMM') + '/ToDo-' + m.format('YYYY-MM-DD') + '.md' : '';
+                    if (today && app.vault.getAbstractFileByPath(today)) rootPath = today;
+                } catch (_e) {}
+                const root = trail.createEl('a', { cls: 'sauce-tdv-crumb', text: 'To-Do', href: '#' });
+                root.addEventListener('click', open(rootPath));
+                const chain = [];
+                let up = TE && typeof TE.parentNotePathOf === 'function' ? TE.parentNotePathOf(taskFile.path) : '';
+                for (let i = 0; up && i < 8; i++) {
+                    const pf = app.vault.getAbstractFileByPath(up);
+                    if (!pf) break;
+                    chain.unshift({ path: up, name: title(pf, TaskDocs._fmOf(app, pf)) });
+                    up = TE.parentNotePathOf(up);
+                }
+                chain.push({ path: taskFile.path, name: title(taskFile, taskFm), task: true });
+                for (const level of chain) {
+                    trail.createEl('span', { cls: 'sauce-tdv-sep', text: '›' });
+                    const a = trail.createEl('a', { cls: 'sauce-tdv-crumb' + (level.task ? ' is-task' : ''), text: level.name, href: '#' });
+                    a.addEventListener('click', open(level.path));
+                }
+            }
+
+            const top = card.createEl('div', { cls: 'sauce-tdv-top' });
+            const badge = top.createEl('button', { cls: 'sauce-tdv-kind' });
+            try { badge.setAttribute('type', 'button'); badge.setAttribute('aria-haspopup', 'menu'); badge.setAttribute('title', 'Change what kind of note this is'); } catch (_e) {}
+            const paintBadge = () => {
+                const meta = TaskDocs._kind(kind);
+                badge.innerHTML = meta.icon;
+                badge.createEl('span', { text: meta.label });
+                card.setAttribute('data-kind', kind);
+            };
+            paintBadge();
+            const docs = taskPath ? TaskDocs.list(app, taskPath) : [];
+            const at = docs.findIndex((d) => d.path === path);
+            if (at >= 0 && docs.length > 1) {
+                const sibs = top.createEl('div', { cls: 'sauce-tdv-sibs' });
+                const jump = (d, cls) => {
+                    const a = sibs.createEl('a', { cls: 'sauce-tdv-sib ' + cls, href: '#' });
+                    if (cls === 'is-prev') a.insertAdjacentHTML('afterbegin', ICON.prev);
+                    a.createEl('span', { text: d.title });
+                    if (cls === 'is-next') a.insertAdjacentHTML('beforeend', ICON.next);
+                    try { a.setAttribute('title', (cls === 'is-prev' ? 'Previous note: ' : 'Next note: ') + d.title); } catch (_e) {}
+                    a.addEventListener('click', open(d.path));
+                };
+                if (at > 0) jump(docs[at - 1], 'is-prev');
+                sibs.createEl('span', { cls: 'sauce-tdv-pos', text: (at + 1) + ' of ' + docs.length + ' notes' });
+                if (at < docs.length - 1) jump(docs[at + 1], 'is-next');
+            }
+
+            card.createEl('div', { cls: 'sauce-tdv-title', text: title(file, fm) || '(untitled)' });
+
+            if (taskFile) {
+                const chips = card.createEl('div', { cls: 'sauce-tdv-chips' });
+                const st = /\/_trash\//.test(taskFile.path) ? 'deleted' : (String(taskFm.status || 'open').trim().toLowerCase() || 'open');
+                const stLabel = { open: 'Task open', done: 'Task done', deleted: 'Task deleted' }[st] || 'Task ' + st;
+                chips.createEl('span', { cls: 'sauce-tdv-chip is-status is-' + st, text: stLabel });
+                let todayStr = '';
+                try { todayStr = window.moment ? window.moment().format('YYYY-MM-DD') : ''; } catch (_e) { todayStr = ''; }
+                const due = TaskDocs.dueChip(taskFm.due, todayStr, st);
+                if (due) chips.createEl('span', { cls: 'sauce-tdv-chip is-due' + (due.tone ? ' is-' + due.tone : ''), text: due.text });
+                const prio = String(taskFm.priority || '').trim().toLowerCase();
+                if (prio && prio !== 'none' && prio !== 'normal') chips.createEl('span', { cls: 'sauce-tdv-chip is-prio-' + prio, text: prio.charAt(0).toUpperCase() + prio.slice(1) + ' priority' });
+                const projLink = unlink(taskFm.project);
+                if (projLink) {
+                    const p = chips.createEl('a', { cls: 'sauce-tdv-chip is-project', text: projLink.split('|').pop().trim(), href: '#' });
+                    p.addEventListener('click', open(projLink.split('|')[0]));
+                }
+            }
+            const made = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fm.created_at || ''));
+            const ago = TaskDocs._ago(file.stat && file.stat.mtime, Date.now());
+            const metaText = [made ? 'Created ' + TaskDocs._MONTHS[+made[2] - 1] + ' ' + (+made[3]) : '', ago ? 'Edited ' + ago : ''].filter(Boolean).join(' · ');
+            if (metaText) card.createEl('div', { cls: 'sauce-tdv-meta', text: metaText });
+
+            const actions = card.createEl('div', { cls: 'sauce-tdv-actions' });
+            const copyBtn = actions.createEl('button', { cls: 'sauce-btn sauce-tdv-copy' });
+            try { copyBtn.setAttribute('type', 'button'); } catch (_e) {}
+            const paintCopy = (label) => {
+                copyBtn.innerHTML = ICON.copy;
+                copyBtn.createEl('span', { text: label || 'Copy prompt' });
+                copyBtn.style.display = TaskDocs._kind(kind).copy ? '' : 'none';
+            };
+            paintCopy();
+            copyBtn.addEventListener('click', async () => {
+                let text = '';
+                try { text = TaskDocs.extractPrompt(await app.vault.read(file)); } catch (_e) { text = ''; }
+                if (!text) { TaskDocs._notice('This note has no prompt to copy yet', 4000); return; }
+                const ok = await TaskDocs._copyText(text);
+                TaskDocs._notice(ok ? 'Prompt copied (' + text.length + ' characters)' : 'Could not copy the prompt', ok ? 2500 : 5000);
+                if (!ok) return;
+                try {
+                    copyBtn.classList.add('is-copied');
+                    paintCopy('Copied');
+                    setTimeout(() => { try { copyBtn.classList.remove('is-copied'); paintCopy(); } catch (_e) {} }, 1400);
+                } catch (_e) {}
+            });
+            if (taskFile) {
+                const taskBtn = actions.createEl('button', { cls: 'sauce-btn sauce-tdv-task' });
+                try { taskBtn.setAttribute('type', 'button'); } catch (_e) {}
+                taskBtn.innerHTML = ICON.task;
+                taskBtn.createEl('span', { text: 'Open task' });
+                taskBtn.addEventListener('click', open(taskFile.path));
+            }
+
+            badge.addEventListener('click', () => {
+                const MP = window.customJS && window.customJS.MenuPopover;
+                if (!MP || typeof MP.open !== 'function') return;
+                const entries = TaskDocs.KINDS.map((k) => ({
+                    label: k.label + (k.key === kind ? '  ✓' : ''),
+                    icon: k.icon,
+                    onSelect: async () => {
+                        if (k.key === kind) return;
+                        const RenderSafe = window.customJS && window.customJS.RenderSafe;
+                        if (!RenderSafe || typeof RenderSafe.mutate !== 'function') { TaskDocs._notice('Could not change the kind right now', 4000); return; }
+                        const prior = kind;
+                        const repaint = (to) => { kind = to; paintBadge(); paintCopy(); };
+                        await RenderSafe.mutate({
+                            app,
+                            path,
+                            failureMessage: 'Could not change the kind',
+                            optimistic: () => repaint(k.key),
+                            write: () => app.fileManager.processFrontMatter(file, (f) => { f.kind = k.key; }),
+                            revert: () => repaint(prior),
+                        });
+                    },
+                }));
+                MP.open(entries, { anchor: badge, title: 'Kind of note', animate: true });
+            });
+            return card;
+        } catch (_e) {
+            return null;
+        }
+    }
 
     /**
      * Draw the Notes section of the task at opts.taskPath into `container`

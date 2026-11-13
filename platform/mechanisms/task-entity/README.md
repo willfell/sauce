@@ -100,6 +100,15 @@ without being steps of it, so they are notes, not subtasks (`TaskDocs`,
   (`TaskDocs.extractPrompt`: a fenced block under a heading or callout titled
   "prompt", else the first text fence, else the body); + Note creates one
   from its kind's template and opens it.
+- **Header.** Every note starts with `TaskDocs.HEADER`: the breadcrumb bar
+  (`TaskChromeBar`, To-Do › task › note) and the header card
+  (`TaskDocs.renderHeader`). The card is tinted in the kind's colour
+  (`TaskDocs.TONES`, which also colours the note icons on the task card) and
+  shows the trail up to the task, the kind badge (click to change the kind),
+  the previous and next notes of the task, the title, the task's status, due
+  date, priority and project, and Copy prompt (prompt and handoff) and Open
+  task. The installer's `applyTaskDocHeaderHeal` adds the header to notes made
+  before it, replacing their one-line `> [!info] <Kind> for [[Task]]` header.
 - **Agents.** The vault's CLAUDE.md directory map names this folder, so a
   session writes its prompts, handoffs and findings here.
 

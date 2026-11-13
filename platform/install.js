@@ -641,6 +641,9 @@ module.exports = async function (tp) {
     // first so a note made a task is planned by the folder dry run below.
     await applyTaskStraysHeal(tp, installedNow.history, git);
     await applyTaskFoldersHeal(tp, installedNow.history, git);
+    // 6a8c. task-entity — task notes made before the header card get the
+    // breadcrumb bar and header card. Idempotent, never throws.
+    await applyTaskDocHeaderHeal(tp, installedNow.history, git);
 
     // 6a9. to-do — inject ToDoDailyTripGroups block into existing daily notes.
     await applyTodoDailyTripGroupsHeal(tp, installedNow.history, git);
@@ -14230,6 +14233,80 @@ async function applyTaskStraysHeal(tp, history, git) {
   }
 }
 
+// _TASK_DOC_HEADER — the header a task note (type: task-doc) starts with: the
+// breadcrumb bar and the note's header card. The same text as
+// TaskDocs.HEADER in task-entity/task-docs.js; run-task-docs.js checks they
+// match.
+const _TASK_DOC_HEADER = [
+  "```dataviewjs",
+  'await dv.view("ranch/views/customjs-guard", { class: "TaskChromeBar" });',
+  "```",
+  "",
+  "```dataviewjs",
+  'await dv.view("ranch/views/customjs-guard", { class: "TaskDocs", method: "renderHeader" });',
+  "```",
+  "",
+].join("\n");
+
+// _taskDocWithHeader — a task note's text with _TASK_DOC_HEADER right after its
+// frontmatter, in place of the one-line "> [!info] <Kind> for [[Task]]" header
+// notes were made with before the header card. Unchanged when the header is
+// already there. Pure; the same rules as TaskDocs.withHeader.
+function _taskDocWithHeader(text) {
+  const s = String(text == null ? "" : text).replace(/\r\n/g, "\n");
+  if (/method:\s*"renderHeader"/.test(s)) return s;
+  const m = /^---\n[\s\S]*?\n---\n?/.exec(s);
+  const fm = m ? m[0] : "";
+  let body = s.slice(fm.length).replace(/^\s*\n/, "");
+  body = body.replace(/^> \[!info\] [A-Za-z]+ for \[\[[^\]\n]*\]\][ \t]*\n(?:[ \t]*\n)?/, "");
+  return (fm && !fm.endsWith("\n") ? fm + "\n" : fm) + "\n" + _TASK_DOC_HEADER + "\n" + body;
+}
+
+// applyTaskDocHeaderHeal — gives every task note (type: task-doc, under a
+// task's notes/ folder) the breadcrumb bar and header card, for notes made
+// before the header existed. Idempotent; a note that already has the header is
+// not touched. Never throws.
+async function applyTaskDocHeaderHeal(tp, history, git) {
+  const stamp = () => ({ git_commit: git && git.commit, git_tag: git && git.tag, git_dirty: git && git.dirty });
+  try {
+    if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+    const adapter = tp.app.vault.adapter;
+    if (!(await adapter.exists(_TF_ROOT).catch(() => false))) return;
+    const docs = [];
+    const walk = async (dir, depth) => {
+      let listing;
+      try { listing = await adapter.list(dir); } catch (_e) { return; }
+      if (dir.split("/").pop() === "notes") {
+        for (const raw of (listing.files || [])) { const f = String(raw).replace(/^\/+/, ""); if (/\.md$/i.test(f)) docs.push(f); }
+      }
+      if (depth >= 32) return;
+      for (const raw of (listing.folders || [])) {
+        const sub = String(raw).replace(/^\/+/, "");
+        if (!sub.substring(sub.lastIndexOf("/") + 1).startsWith(".")) await walk(sub, depth + 1);
+      }
+    };
+    await walk(_TF_ROOT, 0);
+    const healed = [];
+    for (const p of docs) {
+      try {
+        const body = await adapter.read(p);
+        if (_tfReadFm(body).type !== "task-doc") continue;
+        const next = _taskDocWithHeader(body);
+        if (next === body.replace(/\r\n/g, "\n")) continue;
+        await adapter.write(p, next);
+        healed.push(p);
+      } catch (_e) { /* one unreadable note must not stop the rest */ }
+    }
+    if (!healed.length) return;
+    history?.push({ event: "info", step: "task_doc_header_heal", name: "task-entity", action: "headers_added",
+      summary: { notes: healed.length }, targets: healed.slice(0, 50), ...stamp(), attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "task_doc_header_heal", name: "task-entity",
+      reason: `task note header heal failed (non-fatal): ${e && e.message ? e.message : String(e)}`,
+      ...stamp(), attempted_at: new Date().toISOString() });
+  }
+}
+
 // applyTaskFoldersHeal — ungated dry run of the task folder migration. Reads
 // every task note under spice/tasks (any depth), plans, and writes
 // ranch/reports/task-folders-YYYY-MM-DD.md when anything would move. A re-run
@@ -23893,6 +23970,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.planTaskStrays = planTaskStrays;
     module.exports.renderTaskStraysReport = renderTaskStraysReport;
     module.exports.applyTaskStraysHeal = applyTaskStraysHeal;
+    module.exports.applyTaskDocHeaderHeal = applyTaskDocHeaderHeal;
+    module.exports._taskDocWithHeader = _taskDocWithHeader;
+    module.exports._TASK_DOC_HEADER = _TASK_DOC_HEADER;
     module.exports.applyRecurringTasksMigrationHeal = applyRecurringTasksMigrationHeal;
     module.exports._stripCompletionEmojiSuffix = _stripCompletionEmojiSuffix;
     module.exports._parseRecurringRegistry = _parseRecurringRegistry;

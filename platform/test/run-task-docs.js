@@ -81,9 +81,10 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
 
 {
   const text = TD.compose('handoff', 'Handoff', 'Finish AccurAPI Plugin', '2026-11-12T10:00:00-07:00');
-  ok('TD-COMPOSE a new note is type task-doc with its kind, title and task link, a header back to the task, and its template',
+  ok('TD-COMPOSE a new note is type task-doc with its kind, title and task link, the breadcrumb bar and header card, and its template',
     /^---\ntype: task-doc\nkind: handoff\ntitle: "Handoff"\ntask: "\[\[Finish AccurAPI Plugin\]\]"\ncreated_at: 2026-11-12T10:00:00-07:00\n---\n/.test(text)
-    && /> \[!info\] Handoff for \[\[Finish AccurAPI Plugin\]\]/.test(text) && /## Prompt to paste/.test(text) && /claude --resume/.test(text));
+    && /\n---\n\n```dataviewjs\n[^`]*TaskChromeBar[^`]*```\n\n```dataviewjs\n[^`]*class: "TaskDocs", method: "renderHeader"[^`]*```\n\n/.test(text) && !/\[!info\]/.test(text)
+    && /## Prompt to paste/.test(text) && /claude --resume/.test(text));
   ok('TD-COMPOSE-TEMPLATES each known kind has its own starting text; note starts blank',
     /## Steps/.test(TD.template('plan')) && /\[!abstract\] Goal/.test(TD.template('context')) && /\[!abstract\] Summary/.test(TD.template('findings'))
     && /## Open questions/.test(TD.template('questions')) && TD.template('note') === '' && TD.template('prompt').length > 0);
@@ -226,8 +227,8 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
       && prompt._fm.type === 'task-doc' && prompt._fm.kind === 'prompt' && prompt._fm.task === '[[Hemi Config]]' && prompt._fm.title === 'Prompt'
       && !('status' in prompt._fm) && !('parent_task' in prompt._fm) && !('due' in prompt._fm) && prompt._fm.created_at === '2026-11-12'
       && questions._fm.kind === 'questions', JSON.stringify(res));
-    ok('TD-CONVERT-BODY the task chrome is replaced by the note header and the text is kept',
-      !/TaskNoteView|TaskChromeBar|TASK_NOTES/.test(prompt._body) && /> \[!info\] Prompt for \[\[Hemi Config\]\]/.test(prompt._body)
+    ok('TD-CONVERT-BODY the task card is replaced by the note header card and the text is kept',
+      !/TaskNoteView|TASK_NOTES/.test(prompt._body) && /method: "renderHeader"/.test(prompt._body) && prompt._body.split('TaskChromeBar').length === 2
       && /Look at the config repos\./.test(prompt._body) && TD.extractPrompt(prompt._body) === 'Look at the config repos.');
     ok('TD-CONVERT-ORDER deepest first, so the nested one moves before its parent, through renameFile (links follow)',
       app2._renames[0][0] === `${H}/Prompt (Hemi Config)/Questions (Prompt)/Questions (Prompt).md` && app2._renames.length === 2);
@@ -243,6 +244,141 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     const hint = byCls(sec2, 'sauce-tnv-notes-hint')[0];
     ok('TD-RENDER-HINT the Notes section offers to review subtasks that read like notes',
       hint && hint.children[0] && hint.children[0].textContent === '2 subtasks read like notes' && byCls(sec2, 'sauce-tnv-doc-review').length === 1);
+  }
+
+
+  {
+    const install = require('../install.js');
+    const oldNote = '---\ntype: task-doc\nkind: prompt\ntitle: "Prompt"\ntask: "[[Get SND Alerting]]"\n---\n\n> [!info] Prompt for [[Get SND Alerting]]\n\nWrite the prompt here.\n';
+    const healed = TD.withHeader(oldNote);
+    ok('TD-WITH-HEADER an older note gets the breadcrumb bar and header card after its frontmatter, in place of its one-line header',
+      /^---\n[\s\S]*?\n---\n\n```dataviewjs\nawait dv.view\("ranch\/views\/customjs-guard", \{ class: "TaskChromeBar" \}\);\n```\n\n```dataviewjs\nawait dv.view\("ranch\/views\/customjs-guard", \{ class: "TaskDocs", method: "renderHeader" \}\);\n```\n\nWrite the prompt here\.\n$/.test(healed)
+      && !/\[!info\]/.test(healed), JSON.stringify(healed));
+    ok('TD-WITH-HEADER-IDEMPOTENT a note with the header is unchanged, and a user callout is kept',
+      TD.withHeader(healed) === healed
+      && /> \[!info\] Context for the reviewer/.test(TD.withHeader('---\ntype: task-doc\n---\n> [!info] Context for the reviewer\n> read this\n')));
+    ok('TD-WITH-HEADER-PROMPT the header blocks never end up in a copied prompt', TD.extractPrompt(healed) === 'Write the prompt here.');
+    ok('TD-HEADER-INSTALLER the installer adds the same header, by the same rules, as new notes get',
+      install._TASK_DOC_HEADER === TD.HEADER
+      && [oldNote, healed, '---\ntype: task-doc\n---\nbody\n', 'no frontmatter\n', '---\na: 1\n---'].every((t) => install._taskDocWithHeader(t) === TD.withHeader(t)));
+    ok('TD-TASK-PATH a note\'s task is the folder note above its notes folder',
+      TD.taskPathOf('spice/tasks/A/notes/P.md') === 'spice/tasks/A/A.md' && TD.taskPathOf('spice/tasks/A/B/notes/P.md') === 'spice/tasks/A/B/B.md'
+      && TD.taskPathOf('spice/tasks/A/A.md') === '' && TD.taskPathOf('notes/P.md') === '');
+    const due = (d, s) => JSON.stringify(TD.dueChip(d, '2026-11-12', s));
+    ok('TD-DUE the task\'s due chip reads today, tomorrow, overdue or the date',
+      due('2026-11-12') === '{"text":"Due today","tone":"accent"}' && due('2026-11-13') === '{"text":"Due tomorrow","tone":""}'
+      && due('2026-11-10') === '{"text":"Overdue · Nov 10","tone":"danger"}' && due('2026-11-10', 'done') === '{"text":"Due Nov 10","tone":""}'
+      && due('2026-12-01') === '{"text":"Due Dec 1","tone":""}' && TD.dueChip('', '2026-11-12') === null);
+
+    const chromeCfg = new Function(`${read('mechanisms/task-entity/task-chrome-bar.js')}\nreturn TaskChromeBar;`)()._config();
+    ok('TD-CHROME the breadcrumb bar draws on task notes as well as tasks',
+      chromeCfg.detect(null, { type: 'task-doc', file: { path: 'x' } }).context === 'task-doc'
+      && chromeCfg.detect(null, { type: 'task', file: { path: 'x' } }).context === 'task' && chromeCfg.detect(null, { type: 'doc-note' }) === null);
+
+    const mem = new Map([
+      ['spice/tasks/A/A.md', '---\ntype: task\n---\n'],
+      ['spice/tasks/A/notes/Prompt (A).md', oldNote],
+      ['spice/tasks/A/notes/Done.md', healed],
+      ['spice/tasks/A/notes/Loose.md', 'no frontmatter'],
+      ['spice/tasks/A/B/notes/Plan.md', '---\ntype: task-doc\nkind: plan\n---\n\n## Goal\n'],
+      ['spice/tasks/A/Prompt/Prompt.md', '---\ntype: task-doc\n---\n'],
+    ]);
+    const writes = [];
+    const dirs = () => { const s = new Set(); for (const k of mem.keys()) { const parts = k.split('/'); for (let i = 1; i < parts.length; i++) s.add(parts.slice(0, i).join('/')); } return s; };
+    const adapter = {
+      exists: async (p) => mem.has(p) || dirs().has(p),
+      list: async (p) => {
+        const files = [], folders = new Set();
+        for (const k of mem.keys()) {
+          if (!k.startsWith(p + '/')) continue;
+          const rest = k.slice(p.length + 1).split('/');
+          if (rest.length === 1) files.push(k); else folders.add(p + '/' + rest[0]);
+        }
+        return { files, folders: Array.from(folders) };
+      },
+      read: async (p) => mem.get(p),
+      write: async (p, t) => { writes.push(p); mem.set(p, t); },
+    };
+    const history = [];
+    await install.applyTaskDocHeaderHeal({ app: { vault: { adapter } } }, history, {});
+    ok('TD-HEAL the installer gives task notes without one the header, and leaves everything else alone',
+      JSON.stringify(writes.sort()) === JSON.stringify(['spice/tasks/A/B/notes/Plan.md', 'spice/tasks/A/notes/Prompt (A).md'])
+      && mem.get('spice/tasks/A/notes/Prompt (A).md') === healed && /method: "renderHeader"[\s\S]*## Goal/.test(mem.get('spice/tasks/A/B/notes/Plan.md'))
+      && history.some((h) => h.step === 'task_doc_header_heal' && h.summary.notes === 2), JSON.stringify(writes));
+    writes.length = 0;
+    await install.applyTaskDocHeaderHeal({ app: { vault: { adapter } } }, [], {});
+    ok('TD-HEAL-IDEMPOTENT a second run writes nothing', writes.length === 0);
+  }
+
+  {
+    const T = 'spice/tasks/Backup Script';
+    const hApp = makeApp({
+      'spice/tasks/Infra/Infra.md': { fm: { type: 'task', title: 'Infra' } },
+      [`spice/tasks/Infra/${'Backup Script'}/Backup Script.md`]: { fm: { type: 'task', title: 'Backup Script', status: 'open', due: '2026-11-12', priority: 'high', project: '[[Content-Registry]]' } },
+      [`spice/tasks/Infra/Backup Script/notes/Prompt (Backup Script).md`]: { fm: { type: 'task-doc', kind: 'prompt', title: 'Prompt', created_at: '2026-11-12T10:00:00-06:00' }, body: '---\ntype: task-doc\n---\n\nDo it', mtime: 900 },
+      [`spice/tasks/Infra/Backup Script/notes/Plan.md`]: { fm: { type: 'task-doc', kind: 'plan', title: 'Plan' }, mtime: 500 },
+    });
+    hApp.vault.read = async (f) => f._body;
+    const fmCalls = [];
+    hApp.fileManager = { processFrontMatter: async (f, fn) => { fn(f._fm); fmCalls.push(f.path); } };
+    const copied = [];
+    const menus = [];
+    win.customJS.TaskTodayList = { copyText: async (t) => { copied.push(t); return true; } };
+    win.customJS.MenuPopover = { open: (entries, o) => menus.push({ entries, o }) };
+    const mutations = [];
+    win.customJS.RenderSafe = {
+      mutate: async (o) => {
+        mutations.push(o);
+        try { await o.optimistic(); await o.write(); return { ok: true }; } catch (e) { await o.revert(e); return { ok: false, error: e }; }
+      },
+    };
+    win.moment = () => ({ format: (f) => (f === 'YYYY-MM-DD' ? '2026-11-12' : f === 'YYYY/MM-MMMM' ? '2026/11-November' : '') });
+    const mk = (tag, cls) => {
+      const el = { tag, className: cls || '', children: [], style: {}, _attrs: {}, _l: {}, textContent: '', _html: '', classes: new Set(String(cls || '').split(/\s+/).filter(Boolean)) };
+      el.classList = { add: (c) => el.classes.add(c), remove: (c) => el.classes.delete(c) };
+      Object.defineProperty(el, 'innerHTML', { get: () => el._html, set: (v) => { el._html = v; el.children = []; } });
+      el.createEl = (t, o) => { const c = mk(t, (o && o.cls) || ''); if (o && o.text != null) c.textContent = o.text; el.children.push(c); return c; };
+      el.setAttribute = (k, v) => { el._attrs[k] = v; };
+      el.addEventListener = (k, fn) => { el._l[k] = fn; };
+      el.insertAdjacentHTML = (where, html) => { el._html += html; };
+      return el;
+    };
+    const all = (n) => (n.children || []).flatMap((c) => [c, ...all(c)]);
+    const by = (root, cls) => all(root).filter((n) => String(n.className).split(/\s+/).includes(cls));
+    const text = (root, cls) => by(root, cls).map((n) => n.textContent || (n.children[0] && n.children[0].textContent) || '');
+    const P = 'spice/tasks/Infra/Backup Script/notes/Prompt (Backup Script).md';
+    const dv = { container: mk('div'), current: () => ({ file: { path: P } }) };
+    const card = TD.renderHeader(dv, { app: hApp });
+    ok('TD-HEADER-RENDER a prompt note draws a prompt-coloured header card: kind badge, title, and the trail back through its parent task',
+      card && card._attrs['data-kind'] === 'prompt' && text(card, 'sauce-tdv-crumb').join(' › ') === 'To-Do › Infra › Backup Script'
+      && by(card, 'sauce-tdv-kind')[0].children[0].textContent === 'Prompt' && text(card, 'sauce-tdv-title')[0] === 'Prompt', JSON.stringify(text(card, 'sauce-tdv-crumb')));
+    ok('TD-HEADER-CHIPS the card shows the task\'s status, due date, priority and project, and when the note was made',
+      JSON.stringify(text(card, 'sauce-tdv-chip')) === JSON.stringify(['Task open', 'Due today', 'High priority', 'Content-Registry'])
+      && /^Created Nov 12/.test(text(card, 'sauce-tdv-meta')[0]), JSON.stringify(text(card, 'sauce-tdv-chip')));
+    ok('TD-HEADER-SIBLINGS the card steps to the task\'s other notes', text(card, 'sauce-tdv-pos')[0] === '1 of 2 notes' && by(card, 'sauce-tdv-sib').length === 1);
+    await by(card, 'sauce-tdv-copy')[0]._l.click();
+    ok('TD-HEADER-COPY Copy prompt copies the note\'s prompt', copied[copied.length - 1] === 'Do it' && by(card, 'sauce-tdv-copy')[0].style.display === '');
+    by(card, 'sauce-tdv-task')[0]._l.click({});
+    by(card, 'sauce-tdv-crumb')[2]._l.click({});
+    ok('TD-HEADER-OPEN Open task and the trail open the task', hApp._opened.slice(-2).every((p) => p === 'spice/tasks/Infra/Backup Script/Backup Script.md'));
+    by(card, 'sauce-tdv-kind')[0]._l.click();
+    const menu = menus[menus.length - 1];
+    ok('TD-HEADER-KIND-MENU the kind badge offers every kind, the current one ticked', menu && menu.entries.length === 7 && /✓/.test(menu.entries[0].label));
+    await menu.entries.find((e) => e.label === 'Plan').onSelect();
+    ok('TD-HEADER-KIND-CHANGE picking a kind writes it through RenderSafe.mutate and recolours the card; Copy prompt hides for a plan',
+      mutations.length === 1 && mutations[0].path === P && fmCalls[0] === P && hApp._files.get(P)._fm.kind === 'plan'
+      && card._attrs['data-kind'] === 'plan' && by(card, 'sauce-tdv-copy')[0].style.display === 'none');
+    hApp.fileManager.processFrontMatter = async () => { throw new Error('locked'); };
+    by(card, 'sauce-tdv-kind')[0]._l.click();
+    await menus[menus.length - 1].entries.find((e) => e.label === 'Handoff').onSelect();
+    ok('TD-HEADER-KIND-REVERT a failed write puts the card back to the kind on disk',
+      card._attrs['data-kind'] === 'plan' && by(card, 'sauce-tdv-kind')[0].children[0].textContent === 'Plan' && mutations[1].failureMessage === 'Could not change the kind');
+    ok('TD-HEADER-NONE a note that is not in a vault file, or inside an embed, draws nothing',
+      TD.renderHeader({ container: mk('div'), current: () => ({ file: { path: 'nope.md' } }) }, { app: hApp }) === null
+      && TD.renderHeader({ container: Object.assign(mk('div'), { closest: () => ({}) }), current: () => ({ file: { path: P } }) }, { app: hApp }) === null);
+    ok('TD-HEADER-CSS each kind has its own colour, used by the card and the task card\'s note icons',
+      Object.keys(TD.TONES).join(',') === TD.KINDS.map((k) => k.key).join(',') && /\.sauce-tdv\[data-kind="prompt"\]/.test(TD._CSS) && /\.sauce-tnv-doc\.is-handoff/.test(TD._CSS));
+    win.moment = null;
   }
 
   const failed = results.filter(([, c]) => !c).length;
