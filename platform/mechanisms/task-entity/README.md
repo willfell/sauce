@@ -89,7 +89,7 @@ without being steps of it, so they are notes, not subtasks (`TaskDocs`,
 
 - **Where.** `spice/tasks/<Task>/notes/<Name>.md`, only under a task in the
   folder layout. They move with the task's folder to `_done/` or `_trash/`.
-- **Frontmatter.** `type: task-doc`, `kind:` one of prompt, handoff, plan,
+- **Frontmatter.** `type: task-doc`, `kind:` one of prompt, handoff, comms, plan,
   context, findings, questions, note (anything else reads as note),
   `title`, `task: "[[<Task>]]"`, `created_at`. No `status`: a note never
   counts toward the task's progress and never lists as a to-do.
@@ -106,8 +106,8 @@ without being steps of it, so they are notes, not subtasks (`TaskDocs`,
   (`TaskDocs.TONES`, which also colours the note icons on the task card) and
   shows the trail up to the task, the kind badge (click to change the kind),
   the previous and next notes of the task, the title, the task's status, due
-  date, priority and project, and Copy prompt (prompt and handoff) and Open
-  task. The installer's `applyTaskDocHeaderHeal` adds the header to notes made
+  date, priority and project, and Copy prompt (prompt and handoff) or Copy
+  message (comms: the message to send others about the task) and Open task. The installer's `applyTaskDocHeaderHeal` adds the header to notes made
   before it, replacing their one-line `> [!info] <Kind> for [[Task]]` header.
 - **Agents.** The vault's CLAUDE.md directory map names this folder, so a
   session writes its prompts, handoffs and findings here.

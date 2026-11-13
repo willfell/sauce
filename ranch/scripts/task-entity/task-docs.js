@@ -5,7 +5,8 @@ class TaskDocs {
     // at spice/tasks/<Task>/notes/<Name>.md with `type: task-doc` and a
     // `kind`; it has no status, never counts toward the task's progress and
     // never lists as a to-do. The task card shows them in a Notes section
-    // (render), with Copy prompt on prompt and handoff notes and a + Note
+    // (render), with Copy prompt on prompt and handoff notes, Copy message on
+    // comms notes (the message to send others about the task), and a + Note
     // menu that creates one from its kind's template.
     // Spec: Docs/superpowers/specs/2026-11-12-task-notes-design.md.
 
@@ -32,8 +33,9 @@ class TaskDocs {
     static get KINDS() {
         const svg = (d) => '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
         return [
-            { key: 'prompt', label: 'Prompt', copy: true, icon: svg('<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>') },
-            { key: 'handoff', label: 'Handoff', copy: true, icon: svg('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>') },
+            { key: 'prompt', label: 'Prompt', copy: true, copyLabel: 'Copy prompt', copied: 'Prompt', icon: svg('<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>') },
+            { key: 'handoff', label: 'Handoff', copy: true, copyLabel: 'Copy prompt', copied: 'Prompt', icon: svg('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>') },
+            { key: 'comms', label: 'Comms', copy: true, copyLabel: 'Copy message', copied: 'Message', icon: svg('<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>') },
             { key: 'plan', label: 'Plan', copy: false, icon: svg('<path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3z"/><path d="M9 3v15"/><path d="M15 6v15"/>') },
             { key: 'context', label: 'Context', copy: false, icon: svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>') },
             { key: 'findings', label: 'Findings', copy: false, icon: svg('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>') },
@@ -77,6 +79,21 @@ class TaskDocs {
         switch (TaskDocs.kindOf(kind)) {
             case 'prompt':
                 return 'Write the prompt here. Copy prompt on the task card copies this whole section.\n';
+            case 'comms':
+                return [
+                    '> [!info] Send to',
+                    '> **To:** ',
+                    '> **Via:** Slack / Email / Teams',
+                    '',
+                    '````text',
+                    'Hi <name>,',
+                    '',
+                    '<what is happening with this, what you need from them, and by when>',
+                    '',
+                    'Thanks',
+                    '````',
+                    '',
+                ].join('\n');
             case 'handoff':
                 return [
                     '> [!tip] Resume session',
@@ -310,6 +327,7 @@ class TaskDocs {
         if (!t) return '';
         if (/^hand-?off( prompt)?$/.test(t) || /^hand-?off prompt\b/.test(t) || /\bhand-?off$/.test(t)) return 'handoff';
         if (/^(the |initial |kickoff |major theme initial )?prompt\b/.test(t) || /\bprompt$/.test(t)) return 'prompt';
+        if (/^(comms|communications?|message|messages|slack message|email|email draft|announcement)$/.test(t) || /\bcomms$/.test(t)) return 'comms';
         if (/^(proposed |the |initial )?plan$/.test(t)) return 'plan';
         if (/^questions?$/.test(t)) return 'questions';
         if (/^(context|explanation|background|summary)$/.test(t)) return 'context';
@@ -638,6 +656,7 @@ class TaskDocs {
         return {
             prompt: 'var(--color-purple, #8b5cf6)',
             handoff: 'var(--color-cyan, #0891b2)',
+            comms: 'var(--color-pink, #db2777)',
             plan: 'var(--color-orange, #ea580c)',
             context: 'var(--color-blue, #2563eb)',
             findings: 'var(--color-green, #4c9a5a)',
@@ -684,7 +703,8 @@ class TaskDocs {
      * up to its task (To-Do › … › task), the kind as a coloured badge that
      * changes the kind when clicked, previous and next notes of the same
      * task, the title, the task's status, due date, priority and project,
-     * and Copy prompt (prompt and handoff notes) and Open task. The card is
+     * and Copy prompt (prompt and handoff) or Copy message (comms) and Open
+     * task. The card is
      * tinted in the kind's colour (TONES). opts.app overrides window.app.
      * Returns the card, or null. Never throws.
      */
@@ -818,16 +838,17 @@ class TaskDocs {
             try { copyBtn.setAttribute('type', 'button'); } catch (_e) {}
             const paintCopy = (label) => {
                 copyBtn.innerHTML = ICON.copy;
-                copyBtn.createEl('span', { text: label || 'Copy prompt' });
+                copyBtn.createEl('span', { text: label || TaskDocs._kind(kind).copyLabel || 'Copy' });
                 copyBtn.style.display = TaskDocs._kind(kind).copy ? '' : 'none';
             };
             paintCopy();
             copyBtn.addEventListener('click', async () => {
                 let text = '';
                 try { text = TaskDocs.extractPrompt(await app.vault.read(file)); } catch (_e) { text = ''; }
-                if (!text) { TaskDocs._notice('This note has no prompt to copy yet', 4000); return; }
+                const what = TaskDocs._kind(kind).copied || 'Text';
+                if (!text) { TaskDocs._notice('This note has nothing to copy yet', 4000); return; }
                 const ok = await TaskDocs._copyText(text);
-                TaskDocs._notice(ok ? 'Prompt copied (' + text.length + ' characters)' : 'Could not copy the prompt', ok ? 2500 : 5000);
+                TaskDocs._notice(ok ? what + ' copied (' + text.length + ' characters)' : 'Could not copy the ' + what.toLowerCase(), ok ? 2500 : 5000);
                 if (!ok) return;
                 try {
                     copyBtn.classList.add('is-copied');
@@ -916,20 +937,20 @@ class TaskDocs {
                     main.addEventListener('click', () => open(d.path));
                     try { main.setAttribute('title', 'Open ' + d.title); } catch (_e) {}
                     if (meta.copy) {
-                        const btn = row.createEl('button', { cls: 'sauce-tnv-doc-copy', text: 'Copy prompt' });
+                        const btn = row.createEl('button', { cls: 'sauce-tnv-doc-copy', text: meta.copyLabel });
                         try { btn.setAttribute('type', 'button'); } catch (_e) {}
                         btn.addEventListener('click', async (ev) => {
                             try { ev.stopPropagation(); } catch (_e) {}
                             let text = '';
                             try { text = TaskDocs.extractPrompt(await app.vault.cachedRead(d.file)); } catch (_e) { text = ''; }
-                            if (!text) { TaskDocs._notice('This note has no prompt to copy yet', 4000); return; }
+                            if (!text) { TaskDocs._notice('This note has nothing to copy yet', 4000); return; }
                             const ok = await TaskDocs._copyText(text);
-                            TaskDocs._notice(ok ? 'Prompt copied (' + text.length + ' characters)' : 'Could not copy the prompt', ok ? 2500 : 5000);
+                            TaskDocs._notice(ok ? meta.copied + ' copied (' + text.length + ' characters)' : 'Could not copy the ' + meta.copied.toLowerCase(), ok ? 2500 : 5000);
                             if (!ok) return;
                             try {
                                 btn.classList.add('is-copied');
                                 btn.textContent = 'Copied';
-                                setTimeout(() => { try { btn.classList.remove('is-copied'); btn.textContent = 'Copy prompt'; } catch (_e) {} }, 1400);
+                                setTimeout(() => { try { btn.classList.remove('is-copied'); btn.textContent = meta.copyLabel; } catch (_e) {} }, 1400);
                             } catch (_e) {}
                         });
                     }

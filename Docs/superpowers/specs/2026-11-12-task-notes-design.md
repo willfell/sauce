@@ -28,7 +28,7 @@ In one week in accuris, 38 subtasks were really notes about their task, not step
 
 - **Path:** `spice/tasks/<Task>/notes/<Name>.md`, only under a task folder note. Notes move with the folder to `_done/` and `_trash/`.
 - **Frontmatter:** `type: task-doc`, `kind`, `title`, `task: "[[<Task>]]"`, `created_at`.
-  - Kinds are a fixed list: prompt, handoff, plan, context, findings, questions, note. Any other value reads as `note`. A fixed list was Claude's call; Will accepted the proposal without choosing.
+  - Kinds are a fixed list: prompt, handoff, comms, plan, context, findings, questions, note. Comms (added 2026-11-13 at Will's request) holds the message to send others about the task; its card button is Copy message. Any other value reads as `note`. A fixed list was Claude's call; Will accepted the proposal without choosing.
   - Registered as `task-doc-frontmatter` in `platform/schemas-index.json`.
 - **Names:** `TaskEntity.taskName(title, { parentTitle: task title })`, the same rule subtasks use.
 - **Card:** a Notes section after Subtasks.
