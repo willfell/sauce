@@ -20,6 +20,8 @@ class TaskJump {
     score(query, title, extra) { return TaskJump.score(query, title, extra); }
     renderRow(item, el) { return TaskJump.renderRow(item, el); }
     isNewTab(evt) { return TaskJump.isNewTab(evt); }
+    stateOf(path, fm) { return TaskJump.stateOf(path, fm); }
+    docStateOf(path) { return TaskJump.docStateOf(path); }
     openItem(app, item, newTab) { return TaskJump.openItem(app, item, newTab); }
     get LIMIT() { return TaskJump.LIMIT; }
     get ICON() { return TaskJump.ICON; }
@@ -27,7 +29,7 @@ class TaskJump {
     static get ROOT() { return 'spice/tasks'; }
     static get SKIP() { return ['spice/tasks/_sets/']; }
     static get LIMIT() { return 100; }
-    static get GROUPS() { return { open: 0, done: 1, deleted: 2, doc: 3 }; }
+    static get GROUPS() { return { open: 0, done: 1, deleted: 2, doc: 3, doneDoc: 4, trashedDoc: 5 }; }
     static get _MONTHS() { return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; }
 
     static get ICON() {
@@ -94,15 +96,31 @@ class TaskJump {
     }
 
     /**
-     * open, done or deleted. Status decides; a note under _trash/ is
-     * deleted, and a note with no status under _done/ is done.
+     * open, done or deleted, from TaskEntity.taskState when it is loaded
+     * (status decides; a note under _trash/ is deleted). Without it: the
+     * same, plus a note with no status under _done/ reads as done.
      */
     static stateOf(path, fm) {
+        const TE = TaskJump._te();
+        if (TE && typeof TE.taskState === 'function') {
+            try {
+                const s = TE.taskState({ path, status: fm && fm.status != null && fm.status !== '' ? String(fm.status).trim().toLowerCase() : undefined });
+                if (s === 'open' || s === 'done' || s === 'deleted') return s;
+            } catch (_e) {}
+        }
         const p = String(path == null ? '' : path);
         const status = TaskJump._str(fm && fm.status).toLowerCase();
         if (p.indexOf(TaskJump.ROOT + '/_trash/') === 0 || status === 'deleted') return 'deleted';
         if (status === 'done') return 'done';
         if (!status && p.indexOf(TaskJump.ROOT + '/_done/') === 0) return 'done';
+        return 'open';
+    }
+
+    /** A note's place by path: deleted under _trash/, done under _done/, else open. */
+    static docStateOf(path) {
+        const p = String(path == null ? '' : path);
+        if (p.indexOf(TaskJump.ROOT + '/_trash/') === 0) return 'deleted';
+        if (p.indexOf(TaskJump.ROOT + '/_done/') === 0) return 'done';
         return 'open';
     }
 
@@ -211,9 +229,12 @@ class TaskJump {
                     const t = TaskJump._unlink(fm.task);
                     if (t) trail = [t];
                 }
+                const where = TaskJump.docStateOf(r.path);
                 items.push({
-                    path: r.path, title, task: false, state: null, kind: k, group: TaskJump.GROUPS.doc,
-                    trail, meta: meta.label, late: false, due: '', done: '', mtime: Number(r.mtime) || 0,
+                    path: r.path, title, task: false, state: where, kind: k,
+                    group: where === 'deleted' ? TaskJump.GROUPS.trashedDoc : (where === 'done' ? TaskJump.GROUPS.doneDoc : TaskJump.GROUPS.doc),
+                    trail, meta: where === 'deleted' ? 'Trashed note' : (where === 'done' ? 'Done note' : meta.label),
+                    kindLabel: meta.label, late: false, due: '', done: '', mtime: Number(r.mtime) || 0,
                 });
             }
         }
@@ -295,7 +316,7 @@ class TaskJump {
         if (!TaskJump._norm(query)) return list.slice();
         const scored = [];
         list.forEach((item, index) => {
-            const extra = (item.trail || []).join(' ') + (item.task ? '' : ' ' + item.meta);
+            const extra = (item.trail || []).join(' ') + (item.task ? '' : ' ' + (item.kindLabel || '') + ' ' + item.meta);
             const s = TaskJump.score(query, item.title, extra);
             if (s) scored.push({ item, index, tier: s.tier, bonus: s.bonus });
         });
@@ -370,11 +391,15 @@ class TaskJump {
         } catch (_e) {}
     }
 
+    /** Choose the highlighted row; the new-tab flag set by Mod+Enter never outlives this call. */
     static _choose(modal, evt) {
         try {
             if (typeof modal.selectActiveSuggestion === 'function') { modal.selectActiveSuggestion(evt); return; }
             if (modal.chooser && typeof modal.chooser.useSelectedItem === 'function') modal.chooser.useSelectedItem(evt);
-        } catch (_e) {}
+        } catch (_e) {
+        } finally {
+            try { modal._newTab = false; } catch (_e) {}
+        }
     }
 
     /** The picker class, built once from Obsidian's SuggestModal; null when it is missing. */

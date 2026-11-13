@@ -66,19 +66,36 @@ ok('TJ-BUILD-2 order is open tasks, then done, then trashed, then task notes',
   && items.filter((i) => i.group === 2).every((i) => i.task && i.state === 'deleted')
   && items.filter((i) => i.group === 3).every((i) => !i.task), JSON.stringify(items.map((i) => [i.title, i.group])));
 
-ok('TJ-BUILD-3 status decides the state; a note under _trash/ is trashed; a note with no status under _done/ is done; an open subtask under _done/ stays open',
+ok('TJ-BUILD-3 status decides the state (TaskEntity.taskState); a note under _trash/ is trashed; an open or status-less task under _done/ stays open',
   byTitle('Write tests').state === 'done' && byTitle('Gone').state === 'deleted' && byTitle('Old idea').state === 'deleted'
-  && byTitle('Old Ledger').state === 'done' && byTitle('Call the bank').state === 'open' && byTitle('Inbox zero').state === 'open'
+  && byTitle('Old Ledger').state === 'open' && byTitle('Call the bank').state === 'open' && byTitle('Inbox zero').state === 'open'
   && TJ.stateOf('spice/tasks/_done/2026/11/A/A.md', { status: 'open' }) === 'open'
-  && TJ.stateOf('spice/tasks/_trash/A/A.md', { status: 'done' }) === 'deleted');
+  && TJ.stateOf('spice/tasks/_trash/A/A.md', { status: 'done' }) === 'deleted'
+  && TJ.stateOf('spice/tasks/A/A.md', { status: 'Done' }) === 'done');
+
+{
+  const calls = [];
+  const spyWin = { customJS: { TaskEntity: { taskState: (t) => { calls.push(t); return 'done'; } } } };
+  const spy = loadJump(spyWin);
+  const viaTE = spy.stateOf('spice/tasks/A/A.md', { status: 'open' });
+  const bare = loadJump({ customJS: {} });
+  ok('TJ-STATE-1 stateOf delegates to TaskEntity.taskState when it is loaded, passing the path and status',
+    viaTE === 'done' && calls.length === 1 && calls[0].path === 'spice/tasks/A/A.md' && calls[0].status === 'open');
+  ok('TJ-STATE-2 without TaskEntity the fallback keeps the old rule: _trash/ is trashed, status decides, a status-less task under _done/ is done',
+    bare.stateOf('spice/tasks/_trash/A/A.md', { status: 'open' }) === 'deleted'
+    && bare.stateOf('spice/tasks/A/A.md', { status: 'done' }) === 'done'
+    && bare.stateOf('spice/tasks/_done/2026/10/A/A.md', {}) === 'done'
+    && bare.stateOf('spice/tasks/_done/2026/10/A/A.md', { status: 'open' }) === 'open'
+    && bare.stateOf('spice/tasks/A/A.md', {}) === 'open');
+}
 
 const open = items.filter((i) => i.group === 0).map((i) => i.title);
 const done = items.filter((i) => i.group === 1).map((i) => i.title);
 const trashed = items.filter((i) => i.group === 2).map((i) => i.title);
 const notes = items.filter((i) => i.group === 3).map((i) => i.title);
 ok('TJ-BUILD-4 open tasks by due date with undated last (then by title); done newest completed first; trashed and notes newest first',
-  JSON.stringify(open) === JSON.stringify(['Review the routes PR', 'Help Henry out with Routes', 'Call the bank', 'Flat child', 'Inbox zero', 'Untitled'])
-  && JSON.stringify(done) === JSON.stringify(['Write tests', 'Pay Bills', 'Old Ledger'])
+  JSON.stringify(open) === JSON.stringify(['Review the routes PR', 'Help Henry out with Routes', 'Call the bank', 'Flat child', 'Inbox zero', 'Old Ledger', 'Untitled'])
+  && JSON.stringify(done) === JSON.stringify(['Write tests', 'Pay Bills'])
   && JSON.stringify(trashed) === JSON.stringify(['Gone', 'Old idea'])
   && JSON.stringify(notes) === JSON.stringify(['Routes findings', 'Kickoff prompt', 'Loose note']),
   JSON.stringify({ open, done, trashed, notes }));
@@ -115,6 +132,38 @@ ok('TJ-BUILD-9 a note shows its kind; an unknown kind reads as Note; a task with
   byTitle('Kickoff prompt').kind === 'prompt' && byTitle('Kickoff prompt').meta === 'Prompt'
   && byTitle('Loose note').kind === 'note' && byTitle('Loose note').meta === 'Note'
   && !!byTitle('Untitled') && byTitle('Untitled').task === true && byTitle('Untitled').kind === 'task');
+
+{
+  const set = TJ.build([
+    rec('spice/tasks/_trash/Old idea/notes/Idea prompt.md', { type: 'task-doc', kind: 'prompt', title: 'Idea prompt' }, 900),
+    rec('spice/tasks/_done/2026/11/Pay Bills/notes/Bank comms.md', { type: 'task-doc', kind: 'comms', title: 'Bank comms' }, 800),
+    rec('spice/tasks/Live/notes/Live plan.md', { type: 'task-doc', kind: 'plan', title: 'Live plan' }, 100),
+    rec('spice/tasks/Live/Live.md', { type: 'task', title: 'Live', status: 'open' }),
+  ], {});
+  const t = (x) => set.find((i) => i.title === x);
+  ok('TJ-DOCS-1 a note under _done/ reads "Done note", under _trash/ "Trashed note"; a live note keeps its kind',
+    t('Bank comms').meta === 'Done note' && t('Idea prompt').meta === 'Trashed note' && t('Live plan').meta === 'Plan'
+    && t('Bank comms').kind === 'comms' && t('Idea prompt').kind === 'prompt');
+  ok('TJ-DOCS-2 notes of done and trashed tasks list after live notes (live, done, trashed), even when newer',
+    JSON.stringify(set.map((i) => i.title)) === JSON.stringify(['Live', 'Live plan', 'Bank comms', 'Idea prompt']));
+  const r = TJ.rank(set, 'plan prompt comms').length === 0 && TJ.rank(set, 'prompt').map((i) => i.title);
+  const tie = TJ.rank(TJ.build([
+    rec('spice/tasks/_trash/A/notes/Kickoff.md', { type: 'task-doc', kind: 'prompt', title: 'Kickoff' }, 9),
+    rec('spice/tasks/_done/2026/11/B/notes/Kickoff.md', { type: 'task-doc', kind: 'prompt', title: 'Kickoff' }, 8),
+    rec('spice/tasks/C/notes/Kickoff.md', { type: 'task-doc', kind: 'prompt', title: 'Kickoff' }, 1),
+  ], {}), 'kickoff').map((i) => i.meta);
+  ok('TJ-DOCS-3 equal matches rank live notes before done-task notes before trashed-task notes; their kind stays searchable',
+    JSON.stringify(tie) === JSON.stringify(['Prompt', 'Done note', 'Trashed note']) && Array.isArray(r) && r.includes('Idea prompt'));
+  const walk = (e) => e.children.flatMap((c) => [c, ...walk(c)]);
+  const fnd = (el, cls) => walk(el).find((c) => c.classList.contains(cls));
+  const row = makeEl('div');
+  TJ.renderRow(t('Idea prompt'), row);
+  const doneRow = makeEl('div');
+  TJ.renderRow(t('Bank comms'), doneRow);
+  ok('TJ-DOCS-4 a trashed-task note row is struck through and shows "Trashed note"; a done-task note row is not struck',
+    fnd(row, 'suggestion-title').classList.contains('is-trashed') && fnd(row, 'sauce-tj-meta').textContent === 'Trashed note'
+    && !fnd(doneRow, 'suggestion-title').classList.contains('is-trashed') && fnd(doneRow, 'sauce-tj-meta').textContent === 'Done note');
+}
 
 ok('TJ-BUILD-10 pure: no clock — build without opts.today never marks a row late and reads no date',
   TJ.build(RECORDS, {}).every((i) => i.late === false) && !/Date\.now|new Date|Math\.random/.test(TJ.build.toString() + TJ.rank.toString() + TJ.score.toString()));
@@ -260,6 +309,20 @@ const find = (el, cls) => all(el).find((c) => c.classList.contains(cls));
   if (mod) mod.fn({ metaKey: true });
   ok('TJ-MODAL-2 Enter opens in the current tab; Mod+Enter is registered and opens in a new tab',
     !!mod && JSON.stringify(leaves) === JSON.stringify([[false, 'spice/tasks/Inbox zero/Inbox zero.md'], ['tab', 'spice/tasks/Help Henry out with Routes/notes/Kickoff prompt.md']]));
+  leaves.length = 0;
+  modal.query = 'inbox zero';
+  modal.selectActiveSuggestion({});
+  modal.query = 'pay bills';
+  if (mod) mod.fn({});
+  const flagAfter = modal._newTab;
+  modal.query = 'write tests';
+  modal.selectActiveSuggestion({});
+  ok('TJ-MODAL-5 the new-tab choice ends with its Mod+Enter: a later plain Enter opens in the current tab',
+    !!mod && flagAfter === false && JSON.stringify(leaves) === JSON.stringify([
+      [false, 'spice/tasks/Inbox zero/Inbox zero.md'],
+      ['tab', 'spice/tasks/_done/2026/11/Pay Bills/Pay Bills.md'],
+      [false, 'spice/tasks/Help Henry out with Routes/Write tests/Write tests.md'],
+    ]), JSON.stringify(leaves));
   ok('TJ-MODAL-3 the desktop shows the keys (⌘ ↵ opens in a new tab); the phone shows none',
     Array.isArray(modal.instructions) && modal.instructions.some((i) => i.command === '⌘ ↵' && /new tab/.test(i.purpose))
     && (() => { app.isMobile = true; const m = MJ.open(); app.isMobile = false; return m && m.instructions === undefined; })());

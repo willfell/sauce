@@ -128,11 +128,15 @@ is a fuzzy picker over every task and task note.
   every To-Do chrome bar and on Home (`iconActions` in the bar's spec).
 - **Rows.** Open tasks, then done, then trashed, then task notes, read from the
   metadata cache (`type: task` / `type: task-doc` under `spice/tasks/`, never
-  `spice/tasks/_sets/`). Status decides the group; a note under `_trash/` is
-  trashed, and one with no status under `_done/` is done. Each row shows a
-  checkbox glyph (task) or the kind icon (note), the title, the parent trail
-  (from the task folders, else `parent_task` / `task:`), and the due date,
-  Open, Done, Trashed or the note's kind.
+  `spice/tasks/_sets/`). A task's group is `TaskEntity.taskState`: status
+  decides, and a task under `_trash/` is trashed. Notes of a task under
+  `_done/` read "Done note" and those under `_trash/` "Trashed note" (struck
+  through); both list after live notes. Each row shows a checkbox glyph
+  (task) or the kind icon (note), the title, the parent trail (from the task
+  folders, else `parent_task` / `task:`), and the due date, Open, Done,
+  Trashed or the note's kind.
+- **No query.** With no query the picker shows open tasks first (up to 100
+  rows); done, trashed and note rows appear once you type.
 - **Ranking.** `TaskJump.rank`: exact title, then title starts with the query,
   a title word starts with it, the title contains it, every word is in the
   title, every word is in the title or trail, and last the letters in order.
