@@ -16,7 +16,7 @@ In one week in accuris, 38 subtasks were really notes about their task, not step
 
 - A task can hold notes that are not steps. Notes have no checkbox and no status, never count toward progress, and never list as to-dos.
 - The card shows them and copies a prompt in one click.
-- A new note starts from a template for its kind.
+- A new note starts blank under its header. (Until 2026-11-13 each kind had starter text; it was removed so notes start empty.)
 - Agent sessions know where to write them.
 
 ## Non-goals (this release)

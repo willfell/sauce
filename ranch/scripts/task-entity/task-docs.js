@@ -7,7 +7,7 @@ class TaskDocs {
     // never lists as a to-do. The task card shows them in a Notes section
     // (render), with Copy prompt on prompt and handoff notes, Copy message on
     // comms notes (the message to send others about the task), and a + Note
-    // menu that creates one from its kind's template.
+    // menu that creates one, blank under its header.
     // Spec: Docs/superpowers/specs/2026-11-12-task-notes-design.md.
 
     render(container, opts) { return TaskDocs.render(container, opts); }
@@ -75,61 +75,10 @@ class TaskDocs {
         return parts.slice(0, -1).join('/') + '/' + TaskDocs.FOLDER;
     }
 
-    /** The body a new note of `kind` starts with, under its header line. */
-    static template(kind) {
-        switch (TaskDocs.kindOf(kind)) {
-            case 'prompt':
-                return 'Write the prompt here. Copy prompt on the task card copies this whole section.\n';
-            case 'comms':
-                return [
-                    '> [!info] Send to',
-                    '> **To:** ',
-                    '> **Via:** Slack / Email / Teams',
-                    '',
-                    '````text',
-                    'Hi <name>,',
-                    '',
-                    '<what is happening with this, what you need from them, and by when>',
-                    '',
-                    'Thanks',
-                    '````',
-                    '',
-                ].join('\n');
-            case 'handoff':
-                return [
-                    '> [!tip] Resume session',
-                    '> ```bash',
-                    '> cd ~/Documents/GitHub/<repo>',
-                    '> claude --resume <session-id>',
-                    '> ```',
-                    '',
-                    '## Prompt to paste', // lint-display-markers:allow starter text the user edits; extractPrompt matches any heading containing "prompt", not this string
-                    '',
-                    '````text',
-                    'You are continuing work on <what>. Verify the current state read-only before changing anything.',
-                    '',
-                    'Done so far:',
-                    '-',
-                    '',
-                    'Next, in order:',
-                    '1.',
-                    '````',
-                    '',
-                ].join('\n');
-            case 'plan':
-                return ['## Goal', '', '', '## Approach', '', '', '## Steps', '', '- [ ] ', '', '## Risks', '', ''].join('\n'); // lint-display-markers:allow starter text the user edits; nothing reads it back
-            case 'context':
-                return ['> [!abstract] Goal', '> ', '', '## Background', '', '', '## Links', '', '- ', ''].join('\n'); // lint-display-markers:allow starter text the user edits; nothing reads it back
-            case 'findings':
-                return ['> [!abstract] Summary', '> ', '', '## Details', '', ''].join('\n'); // lint-display-markers:allow starter text the user edits; nothing reads it back
-            case 'questions':
-                return ['## Open questions', '', '- [ ] ', '', '## Answers', '', ''].join('\n'); // lint-display-markers:allow starter text the user edits; nothing reads it back
-            default:
-                return '';
-        }
-    }
-
-    /** A whole new note: frontmatter, a link back to the task, the template. */
+    /**
+     * A whole new note: frontmatter, then the header (breadcrumb bar and header
+     * card) and nothing else, so the note starts blank under the header.
+     */
     static compose(kind, title, taskName, createdAt) {
         const k = TaskDocs.kindOf(kind);
         const t = String(title == null || String(title).trim() === '' ? TaskDocs._kind(k).label : title).trim();
@@ -144,7 +93,7 @@ class TaskDocs {
             '---',
             '',
             TaskDocs.HEADER,
-            TaskDocs.template(k),
+            '',
         ].join('\n');
     }
 

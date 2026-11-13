@@ -4,7 +4,7 @@
  * and questions that belong to a task without being steps of it. TaskDocs
  * keeps them at spice/tasks/<Task>/notes/ as `type: task-doc`, lists them on
  * the task card's Notes section in kind order, copies a note's prompt, and
- * creates new ones from per-kind templates with vault-unique names. The
+ * creates new ones, blank under their header, with vault-unique names. The
  * task-entity manifest ships the class, a breadcrumb for task-doc notes, and
  * directory-map rows that tell agent sessions where to write. Zero-dep; exit
  * 0 iff all pass.
@@ -81,15 +81,12 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
 
 {
   const text = TD.compose('handoff', 'Handoff', 'Finish AccurAPI Plugin', '2026-11-12T10:00:00-07:00');
-  ok('TD-COMPOSE a new note is type task-doc with its kind, title and task link, the breadcrumb bar and header card, and its template',
+  ok('TD-COMPOSE a new note is type task-doc with its kind, title and task link, then the breadcrumb bar and header card',
     /^---\ntype: task-doc\nkind: handoff\ntitle: "Handoff"\ntask: "\[\[Finish AccurAPI Plugin\]\]"\ncreated_at: 2026-11-12T10:00:00-07:00\n---\n/.test(text)
-    && /\n---\n\n```dataviewjs\n[^`]*TaskChromeBar[^`]*```\n\n```dataviewjs\n[^`]*class: "TaskDocs", method: "renderHeader"[^`]*```\n\n/.test(text) && !/\[!info\]/.test(text)
-    && /## Prompt to paste/.test(text) && /claude --resume/.test(text));
-  ok('TD-COMPOSE-TEMPLATES each known kind has its own starting text; note starts blank',
-    /## Steps/.test(TD.template('plan')) && /\[!abstract\] Goal/.test(TD.template('context')) && /\[!abstract\] Summary/.test(TD.template('findings'))
-    && /## Open questions/.test(TD.template('questions')) && TD.template('note') === '' && TD.template('prompt').length > 0);
-  ok('TD-PROMPT-HANDOFF-TEMPLATE a fresh handoff copies just its prompt block', /^You are continuing work on <what>/.test(TD.extractPrompt(text))
-    && !/claude --resume/.test(TD.extractPrompt(text)));
+    && /\n---\n\n```dataviewjs\n[^`]*TaskChromeBar[^`]*```\n\n```dataviewjs\n[^`]*class: "TaskDocs", method: "renderHeader"[^`]*```\n\n/.test(text) && !/\[!info\]/.test(text));
+  const blank = (k) => { const c = TD.compose(k, 'X', 'Task', 'x'); return c.slice(c.indexOf(TD.HEADER) + TD.HEADER.length) === '\n'; };
+  ok('TD-COMPOSE-BLANK every kind starts blank under its header: no starter text',
+    TD.KINDS.every((k) => blank(k.key)) && blank('unknown') && typeof TD.template === 'undefined', TD.KINDS.filter((k) => !blank(k.key)).map((k) => k.key));
 }
 
 {
@@ -101,8 +98,9 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     TD.extractPrompt(quoted) === 'You are continuing work.\n\nThen do these.');
   ok('TD-PROMPT-FIRST-TEXT-FENCE with no prompt heading, the first text fence is the prompt; a bash fence is not',
     TD.extractPrompt('Intro\n```bash\nls\n```\n```\nDo the thing\n```\n') === 'Do the thing');
-  ok('TD-PROMPT-NEW-PROMPT a new prompt note copies its own body, not its header line',
-    TD.extractPrompt(TD.compose('prompt', 'Prompt', 'Backup Script', 'x')) === TD.template('prompt').trim());
+  ok('TD-PROMPT-NEW-PROMPT a new prompt note has nothing to copy until something is written under its header',
+    TD.extractPrompt(TD.compose('prompt', 'Prompt', 'Backup Script', 'x')) === ''
+    && TD.extractPrompt(TD.compose('prompt', 'Prompt', 'Backup Script', 'x') + 'Look at the dir.\n') === 'Look at the dir.');
   ok('TD-PROMPT-EMPTY an empty note has nothing to copy', TD.extractPrompt('---\ntype: task-doc\n---\n') === '' && TD.extractPrompt(null) === '');
 }
 
@@ -387,8 +385,8 @@ ok('TD-FOLDER a folder task keeps its notes in <Task>/notes; a flat task has non
     const kind = TD.KINDS.find((k) => k.key === 'comms');
     ok('TD-COMMS a Comms note has a message-bubble icon, its own colour, and copies its message with Copy message',
       kind && kind.label === 'Comms' && kind.copy === true && kind.copyLabel === 'Copy message' && /M7\.9 20A9 9 0 1 0 4 16\.1L2 22Z/.test(kind.icon)
-      && /pink/.test(TD.TONES.comms) && /\*\*To:\*\*/.test(comms)
-      && TD.extractPrompt(comms) === 'Hi <name>,\n\n<what is happening with this, what you need from them, and by when>\n\nThanks', TD.extractPrompt(comms));
+      && /pink/.test(TD.TONES.comms) && !/Send to/.test(comms)
+      && TD.extractPrompt(comms + 'Hi Sam,\n\nThe fix ships today.\n') === 'Hi Sam,\n\nThe fix ships today.', TD.extractPrompt(comms));
     ok('TD-COMMS-TITLE subtasks titled like a message read as comms',
       TD.titleKind('Comms') === 'comms' && TD.titleKind('Slack message') === 'comms' && TD.titleKind('Customer comms') === 'comms'
       && TD.titleKind('Message the team about the outage') === '');
