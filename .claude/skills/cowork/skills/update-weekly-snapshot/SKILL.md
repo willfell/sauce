@@ -30,7 +30,7 @@ Deterministic state mutator for the rolling weekly-snapshot context file. Read â
 - `snapshot_data` (object, required for non-trivial phases):
   - For `weekly-close` / `weekly-reset` / `archive-and-reset`: `{ week_of: "YYYY-MM-DD", totals?, hours?, project_movement?, threads?, meetings?, mood_signals?, goal_progress?, key_events?, relationship_pulse?, threads_resolved?, stale_thread_watch?, archive_to_previous?: boolean }`.
   - For `monthly-reset`: `{ archive_previous_month: true, prev_month_yyyymm: "YYYY-MM" }`.
-  - For `morning` / `eod`: lightweight `{ section?, body? }` plus optional running counters (`wtd_spend`, `cc_total`, `journaled_today`, `completed_count`, `carryover_count`, `threads_resolved_today`).
+  - For `morning` / `eod`: lightweight `{ section?, body? }` plus optional running counters (`journaled_today`, `completed_count`, `carryover_count`, `threads_resolved_today`).
   - For `section-update`: `{ section: string, body: string }`.
 - `vault_path` (string, optional): absolute vault root override.
 
@@ -61,7 +61,6 @@ For back-compat, legacy `mutation` / `caller` / `today` / `week_of` keys are acc
 Canonical section sequence (life variant):
 
 ```markdown
-## Spending Summary
 ## Vault Activity
 ## Mood and Energy Signals
 ## Goal Progress
@@ -82,7 +81,7 @@ Canonical section sequence (ERO variant):
 ## Next Week Highlights
 ```
 
-The skill resolves the engagement record from `engagement_id` and derives the section sequence from `engagement.type` + `render_aspects` (consulting / w2-fte engagements get a leaner section list; personal engagements get the full sequence including spending/debt rows).
+The skill resolves the engagement record from `engagement_id` and derives the section sequence from `engagement.type` + `render_aspects` (consulting / w2-fte engagements get a leaner section list; personal engagements get the full life sequence).
 
 ```
 { "status": "ok" | "schema-error:<reason>" }

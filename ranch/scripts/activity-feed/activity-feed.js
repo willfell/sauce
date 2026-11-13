@@ -975,14 +975,10 @@ class ActivityFeed {
       "team",
       "product",
       "trip",
-      "budget",
-      "paycheck",
-      "invoice",
-      // v0.2.0 (v0.65.0 cowork-scheduling-cycle): 6 cowork run-note types
+      // v0.2.0 (v0.65.0 cowork-scheduling-cycle): cowork run-note types
       "cowork-morning-briefing",
       "cowork-midday-tripwire",
       "cowork-eod-review",
-      "cowork-finance-snapshot",
       "cowork-weekly-review",
       "cowork-monthly-review",
       // v0.95.1 cowork-anti-echo Knob 3 (lens_shift cadence): cold-MB variant

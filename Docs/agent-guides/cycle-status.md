@@ -57,7 +57,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 > Per-mechanism history and rationale: `Docs/cycle-history.md`. Source of truth for versions: `platform/manifest.json`.
 
-## Blueprints (16)
+## Blueprints (15)
 
 | Name | Version | Slash command | Module dir |
 | --- | --- | --- | --- |
@@ -73,7 +73,6 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 | `teams` | 0.4.0 | `/teams` | `spice/teams/` |
 | `to-do` | 0.29.1 | — | `spice/to-do/` |
 | `trips` | 0.10.3 | — | `spice/trips/` |
-| `finance` | 0.23.2 | — | `spice/finance/` |
 | `wiki` | 0.8.4 | `/wiki` | `spice/wiki/` |
 | `home` | 0.8.7 | `/home` | `spice/home/` |
 | `reader` | 0.6.3 | `/reader` | `spice/reader/` |
@@ -82,7 +81,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Test harnesses
 
-180 harness files under `platform/test/run-*.js` (183 steps in `platform/test/preflight-manifest.json`), one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
+198 harness files under `platform/test/run-*.js` (201 steps in `platform/test/preflight-manifest.json`), one per mechanism/blueprint plus cross-cutting suites (seed-vault regression, schema lint, version-sync). Run the full set via `npm run release:preflight`. Per-harness detail and history: `Docs/cycle-history.md`.
 
 Engine harnesses (added in the engine-reintegration cycle; all in the preflight manifest and `package.json`):
 

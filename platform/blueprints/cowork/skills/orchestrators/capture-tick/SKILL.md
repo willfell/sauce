@@ -1,6 +1,6 @@
 ---
 name: cowork:capture-tick
-description: Hourly tick — captures lean deltas across the engagement's MCP kinds (calendar/email/chat/finance/projects/threads per prefs.priorities) within a tight 1-hour window. Appends a collapsed [!example]- callout to spice/cowork/memory/<engagement_id>/YYYY/MM-MMMM/YYYY-MM-DD/memory.md (creating the file on the first tick of the day). Background memory layer — does NOT write to spice/cowork/daily/, does NOT touch the daily note. Reused by cowork:morning-briefing and cowork:synthesize-day downstream as continuity context. Phrasings = "capture this hour", "tick", "memory dump", "log this hour for engagement".
+description: Hourly tick — captures lean deltas across the engagement's MCP kinds (calendar/email/chat/projects/threads per prefs.priorities) within a tight 1-hour window. Appends a collapsed [!example]- callout to spice/cowork/memory/<engagement_id>/YYYY/MM-MMMM/YYYY-MM-DD/memory.md (creating the file on the first tick of the day). Background memory layer — does NOT write to spice/cowork/daily/, does NOT touch the daily note. Reused by cowork:morning-briefing and cowork:synthesize-day downstream as continuity context. Phrasings = "capture this hour", "tick", "memory dump", "log this hour for engagement".
 schedule: Cron-driven hourly during waking hours (default 7am-10pm; 16 ticks/day per engagement)
 scope: shared
 tags: [cowork, orchestrator, tick, memory, background]
@@ -59,8 +59,8 @@ This orchestrator is strictly background-only. It does NOT write to `spice/cowor
       mcps_entry = prefs.mcps[kind_name]    # may be undefined
 
       # Compute kind_title
-      if kind_name in {calendar, email, chat, finance}:
-          kind_title = canonical lookup ("Calendar", "Email", "Chat", "Finance")
+      if kind_name in {calendar, email, chat}:
+          kind_title = canonical lookup ("Calendar", "Email", "Chat")
       else:
           kind_title = title-case of kind_name (whitespace/underscore-split; "ado" -> "Ado", "github" -> "Github", "monitoring" -> "Monitoring")
 
@@ -127,7 +127,7 @@ When `dispatch_mode == "legacy"`, exit silently with Notice `cowork:capture-tick
 When `dispatch_mode == "prefs"`, iterate `dispatch_plan[]` with these tick-specific differences from midday-tripwire's gather phase:
 
 - Pass `range: { start: range.start, end: range.end }` (the tight 1-hour window) to every gather call.
-- DO NOT run engagement-type-aspect gathers (semantic_related, finance from render_aspects). Those are eod-review's job.
+- DO NOT run engagement-type-aspect gathers (semantic_related from render_aspects). Those are eod-review's job.
 - Capture each kind's output as `tick_blocks[kind_name] = { markdown, status, kind_title }`.
 
 ```
@@ -165,7 +165,7 @@ Outcome classification after the loop:
 
 ## Decide
 
-Compute `tick_summary`: a ≤140 character one-liner derived from the non-empty tick_blocks. Enumerate the kinds with non-empty output and compose a plain summary line. Examples: `"2 new emails; 1 calendar event; threads stable"`, `"Finance: 1 charge ($45); calendar quiet"`, `"All kinds quiet — no deltas this hour"` (when all are empty). The summary is the running frontmatter summary replaced each tick; `cowork:synthesize-day` will overwrite it with a full synthesis at EOD.
+Compute `tick_summary`: a ≤140 character one-liner derived from the non-empty tick_blocks. Enumerate the kinds with non-empty output and compose a plain summary line. Examples: `"2 new emails; 1 calendar event; threads stable"`, `"Chat: 1 new thread; calendar quiet"`, `"All kinds quiet — no deltas this hour"` (when all are empty). The summary is the running frontmatter summary replaced each tick; `cowork:synthesize-day` will overwrite it with a full synthesis at EOD.
 
 Compose `tick_block_md` as a collapsed `[!example]-` callout titled `HH:MM Tick` (where `HH:MM` is derived from `range.end`'s hour + `:00` — e.g., `09:00 Tick` for a tick ending at 09:xx):
 

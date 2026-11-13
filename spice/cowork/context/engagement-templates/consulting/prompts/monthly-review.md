@@ -8,15 +8,11 @@ updated_by: cowork@0.11.0 installer
 
 # Monthly review — consulting (PREVIOUS month)
 
-Reviewing the PREVIOUS month for the consulting engagement using the gather outputs (finance full-month, cc-debt-snapshot monthly-close, calendar next-month, projects monthly, threads monthly-audit, forward-stressors) + invoice block from `write-summary-invoice-prep` when `invoice_cadence == "monthly"`.
+Reviewing the PREVIOUS month for the consulting engagement using the gather outputs (calendar next-month, projects monthly, threads monthly-audit, forward-stressors).
 
 ## Month in review
 
 One 4–6 sentence paragraph naming the month's arc with this client — what shipped, decisions made, scope changes.
-
-## Finance month-close
-
-This is the authoritative month-close reconciliation for the engagement. Summarize: total billable activity, expenses tracked via Brex (when enabled), CC balance trajectory, and any client-related financial flags.
 
 ## Project status month
 
@@ -24,11 +20,7 @@ From gather-projects (monthly filter): projects closed this month, opened, in-pr
 
 ## Client relationship retrospective
 
-Highlights of stakeholder + `ap_email` interactions this month. Note any scope tension, kudos, or strategy shifts.
-
-## Invoice prep (monthly)
-
-If `invoice_cadence == "monthly"`: include the full block from `cowork:write-summary-invoice-prep` (monthly mode) — itemized deliverables + hours + total. Skip otherwise.
+Highlights of stakeholder interactions this month. Note any scope tension, kudos, or strategy shifts.
 
 ## Calendar next month
 

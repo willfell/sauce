@@ -47,7 +47,6 @@ Each blueprint owns exactly one directory under `spice/` (landmine #11 module-di
 | `to-do`       | `spice/to-do/`        | To-Do hub + per-card task notes. |
 | `boards`      | `spice/boards/`       | Kanban boards (incl. the global To-Do board). |
 | `cowork`      | `spice/cowork/`       | Cowork hub + per-vault context + cron-fired summaries. |
-| `finance`     | `spice/finance/`      | Invoices, budgets, debt tracking. |
 
 ---
 
@@ -215,7 +214,7 @@ updated_by: <orchestrator-id>
 
 | Orchestrator                | Writes to                                                                                       |
 |:----------------------------|:------------------------------------------------------------------------------------------------|
-| `cowork:morning-briefing`   | Daily-note callouts (Morning Briefing, Finance, Email, Messages) + `active-threads.md` Last Surfaced field. |
+| `cowork:morning-briefing`   | Daily-note callouts (Morning Briefing, Email, Messages) + `active-threads.md` Last Surfaced field. |
 | `cowork:midday-tripwire`    | Daily-note callout (Tripwire red/yellow). No state file writes.                                 |
 | `cowork:eod-review`         | Daily-note callout (EOD Review) + `active-threads.md` (resolve/create/snooze).                  |
 | `cowork:weekly-review`      | New file under `spice/cowork/summaries/weekly/` + `weekly-snapshot.md` reset.                   |
@@ -223,7 +222,7 @@ updated_by: <orchestrator-id>
 | `cowork:ero-morning`        | Daily-note callout (ero Morning Briefing) + `active-projects.md` table refresh + `active-threads.md` Last Surfaced. |
 | `cowork:ero-eod`            | Daily-note callout (ero EOD) + `active-threads.md` (resolve/create/snooze) + session-end hour log. |
 | `cowork:ero-weekly`         | New file under `spice/cowork/summaries/weekly/` + ero `weekly-snapshot.md` reset + 14-day thread archival. |
-| `cowork:ero-monthly`        | New file under `spice/cowork/summaries/monthly/` + invoice-prep handoff.                        |
+| `cowork:ero-monthly`        | New file under `spice/cowork/summaries/monthly/`.                                               |
 
 ---
 
@@ -234,7 +233,6 @@ Daily-note callouts use a fixed type-to-section mapping for visual consistency w
 | Section                | Callout type        | Notes |
 |:-----------------------|:--------------------|:------|
 | Morning Briefing       | `[!summary]-`       | Always collapsed by default (suffix `-`). |
-| Finance                | `[!tip]-`           | Green. |
 | Email                  | `[!info]-`          | Blue. |
 | Messages               | `[!example]-`       | Purple. |
 | EOD Review             | `[!note]-`          | Gray. |
@@ -304,7 +302,7 @@ Each thread is an H3 under `## Open`, `## Snoozed`, or `## Resolved`:
 | Field         | Required | Format |
 |:--------------|:--------:|:-------|
 | Title (H3)    | Yes      | `### [kebab-id] Human Title` |
-| Type          | Yes      | `task`, `commitment`, `financial`, `trip-prep`, `project-blocked`, `stale-card`, `action-item`, `invoice-deadline` |
+| Type          | Yes      | `task`, `commitment`, `trip-prep`, `project-blocked`, `stale-card`, `action-item` |
 | Created       | Yes      | `YYYY-MM-DD` |
 | Target        | No       | `YYYY-MM-DD` -- when to surface, or due date |
 | Status        | Yes      | `open`, `snoozed`, `resolved` |
@@ -325,7 +323,6 @@ These domains have dedicated context files. Do not duplicate their schemas here 
 
 | Domain                | Canonical context file                         |
 |:----------------------|:-----------------------------------------------|
-| Finance posture       | `spice/cowork/context/finance-goals.md` (life) or `finance-guide.md` (ero) |
 | Active projects       | `spice/cowork/context/active-projects.md`      |
 | Active threads        | `spice/cowork/context/active-threads.md`       |
 | Weekly snapshot       | `spice/cowork/context/weekly-snapshot.md`      |

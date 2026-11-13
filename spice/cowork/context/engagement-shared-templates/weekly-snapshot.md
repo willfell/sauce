@@ -14,11 +14,11 @@ Rolling 1-week summary used by morning + weekly orchestrators for trend awarenes
 
 ---
 
-## Spending / Hours Summary
+## Hours Summary
 
 {{week_summary_paragraph}}
 
-Filled in by the weekly orchestrator. May be spending totals (life scope), hours billed (ero scope), or both (mixed scope).
+Filled in by the weekly orchestrator with hours logged (ero scope).
 
 ## Project / Vault Activity
 

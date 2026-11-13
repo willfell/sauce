@@ -54,14 +54,13 @@ Before the per-MCP interview begins, invoke the kind classifier to pre-fill answ
    I detected these connected MCPs and classified them:
      Gmail            → email     (priority 20)
      Google Calendar  → calendar  (priority 10)
-     Brex             → finance   (priority 50)
      apple-mcp        → messages  (priority 40)
 
    Press Enter to accept each as-is, or type the kind name to override
-   (calendar / email / chat / messages / finance / docs / weather / vault).
+   (calendar / email / chat / messages / docs / weather / vault).
    ```
 
-   Capture per-namespace acceptance/override as `auto_fill_decisions = { <namespace>: { kind: <accepted-or-overridden>, accepted_baseline: true|false } }`. A blank/Enter accept keeps the classifier's kind; typed input overrides it (validate against the 8 canonical kinds in `kind-patterns.json`).
+   Capture per-namespace acceptance/override as `auto_fill_decisions = { <namespace>: { kind: <accepted-or-overridden>, accepted_baseline: true|false } }`. A blank/Enter accept keeps the classifier's kind; typed input overrides it (validate against the 7 canonical kinds in `kind-patterns.json`).
 
 5. **For unclassified namespaces, surface them separately.** For each `ns` in `classifier_result.unclassified`, fall through to the existing Unknown-MCP loop (§7 below) — that loop already handles known-override / custom / skip per-namespace and remains the canonical path for namespaces the deterministic classifier could not place.
 
@@ -69,9 +68,9 @@ Before the per-MCP interview begins, invoke the kind classifier to pre-fill answ
 
 7. **Existing user-preferences entries PRESERVE.** Engagements with an existing `user-preferences.mcps.<kind>` block keep that block verbatim — auto-fill only adds entries for kinds NOT already in `existing_prefs`. New detections surface as additive opt-in; the user is never silently re-onboarded for a kind they previously configured.
 
-8. **Proceed to the per-MCP interview (steps 4 onward below), but skip questions whose answers are already implicitly captured by the accepted baseline.** Specifically: when `auto_fill_decisions[<ns>].accepted_baseline == true`, the per-MCP walk in step 10 below SKIPS questions whose output fields were already populated by the baseline (i.e., `what_matters`-equivalent fields like `surface_kinds` defaults), and asks ONLY for the remaining engagement-specific answers (e.g., `vip_senders`, `inner_circle`, `cards_mine` — fields the baseline cannot supply).
+8. **Proceed to the per-MCP interview (steps 4 onward below), but skip questions whose answers are already implicitly captured by the accepted baseline.** Specifically: when `auto_fill_decisions[<ns>].accepted_baseline == true`, the per-MCP walk in step 10 below SKIPS questions whose output fields were already populated by the baseline (i.e., `what_matters`-equivalent fields like `surface_kinds` defaults), and asks ONLY for the remaining engagement-specific answers (e.g., `vip_senders`, `inner_circle` — fields the baseline cannot supply).
 
-Run-time invariants per Rail D design (§4 of `Docs/plans/2026-06-08-v0.96.0-cowork-rethought-1-design.md`): the classifier is deterministic-first + LLM-fallback (currently unwired); cache makes the cost essentially zero after first sighting; the 8 canonical kinds (calendar, email, chat, messages, finance, docs, weather, vault) cover everything we ship microscopes for.
+Run-time invariants per Rail D design (§4 of `Docs/plans/2026-06-08-v0.96.0-cowork-rethought-1-design.md`): the classifier is deterministic-first + LLM-fallback (currently unwired); cache makes the cost essentially zero after first sighting; the 7 canonical kinds (calendar, email, chat, messages, docs, weather, vault) cover everything we ship microscopes for.
 
 ## Detect
 
@@ -103,11 +102,10 @@ Run-time invariants per Rail D design (§4 of `Docs/plans/2026-06-08-v0.96.0-cow
    >   - calendar — use the calendar question set
    >   - email — use the email question set
    >   - chat — use the chat question set
-   >   - finance — use the finance question set
    >   - custom — define a new kind inline
    >   - skip — don't capture preferences for this MCP
 
-   On a known classification (calendar / email / chat / finance):
+   On a known classification (calendar / email / chat):
    - Walk the matching `## Question set — <kind>` section below for this namespace.
    - Capture answers as `unknown_namespace_classifications[<ns>] = [{ kind: <known>, classification: "known-override", answers: <walked answers> }]`.
    - The user can supply MULTIPLE classifications for the same `<ns>` if it logically serves multiple kinds (e.g., classify Outlook UUID as `calendar` AND `email`) — re-prompt until the user picks `skip` or moves on.
@@ -332,39 +330,3 @@ Output field: `mcps.chat.surface_kinds` (string[])
 - no — count all messages
 
 Output field: `mcps.chat.suppress_quiet_hours` (boolean)
-
-## Question set — finance
-
-### Q1 — cards_mine (free-text)
-
-> List card IDs, last-4-digits, or account labels that count as "yours" (from whichever finance MCP you use — Brex, Mercury, etc.). (Comma-separated. Used to filter from a shared account view.)
-
-Output field: `mcps.finance.cards_mine` (string[])
-
-### Q2 — surface_kinds (multi-select)
-
-> Which spending patterns should the briefing surface?
-
-- category-outliers — categories ≥2x your trailing-7-day median
-- daily-spend — yesterday's total vs your trailing-7-day average
-- approval-queue — expenses awaiting your approval
-- recurring-changes — recurring charges that changed amount or frequency
-
-Output field: `mcps.finance.surface_kinds` (string[])
-
-### Q3 — daily_threshold_usd (single-select)
-
-> Surface a daily-spend callout only when total exceeds:
-
-- 100
-- 250
-- 500
-- always
-
-Output field: `mcps.finance.daily_threshold_usd` (string or int)
-
-### Q4 — category_ignore (free-text)
-
-> Categories to ignore entirely from outlier detection. (Comma-separated. Examples: "rent", "groceries-amazon".)
-
-Output field: `mcps.finance.category_ignore` (string[])

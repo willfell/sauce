@@ -1994,7 +1994,7 @@ const selector = process.argv[2] || "all";
     await runCase("AU-DOCS-3", caseAUWIKI3WikiNoteValid);
     await runCase("AU-DOCS-4", caseAUWIKI4ExcludeBasenamesHonored);
   }
-  // AUDIT-V065: 6 new cowork run-note rule_fragments registered
+  // AUDIT-V065: cowork run-note rule_fragments registered
   {
     const manifest = JSON.parse(fs.readFileSync("platform/blueprints/cowork/manifest.json", "utf8"));
     const registeredTypes = (manifest.rule_fragments || [])
@@ -2002,11 +2002,12 @@ const selector = process.argv[2] || "all";
       .filter(Boolean);
     const expectedTypes = [
       "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-      "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+      "cowork-weekly-review", "cowork-monthly-review",
     ];
     for (const t of expectedTypes) {
       assertTrue(registeredTypes.includes(t), `AUDIT-V065: cowork manifest registers rule_fragment for ${t}`);
     }
+    assertTrue(!registeredTypes.includes("cowork-finance-snapshot"), "AUDIT-RETIRED: cowork manifest no longer registers the retired cowork-finance-snapshot rule_fragment");
   }
 
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);

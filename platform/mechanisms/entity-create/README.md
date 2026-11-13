@@ -66,9 +66,6 @@ Comma- or semicolon-separated:
 | people | `person` | 1 prompt (name); flat folder; `safe-filename` validate |
 | project | `project` | 1 prompt (name) + 1 `derive: slugify(prompts.name)` slug; `extra_files[]` for Project Map + Board sidecars |
 | scratch | `scratch` | 1 optional prompt (title); folder routes via `{{current_file.frontmatter.day}}-routed` |
-| finance — budget | `budget` | 1 prompt (month, `type: "month"`); `inline_body` |
-| finance — paycheck | `paycheck` | 3 prompts: `start_date` (date), `end_date` (date, `gte:start_date`), `amount` (number, `min:0`); `paycheck_amount` emitted via `\|number` pipe |
-| finance — invoice | `invoice` | 1 prompt (month); two `extra_files[]` (Time-Log + Board) |
 
 Each migration site is catalogued in detail in **Appendix A** of `Docs/plans/2026-05-14-v0.46.0-entity-create-plan.md`.
 

@@ -22,7 +22,6 @@
 | `{{vault_id}}-obsidian` | yes                         | Vault reads + writes (mandatory).                |
 | Gmail                   | {{mcp_gmail_connected}}     | {{mcp_gmail_purpose}}                            |
 | Google Calendar         | {{mcp_gcal_connected}}      | {{mcp_gcal_purpose}}                             |
-| Copilot Money / Brex    | {{mcp_finance_connected}}   | {{mcp_finance_purpose}}                          |
 | {{mcp_extra_1_name}}    | {{mcp_extra_1_connected}}   | {{mcp_extra_1_purpose}}                          |
 
 ---
@@ -40,12 +39,6 @@
 - For daily briefing: today + next 2 days.
 - Flag conflicts or double-bookings.
 - Never create/modify events without explicit permission.
-
-## Finance MCP (invoice-prep)
-
-- Primary source for billable-hours aggregation + expense tracking.
-- Brex (when enabled per engagement) scoped to {{primary_client}} card.
-- See `finance-guide.md` for the invoice submission flow.
 
 ## Obsidian MCP
 

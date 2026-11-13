@@ -265,11 +265,6 @@
       "path": "blueprints/trips"
     },
     {
-      "name": "finance",
-      "version": "0.23.2",
-      "path": "blueprints/finance"
-    },
-    {
       "name": "sticky-notes",
       "version": "0.11.8",
       "path": "blueprints/sticky-notes"

@@ -42,7 +42,7 @@ v0.96.0 adds Rail D (kind classifier) integration: Step 0 invokes `classifyConne
 {
   engagement_id:        string,    // REQUIRED — matches an entry in vault-config.md engagements[]
   cadence:              string,    // REQUIRED — one of "morning" | "midday" | "eod" | "weekly" | "monthly"
-  reachable_namespaces: string[],  // REQUIRED — runtime MCP namespace set (e.g. ["iMCP", "brex", "github"])
+  reachable_namespaces: string[],  // REQUIRED — runtime MCP namespace set (e.g. ["iMCP", "Google_Calendar", "github"])
   tools_by_namespace:   object,    // OPTIONAL (v0.96.0) — { <namespace>: [<tool short name>, ...] }
                                    //   derived from the orchestrator's agent tool list by stripping
                                    //   the `mcp__<ns>__` prefix. Required for Step 0's classifier
@@ -159,7 +159,7 @@ Reference: design §5 (Rail D classifier integration) and §6.3 (14-key contract
 ## Backward-compatibility
 
 - vault-config.md without `engagements[i].overrides` → `composeFinalPreferences` returns bundle defaults verbatim; observable behavior unchanged from v0.94.x. v0.95.1's `sauce update --migrate-config` adds an empty `overrides: {}` block to every engagement and drops backward-compat reads.
-- `data/kind-titles.json` absent → `loadKindTitles` falls back to module-private `CANONICAL_TITLES` const (4 entries: calendar/email/chat/finance). Fresh consumer installs pick up the 7-entry data file at v0.95.0 deploy time.
+- `data/kind-titles.json` absent → `loadKindTitles` falls back to module-private `CANONICAL_TITLES` const (3 entries: calendar/email/chat). Fresh consumer installs pick up the 6-entry data file at v0.95.0 deploy time.
 - `engagement.inner_circle_people` absent → `allowlist` returns empty arrays (no resolver invocations).
 
 ## Connectivity signal authority (v0.91.3)

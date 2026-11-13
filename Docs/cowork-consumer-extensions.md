@@ -4,7 +4,7 @@ How to add your own scheduled jobs (e.g. ADO sprint-sync, custom snapshots) on t
 
 ## Reference template
 
-The sauce-shipped `cowork:write-run-note-finance` sub-skill is the canonical copy-paste template. Open `<vault>/.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` and use it as the starting point for your extension.
+The skill skeleton in Step 2 below is the copy-paste template. The sauce-shipped `cowork:write-run-note-*` sub-skills are not: each one writes through `writeAtomicNote`, which requires a sidecar validated against that cadence's JSON Schema.
 
 ## Worked example — sprint-sync against ADO
 
@@ -34,11 +34,41 @@ Add `cowork-sprint-sync` to a consumer-local rule_fragment. Use the `.local/` ov
 
 ### Step 2 — Author a consumer-local skill
 
-Copy `<vault>/.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` to `<vault>/.claude/skills.local/cowork-sprint-sync/SKILL.md`. In the new file, substitute these literals:
+Create `<vault>/.claude/skills.local/cowork-sprint-sync/SKILL.md`. Three literals vary per extension: the orchestrator name (`cowork:sprint-sync`), the type value (`cowork-sprint-sync`), and the filename slug (`sprint-sync.md`).
 
-- `cowork:write-run-note-finance` → `cowork:sprint-sync` (the orchestrator name)
-- `cowork-finance-snapshot` → `cowork-sprint-sync` (the type value)
-- `finance.md` → `sprint-sync.md` (the filename slug)
+````markdown
+---
+name: cowork:sprint-sync
+description: Write today's sprint-sync run as an atomic note to spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/sprint-sync.md (type cowork-sprint-sync). Overwrites the prior same-day run.
+inputs:
+  engagement: object
+  date: string
+  weekday: string
+  month_name: string
+  body: string
+outputs:
+  path: string
+  status: string
+---
+
+# cowork:sprint-sync
+
+1. Compose the path `spice/cowork/daily/<YYYY>/<MM>-<MonthName>/<YYYY-MM-DD>/sprint-sync.md` from `date` and `month_name` (take `date` from `cowork:date-context`, never the local clock).
+2. Compose the frontmatter:
+   ```yaml
+   ---
+   type: cowork-sprint-sync
+   title: "Sprint Sync — <weekday>, <month_name> <D>, <YYYY>"
+   summary: "<1-2 sentences>"
+   created_at: "<ISO-8601 with offset>"
+   engagement_id: "<engagement.id>"
+   day: "<date>"
+   generator: "cowork:sprint-sync@1.0.0"
+   ---
+   ```
+3. Write frontmatter + one blank line + `body`: `mkdir -p` the parent directory, then write the file (overwrite is the contract: last write wins).
+4. Return `{ path, status: "written" }`, or `{ path, status: "failed:<reason>" }` on any failure.
+````
 
 Add gather steps for ADO ahead of the write step (use whatever ADO MCP you have configured — `azuredevops` or similar).
 

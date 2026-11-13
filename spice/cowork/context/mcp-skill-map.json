@@ -22,13 +22,6 @@
       "tool_alternatives": [["list_chats"], ["list_threads"], ["list_conversations"]],
       "gather_skill": "cowork:gather-imessage",
       "rename_from_v1": "imessage"
-    },
-    {
-      "kind": "finance",
-      "required_tools": ["list_expenses"],
-      "optional_tools": ["list_cards", "list_transactions"],
-      "gather_skill": "cowork:gather-finance-yesterday",
-      "rename_from_v1": null
     }
   ]
 }

@@ -34,7 +34,7 @@ The compounding-assistant North Star has to be measurable. The platform's curren
 | 6 | **Quality observability** (grading own output) | Automated KPIs (Echoes-fire rate; warning-Notice count; sub-skill-invocation rate; atomic-note size variance). `cowork:doctor` skill surfaces them. | F (manual inspection only) | B by v0.96.0+ |
 | 7 | **Recoverability** (failure-mode polish) | MCP-unavailable warnings render usefully; cold-corpus Echoes warning rewords gracefully; sentinel detection is robust. | C (the Echoes warning callout is the most visible scar) | A by v0.95.0.x or v0.96.x |
 | 8 | **Cross-machine consistency** | Same wrapper, same atomic-note output on every machine the user syncs to. No machine-local paths baked into wrapper bodies. | C (v0.93.0 sync-scheduled-jobs gave partial relief; wrappers still bake `/Users/willfell` at sync time) | A by v0.96.0+ |
-| 9 | **Bootstrap quality** (interview thoroughness) | Engagement context dir gets populated to ~7-8 files for every engagement; `brand-voice.md`, `people.md`, `finance-guide.md` are prompted aggressively when relevant. | C (headspace has 8; accuris has 4 — population gap pulls voice fidelity down) | B by v0.95.0.x |
+| 9 | **Bootstrap quality** (interview thoroughness) | Engagement context dir gets populated to ~7-8 files for every engagement; `brand-voice.md` and `people.md` are prompted aggressively when relevant. | C (headspace has 8; accuris has 4 — population gap pulls voice fidelity down) | B by v0.95.0.x |
 
 ## 3 — Anti-goals
 
@@ -43,7 +43,7 @@ What cowork is explicitly NOT trying to be. Naming these prevents scope drift.
 - **NOT a CRM.** People records live in `spice/people/`; cowork *references* them via wikilinks and resolves them via `cowork:resolve-person`, but cowork doesn't own the CRM data model. (CRM-ish ergonomics like inner-circle bootstrap, person-note stubs, and the `discover-people` / `find-missing-people` orchestrators are SECONDARY tooling that supports atomic-note quality. They are not the product.)
 - **NOT a project-management tool.** Projects (and their statuses) live in `spice/projects/`; cowork *reads* them via `gather-projects` but doesn't manipulate the project model. Atomic notes surface project signal; they don't manage it.
 - **NOT an email client / chat client / calendar.** MCPs own the data sources; cowork is the cadence-driven reader + composer. The platform never tries to *replace* M365 / Gmail / Google Calendar / iMessage — it consumes whatever's served and renders it through the user's voice + microscopes.
-- **NOT a finance tracker.** Finance data lives in third-party services (Copilot, banks, Brex) reached via MCP. cowork's finance callouts are surface-level — debt snapshot, CC drift, budget pace. Detailed budget management is out of scope.
+- **NOT a finance tracker.** Finance data lives in third-party services (Copilot, banks, Brex). Cowork does not gather or surface it; budget management is out of scope.
 - **NOT a slash-command interface.** Cowork is primarily cron-driven (5 cadences). User-invocable orchestrators (`/cowork discover-people`, `/cowork find-missing-people`, `/cowork sync-scheduled-jobs`) exist as platform tooling — they support the cadence flow but are not the everyday surface.
 - **NOT a workflow engine.** Cowork has fixed cadences (morning, midday, eod, weekly, monthly). It is not pluggable with arbitrary user-defined cadences. The five are the contract.
 - **NOT an AI-generic chat assistant.** Cowork doesn't converse. It generates ONE deterministic-path atomic note per (engagement, cadence, day). The personality + voice contract is what makes it feel assistant-like; the cadence-driven write contract is what makes it a *system*, not a chat.
@@ -74,7 +74,7 @@ Q&A list, mirrored on `Docs/plans/2026-06-07-post-v0.93.2-brainstorm-state.md` �
 **Locked: `cowork:doctor` skill is a v0.96.0+ candidate; manual inspection covers v0.94-v0.95.** v0.95.0's verification step (re-read + structural verify, already shipped in v0.91.x) catches per-run violations. Aggregate KPIs (warning-Notice count over time; Echoes-fire rate; atomic-note size variance per cadence) wait until v0.96.0+ when the memory write-side gives us a place to *write* the observations.
 
 ### Q8 — Bootstrap-interview quality
-**Locked: v0.95.0.x PATCH ships interview enhancement after the spine lands.** Headspace has 8 populated context files; accuris has 4. The gap is bootstrap-vault not prompting aggressively for `brand-voice.md` / `people.md` / `finance-guide.md`. Post-v0.95.0, bootstrap-vault gains stage-gated optional fill steps that walk the user through populating each context file when its render_aspect is `include`. v0.95.0 itself does NOT enhance bootstrap — the spine refactor is the gate.
+**Locked: v0.95.0.x PATCH ships interview enhancement after the spine lands.** Headspace has 8 populated context files; accuris has 4. The gap is bootstrap-vault not prompting aggressively for `brand-voice.md` / `people.md`. Post-v0.95.0, bootstrap-vault gains stage-gated optional fill steps that walk the user through populating each context file when its render_aspect is `include`. v0.95.0 itself does NOT enhance bootstrap — the spine refactor is the gate.
 
 ### Q9 — Memory-layer write side
 **Locked: v0.96.0+.** See Q6. Premature without the spine.

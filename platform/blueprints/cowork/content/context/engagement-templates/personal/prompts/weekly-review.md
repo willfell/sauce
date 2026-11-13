@@ -8,15 +8,11 @@ updated_by: cowork@0.11.0 installer
 
 # Weekly review — personal
 
-Compose this week's review body using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail 7-day, imessage 7-day, projects weekly, threads weekly-audit).
+Compose this week's review body using the gather outputs (calendar next-week, gmail 7-day, imessage 7-day, projects weekly, threads weekly-audit).
 
 ## Week in review
 
 One paragraph naming the week's tone — wins, frustrations, big moves. 4–6 sentences.
-
-## Finance week
-
-Week-to-date spend total (USD). Top 3 merchants. CC payoff progress: current balance vs target (delta in dollars + a one-sentence trajectory call). If `debt_weekly_target_usd` is configured, compare actual paydown vs target.
 
 ## Calendar next week
 
@@ -40,9 +36,9 @@ One 2–3 sentence paragraph naming the next week's main objective. End with a c
 
 ---
 
-Tone: zoomed-out and honest. Numbers matter (spend + payoff progress); the rest can be qualitative.
+Tone: zoomed-out and honest.
 
-**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
 
 > [!tip] Related context
 > When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).

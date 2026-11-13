@@ -34,7 +34,7 @@ If you're new: read § 1 + § 2 first to orient. If you're designing a cycle: §
 
 ## § 1 — TL;DR (one paragraph)
 
-Cowork is a cron-driven, cadence-bound personal assistant that synthesizes a daily corpus of inputs (chat, calendar, email, github, ADO, finance, reminders, semantic memory) into structured atomic notes — one per (engagement, cadence, day) — landed in Obsidian. Each atomic note ends with a "Was today useful?" check-mark callout (**Rail L**). On the EOD cadence the rail captures per-item ticks + per-kind frequency knobs + free-text prose; on the other four cadences it captures coarser kind-level boolean ticks. A reconciler reads those check-marks, applies a deterministic weight-update formula to `learned_weights.json`, and the next day's brief consults those weights to decide what to surface vs. demote. Voice contract (vibe, personality, microscopes) layers on top of the structural rules. The system is **memory-compounding by design**: every tick is a weight nudge, and the corpus is the input to the LLM that writes tomorrow's brief.
+Cowork is a cron-driven, cadence-bound personal assistant that synthesizes a daily corpus of inputs (chat, calendar, email, github, ADO, reminders, semantic memory) into structured atomic notes — one per (engagement, cadence, day) — landed in Obsidian. Each atomic note ends with a "Was today useful?" check-mark callout (**Rail L**). On the EOD cadence the rail captures per-item ticks + per-kind frequency knobs + free-text prose; on the other four cadences it captures coarser kind-level boolean ticks. A reconciler reads those check-marks, applies a deterministic weight-update formula to `learned_weights.json`, and the next day's brief consults those weights to decide what to surface vs. demote. Voice contract (vibe, personality, microscopes) layers on top of the structural rules. The system is **memory-compounding by design**: every tick is a weight nudge, and the corpus is the input to the LLM that writes tomorrow's brief.
 
 ## § 2 — The five cadences
 
@@ -46,7 +46,7 @@ Cowork fires five distinct atomic-note types on five cron schedules. Each is a s
 | `midday-tripwire` | ~12:30pm local | Compresses tripwire severities + new arrivals since morning | `cowork-midday-tripwire` |
 | `eod-review` | ~5:30pm local | Reflects what landed today; flags what slipped; **the primary feedback-capture moment** | `cowork-eod-review` |
 | `weekly-review` | ~Friday 5:00pm | What stalled, what advanced, what's queued | `cowork-weekly-review` |
-| `monthly-review` | First-of-month 5:00am | Recurring patterns, blockers, throughput; the authoritative debt-payoff reconciliation moment for finance-tracking engagements | `cowork-monthly-review` |
+| `monthly-review` | First-of-month 5:00am | Recurring patterns, blockers, throughput | `cowork-monthly-review` |
 
 The five cadences are **the contract**. Cowork is explicitly not a workflow engine — you can't add a custom cadence. Adding new cadences is a workshop-level cycle, not a per-engagement knob (see `Docs/cowork-vision.md` § 3 anti-goals).
 
@@ -107,9 +107,9 @@ The orchestrator-instructions are **the only thing** the LLM session reads at th
 
 ### 3.3 The sub-skill graph
 
-Cowork ships **20 sub-skills** under `.claude/skills/cowork/skills/<name>/SKILL.md`. Each is a thin shim around a deterministic JS helper at `spice/cowork/helpers/<name>-helper.js`. The orchestrators invoke sub-skills from their Steps sections.
+Cowork ships **17 sub-skills** under `.claude/skills/cowork/skills/<name>/SKILL.md`. Each is a thin shim around a deterministic JS helper at `spice/cowork/helpers/<name>-helper.js`. The orchestrators invoke sub-skills from their Steps sections.
 
-The 20 sub-skills, grouped by role:
+The 17 sub-skills, grouped by role:
 
 | Group | Sub-skill | Helper | Role |
 | --- | --- | --- | --- |
@@ -122,9 +122,6 @@ The 20 sub-skills, grouped by role:
 | | `gather-imessage` | (MCP-direct) | iMessage threads via apple-mcp |
 | | `gather-gmail` | (MCP-direct) | Gmail threads |
 | | `gather-threads` | (MCP-direct) | Slack/Teams chat threads |
-| | `gather-finance-cc-today` | (MCP-direct) | Credit-card transactions today |
-| | `gather-finance-yesterday` | (MCP-direct) | Credit-card transactions yesterday (for EOD) |
-| | `gather-cc-debt-snapshot` | (MCP-direct) | Debt + utilization snapshot |
 | | `gather-weather` | (MCP-direct) | Weather frame for the cadence window |
 | | `gather-projects` | (MCP-direct) | Project + status snapshot from `spice/projects/` |
 | | `gather-from-served-by` | (MCP-direct) | "Served by X" routing for per-kind microscope selection |
@@ -261,7 +258,7 @@ Morning-briefing, midday-tripwire, weekly-review, monthly-review all emit the sa
 > ### Free-text feedback
 >
 > ```feedback
-> (Type prose here — name a section to scope it, e.g. `finance: too long`.)
+> (Type prose here — name a section to scope it, e.g. `calendar: too long`.)
 > ```
 >
 > > [!summary]- Kinds — quick ticks
@@ -291,7 +288,7 @@ EOD-review emits a prose-first feedback section (v=4 marker as of v0.101.0; the 
 > ### Free-text feedback
 >
 > ```feedback
-> (Type prose here — name a section to scope it, e.g. `finance: too long`.)
+> (Type prose here — name a section to scope it, e.g. `calendar: too long`.)
 > ```
 >
 > > [!summary]- Chat — items
@@ -318,7 +315,7 @@ EOD-review emits a prose-first feedback section (v=4 marker as of v0.101.0; the 
 Five capture surfaces (v0.99.0 adds the first; the order is contract):
 
 1. **One-tap satisfaction (v0.99.0; per-cadence since v0.101.0)** — `Useful: [ ] yes [ ] no` at the very top. SATISFACTION LOG ONLY: it feeds the `totals.satisfaction[]` series (§ 7.2.7 — entries are `{day, cadence, useful}`, so up to five taps a day coexist) but does NOT count as a full engagement day — a bare tap can never demote anything (see § 9's Step 3.4 gate). `yes` → true; `no` → false; BOTH ticked → ambiguous (preserved visually, no signal); NEITHER → null.
-2. **Free-text feedback (PRIMARY channel, v0.99.0 moves it to the top)** — a tagged fenced ` ```feedback…``` ` block directly under the tap. The user types prose: "stop surfacing Diana's emails", "finance: too long", "Brex bills are too noisy". A line starting with `<kind>:` (where the prefix case-insensitively matches a kind in the engagement's dispatch set) is **deterministically scoped to that section** by the nightly reconciler (`parseKindPrefixLines` — the LLM interprets intent but cannot mis-route the kind; non-matching prefixes like a person's name fall through to unmodified LLM extraction). An uprank-intent prose line scoped to a kind counts as that kind's tick; as of v0.101.0, a DOWNRANK-intent prose line scoped to a kind WITHOUT a named entity counts as that kind's skip (`applyIntentKindObservations` — renamed from `applyIntentKindTicks` because it now emits skips, not just ticks).
+2. **Free-text feedback (PRIMARY channel, v0.99.0 moves it to the top)** — a tagged fenced ` ```feedback…``` ` block directly under the tap. The user types prose: "stop surfacing Diana's emails", "calendar: too long", "GitHub notifications are too noisy". A line starting with `<kind>:` (where the prefix case-insensitively matches a kind in the engagement's dispatch set) is **deterministically scoped to that section** by the nightly reconciler (`parseKindPrefixLines` — the LLM interprets intent but cannot mis-route the kind; non-matching prefixes like a person's name fall through to unmodified LLM extraction). An uprank-intent prose line scoped to a kind counts as that kind's tick; as of v0.101.0, a DOWNRANK-intent prose line scoped to a kind WITHOUT a named entity counts as that kind's skip (`applyIntentKindObservations` — renamed from `applyIntentKindTicks` because it now emits skips, not just ticks).
 3. **Per-item Mattered ticks** — one checkbox per surfaced person-block / PR-row / ADO-story-row / etc. The wikilink target (`[[#^item-chat-a7b3c9d|<label>]]`) resolves to the block-ID emitted by compose-body at Step 3c. The block-ID itself renders invisibly; the user sees just `<label>` as a clickable link.
 4. **Per-item Didn't-like ticks (v0.98.2)** — second checkbox row per kind sharing the SAME `^item-<kind>-<sha>` IDs as the Mattered list. Block-ID anchors are defined ONCE in the body; the rail only links. Section-context state machine in the parser: tick lines after `Mattered:` → `ticks{}`; after `Didn't like:` → `downvotes{}`.
 5. **Per-kind frequency knob** — `[ ] less` / `[ ] same` / `[ ] more` per kind. Single signed signal per kind. (See § 7.2.4 for how this becomes a weight delta.)
@@ -662,9 +659,9 @@ The ingest pipeline lives inside the existing nightly `reconcile-cowork` cadence
    - **ENGAGED** — any note for that engagement/day shows ≥1 item tick (Mattered or Didn't-like), ≥1 kind-checkbox tick (v=4 checklist or legacy rating-block), ≥1 knob ≠ `same`, or a non-empty typing box. The FULL pipeline below runs: observations (ticks AND skips), entity deltas, knob deltas, decay, warmup progress, `engaged_days[]` append.
    - **TAP-ONLY** — the only signal is `Useful:` yes/no taps (even all five notes tapped — multi-note taps without other signal are still TAP-ONLY; semantics UNCHANGED at v0.101.0). Satisfaction appends (`totals.satisfaction[]`, per-cadence) + `[satisfaction]` audit lines ONLY — no `updateWeights` call, no decay, no warmup, no `engaged_days[]` entry. The `per_kind` subtree is untouched.
    - **SILENT** — nothing. Audit section still written with the `no feedback signal` line + totals bookkeeping; no weight pipeline. (A pre-schema-4 weights file still gets the one-time normalize/migration on first touch — the silence-reset must not wait for an engaged day.)
-   The gate lives at the CALL SITE because `updateWeights` decays unconditionally inside (2%/day toward 1.00) — passing empty observations would still decay every kind. **Silence = no signal, ever:** a never-ticking user stays advisory-forever; the day the user DOES engage, that day's skips become meaningful ("I looked, finance didn't matter today").
+   The gate lives at the CALL SITE because `updateWeights` decays unconditionally inside (2%/day toward 1.00) — passing empty observations would still decay every kind. **Silence = no signal, ever:** a never-ticking user stays advisory-forever; the day the user DOES engage, that day's skips become meaningful ("I looked, calendar didn't matter today").
 
-3. **Step 3.5 — deterministic rollup (ENGAGED days only; per `ingest-feedback-helper.js` contract).** `<kind>:` prose-prefix lines (e.g. `finance: too long`) arrive kind-bound via `parseKindPrefixLines` — deterministic section scoping the LLM cannot override.
+3. **Step 3.5 — deterministic rollup (ENGAGED days only; per `ingest-feedback-helper.js` contract).** `<kind>:` prose-prefix lines (e.g. `calendar: too long`) arrive kind-bound via `parseKindPrefixLines` — deterministic section scoping the LLM cannot override.
    - **Per-item Mattered tick** → entity delta **+0.05** on the item's person/channel/topic under its kind (identity via the sidecar's 1.2.0 `items[]` registry; wikilink-label fallback for v=1-era sidecars; kind-only rollup fallback when identity resolution fails).
    - **Per-item Didn't-like tick** → entity delta **−0.10** (dislikes are rarer + stronger signal) AND counts toward the kind-skip side of the kind-level formula.
    - **Frequency knobs** → direct **±0.05** per-kind delta applied AFTER the v0.96.0 formula + re-clamped. `ambiguous` → no signal.

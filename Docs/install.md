@@ -1556,3 +1556,21 @@ brew update && brew upgrade sauce
 - `heal-epic-bindings --apply` now refuses with `concurrent_modification` (zero vault and zero ledger writes) when any target changed after its plan was computed. `restructure` and `reconcile-metadata --parked-rebind --apply` emit the same code for the same condition.
 
 **Existing findings are not healed by this upgrade.** `adopt` is the tool; running it against your board is an operational decision. Start with `board-health --json` and read `untracked_members_by_provenance` before adopting anything.
+
+## Retiring the `finance` blueprint (version assigned by the release pipeline)
+
+The `finance` blueprint no longer ships. The usual upgrade applies the retirement:
+
+```bash
+brew update && brew upgrade sauce
+cd /abs/path/to/vault
+sauce update --bump-pins
+```
+
+**What changes:**
+
+- An ungated install heal, `applyRetiredBlueprintsHeal`, drops `finance` from the vault's `ranch/platform-subscription.json` `blueprints[]` and deletes the platform-owned `ranch/scripts/finance/` and `ranch/rules/finance.json`. The install history records it as a `retired_blueprint` step. The pre-heal subscription and every deleted file are snapshotted under `.sauce-backup/<timestamp>/` first; a path whose snapshot fails is left in place with a warning.
+- Because the subscription no longer lists `finance`, the same install prunes finance's nav-buttons, entity-create and breadcrumb registry contributions and its `platform-installed.json` ledger entry.
+- The finance note templates in `ranch/templates/` (`Template, Budget.md` and the other five) and Templater's folder-template entries for `spice/finance/budgets` and `spice/finance/paychecks` are left as they are.
+- Notes under `spice/finance/` are not touched. They stay as plain Markdown, but their `dataviewjs` widget blocks no longer have a class to render. Archive or delete the folder yourself if you no longer want it.
+- Cowork no longer ships the finance-snapshot run or its finance gather skills.

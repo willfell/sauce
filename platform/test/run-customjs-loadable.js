@@ -133,10 +133,9 @@ function scan(dirs) {
 // customjs-guard with { class: "X" } for a class X that has NO `class X`
 // definition in any shipped helper produces the SAME "_X unavailable_"
 // placeholder as a class file that fails to load — customJS simply never
-// registers X. This is exactly how finance shipped the deleted InvoiceNavButtons
-// ref (consistency-audit W0). run-finance-template-classes.js is the finance-
-// scoped regression lock; this is the PLATFORM-WIDE guardrail across all
-// blueprints + mechanisms. Only literal `class: "Name"` refs are checked;
+// registers X (consistency-audit W0 found a template still invoking a deleted
+// class). This is the PLATFORM-WIDE guardrail across all blueprints +
+// mechanisms. Only literal `class: "Name"` refs are checked;
 // dynamic/variable class names are not statically resolvable and are skipped.
 const REF_SCAN_DIRS = ['platform/blueprints', 'platform/mechanisms'];
 

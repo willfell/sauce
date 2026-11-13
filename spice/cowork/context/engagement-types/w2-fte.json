@@ -26,8 +26,6 @@
     "synthesize_week": true
   },
   "render_aspects": {
-    "finance_block":          "skip",
-    "invoice_prep":           "skip",
     "ai_committee":           "include",
     "kanban_projects":        "include",
     "inner_circle_imessage":  "skip",

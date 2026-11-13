@@ -13,7 +13,6 @@ const CADENCE_BY_TYPE = {
   "cowork-morning-briefing-cold": "lens-shift",
   "cowork-midday-tripwire": "midday-tripwire",
   "cowork-eod-review": "eod-review",
-  "cowork-finance": "finance",
   "cowork-weekly-review": "weekly-review",
   "cowork-monthly-review": "monthly-review",
 };

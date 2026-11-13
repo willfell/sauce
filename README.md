@@ -4,7 +4,7 @@
 
 Sauce is an operating system for an Obsidian vault that you and your agents both use.
 
-It installs a versioned set of **blueprints** (daily notes, projects, meetings, tasks, finance, trips, wiki, reading queue, people, and more) and shared **mechanisms** into any vault through Homebrew. Every blueprint works by hand in Obsidian, with hubs, buttons, templates, and boards. Most also ship Claude Code slash commands and skills, so an agent can work on the same notes you do. On top of that sit scheduled briefings (cowork), a graph engine that runs agent work from a note (`sauce run`), and a delivery loop that drives a Kanban board through review and release.
+It installs a versioned set of **blueprints** (daily notes, projects, meetings, tasks, trips, wiki, reading queue, people, and more) and shared **mechanisms** into any vault through Homebrew. Every blueprint works by hand in Obsidian, with hubs, buttons, templates, and boards. Most also ship Claude Code slash commands and skills, so an agent can work on the same notes you do. On top of that sit scheduled briefings (cowork), a graph engine that runs agent work from a note (`sauce run`), and a delivery loop that drives a Kanban board through review and release.
 
 ## What you get
 
@@ -25,7 +25,6 @@ A vault subscribes to the blueprints it wants. The installer materializes them, 
 | `wiki` | A knowledge base of any depth where the folder path is the hierarchy | `/wiki` |
 | `reader` | A flat reading queue for clipped web articles | `/reader` |
 | `trips` | A folder per trip: atlas, flights, stay, packing list, to-do, notes | |
-| `finance` | A finance hub over budgets, paychecks, invoices, and debts | |
 | `cowork` | Daily, weekly, and monthly hubs fed by scheduled agent briefings | `/cowork`, `/weekly`, `/monthly` |
 
 Blueprints without an agent command are still plain Markdown that an agent can read and write. They just do not ship a dedicated command yet.
@@ -166,7 +165,7 @@ The slice pipeline is also shipped as an engine graph, `platform/engine/graphs/d
 
 Pre-1.0 and solo-developed. APIs, graph syntax, and blueprint shapes may change between minor versions.
 
-- **Vault platform.** In daily use across the author's own vaults. Five blueprints (`boards`, `finance`, `people`, `to-do`, `trips`) do not ship an agent command yet.
+- **Vault platform.** In daily use across the author's own vaults. Four blueprints (`boards`, `people`, `to-do`, `trips`) do not ship an agent command yet.
 - **Cowork.** Needs an external scheduler and MCP access to the vault. It is not self-contained.
 - **Engine.** The `fake` worker is exercised end to end by the harnesses. The Claude Code and Codex adapters are thin shell-outs. Worktrees are the only isolation; there is no sandbox.
 - **Delivery loop.** The coordinator-driven path is the default and is what ships this repository. The delivery-slice graph is opt-in and has not yet driven a live epic.

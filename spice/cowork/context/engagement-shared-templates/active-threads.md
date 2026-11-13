@@ -17,7 +17,7 @@ Open items, blockers, and follow-ups that need cross-day tracking. Updated by th
 
 Each thread is an H3 under its section. Fields:
 
-- **Type:** {{example_thread_types}} -- consumer-defined; common values are `task`, `commitment`, `financial`, `trip-prep`, `project-blocked`, `stale-card`, `action-item`, `invoice-deadline`.
+- **Type:** {{example_thread_types}} -- consumer-defined; common values are `task`, `commitment`, `trip-prep`, `project-blocked`, `stale-card`, `action-item`.
 - **Created:** YYYY-MM-DD
 - **Target:** YYYY-MM-DD (optional)
 - **Status:** `open` | `snoozed` | `resolved`

@@ -15,7 +15,7 @@ Authors and iteratively deepens a USER-OWNED per-kind gather contract. The outpu
 
 ## Inputs
 
-- `kind` (string, optional): the MCP kind to deepen (e.g. `finance`, `chat`). When omitted, ask the user which kind, listing the kinds present in `spice/cowork/context/user-preferences.md`.
+- `kind` (string, optional): the MCP kind to deepen (e.g. `calendar`, `chat`). When omitted, ask the user which kind, listing the kinds present in `spice/cowork/context/user-preferences.md`.
 
 ## Steps
 

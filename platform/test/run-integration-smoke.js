@@ -98,14 +98,14 @@ withTempHomeAndVault(({ home, vault }) => {
     if (coworkEntry && !sub.blueprints.find(b => b.name === "cowork")) {
         sub.blueprints.push({ name: coworkEntry.name, version: coworkEntry.version });
     }
-    // v0.46.0 S11 — subscribe the entity-create mechanism + the 5 migrated
-    // blueprints so the registry materializes (most of) the 7 entries for
-    // the entity-create smoke assertions below.
+    // v0.46.0 S11 — subscribe the entity-create mechanism + the migrated
+    // blueprints so the registry materializes the entries for the
+    // entity-create smoke assertions below.
     const ecMech = wsmf.mechanisms.find(m => m.name === "entity-create");
     if (ecMech && !sub.mechanisms.find(m => m.name === "entity-create")) {
         sub.mechanisms.push({ name: ecMech.name, version: ecMech.version });
     }
-    for (const bpName of ["meetings", "people", "project", "sticky-notes", "finance", "to-do"]) {
+    for (const bpName of ["meetings", "people", "project", "sticky-notes", "to-do"]) {
         // v0.46.2: project re-included after FLN-f fix (stale
         // helpers/project-action-buttons.js reference removed from project's
         // manifest customjs_classes[] + files[]). Project's entity-create
@@ -190,9 +190,9 @@ withTempHomeAndVault(({ home, vault }) => {
     ok("smoke-installed-mech-versions-match-manifest", allMatch);
 
     // v0.46.0 S11 — entity-create post-install side-effects (5 sub-asserts).
-    // The cycle wires entity-create into 5 blueprints (meetings, people,
-    // project, sticky-notes, finance) contributing 7 entries total (meeting,
-    // person, project, sticky-note, budget, paycheck, invoice). Verify:
+    // The cycle wires entity-create into the meetings, people, project and
+    // sticky-notes blueprints (entries meeting, person, project, sticky-note).
+    // Verify:
     //   1. ranch/entity-create-registry.json exists + has the entries from
     //      the subscribed blueprints. Project is intentionally excluded
     //      from this smoke's subscription (see note above) so we expect 6.
@@ -213,11 +213,11 @@ withTempHomeAndVault(({ home, vault }) => {
     try { ecRegistry = JSON.parse(fs.readFileSync(ecRegistryPath, "utf8")); }
     catch (e) { /* leave null; assertion below will surface */ }
     const ecEntries = (ecRegistry && Array.isArray(ecRegistry.entries)) ? ecRegistry.entries : [];
-    // 7 expected ids — project re-included in v0.46.2 (FLN-f fix).
-    const expectedEcIds = ["meeting", "person", "project", "sticky-note", "budget", "paycheck", "invoice"];
+    // Project re-included in v0.46.2 (FLN-f fix).
+    const expectedEcIds = ["meeting", "person", "project", "sticky-note"];
     const haveAllExpectedIds = expectedEcIds.every(id => ecEntries.some(e => e && e.id === id));
     ok("smoke-ec-registry-has-subscribed-entries",
-        ecEntries.length >= 7 && haveAllExpectedIds,
+        ecEntries.length >= expectedEcIds.length && haveAllExpectedIds,
         `entries=${ecEntries.length} ids=${JSON.stringify(ecEntries.map(e => e && e.id))}`);
 
     // entity-create mechanism source is shipped in the workshop catalogue.
@@ -246,9 +246,6 @@ withTempHomeAndVault(({ home, vault }) => {
         person:   "spice/people/People.md",
         project:  "spice/projects/Projects.md",
         "sticky-note": "ranch/templates/Sticky Day Hub.md",
-        budget:   "spice/finance/budgets/Budgets.md",
-        paycheck: "spice/finance/paychecks/Paychecks.md",
-        invoice:  "spice/finance/invoices/Invoices.md",
     };
     // button/nav refactor Pass 9a (project) + v0.205.0 (people, meetings) — hubs
     // that render a single "<Name>ChromeBar" block OWN entity creation (the
@@ -257,10 +254,8 @@ withTempHomeAndVault(({ home, vault }) => {
     // `// entity-create:<id>` marker. For a ChromeBar-owned hub we assert its
     // bar is present exactly once instead of the marker; every OTHER
     // (marker-based) hub still asserts its marker. This keeps the check
-    // meaningful for finance/sticky-notes, which still ship markers (finance's
-    // marker sits on FinanceNav's own call, not a standalone EntityCreate
-    // block — see finance-nav.js's chromePresent guard).
-    const ecChromeBarClassFor = { project: "ProjectChromeBar", person: "PeopleChromeBar", meeting: "MeetingChromeBar", budget: "FinanceChromeBar", paycheck: "FinanceChromeBar", invoice: "FinanceChromeBar", debt: "FinanceChromeBar", month: "FinanceChromeBar", savings: "FinanceChromeBar" };
+    // meaningful for sticky-notes, which still ships a marker.
+    const ecChromeBarClassFor = { project: "ProjectChromeBar", person: "PeopleChromeBar", meeting: "MeetingChromeBar" };
     const ecChromeBarHubs = new Set(Object.keys(ecChromeBarClassFor));
     const hasChromeBarBlock = (body, barClass) =>
         (body.match(new RegExp('```dataviewjs[\\s\\S]*?class:\\s*"' + barClass + '"[\\s\\S]*?\\n```', 'g')) || []).length;
@@ -330,9 +325,9 @@ withTempHomeAndVault(({ home, vault }) => {
         dupTarget || "");
 
     // No orphan New*Button.js helper files in any migrated blueprint's
-    // scripts dir. Scope to the 5 migrated blueprints; an orphan in a
+    // scripts dir. Scope to the migrated blueprints; an orphan in a
     // non-migrated blueprint is out-of-scope for this cycle.
-    const migratedBlueprints = ["meetings", "people", "project", "sticky-notes", "finance"];
+    const migratedBlueprints = ["meetings", "people", "project", "sticky-notes"];
     const orphans = [];
     for (const bp of migratedBlueprints) {
         const sd = path.join(vault, "ranch", "scripts", bp);

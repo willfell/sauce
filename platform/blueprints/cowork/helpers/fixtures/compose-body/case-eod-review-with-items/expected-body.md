@@ -44,7 +44,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > ### Free-text feedback
 >
 ```feedback
-(Type prose here — name a section to scope it, e.g. `finance: too long`.)
+(Type prose here — name a section to scope it, e.g. `calendar: too long`.)
 ```
 >
 > > [!summary]- Chat — items

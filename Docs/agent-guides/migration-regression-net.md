@@ -24,13 +24,13 @@ platform/test/
 │   ├── ranch/platform-installed.json                    (installed history from last bootstrap)
 │   ├── ranch/{scripts,templates,rules,templater,...}    (materialized blueprint surfaces)
 │   ├── ranch/{*-registry}.json                          (3 registries)
-│   ├── spice/{cowork,finance,projects,daily,...}        (per-blueprint dirs + hub notes)
+│   ├── spice/{cowork,projects,daily,...}                (per-blueprint dirs + hub notes)
 │   ├── spice/daily/2026-06-14.md                        (hand-authored user fixture — PRESERVE-1)
 │   ├── spice/scratch/2026-06-14-test-scratch.md         (hand-authored user fixture — PRESERVE-2)
 │   ├── spice/meetings/2026-06-14 Test Meeting.md        (hand-authored user fixture — PRESERVE-3)
 │   ├── .claude/{commands,skills}/                       (claude_surface materialized)
 │   └── .obsidian/                                       (data.json files only; plugin binaries excluded)
-├── seed-vault-prev/README.md                            (one-cycle-back snapshot; empty until cycle 2)
+├── seed-vault-prev/                                     (one-cycle-back snapshot; input to retire-path families)
 ├── run-seed-migrations.js                               (the harness)
 └── helpers/seed-vault-helpers.js                        (frontmatter parse, tree snapshot, diff, runInstall)
 
@@ -57,9 +57,9 @@ Any new tooling that runs install against the seed MUST do the same patch-then-r
 | Family | Count | Covers |
 |---|---|---|
 | `INSTALL-*` | 6 | install exit code 0, `platform-installed.json` exists + parses + has `history[]` + >50 entries + records `workshop_version` |
-| `SHAPE-*` | 12 | root tetrad (`spice/`, `ranch/`, `.claude/`, `.obsidian/`) + key blueprint dirs (`spice/cowork/`, `spice/finance/`, `spice/projects/`, `spice/finance/debts/`) + materialized infra (`ranch/scripts/`, `ranch/templates/`, `.claude/{commands,skills}/`) |
+| `SHAPE-*` | 10 | root tetrad (`spice/`, `ranch/`, `.claude/`, `.obsidian/`) + key blueprint dirs (`spice/cowork/`, `spice/projects/`) + materialized infra (`ranch/scripts/`, `ranch/templates/`, `.claude/{commands,skills}/`) |
 | `REGISTRIES-*` | 3 | `claude-surface-registry.json`, `nav-buttons-registry.json`, `entity-create-registry.json` exist + valid JSON |
-| `FM-*` | 10 | hub-note `type:` frontmatter (Cowork.md, Daily Hub.md, Finance.md, Debts.md, Budget Defaults.md, Projects.md, Scratch.md, All-ToDos.md, People.md, Products.md) |
+| `FM-*` | 7 | hub-note `type:` frontmatter (Cowork.md, Daily Hub.md, Projects.md, Sticky.md, All-ToDos.md, People.md, Products.md) |
 | `PRESERVE-*` | 3 | 3 hand-authored user notes (daily, scratch, meetings) byte-equal between seed and post-install vault |
 | `CLAUDE-*` | 6 | `CLAUDE.md` exists; 3 markered-surface pairs present (`resolvers`, `directory-map`, `skills-index`); resolvers block populated by install; outside-marker prose preserved |
 | `IDEMP-*` | 5 + 3 | second install exit 0, no unexpected files added / changed / removed vs. first install (with `KNOWN_MUTABLE` allowlist for timestamp-bearing files), `platform-installed.json` history grew, all 3 user notes still preserved after second install |
@@ -72,27 +72,23 @@ The whole point. For every cycle that ships an install-time migration (`platform
 
 The migration transforms vault state from shape A to shape B. The harness needs to *see* shape A in the seed so it can verify the install applied the transform. Add a note (or edit an existing one in the seed) at shape A. This is a **sanctioned hand-edit** of `seed-vault/` per landmine #26.
 
-Example: if a cycle adds `applyFinanceBudgetGroupSeed` that backfills `groups[]` on existing budget notes, add a `Budget-2026-07.md` to the seed without the `groups[]` field. The harness will assert post-install that the field got backfilled.
+Example: if a cycle adds a heal that backfills a `sections[]` field on existing project hubs, add a project hub to the seed without that field. The harness will assert post-install that the field got backfilled.
 
 ### 2. Add an `HC-V0XYZ-SEED-MIGRATE-*` assert family
 
 In `run-seed-migrations.js`, append a new family after the existing ones (keep families ordered chronologically by cycle). Pattern:
 
 ```js
-// ===== HC-V0XYZ-SEED-MIGRATE-BUDGET-GROUP-* — applyFinanceBudgetGroupSeed =====
-const budgetNote = helpers.readNote(vault, "spice/finance/budgets/Budget-2026-07.md");
-const { frontmatter: budgetFm } = helpers.parseFrontmatter(budgetNote);
+// ===== HC-V0XYZ-SEED-MIGRATE-SECTIONS-* — applyProjectSectionsBackfill =====
+const hubNote = helpers.readNote(vault, "spice/projects/Legacy Project/Legacy Project.md");
+const { frontmatter: hubFm } = helpers.parseFrontmatter(hubNote);
 ok(
-    "HC-V0XYZ-SEED-MIGRATE-BUDGET-GROUP-1 groups[] backfilled",
-    Array.isArray(budgetFm.groups) && budgetFm.groups.length > 0
+    "HC-V0XYZ-SEED-MIGRATE-SECTIONS-1 sections[] backfilled",
+    Array.isArray(hubFm.sections) && hubFm.sections.length > 0
 );
 ok(
-    "HC-V0XYZ-SEED-MIGRATE-BUDGET-GROUP-2 .sauce-backup snapshot exists",
+    "HC-V0XYZ-SEED-MIGRATE-SECTIONS-2 .sauce-backup snapshot exists",
     fs.readdirSync(path.join(vault, ".sauce-backup")).length > 0
-);
-ok(
-    "HC-V0XYZ-SEED-MIGRATE-BUDGET-GROUP-3 marker comment present",
-    budgetNote.includes("__group_seed_migrated:")
 );
 ```
 
@@ -122,6 +118,15 @@ git push
 ```
 
 The seed forward-ratchets to represent the just-released version. The next cycle's pre-migration data lands on top of the new baseline.
+
+## Retiring a blueprint
+
+When a blueprint is removed from the workshop, its retirement heal needs the pre-removal vault state as input, but the current seed should no longer carry that blueprint. The finance retirement set the pattern:
+
+- The current `seed-vault/` has the blueprint's plumbing removed (subscription pin, `ranch/scripts/<bp>/`, `ranch/rules/<bp>.json`, its templates, registry contributions, installed-ledger entry, Templater folder templates) and its `spice/<bp>/` tree removed.
+- `seed-vault-prev/` keeps the pre-removal state. `runRetireFinanceFamily` (`HC-RETIRE-FINANCE-SEED-*`) layers the prev seed's finance subscription pin, plumbing, registry contributions, ledger entry and `spice/finance/` notes onto a copy of the current seed, runs the real installer twice, and asserts the retire path: unsubscribed, plumbing deleted with `.sauce-backup` snapshots, registries and ledger pruned, `spice/finance/` byte-identical, idempotent.
+- `seed-vault-prev/` is not installable on its own (its pins predate the current catalogue), so families read from it rather than install it. A `seed:prev` that overwrites it would drop the retire-path input, so re-point or retire `HC-RETIRE-FINANCE-SEED-*` in the same change.
+- The heal's edge cases (unsafe paths refused, snapshot failure, no-op vault, a real install over a vault subscribed to nothing but the retired blueprint) live in `platform/test/run-retired-blueprints.js`.
 
 ## What the harness does NOT cover
 

@@ -63,24 +63,6 @@
       "group": "chrome"
     },
     {
-      "id": "finance-style-adoption",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-style-adoption.js"
-      ],
-      "lane": "parallel",
-      "group": "chrome"
-    },
-    {
-      "id": "finance-modal-adoption",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-modal-adoption.js"
-      ],
-      "lane": "parallel",
-      "group": "chrome"
-    },
-    {
       "id": "codex-autoloop",
       "cmd": [
         "node",
@@ -93,6 +75,14 @@
       "cmd": [
         "node",
         "platform/test/run-seed-migrations.js"
+      ],
+      "lane": "parallel"
+    },
+    {
+      "id": "retired-blueprints",
+      "cmd": [
+        "node",
+        "platform/test/run-retired-blueprints.js"
       ],
       "lane": "parallel"
     },
@@ -596,22 +586,6 @@
       "lane": "parallel"
     },
     {
-      "id": "v01103-monthly-overview",
-      "cmd": [
-        "node",
-        "platform/test/run-v01103-monthly-overview.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "v01120-monthly-cohesion",
-      "cmd": [
-        "node",
-        "platform/test/run-v01120-monthly-cohesion.js"
-      ],
-      "lane": "parallel"
-    },
-    {
       "id": "customjs-contract",
       "cmd": [
         "node",
@@ -941,30 +915,6 @@
       "lane": "parallel"
     },
     {
-      "id": "finance-plan-state",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-plan-state.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "finance-plan-widgets",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-plan-widgets.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "finance-frontmatter",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-frontmatter.js"
-      ],
-      "lane": "parallel"
-    },
-    {
       "id": "release-bumper",
       "cmd": [
         "node",
@@ -1070,14 +1020,6 @@
       "cmd": [
         "node",
         "platform/test/run-workstream-source.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "finance-template-classes",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-template-classes.js"
       ],
       "lane": "parallel"
     },
@@ -1366,22 +1308,6 @@
       "cmd": [
         "node",
         "platform/test/run-boards-chrome-bar.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "finance-chrome-bar",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-chrome-bar.js"
-      ],
-      "lane": "parallel"
-    },
-    {
-      "id": "finance-nav-guard",
-      "cmd": [
-        "node",
-        "platform/test/run-finance-nav-guard.js"
       ],
       "lane": "parallel"
     },

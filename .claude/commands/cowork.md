@@ -32,7 +32,7 @@ Invokes the canonical `cowork:bootstrap-vault` SKILL.md materialized at `<vault>
    - optional fields per type
    - cadences to enable (morning / midday / eod / weekly / monthly)
    - cron drop mode
-3. **MCP probe** — check connected backends (obsidian + gmail + gcal + brex + imessage + whatsapp depending on engagement type).
+3. **MCP probe** — check connected backends (obsidian + gmail + gcal + imessage + whatsapp depending on engagement type).
 4. **Compose + write** — `<vault>/spice/cowork/context/vault-config.md` with engagement[] frontmatter; per-engagement context files from `engagement-templates/<type>/*.md`; nav-button table on `<vault>/spice/cowork/Cowork.md`; cron paste-blocks.
 5. **Report** — emit 7-section bootstrap report with inline audit-receipt.
 
@@ -82,9 +82,9 @@ No writes, no MCP gather calls. Run after every `/cowork microscope <kind>` roun
 
 | Type | Required fields | Default cadences | Render aspects |
 |---|---|---|---|
-| `personal` | `owner_name`, `home_city` | morning / midday / eod / weekly / monthly | finance ✓ / invoice ✗ / imessage ✓ |
-| `w2-fte` | `role`, `employer`, `stakeholders[]` | morning / eod / weekly | finance ✗ / invoice ✗ / ai_committee ✓ |
-| `consulting` | `role`, `primary_client`, `hourly_rate_usd`, `ap_email`, `invoice_cadence` | morning / eod / weekly / monthly | finance ✓ / invoice ✓ |
+| `personal` | `owner_name`, `home_city` | morning / eod / weekly / monthly | imessage ✓ |
+| `w2-fte` | `role`, `employer`, `stakeholders[]` | morning / eod / weekly | ai_committee ✓ |
+| `consulting` | `role`, `primary_client` | morning / eod / weekly / monthly | ai_committee ✓ |
 
 (Full schema lives in `pantry/platform/blueprints/cowork/engagement-types/<type>.json`.)
 

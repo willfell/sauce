@@ -309,24 +309,6 @@
       },
       {
         "kind": "skill",
-        "source": "skills/skills/gather-finance-yesterday/SKILL.md",
-        "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
-        "version": "0.41.0"
-      },
-      {
-        "kind": "skill",
-        "source": "skills/skills/gather-finance-cc-today/SKILL.md",
-        "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
-        "version": "0.41.0"
-      },
-      {
-        "kind": "skill",
-        "source": "skills/skills/gather-cc-debt-snapshot/SKILL.md",
-        "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
-        "version": "0.41.0"
-      },
-      {
-        "kind": "skill",
         "source": "skills/skills/gather-projects/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
         "version": "0.41.0"
@@ -363,12 +345,6 @@
       },
       {
         "kind": "skill",
-        "source": "skills/skills/write-run-note-finance/SKILL.md",
-        "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
-        "version": "0.41.0"
-      },
-      {
-        "kind": "skill",
         "source": "skills/skills/write-run-note-weekly-review/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
         "version": "0.41.0"
@@ -377,12 +353,6 @@
         "kind": "skill",
         "source": "skills/skills/write-run-note-monthly-review/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
-        "version": "0.41.0"
-      },
-      {
-        "kind": "skill",
-        "source": "skills/skills/write-summary-invoice-prep/SKILL.md",
-        "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
         "version": "0.41.0"
       },
       {

@@ -147,7 +147,7 @@ The only sanctioned write is `--output-file <path>` when the user explicitly pas
 
 ## What the rule-fragment pass covers / doesn't cover
 
-### Covered (15 of 16 blueprints declare `rule_fragments[]`)
+### Covered (14 of 15 blueprints declare `rule_fragments[]`)
 
 The first five (trips, project, people, meetings, daily) shipped in v0.29.0. The rest followed.
 
@@ -156,7 +156,6 @@ The first five (trips, project, people, meetings, daily) shipped in v0.29.0. The
 | boards | card notes under `spice/boards/cards/` |
 | cowork | hubs, context files, prompts, scheduled-jobs config, and the briefing / review / memory notes |
 | daily | daily-note shape + filename pattern |
-| finance | budgets, paychecks, invoices, time logs, debts, savings, months, the defaults notes, and `Finance Plan.md` |
 | journal | journal entries + per-day hubs |
 | meetings | per-meeting note + per-period hub (frontmatter_branch) |
 | people | per-person notes (excludes hub) |
@@ -178,7 +177,7 @@ The first five (trips, project, people, meetings, daily) shipped in v0.29.0. The
 ### Out of scope (this cycle's design)
 
 - **No auto-fix tooling.** No `sauce audit --fix`, no `sauce conform` interactive verb. Detection-only by design — auto-fix is a separate feature surface that benefits from seeing real-world violations first.
-- **No new migrators** (journal-migrator, finance-migrator, full Sauce-shape project ecosystem) — deferred to v0.30.0+.
+- **No new migrators** (journal-migrator, full Sauce-shape project ecosystem) — deferred to v0.30.0+.
 - **No visual / UX audit.** Card rendering, nav-button wiring, hub feel — these are a manual visual smoke pass after the structural audit clears. The legacy in-vault `/audit` Templater command (workshop dogfood) covers the in-Obsidian render check.
 
 ---

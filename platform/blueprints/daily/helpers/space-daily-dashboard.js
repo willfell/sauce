@@ -1240,11 +1240,10 @@ class SpaceDailyDashboard {
     return [
       "sticky-note", "journal-entry",
       "project", "person", "team", "product", "trip",
-      "budget", "paycheck", "invoice",
       "kanban", "board-card",
       "wiki-page", "wiki-section", "doc-note", "reader-article",
       "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-      "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
+      "cowork-weekly-review", "cowork-monthly-review"
     ];
   }
 
@@ -1267,9 +1266,6 @@ class SpaceDailyDashboard {
       wiki:      "var(--color-yellow)",
       trip:      "var(--color-cyan)",
       "journal-entry": "var(--color-red)",
-      budget:    "var(--color-green)",
-      paycheck:  "var(--color-green)",
-      invoice:   "var(--color-green)",
       kanban:    "var(--color-pink)",
       // Main dashboard sections (used by the 3 main wrappers)
       tasks:     "var(--color-cyan)",
@@ -1305,7 +1301,6 @@ class SpaceDailyDashboard {
       "cowork-morning-briefing": "var(--color-blue)",
       "cowork-midday-tripwire":  "var(--color-yellow)",
       "cowork-eod-review":       "var(--color-purple)",
-      "cowork-finance-snapshot": "var(--color-cyan)",
       "cowork-weekly-review":    "var(--color-pink)",
       "cowork-monthly-review":   "var(--color-red)",
     };

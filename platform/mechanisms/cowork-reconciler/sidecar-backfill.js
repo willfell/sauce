@@ -62,7 +62,6 @@ function _inferKindFromCalloutTitle(title, priorities) {
   if (lower.includes("email") || lower.includes("gmail") || lower.includes("inbox")) return "email";
   if (lower.includes("chat") || lower.includes("teams") || lower.includes("slack") || lower.includes("conversation")) return "chat";
   if (lower.includes("message")) return "messages";
-  if (lower.includes("finance") || lower.includes("debt") || lower.includes("scoreboard")) return "finance";
   if (lower.includes("project") || lower.includes("kanban")) return "projects";
   if (lower.includes("thread")) return "threads";
   if (lower.includes("github") || lower.includes("pull request")) return "github";

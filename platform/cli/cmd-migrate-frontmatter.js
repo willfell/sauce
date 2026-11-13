@@ -39,7 +39,6 @@ const PATH_TO_TYPE = {
     "scratch": "scratch",
     "sticky-notes": "sticky-note",
     "cowork": "cowork-daily",   // overridden by sub-path below
-    "finance": null,             // ambiguous: budget / paycheck / invoice
     "to-do": "to-do",
     "boards": "board",
 };

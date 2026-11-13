@@ -149,7 +149,7 @@ this is unexpected.`
 
 2d. **Morning followup.** Compose `morning_followup` summary by reading the matching
     `## Morning — <engagement.label>` block in today's daily note:
-    `{ flagged_transactions, unanswered_messages, threads: { resolved, snoozed, still_open } }`.
+    `{ unanswered_messages, threads: { resolved, snoozed, still_open } }`.
 
 ### Step 3: Compose run-note body via cowork:compose-body (retrospective synopsis → day-pattern → per-kind → carry-forward)
 
@@ -379,4 +379,4 @@ Compose the paragraph per the following rules. Voice contract (vibe, personality
 
 ### Per-kind callout default-expand
 
-Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
+Every per-kind callout (chat, calendar, email, github, ado, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.

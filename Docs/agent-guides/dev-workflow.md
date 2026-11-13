@@ -29,7 +29,7 @@ Flags worth knowing:
 | Self-installs? | Yes (dogfood) — but only subscribes to a subset of blueprints | Yes — subscribes to whichever blueprints the engagement needs |
 | Modifies platform code? | YES — this is where edits happen | NO — installer overwrites consumer copies on every run |
 
-The workshop is its OWN first consumer (workshop dogfood). Look at `ranch/platform-subscription.json` in the workshop to see what the workshop subscribes to (it deliberately omits `finance` for example — finance is consumer-vault-only).
+The workshop is its OWN first consumer (workshop dogfood). Look at `ranch/platform-subscription.json` in the workshop to see what the workshop subscribes to (it does not subscribe to every blueprint — `trips`, for example, is omitted).
 
 ## Local-clone vs brew install
 
@@ -123,7 +123,7 @@ Flags:
 - `--dry-run` — print to stdout instead of writing.
 - `--help` — usage.
 
-The cycle-id pattern is `v\d+` or `v\d+-CFn` (e.g. `v01200`, `v01200-CF1`). The topic-slug is lowercase-with-hyphens (`workshop-tooling`, `finance-monthly-overview`).
+The cycle-id pattern is `v\d+` or `v\d+-CFn` (e.g. `v01200`, `v01200-CF1`). The topic-slug is lowercase-with-hyphens (`workshop-tooling`, `todo-regression-net`).
 
 ## `scripts/dev-sync.sh`
 

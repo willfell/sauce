@@ -4093,7 +4093,7 @@ const COWORK_DIR        = path.join(WORKSHOP, "platform", "blueprints", "cowork"
 const ENGAGEMENT_TYPES_DIR = path.join(COWORK_DIR, "engagement-types");
 const COWORK_MANIFEST_PATH = path.join(COWORK_DIR, "manifest.json");
 const BLUEPRINTS_DIR    = path.join(WORKSHOP, "platform", "blueprints");
-const CONTRIB_BPS       = ["finance", "people", "meetings", "project"];
+const CONTRIB_BPS       = ["people", "meetings", "project"];
 const VALID_CONTRIB_KINDS = new Set(["engagement_field_offer", "context_file_offer", "vault_question"]);
 
 function _readJson(p) { return JSON.parse(fs.readFileSync(p, "utf8")); }
@@ -4410,7 +4410,7 @@ async function caseSHCS7ScratchNewButtonHelper() {
 
 // ============================================================
 // v0.46.0 S11 — entity-create migration orphan-class scan across the 5
-// migrated blueprints (meetings / people / project / scratch / finance).
+// migrated blueprints (meetings / people / project / scratch).
 // Each case asserts the legacy New*Button helper file is ABSENT (deleted in
 // its respective migration stage S4-S10), plus two cases that validate the
 // entity-create mechanism's source surface parses cleanly.
@@ -4443,24 +4443,6 @@ async function caseSHCS11ProjectNavButtonsNoCreate() {
 // dropped when the day-hub adopted StickyChromeBar. The surviving day-hub shape
 // (StickyChromeBar + StickyDayList, no entity-create sentinel) is pinned by
 // SHC-S3 above.
-
-async function caseSHCS11FinanceBudget() {
-  console.log("\n--- Case SHC-S11-finance-budget: new-budget-button.js deleted (v0.46.0 S8) ---");
-  const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-budget-button.js");
-  assertTrue("SHC-S11-finance-budget: finance/helpers/new-budget-button.js absent", !fs.existsSync(p));
-}
-
-async function caseSHCS11FinancePaycheck() {
-  console.log("\n--- Case SHC-S11-finance-paycheck: new-paycheck-button.js deleted (v0.46.0 S9) ---");
-  const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-paycheck-button.js");
-  assertTrue("SHC-S11-finance-paycheck: finance/helpers/new-paycheck-button.js absent", !fs.existsSync(p));
-}
-
-async function caseSHCS11FinanceInvoice() {
-  console.log("\n--- Case SHC-S11-finance-invoice: new-invoice-button.js deleted (v0.46.0 S10) ---");
-  const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-invoice-button.js");
-  assertTrue("SHC-S11-finance-invoice: finance/helpers/new-invoice-button.js absent", !fs.existsSync(p));
-}
 
 async function caseSHCS11EntityCreateMechanismParses() {
   console.log("\n--- Case SHC-S11-entity-create-js: entity-create.js parses via new Function() ---");
@@ -7533,88 +7515,6 @@ async function caseFA6DomainRuleFragments() {
     boards.rule_fragments[0].fragment.scope.path_glob === "spice/boards/cards/**/*.md");
 }
 
-// ============================================================
-// v0.59.0 FA-7 — Finance canonical vocab adoption
-// ============================================================
-
-async function caseFA7FinanceManifest() {
-  console.log("\n--- Case FA7-MANIFEST: finance version range 0.4.x|0.5.x|0.6.x ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  // v0.107.0 widened from === "0.4.0" → /^0\.(4|5)\.\d+$/. v0.108.0 widens
-  // again to include 0.6.x (debt sub-area MINOR). Same posture as FA3-PROJ-1
-  // widening at v0.104.0.
-  assertTrue("FA7-MANIFEST-1: finance manifest version matches snapshot SSOT",
-    m.version === VERSION_SNAPSHOT.components.finance, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
-}
-
-async function caseFA7FinanceTemplates() {
-  console.log("\n--- Case FA7-TEMPLATES: finance templates use canonical created_at ---");
-  const checks = [
-    ["finance/templates/Budget Template.md", "budget"],
-    ["finance/templates/Paycheck Template.md", "paycheck"],
-    ["finance/templates/Invoice Template.md", "invoice"],
-    ["finance/templates/Time Log Template.md", "time-log"],
-    ["finance/templates/Invoice Board Card.md", "invoice-board-card"],
-  ];
-  for (const [rel, expectedType] of checks) {
-    const body = fs.readFileSync(
-      path.join(WORKSHOP, "platform/blueprints", rel), "utf8");
-    assertTrue(`FA7-TPL-${rel} declares created_at`,
-      /^created_at:/m.test(body) && !/^created:\s/m.test(body),
-      `template ${rel} fm header:\n${body.slice(0, 300)}`);
-    assertTrue(`FA7-TPL-${rel} declares type: ${expectedType}`,
-      new RegExp(`^type:\\s*${expectedType}\\b`, "m").test(body),
-      `template ${rel} fm header:\n${body.slice(0, 300)}`);
-  }
-  // Budget template: budget_month → month canonical alignment (with cowork)
-  const budget = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/templates/Budget Template.md"), "utf8");
-  assertTrue("FA7-TPL-BUDGET-month: Budget Template emits canonical month: (was budget_month:)",
-    /^month:/m.test(budget) && !/^budget_month:/m.test(budget),
-    `budget fm:\n${budget.slice(0, 300)}`);
-}
-
-async function caseFA7FinanceEntityCreate() {
-  console.log("\n--- Case FA7-ENTITY: entity-create entries emit canonical created_at ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const entries = m.new_entity_buttons || [];
-  assertTrue("FA7-ENTITY-count: >=3 entity-create entries (was 3; v0.108.0 added debt)",
-    entries.length >= 3);
-  for (const e of entries) {
-    const ft = e.frontmatter_template || {};
-    assertTrue(`FA7-ENTITY-${e.id}-created_at: emits canonical created_at`,
-      typeof ft.created_at === "string" && /\{\{now\.YYYY-MM-DDTHH:mm:ssZ\}\}/.test(ft.created_at),
-      `frontmatter_template: ${JSON.stringify(ft)}`);
-    assertTrue(`FA7-ENTITY-${e.id}-drops-created: drops legacy created:`,
-      !ft.hasOwnProperty("created"));
-  }
-  // Budget canonical month: alignment (was budget_month)
-  const budget = entries.find(e => e.id === "budget");
-  assertTrue("FA7-ENTITY-budget-month: budget emits canonical month: (was budget_month)",
-    "month" in budget.frontmatter_template && !("budget_month" in budget.frontmatter_template));
-}
-
-async function caseFA7FinanceRuleFragments() {
-  console.log("\n--- Case FA7-EXTENDS: finance rule_fragments extend canonical-vocab ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const frags = m.rule_fragments || [];
-  // v0.107.0: rule_fragment count widened from === 4 → >= 4. v0.107.0 added
-  // two new fragments for Budget Defaults.md + Paycheck Defaults.md.
-  assertTrue("FA7-EXTENDS-count: >=4 rule_fragments",
-    frags.length >= 4, `got: ${frags.length}`);
-  assertTrue("FA7-EXTENDS-all: all rule_fragments declare extends",
-    frags.every(rf => rf.fragment.extends === "_canonical-vocab"));
-  // Verify the four original per-sub-flow scopes still present.
-  const scopes = frags.map(rf => rf.fragment.scope.path_glob);
-  for (const s of ["spice/finance/budgets/**/*.md", "spice/finance/paychecks/**/*.md", "spice/finance/invoices/*/Invoice-*.md", "spice/finance/invoices/*/Time-Log-*.md"]) {
-    assertTrue(`FA7-EXTENDS-scope-${s.split('/').pop()}: ${s} fragment present`,
-      scopes.includes(s));
-  }
-}
-
 // v0.63.0 S7 — TD-HC-1: to-do v0.3.x manifest schema clean.
 // v0.63.1 PATCH amendment: All-To-Dos + Migrate moved from global nav-buttons to inline ToDoLeafActions
 // AccentButtons (Today To-Do.md embeds a ToDoLeafActions dataviewjs block). nav_buttons[] reverts to
@@ -10087,11 +9987,13 @@ async function caseV0990GateA4() {
   try {
     const { classifyEngagementDay } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
     const { FREE_TEXT_PLACEHOLDERS } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
-    const silent = classifyEngagementDay({ notes: [_v0990Note([{ kind: "chat", ticked: false }], { free_text: FREE_TEXT_PLACEHOLDERS[FREE_TEXT_PLACEHOLDERS.length - 1] })] });
-    assertTrue(
-      "HC-V0990-GATE-A4: unticked rating boxes + placeholder-only fence classify \"silent\"",
-      silent === "silent"
-    );
+    for (const placeholder of FREE_TEXT_PLACEHOLDERS) {
+      const silent = classifyEngagementDay({ notes: [_v0990Note([{ kind: "chat", ticked: false }], { free_text: placeholder })] });
+      assertTrue(
+        `HC-V0990-GATE-A4: unticked rating boxes + placeholder-only fence classify "silent" (${placeholder})`,
+        silent === "silent"
+      );
+    }
   } catch (e) { assertTrue("HC-V0990-GATE-A4: silent", false, e && e.message); }
 }
 
@@ -10291,7 +10193,7 @@ function _v1010V4NonEodBody(o) {
     "> ### Free-text feedback",
     ">",
     "```feedback",
-    o.free_text !== undefined ? o.free_text : "(Type prose here — name a section to scope it, e.g. `finance: too long`.)",
+    o.free_text !== undefined ? o.free_text : "(Type prose here — name a section to scope it, e.g. `calendar: too long`.)",
     "```",
     ">",
     "> > [!summary]- Kinds — quick ticks",
@@ -10800,14 +10702,13 @@ async function caseV01020EC3SchemaExposesNewFields() {
   const asText = JSON.stringify(parsed);
   assertTrue("HC-V01020-EC-3b: schema mentions presetPrompts", asText.includes("presetPrompts"));
   assertTrue("HC-V01020-EC-3c: schema mentions options_source", asText.includes("options_source"));
-  // Manifest version bumped to 0.6.0 in v0.105.0, 0.7.0 in v0.107.0
-  // (seed_from_defaults). Range-widen to /^0\.[6-9]\.\d+$/ so future MINOR
-  // bumps don't whack-a-mole the same assertion.
+  // Version reads the snapshot SSOT the release bumper regenerates, so MINOR
+  // bumps never need a hand edit here.
   const mp = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "manifest.json");
   const man = JSON.parse(fs.readFileSync(mp, "utf8"));
-  assertTrue("HC-V01020-EC-3d: entity-create manifest version 0.6.x or higher MINOR",
-    /^0\.[6-9]\.\d+$/.test(man.version),
-    `got: ${man.version}`);
+  assertTrue("HC-V01020-EC-3d: entity-create manifest version matches snapshot SSOT",
+    man.version === VERSION_SNAPSHOT.components["entity-create"],
+    `got: ${man.version}, snapshot: ${VERSION_SNAPSHOT.components["entity-create"]}`);
 }
 
 // v0.102.0 S2 — ProjectDocsSections helper (Confluence-style buckets on Docs Hub).
@@ -12086,16 +11987,15 @@ async function caseV01050EcSkip1SkipEmptyOptions() {
     /ctx\.prompts\[\s*p\.key\s*\]\s*=\s*["']{2}/.test(src));
 }
 
-// Manifest — entity-create at 0.6.x or higher; doc-note section + sub_section
-// prompts use the new options_source values; project blueprint at 1.20.0
-// (post-v0.106.0). v0.107.0 widened version assert to /^0\.[6-9]\.\d+$/ so
-// future MINOR bumps (e.g. 0.7.0 seed_from_defaults) don't fail this.
+// Manifest — entity-create version matches the snapshot SSOT; doc-note section +
+// sub_section prompts use the new options_source values; project blueprint at
+// 1.20.0 (post-v0.106.0).
 async function caseV01050EcMan1Manifest060() {
   console.log("\n--- Case HC-V01050-EC-MAN-1: entity-create mechanism manifest 0.6.x or higher ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
-  assertTrue("HC-V01050-EC-MAN-1: entity-create mechanism version 0.6.x or higher MINOR",
-    /^0\.[6-9]\.\d+$/.test(m.version),
-    `got: ${m.version}`);
+  assertTrue("HC-V01050-EC-MAN-1: entity-create mechanism version matches snapshot SSOT",
+    m.version === VERSION_SNAPSHOT.components["entity-create"],
+    `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components["entity-create"]}`);
   // Description references the v0.6.0 paragraph (still present in v0.7.0 desc).
   assertTrue("HC-V01050-EC-MAN-1: description mentions v0.6.0",
     typeof m.description === "string" && /v0\.6\.0/.test(m.description));
@@ -12360,935 +12260,35 @@ async function caseV01060PdiWidgets3TopTags() {
     /SectionLabel\.divider/.test(src));
 }
 
-// v0.107.0 — entity-create seed_from_defaults schema field (additive).
-// Per design Section 3: optional block on new_entity_buttons[*] that reads
-// a defaults file at scaffold time and copies arrays into the new entity
-// (carry_arrays for top-level snapshots; per_item_set to merge fields like
-// actual:0 / paid:false; template wins on conflict).
-
-async function caseV01070EcSfd1MethodPresent() {
-  console.log("\n--- Case HC-V01070-EC-SFD-1: _resolveSeedFromDefaults method declared on EntityCreate ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
-  assertTrue("HC-V01070-EC-SFD-1: _resolveSeedFromDefaults method present",
-    /_resolveSeedFromDefaults\s*\(/.test(src));
-}
-
-async function caseV01070EcSfd2MissingDefaultsNotice() {
-  console.log("\n--- Case HC-V01070-EC-SFD-2: missing-defaults Notice path (non-blocking) ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
-  assertTrue("HC-V01070-EC-SFD-2: Notice on missing defaults file",
-    /new Notice\([^)]*not found[^)]*\)/.test(src) || /new Notice\([^)]*defaults[^)]*\)/i.test(src));
-}
-
-async function caseV01070EcSfd3PerItemSetMerge() {
-  console.log("\n--- Case HC-V01070-EC-SFD-3: per_item_set merge step present ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
-  assertTrue("HC-V01070-EC-SFD-3: per_item_set referenced",
-    /per_item_set/.test(src));
-  assertTrue("HC-V01070-EC-SFD-3: spread or assign merges per_item_set onto items",
-    /\.\.\.\s*per_item_set|Object\.assign\([^)]*per_item_set/.test(src));
-}
-
-async function caseV01070EcSfd4CarryArraysCopy() {
-  console.log("\n--- Case HC-V01070-EC-SFD-4: carry_arrays iteration ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
-  assertTrue("HC-V01070-EC-SFD-4: carry_arrays present",
-    /carry_arrays/.test(src));
-}
-
-async function caseV01070EcSfd5TemplateWinsOnConflict() {
-  console.log("\n--- Case HC-V01070-EC-SFD-5: template-wins guard on dest_array ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
-  assertTrue("HC-V01070-EC-SFD-5: source_array referenced",
-    /source_array/.test(src));
-  assertTrue("HC-V01070-EC-SFD-5: dest_array or default-to-source resolution",
-    /dest_array/.test(src));
-  // Template-wins: the implementation must guard injection on the template
-  // value being empty/missing for that key. Accept either Array.isArray + length
-  // check, or !frontmatter[key] guard form.
-  assertTrue("HC-V01070-EC-SFD-5: empty-or-missing guard before inject",
-    /(\.length\s*===?\s*0|!\s*\w+\[)/.test(src));
-}
-
-// v0.107.0 — installer migration block: applyFinanceMigrations orchestrator
-// wrapping applyFinanceDefaultsScaffolding (create-if-absent) and
-// applyFinanceCategoriesGroupBackfill (append-only group field + .sauce-backup
-// snapshot before write). Both gated on manifest.name === "finance".
-
-async function caseV01070Fds1OrchestratorPresent() {
-  console.log("\n--- Case HC-V01070-FDS-1: applyFinanceMigrations orchestrator declared ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FDS-1: applyFinanceMigrations function present",
-    /async\s+function\s+applyFinanceMigrations\s*\(/.test(src));
-  assertTrue("HC-V01070-FDS-1: applyFinanceMigrations called from main install loop",
-    /await\s+applyFinanceMigrations\s*\(/.test(src));
-  assertTrue("HC-V01070-FDS-1: gated on manifest.name === \"finance\"",
-    /manifest\.name\s*===?\s*["']finance["']/.test(src));
-}
-
-async function caseV01070Fds2ScaffoldingCreateIfAbsent() {
-  console.log("\n--- Case HC-V01070-FDS-2: applyFinanceDefaultsScaffolding create-if-absent ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FDS-2: applyFinanceDefaultsScaffolding function present",
-    /async\s+function\s+applyFinanceDefaultsScaffolding\s*\(/.test(src));
-  // Match either:
-  //   • literal `adapter.exists(...Budget Defaults...)` — when the path is inlined; or
-  //   • `if (!(await adapter.exists(budgetDefaultsPath))) {` shape — when stored
-  //     in a path variable named `budgetDefaultsPath` (our impl).
-  assertTrue("HC-V01070-FDS-2: exists-check guards write",
-    /adapter\.exists\([^)]*Budget Defaults/.test(src) ||
-    /adapter\.exists\(\s*budgetDefaultsPath\s*\)/.test(src) ||
-    /await\s+adapter\.exists\([^)]*defaults[^)]*\.md/i.test(src));
-}
-
-async function caseV01070Fds3BothDefaultsTargets() {
-  console.log("\n--- Case HC-V01070-FDS-3: both Budget Defaults + Paycheck Defaults targets ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FDS-3: Budget Defaults.md target string",
-    /Budget Defaults\.md/.test(src));
-  assertTrue("HC-V01070-FDS-3: Paycheck Defaults.md target string",
-    /Paycheck Defaults\.md/.test(src));
-  assertTrue("HC-V01070-FDS-3: budget-defaults type in content payload",
-    /budget-defaults/.test(src));
-  assertTrue("HC-V01070-FDS-3: paycheck-defaults type in content payload",
-    /paycheck-defaults/.test(src));
-}
-
-async function caseV01070Fcgb1BackfillPresent() {
-  console.log("\n--- Case HC-V01070-FCGB-1: applyFinanceCategoriesGroupBackfill declared ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FCGB-1: applyFinanceCategoriesGroupBackfill function present",
-    /async\s+function\s+applyFinanceCategoriesGroupBackfill\s*\(/.test(src));
-  assertTrue("HC-V01070-FCGB-1: walks Budget-*.md files under spice/finance/budgets",
-    /spice\/finance\/budgets/.test(src));
-}
-
-async function caseV01070Fcgb2SnapshotBeforeWrite() {
-  console.log("\n--- Case HC-V01070-FCGB-2: .sauce-backup snapshot precedes any write ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FCGB-2: .sauce-backup snapshot path used",
-    /\.sauce-backup/.test(src));
-  // Snapshot mechanism: adapter.read source + adapter.write to backup dest is
-  // acceptable; OR fs.copyFileSync. We use adapter.read+write here to match
-  // existing install.js patterns.
-  assertTrue("HC-V01070-FCGB-2: snapshot mechanism (adapter.write into backup path)",
-    /adapter\.write\([^)]*\.sauce-backup/.test(src) || /copyFileSync/.test(src));
-}
-
-async function caseV01070Fcgb3AppendOnlyGuard() {
-  console.log("\n--- Case HC-V01070-FCGB-3: 'Unassigned' fallback group ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FCGB-3: \"Unassigned\" fallback group present",
-    /["']Unassigned["']/.test(src));
-  // v0.5.1 patch: backfill is regex-based (headless installer; no
-  // processFrontMatter). Append-only is enforced by per-item `hasGroup` check
-  // — only inserts `    group: Unassigned` when no `group:` key appears within
-  // the item's continuation lines.
-  assertTrue("HC-V01070-FCGB-3: append-only check (hasGroup guard before insert)",
-    /hasGroup\s*=\s*false|let\s+hasGroup|if\s*\(\s*!\s*hasGroup\s*\)/.test(src));
-}
-
-async function caseV01070Fcgb4PerFileFailureLoud() {
-  console.log("\n--- Case HC-V01070-FCGB-4: per-file try/catch + Notice on failure ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  // Look for a try/catch block within applyFinanceCategoriesGroupBackfill that
-  // emits a Notice or history warning on failure. We grep for the function start
-  // through to the next async function declaration.
-  const m = src.match(/async\s+function\s+applyFinanceCategoriesGroupBackfill\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
-  assertTrue("HC-V01070-FCGB-4: function body matched", m !== null);
-  if (m) {
-    assertTrue("HC-V01070-FCGB-4: try/catch present in body",
-      /try\s*\{[\s\S]*catch\s*\([^)]*\)/.test(m[1]));
-  }
-}
-
-async function caseV01070Fcgb5IdempotentSkip() {
-  console.log("\n--- Case HC-V01070-FCGB-5: idempotent — skip write when nothing changed ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  // Look for a change-detection guard so re-runs no-op once all budgets are
-  // backfilled. Accepts a 'changed' boolean, 'needsWrite', or 'modified' flag.
-  assertTrue("HC-V01070-FCGB-5: change-detection guard present",
-    /(let\s+changed\s*=\s*false|needsWrite|let\s+modified\s*=)/.test(src));
-}
-
-// 2026-07-01 finance-stabilize — behavioral cases for the flow-map-aware group
-// backfill (D1) and the malformed-group repair transform/heal (D2).
-
-async function caseFinBgrBackfillSkipsFlowMap() {
-  console.log("\n--- Case HC-FIN-BGR-1: backfill skips inline flow-mapping categories ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const body = [
-    "---",
-    "type: budget",
-    "month: 2026-08",
-    "categories:",
-    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
-    '  - {"group":"Travel","name":"Travel","planned":100,"actual":0}',
-    "groups:",
-    "  - Lifestyle",
-    "  - Travel",
-    "---",
-    "",
-    "body",
-  ].join("\n");
-  const out = installer._backfillBudgetGroupsFromText(body);
-  assertTrue("HC-FIN-BGR-1: flow-map body is NOT touched", out.touched === false);
-  assertTrue("HC-FIN-BGR-1: no stray 'group: Unassigned' inserted",
-    !/\n    group: Unassigned/.test(out.body));
-  assertTrue("HC-FIN-BGR-1: original flow-map rows intact",
-    /\{"group":"Lifestyle","name":"Golf"/.test(out.body) &&
-    /\{"group":"Travel","name":"Travel"/.test(out.body));
-}
-
-async function caseFinBgrBackfillStillBackfillsBlock() {
-  console.log("\n--- Case HC-FIN-BGR-2: backfill still adds Unassigned to block items lacking a group ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const body = [
-    "---",
-    "type: budget",
-    "month: 2026-08",
-    "categories:",
-    "  - name: Groceries",
-    "    planned: 550",
-    "    actual: 0",
-    "groups: []",
-    "---",
-    "",
-  ].join("\n");
-  const out = installer._backfillBudgetGroupsFromText(body);
-  assertTrue("HC-FIN-BGR-2: block item without group is backfilled", out.touched === true);
-  assertTrue("HC-FIN-BGR-2: 'group: Unassigned' inserted for block item",
-    /\n    group: Unassigned/.test(out.body));
-}
-
-async function caseFinBgrRepairStripsStray() {
-  console.log("\n--- Case HC-FIN-BGR-3: repair strips stray 'group: Unassigned' under a flow-map ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const corrupt = [
-    "---",
-    "type: budget",
-    "month: 2026-07",
-    "categories:",
-    '  - {"group":"Variable Essentials","name":"Groceries","planned":550,"actual":0}',
-    "    group: Unassigned",
-    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
-    "    group: Unassigned",
-    "groups:",
-    "  - Variable Essentials",
-    "  - Lifestyle",
-    "---",
-    "",
-  ].join("\n");
-  const out = installer._repairMalformedBudgetGroups(corrupt);
-  assertTrue("HC-FIN-BGR-3: repair reports touched", out.touched === true);
-  assertTrue("HC-FIN-BGR-3: stray lines removed", !/\n    group: Unassigned/.test(out.body));
-  assertTrue("HC-FIN-BGR-3: flow-map rows preserved",
-    /\{"group":"Variable Essentials","name":"Groceries"/.test(out.body) &&
-    /\{"group":"Lifestyle","name":"Golf"/.test(out.body));
-  // Idempotent: second pass is a no-op.
-  const out2 = installer._repairMalformedBudgetGroups(out.body);
-  assertTrue("HC-FIN-BGR-3: idempotent (second pass no-op)", out2.touched === false);
-}
-
-async function caseFinBgrRepairLeavesCleanNotes() {
-  console.log("\n--- Case HC-FIN-BGR-4: repair no-ops on clean notes (block + flow) ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const cleanBlock = [
-    "---","type: budget","month: 2026-06","categories:",
-    "  - group: Lifestyle","    name: Golf","    planned: 30","    actual: 0",
-    "---","",
-  ].join("\n");
-  const cleanFlow = [
-    "---","type: budget","month: 2026-08","categories:",
-    '  - {"group":"Lifestyle","name":"Golf","planned":30,"actual":0}',
-    "---","",
-  ].join("\n");
-  assertTrue("HC-FIN-BGR-4: clean block untouched", installer._repairMalformedBudgetGroups(cleanBlock).touched === false);
-  assertTrue("HC-FIN-BGR-4: clean flow untouched", installer._repairMalformedBudgetGroups(cleanFlow).touched === false);
-  // A legitimately block-Unassigned row (not under a flow-map) must NOT be stripped.
-  const legitBlockUnassigned = [
-    "---","type: budget","month: 2026-03","categories:",
-    "  - name: Mystery","    group: Unassigned","    planned: 10","    actual: 0",
-    "---","",
-  ].join("\n");
-  assertTrue("HC-FIN-BGR-4: legit block Unassigned preserved",
-    installer._repairMalformedBudgetGroups(legitBlockUnassigned).touched === false);
-}
-
-// ===== HC-FIN-COCKPIT-* — Month cockpit + edit-scope banner injection + nav retirement =====
-
-async function caseFinCockpitChecklistInject() {
-  console.log("\n--- Case HC-FIN-COCKPIT-1: _injectMonthChecklist inserts checklist above MonthDashboard, idempotent ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("HC-FIN-COCKPIT-1: _injectMonthChecklist is a function",
-    typeof installer._injectMonthChecklist === "function");
-  const body = [
-    "---", "type: month", "month: 2026-07", "---", "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "MonthDashboard" });',
-    '```', "", "## Notes", "",
-  ].join("\n");
-  const out = installer._injectMonthChecklist(body);
-  assertTrue("HC-FIN-COCKPIT-1: reports touched", out.touched === true);
-  assertTrue("HC-FIN-COCKPIT-1: marker present", /<!-- month-setup-checklist -->/.test(out.body));
-  assertTrue("HC-FIN-COCKPIT-1: MonthSetupChecklist block present",
-    /class:\s*"MonthSetupChecklist"/.test(out.body));
-  // Anchored ABOVE MonthDashboard.
-  const checklistIdx = out.body.indexOf('MonthSetupChecklist');
-  const dashboardIdx = out.body.indexOf('MonthDashboard');
-  assertTrue("HC-FIN-COCKPIT-1: checklist appears BEFORE MonthDashboard",
-    checklistIdx > 0 && dashboardIdx > 0 && checklistIdx < dashboardIdx);
-  // Idempotent — second pass is a no-op.
-  const out2 = installer._injectMonthChecklist(out.body);
-  assertTrue("HC-FIN-COCKPIT-1: idempotent (second pass no-op)", out2.touched === false);
-  assertTrue("HC-FIN-COCKPIT-1: only ONE checklist block after two passes",
-    (out2.body.match(/class:\s*"MonthSetupChecklist"/g) || []).length === 1);
-}
-
-async function caseFinCockpitBannerInject() {
-  console.log("\n--- Case HC-FIN-COCKPIT-2: _injectEditScopeBanner inserts banner after FinanceNav, idempotent ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("HC-FIN-COCKPIT-2: _injectEditScopeBanner is a function",
-    typeof installer._injectEditScopeBanner === "function");
-  const body = [
-    "---", "type: budget", "month: 2026-07", "---", "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });',
-    '```', "",
-  ].join("\n");
-  const out = installer._injectEditScopeBanner(body);
-  assertTrue("HC-FIN-COCKPIT-2: reports touched", out.touched === true);
-  assertTrue("HC-FIN-COCKPIT-2: marker present", /<!-- finance-edit-scope -->/.test(out.body));
-  assertTrue("HC-FIN-COCKPIT-2: FinanceEditScopeBanner block present",
-    /class:\s*"FinanceEditScopeBanner"/.test(out.body));
-  // Anchored AFTER FinanceNav, BEFORE BudgetSummary.
-  const navIdx = out.body.indexOf('FinanceNav"');
-  const bannerIdx = out.body.indexOf('FinanceEditScopeBanner');
-  const summaryIdx = out.body.indexOf('BudgetSummary');
-  assertTrue("HC-FIN-COCKPIT-2: banner appears AFTER FinanceNav and BEFORE BudgetSummary",
-    navIdx > 0 && bannerIdx > navIdx && bannerIdx < summaryIdx);
-  // Idempotent.
-  const out2 = installer._injectEditScopeBanner(out.body);
-  assertTrue("HC-FIN-COCKPIT-2: idempotent (second pass no-op)", out2.touched === false);
-  assertTrue("HC-FIN-COCKPIT-2: only ONE banner block after two passes",
-    (out2.body.match(/class:\s*"FinanceEditScopeBanner"/g) || []).length === 1);
-}
-
-async function caseFinCockpitNavRowStrip() {
-  console.log("\n--- Case HC-FIN-COCKPIT-3: _stripDefaultsNavRow removes a FinanceNavRow block, leaves FinanceNav, idempotent ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("HC-FIN-COCKPIT-3: _stripDefaultsNavRow is a function",
-    typeof installer._stripDefaultsNavRow === "function");
-  const body = [
-    "---", "type: budget-defaults", "---", "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });',
-    '```', "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "BudgetDefaultsEditor" });',
-    '```', "",
-  ].join("\n");
-  const out = installer._stripDefaultsNavRow(body);
-  assertTrue("HC-FIN-COCKPIT-3: reports touched", out.touched === true);
-  assertTrue("HC-FIN-COCKPIT-3: FinanceNavRow block removed",
-    !/class:\s*"FinanceNavRow"/.test(out.body));
-  assertTrue("HC-FIN-COCKPIT-3: FinanceNav block preserved",
-    /class:\s*"FinanceNav"/.test(out.body));
-  assertTrue("HC-FIN-COCKPIT-3: editor block preserved",
-    /class:\s*"BudgetDefaultsEditor"/.test(out.body));
-  // Idempotent — a body with no FinanceNavRow is a no-op.
-  const out2 = installer._stripDefaultsNavRow(out.body);
-  assertTrue("HC-FIN-COCKPIT-3: idempotent (second pass no-op)", out2.touched === false);
-  // A body that never had a FinanceNavRow is untouched.
-  const clean = [
-    "---", "type: budget-defaults", "---", "",
-    '```dataviewjs',
-    'await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });',
-    '```', "",
-  ].join("\n");
-  assertTrue("HC-FIN-COCKPIT-3: clean body untouched", installer._stripDefaultsNavRow(clean).touched === false);
-}
-
-async function caseFinCockpitHealsWiredAndUngated() {
-  console.log("\n--- Case HC-FIN-COCKPIT-4: heals exported, wired in applyFinanceMigrations, ungated, snapshot-first; injection call removed ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("HC-FIN-COCKPIT-4: applyFinanceMonthChecklistInjection exported",
-    typeof installer.applyFinanceMonthChecklistInjection === "function");
-  assertTrue("HC-FIN-COCKPIT-4: applyFinanceEditScopeBannerInjection exported",
-    typeof installer.applyFinanceEditScopeBannerInjection === "function");
-  assertTrue("HC-FIN-COCKPIT-4: applyFinanceDefaultsNavRowRetirement exported",
-    typeof installer.applyFinanceDefaultsNavRowRetirement === "function");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  // All three new heals invoked in applyFinanceMigrations.
-  const migMatch = src.match(/async\s+function\s+applyFinanceMigrations\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
-  assertTrue("HC-FIN-COCKPIT-4: applyFinanceMigrations body matched", migMatch !== null);
-  const migBody = migMatch ? migMatch[1] : "";
-  assertTrue("HC-FIN-COCKPIT-4: month-checklist heal invoked",
-    /await\s+applyFinanceMonthChecklistInjection\(/.test(migBody));
-  assertTrue("HC-FIN-COCKPIT-4: edit-scope banner heal invoked",
-    /await\s+applyFinanceEditScopeBannerInjection\(/.test(migBody));
-  assertTrue("HC-FIN-COCKPIT-4: nav-row RETIREMENT heal invoked",
-    /await\s+applyFinanceDefaultsNavRowRetirement\(/.test(migBody));
-  // The OLD injection call is REMOVED from applyFinanceMigrations.
-  assertTrue("HC-FIN-COCKPIT-4: old applyFinanceDefaultsNavRowInjection call REMOVED from applyFinanceMigrations",
-    !/await\s+applyFinanceDefaultsNavRowInjection\(/.test(migBody));
-  // Each heal snapshot-first + ungated.
-  for (const fn of ["applyFinanceMonthChecklistInjection", "applyFinanceEditScopeBannerInjection", "applyFinanceDefaultsNavRowRetirement"]) {
-    const m = src.match(new RegExp("async\\s+function\\s+" + fn + "\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}"));
-    assertTrue(`HC-FIN-COCKPIT-4: ${fn} body matched`, m !== null);
-    if (m) {
-      assertTrue(`HC-FIN-COCKPIT-4: ${fn} snapshot-first (.sauce-backup)`, /\.sauce-backup/.test(m[1]));
-      assertTrue(`HC-FIN-COCKPIT-4: ${fn} ungated (no version-gate compare)`,
-        !/VERSION_SNAPSHOT|semverGte|isVersionAtLeast/.test(m[1]));
-    }
-  }
-}
-
-async function caseFinBgrHealWiredAndUngated() {
-  console.log("\n--- Case HC-FIN-BGR-5: repair heal exported, called, ungated, snapshot-first ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("HC-FIN-BGR-5: heal exported",
-    typeof installer.applyFinanceBudgetMalformedGroupRepair === "function");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-FIN-BGR-5: heal invoked in applyFinanceMigrations",
-    /await\s+applyFinanceBudgetMalformedGroupRepair\(/.test(src));
-  const m = src.match(/async\s+function\s+applyFinanceBudgetMalformedGroupRepair\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
-  assertTrue("HC-FIN-BGR-5: heal body matched", m !== null);
-  if (m) {
-    assertTrue("HC-FIN-BGR-5: snapshot before write (.sauce-backup)", /\.sauce-backup/.test(m[1]));
-    assertTrue("HC-FIN-BGR-5: marker-guarded", /__budget_malformed_group_repaired/.test(m[1]));
-    assertTrue("HC-FIN-BGR-5: ungated (no version-gate compare)", !/VERSION_SNAPSHOT|semverGte|isVersionAtLeast/.test(m[1]));
-  }
-}
-
-// v0.107.0 — defaults editor classes shipped in finance blueprint.
-
-async function caseV01070Bde1ClassDeclared() {
-  console.log("\n--- Case HC-V01070-BDE-1: BudgetDefaultsEditor class declared ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-BDE-1: class BudgetDefaultsEditor declared",
-    /class\s+BudgetDefaultsEditor\s*\{/.test(src));
-  assertTrue("HC-V01070-BDE-1: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\b/.test(src));
-  assertTrue("HC-V01070-BDE-1: embed-dedup guard",
-    /markdown-embed/.test(src));
-}
-
-async function caseV01070Bde2GroupsPane() {
-  console.log("\n--- Case HC-V01070-BDE-2: Groups pane + Add Group dialog ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-BDE-2: 'Add Group' action label",
-    /Add Group/.test(src));
-  assertTrue("HC-V01070-BDE-2: groups pane mutates fm.groups",
-    /fm\.groups\s*=|\.groups\s*=\s*\[?/.test(src));
-  assertTrue("HC-V01070-BDE-2: reorder helper (move up/down)",
-    /(_moveGroup|moveUp|moveDown|↑|↓)/.test(src));
-}
-
-async function caseV01070Bde3CategoriesPaneGrouped() {
-  console.log("\n--- Case HC-V01070-BDE-3: Categories pane uses grouped <details> sections ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-BDE-3: <details> element used for collapsible groups",
-    /createEl\(\s*["']details["']/.test(src));
-  assertTrue("HC-V01070-BDE-3: Add Category action label",
-    /Add Category/.test(src));
-}
-
-async function caseV01070Bde4UsesFinanceFrontmatter() {
-  console.log("\n--- Case HC-V01070-BDE-4: writes go through FinanceFrontmatter.update ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-BDE-4: customJS.FinanceFrontmatter.update referenced",
-    /customJS\.FinanceFrontmatter\.update/.test(src));
-}
-
-async function caseV01070Pde1ClassDeclared() {
-  console.log("\n--- Case HC-V01070-PDE-1: PaycheckDefaultsEditor class declared ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-PDE-1: class PaycheckDefaultsEditor declared",
-    /class\s+PaycheckDefaultsEditor\s*\{/.test(src));
-  assertTrue("HC-V01070-PDE-1: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\s*\)/.test(src));
-  assertTrue("HC-V01070-PDE-1: embed-dedup guard",
-    /markdown-embed/.test(src));
-}
-
-async function caseV01070Pde2DatalistAutocomplete() {
-  console.log("\n--- Case HC-V01070-PDE-2: datalist autocomplete for Category from Budget Defaults ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-PDE-2: datalist element used",
-    /createEl\(\s*["']datalist["']|<datalist|setAttribute\(\s*["']list["']/.test(src));
-  assertTrue("HC-V01070-PDE-2: reads from Budget Defaults.md for suggestions",
-    /Budget Defaults\.md/.test(src));
-}
-
-async function caseV01070Pde3UsesFinanceFrontmatter() {
-  console.log("\n--- Case HC-V01070-PDE-3: writes go through FinanceFrontmatter.update ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js"), "utf8");
-  assertTrue("HC-V01070-PDE-3: customJS.FinanceFrontmatter.update referenced",
-    /customJS\.FinanceFrontmatter\.update/.test(src));
-}
-
-// v0.107.0 — S4: entity editors v2 + BudgetSummary
-
-async function caseV01070BceExt1GroupedSections() {
-  console.log("\n--- Case HC-V01070-BCE-EXT-1: BudgetCategoriesEditor iterates page.groups + uses <details> ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-categories-editor.js"), "utf8");
-  assertTrue("HC-V01070-BCE-EXT-1: reads page.groups",
-    /page\.groups|fm\.groups/.test(src));
-  assertTrue("HC-V01070-BCE-EXT-1: uses <details> element for grouped sections",
-    /createEl\(\s*["']details["']/.test(src));
-}
-
-async function caseV01070BceExt2SubTotals() {
-  console.log("\n--- Case HC-V01070-BCE-EXT-2: per-group sub-totals computed in-place ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-categories-editor.js"), "utf8");
-  assertTrue("HC-V01070-BCE-EXT-2: sub-total accumulator references planned + actual",
-    /planned/.test(src) && /actual/.test(src));
-  assertTrue("HC-V01070-BCE-EXT-2: variance computation present",
-    /(variance|subtotal|sub_total|sub-total|SUBTOTAL)/i.test(src));
-}
-
-async function caseV01070BceExt3GroupDropdownInModal() {
-  console.log("\n--- Case HC-V01070-BCE-EXT-3: Add/Edit modal has Group dropdown ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-categories-editor.js"), "utf8");
-  assertTrue("HC-V01070-BCE-EXT-3: <select> element used (group picker)",
-    /createEl\(\s*["']select["']|createElement\(\s*["']select["']/i.test(src));
-}
-
-async function caseV01070PeeExt1Datalist() {
-  console.log("\n--- Case HC-V01070-PEE-EXT-1: PaycheckExpensesEditor uses datalist for Category ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-expenses-editor.js"), "utf8");
-  assertTrue("HC-V01070-PEE-EXT-1: datalist element used in modal",
-    /createEl\(\s*["']datalist["']|createElement\(\s*["']datalist["']|setAttribute\(\s*["']list["']/.test(src));
-}
-
-async function caseV01070PeeExt2ReadsBudgetDefaults() {
-  console.log("\n--- Case HC-V01070-PEE-EXT-2: PaycheckExpensesEditor reads Budget Defaults for category suggestions ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-expenses-editor.js"), "utf8");
-  assertTrue("HC-V01070-PEE-EXT-2: references Budget Defaults.md",
-    /Budget Defaults\.md/.test(src));
-}
-
-async function caseV01070Bs1ClassDeclared() {
-  console.log("\n--- Case HC-V01070-BS-1: BudgetSummary class declared + read-only ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
-  assertTrue("HC-V01070-BS-1: class BudgetSummary declared",
-    /class\s+BudgetSummary\s*\{/.test(src));
-  assertTrue("HC-V01070-BS-1: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\s*\)/.test(src));
-  assertTrue("HC-V01070-BS-1: embed-dedup guard",
-    /markdown-embed/.test(src));
-}
-
-async function caseV01070Bs2ThreeBands() {
-  console.log("\n--- Case HC-V01070-BS-2: three bands — totals + month progress + per-group ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
-  assertTrue("HC-V01070-BS-2: Band 1 — planned + actual + variance",
-    /planned/i.test(src) && /actual/i.test(src) && /variance/i.test(src));
-  assertTrue("HC-V01070-BS-2: Band 2 — month progress (daysInMonth or getDate)",
-    /(daysInMonth|getDate\s*\(\s*\)|elapsed)/i.test(src));
-  assertTrue("HC-V01070-BS-2: Band 3 — per-group iteration",
-    /(per[_-]?group|page\.groups|fm\.groups)/.test(src));
-}
-
-async function caseV01070Bs3PaceIndicator() {
-  console.log("\n--- Case HC-V01070-BS-3: pace indicator threshold ±10 ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
-  assertTrue("HC-V01070-BS-3: pace symbol or threshold reference",
-    /(pace|>=?\s*10\b|<=?\s*-?10\b|AHEAD|BEHIND)/.test(src));
-}
-
-async function caseV01070Bs4ReadOnly() {
-  console.log("\n--- Case HC-V01070-BS-4: never writes frontmatter (read-only widget) ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
-  // BudgetSummary must NOT call FinanceFrontmatter.update or processFrontMatter.
-  assertTrue("HC-V01070-BS-4: does NOT call FinanceFrontmatter.update",
-    !/FinanceFrontmatter\.update/.test(src));
-  assertTrue("HC-V01070-BS-4: does NOT call processFrontMatter",
-    !/processFrontMatter/.test(src));
-}
-
-// v0.107.0 — S5: finance + entity-create + workshop manifest deltas.
+// v0.107.0 — S5: entity-create + workshop manifest deltas.
 
 async function caseV01070FinMan1Versions() {
-  console.log("\n--- Case HC-V01070-FIN-MAN-1: finance + entity-create + workshop versions ---");
-  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  console.log("\n--- Case HC-V01070-FIN-MAN-1: entity-create + workshop versions ---");
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  // v0.108.0 superseded the v0.107.0 finance + entity-create pins:
-  //   finance 0.5.2 → 0.6.0 (CF-3 + v0.108.0 ship)
-  //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
-  // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
-  assertTrue("HC-V01070-FIN-MAN-1: finance version matches snapshot SSOT", fin.version === VERSION_SNAPSHOT.components.finance, `got: ${fin.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   assertEqual(ec.version, VERSION_SNAPSHOT.components["entity-create"], "HC-V01070-FIN-MAN-1: entity-create version");
   assertTrue("HC-V01070-FIN-MAN-1: workshop_version 0.115.x or 0.116.x or 0.117.x or 0.118.x or 0.119.x", sameMajorMinor(ws.workshop_version, VERSION_SNAPSHOT.workshop_version));
-  assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
-    fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
 
-async function caseV01070FinMan2NewClassesAndFiles() {
-  console.log("\n--- Case HC-V01070-FIN-MAN-2: finance customjs_classes + files include new entries ---");
-  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  // v0.5.3 CF-3 added PaycheckSummary + FinanceHubActions (alongside the
-  // three v0.5.0 classes).
-  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary"]) {
-    assertTrue(`HC-V01070-FIN-MAN-2: customjs_classes includes ${cls}`,
-      fin.customjs_classes.includes(cls));
-  }
-  for (const src of [
-    "helpers/budget-defaults-editor.js",
-    "helpers/paycheck-defaults-editor.js",
-    "helpers/budget-summary.js",
-    "helpers/paycheck-summary.js"
-  ]) {
-    assertTrue(`HC-V01070-FIN-MAN-2: files[] includes ${src}`,
-      fin.files.some(f => f.source === src));
-  }
-}
-
-async function caseV01070FinMan3SeedFromDefaults() {
-  console.log("\n--- Case HC-V01070-FIN-MAN-3: budget + paycheck new_entity_buttons carry seed_from_defaults ---");
-  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const budget = fin.new_entity_buttons.find(b => b.id === "budget");
-  const paycheck = fin.new_entity_buttons.find(b => b.id === "paycheck");
-
-  // v0.5.2 (CF-2): source_path is a literal path; {{module_directory}} is an
-  // installer-time token and is NOT in entity-create's runtime _substitute
-  // catalogue (which only handles prompts/now/current_file).
-  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults present",
-    budget && budget.seed_from_defaults && budget.seed_from_defaults.source_path === "spice/finance/Budget Defaults.md");
-  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults source_array=categories",
-    budget.seed_from_defaults.source_array === "categories");
-  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults carries groups",
-    Array.isArray(budget.seed_from_defaults.carry_arrays) && budget.seed_from_defaults.carry_arrays.includes("groups"));
-  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults sets actual: 0",
-    budget.seed_from_defaults.per_item_set && budget.seed_from_defaults.per_item_set.actual === 0);
-  assertTrue("HC-V01070-FIN-MAN-3: budget.frontmatter_template grows groups: []",
-    Array.isArray(budget.frontmatter_template.groups));
-  assertTrue("HC-V01070-FIN-MAN-3: budget.inline_body adds BudgetSummary block",
-    /BudgetSummary/.test(budget.inline_body));
-
-  assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults present",
-    paycheck && paycheck.seed_from_defaults && paycheck.seed_from_defaults.source_path === "spice/finance/Paycheck Defaults.md");
-  assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults source_array=expenses",
-    paycheck.seed_from_defaults.source_array === "expenses");
-  assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults sets paid: false",
-    paycheck.seed_from_defaults.per_item_set && paycheck.seed_from_defaults.per_item_set.paid === false);
-
-  // v0.5.2 (CF-2): budget.inline_body must NOT contain a `## Categories`
-  // heading line — the heading was redundant. Editor stands on its own.
-  assertTrue("HC-V01070-FIN-MAN-3: budget.inline_body drops `## Categories` heading",
-    !/##\s+Categories/.test(budget.inline_body));
-}
-
-// v0.5.3 CF-3 — PaycheckSummary widget shipped.
-
-async function caseV01070PsClassDeclared() {
-  console.log("\n--- Case HC-V01070-PS-1: PaycheckSummary class declared + read-only ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-summary.js"), "utf8");
-  assertTrue("HC-V01070-PS-1: class PaycheckSummary declared",
-    /class\s+PaycheckSummary\s*\{/.test(src));
-  assertTrue("HC-V01070-PS-1: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\s*\)/.test(src));
-  assertTrue("HC-V01070-PS-1: embed-dedup guard",
-    /markdown-embed/.test(src));
-  assertTrue("HC-V01070-PS-1: does NOT write frontmatter",
-    !/FinanceFrontmatter\.update/.test(src) && !/processFrontMatter/.test(src));
-}
-
-async function caseV01070PsThreeBands() {
-  console.log("\n--- Case HC-V01070-PS-2: PaycheckSummary three bands (pay/paid/remaining + progress + per-category) ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-summary.js"), "utf8");
-  assertTrue("HC-V01070-PS-2: Band 1 — pay amount + paid + remaining",
-    /paycheck_amount/.test(src) && /paidExpenses/.test(src) && /remaining/i.test(src));
-  assertTrue("HC-V01070-PS-2: Band 2 — paid X of N progress",
-    /paidCount/.test(src) && /totalCount/.test(src));
-  assertTrue("HC-V01070-PS-2: Band 3 — per-category aggregation",
-    /buckets|category|e\.category/.test(src));
-}
-
-// v0.5.2 CF-2 — applyFinanceBudgetBodyMigration (BudgetSummary block injection
-// + `## Categories` heading removal on existing Budget-*.md files).
-
-async function caseV01070FbbmBudgetBodyMigration() {
-  console.log("\n--- Case HC-V01070-FBBM: applyFinanceBudgetBodyMigration shipped ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FBBM-1: applyFinanceBudgetBodyMigration function present",
-    /async\s+function\s+applyFinanceBudgetBodyMigration\s*\(/.test(src));
-  assertTrue("HC-V01070-FBBM-1: wired into applyFinanceMigrations orchestrator",
-    /await\s+applyFinanceBudgetBodyMigration\s*\(/.test(src));
-  assertTrue("HC-V01070-FBBM-2: _migrateBudgetBody helper present",
-    /function\s+_migrateBudgetBody\s*\(/.test(src));
-  assertTrue("HC-V01070-FBBM-2: marker-guarded BudgetSummary injection",
-    /<!--\s*budget-summary-v0\.5\.2\s*-->/.test(src));
-  assertTrue("HC-V01070-FBBM-3: removes `## Categories` heading line",
-    /\^##\s+Categories|## Categories/.test(src));
-}
-
-// v0.108.0 S1 — entity-create 0.7.1 PATCH (resolve_wikilinks)
+// v0.108.0 S1 — entity-create 0.7.1 PATCH
 
 async function caseV01080EntityCreatePatchBump() {
   console.log("\n--- Case V01080-EC-PATCH: entity-create 0.7.1 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   assertTrue("V01080-EC-PATCH-1: version matches snapshot SSOT", m.version === VERSION_SNAPSHOT.components["entity-create"], `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components["entity-create"]}`);
-  assertTrue("V01080-EC-PATCH-2: description references resolve_wikilinks",
-    /resolve_wikilinks/.test(m.description || ""), "description missing resolve_wikilinks");
 }
 
-async function caseV01080EntityCreateResolveWikilinks() {
-  console.log("\n--- Case V01080-EC-RW: entity-create source has resolve_wikilinks resolver ---");
-  const ecDir = path.join(WORKSHOP, "platform/mechanisms/entity-create");
-  const jsFiles = fs.readdirSync(ecDir).filter(f => f.endsWith(".js"));
-  let foundResolver = false;
-  for (const f of jsFiles) {
-    const src = fs.readFileSync(path.join(ecDir, f), "utf8");
-    if (/resolve_wikilinks/.test(src) && /metadataCache|getFirstLinkpathDest/.test(src)) {
-      foundResolver = true;
-      break;
-    }
-  }
-  assertTrue("V01080-EC-RW-1: source references resolve_wikilinks + metadataCache lookup",
-    foundResolver, "no source file matches the expected resolver shape");
-}
-
-// v0.108.0 S2 — finance migration orchestrator wiring
-async function caseV01080FinanceMigrationOrchestrator() {
-  console.log("\n--- Case V01080-FM-ORCH: applyFinanceMigrations wires 4 new steps ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  const newCalls = [
-    "applyFinanceDebtScaffolding",
-    "applyFinanceBudgetGroupSeed",
-    "applyFinancePaycheckDefaultsDebtLinking",
-    "applyFinanceNavRowMigration",
-  ];
-  for (const fn of newCalls) {
-    assertTrue(`V01080-FM-ORCH-${fn}-defined: function defined`,
-      new RegExp(`async function ${fn}\\(`).test(src));
-    assertTrue(`V01080-FM-ORCH-${fn}-called: orchestrator calls it`,
-      new RegExp(`await ${fn}\\(tp,\\s*manifest`).test(src));
-    assertTrue(`V01080-FM-ORCH-${fn}-exported: module.exports declares it`,
-      new RegExp(`module\\.exports\\.${fn}\\s*=\\s*${fn}`).test(src));
-  }
-}
-
-// v0.108.0 S2 — nav-row migration regex patterns in install.js
-async function caseV01080FinanceNavRowMigrationRegex() {
-  console.log("\n--- Case V01080-FNR-MIG: nav-row migration regex matches old + new ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01080-FNR-MIG-budgetref: references BudgetNavButtons",
-    /BudgetNavButtons/.test(src));
-  assertTrue("V01080-FNR-MIG-paycheckref: references PaycheckNavButtons",
-    /PaycheckNavButtons/.test(src));
-  assertTrue("V01080-FNR-MIG-invoiceref: references InvoiceNavButtons",
-    /InvoiceNavButtons/.test(src));
-  assertTrue("V01080-FNR-MIG-marker: emits v0.6.0 marker",
-    /finance-nav-row-v0\.6\.0/.test(src));
-}
-
-// v0.108.0 S3 — new widgets + delete old nav-buttons
-
-async function caseV01080FinanceNewHelpers() {
-  console.log("\n--- Case V01080-FH-NEW: new finance helpers present ---");
-  const helpersDir = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
-  const expected = [
-    "debt-summary.js",
-    "debts-hub-summary.js",
-    "debts-cards.js",
-    "debt-defaults-editor.js",
-    "debt-config-editor.js",
-  ];
-  for (const f of expected) {
-    assertTrue(`V01080-FH-NEW-${f}: exists`, fs.existsSync(path.join(helpersDir, f)));
-  }
-}
-
-async function caseV01080FinanceOldNavButtonsDeleted() {
-  console.log("\n--- Case V01080-FH-DEL: old nav buttons deleted ---");
-  const helpersDir = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
-  const deleted = ["budget-nav-buttons.js", "paycheck-nav-buttons.js", "invoice-nav-buttons.js"];
-  for (const f of deleted) {
-    assertTrue(`V01080-FH-DEL-${f}: deleted`, !fs.existsSync(path.join(helpersDir, f)));
-  }
-}
-
-async function caseV01080DebtSummaryWidget() {
-  console.log("\n--- Case V01080-DS-CLS: DebtSummary class shape ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debt-summary.js"), "utf8");
-  assertTrue("V01080-DS-CLS-class: class DebtSummary defined", /class DebtSummary/.test(src));
-  assertTrue("V01080-DS-CLS-render: async render(dv)", /async render\(dv\)/.test(src));
-  assertTrue("V01080-DS-CLS-marker: emits debt-summary-v0.6.0",
-    /debt-summary-v0\.6\.0/.test(src));
-  assertTrue("V01080-DS-CLS-css: dbt-sum-root", /dbt-sum-root/.test(src));
-  assertTrue("V01080-DS-CLS-math: monthly interest math present",
-    /apr\s*\/\s*100\s*\/\s*12|apr\s*\*\s*current_balance/.test(src));
-}
-
-async function caseV01080DebtsHubSummary() {
-  console.log("\n--- Case V01080-DHS-CLS: DebtsHubSummary class shape ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debts-hub-summary.js"), "utf8");
-  assertTrue("V01080-DHS-CLS-class: class DebtsHubSummary defined",
-    /class DebtsHubSummary/.test(src));
-  assertTrue("V01080-DHS-CLS-css: dhs-root", /dhs-root/.test(src));
-  assertTrue("V01080-DHS-CLS-weighted: weighted-avg APR math present",
-    /weighted|balance\s*\*\s*apr/.test(src));
-}
-
-async function caseV01080DebtDefaultsEditor() {
-  console.log("\n--- Case V01080-DDE-CLS: DebtDefaultsEditor class shape ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debt-defaults-editor.js"), "utf8");
-  assertTrue("V01080-DDE-CLS-class: class DebtDefaultsEditor defined",
-    /class DebtDefaultsEditor/.test(src));
-  assertTrue("V01080-DDE-CLS-render: async render(dv)", /async render\(dv\)/.test(src));
-  assertTrue("V01080-DDE-CLS-css: dde-root", /dde-root/.test(src));
-  assertTrue("V01080-DDE-CLS-mutation: FinanceFrontmatter.update used",
-    /FinanceFrontmatter\.update/.test(src));
-}
-
-async function caseV01080DebtConfigEditor() {
-  console.log("\n--- Case V01080-DCE-CLS: DebtConfigEditor class shape ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debt-config-editor.js"), "utf8");
-  assertTrue("V01080-DCE-CLS-class: class DebtConfigEditor defined",
-    /class DebtConfigEditor/.test(src));
-  assertTrue("V01080-DCE-CLS-snapshot: auto-snapshot on save",
-    /balance_history/.test(src) && /source.*manual/.test(src));
-}
-
-async function caseV01080DebtsContentTemplate() {
-  console.log("\n--- Case V01080-DCT: Debts.md content template present ---");
-  const tpath = path.join(WORKSHOP, "platform/blueprints/finance/content/Debts.md");
-  assertTrue("V01080-DCT-exists: Debts.md content template exists", fs.existsSync(tpath));
-  const src = fs.readFileSync(tpath, "utf8");
-  assertTrue("V01080-DCT-type: type: debts-hub frontmatter",
-    /type:\s*debts-hub/.test(src));
-  assertTrue("V01080-DCT-dhs: DebtsHubSummary view invoked",
-    /class:\s*["']DebtsHubSummary["']/.test(src));
-}
-
-async function caseV01080PaycheckExpensesEditorDebtChip() {
-  console.log("\n--- Case V01080-PEE-DEBT: PaycheckExpensesEditor debt chip + locked cells ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-expenses-editor.js"), "utf8");
-  assertTrue("V01080-PEE-DEBT-chip: pee-debt-chip class rendered",
-    /pee-debt-chip/.test(src));
-  assertTrue("V01080-PEE-DEBT-resolver: _resolveDebt helper present",
-    /_resolveDebt|getFirstLinkpathDest/.test(src));
-  assertTrue("V01080-PEE-DEBT-readonly: locks amount/url cells when row.debt set",
-    /readonly|read-only|disabled/.test(src) && /row\.debt|debtLink|\.debt\b/.test(src));
-}
-
-async function caseV01080FinanceVersionBump() {
-  console.log("\n--- Case V01080-FV: finance 0.6.0 + workshop manifest pin ---");
-  const finance = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01080-FV-1: finance.version matches snapshot SSOT",
-    finance.version === VERSION_SNAPSHOT.components.finance, `got: ${finance.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
-  assertTrue("V01080-FV-2: description references v0.6.0",
-    /v0\.6\.0/.test(finance.description));
-
+async function caseV01080EntityCreatePinBump() {
+  console.log("\n--- Case V01080-FV: entity-create + workshop manifest pins ---");
   const workshop = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  const fbp = (workshop.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V01080-FV-3: workshop manifest pin finance matches snapshot SSOT",
-    fbp && fbp.version === VERSION_SNAPSHOT.components.finance, `got: ${fbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const ec = (workshop.mechanisms || []).find(m => m.name === "entity-create");
   assertTrue("V01080-FV-4: workshop manifest pin entity-create matches snapshot SSOT",
     ec && ec.version === VERSION_SNAPSHOT.components["entity-create"], `got: ${ec?.version}, snapshot: ${VERSION_SNAPSHOT.components["entity-create"]}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version matches the version-pin snapshot (major.minor; v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
     sameMajorMinor(workshop.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${workshop.workshop_version}`);
-}
-
-async function caseV01080FinanceNewEntityButtonDebt() {
-  console.log("\n--- Case V01080-NEB-DEBT: finance new_entity_buttons[] has debt entry ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const entries = m.new_entity_buttons || [];
-  assertTrue("V01080-NEB-count: 6 entity-create entries (v0.10.0 +savings)",
-    entries.length === 6, `got: ${entries.length}`);
-  const debt = entries.find(e => e.id === "debt");
-  assertTrue("V01080-NEB-DEBT-id: debt entry present", !!debt);
-  assertTrue("V01080-NEB-DEBT-type: frontmatter_template type === debt",
-    debt?.frontmatter_template?.type === "debt");
-  const pc = entries.find(e => e.id === "paycheck");
-  assertTrue("V01080-NEB-PC-rw: paycheck seed_from_defaults declares resolve_wikilinks",
-    pc?.seed_from_defaults?.resolve_wikilinks?.field === "debt");
-  assertTrue("V01080-NEB-PC-merge: paycheck resolve_wikilinks merge map correct",
-    pc?.seed_from_defaults?.resolve_wikilinks?.merge?.planned_monthly_payment === "amount" &&
-    pc?.seed_from_defaults?.resolve_wikilinks?.merge?.url === "url");
-}
-
-async function caseV01080FinanceRuleFragmentsExpanded() {
-  console.log("\n--- Case V01080-RF: finance rule_fragments += 2 (debt + debt-defaults) ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const frags = m.rule_fragments || [];
-  assertTrue("V01080-RF-count: >= 8 rule_fragments (was 6; v0.108.0 +2 debt)",
-    frags.length >= 8, `got: ${frags.length}`);
-  const scopes = frags.map(rf => rf.fragment.scope.path_glob);
-  assertTrue("V01080-RF-debts: spice/finance/debts/Debt-*.md fragment present",
-    scopes.includes("spice/finance/debts/Debt-*.md"));
-  assertTrue("V01080-RF-defaults: spice/finance/Debt Defaults.md fragment present",
-    scopes.includes("spice/finance/Debt Defaults.md"));
-}
-
-async function caseV01080FinanceCustomJsClasses() {
-  console.log("\n--- Case V01080-CJS: finance customjs_classes[] reflects deletions + additions ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const cls = m.customjs_classes || [];
-  for (const removed of ["BudgetNavButtons", "PaycheckNavButtons", "InvoiceNavButtons"]) {
-    assertTrue(`V01080-CJS-removed-${removed}: ${removed} removed from customjs_classes`,
-      !cls.includes(removed), `still present in customjs_classes`);
-  }
-  for (const added of ["DebtSummary", "DebtsHubSummary", "DebtsCards", "DebtDefaultsEditor", "DebtConfigEditor"]) {
-    assertTrue(`V01080-CJS-added-${added}: ${added} present in customjs_classes`,
-      cls.includes(added));
-  }
-}
-
-// v0.110.0 — installer healing MINOR. 4 items:
-//   1. applyFinanceHubsRepair — heals stale pre-CF-3 finance hub bodies
-//   2. applyOrphanedHelperCleanup — removes obsolete *.js + *.js.bak files
-//   3. applyFinanceDebtScaffolding extension — auto-scaffolds Debt-*.md per Defaults row
-//   4. Project blueprint template sentinels (doc-note, section-hub, sub-section-hub)
-async function caseV0110FinanceHubsRepair() {
-  console.log("\n--- Case V0110-FHR: applyFinanceHubsRepair shipped + wired ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V0110-FHR-1: function defined",
-    /async function applyFinanceHubsRepair\(/.test(src));
-  assertTrue("V0110-FHR-2: orchestrator calls it",
-    /await applyFinanceHubsRepair\(tp,\s*manifest/.test(src));
-  assertTrue("V0110-FHR-3: module.exports declares it",
-    /module\.exports\.applyFinanceHubsRepair\s*=\s*applyFinanceHubsRepair/.test(src));
-  assertTrue("V0110-FHR-4: hub body templates dict declared",
-    /FINANCE_HUB_BODY_TEMPLATES/.test(src));
-  // v0.111.0 updated detection: file is canonical when it invokes FinanceNav
-  // via the customjs-guard (was: FinanceHubActions presence).
-  assertTrue("V0110-FHR-5: detection via FinanceNav guard presence (v0.111.0+)",
-    /class:\\s\*\["']FinanceNav\["']/.test(src) || /class:\s*\["']FinanceNav\["']/.test(src));
 }
 
 async function caseV0110OrphanedHelperCleanup() {
@@ -13300,25 +12300,14 @@ async function caseV0110OrphanedHelperCleanup() {
     /await applyOrphanedHelperCleanup\(tp,\s*mech/.test(src));
   assertTrue("V0110-ORPH-3: module.exports declares it",
     /module\.exports\.applyOrphanedHelperCleanup\s*=\s*applyOrphanedHelperCleanup/.test(src));
-  assertTrue("V0110-ORPH-4: KNOWN_ORPHANS lists 3 NavButtons files",
-    /budget-nav-buttons\.js/.test(src) &&
-    /paycheck-nav-buttons\.js/.test(src) &&
-    /invoice-nav-buttons\.js/.test(src));
+  // The three finance NavButtons orphans left KNOWN_ORPHANS when the finance
+  // blueprint was retired: applyRetiredBlueprintsHeal deletes all of
+  // ranch/scripts/finance/ (run-retired-blueprints.js covers it).
+  assertTrue("V0110-ORPH-4: KNOWN_ORPHANS lists the retired to-do migrate-modal helpers",
+    /ranch\/scripts\/to-do\/todo-migrate-modal\.js/.test(src) &&
+    /ranch\/scripts\/to-do\/todo-migrate-init\.js/.test(src));
   assertTrue("V0110-ORPH-5: deletes *.js.bak siblings recursively",
     /\.js\.bak/.test(src) && /_walkAndDeleteBaks/.test(src));
-}
-
-async function caseV0110FinanceDebtAutoScaffold() {
-  console.log("\n--- Case V0110-FDS-AUTO: applyFinanceDebtScaffolding auto-scaffolds Debt-*.md per Defaults row ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V0110-FDS-AUTO-1: iterates debts[] from defaults",
-    /defaultsFm\?\.debts|fm\?\.debts|defaults.*debts/.test(src));
-  assertTrue("V0110-FDS-AUTO-2: slugifies name for path",
-    /Debt-\$\{slug\}/.test(src) || /replace\(\/\\\\s\+\/g/.test(src));
-  assertTrue("V0110-FDS-AUTO-3: emits install-seed balance_history row",
-    /install-seed/.test(src) && /balance_history/.test(src));
-  assertTrue("V0110-FDS-AUTO-4: create-if-absent semantics (entitiesPreserved counter)",
-    /entitiesPreserved/.test(src));
 }
 
 async function caseV0110ProjectTemplateSentinels() {
@@ -13498,149 +12487,10 @@ async function caseV01101SourceTemplatesUseGuard() {
 // v0.110.3 — MonthlyOverview band on Budget-YYYY-MM.md.
 // See Docs/plans/2026-06-15-v0.110.3-monthly-overview-{brief,design,plan}.md.
 
-async function caseV01103MonthlyOverviewHelperPresent() {
-  console.log("\n--- Case V01103-MO-HELPER: monthly-overview.js helper shipped ---");
-  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/monthly-overview.js");
-  assertTrue("V01103-MO-HELPER-1: helper file exists",
-    fs.existsSync(helperPath), `missing: ${helperPath}`);
-  const src = fs.readFileSync(helperPath, "utf8");
-  assertTrue("V01103-MO-HELPER-2: class MonthlyOverview defined",
-    /class\s+MonthlyOverview\b/.test(src));
-  assertTrue("V01103-MO-HELPER-3: async render(dv) method present",
-    /async\s+render\s*\(\s*dv\s*\)/.test(src));
-}
-
-async function caseV01103MonthlyOverviewShape() {
-  console.log("\n--- Case V01103-MO-SHAPE: helper internal structure ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/monthly-overview.js"), "utf8");
-  assertTrue("V01103-MO-SHAPE-1: mo-root CSS class for embed-dedup",
-    /\.mo-root|cls:\s*["']mo-root["']/.test(src));
-  assertTrue("V01103-MO-SHAPE-2: _renderBand1 method present",
-    /_renderBand1\s*\(/.test(src));
-  assertTrue("V01103-MO-SHAPE-3: _renderBand2 method present",
-    /_renderBand2\s*\(/.test(src));
-  assertTrue("V01103-MO-SHAPE-4: _renderBand3 method present",
-    /_renderBand3\s*\(/.test(src));
-  assertTrue("V01103-MO-SHAPE-5: _fmtMoney currency formatter",
-    /_fmtMoney\s*\(/.test(src));
-}
-
-async function caseV01103MonthlyOverviewDataReads() {
-  console.log("\n--- Case V01103-MO-READS: helper queries paychecks + debts folders ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/monthly-overview.js"), "utf8");
-  assertTrue("V01103-MO-READS-1: queries spice/finance/paychecks",
-    /spice\/finance\/paychecks/.test(src));
-  assertTrue("V01103-MO-READS-2: queries spice/finance/debts",
-    /spice\/finance\/debts/.test(src));
-  assertTrue("V01103-MO-READS-3: attributes paychecks by month (month-keyed primary) with legacy pay_period_end prefix fallback",
-    /_coerceMonthString\(p\.month\)/.test(src)
-    && /monthStr !== monthKey/.test(src)
-    && /pay_period_end[\s\S]{0,400}startsWith/.test(src));
-  assertTrue("V01103-MO-READS-4: sums paycheck_amount + expenses + current_balance + balance_history",
-    /paycheck_amount/.test(src) && /\.expenses\b/.test(src) && /current_balance/.test(src) && /balance_history/.test(src));
-}
-
-async function caseV01103InjectionMigrationDefined() {
-  console.log("\n--- Case V01103-MO-MIG: applyFinanceBudgetMonthlyBandInjection installer migration ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01103-MO-MIG-1: applyFinanceBudgetMonthlyBandInjection function present",
-    /async\s+function\s+applyFinanceBudgetMonthlyBandInjection\s*\(/.test(src));
-  assertTrue("V01103-MO-MIG-2: _injectMonthlyBand body-transform present",
-    /function\s+_injectMonthlyBand\s*\(/.test(src));
-  assertTrue("V01103-MO-MIG-3: marker constant `<!-- monthly-overview-v0.6.3 -->`",
-    /<!--\s*monthly-overview-v0\.6\.3\s*-->/.test(src));
-}
-
-async function caseV01103InjectionMigrationOrchestrated() {
-  console.log("\n--- Case V01103-MO-ORCH: applyFinanceMigrations orchestrator wiring ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01103-MO-ORCH-1: orchestrator calls applyFinanceBudgetMonthlyBandInjection",
-    /await\s+applyFinanceBudgetMonthlyBandInjection\s*\(/.test(src));
-  // Verify ordering: MonthlyBandInjection must be called AFTER BudgetBodyMigration
-  // (anchor relies on BudgetSummary block having been injected by the prior step
-  // on stale v0.106.x bodies).
-  const bbm = src.indexOf("await applyFinanceBudgetBodyMigration(tp");
-  const mbi = src.indexOf("await applyFinanceBudgetMonthlyBandInjection(tp");
-  assertTrue("V01103-MO-ORCH-2: MonthlyBandInjection runs after BudgetBodyMigration",
-    bbm > 0 && mbi > bbm, `bbm=${bbm} mbi=${mbi}`);
-}
-
-async function caseV01103InjectionMigrationExported() {
-  console.log("\n--- Case V01103-MO-EXPORT: module.exports registers migration ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01103-MO-EXPORT-1: module.exports.applyFinanceBudgetMonthlyBandInjection",
-    /module\.exports\.applyFinanceBudgetMonthlyBandInjection\s*=\s*applyFinanceBudgetMonthlyBandInjection/.test(src));
-}
-
-async function caseV01103FinanceManifestBumped() {
-  console.log("\n--- Case V01103-MO-FBP: finance manifest version + classes + files ---");
-  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01103-MO-FBP-1: finance version matches snapshot SSOT",
-    m.version === VERSION_SNAPSHOT.components.finance, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
-  const cls = m.customjs_classes || [];
-  assertTrue("V01103-MO-FBP-2: MonthlyOverview in customjs_classes",
-    cls.includes("MonthlyOverview"), `got: ${cls.join(",")}`);
-  const files = m.files || [];
-  assertTrue("V01103-MO-FBP-3: monthly-overview.js in files[]",
-    files.some(f => (f.source || "") === "helpers/monthly-overview.js"));
-  assertTrue("V01103-MO-FBP-4: description mentions MonthlyOverview",
-    /MonthlyOverview/i.test(m.description || ""));
-}
-
 async function caseV01103WorkshopManifestBumped() {
   console.log("\n--- Case V01103-MO-WS: workshop manifest at 0.110.3 ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   assertTrue("V01103-MO-WS-1: workshop_version 0.115.x or 0.116.x or 0.117.x or 0.118.x or 0.119.x", sameMajorMinor(ws.workshop_version, VERSION_SNAPSHOT.workshop_version));
-}
-
-async function caseV01103BudgetTemplateUpdated() {
-  console.log("\n--- Case V01103-MO-TPL: Budget Template embeds MonthlyOverview ---");
-  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/templates/Budget Template.md"), "utf8");
-  assertTrue("V01103-MO-TPL-1: MonthlyOverview class reference",
-    /class:\s*["']MonthlyOverview["']/.test(tpl));
-  assertTrue("V01103-MO-TPL-2: monthly-overview-v0.6.3 marker comment",
-    /<!--\s*monthly-overview-v0\.6\.3\s*-->/.test(tpl));
-  // Ordering: MonthlyOverview must appear AFTER FinanceStatus.renderBadge and
-  // BEFORE BudgetSummary so the cohesion band sits above the sliced view.
-  const moIdx = tpl.search(/class:\s*["']MonthlyOverview["']/);
-  const bsIdx = tpl.search(/class:\s*["']BudgetSummary["']/);
-  const fsIdx = tpl.search(/class:\s*["']FinanceStatus["']/);
-  assertTrue("V01103-MO-TPL-3: MonthlyOverview between FinanceStatus and BudgetSummary",
-    fsIdx > 0 && moIdx > fsIdx && moIdx < bsIdx, `fsIdx=${fsIdx} moIdx=${moIdx} bsIdx=${bsIdx}`);
-}
-
-async function caseV01103BehavioralHarnessShipped() {
-  console.log("\n--- Case V01103-MO-BH: behavioral harness file present + wired into preflight ---");
-  const harnessRel = "platform/test/run-v01103-monthly-overview.js";
-  const harnessAbs = path.join(WORKSHOP, harnessRel);
-  assertTrue("V01103-MO-BH-1: behavioral harness file exists",
-    fs.existsSync(harnessAbs), `missing: ${harnessAbs}`);
-  const src = fs.readFileSync(harnessAbs, "utf8");
-  assertTrue("V01103-MO-BH-2: harness loads MonthlyOverview class",
-    /loadClass\(["']monthly-overview\.js["']/.test(src));
-  assertTrue("V01103-MO-BH-3: harness requires install.js for _injectMonthlyBand",
-    /require\(.*platform\/install\.js.*\)/.test(src) && /_injectMonthlyBand/.test(src));
-  assertTrue("V01103-MO-BH-4: harness covers all 4 anchor tiers (MIG-B-1..4)",
-    /MIG-B-1[\s\S]{0,4000}MIG-B-2[\s\S]{0,4000}MIG-B-3[\s\S]{0,4000}MIG-B-4/.test(src));
-  assertTrue("V01103-MO-BH-5: harness covers chained-migration ordering (MIG-B-8)",
-    /MIG-B-8[\s\S]{0,400}chained migrations|MIG-B-8[\s\S]{0,400}canonical order/.test(src));
-  // The release:preflight registration surface moved from a package.json chain
-  // string to platform/test/preflight-manifest.json (2026-08-10 parallel preflight
-  // cutover); count manifest steps whose command invokes this harness instead.
-  const manifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/test/preflight-manifest.json"), "utf8"));
-  const moSteps = manifest.steps.filter((s) => s.cmd.join(" ").includes(harnessRel));
-  assertTrue("V01103-MO-BH-6: release:preflight manifest invokes run-v01103-monthly-overview.js exactly once",
-    moSteps.length === 1,
-    `preflight manifest missing harness invocation (found ${moSteps.length})`);
-  // Coverage expansion (post-cycle additions 2026-06-15):
-  assertTrue("V01103-MO-BH-7: harness covers Dataview-proxy fidelity (DV-PROXY-1..3)",
-    /DV-PROXY-1[\s\S]{0,6000}DV-PROXY-2[\s\S]{0,6000}DV-PROXY-3/.test(src));
-  assertTrue("V01103-MO-BH-8: harness covers performance ceiling (MO-PERF-1)",
-    /MO-PERF-1[\s\S]{0,400}render time|MO-PERF-1[\s\S]{0,400}vault scale/.test(src));
-  assertTrue("V01103-MO-BH-9: harness covers cross-year month-key boundary (MO-XYR-1..2)",
-    /MO-XYR-1[\s\S]{0,6000}MO-XYR-2/.test(src));
-  assertTrue("V01103-MO-BH-10: strict Dataview proxy stub asserts no Array.prototype methods",
-    /makeStrictDA[\s\S]{0,2000}_kind:\s*["']DataArray["']/.test(src));
 }
 
 // v0.112.0 — workshop tooling MINOR. 4 additive artifacts + npm-script wiring.
@@ -13825,593 +12675,24 @@ async function caseV0113WorkshopBumped() {
     sameMajorMinor(pkg.version, VERSION_SNAPSHOT.workshop_version), `got: ${pkg.version}`);
 }
 
-// v0.112.0 finance (MINOR) — FinanceMath shared aggregation helper + tests (S1)
-// See Docs/plans/2026-06-15-v0.112.0-monthly-cohesion-plan.md S1.
-
-async function caseV01120FinanceMathPresent() {
-  console.log("\n--- Case V01120-FM-PRESENT: finance-math.js helper shipped ---");
-  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js");
-  if (!assertTrue("V01120-FM-PRESENT-1: file exists",
-    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
-  const src = fs.readFileSync(helperPath, "utf8");
-  assertTrue("V01120-FM-PRESENT-2: class FinanceMath declared",
-    /class\s+FinanceMath\b/.test(src));
-  assertTrue("V01120-FM-PRESENT-3: no \"use strict\" directive",
-    !/^"use strict";?\s*$/m.test(src) ||
-      /class\s+FinanceMath[\s\S]*\n"use strict"/.test(src),
-    "finance-math.js has \"use strict\" before its class declaration");
-  // Nothing meaningful after the class closing brace (mirrors caseV01104CustomJsClassFilesAreClean)
-  const lines = src.split(/\r?\n/);
-  let classCloseLine = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
-  }
-  assertTrue("V01120-FM-PRESENT-4: class closing brace found",
-    classCloseLine !== -1, "no top-level closing brace found");
-  if (classCloseLine !== -1) {
-    const tail = lines.slice(classCloseLine + 1);
-    let inBlock = false;
-    const offending = tail.filter((l) => {
-      const t = l.trim();
-      if (t === "") return false;
-      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
-      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
-      if (/^\/\//.test(t)) return false;
-      return true;
-    });
-    assertTrue("V01120-FM-PRESENT-5: no code after class closing brace",
-      offending.length === 0,
-      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
-  }
-}
-
-async function caseV01120FinanceMathStaticApi() {
-  console.log("\n--- Case V01120-FM-API: FinanceMath declares all instance methods (v0.115.1: NOT static — CustomJS exposes instances) ---");
-  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js");
-  if (!fs.existsSync(helperPath)) {
-    assertTrue("V01120-FM-API-file-exists: helper file must exist first", false, `missing: ${helperPath}`);
-    return;
-  }
-  const src = fs.readFileSync(helperPath, "utf8");
-  const methods = [
-    "readDebts", "readPaychecksForMonth", "readBudgetForMonth",
-    "monthBounds", "debtTotals", "monthIncome", "monthSpending",
-    "monthExpensesTotal", "monthDebtPaid", "debtPaidByDebt",
-    "measuredMovement", "reconcile", "fmtMoney", "budgetAllocations",
-    "depositTotals", "_depositIndex", "fixedBillsForMonth",
-  ];
-  for (const m of methods) {
-    assertTrue(`V01120-FM-API-${m}: instance ${m} declared (not static)`,
-      new RegExp(`^\\s{4}${m}\\s*\\(`, "m").test(src),
-      `missing instance method ${m}`);
-  }
-  // v0.115.1 regression guard: FinanceMath methods MUST NOT be `static`. CustomJS
-  // stores instances on customJS.<Class>; static methods are unreachable that way
-  // — this is what broke FinanceHubSummary in Obsidian at the v0.115.0 deploy.
-  assertTrue("V01120-FM-API-no-static: no method declared `static`",
-    !/\bstatic\s+\w+\s*\(/.test(src),
-    "FinanceMath contains a `static` method — CustomJS will hide it from widgets");
-}
-
-// v0.112.0 finance — installer migrations S2
-// See Docs/plans/2026-06-15-v0.112.0-monthly-cohesion-plan.md S2.
-
-async function caseV01120MonthsScaffoldingDefined() {
-  console.log("\n--- Case V01120-FMS-DEF: applyFinanceMonthsScaffolding exported function ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("V01120-FMS-DEF-1: applyFinanceMonthsScaffolding is a function",
-    typeof installer.applyFinanceMonthsScaffolding === "function");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01120-FMS-DEF-2: async function applyFinanceMonthsScaffolding declared",
-    /async\s+function\s+applyFinanceMonthsScaffolding\s*\(/.test(src));
-  assertTrue("V01120-FMS-DEF-3: months hub path spice/finance/months/Months.md referenced",
-    /spice\/finance\/months\/Months\.md/.test(src));
-  assertTrue("V01120-FMS-DEF-4: MonthsCards referenced in scaffold body",
-    /MonthsCards/.test(src));
-}
-
-async function caseV01120MonthsScaffoldingOrchestrated() {
-  console.log("\n--- Case V01120-FMS-ORCH: applyFinanceMonthsScaffolding wired into orchestrator ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01120-FMS-ORCH-1: orchestrator calls applyFinanceMonthsScaffolding",
-    /await\s+applyFinanceMonthsScaffolding\s*\(/.test(src));
-  const dsIdx = src.indexOf("await applyFinanceDebtScaffolding(tp");
-  const msIdx = src.indexOf("await applyFinanceMonthsScaffolding(tp");
-  assertTrue("V01120-FMS-ORCH-2: MonthsScaffolding runs after DebtScaffolding in orchestrator",
-    dsIdx > 0 && msIdx > dsIdx, `dsIdx=${dsIdx} msIdx=${msIdx}`);
-  assertTrue("V01120-FMS-ORCH-3: module.exports.applyFinanceMonthsScaffolding registered",
-    /module\.exports\.applyFinanceMonthsScaffolding\s*=\s*applyFinanceMonthsScaffolding/.test(src));
-}
-
-async function caseV01120PaycheckDebtBandInjectionDefined() {
-  console.log("\n--- Case V01120-FPDBI-DEF: applyFinancePaycheckDebtBandInjection exported function ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("V01120-FPDBI-DEF-1: applyFinancePaycheckDebtBandInjection is a function",
-    typeof installer.applyFinancePaycheckDebtBandInjection === "function");
-  assertTrue("V01120-FPDBI-DEF-2: _injectPaycheckDebtBand is a function",
-    typeof installer._injectPaycheckDebtBand === "function");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01120-FPDBI-DEF-3: async function applyFinancePaycheckDebtBandInjection declared",
-    /async\s+function\s+applyFinancePaycheckDebtBandInjection\s*\(/.test(src));
-  assertTrue("V01120-FPDBI-DEF-4: _injectPaycheckDebtBand pure helper declared",
-    /function\s+_injectPaycheckDebtBand\s*\(/.test(src));
-  assertTrue("V01120-FPDBI-DEF-5: marker paycheck-debt-band-v0.8.0 present",
-    /<!--\s*paycheck-debt-band-v0\.8\.0\s*-->/.test(src));
-  assertTrue("V01120-FPDBI-DEF-6: PaycheckDebtBand class referenced in injected block",
-    /PaycheckDebtBand/.test(src));
-}
-
-async function caseV01120PaycheckDebtBandInjectionOrchestrated() {
-  console.log("\n--- Case V01120-FPDBI-ORCH: applyFinancePaycheckDebtBandInjection wired into orchestrator ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01120-FPDBI-ORCH-1: orchestrator calls applyFinancePaycheckDebtBandInjection",
-    /await\s+applyFinancePaycheckDebtBandInjection\s*\(/.test(src));
-  const pbmIdx = src.indexOf("await applyFinancePaycheckBodyMigration(tp");
-  const pdbiIdx = src.indexOf("await applyFinancePaycheckDebtBandInjection(tp");
-  assertTrue("V01120-FPDBI-ORCH-2: PaycheckDebtBandInjection runs after PaycheckBodyMigration",
-    pbmIdx > 0 && pdbiIdx > pbmIdx, `pbmIdx=${pbmIdx} pdbiIdx=${pdbiIdx}`);
-  assertTrue("V01120-FPDBI-ORCH-3: module.exports.applyFinancePaycheckDebtBandInjection registered",
-    /module\.exports\.applyFinancePaycheckDebtBandInjection\s*=\s*applyFinancePaycheckDebtBandInjection/.test(src));
-}
-
-async function caseV01120PaycheckDebtBandIdempotent() {
-  console.log("\n--- Case V01120-FPDBI-IDEM: _injectPaycheckDebtBand transform is idempotent ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("V01120-FPDBI-IDEM-1: _injectPaycheckDebtBand exported",
-    typeof installer._injectPaycheckDebtBand === "function");
-
-  // Sample paycheck with both PaycheckSummary and PaycheckExpensesEditor blocks
-  const sampleBodyFull =
-    "---\ntype: paycheck\npay_period_start: 2026-06-01\n---\n\n" +
-    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n" +
-    "<!-- paycheck-summary-v0.5.3 -->\n" +
-    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n" +
-    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n";
-
-  const r1 = installer._injectPaycheckDebtBand(sampleBodyFull);
-  assertTrue("V01120-FPDBI-IDEM-2: first pass injects (touched)", r1.touched === true);
-  assertTrue("V01120-FPDBI-IDEM-3: first pass body contains marker",
-    /<!--\s*paycheck-debt-band-v0\.8\.0\s*-->/.test(r1.body));
-
-  const r2 = installer._injectPaycheckDebtBand(r1.body);
-  assertTrue("V01120-FPDBI-IDEM-4: second pass is a no-op (idempotent)",
-    r2.touched === false && r2.body === r1.body);
-
-  // Anchor priority: PaycheckDebtBand must appear AFTER PaycheckSummary and BEFORE PaycheckExpensesEditor
-  const markerIdx = r1.body.indexOf("<!-- paycheck-debt-band-v0.8.0 -->");
-  const summaryIdx = r1.body.indexOf("PaycheckSummary");
-  const editorIdx = r1.body.indexOf("PaycheckExpensesEditor");
-  assertTrue("V01120-FPDBI-IDEM-5: PaycheckDebtBand block lands between PaycheckSummary and PaycheckExpensesEditor",
-    markerIdx > summaryIdx && markerIdx < editorIdx,
-    `markerIdx=${markerIdx} summaryIdx=${summaryIdx} editorIdx=${editorIdx}`);
-
-  // Sample paycheck with only PaycheckSummary (no PaycheckExpensesEditor) — anchor priority 3
-  const sampleBodySummaryOnly =
-    "---\ntype: paycheck\npay_period_start: 2026-06-01\n---\n\n" +
-    "<!-- paycheck-summary-v0.5.3 -->\n" +
-    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n";
-  const r3 = installer._injectPaycheckDebtBand(sampleBodySummaryOnly);
-  assertTrue("V01120-FPDBI-IDEM-6: anchor priority 3 — injects after PaycheckSummary when no editor block",
-    r3.touched === true && /<!--\s*paycheck-debt-band-v0\.8\.0\s*-->/.test(r3.body));
-  const r4 = installer._injectPaycheckDebtBand(r3.body);
-  assertTrue("V01120-FPDBI-IDEM-7: idempotency holds on priority-3 anchor result",
-    r4.touched === false && r4.body === r3.body);
-}
-
-async function caseV01120HubsRepairMonths() {
-  console.log("\n--- Case V01120-FHR-MONTHS: applyFinanceHubsRepair dict includes months/Months.md ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01120-FHR-MONTHS-1: FINANCE_HUB_BODY_TEMPLATES contains months/Months.md key",
-    /spice\/finance\/months\/Months\.md/.test(src));
-  assertTrue("V01120-FHR-MONTHS-2: months hub template references MonthsCards",
-    /MonthsCards/.test(src));
-  // Verify the key is in the dict literal (not just a standalone string elsewhere)
-  const dictMatch = src.match(/const FINANCE_HUB_BODY_TEMPLATES\s*=\s*\{([\s\S]*?)\};/);
-  assertTrue("V01120-FHR-MONTHS-3: FINANCE_HUB_BODY_TEMPLATES dict found",
-    dictMatch !== null);
-  if (dictMatch) {
-    assertTrue("V01120-FHR-MONTHS-4: dict body contains months/Months.md entry",
-      /months\/Months\.md/.test(dictMatch[1]));
-  }
-}
-
-async function caseV01120HubsRepairFinanceSummary() {
-  console.log("\n--- Case V01120-FHR-FHS: applyFinanceHubsRepair Finance.md template includes FinanceHubSummary ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01120-FHR-FHS-1: FINANCE_HUB_BODY_TEMPLATES Finance.md entry references FinanceHubSummary",
-    /FinanceHubSummary/.test(src));
-  // Verify FinanceHubSummary appears after FinanceNav in the Finance.md dict entry.
-  // The dict values use escaped JS string literals on one line. Rather than trying to
-  // extract the full string value (which contains \" sequences), we find the dict entry
-  // line for Finance.md and check the ordering of class names within that line.
-  // v0.115.1: scope the search to the FINANCE_HUB_BODY_TEMPLATES dict only —
-  // FINANCE_HUB_CANONICAL_TYPES (new in v0.115.1) ALSO has a Finance.md row but
-  // it carries only the canonical `type` string, not the body template.
-  const bodyTemplatesDict = src.split("const FINANCE_HUB_BODY_TEMPLATES")[1];
-  const lines = (bodyTemplatesDict || "").split("\n");
-  const financeLine = lines.find(l => /["']spice\/finance\/Finance\.md["']/.test(l));
-  if (financeLine) {
-    const cbIdx = financeLine.indexOf("FinanceChromeBar");
-    const fhsIdx = financeLine.indexOf("FinanceHubSummary");
-    assertTrue("V01120-FHR-FHS-2: FinanceHubSummary appears after FinanceChromeBar in Finance.md dict entry",
-      cbIdx >= 0 && fhsIdx > cbIdx, `cbIdx=${cbIdx} fhsIdx=${fhsIdx}`);
-  } else {
-    assertTrue("V01120-FHR-FHS-2: Finance.md dict entry must be present in FINANCE_HUB_BODY_TEMPLATES", false,
-      "Could not find Finance.md line in FINANCE_HUB_BODY_TEMPLATES dict");
-  }
-}
-
-// v0.115.0 finance Stage A — MonthsCards + MonthDashboard + FinanceHubSummary + FinanceMath manifest
-
-async function caseV01150MonthsCardsPresent() {
-  console.log("\n--- Case V01150-MC-PRESENT: months-cards.js helper shipped ---");
-  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/months-cards.js");
-  if (!assertTrue("V01150-MC-PRESENT-1: file exists",
-    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
-  const src = fs.readFileSync(helperPath, "utf8");
-  assertTrue("V01150-MC-PRESENT-2: class MonthsCards declared",
-    /class\s+MonthsCards\b/.test(src));
-  assertTrue("V01150-MC-PRESENT-3: no \"use strict\" directive",
-    !/^"use strict";?\s*$/m.test(src));
-  assertTrue("V01150-MC-PRESENT-4: has render method",
-    /\basync\s+render\s*\(/.test(src));
-  assertTrue("V01150-MC-PRESENT-5: CSS root fmc-root referenced",
-    /fmc-root/.test(src));
-  assertTrue("V01150-MC-PRESENT-6: references FinanceMath",
-    /FinanceMath/.test(src));
-  const lines = src.split(/\r?\n/);
-  let classCloseLine = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
-  }
-  assertTrue("V01150-MC-PRESENT-7: class closing brace found", classCloseLine !== -1);
-  if (classCloseLine !== -1) {
-    const tail = lines.slice(classCloseLine + 1);
-    let inBlock = false;
-    const offending = tail.filter((l) => {
-      const t = l.trim();
-      if (t === "") return false;
-      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
-      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
-      if (/^\/\//.test(t)) return false;
-      return true;
-    });
-    assertTrue("V01150-MC-PRESENT-8: no code after class closing brace",
-      offending.length === 0,
-      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
-  }
-}
-
-async function caseV01150MonthDashboardPresent() {
-  console.log("\n--- Case V01150-MD-PRESENT: month-dashboard.js helper shipped ---");
-  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/month-dashboard.js");
-  if (!assertTrue("V01150-MD-PRESENT-1: file exists",
-    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
-  const src = fs.readFileSync(helperPath, "utf8");
-  assertTrue("V01150-MD-PRESENT-2: class MonthDashboard declared",
-    /class\s+MonthDashboard\b/.test(src));
-  assertTrue("V01150-MD-PRESENT-3: no \"use strict\" directive",
-    !/^"use strict";?\s*$/m.test(src));
-  assertTrue("V01150-MD-PRESENT-4: has render method",
-    /\basync\s+render\s*\(/.test(src));
-  assertTrue("V01150-MD-PRESENT-5: CSS root mdash-root referenced",
-    /mdash-root/.test(src));
-  assertTrue("V01150-MD-PRESENT-6: references FinanceMath",
-    /FinanceMath/.test(src));
-  assertTrue("V01150-MD-PRESENT-7: references measuredMovement",
-    /measuredMovement/.test(src));
-  assertTrue("V01150-MD-PRESENT-8: references reconcile",
-    /reconcile/.test(src));
-  assertTrue("V01150-MD-PRESENT-9: type guard for month",
-    /type\s*!==\s*["']month["']|page\.type\s*===\s*["']month["']/.test(src));
-  const lines = src.split(/\r?\n/);
-  let classCloseLine = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
-  }
-  assertTrue("V01150-MD-PRESENT-10: class closing brace found", classCloseLine !== -1);
-  if (classCloseLine !== -1) {
-    const tail = lines.slice(classCloseLine + 1);
-    let inBlock = false;
-    const offending = tail.filter((l) => {
-      const t = l.trim();
-      if (t === "") return false;
-      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
-      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
-      if (/^\/\//.test(t)) return false;
-      return true;
-    });
-    assertTrue("V01150-MD-PRESENT-11: no code after class closing brace",
-      offending.length === 0,
-      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
-  }
-}
-
-async function caseV01150FinanceHubSummaryPresent() {
-  console.log("\n--- Case V01150-FHS-PRESENT: finance-hub-summary.js helper shipped ---");
-  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-summary.js");
-  if (!assertTrue("V01150-FHS-PRESENT-1: file exists",
-    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
-  const src = fs.readFileSync(helperPath, "utf8");
-  assertTrue("V01150-FHS-PRESENT-2: class FinanceHubSummary declared",
-    /class\s+FinanceHubSummary\b/.test(src));
-  assertTrue("V01150-FHS-PRESENT-3: no \"use strict\" directive",
-    !/^"use strict";?\s*$/m.test(src));
-  assertTrue("V01150-FHS-PRESENT-4: has render method",
-    /\basync\s+render\s*\(/.test(src));
-  assertTrue("V01150-FHS-PRESENT-5: CSS root fhs-root referenced",
-    /fhs-root/.test(src));
-  assertTrue("V01150-FHS-PRESENT-6: references FinanceMath",
-    /FinanceMath/.test(src));
-  assertTrue("V01150-FHS-PRESENT-7: references FinanceMath.projectedPayoff literal",
-    /FinanceMath\.projectedPayoff/.test(src));
-  assertTrue("V01150-FHS-PRESENT-8: references path guard spice/finance/Finance.md",
-    /spice\/finance\/Finance\.md/.test(src));
-  const lines = src.split(/\r?\n/);
-  let classCloseLine = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
-  }
-  assertTrue("V01150-FHS-PRESENT-9: class closing brace found", classCloseLine !== -1);
-  if (classCloseLine !== -1) {
-    const tail = lines.slice(classCloseLine + 1);
-    let inBlock = false;
-    const offending = tail.filter((l) => {
-      const t = l.trim();
-      if (t === "") return false;
-      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
-      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
-      if (/^\/\//.test(t)) return false;
-      return true;
-    });
-    assertTrue("V01150-FHS-PRESENT-10: no code after class closing brace",
-      offending.length === 0,
-      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
-  }
-}
-
-async function caseV01150FinanceMathRegistered() {
-  console.log("\n--- Case V01150-FM-REG: FinanceMath in manifest customjs_classes and files ---");
-  const manifestPath = path.join(WORKSHOP, "platform/blueprints/finance/manifest.json");
-  if (!assertTrue("V01150-FM-REG-1: manifest file exists",
-    fs.existsSync(manifestPath), `missing: ${manifestPath}`)) return;
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  assertTrue("V01150-FM-REG-2: FinanceMath in customjs_classes[]",
-    Array.isArray(manifest.customjs_classes) && manifest.customjs_classes.includes("FinanceMath"));
-  assertTrue("V01150-FM-REG-3: files[] has entry whose source ends in finance-math.js",
-    Array.isArray(manifest.files) && manifest.files.some(f => f && typeof f.source === "string" && f.source.endsWith("finance-math.js")));
-}
-
-async function caseV01150ThreeNewClassesRegistered() {
-  console.log("\n--- Case V01150-3CLS-REG: MonthsCards + MonthDashboard + FinanceHubSummary in manifest ---");
-  const manifestPath = path.join(WORKSHOP, "platform/blueprints/finance/manifest.json");
-  if (!assertTrue("V01150-3CLS-REG-1: manifest file exists",
-    fs.existsSync(manifestPath), `missing: ${manifestPath}`)) return;
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  const classes = Array.isArray(manifest.customjs_classes) ? manifest.customjs_classes : [];
-  const files = Array.isArray(manifest.files) ? manifest.files : [];
-  assertTrue("V01150-3CLS-REG-2: MonthsCards in customjs_classes[]",
-    classes.includes("MonthsCards"));
-  assertTrue("V01150-3CLS-REG-3: MonthDashboard in customjs_classes[]",
-    classes.includes("MonthDashboard"));
-  assertTrue("V01150-3CLS-REG-4: FinanceHubSummary in customjs_classes[]",
-    classes.includes("FinanceHubSummary"));
-  assertTrue("V01150-3CLS-REG-5: files[] has months-cards.js source",
-    files.some(f => f && typeof f.source === "string" && f.source.endsWith("months-cards.js")));
-  assertTrue("V01150-3CLS-REG-6: files[] has month-dashboard.js source",
-    files.some(f => f && typeof f.source === "string" && f.source.endsWith("month-dashboard.js")));
-  assertTrue("V01150-3CLS-REG-7: files[] has finance-hub-summary.js source",
-    files.some(f => f && typeof f.source === "string" && f.source.endsWith("finance-hub-summary.js")));
-}
-
-async function caseV01150FinanceNavMonths() {
-  console.log("\n--- Case V01150-FNM: FinanceNav extended with Months modes + calendar icon ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-nav.js"), "utf8");
-  assertTrue("V01150-FNM-1: hub-months mode literal present",
-    /hub-months/.test(src));
-  assertTrue("V01150-FNM-2: entity-month mode literal present",
-    /entity-month/.test(src));
-  assertTrue("V01150-FNM-3: months HUBS entry present",
-    /key:\s*["']months["']/.test(src));
-  assertTrue("V01150-FNM-4: calendar icon case present",
-    /case\s+"calendar":/.test(src));
-}
-
-async function caseV01150ContentMonthsExists() {
-  console.log("\n--- Case V01150-CME: content/Months.md exists with correct blocks ---");
-  const contentPath = path.join(WORKSHOP, "platform/blueprints/finance/content/Months.md");
-  if (!assertTrue("V01150-CME-1: content/Months.md file exists",
-    fs.existsSync(contentPath), `missing: ${contentPath}`)) return;
-  const body = fs.readFileSync(contentPath, "utf8");
-  assertTrue("V01150-CME-2: body contains MonthsCards block",
-    /MonthsCards/.test(body));
-  assertTrue("V01150-CME-3: body contains FinanceChromeBar block",
-    /FinanceChromeBar/.test(body));
-}
-
-async function caseV01150ContentFinanceLanding() {
-  console.log("\n--- Case V01150-CFL: content/Finance.md contains FinanceHubSummary ---");
-  const contentPath = path.join(WORKSHOP, "platform/blueprints/finance/content/Finance.md");
-  if (!assertTrue("V01150-CFL-1: content/Finance.md exists",
-    fs.existsSync(contentPath), `missing: ${contentPath}`)) return;
-  const body = fs.readFileSync(contentPath, "utf8");
-  assertTrue("V01150-CFL-2: body contains FinanceHubSummary block",
-    /FinanceHubSummary/.test(body));
-}
-
-async function caseV01150PaycheckTemplateAlignsManifest() {
-  console.log("\n--- Case V01150-PTAM: Paycheck Template aligned to manifest inline_body ---");
-  const templatePath = path.join(WORKSHOP, "platform/blueprints/finance/templates/Paycheck Template.md");
-  if (!assertTrue("V01150-PTAM-1: Paycheck Template.md exists",
-    fs.existsSync(templatePath), `missing: ${templatePath}`)) return;
-  const body = fs.readFileSync(templatePath, "utf8");
-  assertTrue("V01150-PTAM-2: template body contains PaycheckDebtBand",
-    /PaycheckDebtBand/.test(body));
-  assertTrue("V01150-PTAM-3: template body contains FinanceNav (unified nav)",
-    /FinanceNav/.test(body));
-  assertTrue("V01150-PTAM-4: template body does NOT contain FinanceNavRow (legacy removed)",
-    !/FinanceNavRow/.test(body));
-}
-
 // v0.115.0 Stage C — manifest additions (month entity-create + months rule_fragment + version bumps)
 
 async function caseV01150ManifestsBumped() {
-  console.log("\n--- Case V01150-C-MANIFESTS: workshop + finance version pins (snapshot SSOT) ---");
+  console.log("\n--- Case V01150-C-MANIFESTS: workshop + package.json version pins (snapshot SSOT) ---");
   // v0.115.1: widened from exact 0.115.0 to 0.115.x pattern (precedent: EC-2 /
   // FA3-PROJ-1 / V01080-NEB-count range guards). Patch bumps shouldn't whack-a-mole
   // every assert.
   const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   assertTrue("V01150-C-MANIFESTS-1: platform/manifest.json workshop_version matches 0.115.x..0.119.x",
     sameMajorMinor(platMan.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${platMan.workshop_version}`);
-  const finPin = (platMan.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V01150-C-MANIFESTS-2: platform/manifest.json finance blueprint pin matches snapshot SSOT",
-    finPin && finPin.version === VERSION_SNAPSHOT.components.finance, `got: ${finPin?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
-  const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01150-C-MANIFESTS-3: finance manifest version matches snapshot SSOT",
-    finMan.version === VERSION_SNAPSHOT.components.finance, `got: ${finMan.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
   assertTrue("V01150-C-MANIFESTS-4: package.json version matches 0.115.x..0.119.x",
     sameMajorMinor(pkg.version, VERSION_SNAPSHOT.workshop_version), `got: ${pkg.version}`);
 }
 
-async function caseV01150MonthEntityCreateEntry() {
-  console.log("\n--- Case V01150-C-NEB-MONTH: finance new_entity_buttons[] month entry ---");
-  const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const entries = finMan.new_entity_buttons || [];
-  const month = entries.find(e => e.id === "month");
-  assertTrue("V01150-C-NEB-MONTH-1: month entry present in new_entity_buttons[]", !!month);
-  assertTrue("V01150-C-NEB-MONTH-2: destination.folder_prefix === spice/finance/months",
-    month?.destination?.folder_prefix === "spice/finance/months");
-  assertTrue("V01150-C-NEB-MONTH-3: frontmatter_template.type === month",
-    month?.frontmatter_template?.type === "month");
-  assertTrue("V01150-C-NEB-MONTH-4: inline_body contains MonthDashboard and ## Notes",
-    typeof month?.inline_body === "string" &&
-    /MonthDashboard/.test(month.inline_body) &&
-    /##\s*Notes/.test(month.inline_body));
-}
-
-async function caseV01150MonthsRuleFragment() {
-  console.log("\n--- Case V01150-C-RF-MONTHS: finance rule_fragments[] months entry ---");
-  const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  const frags = finMan.rule_fragments || [];
-  const monthsFrag = frags.find(f => f.fragment && f.fragment.scope &&
-    typeof f.fragment.scope.path_glob === "string" &&
-    f.fragment.scope.path_glob.includes("months"));
-  assertTrue("V01150-C-RF-MONTHS-1: months rule_fragment present (scope.path_glob contains months)",
-    !!monthsFrag, `got: ${JSON.stringify(frags.map(f => f.fragment?.scope?.path_glob))}`);
-  assertTrue("V01150-C-RF-MONTHS-2: naming_pattern matches Month-YYYY-MM.md",
-    monthsFrag && /Month-\\d\{4\}-\\d\{2\}/.test(monthsFrag.fragment.naming_pattern),
-    `got: ${monthsFrag?.fragment?.naming_pattern}`);
-}
-
 // =========================================================================
-// v0.115.1 PATCH — FinanceMath instance methods + hub frontmatter heal
+// v0.115.1 PATCH — workshop version range
 // =========================================================================
-
-async function caseV01151FinanceMathInstanceMethods() {
-  console.log("\n--- Case V01151-FM-INST: FinanceMath methods callable on an instance (CustomJS contract) ---");
-  // Load the source via IIFE-eval (mirrors run-v01120 harness pattern).
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js"), "utf8");
-  const wrapper = `${src}\n; return FinanceMath;`;
-  const FinanceMathClass = new Function(wrapper)();
-  const fm = new FinanceMathClass();
-  assertTrue("V01151-FM-INST-1: fm.readDebts is a function on instance",
-    typeof fm.readDebts === "function");
-  assertTrue("V01151-FM-INST-2: fm.debtTotals is a function on instance",
-    typeof fm.debtTotals === "function");
-  assertTrue("V01151-FM-INST-3: fm.measuredMovement is a function on instance",
-    typeof fm.measuredMovement === "function");
-  assertTrue("V01151-FM-INST-4: fm.fmtMoney is a function on instance",
-    typeof fm.fmtMoney === "function");
-  // Static-call MUST fail (regression guard — verifies the bug that broke v0.115.0).
-  assertTrue("V01151-FM-INST-5: FinanceMathClass.readDebts is NOT a function (static would defeat CustomJS contract)",
-    typeof FinanceMathClass.readDebts !== "function");
-  // Smoke an actual computation through the instance to confirm `this` references work.
-  const totals = fm.debtTotals([{ current_balance: 1000, apr: 24, planned_monthly_payment: 100 }]);
-  assertTrue("V01151-FM-INST-6: instance debtTotals computes (totalBalance===1000)",
-    totals && totals.totalBalance === 1000, `got: ${JSON.stringify(totals)}`);
-}
-
-async function caseV01151HubFrontmatterHealDefined() {
-  console.log("\n--- Case V01151-FMH-DEF: applyFinanceHubFrontmatterHeal exported function ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("V01151-FMH-DEF-1: applyFinanceHubFrontmatterHeal is a function",
-    typeof installer.applyFinanceHubFrontmatterHeal === "function");
-  assertTrue("V01151-FMH-DEF-2: _detectFinanceHubFrontmatterCorruption exported",
-    typeof installer._detectFinanceHubFrontmatterCorruption === "function");
-  assertTrue("V01151-FMH-DEF-3: _buildCanonicalFinanceHubFrontmatter exported",
-    typeof installer._buildCanonicalFinanceHubFrontmatter === "function");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V01151-FMH-DEF-4: async function applyFinanceHubFrontmatterHeal declared",
-    /async\s+function\s+applyFinanceHubFrontmatterHeal\s*\(/.test(src));
-  assertTrue("V01151-FMH-DEF-5: FINANCE_HUB_CANONICAL_TYPES table declared",
-    /const\s+FINANCE_HUB_CANONICAL_TYPES\s*=/.test(src));
-}
-
-async function caseV01151HubFrontmatterHealOrchestrated() {
-  console.log("\n--- Case V01151-FMH-ORCH: heal wired BEFORE applyFinanceHubsRepair in orchestrator ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  // Locate applyFinanceMigrations body
-  const bodyMatch = src.match(/async\s+function\s+applyFinanceMigrations[\s\S]*?\n\}/);
-  assertTrue("V01151-FMH-ORCH-1: applyFinanceMigrations body locatable",
-    !!bodyMatch);
-  if (!bodyMatch) return;
-  const body = bodyMatch[0];
-  const healIdx = body.indexOf("applyFinanceHubFrontmatterHeal");
-  const repairIdx = body.indexOf("applyFinanceHubsRepair");
-  assertTrue("V01151-FMH-ORCH-2: heal call present in orchestrator", healIdx > -1);
-  assertTrue("V01151-FMH-ORCH-3: repair call present in orchestrator", repairIdx > -1);
-  assertTrue("V01151-FMH-ORCH-4: heal runs BEFORE repair (so repair preserves clean frontmatter)",
-    healIdx > -1 && repairIdx > -1 && healIdx < repairIdx,
-    `healIdx=${healIdx} repairIdx=${repairIdx}`);
-}
-
-async function caseV01151HubFrontmatterHealDetector() {
-  console.log("\n--- Case V01151-FMH-DET: detector recognizes real ero corruption + accepts clean ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const det = installer._detectFinanceHubFrontmatterCorruption;
-  // Real ero v0.111.3 Finance.md inner FM (verbatim from production observation)
-  const eroFin = 'type: finance-hub\ncreated_at: "2026-05-17T16:45:00-06:00"\ncreated_at: "2026-05-17T16:45:00-06:00"\ntags:\n  - finance-hub-hub\ncssclasses:\n  - wide';
-  // Real ero Invoices.md inner FM
-  const eroInv = 'type: invoices-hub\ncreated_at: "2026-05-17T16:45:00-06:00"\nhub\ncreated_at: "2026-05-17T16:45:00-06:00"\ntags:\n  - finance-hubssclasses:\n  - wide';
-  // Clean canonical FM
-  const cleanFin   = 'type: finance-hub\ncreated_at: "2026-05-17T16:45:00-06:00"\ntags:\n  - finance-hub\ncssclasses:\n  - wide';
-  const cleanMonths = 'type: months-hub\ncreated_at: "2026-06-15T18:00:00-06:00"\ntags:\n  - finance-hub\ncssclasses:\n  - wide';
-  const r1 = det(eroFin);
-  assertTrue("V01151-FMH-DET-1: ero Finance.md flagged corrupt (duplicate created_at)",
-    r1.corrupt === true && r1.reason.includes("created_at"),
-    `got: ${JSON.stringify(r1)}`);
-  const r2 = det(eroInv);
-  assertTrue("V01151-FMH-DET-2: ero Invoices.md flagged corrupt",
-    r2.corrupt === true,
-    `got: ${JSON.stringify(r2)}`);
-  const r3 = det(cleanFin);
-  assertTrue("V01151-FMH-DET-3: clean Finance.md accepted",
-    r3.corrupt === false,
-    `got: ${JSON.stringify(r3)}`);
-  const r4 = det(cleanMonths);
-  assertTrue("V01151-FMH-DET-4: clean Months.md accepted",
-    r4.corrupt === false,
-    `got: ${JSON.stringify(r4)}`);
-}
-
-async function caseV01151HubFrontmatterHealCanonicalBuilder() {
-  console.log("\n--- Case V01151-FMH-CAN: canonical frontmatter builder shape ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const build = installer._buildCanonicalFinanceHubFrontmatter;
-  const fm = build("finance-hub", "2026-05-17T16:45:00-06:00");
-  assertTrue("V01151-FMH-CAN-1: starts with ---", fm.startsWith("---\n"));
-  assertTrue("V01151-FMH-CAN-2: ends with ---<newline>", fm.endsWith("---\n"));
-  assertTrue("V01151-FMH-CAN-3: contains canonical type", fm.includes("type: finance-hub"));
-  assertTrue("V01151-FMH-CAN-4: preserves created_at", fm.includes('created_at: "2026-05-17T16:45:00-06:00"'));
-  assertTrue("V01151-FMH-CAN-5: emits clean tags block", fm.includes("tags:\n  - finance-hub\n"));
-  assertTrue("V01151-FMH-CAN-6: emits clean cssclasses block", fm.includes("cssclasses:\n  - wide\n"));
-  // No created_at given -> uses a now-ish ISO timestamp
-  const fmNow = build("months-hub", null);
-  assertTrue("V01151-FMH-CAN-7: fallback now-timestamp valid ISO",
-    /created_at: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(fmNow));
-}
 
 async function caseV01151ManifestsBumped() {
   console.log("\n--- Case V01151-VER: workshop 0.115.x PATCH range ---");
@@ -14422,179 +12703,6 @@ async function caseV01151ManifestsBumped() {
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
   assertTrue("V01151-VER-2: package.json version matches 0.115.x..0.119.x",
     sameMajorMinor(pkg.version, VERSION_SNAPSHOT.workshop_version), `got: ${pkg.version}`);
-}
-
-// =========================================================================
-// v0.115.3 PATCH — Dataview Link-object debt coercion
-// =========================================================================
-//
-// Dataview auto-converts wikilink-shaped frontmatter strings ("[[Debt-X]]")
-// into Link objects { path, display, type }. v0.115.0..v0.115.2 widgets
-// filtered debt fields with `typeof === "string"` and silently rendered
-// nothing on Link-object debts. v0.115.3 normalizes via:
-//   PaycheckDebtBand._hasDebtLink + ._parseDebtSlug
-//   FinanceMath._debtKey (consumed by monthDebtPaid + debtPaidByDebt)
-
-function _v01153LoadInstance(workshop, relativeHelperPath, className) {
-  const fs = require("fs");
-  const p = require("path");
-  const src = fs.readFileSync(p.join(workshop, "platform/blueprints/finance/helpers", relativeHelperPath), "utf8");
-  const Cls = (new Function(src + "\n; return " + className + ";"))();
-  return new Cls();
-}
-
-async function caseV01153FinanceMathDebtKey() {
-  console.log("\n--- Case V01153-FM-DEBT-KEY: FinanceMath._debtKey normalizes string + Link object ---");
-  const FM = _v01153LoadInstance(WORKSHOP, "finance-math.js", "FinanceMath");
-  assertTrue("V01153-FM-DEBT-KEY-1: _debtKey is a function",
-    typeof FM._debtKey === "function");
-  assertEqual(FM._debtKey("[[Debt-Apple-Card]]"), "[[Debt-Apple-Card]]", "V01153-FM-DEBT-KEY-2: string passes through");
-  assertEqual(FM._debtKey({ path: "Debt-Brex-Card", type: "file" }), "[[Debt-Brex-Card]]", "V01153-FM-DEBT-KEY-3: Link object becomes [[path]]");
-  assertEqual(FM._debtKey({ path: "Debt-Discover-It.md", type: "file" }), "[[Debt-Discover-It]]", "V01153-FM-DEBT-KEY-4: Link object strips .md");
-  assertEqual(FM._debtKey({ display: "Debt-Foo" }), "[[Debt-Foo]]", "V01153-FM-DEBT-KEY-5: Link object falls back to .display");
-  assertTrue("V01153-FM-DEBT-KEY-6: null returns null", FM._debtKey(null) === null);
-  assertTrue("V01153-FM-DEBT-KEY-7: empty string returns null", FM._debtKey("") === null);
-  assertTrue("V01153-FM-DEBT-KEY-8: object without path/display returns null",
-    FM._debtKey({ type: "file" }) === null);
-}
-
-async function caseV01153FinanceMathLinkObjectDebtPaid() {
-  console.log("\n--- Case V01153-FM-LINK-PAID: monthDebtPaid + debtPaidByDebt accept Link objects ---");
-  const FM = _v01153LoadInstance(WORKSHOP, "finance-math.js", "FinanceMath");
-  const paychecks = [{ expenses: [
-    { item: "Apple", amount: 380, debt: "[[Debt-Apple-Card]]", paid: true },
-    { item: "Brex",  amount: 200, debt: { path: "Debt-Brex-Card", type: "file" }, paid: true },
-    { item: "Disco", amount: 100, debt: { path: "Debt-Discover-It.md", type: "file" }, paid: true },
-    { item: "Rent",  amount: 2200, paid: false },
-  ]}];
-  assertEqual(FM.monthDebtPaid(paychecks), 680,
-    "V01153-FM-LINK-PAID-1: monthDebtPaid sums paid debt-linked (string + 2 Link objects) = 680");
-  const map = FM.debtPaidByDebt(paychecks);
-  assertEqual(map.size, 3, "V01153-FM-LINK-PAID-2: debtPaidByDebt has 3 entries");
-  assertTrue("V01153-FM-LINK-PAID-3: Apple key present",
-    map.has("[[Debt-Apple-Card]]"));
-  assertTrue("V01153-FM-LINK-PAID-4: Brex key present (Link-object normalized)",
-    map.has("[[Debt-Brex-Card]]"));
-  assertTrue("V01153-FM-LINK-PAID-5: Discover key present (.md stripped)",
-    map.has("[[Debt-Discover-It]]"));
-}
-
-async function caseV01153PaycheckDebtBandLinkObjectFilter() {
-  console.log("\n--- Case V01153-PDB-LINK-FILTER: PaycheckDebtBand._hasDebtLink accepts string + Link ---");
-  const PDB = _v01153LoadInstance(WORKSHOP, "paycheck-debt-band.js", "PaycheckDebtBand");
-  assertTrue("V01153-PDB-LINK-FILTER-1: _hasDebtLink is a function",
-    typeof PDB._hasDebtLink === "function");
-  assertTrue("V01153-PDB-LINK-FILTER-2: string '[[Debt-X]]' detected",
-    PDB._hasDebtLink({ debt: "[[Debt-X]]" }) === true);
-  assertTrue("V01153-PDB-LINK-FILTER-3: Link object detected",
-    PDB._hasDebtLink({ debt: { path: "Debt-Y", type: "file" } }) === true);
-  assertTrue("V01153-PDB-LINK-FILTER-4: empty string rejected",
-    PDB._hasDebtLink({ debt: "" }) === false);
-  assertTrue("V01153-PDB-LINK-FILTER-5: null rejected",
-    PDB._hasDebtLink({ debt: null }) === false);
-  assertTrue("V01153-PDB-LINK-FILTER-6: undefined debt rejected",
-    PDB._hasDebtLink({}) === false);
-  assertTrue("V01153-PDB-LINK-FILTER-7: Link without path rejected",
-    PDB._hasDebtLink({ debt: { type: "file" } }) === false);
-}
-
-async function caseV01153PaycheckDebtBandLinkSlug() {
-  console.log("\n--- Case V01153-PDB-LINK-SLUG: PaycheckDebtBand._parseDebtSlug normalizes Link/string ---");
-  const PDB = _v01153LoadInstance(WORKSHOP, "paycheck-debt-band.js", "PaycheckDebtBand");
-  assertEqual(PDB._parseDebtSlug("[[Debt-Apple-Card]]"), "Debt-Apple-Card", "V01153-PDB-LINK-SLUG-1: string wikilink -> slug");
-  assertEqual(PDB._parseDebtSlug({ path: "Debt-Brex-Card", type: "file" }), "Debt-Brex-Card", "V01153-PDB-LINK-SLUG-2: Link object -> slug");
-  assertEqual(PDB._parseDebtSlug({ path: "Debt-Discover-It.md", type: "file" }), "Debt-Discover-It", "V01153-PDB-LINK-SLUG-3: Link with .md stripped");
-  assertEqual(PDB._parseDebtSlug({ display: "Debt-Foo" }), "Debt-Foo", "V01153-PDB-LINK-SLUG-4: Link with only display");
-  assertTrue("V01153-PDB-LINK-SLUG-5: null returns null",
-    PDB._parseDebtSlug(null) === null);
-}
-
-// =========================================================================
-// v0.115.4 PATCH — _pcdBackfillExistingExpenses inline-row idempotency guard
-// =========================================================================
-//
-// v0.114.0 backfill migration silently corrupted Paycheck Defaults on every
-// install by adding orphan `      debt: "[[Debt-X]]"` lines below inline rows
-// that already had `debt:` set inside `{ ... }`. v0.115.4 detects inline form
-// + scans the whole item-block for any debt: wikilink shape, and skips both:
-// (1) rows that already have debt: anywhere in the block, and
-// (2) all inline-form rows (separate-line injection cannot safely target an
-//     inline `  - { ... }` single-node YAML row).
-
-async function caseV01154BackfillInlineWithDebtUntouched() {
-  console.log("\n--- Case V01154-BF-INLINE-DEBT: inline rows with debt: already set are NOT touched ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const backfill = installer._pcdBackfillExistingExpenses;
-  assertTrue("V01154-BF-INLINE-DEBT-1: _pcdBackfillExistingExpenses exported",
-    typeof backfill === "function");
-  const body = [
-    "---",
-    "type: paycheck-defaults",
-    "expenses:",
-    '  - { item: Apple Card, amount: 500, category: Credit Payment, url: "", debt: "[[Debt-Apple-Card]]" }',
-    '  - { item: Brex Card, amount: 0, category: Credit Payment, url: "", debt: "[[Debt-Brex-Card]]" }',
-    "---",
-    "",
-  ].join("\n");
-  const debtList = [
-    { name: "Apple Card", slug: "Debt-Apple-Card", planned_monthly_payment: 380, url: "", kind: "credit-card" },
-    { name: "Brex Card",  slug: "Debt-Brex-Card",  planned_monthly_payment: 0,   url: "", kind: "credit-card" },
-  ];
-  const r = backfill(body, debtList);
-  assertTrue("V01154-BF-INLINE-DEBT-2: touched === false (idempotent on already-linked inline rows)",
-    r.touched === false);
-  assertTrue("V01154-BF-INLINE-DEBT-3: body bytes identical to input",
-    r.body === body);
-}
-
-async function caseV01154BackfillInlineWithoutDebtUntouched() {
-  console.log("\n--- Case V01154-BF-INLINE-NODEBT: inline rows without debt: are also skipped (cannot safely inject) ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const backfill = installer._pcdBackfillExistingExpenses;
-  const body = [
-    "---",
-    "type: paycheck-defaults",
-    "expenses:",
-    '  - { item: Apple Card, amount: 500, category: Credit Payment, url: "" }',
-    "---",
-    "",
-  ].join("\n");
-  const debtList = [
-    { name: "Apple Card", slug: "Debt-Apple-Card", planned_monthly_payment: 380, url: "", kind: "credit-card" },
-  ];
-  const r = backfill(body, debtList);
-  assertTrue("V01154-BF-INLINE-NODEBT-1: touched === false (inline rows always skipped)",
-    r.touched === false, "inline rows must never be modified by backfill");
-}
-
-async function caseV01154BackfillBlockFormStillWorks() {
-  console.log("\n--- Case V01154-BF-BLOCK: block-form rows without debt: still get backfilled ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  const backfill = installer._pcdBackfillExistingExpenses;
-  const body = [
-    "---",
-    "type: paycheck-defaults",
-    "expenses:",
-    "  - item: Apple Card",
-    "      amount: 500",
-    "      category: Credit Payment",
-    '      url: ""',
-    "---",
-    "",
-  ].join("\n");
-  const debtList = [
-    { name: "Apple Card", slug: "Debt-Apple-Card", planned_monthly_payment: 380, url: "", kind: "credit-card" },
-  ];
-  const r = backfill(body, debtList);
-  assertTrue("V01154-BF-BLOCK-1: block-form row got backfilled (touched === true)",
-    r.touched === true);
-  assertTrue("V01154-BF-BLOCK-2: debt: line injected",
-    /^      debt: "\[\[Debt-Apple-Card\]\]"$/m.test(r.body));
-  assertTrue("V01154-BF-BLOCK-3: linked count is 1", r.linked === 1);
-  // Run again — should now be a no-op (the row HAS debt now).
-  const r2 = backfill(r.body, debtList);
-  assertTrue("V01154-BF-BLOCK-4: second pass on backfilled body is no-op (idempotent)",
-    r2.touched === false && r2.body === r.body);
 }
 
 async function caseEditorWidthPatchedAssets() {
@@ -14612,145 +12720,17 @@ async function caseEditorWidthPatchedAssets() {
   assertEq("editor-width: bundled files count", (mech.bundled_plugin.files || []).length, 3);
 }
 
-async function caseV01103InjectMonthlyBandIdempotent() {
-  console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
-  const installer = require(path.join(WORKSHOP, "platform/install.js"));
-  assertTrue("V01103-MO-IDEM-1: _injectMonthlyBand exported",
-    typeof installer._injectMonthlyBand === "function");
-  const sampleBody =
-    "---\ntype: budget\nmonth: 2026-07\n---\n\n" +
-    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n" +
-    "```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n" +
-    "<!-- budget-summary-v0.5.2 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n";
-  const r1 = installer._injectMonthlyBand(sampleBody);
-  assertTrue("V01103-MO-IDEM-2: first pass injects (touched)",
-    r1.touched === true);
-  assertTrue("V01103-MO-IDEM-3: first pass body contains marker",
-    /<!--\s*monthly-overview-v0\.6\.3\s*-->/.test(r1.body));
-  const r2 = installer._injectMonthlyBand(r1.body);
-  assertTrue("V01103-MO-IDEM-4: second pass no-op (idempotent)",
-    r2.touched === false && r2.body === r1.body);
-  // Anchor priority: MonthlyOverview must appear BEFORE budget-summary marker.
-  const moMarkerIdx = r1.body.indexOf("<!-- monthly-overview-v0.6.3 -->");
-  const bsMarkerIdx = r1.body.indexOf("<!-- budget-summary-v0.5.2 -->");
-  assertTrue("V01103-MO-IDEM-5: MonthlyOverview block precedes BudgetSummary marker",
-    moMarkerIdx > 0 && moMarkerIdx < bsMarkerIdx, `mo=${moMarkerIdx} bs=${bsMarkerIdx}`);
-}
-
-async function caseV0111FinanceNavClass() {
-  console.log("\n--- Case V0111-FN-CLS: FinanceNav unified context-aware nav class shipped ---");
-  const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-nav.js"), "utf8");
-  assertTrue("V0111-FN-CLS-1: class FinanceNav defined",
-    /class FinanceNav\s*\{/.test(src));
-  assertTrue("V0111-FN-CLS-2: async render(dv) method",
-    /async render\(dv\)/.test(src));
-  assertTrue("V0111-FN-CLS-3: detects 9 modes from path + type frontmatter",
-    /hub-finance/.test(src) && /hub-budgets/.test(src) && /hub-paychecks/.test(src) &&
-    /hub-invoices/.test(src) && /hub-debts/.test(src) &&
-    /entity-budget/.test(src) && /entity-paycheck/.test(src) &&
-    /entity-invoice/.test(src) && /entity-debt/.test(src));
-  assertTrue("V0111-FN-CLS-4: per-area Defaults labels (Budget/Paycheck/Debt Defaults)",
-    /Budget Defaults/.test(src) && /Paycheck Defaults/.test(src) && /Debt Defaults/.test(src));
-  assertTrue("V0111-FN-CLS-5: HR separators wrap sections",
-    /createEl\("hr"\)/.test(src));
-  assertTrue("V0111-FN-CLS-6: EntityCreate poll fallback present",
-    /window\.customJS\?\.EntityCreate/.test(src) && /EntityCreate unavailable/.test(src));
-}
-
-async function caseV0111FinanceUnifiedNavMigration() {
-  console.log("\n--- Case V0111-FUN-MIG: applyFinanceUnifiedNavMigration shipped + wired ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("V0111-FUN-MIG-1: function defined",
-    /async function applyFinanceUnifiedNavMigration\(/.test(src));
-  assertTrue("V0111-FUN-MIG-2: top-level install calls it",
-    /await applyFinanceUnifiedNavMigration\(tp,\s*mech/.test(src));
-  assertTrue("V0111-FUN-MIG-3: module.exports declares it",
-    /module\.exports\.applyFinanceUnifiedNavMigration\s*=\s*applyFinanceUnifiedNavMigration/.test(src));
-  assertTrue("V0111-FUN-MIG-4: rewrites FinanceHubActions + FinanceNavRow guard-form to FinanceNav",
-    /FinanceHubActions\|FinanceNavRow/.test(src));
-  assertTrue("V0111-FUN-MIG-5: replacement is the canonical single-line FinanceNav call",
-    /class:\s*"FinanceNav"\s*\}/.test(src));
-}
-
-async function caseV0111FinanceContentTemplatesUseFinanceNav() {
-  console.log("\n--- Case V0111-TPL-FN: all 5 finance hub content templates use single-line FinanceNav ---");
-  const HUBS = [
-    "platform/blueprints/finance/content/Finance.md",
-    "platform/blueprints/finance/content/Budgets.md",
-    "platform/blueprints/finance/content/Paychecks.md",
-    "platform/blueprints/finance/content/Invoices.md",
-    "platform/blueprints/finance/content/Debts.md",
-  ];
-  for (const rel of HUBS) {
-    const src = fs.readFileSync(path.join(WORKSHOP, rel), "utf8");
-    assertTrue(`V0111-TPL-FN-${rel}: invokes FinanceChromeBar via guard`,
-      /class:\s*["']FinanceChromeBar["']/.test(src),
-      `${rel} does not call FinanceChromeBar via the guard`);
-    assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceNav on hub (ChromeBar owns hub chrome)`,
-      !/class:\s*["']FinanceNav["']/.test(src),
-      `${rel} still has FinanceNav (should be removed from hubs)`);
-    assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceHubActions invocation`,
-      !/FinanceHubActions/.test(src),
-      `${rel} still mentions FinanceHubActions`);
-    assertTrue(`V0111-TPL-FN-${rel}: NO legacy FinanceNavRow invocation`,
-      !/FinanceNavRow/.test(src),
-      `${rel} still mentions FinanceNavRow`);
-  }
-}
-
-async function caseV0111FinanceManifestRegistersFinanceNav() {
-  console.log("\n--- Case V0111-MAN: finance manifest registers FinanceNav class + files entry + entity-create inline_body uses it ---");
-  const m = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V0111-MAN-1: FinanceNav in customjs_classes",
-    (m.customjs_classes || []).includes("FinanceNav"));
-  assertTrue("V0111-MAN-2: finance-nav.js in files[]",
-    (m.files || []).some((f) => f.source === "helpers/finance-nav.js"));
-  for (const entry of (m.new_entity_buttons || [])) {
-    if (!entry.inline_body) continue;
-    assertTrue(`V0111-MAN-3-${entry.id}: inline_body calls FinanceNav (not FinanceNavRow / FinanceHubActions)`,
-      /FinanceNav/.test(entry.inline_body) &&
-      !/FinanceNavRow|FinanceHubActions/.test(entry.inline_body),
-      `${entry.id} inline_body still references legacy nav class`);
-  }
-}
-
 async function caseV0110VersionBump() {
-  console.log("\n--- Case V0110-VER: workshop 0.110.x or 0.111.x or 0.112.x + finance 0.6.x or 0.7.x + project 1.21.x ---");
+  console.log("\n--- Case V0110-VER: workshop 0.110.x or 0.111.x or 0.112.x + project 1.21.x ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   assertTrue("V0110-VER-1: workshop_version 0.110.x..0.119.x",
     sameMajorMinor(ws.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${ws.workshop_version}`);
-  const fbp = (ws.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V0110-VER-2: finance pin matches snapshot SSOT",
-    fbp && fbp.version === VERSION_SNAPSHOT.components.finance, `got: ${fbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
   assertTrue("V0110-VER-3: project pin matches snapshot SSOT",
     pbp && pbp.version === VERSION_SNAPSHOT.components.project, `got: ${pbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
-  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V0110-VER-4: finance manifest version matches snapshot SSOT",
-    fin.version === VERSION_SNAPSHOT.components.finance, `got: ${fin.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   assertTrue("V0110-VER-5: project manifest version matches snapshot SSOT",
     proj.version === VERSION_SNAPSHOT.components.project, `got: ${proj.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
-}
-
-// v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
-// injection + `## Expenses` heading removal on existing Paycheck-*.md files).
-
-async function caseV01070FpbmPaycheckBodyMigration() {
-  console.log("\n--- Case HC-V01070-FPBM: applyFinancePaycheckBodyMigration shipped ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
-  assertTrue("HC-V01070-FPBM-1: applyFinancePaycheckBodyMigration function present",
-    /async\s+function\s+applyFinancePaycheckBodyMigration\s*\(/.test(src));
-  assertTrue("HC-V01070-FPBM-1: wired into applyFinanceMigrations orchestrator",
-    /await\s+applyFinancePaycheckBodyMigration\s*\(/.test(src));
-  assertTrue("HC-V01070-FPBM-2: _migratePaycheckBody helper present",
-    /function\s+_migratePaycheckBody\s*\(/.test(src));
-  assertTrue("HC-V01070-FPBM-2: marker-guarded PaycheckSummary injection",
-    /<!--\s*paycheck-summary-v0\.5\.3\s*-->/.test(src));
-  assertTrue("HC-V01070-FPBM-3: removes `## Expenses` heading line",
-    /## Expenses/.test(src));
 }
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
@@ -15071,13 +13051,6 @@ async function caseHCV0127Versions() {
   assertTrue("HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version matches /^0\\.128\\.\\d+$/",
     sameMajorMinor(sub.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${sub.workshop_version}`);
 
-  // F (v0.128.0): finance catalogue pin 0.10.0 — NEW planning/lever/allocation layer.
-  const finance = (platformMan.blueprints || []).find(b => b && b.name === "finance");
-  assertTrue("HC-V0128-VERSION-F1: finance catalogue entry present",
-    !!finance, `got: ${JSON.stringify(finance)}`);
-  assertTrue("HC-V0128-VERSION-F2: finance catalogue version matches /^0\\.10\\.\\d+$/",
-    finance && finance.version === VERSION_SNAPSHOT.components.finance, `got: ${finance && finance.version}`);
-
   // B: meetings catalogue pin 0.12.0 in both manifest + subscription.
   const meetings = (platformMan.blueprints || []).find(b => b && b.name === "meetings");
   assertTrue("HC-V0127-VERSION-B1: meetings catalogue entry present",
@@ -15123,51 +13096,6 @@ async function caseHCV0127Versions() {
   const taskISub = (sub.mechanisms || []).find(m => m && m.name === "task-interactions");
   assertEqual(taskISub && taskISub.version, VERSION_SNAPSHOT.components["task-interactions"],
     "HC-V0127-VERSION-E4: task-interactions subscription pin === 0.1.0");
-}
-
-// v0.128.0 HC-V0128-FIN-PLAN-* — finance planning/lever/allocation layer source contracts.
-// ========================================================================
-async function caseHCV0128FinancePlanning() {
-  console.log("\n--- Case HC-V0128-FIN-PLAN: planning-layer helpers + manifest surface ---");
-  const H = (f) => fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/" + f), "utf8");
-  const man = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-
-  // computePlanState engine in finance-math.js
-  const fmSrc = H("finance-math.js");
-  assertTrue("HC-V0128-FIN-PLAN-1: finance-math has computePlanState", /computePlanState\s*\(/.test(fmSrc));
-  assertTrue("HC-V0128-FIN-PLAN-2: finance-math has glide + simulateAvalanche + readPlan + readSavings",
-    /\bglide\s*\(/.test(fmSrc) && /simulateAvalanche\s*\(/.test(fmSrc) && /readPlan\s*\(/.test(fmSrc) && /readSavings\s*\(/.test(fmSrc));
-
-  // 5 new widget classes present + thin-view conventions (instance render, no module.exports)
-  const widgets = [
-    ["finance-plan-dashboard.js", "FinancePlanDashboard"],
-    ["plan-band.js", "PlanBand"],
-    ["savings-summary.js", "SavingsSummary"],
-    ["savings-config-editor.js", "SavingsConfigEditor"],
-    ["savings-cards.js", "SavingsCards"],
-  ];
-  for (const [file, cls] of widgets) {
-    const src = H(file);
-    assertTrue(`HC-V0128-FIN-PLAN-CLS-${cls}: class ${cls} defined`, new RegExp("class " + cls + "\\b").test(src));
-    assertTrue(`HC-V0128-FIN-PLAN-RENDER-${cls}: ${cls} has async render`, /async render\s*\(/.test(src));
-    assertTrue(`HC-V0128-FIN-PLAN-NOEXP-${cls}: ${cls} no module.exports`, !/module\.exports/.test(src));
-  }
-  // dashboard + plan-band are thin views of the engine; dashboard writes via FinanceFrontmatter
-  assertTrue("HC-V0128-FIN-PLAN-X1: dashboard calls computePlanState", /computePlanState/.test(H("finance-plan-dashboard.js")));
-  assertTrue("HC-V0128-FIN-PLAN-X2: dashboard Apply uses FinanceFrontmatter.update", /FinanceFrontmatter\.update/.test(H("finance-plan-dashboard.js")));
-  assertTrue("HC-V0128-FIN-PLAN-X3: plan-band reads computePlanState", /computePlanState/.test(H("plan-band.js")));
-
-  // manifest surface
-  const classes = man.customjs_classes || [];
-  for (const c of ["FinancePlanDashboard", "PlanBand", "SavingsSummary", "SavingsConfigEditor", "SavingsCards"])
-    assertTrue(`HC-V0128-FIN-PLAN-MCLS-${c}: customjs_classes includes ${c}`, classes.includes(c));
-  assertTrue("HC-V0128-FIN-PLAN-FILES: files[] has content/Savings.md",
-    (man.files || []).some(f => f && f.source === "content/Savings.md"));
-  assertTrue("HC-V0128-FIN-PLAN-NEB: new_entity_buttons has savings",
-    (man.new_entity_buttons || []).some(b => b && b.id === "savings"));
-  assertTrue("HC-V0128-FIN-PLAN-RF: rule_fragments has finance-plan + savings-accounts",
-    (man.rule_fragments || []).some(r => r && r.fragment && r.fragment.naming_pattern === "^Finance Plan\\.md$") &&
-    (man.rule_fragments || []).some(r => r && r.fragment && r.fragment.naming_pattern === "^Savings-.+\\.md$"));
 }
 
 async function caseDisableSmartConnectionsOnce() {
@@ -15361,9 +13289,6 @@ async function caseRetireOldClaudianOnce() {
   await caseSHCS11ProjectNavButtonsNoCreate();
   // SHC-S11..S14 scratch-day-actions cases removed — the action class they
   // covered was dropped in the sticky-notes chrome-bar adoption (see SHC-S3).
-  await caseSHCS11FinanceBudget();
-  await caseSHCS11FinancePaycheck();
-  await caseSHCS11FinanceInvoice();
   await caseSHCS11EntityCreateMechanismParses();
   await caseSHCS11EntityCreateSchemaParses();
 
@@ -15581,7 +13506,6 @@ async function caseRetireOldClaudianOnce() {
   await caseHCV0891Versions();
   await caseHCV01340RenderSafe();
   await caseHCV0127Versions();
-  await caseHCV0128FinancePlanning();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();
@@ -15606,12 +13530,6 @@ async function caseRetireOldClaudianOnce() {
   await caseFA6DomainManifests();
   await caseFA6DomainTemplates();
   await caseFA6DomainRuleFragments();
-
-  // v0.59.0 FA-7 — finance canonical vocab
-  await caseFA7FinanceManifest();
-  await caseFA7FinanceTemplates();
-  await caseFA7FinanceEntityCreate();
-  await caseFA7FinanceRuleFragments();
 
   // v0.63.0 S7 — TD-HC-1: to-do v0.3.0 manifest schema clean
   await caseTodoManifestV3();
@@ -15862,58 +13780,9 @@ async function caseRetireOldClaudianOnce() {
   await caseV01060PdiWidgets2RecentActivity();
   await caseV01060PdiWidgets3TopTags();
 
-  // v0.107.0 — entity-create seed_from_defaults
-  await caseV01070EcSfd1MethodPresent();
-  await caseV01070EcSfd2MissingDefaultsNotice();
-  await caseV01070EcSfd3PerItemSetMerge();
-  await caseV01070EcSfd4CarryArraysCopy();
-  await caseV01070EcSfd5TemplateWinsOnConflict();
-
-  // v0.107.0 — installer migration block (applyFinanceMigrations)
-  await caseV01070Fds1OrchestratorPresent();
-  await caseV01070Fds2ScaffoldingCreateIfAbsent();
-  await caseV01070Fds3BothDefaultsTargets();
-  await caseV01070Fcgb1BackfillPresent();
-  await caseV01070Fcgb2SnapshotBeforeWrite();
-  await caseV01070Fcgb3AppendOnlyGuard();
-  await caseV01070Fcgb4PerFileFailureLoud();
-  await caseV01070Fcgb5IdempotentSkip();
-  await caseFinBgrBackfillSkipsFlowMap();
-  await caseFinBgrBackfillStillBackfillsBlock();
-  await caseFinBgrRepairStripsStray();
-  await caseFinBgrRepairLeavesCleanNotes();
-  await caseFinBgrHealWiredAndUngated();
-  await caseFinCockpitChecklistInject();
-  await caseFinCockpitBannerInject();
-  await caseFinCockpitNavRowStrip();
-  await caseFinCockpitHealsWiredAndUngated();
-
-  // v0.107.0 — defaults editor widgets (S3)
-  await caseV01070Bde1ClassDeclared();
-  await caseV01070Bde2GroupsPane();
-  await caseV01070Bde3CategoriesPaneGrouped();
-  await caseV01070Bde4UsesFinanceFrontmatter();
-  await caseV01070Pde1ClassDeclared();
-  await caseV01070Pde2DatalistAutocomplete();
-  await caseV01070Pde3UsesFinanceFrontmatter();
-
-  // v0.107.0 — entity editors v2 + BudgetSummary (S4)
-  await caseV01070BceExt1GroupedSections();
-  await caseV01070BceExt2SubTotals();
-  await caseV01070BceExt3GroupDropdownInModal();
-  await caseV01070PeeExt1Datalist();
-  await caseV01070PeeExt2ReadsBudgetDefaults();
-  await caseV01070Bs1ClassDeclared();
-  await caseV01070Bs2ThreeBands();
-  await caseV01070Bs3PaceIndicator();
-  await caseV01070Bs4ReadOnly();
-
   // v0.107.0 — manifest deltas (S5)
   await caseV01070FinMan1Versions();
-  await caseV01070FinMan2NewClassesAndFiles();
-  await caseV01070FinMan3SeedFromDefaults();
 
-  // v0.107.0 CF-2 — body migration on existing budgets
   // v0.109.0 — projects visual overhaul.
   await caseV01090Ds1EntityTypeOpt();        // S1
   await caseV01090Sl1ClassDefined();         // S2
@@ -15940,12 +13809,6 @@ async function caseRetireOldClaudianOnce() {
   await caseV01090TplMapHasBreadcrumb();     // S7
   await caseV01090TplTaskHasBreadcrumb();    // S7
   await caseV01090TplBoardHasBreadcrumb();   // S7
-  await caseV01070FbbmBudgetBodyMigration();
-
-  // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
-  await caseV01070PsClassDeclared();
-  await caseV01070PsThreeBands();
-  await caseV01070FpbmPaycheckBodyMigration();
 
   // v0.109.0 projects visual overhaul
   await caseV01090Phc1DocSearchInvoked();
@@ -15957,30 +13820,12 @@ async function caseRetireOldClaudianOnce() {
 
   // v0.108.0 S1 — entity-create 0.7.1 PATCH (resolve_wikilinks)
   await caseV01080EntityCreatePatchBump();
-  await caseV01080EntityCreateResolveWikilinks();
-
-  // v0.108.0 S2 — 4 finance migrations (debt scaffolding, group seed, paycheck-defaults debt linking, nav-row sweep)
-  await caseV01080FinanceMigrationOrchestrator();
-  await caseV01080FinanceNavRowMigrationRegex();
 
   // v0.108.0 S3 — 6 new widgets + delete 3 old nav-button classes
-  await caseV01080FinanceNewHelpers();
-  await caseV01080FinanceOldNavButtonsDeleted();
-  await caseV01080DebtSummaryWidget();
-  await caseV01080DebtsHubSummary();
-  await caseV01080DebtDefaultsEditor();
-  await caseV01080DebtConfigEditor();
-  await caseV01080DebtsContentTemplate();
-  await caseV01080PaycheckExpensesEditorDebtChip();
-  await caseV01080FinanceVersionBump();
-  await caseV01080FinanceNewEntityButtonDebt();
-  await caseV01080FinanceRuleFragmentsExpanded();
-  await caseV01080FinanceCustomJsClasses();
+  await caseV01080EntityCreatePinBump();
 
   // v0.110.0 — installer healing MINOR
-  await caseV0110FinanceHubsRepair();
   await caseV0110OrphanedHelperCleanup();
-  await caseV0110FinanceDebtAutoScaffold();
   await caseV0110ProjectTemplateSentinels();
   await caseV0110VersionBump();
 
@@ -15991,27 +13836,11 @@ async function caseRetireOldClaudianOnce() {
   // v0.110.2 — generalized direct-call → guard migration (mobile race fix)
   await caseV01102CustomJsGuardMigration();
 
-  // v0.111.0 — unified FinanceNav (context-aware single-line nav)
-  await caseV0111FinanceNavClass();
-  await caseV0111FinanceUnifiedNavMigration();
-  await caseV0111FinanceContentTemplatesUseFinanceNav();
-  await caseV0111FinanceManifestRegistersFinanceNav();
-
   // v0.110.4 — CustomJS class file cleanliness (no parse-blocking antipatterns)
   await caseV01104CustomJsClassFilesAreClean();
 
   // v0.110.3 — MonthlyOverview band on Budget-YYYY-MM.md
-  await caseV01103MonthlyOverviewHelperPresent();
-  await caseV01103MonthlyOverviewShape();
-  await caseV01103MonthlyOverviewDataReads();
-  await caseV01103InjectionMigrationDefined();
-  await caseV01103InjectionMigrationOrchestrated();
-  await caseV01103InjectionMigrationExported();
-  await caseV01103FinanceManifestBumped();
   await caseV01103WorkshopManifestBumped();
-  await caseV01103BudgetTemplateUpdated();
-  await caseV01103InjectMonthlyBandIdempotent();
-  await caseV01103BehavioralHarnessShipped();
 
   // v0.112.0 — workshop tooling MINOR
   await caseV0112WorkshopStatusShipped();
@@ -16038,7 +13867,6 @@ async function caseRetireOldClaudianOnce() {
       "write-run-note-morning-briefing",
       "write-run-note-midday-tripwire",
       "write-run-note-eod-review",
-      "write-run-note-finance",
       "write-run-note-weekly-review",
       "write-run-note-monthly-review",
     ];
@@ -16057,7 +13885,7 @@ async function caseRetireOldClaudianOnce() {
     assertTrue("HC-V065-DASHBOARD: _DEFAULT_DASHBOARD_BLUEPRINTS getter present", src.includes("_DEFAULT_DASHBOARD_BLUEPRINTS"));
     assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-morning-briefing", src.includes('"cowork-morning-briefing"'));
     assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-eod-review", src.includes('"cowork-eod-review"'));
-    assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-finance-snapshot", src.includes('"cowork-finance-snapshot"'));
+    assertTrue("HC-V065-DASHBOARD: retired cowork-finance-snapshot no longer in the allowlist", !src.includes('"cowork-finance-snapshot"'));
   }
 
   // FA6-MANIFEST version pins — daily / activity-feed / cards
@@ -16363,7 +14191,6 @@ async function caseRetireOldClaudianOnce() {
         "cowork-morning-briefing": "Morning Briefing",
         "cowork-midday-tripwire":  "Midday Tripwire",
         "cowork-eod-review":       "EOD Review",
-        "cowork-finance-snapshot": "Finance Snapshot",
         "cowork-weekly-review":    "Weekly Review",
         "cowork-monthly-review":   "Monthly Review",
       };
@@ -16389,7 +14216,7 @@ async function caseRetireOldClaudianOnce() {
       ));
       const targetTypes = [
         "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-        "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+        "cowork-weekly-review", "cowork-monthly-review",
       ];
       const fragments = (manifest.validator_rule_fragments || manifest.rule_fragments || []);
       for (const t of targetTypes) {
@@ -16415,7 +14242,7 @@ async function caseRetireOldClaudianOnce() {
   // HC-V0710-3b and HC-V0710-3c superseded by HC-V0740-5 (v0.74.0 S4 renamed '## Body shape'
   // to '## Adaptive body skeleton'; HC-V0740-5 asserts that section + SpaceNavButtons marker).
   try {
-    const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "finance", "weekly-review", "monthly-review"];
+    const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
     for (const o of orchs) {
       const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + o + "/SKILL.md");
       const body = fs.readFileSync(skillPath, "utf8");
@@ -16493,7 +14320,7 @@ async function caseRetireOldClaudianOnce() {
     ];
     const coworkTypes = [
       "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-      "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+      "cowork-weekly-review", "cowork-monthly-review",
     ];
     for (const h of hubs) {
       const body = fs.readFileSync(path.join(hubDir, h.file), "utf8");
@@ -16506,7 +14333,7 @@ async function caseRetireOldClaudianOnce() {
         call.indexOf('scope: "' + h.scope + '"') >= 0 || call.indexOf("scope: '" + h.scope + "'") >= 0);
       assertTrue("HC-V0710-7c: " + h.file + " passes framed: true",
         /framed:\s*true/.test(call));
-      assertTrue("HC-V0710-7d: " + h.file + " passes blueprints: array with 6 cowork-* types",
+      assertTrue("HC-V0710-7d: " + h.file + " passes blueprints: array with 5 cowork-* types",
         coworkTypes.every(function (t) { return call.indexOf('"' + t + '"') >= 0; }));
       assertTrue("HC-V0710-7e: " + h.file + " passes groupOrder:",
         /groupOrder\s*:/.test(call));
@@ -16556,12 +14383,14 @@ async function caseRetireOldClaudianOnce() {
       const w2fte   = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/w2-fte.json"), "utf8"));
       const consul  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/consulting.json"), "utf8"));
 
-      assertTrue("HC-V0740-1: personal.tripwire_aspects === ['cc_drift']",
-        JSON.stringify(personal.tripwire_aspects) === JSON.stringify(["cc_drift"]));
+      assertTrue("HC-V0740-1: personal.tripwire_aspects === []",
+        JSON.stringify(personal.tripwire_aspects) === JSON.stringify([]));
+      assertTrue("HC-V0740-1: personal default_cadences.midday === false (no tripwire aspects to fire on)",
+        personal.default_cadences && personal.default_cadences.midday === false);
       assertTrue("HC-V0740-1: w2-fte.tripwire_aspects === ['calendar_drift', 'queue_growth']",
         JSON.stringify(w2fte.tripwire_aspects) === JSON.stringify(["calendar_drift", "queue_growth"]));
-      assertTrue("HC-V0740-1: consulting.tripwire_aspects === ['cc_drift', 'calendar_drift', 'queue_growth']",
-        JSON.stringify(consul.tripwire_aspects) === JSON.stringify(["cc_drift", "calendar_drift", "queue_growth"]));
+      assertTrue("HC-V0740-1: consulting.tripwire_aspects === ['calendar_drift', 'queue_growth']",
+        JSON.stringify(consul.tripwire_aspects) === JSON.stringify(["calendar_drift", "queue_growth"]));
 
       assertTrue("HC-V0740-1: w2-fte supported_cadences must include midday",
         Array.isArray(w2fte.supported_cadences) && w2fte.supported_cadences.includes("midday"));
@@ -16578,17 +14407,17 @@ async function caseRetireOldClaudianOnce() {
     }
   }
 
-  // v0.74.0 HC-V0740-2: title required on 6 cowork atomic-note rule_fragments
+  // v0.74.0 HC-V0740-2: title required on the 5 cowork atomic-note rule_fragments
   {
-    console.log("\n--- Case HC-V0740-2: title required on 6 cowork atomic-note rule_fragments ---");
+    console.log("\n--- Case HC-V0740-2: title required on 5 cowork atomic-note rule_fragments ---");
     try {
       const manifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
-      const sixTypes = [
+      const atomicTypes = [
         "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
-        "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
+        "cowork-weekly-review", "cowork-monthly-review"
       ];
       const fragments = manifest.validator_rule_fragments || manifest.rule_fragments || [];
-      for (const t of sixTypes) {
+      for (const t of atomicTypes) {
         const frag = fragments.find(rf =>
           rf.fragment && rf.fragment.required_frontmatter
             && rf.fragment.required_frontmatter.type
@@ -16639,7 +14468,6 @@ async function caseRetireOldClaudianOnce() {
         "write-run-note-morning-briefing": "Morning Briefing",
         "write-run-note-midday-tripwire":  "Midday Tripwire",
         "write-run-note-eod-review":       "EOD Review",
-        "write-run-note-finance":          "Finance Snapshot",
         "write-run-note-weekly-review":    "Weekly Review",
         "write-run-note-monthly-review":   "Monthly Review"
       };
@@ -16662,7 +14490,7 @@ async function caseRetireOldClaudianOnce() {
     try {
       const skills = [
         "write-run-note-morning-briefing", "write-run-note-midday-tripwire",
-        "write-run-note-eod-review",       "write-run-note-finance",
+        "write-run-note-eod-review",
         "write-run-note-weekly-review",    "write-run-note-monthly-review"
       ];
       const markers = ["SpaceNavButtons", "> [!info]-", "> [!example]+", "> [!warning]", "> [!tip]"];
@@ -16687,7 +14515,7 @@ async function caseRetireOldClaudianOnce() {
     try {
       const skills = [
         "write-run-note-morning-briefing", "write-run-note-midday-tripwire",
-        "write-run-note-eod-review",       "write-run-note-finance",
+        "write-run-note-eod-review",
         "write-run-note-weekly-review",    "write-run-note-monthly-review"
       ];
       for (const skill of skills) {
@@ -16706,8 +14534,6 @@ async function caseRetireOldClaudianOnce() {
   // v0.74.0 HC-V0740-7: write-run-note uses filesystem write; no obsidian MCP in write step
   // v0.96.0 S1.7: the 5 cowork-cadence write-run-note SKILL.mds were slimmed to
   // thin shims that invoke `writeAtomicNote` from `write-atomic-note-helper.js`.
-  // The legacy Write-tool-mentioning sub-skill (write-run-note-finance) still
-  // uses the prior shape and is asserted with the prior contract.
   {
     console.log("\n--- Case HC-V0740-7: write-run-note Steps section uses filesystem write contract; no obsidian MCP ---");
     try {
@@ -16716,7 +14542,6 @@ async function caseRetireOldClaudianOnce() {
         "write-run-note-eod-review",       "write-run-note-weekly-review",
         "write-run-note-monthly-review"
       ];
-      const legacyShims = ["write-run-note-finance"];
 
       for (const skill of railWShims) {
         const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
@@ -16732,21 +14557,6 @@ async function caseRetireOldClaudianOnce() {
           /writeAtomicNote/.test(stepsBody));
         assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference write-atomic-note-helper`,
           /write-atomic-note-helper/.test(stepsBody));
-        assertTrue(`HC-V0740-7: ${skill} '## Steps' must NOT reference mcp__obsidian__create_note or obsidian_put_content`,
-          !/mcp__obsidian__create_note|obsidian_put_content/.test(stepsBody));
-      }
-
-      for (const skill of legacyShims) {
-        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
-        const body = fs.readFileSync(p, "utf8");
-        const stepsIdx = body.indexOf("## Steps");
-        assertTrue(`HC-V0740-7: ${skill} missing '## Steps' section`, stepsIdx >= 0);
-        if (stepsIdx < 0) continue;
-        const afterSteps = body.slice(stepsIdx + "## Steps".length);
-        const nextH2 = afterSteps.search(/\n## /);
-        const stepsBody = nextH2 >= 0 ? afterSteps.slice(0, nextH2) : afterSteps;
-        assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference 'Write tool' (legacy shape)`,
-          /Write tool/.test(stepsBody));
         assertTrue(`HC-V0740-7: ${skill} '## Steps' must NOT reference mcp__obsidian__create_note or obsidian_put_content`,
           !/mcp__obsidian__create_note|obsidian_put_content/.test(stepsBody));
       }
@@ -16770,8 +14580,6 @@ async function caseRetireOldClaudianOnce() {
       if (preflight) {
         assertTrue("HC-V0740-8: preflight must reference tripwire_aspects",
           /tripwire_aspects/.test(preflight[1]));
-        assertTrue('HC-V0740-8: preflight must NOT use finance_block != include as the gate',
-          !/finance_block != "include"/.test(preflight[1]));
       }
     } catch (e) {
       assertTrue("HC-V0740-8: midday-tripwire preflight contract", false, e && e.message);
@@ -18653,25 +16461,25 @@ type: cowork-microscope
     // A1: no overrides key at all -> bundle defaults verbatim
     const r1 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: undefined, ad_hoc_prefs: null });
     assertTrue("HC-V0950-OVERRIDES-A1: render_aspects mirrors bundle when overrides absent",
-      r1 && r1.render_aspects && r1.render_aspects.finance_block === "include");
+      r1 && r1.render_aspects && r1.render_aspects.inner_circle_imessage === "include");
     // A2: empty overrides object -> identical to A1
     const r2 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: {}, ad_hoc_prefs: null });
     assertTrue("HC-V0950-OVERRIDES-A2: empty overrides equals bundle defaults",
-      r2 && r2.render_aspects && r2.render_aspects.finance_block === "include"
+      r2 && r2.render_aspects && r2.render_aspects.inner_circle_imessage === "include"
       && JSON.stringify(r2.tripwire_aspects) === JSON.stringify(PERSONAL.tripwire_aspects));
-    // A3: override.render_aspects.finance_block: skip -> override wins
+    // A3: override.render_aspects.inner_circle_imessage: skip -> override wins
     const r3 = DPH.composeFinalPreferences({
       bundle: PERSONAL,
-      overrides: { render_aspects: { finance_block: "skip" } },
+      overrides: { render_aspects: { inner_circle_imessage: "skip" } },
       ad_hoc_prefs: null,
     });
     assertTrue("HC-V0950-OVERRIDES-A3: override wins per-key on render_aspects",
-      r3 && r3.render_aspects && r3.render_aspects.finance_block === "skip"
+      r3 && r3.render_aspects && r3.render_aspects.inner_circle_imessage === "skip"
       && r3.render_aspects.kanban_projects === "include");
     // A4: malformed overrides (string) -> bundle defaults verbatim (Postel)
     const r4 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: "not-an-object", ad_hoc_prefs: null });
     assertTrue("HC-V0950-OVERRIDES-A4: malformed overrides falls back to bundle defaults",
-      r4 && r4.render_aspects && r4.render_aspects.finance_block === "include");
+      r4 && r4.render_aspects && r4.render_aspects.inner_circle_imessage === "include");
   } catch (e) {
     assertTrue("HC-V0950-OVERRIDES: composeFinalPreferences contract", false, e && e.message);
   }
@@ -18688,14 +16496,12 @@ type: cowork-microscope
       calendar: { kind: "calendar", served_by: "iMCP",       connected: true },
       email:    { kind: "email",    served_by: "iMCP",       connected: true },
       chat:     { kind: "chat",     served_by: "iMCP",       connected: true },
-      finance:  { kind: "finance",  served_by: "brex",       connected: true },
     };
-    const reachable = new Set(["iMCP", "brex"]);
+    const reachable = new Set(["iMCP"]);
     const mcpSkillMap = { kinds: [
       { kind: "calendar", gather_skill: "cowork:gather-calendar" },
       { kind: "email",    gather_skill: "cowork:gather-email" },
       { kind: "chat",     gather_skill: "cowork:gather-chat" },
-      { kind: "finance",  gather_skill: "cowork:gather-finance" },
     ]};
 
     // A1: ALL 5 final-prefs keys present for a no-overrides personal bundle
@@ -18704,23 +16510,23 @@ type: cowork-microscope
     assertTrue("HC-V0950-PLAN-DISPATCH-A1: composeFinalPreferences returns all 5 keys for no-overrides bundle",
       finalA1 && keysA1.every(k => Object.prototype.hasOwnProperty.call(finalA1, k)));
 
-    // A2: override.render_aspects.finance_block: skip → final.render_aspects.finance_block === skip
+    // A2: override.render_aspects.inner_circle_imessage: skip → final.render_aspects.inner_circle_imessage === skip
     const finalA2 = DPH.composeFinalPreferences({
       bundle: PERSONAL,
-      overrides: { render_aspects: { finance_block: "skip" } },
+      overrides: { render_aspects: { inner_circle_imessage: "skip" } },
       ad_hoc_prefs: null,
     });
     assertTrue("HC-V0950-PLAN-DISPATCH-A2: render_aspects override wins per-key",
-      finalA2.render_aspects.finance_block === "skip");
+      finalA2.render_aspects.inner_circle_imessage === "skip");
 
     // A3: override.cadence_order.morning reorders priorities
     const finalA3 = DPH.composeFinalPreferences({
       bundle: PERSONAL,
-      overrides: { cadence_order: { morning: ["chat", "finance", "calendar", "email"] } },
+      overrides: { cadence_order: { morning: ["chat", "github", "calendar", "email"] } },
       ad_hoc_prefs: null,
     });
     assertTrue("HC-V0950-PLAN-DISPATCH-A3: cadence_order.morning override observed",
-      JSON.stringify(finalA3.cadence_order.morning) === JSON.stringify(["chat", "finance", "calendar", "email"]));
+      JSON.stringify(finalA3.cadence_order.morning) === JSON.stringify(["chat", "github", "calendar", "email"]));
 
     // A4: voice override wins per-key; composeVoiceContract reflects new vibe
     const finalA4 = DPH.composeFinalPreferences({
@@ -18740,11 +16546,11 @@ type: cowork-microscope
     // A6: tripwire_aspects override REPLACES (not merges) bundle's array
     const finalA6 = DPH.composeFinalPreferences({
       bundle: W2_FTE,
-      overrides: { tripwire_aspects: ["cc_drift"] },
+      overrides: { tripwire_aspects: ["frame_drift"] },
       ad_hoc_prefs: null,
     });
     assertTrue("HC-V0950-PLAN-DISPATCH-A6: tripwire_aspects override REPLACES bundle array",
-      JSON.stringify(finalA6.tripwire_aspects) === JSON.stringify(["cc_drift"]));
+      JSON.stringify(finalA6.tripwire_aspects) === JSON.stringify(["frame_drift"]));
   } catch (e) {
     assertTrue("HC-V0950-PLAN-DISPATCH-A: helper chain contract", false, e && e.message);
   }
@@ -18778,7 +16584,6 @@ type: cowork-microscope
             calendar: "Today's calendar",
             email:    "Email triage",
             chat:     "Chat",
-            finance:  "Finance",
             github:   "GitHub",
             ado:      "ADO",
             monitoring: "Monitoring",
@@ -19141,7 +16946,7 @@ type: cowork-microscope
     // its LLM call. Design § 4.4 + § 4.7.
     const themes = JSON.parse(fs.readFileSync(path.join(K2_FIXTURES, "v0951-k2-frame-repeat/syntheses.json"), "utf8")).themes;
     const gatedReport = typeof FDH.evaluateDrift === "function"
-      ? FDH.evaluateDrift({ themes, atomicNotes: [], tripwire_aspects: ["cc_drift"] })
+      ? FDH.evaluateDrift({ themes, atomicNotes: [], tripwire_aspects: ["calendar_drift"] })
       : null;
     assertTrue("HC-V0951-K2-B: evaluateDrift returns a no-flag report when tripwire_aspects excludes 'frame_drift'",
       gatedReport
@@ -20497,8 +18302,8 @@ type: cowork-microscope
   //
   // Rail D introduces a pure pattern-based MCP namespace classifier
   // (`kind-classifier-helper.js`) that maps reachable MCP namespaces +
-  // their tools to one of five canonical kinds (email, calendar, messages,
-  // finance, docs) WITHOUT calling an LLM in the common case. When a
+  // their tools to one of the canonical kinds (email, calendar, messages,
+  // docs, ...) WITHOUT calling an LLM in the common case. When a
   // namespace pattern doesn't match any rule, the helper reports it via
   // `unclassified[]` so the orchestrator can decide whether to fall back
   // to an LLM nudge.
@@ -20606,31 +18411,6 @@ type: cowork-microscope
     }
   } catch (e) {
     assertTrue("HC-V0960-D-4: classifyConnectedKinds maps apple-mcp + messages_* tools to kind 'messages'", false, e && e.message);
-  }
-
-  console.log(`\n--- Case HC-V0960-D-5: classifyConnectedKinds matches Brex + expense tools → kind 'finance' ---`);
-  try {
-    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
-    delete require.cache[require.resolve(helperPath)];
-    const { classifyConnectedKinds } = require(helperPath);
-    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
-    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-5-"));
-    try {
-      const result = classifyConnectedKinds({
-        reachable_namespaces: fixture.reachable_namespaces,
-        tools_by_namespace: fixture.tools_by_namespace,
-        vault_root: tmpVault,
-      });
-      const classified = result && result.classified;
-      const brexEntry = classified && (classified.Brex || (typeof classified.find === "function" && classified.find((e) => e.namespace === "Brex")));
-      const kindValue = brexEntry && (typeof brexEntry === "string" ? brexEntry : brexEntry.kind);
-      assertTrue("HC-V0960-D-5: classifyConnectedKinds maps Brex + expense tools to kind 'finance'",
-        kindValue === "finance");
-    } finally {
-      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
-    }
-  } catch (e) {
-    assertTrue("HC-V0960-D-5: classifyConnectedKinds maps Brex + expense tools to kind 'finance'", false, e && e.message);
   }
 
   console.log(`\n--- Case HC-V0960-D-6: classifyConnectedKinds matches Google_Drive + file tools → kind 'docs' ---`);
@@ -23830,7 +21610,7 @@ type: cowork-microscope
     try {
       const mdPath = path.join(tmpDir, "out.md");
       const sidecarPath = path.join(tmpDir, "out.cowork.json");
-      const sidecar = _baseSidecarT({ render_aspects_applied: ["finance_block:skip"] });
+      const sidecar = _baseSidecarT({ render_aspects_applied: ["kanban_projects:include"] });
       const result = writeAtomicNote({
         mdPath, sidecarPath,
         body_md: _baseBodyMdT(),  // no anti-echo callout
@@ -23838,7 +21618,7 @@ type: cowork-microscope
         schemaPath: MB_SCHEMA_PATH,
       });
       assertTrue(
-        "HC-V0974-WG-7: writeAtomicNote returns ok when anti_echo NOT applied (render_aspects_applied=[finance_block:skip]) — gate closes, anti-echo callout not expected",
+        "HC-V0974-WG-7: writeAtomicNote returns ok when anti_echo NOT applied (render_aspects_applied=[kanban_projects:include]) — gate closes, anti-echo callout not expected",
         result && result.status === "ok",
         `status=${result && result.status}`
       );
@@ -24248,57 +22028,9 @@ type: cowork-microscope
     assertTrue("HC-V0974-GS-6: urgency tier labels enumerated", false, e && e.message);
   }
 
-  // v0.112.0 finance — FinanceMath shared aggregation helper (S1)
-  // Note: caseV01120FinanceMathStaticApi was renamed semantically to assert
-  // INSTANCE methods (not static) in v0.115.1 — CustomJS exposes instances.
-  await caseV01120FinanceMathPresent();
-  await caseV01120FinanceMathStaticApi();
-
-  // v0.112.0 finance — installer migrations S2 (months scaffolding + paycheck-debt-band + hubs-repair)
-  await caseV01120MonthsScaffoldingDefined();
-  await caseV01120MonthsScaffoldingOrchestrated();
-  await caseV01120PaycheckDebtBandInjectionDefined();
-  await caseV01120PaycheckDebtBandInjectionOrchestrated();
-  await caseV01120PaycheckDebtBandIdempotent();
-  await caseV01120HubsRepairMonths();
-  await caseV01120HubsRepairFinanceSummary();
-
-  // v0.115.0 finance Stage A — new widget helpers + manifest wiring
-  await caseV01150MonthsCardsPresent();
-  await caseV01150MonthDashboardPresent();
-  await caseV01150FinanceHubSummaryPresent();
-  await caseV01150FinanceMathRegistered();
-  await caseV01150ThreeNewClassesRegistered();
-
-  // v0.115.0 finance Stage B — FinanceNav months modes + content files + Paycheck Template fix
-  await caseV01150FinanceNavMonths();
-  await caseV01150ContentMonthsExists();
-  await caseV01150ContentFinanceLanding();
-  await caseV01150PaycheckTemplateAlignsManifest();
-
-  // v0.115.0 finance Stage C — manifest additions (version bumps + month entity-create + months rule_fragment)
+  // v0.115.0 / v0.115.1 — workshop version ranges
   await caseV01150ManifestsBumped();
-  await caseV01150MonthEntityCreateEntry();
-  await caseV01150MonthsRuleFragment();
-
-  // v0.115.1 PATCH — FinanceMath instance-method fix + hub frontmatter heal migration
-  await caseV01151FinanceMathInstanceMethods();
-  await caseV01151HubFrontmatterHealDefined();
-  await caseV01151HubFrontmatterHealOrchestrated();
-  await caseV01151HubFrontmatterHealDetector();
-  await caseV01151HubFrontmatterHealCanonicalBuilder();
   await caseV01151ManifestsBumped();
-
-  // v0.115.3 PATCH — Dataview Link-object debt coercion (PaycheckDebtBand + FinanceMath)
-  await caseV01153FinanceMathDebtKey();
-  await caseV01153FinanceMathLinkObjectDebtPaid();
-  await caseV01153PaycheckDebtBandLinkObjectFilter();
-  await caseV01153PaycheckDebtBandLinkSlug();
-
-  // v0.115.4 PATCH — backfill migration inline-row idempotency
-  await caseV01154BackfillInlineWithDebtUntouched();
-  await caseV01154BackfillInlineWithoutDebtUntouched();
-  await caseV01154BackfillBlockFormStillWorks();
 
   await caseEditorWidthPatchedAssets();
 

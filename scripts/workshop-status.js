@@ -11,7 +11,7 @@
 // long as the script lives under <workshop>/scripts/.
 //
 // Flags:
-//   --fresh    re-run helper-cases + behavioral harness (slow; default skips)
+//   --fresh    re-run helper-cases (slow; default skips)
 //   --json     emit machine-readable JSON
 //   --no-color disable ANSI codes
 //
@@ -195,7 +195,6 @@ function getHarnessCounts() {
   if (FRESH) {
     const results = [
       runHarness("helper-cases", ["node", "platform/test/run-helper-cases.js"]),
-      runHarness("v01103-monthly", ["node", "platform/test/run-v01103-monthly-overview.js"]),
     ];
     const cache = { ts: new Date().toISOString(), results };
     writeCache(cache);
@@ -209,13 +208,11 @@ function getHarnessCounts() {
 function emitProse(snapshot) {
   const m = snapshot.manifest;
   const g = snapshot.git;
-  const fin = (m.blueprints || []).find(b => b.name === "finance");
-
   const blueprints = (m.blueprints || []).length;
   const mechanisms = (m.mechanisms || []).length;
 
   console.log("");
-  console.log(`${bold("sauce workshop")} ${green(m.workshop_version)} · finance ${fin ? cyan(fin.version) : dim("(none)")} · ${mechanisms} mechanisms · ${blueprints} blueprints`);
+  console.log(`${bold("sauce workshop")} ${green(m.workshop_version)} · ${mechanisms} mechanisms · ${blueprints} blueprints`);
   const syncLabel = g.ahead === 0 && g.behind === 0 ? green("in sync") : yellow(`${g.ahead} ahead / ${g.behind} behind`);
   const dirtLabel = g.dirty ? red("dirty") : green("clean");
   console.log(`branch ${bold(g.branch)} (${dirtLabel}) · ${syncLabel} ${dim("origin/main")}`);

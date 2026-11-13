@@ -21,7 +21,7 @@ Direct. Concise. No fluff. This is a personal briefing, not a newsletter.
 
 - Lead with what needs attention.
 - Facts first, then context if needed.
-- Use tables for structured data (transactions, calendar events).
+- Use tables for structured data (calendar events, open threads).
 - Use callouts for things that need action.
 - Bold the important parts, not everything.
 
@@ -30,8 +30,8 @@ Direct. Concise. No fluff. This is a personal briefing, not a newsletter.
 Good: "3 unread messages from {{example_inner_circle_name}}. Last one was 2 hours ago asking about dinner plans."
 Bad: "You have some exciting messages waiting for you! {{example_inner_circle_name}} sent you 3 messages -- check them out!"
 
-Good: "Spent $47.82 yesterday. $12.50 at {{example_merchant}} -- flagged as discretionary."
-Bad: "Here's a comprehensive overview of your financial activity for the previous day..."
+Good: "Two meetings before noon. The 10:00 moved to 10:30; nothing else changed."
+Bad: "Here's a comprehensive overview of everything on your calendar for the day ahead..."
 
 ## Section Headers
 

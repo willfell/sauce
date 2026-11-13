@@ -245,114 +245,23 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
   ok('CBC4-BOARDS-3: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'board-card') === after);
 }
 
-// ---- finance: finance-hub body carries SpaceNavButtons + FinanceNav — FinanceNav MUST survive ----
-{
+// ---- retired finance blueprint: its note types no longer map to a ChromeBar ----
+// The finance blueprint was removed; FinanceChromeBar no longer ships, so the
+// chrome-bar migration must never stamp it. (applyNoteChromeHeal also stops
+// walking spice/finance/ — the full-install guarantee that those user notes stay
+// byte-identical lives in run-seed-migrations.js HC-RETIRE-FINANCE-SEED-*.)
+for (const type of ["finance-hub", "budget", "invoice-board-card", "time-log"]) {
   const before = `---
-type: finance-hub
-created_at: "2026-05-17T16:45:00-06:00"
-tags:
-  - finance-hub
-cssclasses:
-  - wide
+type: ${type}
+created_at: "2026-07-08T09:00:00-06:00"
 ---
 
 \`\`\`dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceHubSummary" });
-\`\`\`
 `;
-  const after = _healNoteChromeBody(before, 'finance-hub');
-  ok('CBC4-FINANCE-1: finance-hub heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
-  ok('CBC4-FINANCE-2: finance-hub heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
-  ok('CBC4-FINANCE-3: finance-hub heal KEEPS FinanceNav untouched', after.includes('class: "FinanceNav"'));
-  ok('CBC4-FINANCE-4: finance-hub heal KEEPS FinanceHubSummary untouched', after.includes('class: "FinanceHubSummary"'));
-  ok('CBC4-FINANCE-5: FinanceChromeBar is inserted BEFORE FinanceNav', after.indexOf('FinanceChromeBar') < after.indexOf('FinanceNav'));
-  ok('CBC4-FINANCE-6: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'finance-hub') === after);
-}
-
-// ---- finance: entity-level type (budget) — same guarantee ----
-{
-  const before = `---
-type: budget
-month: "2026-07"
-categories: []
-groups: []
----
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });
-\`\`\`
-`;
-  const after = _healNoteChromeBody(before, 'budget');
-  ok('CBC4-BUDGET-1: budget heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
-  ok('CBC4-BUDGET-2: budget heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
-  ok('CBC4-BUDGET-3: budget heal KEEPS FinanceNavRow untouched (not in scope to fix)', after.includes('class: "FinanceNavRow"'));
-}
-
-// ---- finance: invoice-board-card (kanban card) — a previously-missed type ----
-{
-  const before = `---
-type: invoice-board-card
-created_at: "2026-07-09T09:00:00-06:00"
-tags:
-  - kanban-card
-  - invoice-card
----
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
-\`\`\`
-`;
-  const after = _healNoteChromeBody(before, 'invoice-board-card');
-  ok('CBC4-INVBOARD-1: invoice-board-card heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
-  ok('CBC4-INVBOARD-2: invoice-board-card heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
-  ok('CBC4-INVBOARD-3: idempotent — second pass is a no-op', _healNoteChromeBody(after, 'invoice-board-card') === after);
-}
-
-// ---- finance: time-log — same previously-missed-type guarantee ----
-{
-  const before = `---
-type: time-log
-month: "2026-07"
-total_hours: 0
-entries: []
----
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "InvoiceTimeLogEditor" });
-\`\`\`
-`;
-  const after = _healNoteChromeBody(before, 'time-log');
-  ok('CBC4-TIMELOG-1: time-log heal inserts FinanceChromeBar', after.includes('class: "FinanceChromeBar"'));
-  ok('CBC4-TIMELOG-2: time-log heal strips legacy SpaceNavButtons', !after.includes('class: "SpaceNavButtons"'));
-  ok('CBC4-TIMELOG-3: time-log heal KEEPS InvoiceTimeLogEditor untouched', after.includes('class: "InvoiceTimeLogEditor"'));
+  const after = _healNoteChromeBody(before, type);
+  ok(`CBC4-FIN-RETIRED: ${type} heal inserts no FinanceChromeBar`, !after.includes("FinanceChromeBar"));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

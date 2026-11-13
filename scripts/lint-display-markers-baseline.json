@@ -62,17 +62,17 @@
     },
     {
       "file": "platform/cli/cmd-migrate-frontmatter.js",
-      "line": 611,
+      "line": 610,
       "snippet": "lines.push(\"## Summary\");"
     },
     {
       "file": "platform/cli/cmd-migrate-frontmatter.js",
-      "line": 617,
+      "line": 616,
       "snippet": "lines.push(\"## By blueprint\");"
     },
     {
       "file": "platform/cli/cmd-migrate-frontmatter.js",
-      "line": 625,
+      "line": 624,
       "snippet": "lines.push(\"## Proposed changes by file\");"
     },
     {

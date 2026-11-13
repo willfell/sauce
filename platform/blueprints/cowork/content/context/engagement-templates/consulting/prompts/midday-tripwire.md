@@ -10,12 +10,11 @@ updated_by: cowork@0.11.0 installer
 
 > [!note]
 > The consulting engagement type does NOT enable midday-tripwire by default
-> (`default_cadences.midday: false`). Although consulting has `render_aspects.finance_block: include`,
-> consulting finance is invoice-driven (not daily-CC-tracked the way personal
-> is), so the personal-finance midday tripwire logic isn't directly useful.
-> This default body exists only as a placeholder if you customize the
-> engagement for something specific (e.g., a billable-hours threshold check
-> or expense-report alert).
+> (`default_cadences.midday: false`). When you enable it, the orchestrator
+> checks the engagement's `tripwire_aspects` (`calendar_drift`,
+> `queue_growth`) and writes a note only when one trips. This default body
+> exists as a placeholder if you customize the engagement for something
+> more specific (e.g., a billable-hours threshold check).
 
 Customize for your use case. Suggested shape:
 

@@ -22,6 +22,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const MECH_DIR = path.join(ROOT, "platform/mechanisms/entity-create");
@@ -171,11 +172,10 @@ for (const [label, p] of mechFiles) {
 }
 ok("EC-1 entity-create mechanism dir + 4 files present", fs.existsSync(MECH_DIR) && allPresent);
 
-// 2. manifest parses, version range 0.6.x or higher MINOR
-//    (0.6.0 — v0.105.0 S1; 0.7.0 — v0.107.0 S1 seed_from_defaults).
+// 2. manifest parses; version matches the snapshot SSOT the release bumper regenerates.
 const manifest = JSON.parse(fs.readFileSync(path.join(MECH_DIR, "manifest.json"), "utf8"));
-ok("EC-2 entity-create manifest parses + version 0.6.x or higher MINOR",
-    manifest && manifest.name === "entity-create" && /^0\.[6-9]\.\d+$/.test(manifest.version),
+ok("EC-2 entity-create manifest parses + version matches snapshot SSOT",
+    manifest && manifest.name === "entity-create" && manifest.version === VERSION_SNAPSHOT.components["entity-create"],
     `got name=${manifest && manifest.name} version=${manifest && manifest.version}`);
 
 // 3. json-schema parses + has 7 extension shapes

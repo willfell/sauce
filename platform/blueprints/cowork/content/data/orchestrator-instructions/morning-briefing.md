@@ -28,7 +28,7 @@ cold_path_skips: [step_1_memory, step_2c_semantic_gather]
 > microscope's `## Output shape` directives verbatim.
 
 Composes a morning briefing for one engagement (calendar + email + optional
-Finance + optional Messages + Open Threads) and writes ONE atomic note at
+Messages + Open Threads) and writes ONE atomic note at
 `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/morning-briefing.md`
 (deterministic path per `(orchestrator, day)`; overwrite-last-write-wins
 idempotency). Body shape follows `spice/cowork/prompts/morning-briefing.md`;
@@ -164,7 +164,7 @@ empty.
     - `entry.action == "gather_canonical"` → READ the kind's canonical gather sub-skill at
       `<vault>/.claude/skills/cowork/skills/<entry.gather_skill-after-cowork-prefix>/SKILL.md`
       with the kind's canonical input shape (calendar / email / messages / threads /
-      projects / finance).
+      projects).
     - `entry.action == "gather_from_served_by"` → READ
       `<vault>/.claude/skills/cowork/skills/gather-from-served-by/SKILL.md` with
       `{ kind_name, kind_title, served_by, what_matters, question_set_answers, hard_rules: plan.effective_hard_rules, siblings: plan.siblings[entry.kind_name] || [], callout_type: prefs.mcps[entry.kind_name].callout_type, inner_circle_resolved: plan.allowlist.resolved, engagement_id: {{$engagement_id}}, today: {{$today_date}}, range: { start, end }, timezone: {{$timezone}} }`.
@@ -218,8 +218,7 @@ empty.
     per ready signal. When `semantic_index_unavailable == true`: push ONCE
     `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`.
     Step 2c sets `semantic_index_unavailable = true` when gather-semantic-related returns
-    skipped-no-index (first 5 events only — semantic fan-out capped). Finance does NOT
-    flow through here — it's written by Step 15's separate sub-skill.
+    skipped-no-index (first 5 events only — semantic fan-out capped).
 
 3g. **Invoke composeBody.** READ `<vault>/.claude/skills/cowork/skills/compose-body/SKILL.md`
     in full and follow its `## Compose` section with the full payload (frontmatter +
@@ -404,7 +403,7 @@ sidecar already carries `render_aspects_applied`.
 
 9b. READ `<vault>/.claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md` in full
     and follow its `## Steps` section with
-    `{ engagement_id: {{$engagement_id}}, phase: "morning", date_today: {{$today_date}}, writer: "cowork:morning-briefing", snapshot_data: { week_of, wtd_spend, cc_total, journaled_today: false } }`.
+    `{ engagement_id: {{$engagement_id}}, phase: "morning", date_today: {{$today_date}}, writer: "cowork:morning-briefing", snapshot_data: { week_of, journaled_today: false } }`.
 
 ### Step 10: Done notice
 
@@ -465,4 +464,4 @@ Compose the paragraph per the following rules. Voice contract (vibe, personality
 
 ### Per-kind callout default-expand
 
-Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
+Every per-kind callout (chat, calendar, email, github, ado, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.

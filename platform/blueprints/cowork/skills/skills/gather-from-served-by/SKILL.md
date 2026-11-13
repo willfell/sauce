@@ -32,11 +32,11 @@ Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Out
 
 ## Inputs
 
-- `kind_name` (string, required): one of `calendar` / `email` / `chat` / `finance` (override_classified case) OR a user-defined kind name (custom_kind case).
-- `kind_title` (string, required): markdown section title for the `[!example]+` callout. Title-cased mechanically from `kind_name` for custom kinds; fixed lookup for known kinds (Calendar / Email / Chat / Finance).
+- `kind_name` (string, required): one of `calendar` / `email` / `chat` (override_classified case) OR a user-defined kind name (custom_kind case).
+- `kind_title` (string, required): markdown section title for the `[!example]+` callout. Title-cased mechanically from `kind_name` for custom kinds; fixed lookup for known kinds (Calendar / Email / Chat).
 - `served_by` (string, required): MCP namespace string (e.g., `45224a84-ce0e-459b-a016-909ab178ad8c` for M365, `github` for GitHub).
 - `what_matters` (string, required): free-text gather contract pulled from `user-preferences.md` `mcps.<kind>.what_matters`.
-- `question_set_answers` (object, optional): when kind is known (calendar/email/chat/finance), the captured answers for the kind's question set (e.g., `vip_senders`, `surface_event_kinds`). `null` for custom kinds.
+- `question_set_answers` (object, optional): when kind is known (calendar/email/chat), the captured answers for the kind's question set (e.g., `vip_senders`, `surface_event_kinds`). `null` for custom kinds.
 - `inner_circle_resolved` (list, optional): pre-resolved inner-circle allowlist from `composeInnerCircleAllowlist` (see `cowork/helpers/resolve-inner-circle-helper.js`). Each entry: `{ name, person_link, person_basename, aliases_by_type: {phone, email, name, handle}, matched_via, collision_warning }`. Empty list / absent → no allowlist injected; ambient soft-prompt still applies.
 - `engagement_id` (string, optional): forwarded into the dispatch contract so the per-emission resolver call inherits the orchestrator's engagement scope. Reserved field per v0.89.0 `cowork:resolve-person` contract; safe to omit.
 - `today` (string, required): `YYYY-MM-DD` from `cowork:date-context`.
@@ -162,7 +162,6 @@ If a tool result includes any of these, surface the URL inline in your `[!exampl
 | `email` | **MUST** | Message permalink per surfaced thread — `webLink` field on the message resource (Outlook/M365 Graph) |
 | `calendar` | **SHOULD** | Outlook web event link — `webLink` on the event resource (omit only when MCP genuinely lacks one) |
 | `chat` | **SHOULD** | Teams chat/channel message permalink — `webUrl` on the message resource (omit only when MCP genuinely lacks one) |
-| `finance` | **SHOULD** | Receipt/statement URL when exposed by the MCP |
 | any custom kind beyond the above | **SHOULD** | Any URL field present in tool results |
 
 **If a MUST-kind gather returns markdown with NO URLs:** that's a contract violation. Re-inspect tool results, verify whether the MCP genuinely exposes no URL field (the answer is almost always no for github/ado/email — they all expose URLs). Either include the URLs OR emit a brief explanatory line at the bottom of the callout: `> _Note: <served_by> did not expose URL fields on <tool_name> in this run._`
@@ -186,7 +185,7 @@ This URL requirement applies regardless of dispatch path. It binds the agent's g
 
 ## Hard rules
 
-When the orchestrator passes a non-empty `hard_rules[]` input, inject it into the dispatch contract (Step 3) under `**Hard rules (bind this callout's TITLE and BODY, apply verbatim):**` and obey every rule when composing the `[!example]+ <kind_title>` callout. These bind BOTH the callout title and its body — e.g. a "no emoji anywhere" rule means the title is `> [!example]+ Finance` (never `> [!example]+ 💰 Finance`) and no table cell or bullet carries a pictographic glyph. `hard_rules[]` is sourced from `prefs.effective_hard_rules` (see `cowork:read-user-preferences`). When empty or absent, compose normally.
+When the orchestrator passes a non-empty `hard_rules[]` input, inject it into the dispatch contract (Step 3) under `**Hard rules (bind this callout's TITLE and BODY, apply verbatim):**` and obey every rule when composing the `[!example]+ <kind_title>` callout. These bind BOTH the callout title and its body — e.g. a "no emoji anywhere" rule means the title is `> [!example]+ Calendar` (never `> [!example]+ 📅 Calendar`) and no table cell or bullet carries a pictographic glyph. `hard_rules[]` is sourced from `prefs.effective_hard_rules` (see `cowork:read-user-preferences`). When empty or absent, compose normally.
 
 **Precedence note (v0.90.0):** the FIRST hard rule in `hard_rules[]` is the canonical `wikilink_people` rule (PRECEDENCE OVERRIDE prefix in its body) injected at the top of `effective_hard_rules[]` by `read-user-preferences-helper.js`. It governs person-name format unconditionally: when a person is in the `Known people in scope` allowlist OR resolves via `cowork:resolve-person`, emit `**[[Basename]]**` even when a microscope's `## Output shape` instructs a different per-item format. The "microscope `## Output shape` directives ALWAYS WIN" phrasing in Step 3 above refers to STRUCTURAL layout choice (table vs bullet, which fields per item, grouping order) — it does NOT override hard rules. Microscope output shape governs LAYOUT; the wikilink hard rule governs IDENTIFIER format. Both can apply to the same callout simultaneously.
 

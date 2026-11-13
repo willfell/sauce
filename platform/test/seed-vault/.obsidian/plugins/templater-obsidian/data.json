@@ -24,14 +24,6 @@
       "template": "ranch/templates/Today Journal.md"
     },
     {
-      "folder": "spice/finance/budgets",
-      "template": "ranch/templates/Template, Budget.md"
-    },
-    {
-      "folder": "spice/finance/paychecks",
-      "template": "ranch/templates/Template, Paycheck.md"
-    },
-    {
       "folder": "spice/scratch",
       "template": "ranch/templates/Scratch.md"
     },

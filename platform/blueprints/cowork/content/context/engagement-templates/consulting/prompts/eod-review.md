@@ -28,7 +28,7 @@ Compact 2–3-line summary of tomorrow's client-related calendar.
 
 ## Late emails
 
-Late client emails from the engagement's `gmail_label`. Top 3–5. Each bullet: subject · sender · intent. Flag any from `stakeholders[]` or `ap_email`.
+Late client emails from the engagement's `gmail_label`. Top 3–5. Each bullet: subject · sender · intent. Flag any from `stakeholders[]`.
 
 ## Thread status changes
 
@@ -40,7 +40,7 @@ If you track billable hours per day, note today's total and any context for the 
 
 ---
 
-Tone: client-aware status report. Outputs from this EOD feed the weekly invoice-prep when `invoice_prep: include`.
+Tone: client-aware status report.
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar or email MCP unavailable, or any consulting-specific source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
 
