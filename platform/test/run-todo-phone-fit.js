@@ -39,6 +39,12 @@ ok('PF-BULK-BOTTOM on a phone the sticky bulk bar sits above the floating toolba
 const View = loadClass('blueprints/to-do/helpers/todo-daily-filter-view.js', 'ToDoDailyFilterView');
 ok('PF-BULK-CSS the bulk bar\'s buttons are compact on a phone',
   View.BULKBAR_CSS.includes('body.is-phone .sauce-todo-bulkbar button.sauce-todo-bulk-action { height: auto; min-height: 30px;'));
+ok('PF-STRIP-ROW on a phone the week arrows and calendar button sit above the seven cells, each control 36px',
+  View.STRIP_CSS.includes('body.is-phone .sauce-todo-strip-row { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "prev title next tools" "cells cells cells cells";')
+  && /\.sauce-todo-month-head button \{[^}]*min-width: 36px; min-height: 36px;/.test(View.STRIP_CSS));
+ok('PF-MONTH the month grid is seven shrinking columns of days at least 36px tall',
+  View.STRIP_CSS.includes('.sauce-todo-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));')
+  && /button\.sauce-todo-month-cell \{[^}]*min-height: 40px;/.test(View.STRIP_CSS));
 const viewSrc = read('blueprints/to-do/helpers/todo-daily-filter-view.js');
 ok('PF-BULK-HOST the bulk host reads its sticky offset from --sauce-bulk-bottom',
   viewSrc.includes('position:sticky; bottom:var(--sauce-bulk-bottom, 12px);'));

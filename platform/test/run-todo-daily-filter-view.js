@@ -802,8 +802,9 @@ process.exitCode = 1;
     const env = makeRenderHarness();
     const { View, root } = await mount(env);
     const styles = descendants(root).filter((n) => n.tagName === 'STYLE');
-    assert.strictEqual(styles.length, 1);
+    assert.strictEqual(styles.length, 2, 'the bulk bar sheet, then the strip and month sheet');
     assert.strictEqual(styles[0].textContent, View.BULKBAR_CSS);
+    assert.strictEqual(styles[1].textContent, View.STRIP_CSS);
   });
 
   await okAsync('RD-DV-SEL Select toggles selection mode; selection survives tab switches; exit clears it', async () => {
@@ -1536,6 +1537,325 @@ process.exitCode = 1;
       }));
       assert.strictEqual(root.children.length, 0);
     }
+  });
+
+  ok('RD-DV-WEEKOF weekStrip shows the week holding weekOf; the old three-argument call is this week', () => {
+    const View = loadClass({ customJS: { TaskEntity: TE } });
+    const next = View.weekStrip(PARSED, TODAY, TE, '2026-11-18');
+    assert.deepStrictEqual(next.map((c) => [c.date, c.count, c.isToday]), [
+      ['2026-11-16', 1, false], ['2026-11-17', 0, false], ['2026-11-18', 0, false], ['2026-11-19', 0, false],
+      ['2026-11-20', 0, false], ['2026-11-21', 0, false], ['2026-11-22', 0, false],
+    ], 'any day of a week shows Monday..Sunday of it, counting open tasks due');
+    assert.deepStrictEqual(View.weekStrip(PARSED, TODAY, TE, null), View.weekStrip(PARSED, TODAY),
+      'no week given is the week holding today');
+    assert.deepStrictEqual(View.weekStrip(PARSED, TODAY, TE, '2026-12-31').map((c) => c.label),
+      ['Mon 28', 'Tue 29', 'Wed 30', 'Thu 31', 'Fri 1', 'Sat 2', 'Sun 3'], 'a week crosses into the new year');
+    assert.deepStrictEqual(View.weekStrip(PARSED, TODAY, TE, 'nope'), []);
+    assert.strictEqual(View._weekOfLabel('2026-11-16'), 'Week of Nov 16');
+    assert.strictEqual(View._weekOfLabel('2027-01-04'), 'Week of Jan 4');
+  });
+
+  ok('RD-DV-MONTH-GRID monthGrid: Monday-first rows of seven, counts, in-month and today flags, edge months', () => {
+    const View = loadClass({ customJS: { TaskEntity: TE } });
+    const flat = (rows) => rows.reduce((all, row) => all.concat(row), []);
+    const nov = View.monthGrid(PARSED, '2026-11', TODAY);
+    assert.strictEqual(nov.length, 6, 'November 2026 starts on a Sunday and ends on a Monday: six rows');
+    assert(nov.every((row) => row.length === 7), 'every row is seven days');
+    assert.deepStrictEqual(nov[0][0], { date: '2026-10-26', day: 26, count: 0, inMonth: false, isToday: false },
+      'the grid starts on the Monday before the 1st');
+    assert.deepStrictEqual(nov[0][6], { date: '2026-11-01', day: 1, count: 0, inMonth: true, isToday: false },
+      'a Sunday 1st sits alone in the last column of the first row');
+    assert.deepStrictEqual(nov[5].map((c) => [c.date, c.inMonth]), [
+      ['2026-11-30', true], ['2026-12-01', false], ['2026-12-02', false], ['2026-12-03', false],
+      ['2026-12-04', false], ['2026-12-05', false], ['2026-12-06', false],
+    ], 'a Monday 30th opens a sixth row that runs into December');
+    const byDate = new Map(flat(nov).map((c) => [c.date, c]));
+    assert.deepStrictEqual([TODAY, '2026-11-05', '2026-11-13', '2026-11-16', '2026-11-10', '2026-09-01']
+      .map((d) => byDate.has(d) ? byDate.get(d).count : null), [2, 1, 1, 1, 0, null],
+    'open tasks due per day; done tasks and days off the grid do not count');
+    assert.deepStrictEqual(flat(nov).filter((c) => c.isToday).map((c) => c.date), [TODAY]);
+    assert.deepStrictEqual(View.monthGrid(PARSED, '2026-11-17', TODAY), nov, 'any date of the month works');
+
+    const june = View.monthGrid(PARSED, '2026-06', TODAY);
+    assert.strictEqual(june[0][0].date, '2026-06-01', 'a Monday 1st starts the first row');
+    assert.strictEqual(june[0][0].inMonth, true);
+    assert.strictEqual(june.length, 5);
+
+    const feb27 = View.monthGrid([], '2027-02', TODAY);
+    assert.strictEqual(feb27.length, 5, 'a 28-day February starting on a Monday is padded to five rows');
+    assert.deepStrictEqual(feb27[3][6].date, '2027-02-28');
+    assert(feb27[4].every((c) => !c.inMonth) && feb27[4][0].date === '2027-03-01', 'the padding row is the next week, dimmed');
+
+    const feb28 = flat(View.monthGrid([], '2028-02', TODAY));
+    assert.deepStrictEqual(feb28.filter((c) => c.inMonth).map((c) => c.day).slice(-2), [28, 29], 'a leap February has the 29th');
+    assert.strictEqual(feb28[0].date, '2028-01-31');
+    assert.strictEqual(feb28.find((c) => c.date === '2028-03-01').inMonth, false);
+
+    const dec = View.monthGrid([], '2026-12', TODAY);
+    assert.deepStrictEqual(dec[dec.length - 1].map((c) => c.date).slice(-3), ['2027-01-01', '2027-01-02', '2027-01-03'],
+      'December runs into the new year');
+    const jan = View.monthGrid([], '2027-01', TODAY);
+    assert.deepStrictEqual(jan[0].map((c) => c.date).slice(0, 4), ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31'],
+      'January starts in the old year');
+    assert.strictEqual(View._shiftMonth('2026-12', 1), '2027-01');
+    assert.strictEqual(View._shiftMonth('2027-01', -1), '2026-12');
+    assert.strictEqual(View._shiftMonth('2026-11', -23), '2024-12');
+    assert.strictEqual(View._monthTitle('2026-11'), 'November 2026');
+    assert.strictEqual(View._monthTitle('2027-01-15'), 'January 2027');
+
+    assert.deepStrictEqual(View.monthGrid(PARSED, 'garbage', TODAY), []);
+    assert.deepStrictEqual(View.monthGrid(PARSED, '2026-13', TODAY), []);
+    assert.deepStrictEqual(loadClass({}).monthGrid(PARSED, '2026-11', TODAY), [], 'cold load: no calendar');
+  });
+
+  const weekCells = (root) => byClass(root, 'sauce-todo-week-cell');
+  const weekDates = (root) => weekCells(root).map((c) => c.dataset.date);
+  const weekCounts = (root) => weekCells(root).map((c) => byClass(c, 'sauce-todo-week-count')[0].textContent);
+  const stripOf = (root) => byClass(root, 'sauce-todo-week-strip')[0];
+  const navOf = (root, cls) => byClass(root, cls)[0];
+  const monthOf = (root) => byClass(root, 'sauce-todo-month')[0];
+  const monthCell = (root, date) => byClass(root, 'sauce-todo-month-cell').find((c) => c.dataset.date === date);
+  const monthTitle = (root) => byClass(root, 'sauce-todo-month-title')[0].textContent;
+  const pillText = (root) => {
+    const pill = byClass(root, 'sauce-todo-day-pill')[0];
+    return pill ? byClass(pill, 'sauce-todo-day-pill-label')[0].textContent : null;
+  };
+  const hasClass = (node, cls) => String(node.className).split(/\s+/).includes(cls);
+
+  await okAsync('RD-DV-WEEK-NAV the arrows move the strip a week at a time, with that week\'s counts', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    const prev = navOf(root, 'is-prev');
+    assert(hasClass(prev, 'sauce-todo-week-nav') && prev.textContent === '‹' && prev.attributes['aria-label'] === 'Previous week');
+    const row = byClass(root, 'sauce-todo-strip-row')[0];
+    assert.deepStrictEqual(row.children.map((c) => String(c.className).split(/\s+/)[0]), [
+      'sauce-todo-week-nav', 'sauce-todo-week-title', 'sauce-todo-week-strip', 'sauce-todo-week-nav', 'sauce-todo-strip-tools',
+    ], '‹ and › sit either side of the cells, the tools at the end');
+    assert.strictEqual(stripOf(root).attributes['aria-label'], 'This week');
+    assert.strictEqual(byClass(root, 'sauce-todo-week-reset').length, 0, 'no This week button on this week');
+
+    await navOf(root, 'is-next').fire('click');
+    assert.deepStrictEqual(weekDates(root), ['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22']);
+    assert.deepStrictEqual(weekCounts(root), ['1', '0', '0', '0', '0', '0', '0'], 'counts are that week\'s open tasks due');
+    assert.strictEqual(stripOf(root).attributes['aria-label'], 'Week of Nov 16');
+    assert.strictEqual(byClass(root, 'sauce-todo-week-title')[0].textContent, 'Week of Nov 16');
+    assert(!weekCells(root).some((c) => hasClass(c, 'is-today')), 'today is not in that week');
+    assert.deepStrictEqual(listTitles(root), ['Today high', 'Today low'], 'moving the week never changes the list');
+
+    await navOf(root, 'is-prev').fire('click');
+    await navOf(root, 'is-prev').fire('click');
+    assert.strictEqual(weekDates(root)[0], '2026-11-02');
+    assert.deepStrictEqual(weekCounts(root), ['0', '0', '0', '1', '0', '0', '0'], 'Thu Nov 5 holds the overdue task');
+    assert.strictEqual(stripOf(root).attributes['aria-label'], 'Week of Nov 2');
+
+    const again = await mount(env, PAGES, View);
+    assert.strictEqual(weekDates(again.root)[0], '2026-11-02', 'the shown week survives a Dataview re-render');
+
+    const reset = byClass(again.root, 'sauce-todo-week-reset')[0];
+    assert(reset && reset.textContent === 'This week', 'another week shows a This week button');
+    await reset.fire('click');
+    assert.strictEqual(weekDates(again.root)[0], '2026-11-09');
+    assert.strictEqual(stripOf(again.root).attributes['aria-label'], 'This week');
+    assert.strictEqual(byClass(again.root, 'sauce-todo-week-reset').length, 0);
+    assert(hasClass(weekCells(again.root)[0], 'is-today'));
+
+    await navOf(again.root, 'is-next').fire('click');
+    await navOf(again.root, 'is-prev').fire('click');
+    assert.strictEqual(byClass(again.root, 'sauce-todo-week-reset').length, 0, 'arrowing back to this week is this week');
+  });
+
+  await okAsync('RD-DV-WEEK-NAV a day in another week can be picked, and a drop there reschedules', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    await navOf(root, 'is-next').fire('click');
+    await weekCells(root)[0].fire('click');
+    assert.deepStrictEqual(listTitles(root), ['Next week item']);
+    assert.strictEqual(pillText(root), 'Mon Nov 16');
+    assert(hasClass(weekCells(root)[0], 'is-selected'));
+    await byClass(root, 'sauce-todo-day-pill')[0].fire('click');
+    assert.strictEqual(weekDates(root)[0], '2026-11-16', 'leaving the day keeps the shown week');
+
+    const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    await findButton(controlsOf(root), 'All open').fire('click');
+    await byClass(lastRow(env, 'Backlog item').row, 'sauce-task-drag')[0].fire('dragstart', { dataTransfer: dt });
+    const wed = weekCells(root).find((c) => c.dataset.date === '2026-11-18');
+    let prevented = false;
+    await wed.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(prevented, 'a cell of another week takes the drag');
+    await wed.fire('drop', { dataTransfer: dt });
+    await flush();
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue, c.viewedDay]),
+      [['spice/tasks/Backlog item.md', '2026-11-18', TODAY]]);
+    assert.strictEqual(weekDates(root)[0], '2026-11-16', 'the strip stays on that week');
+    assert.deepStrictEqual(weekCounts(root), ['1', '0', '1', '0', '0', '0', '0']);
+  });
+
+  await okAsync('RD-DV-MONTH the calendar button toggles the month under the strip and is remembered per device', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    const toggle = () => byClass(root, 'sauce-todo-month-toggle')[0];
+    assert.strictEqual(monthOf(root), undefined, 'closed by default');
+    assert.strictEqual(toggle().attributes['aria-expanded'], 'false');
+    assert.strictEqual(toggle().attributes['aria-label'], 'Show month');
+    assert(/<svg[^>]*>.*<rect width="18" height="18" x="3" y="4" rx="2"\/><path d="M3 10h18"\/><\/svg>/.test(toggle().innerHTML),
+      'the lucide calendar icon');
+    assert(toggle().parentNode === byClass(root, 'sauce-todo-strip-tools')[0], 'at the end of the strip row');
+
+    await toggle().fire('click');
+    assert.strictEqual(env.storage.data.get('sauce-todo-month-open'), '1');
+    assert.strictEqual(View.MONTH_OPEN_KEY, 'sauce-todo-month-open');
+    const host = byClass(root, 'sauce-todo-above-tabs')[0];
+    assert.deepStrictEqual(host.children.map((c) => c.className), ['sauce-todo-strip-row', 'sauce-todo-month'],
+      'the month sits below the strip');
+    assert.strictEqual(toggle().attributes['aria-expanded'], 'true');
+    assert(hasClass(toggle(), 'is-active'));
+    assert.strictEqual(monthTitle(root), 'November 2026');
+    assert.deepStrictEqual(byClass(root, 'sauce-todo-month-dow').map((c) => c.textContent),
+      ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    assert.strictEqual(byClass(root, 'sauce-todo-month-cell').length, 42, 'six rows of seven');
+    const today = monthCell(root, TODAY);
+    assert(hasClass(today, 'is-today') && today.attributes['aria-current'] === 'date');
+    assert.strictEqual(byClass(today, 'sauce-todo-month-date')[0].textContent, '9');
+    assert.strictEqual(byClass(today, 'sauce-todo-month-count')[0].textContent, '2');
+    assert.strictEqual(today.attributes['aria-label'], 'Mon Nov 9: 2 open');
+    const empty = byClass(monthCell(root, '2026-11-10'), 'sauce-todo-month-count')[0];
+    assert(empty.textContent === '0' && hasClass(empty, 'is-zero'), 'a day with nothing due shows a faint 0');
+    assert(hasClass(monthCell(root, '2026-10-26'), 'is-outside') && !hasClass(monthCell(root, '2026-11-01'), 'is-outside'),
+      'days outside the month are dimmed');
+
+    const reopened = await mount(env);
+    assert(monthOf(reopened.root), 'a fresh load on this device opens the month again');
+
+    await toggle().fire('click');
+    assert.strictEqual(monthOf(root), undefined);
+    assert.strictEqual(env.storage.data.get('sauce-todo-month-open'), '0');
+    const again = await mount(env, PAGES, View);
+    assert.strictEqual(monthOf(again.root), undefined, 'closed survives a re-render');
+
+    const broken = makeRenderHarness();
+    broken.windowShim.localStorage = {
+      getItem() { throw new Error('denied'); },
+      setItem() { throw new Error('denied'); },
+    };
+    const b = await mount(broken);
+    assert.strictEqual(monthOf(b.root), undefined, 'unreadable storage: closed');
+    await byClass(b.root, 'sauce-todo-month-toggle')[0].fire('click');
+    assert(monthOf(b.root), 'unwritable storage still opens the month for this session');
+  });
+
+  await okAsync('RD-DV-MONTH-PICK a month day shows that day, moves the strip to its week and keeps the month', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    await byClass(root, 'sauce-todo-month-toggle')[0].fire('click');
+    await monthCell(root, '2026-11-16').fire('click');
+    assert.deepStrictEqual(listTitles(root), ['Next week item']);
+    assert.strictEqual(pillText(root), 'Mon Nov 16');
+    assert.strictEqual(weekDates(root)[0], '2026-11-16', 'the strip moves to the week holding the day');
+    assert(hasClass(weekCells(root)[0], 'is-selected'));
+    assert(monthOf(root), 'the month stays open');
+    assert(hasClass(monthCell(root, '2026-11-16'), 'is-selected'));
+    assert.strictEqual(monthCell(root, '2026-11-16').attributes['aria-pressed'], 'true');
+
+    await monthCell(root, '2026-12-03').fire('click');
+    assert.strictEqual(pillText(root), 'Thu Dec 3', 'a dimmed day is still clickable');
+    assert.strictEqual(monthTitle(root), 'November 2026', 'the month does not jump');
+    assert.strictEqual(weekDates(root)[0], '2026-11-30');
+
+    await monthCell(root, TODAY).fire('click');
+    assert.strictEqual(pillText(root), 'Mon Nov 9');
+    assert.strictEqual(byClass(root, 'sauce-todo-week-reset').length, 0, 'a day this week puts the strip on this week');
+
+    await monthCell(root, '2026-11-20').fire('click');
+    const again = await mount(env, PAGES, View);
+    assert.strictEqual(pillText(again.root), 'Fri Nov 20');
+    assert.strictEqual(weekDates(again.root)[0], '2026-11-16');
+    assert(monthOf(again.root) && hasClass(monthCell(again.root, '2026-11-20'), 'is-selected'), 'all of it survives a re-render');
+  });
+
+  await okAsync('RD-DV-MONTH-NAV ‹ › change the month, Today goes back, and the month follows a picked day', async () => {
+    const env = makeRenderHarness();
+    const { View, root } = await mount(env);
+    await byClass(root, 'sauce-todo-month-toggle')[0].fire('click');
+    const head = () => byClass(root, 'sauce-todo-month-head')[0];
+    assert.deepStrictEqual(head().children.map((c) => c.textContent), ['‹', 'November 2026', 'Today', '›']);
+    await byClass(head(), 'is-next')[0].fire('click');
+    assert.strictEqual(monthTitle(root), 'December 2026');
+    assert.strictEqual(byClass(root, 'sauce-todo-month-cell').length, 35, 'December 2026 is five rows');
+    assert.strictEqual(monthOf(root).attributes['aria-label'], 'December 2026');
+    await byClass(head(), 'is-next')[0].fire('click');
+    assert.strictEqual(monthTitle(root), 'January 2027', 'the year rolls over');
+    assert.strictEqual(weekDates(root)[0], '2026-11-09', 'changing the month leaves the strip alone');
+    for (let i = 0; i < 3; i += 1) await byClass(head(), 'is-prev')[0].fire('click');
+    assert.strictEqual(monthTitle(root), 'October 2026');
+
+    const again = await mount(env, PAGES, View);
+    assert.strictEqual(monthTitle(again.root), 'October 2026', 'the shown month survives a re-render');
+
+    await navOf(again.root, 'sauce-todo-week-nav').fire('click');
+    await findButton(byClass(again.root, 'sauce-todo-month-head')[0], 'Today').fire('click');
+    assert.strictEqual(monthTitle(again.root), 'November 2026');
+    assert.strictEqual(weekDates(again.root)[0], '2026-11-09', 'Today also brings the strip back to this week');
+
+    const fresh = makeRenderHarness();
+    fresh.storage.setItem('sauce-todo-month-open', '1');
+    const f = await mount(fresh);
+    for (let i = 0; i < 3; i += 1) await byClass(f.root, 'sauce-todo-week-nav')[1].fire('click');
+    await weekCells(f.root).find((c) => c.dataset.date === '2026-12-03').fire('click');
+    assert.strictEqual(monthTitle(f.root), 'December 2026', 'with no month chosen, the month is the picked day\'s');
+  });
+
+  await okAsync('RD-DV-MONTH-DROP desktop: a month day takes a dropped task like a strip day', async () => {
+    const env = makeRenderHarness();
+    const { root } = await mount(env);
+    await byClass(root, 'sauce-todo-month-toggle')[0].fire('click');
+    const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    const cell = monthCell(root, '2026-11-25');
+    let prevented = false;
+    await cell.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(!prevented, 'no drag in progress: the day refuses');
+    await byClass(lastRow(env, 'Today high').row, 'sauce-task-drag')[0].fire('dragstart', { dataTransfer: dt });
+    await cell.fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(prevented, 'the day takes the drag');
+    assert.strictEqual(cell.style.background, 'var(--background-modifier-hover)', 'the same hover feedback as the strip');
+    await cell.fire('dragleave');
+    assert.strictEqual(cell.style.background, '', 'leaving puts the sheet\'s own background back');
+    await cell.fire('drop', { dataTransfer: dt });
+    await flush();
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue, c.viewedDay]),
+      [['spice/tasks/Today high.md', '2026-11-25', TODAY]], 'the strip\'s reschedule path');
+    assert.strictEqual(byClass(monthCell(root, '2026-11-25'), 'sauce-todo-month-count')[0].textContent, '1', 'the count repaints');
+    assert.strictEqual(byClass(monthCell(root, TODAY), 'sauce-todo-month-count')[0].textContent, '1');
+    assert(monthOf(root), 'the month stays open');
+
+    const mobile = makeRenderHarness();
+    mobile.appStub.isMobile = true;
+    mobile.storage.setItem('sauce-todo-month-open', '1');
+    const m = await mount(mobile);
+    const cells = byClass(m.root, 'sauce-todo-month-cell');
+    assert.strictEqual(cells.length, 42);
+    for (const c of cells) {
+      assert(!c._listeners.dragover && !c._listeners.drop, 'no drop targets on a phone');
+      assert.strictEqual(typeof c._listeners.click, 'function', 'month days stay clickable');
+    }
+    for (const cls of ['sauce-todo-week-nav', 'sauce-todo-month-toggle', 'sauce-todo-month-nav', 'sauce-todo-month-today']) {
+      for (const b of byClass(m.root, cls)) assert.strictEqual(typeof b._listeners.click, 'function', `${cls} works by tap`);
+    }
+  });
+
+  ok('RD-DV-MONTH-CSS the strip row and month fit a 360px phone with 36px targets', () => {
+    const css = loadClass({}).STRIP_CSS;
+    assert(/\.sauce-todo-strip-row \{ display: grid; grid-template-columns: auto minmax\(0, 1fr\) auto auto; grid-template-areas: "prev cells next tools";/.test(css),
+      'desktop: ‹ cells › tools on one line');
+    const phone = /body\.is-phone \.sauce-todo-strip-row \{[^}]*grid-template-areas: "prev title next tools" "cells cells cells cells";/;
+    assert(phone.test(css), 'phone: the controls on a line above, the cells full width');
+    assert(/@media \(max-width: 480px\) \{[^@]*grid-template-areas: "prev title next tools" "cells cells cells cells";/.test(css),
+      'a narrow pane gets the same layout');
+    assert(/button\.sauce-todo-week-nav, [^{]*\.sauce-todo-month-head button \{[^}]*min-width: 36px; min-height: 36px;/.test(css),
+      'every strip and month control is at least 36px');
+    assert(/button\.sauce-todo-month-cell \{[^}]*min-width: 0; min-height: 40px;/.test(css), 'month days are at least 36px tall');
+    assert(/\.sauce-todo-month-grid \{ display: grid; grid-template-columns: repeat\(7, minmax\(0, 1fr\)\);/.test(css),
+      'seven columns that shrink, so the grid never scrolls sideways');
+    assert(!/:hover \{[^}]*display/.test(css), 'nothing is shown only on hover');
   });
 
   console.log(`\nrun-todo-daily-filter-view: ${passed} passed, ${failed} failed`);
