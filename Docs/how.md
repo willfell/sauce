@@ -266,6 +266,13 @@ The wizard handles config + subscription generation on first run, then plugin fe
 4. **Vendors the v0.1.2 thin-stub** at `ranch/templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
 5. **Fetches the upstream community-plugins index** (`raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json`) for id → repo lookup. Cached for the run.
 6. **Per plugin in (foundational ∪ subscribed `external_plugins[]`):** skip-if-present unless force-redownload selected. Otherwise HTTPS GET `manifest.json` + `main.js` + (optional) `styles.css` from `https://github.com/<repo>/releases/latest/download/<asset>` (follows 302 redirects to GitHub's CDN). Vendors into `<vault>/.obsidian/plugins/<id>/`.
+
+**When the network is down** (bootstrap and the installer's `applyExternalPluginInstall` behave the same way; code in `platform/bootstrap-lib/`):
+
+- Every request has a 30 s no-response timeout. A transient failure (DNS, refused/reset connection, timeout, 5xx, 429) is retried twice, after 0.5 s and 2 s. A 404 or other 4xx is final at once.
+- Each successful index fetch and plugin download is kept as a last-known-good copy in `$SAUCE_NET_CACHE_DIR`, default `<os.tmpdir()>/sauce-net-cache/`, never in a vault. When retries are exhausted on a transient failure, that copy is used and the install history records it (`action: "index_from_cache"`, or `source: "cache"` on the `fetched` entry). A non-transient answer is never covered up by a cached copy.
+- With no cached index, a manifest whose `external_plugins[]` are all already installed records an `info` entry (`action: "index_unreachable_all_installed"`) and enables them as usual, since the index would only have been used to skip them.
+- Otherwise the failure stays an `error` entry naming the missing plugin ids, as before.
 7. **Merges plugin ids into `community-plugins.json`** (additive; sorted; deduped; `.sauce-backup` of prior).
 8. **Invokes `runInstall(vaultPath)`** — the existing Node installer — which materializes themes, appearance, style-settings, blueprints, nav-buttons, etc.
 9. **Prints a condensed summary** (Notice lines + Verdict + section counts; ~30-80 lines). Full output tee'd to `ranch/bootstrap-last-install.log` for inspection.

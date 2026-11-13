@@ -209,13 +209,57 @@ async function removeTreeWithRetry(target) {
   throw lastError;
 }
 
-// Start an isolated headless Chrome and wait for its DevTools port.
+// Open a DevTools session on a blank page of the browser listening on `port`.
+//
+// The target is created at about:blank, not at the fixture URL. A target created
+// at the URL starts loading the fixture at once, at Chrome's default window size,
+// while Page.enable, Runtime.enable and the viewport override are still in flight,
+// and Page.navigate then loads it a second time. Which of those two renders a
+// native control was first painted in decided how big a <select>'s chevron came
+// out, so two independent captures of one fixture disagreed by that chevron on
+// roughly a third of launches. Every command up to Page.navigate now reaches an
+// idle blank page, and the fixture renders once, at the requested viewport.
+async function openSession(port, tail) {
+  const target = await deadline(createCdpTarget(port, 'about:blank'),
+    CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${tail()})`);
+  const socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
+    CHROME_READY_TIMEOUT_MS, `Chrome accepts the DevTools WebSocket (${tail()})`);
+  let nextId = 0;
+  const pending = new Map();
+  socket.onMessage((data) => {
+    const message = JSON.parse(data);
+    if (!message.id || !pending.has(message.id)) return;
+    const { resolve, reject } = pending.get(message.id);
+    pending.delete(message.id);
+    if (message.error) reject(new Error(message.error.message));
+    else resolve(message.result || {});
+  });
+  const send = (method, params = {}) => deadline(new Promise((resolve, reject) => {
+    const id = ++nextId;
+    pending.set(id, { resolve, reject });
+    socket.send(JSON.stringify({ id, method, params }));
+  }), CHROME_READY_TIMEOUT_MS, `CDP ${method}`);
+  try {
+    await send('Page.enable');
+    await send('Runtime.enable');
+  } catch (error) {
+    socket.close();
+    throw error;
+  }
+  return { socket, send };
+}
+
+// Start an isolated headless Chrome, wait for its DevTools port, and open a
+// session on a blank page.
 //
 // A browser that never comes up is a property of the machine, not of the page
 // under test, and it has failed CI both ways: killed before it published the
-// port, and alive but silent for the whole budget. Neither says anything about
-// the fixture, so one relaunch is allowed before the harness fails. The first
-// failure is written to stderr, so a run that needed the relaunch still shows it.
+// port, and alive but silent for the whole budget. A browser that publishes its
+// port and then cannot create a target or answer Page.enable / Runtime.enable on
+// about:blank is the same failure one step later: the fixture has not been
+// loaded yet, so it says nothing about the fixture. Either way one relaunch is
+// allowed before the harness fails, and no more. The first failure is written to
+// stderr, so a run that needed the relaunch still shows it.
 const CHROME_LAUNCH_ATTEMPTS = 2;
 
 async function launchChrome(executable, options = {}) {
@@ -223,6 +267,9 @@ async function launchChrome(executable, options = {}) {
   let failure = '';
   for (let attempt = 1; attempt <= CHROME_LAUNCH_ATTEMPTS; attempt++) {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sauce-cdp-'));
+    // A caller that needs profile state before Chrome starts (preferences that
+    // must be off from the first frame) writes it here, on every attempt.
+    if (options.prepareProfile) options.prepareProfile(profile);
     const chrome = childProcess.spawn(executable, [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--hide-scrollbars',
       '--allow-file-access-from-files', '--force-prefers-reduced-motion',
@@ -254,12 +301,18 @@ async function launchChrome(executable, options = {}) {
       if (chromeExit) break;
       await wait(50);
     }
-    if (port) return { chrome, profile, port, tail };
-
-    failure = chromeExit
-      ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
-        + `before publishing its DevTools endpoint: ${tail()}`
-      : `Chrome publishes its DevTools endpoint within ${readyTimeoutMs}ms: ${tail()}`;
+    if (port) {
+      try {
+        return { chrome, profile, tail, ...(await openSession(port, tail)) };
+      } catch (error) {
+        failure = `Chrome opens a DevTools session on about:blank: ${error && error.message}`;
+      }
+    } else {
+      failure = chromeExit
+        ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
+          + `before publishing its DevTools endpoint: ${tail()}`
+        : `Chrome publishes its DevTools endpoint within ${readyTimeoutMs}ms: ${tail()}`;
+    }
     await stopChild(chrome);
     await removeTreeWithRetry(profile);
     if (attempt < CHROME_LAUNCH_ATTEMPTS) {
@@ -279,34 +332,9 @@ async function launchChrome(executable, options = {}) {
 // documentFits), so callers read it exactly as they read a parsed <meta> tag.
 async function captureViewport(executable, url, width, height, options = {}) {
   const markerSelector = options.markerSelector || '#fixture-results';
-  const { chrome, profile, port, tail } = await launchChrome(executable, options);
+  const { chrome, profile, tail, socket, send } = await launchChrome(executable, options);
 
-  let socket;
-  let sendCommand;
   try {
-    const target = await deadline(createCdpTarget(port, url),
-      CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${tail()})`);
-    socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
-      CHROME_READY_TIMEOUT_MS, `Chrome accepts the DevTools WebSocket (${tail()})`);
-    let nextId = 0;
-    const pending = new Map();
-    socket.onMessage((data) => {
-      const message = JSON.parse(data);
-      if (!message.id || !pending.has(message.id)) return;
-      const { resolve, reject } = pending.get(message.id);
-      pending.delete(message.id);
-      if (message.error) reject(new Error(message.error.message));
-      else resolve(message.result || {});
-    });
-    const send = (method, params = {}) => deadline(new Promise((resolve, reject) => {
-      const id = ++nextId;
-      pending.set(id, { resolve, reject });
-      socket.send(JSON.stringify({ id, method, params }));
-    }), CHROME_READY_TIMEOUT_MS, `CDP ${method}`);
-    sendCommand = send;
-
-    await send('Page.enable');
-    await send('Runtime.enable');
     await send('Emulation.setDeviceMetricsOverride', {
       width, height, deviceScaleFactor: 1, mobile: false,
     });
@@ -332,14 +360,12 @@ async function captureViewport(executable, url, width, height, options = {}) {
     })).data, 'base64');
     return { marker, screenshot };
   } finally {
-    if (sendCommand) {
-      const gracefulClose = sendCommand('Browser.close').catch(() => {});
-      await Promise.race([gracefulClose, wait(1000)]);
-    }
-    if (socket) socket.close();
+    const gracefulClose = send('Browser.close').catch(() => {});
+    await Promise.race([gracefulClose, wait(1000)]);
+    socket.close();
     await stopChild(chrome);
     await removeTreeWithRetry(profile);
   }
 }
 
-module.exports = { captureViewport, chromeExecutable, CHROME_READY_TIMEOUT_MS, CHROME_LAUNCH_ATTEMPTS };
+module.exports = { captureViewport, launchChrome, chromeExecutable, CHROME_READY_TIMEOUT_MS, CHROME_LAUNCH_ATTEMPTS };

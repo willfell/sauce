@@ -18312,20 +18312,6 @@ async function applyExternalPluginInstall(tp, manifest, vaultPath, workshopPath,
     return;
   }
 
-  let index;
-  try {
-    index = await indexMod.fetchIndex();
-  } catch (e) {
-    new Notice(`applyExternalPluginInstall: cannot fetch community-plugins index (${e.message}); skipping for ${manifest.name}`, 8000);
-    if (history) history.push({
-      event: "error", step: "external_plugin_install", name: manifest.name,
-      message: `index fetch failed: ${e.message}`,
-      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
-      attempted_at: new Date().toISOString(),
-    });
-    return;
-  }
-
   const fetched = [], skipped = [], failed = [];
 
   const noEnable = new Set(
@@ -18333,6 +18319,57 @@ async function applyExternalPluginInstall(tp, manifest, vaultPath, workshopPath,
       .filter((d) => d && d.auto_enable === false)
       .map((d) => d.id)
   );
+
+  // loadIndex retries transient failures and falls back to the last copy
+  // fetched on this machine; fetchIndex is the older bootstrap-lib surface.
+  let index;
+  try {
+    const loaded = typeof indexMod.loadIndex === "function"
+      ? await indexMod.loadIndex()
+      : { index: await indexMod.fetchIndex(), source: "network" };
+    index = loaded.index;
+    if (loaded.source === "cache") {
+      new Notice(`applyExternalPluginInstall: community-plugins index unreachable; using the copy cached ${loaded.cachedAt} for ${manifest.name}`, 8000);
+      if (history) history.push({
+        event: "info", step: "external_plugin_install", name: manifest.name,
+        action: "index_from_cache", cached_at: loaded.cachedAt,
+        message: `index fetch failed (${loaded.networkError}); using the copy cached ${loaded.cachedAt}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    // Every declared plugin already installed means there is nothing the
+    // index is needed for: the run with a working network would skip each
+    // one and only enable it, which is exactly what happens here.
+    const fsMod = require("fs");
+    const declared = manifest.external_plugins.filter((d) => d && typeof d.id === "string").map((d) => d.id);
+    const missing = vaultPath
+      ? declared.filter((id) => !fsMod.existsSync(path.join(vaultPath, ".obsidian", "plugins", id, "manifest.json")))
+      : declared;
+    if (missing.length === 0) {
+      if (history) history.push({
+        event: "info", step: "external_plugin_install", name: manifest.name,
+        action: "index_unreachable_all_installed", plugin_ids: declared,
+        message: `index fetch failed (${e.message}); every declared plugin is already installed, so none needed it`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+      const enableIds = declared.filter((id) => !noEnable.has(id));
+      if (enableIds.length > 0) {
+        await mergeMod.mergeCommunityPlugins({ vaultPath, addIds: enableIds });
+      }
+      return;
+    }
+    new Notice(`applyExternalPluginInstall: cannot fetch community-plugins index (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) history.push({
+      event: "error", step: "external_plugin_install", name: manifest.name,
+      message: `index fetch failed: ${e.message}`, missing_plugin_ids: missing,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+    return;
+  }
 
   for (const dep of manifest.external_plugins) {
     if (!dep || typeof dep.id !== "string") continue;
@@ -18354,10 +18391,14 @@ async function applyExternalPluginInstall(tp, manifest, vaultPath, workshopPath,
         skipped.push({ id });
       } else if (r.status === "fetched") {
         fetched.push({ id });
-        new Notice(`applyExternalPluginInstall: fetched ${id} from ${entry.repo}`, 6000);
+        const fromCache = r.source === "cache";
+        new Notice(fromCache
+          ? `applyExternalPluginInstall: ${entry.repo} unreachable; installed ${id} from the copy cached ${r.cachedAt}`
+          : `applyExternalPluginInstall: fetched ${id} from ${entry.repo}`, 6000);
         if (history) history.push({
           event: "fetched", step: "external_plugin_install", name: manifest.name,
           plugin_id: id, repo: entry.repo,
+          ...(fromCache ? { source: "cache", cached_at: r.cachedAt, message: `download failed (${r.networkError}); installed the cached copy` } : {}),
           git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });

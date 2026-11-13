@@ -141,9 +141,29 @@ async function phaseFetchPlugins(opts) {
     for (const id of (injectExtraPluginIds || [])) {
         if (typeof id === "string") pluginIds.add(id);
     }
-    const index = await indexMod.fetchIndex();
     const fetched = [], skipped = [], failed = [];
+    let index;
+    try {
+        const loaded = await indexMod.loadIndex();
+        index = loaded.index;
+        if (loaded.source === "cache") {
+            console.warn(`bootstrap: ${loaded.networkError}; using the copy cached ${loaded.cachedAt}`);
+        }
+    } catch (e) {
+        // With every plugin already installed and none forced, the index has
+        // nothing to resolve: each id would be skipped and enabled anyway.
+        const forced = new Set(forceReinstall || []);
+        const allPresent = [...pluginIds].every((id) => !forced.has(id)
+            && fs.existsSync(path.join(vaultPath, ".obsidian", "plugins", id, "manifest.json")));
+        if (!allPresent) throw e;
+        console.warn(`bootstrap: ${e.message}; every plugin is already installed, continuing without it`);
+        index = null;
+    }
     for (const id of pluginIds) {
+        if (index === null) {
+            skipped.push({ id });
+            continue;
+        }
         const entry = index[id];
         if (!entry) {
             failed.push({ id, reason: `plugin id '${id}' not found in obsidian-releases community-plugins index` });

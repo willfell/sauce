@@ -1664,10 +1664,12 @@ process.stdout.write = function(chunk, encoding, callback) {
   const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
   const padding = Buffer.alloc(Number(process.env.SYNC2D_STDOUT_PADDING), 0x20);
   const queued = write.call(this, Buffer.concat([padding, bytes]), callback);
-  fs.writeFileSync(process.env.SYNC2D_STDOUT_QUEUED, JSON.stringify({
+  const signal = process.env.SYNC2D_STDOUT_QUEUED;
+  fs.writeFileSync(signal + '.tmp', JSON.stringify({
     backpressured: !queued, receiptBytes: bytes.length,
     receiptSha: crypto.createHash('sha256').update(bytes).digest('hex'),
   }));
+  fs.renameSync(signal + '.tmp', signal);
   return queued;
 };
 `);

@@ -5,12 +5,11 @@ const assert = require("assert");
 const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
-const http = require("http");
-const net = require("net");
 const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const { pathToFileURL } = require("url");
+const { launchChrome } = require("./chrome-cdp");
 
 const ROOT = path.resolve(__dirname, "../..");
 const PROJECT = path.join(ROOT, "platform/blueprints/project/helpers");
@@ -228,8 +227,9 @@ function staticContract() {
     const sources = Object.fromEntries(Object.keys(FILES).map((name) => [name, source(name)]));
     const combined = Object.values(sources).join("\n");
     const harnessSource = fs.readFileSync(__filename, "utf8");
-    assert(!/\bnew\s+WebSocket\s*\(/.test(harnessSource), "exact viewport proof does not require the Node 21+ global WebSocket API");
-    assert(harnessSource.includes("net.createConnection") && harnessSource.includes("clientFrame"), "exact viewport proof uses only the supported Node built-in CDP transport");
+    const cdpSource = fs.readFileSync(path.join(__dirname, "chrome-cdp.js"), "utf8");
+    assert(!/\bnew\s+WebSocket\s*\(/.test(harnessSource + cdpSource), "exact viewport proof does not require the Node 21+ global WebSocket API");
+    assert(harnessSource.includes("launchChrome(executable") && cdpSource.includes("net.createConnection") && cdpSource.includes("clientFrame"), "exact viewport proof uses only the supported Node built-in CDP transport, through chrome-cdp.js");
     assert(!/_mobilize|_styleLeafBtn/.test(combined), "all four duplicated responsive sizing helpers are deleted");
     for (const name of ["nav", "links", "leaf"]) {
         assert(sources[name].includes("sauce-action-row"), `${name} adopts sauce-action-row`);
@@ -562,19 +562,6 @@ function pngDimensions(buffer) {
 }
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Every CDP operation needs its own deadline. The readiness polls are bounded, but a
-// request/response against a browser that has stopped answering is not: an un-raced
-// await blocks forever and only the runner's 15-minute per-step kill ends it. Both
-// concurrent suites wedged here on 2026-09-01, in this file's visual section.
-function deadline(promise, milliseconds, label) {
-    let timer;
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds}ms`)), milliseconds);
-        }),
-    ]).finally(() => clearTimeout(timer));
-}
 async function stopChild(child) {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
@@ -604,185 +591,28 @@ async function removeTreeWithRetry(target) {
     }
     throw lastError;
 }
-function createCdpTarget(port, url) {
-    if (!/^\d+$/.test(String(port)) || Number(port) <= 0) {
-        return Promise.reject(new Error(`createCdpTarget requires a positive integer port, got: ${JSON.stringify(port)}`));
-    }
-    return new Promise((resolve, reject) => {
-        const request = http.request({
-            hostname: "127.0.0.1", port, method: "PUT",
-            path: `/json/new?${encodeURIComponent(url)}`,
-        }, (response) => {
-            const chunks = [];
-            response.on("data", (chunk) => chunks.push(chunk));
-            response.on("end", () => {
-                const body = Buffer.concat(chunks).toString("utf8");
-                if (response.statusCode < 200 || response.statusCode >= 300) {
-                    reject(new Error(`Chrome creates a DevTools target (${response.statusCode}): ${body}`));
-                    return;
-                }
-                try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
-            });
-        });
-        request.on("error", reject);
-        request.end();
-    });
-}
-function clientFrame(text, opcode = 1) {
-    const payload = Buffer.from(text);
-    const mask = crypto.randomBytes(4);
-    let header;
-    if (payload.length < 126) {
-        header = Buffer.from([0x80 | opcode, 0x80 | payload.length]);
-    } else if (payload.length <= 0xffff) {
-        header = Buffer.alloc(4); header[0] = 0x80 | opcode; header[1] = 0x80 | 126; header.writeUInt16BE(payload.length, 2);
-    } else {
-        header = Buffer.alloc(10); header[0] = 0x80 | opcode; header[1] = 0x80 | 127; header.writeBigUInt64BE(BigInt(payload.length), 2);
-    }
-    const masked = Buffer.alloc(payload.length);
-    for (let index = 0; index < payload.length; index += 1) masked[index] = payload[index] ^ mask[index % 4];
-    return Buffer.concat([header, mask, masked]);
-}
-function connectCdpSocket(endpoint) {
-    return new Promise((resolve, reject) => {
-        const parsed = new URL(endpoint);
-        const key = crypto.randomBytes(16).toString("base64");
-        const expectedAccept = crypto.createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
-        const stream = net.createConnection({ host: parsed.hostname, port: Number(parsed.port) });
-        let buffer = Buffer.alloc(0);
-        let handshaken = false;
-        let fragmented = [];
-        const messageListeners = new Set();
-        const client = {
-            send(text) { stream.write(clientFrame(text)); },
-            onMessage(listener) { messageListeners.add(listener); },
-            close() { if (!stream.destroyed) { stream.write(clientFrame("", 8)); stream.end(); } },
-        };
-        const consumeFrames = () => {
-            while (buffer.length >= 2) {
-                const first = buffer[0]; const second = buffer[1];
-                const fin = !!(first & 0x80); const opcode = first & 0x0f; const masked = !!(second & 0x80);
-                let length = second & 0x7f; let offset = 2;
-                if (length === 126) { if (buffer.length < 4) return; length = buffer.readUInt16BE(2); offset = 4; }
-                else if (length === 127) { if (buffer.length < 10) return; length = Number(buffer.readBigUInt64BE(2)); offset = 10; }
-                const maskOffset = masked ? 4 : 0;
-                if (buffer.length < offset + maskOffset + length) return;
-                const mask = masked ? buffer.subarray(offset, offset + 4) : null;
-                const payload = Buffer.from(buffer.subarray(offset + maskOffset, offset + maskOffset + length));
-                buffer = buffer.subarray(offset + maskOffset + length);
-                if (mask) for (let index = 0; index < payload.length; index += 1) payload[index] ^= mask[index % 4];
-                if (opcode === 8) { stream.end(); continue; }
-                if (opcode === 9) { stream.write(clientFrame(payload, 10)); continue; }
-                if (opcode === 1 || opcode === 0) fragmented.push(payload);
-                if (fin && (opcode === 1 || opcode === 0)) {
-                    const message = Buffer.concat(fragmented).toString("utf8"); fragmented = [];
-                    for (const listener of messageListeners) listener(message);
-                }
-            }
-        };
-        stream.on("connect", () => {
-            stream.write([
-                `GET ${parsed.pathname}${parsed.search} HTTP/1.1`,
-                `Host: ${parsed.host}`, "Upgrade: websocket", "Connection: Upgrade",
-                `Sec-WebSocket-Key: ${key}`, "Sec-WebSocket-Version: 13", "", "",
-            ].join("\r\n"));
-        });
-        stream.on("data", (chunk) => {
-            buffer = Buffer.concat([buffer, chunk]);
-            if (!handshaken) {
-                const boundary = buffer.indexOf("\r\n\r\n");
-                if (boundary < 0) return;
-                const header = buffer.subarray(0, boundary).toString("utf8");
-                buffer = buffer.subarray(boundary + 4);
-                if (!/^HTTP\/1\.1 101\b/m.test(header) || !header.toLowerCase().includes(`sec-websocket-accept: ${expectedAccept.toLowerCase()}`)) {
-                    reject(new Error(`Chrome DevTools WebSocket handshake failed: ${header}`)); stream.destroy(); return;
-                }
-                handshaken = true; resolve(client);
-            }
-            consumeFrames();
-        });
-        stream.on("error", reject);
-    });
-}
 async function exactViewportCapture(executable, url, width, height) {
-    const profile = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-r7a2-cdp-"));
-    // Disable spellchecking before Chrome ever starts. The spellchecker runs
-    // ASYNCHRONOUSLY against the modal's auto-focused URL input, so whether its
-    // red squiggle has painted by capture time is a scheduling race — the
-    // light/1024 CI frames differed by exactly a 2px dotted red band under
-    // "https" (rows 429-430), present in one launch and absent in the other.
-    // The linux pool's Chromium+hunspell paints it; macOS headless never does,
-    // which is why this only ever failed there. No settle loop can catch a
-    // marker that appears once, later; it has to be off at the source.
-    fs.mkdirSync(path.join(profile, "Default"), { recursive: true });
-    fs.writeFileSync(path.join(profile, "Default", "Preferences"),
-        JSON.stringify({ browser: { enable_spellchecking: false }, spellcheck: { dictionaries: [], use_spelling_service: false } }));
-    const chrome = childProcess.spawn(executable, [
-        "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
-        "--allow-file-access-from-files", "--force-prefers-reduced-motion",
-        "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
-    ], { stdio: ["ignore", "ignore", "pipe"] });
-    // Keep Chrome's stderr and its exit. Discarding them (stdio: "ignore") is why a
-    // browser that dies on startup and a browser that is merely slow produced the
-    // same bare assertion, with nothing to diagnose it from.
-    let chromeStderr = "";
-    chrome.stderr.on("data", (chunk) => { chromeStderr += chunk; });
-    let chromeExit = null;
-    chrome.on("exit", (code, signal) => { chromeExit = { code, signal }; });
-    const chromeTail = () => chromeStderr.trim().split(/\r?\n/).filter(Boolean).slice(-5).join(" | ")
-        || "(no stderr)";
-    let socket;
-    let sendCommand;
+    // The launch, the bounded relaunch of a browser that never comes up, and the
+    // DevTools session on about:blank are chrome-cdp.js's, shared with the other
+    // visual harnesses. This file's own copy had no relaunch, so a browser that
+    // stayed silent at startup on a busy macOS runner failed the whole step
+    // ("Chrome publishes its DevTools endpoint within 60000ms: (no stderr)").
+    const { chrome, profile, tail: chromeTail, socket, send } = await launchChrome(executable, {
+        // Disable spellchecking before Chrome ever starts. The spellchecker runs
+        // ASYNCHRONOUSLY against the modal's auto-focused URL input, so whether its
+        // red squiggle has painted by capture time is a scheduling race — the
+        // light/1024 CI frames differed by exactly a 2px dotted red band under
+        // "https" (rows 429-430), present in one launch and absent in the other.
+        // The linux pool's Chromium+hunspell paints it; macOS headless never does,
+        // which is why this only ever failed there. No settle loop can catch a
+        // marker that appears once, later; it has to be off at the source.
+        prepareProfile(dir) {
+            fs.mkdirSync(path.join(dir, "Default"), { recursive: true });
+            fs.writeFileSync(path.join(dir, "Default", "Preferences"),
+                JSON.stringify({ browser: { enable_spellchecking: false }, spellcheck: { dictionaries: [], use_spelling_service: false } }));
+        },
+    });
     try {
-        const portFile = path.join(profile, "DevToolsActivePort");
-        // Chrome creates the file and writes its contents non-atomically: there is a
-        // window where the file exists but is still empty. Poll for valid content, not
-        // mere existence, or a read in that window yields an empty port string (which
-        // Node resolves to port 80, talking to whatever else is listening there).
-        let port = "";
-        // Bound this by wall clock, not by a poll count. A fixed 200 x 50ms budget is
-        // ten seconds of Chrome startup, which is ample on an idle machine and not
-        // ample when the preflight suite is running fourteen steps wide: Chrome loses
-        // the CPU race, the poll count runs out, and the assertion below reports a
-        // browser that never started when it was merely slow. That is a flake that
-        // only ever reproduces under load, so it always passes when re-run alone.
-        const portDeadline = Date.now() + CHROME_READY_TIMEOUT_MS;
-        while (Date.now() < portDeadline) {
-            if (fs.existsSync(portFile)) {
-                const first = fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0].trim();
-                if (/^\d+$/.test(first) && Number(first) > 0) { port = first; break; }
-            }
-            // A dead browser will never publish the port. Stop waiting for it and say
-            // so, rather than spending the whole deadline and blaming the clock.
-            if (chromeExit) break;
-            await wait(50);
-        }
-        assert(/^\d+$/.test(port) && Number(port) > 0, chromeExit
-            ? `headless Chrome exited (code=${chromeExit.code}, signal=${chromeExit.signal}) `
-                + `before publishing its DevTools endpoint: ${chromeTail()}`
-            : `Chrome publishes its DevTools endpoint within ${CHROME_READY_TIMEOUT_MS}ms: ${chromeTail()}`);
-        const target = await deadline(createCdpTarget(port, url),
-            CHROME_READY_TIMEOUT_MS, `Chrome creates a DevTools target (${chromeTail()})`);
-        socket = await deadline(connectCdpSocket(target.webSocketDebuggerUrl),
-            CHROME_READY_TIMEOUT_MS, `Chrome accepts the DevTools WebSocket (${chromeTail()})`);
-        let nextId = 0;
-        const pending = new Map();
-        socket.onMessage((data) => {
-            const message = JSON.parse(data);
-            if (!message.id || !pending.has(message.id)) return;
-            const { resolve, reject } = pending.get(message.id);
-            pending.delete(message.id);
-            if (message.error) reject(new Error(message.error.message));
-            else resolve(message.result || {});
-        });
-        const send = (method, params = {}) => deadline(new Promise((resolve, reject) => {
-            const id = ++nextId;
-            pending.set(id, { resolve, reject });
-            socket.send(JSON.stringify({ id, method, params }));
-        }), CHROME_READY_TIMEOUT_MS, `CDP ${method}`);
-        sendCommand = send;
-        await send("Page.enable");
-        await send("Runtime.enable");
         await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
         await send("Page.navigate", { url });
         let marker = null;
@@ -856,11 +686,9 @@ async function exactViewportCapture(executable, url, width, height) {
             `the page settles to a stable frame within ${CHROME_READY_TIMEOUT_MS}ms (${chromeTail()})`);
         return { marker, first, second };
     } finally {
-        if (sendCommand) {
-            const gracefulClose = sendCommand("Browser.close").catch(() => {});
-            await Promise.race([gracefulClose, wait(1000)]);
-        }
-        if (socket) socket.close();
+        const gracefulClose = send("Browser.close").catch(() => {});
+        await Promise.race([gracefulClose, wait(1000)]);
+        socket.close();
         await stopChild(chrome);
         await removeTreeWithRetry(profile);
     }
