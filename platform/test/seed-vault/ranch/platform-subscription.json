@@ -15,7 +15,7 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.10.3"
+      "version": "0.11.0"
     },
     {
       "name": "kanban-status-sync",
@@ -71,11 +71,11 @@
     },
     {
       "name": "icons",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     {
       "name": "entity-create",
-      "version": "0.9.4"
+      "version": "0.10.0"
     },
     {
       "name": "people-rendering",
@@ -133,11 +133,11 @@
     },
     {
       "name": "cowork",
-      "version": "0.41.1"
+      "version": "0.42.0"
     },
     {
       "name": "daily",
-      "version": "0.30.0"
+      "version": "0.31.0"
     },
     {
       "name": "meetings",

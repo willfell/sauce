@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.319.0",
+  "workshop_version": "0.320.0",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -59,7 +59,7 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.10.3",
+      "version": "0.11.0",
       "path": "mechanisms/activity-feed"
     },
     {
@@ -129,12 +129,12 @@
     },
     {
       "name": "icons",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "path": "mechanisms/icons"
     },
     {
       "name": "entity-create",
-      "version": "0.9.4",
+      "version": "0.10.0",
       "path": "mechanisms/entity-create"
     },
     {
@@ -221,12 +221,12 @@
     },
     {
       "name": "cowork",
-      "version": "0.41.1",
+      "version": "0.42.0",
       "path": "blueprints/cowork"
     },
     {
       "name": "daily",
-      "version": "0.30.0",
+      "version": "0.31.0",
       "path": "blueprints/daily"
     },
     {
