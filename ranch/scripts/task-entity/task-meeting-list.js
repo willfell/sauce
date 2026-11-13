@@ -25,8 +25,8 @@
  * the statics, load via `new Function(src + "\nreturn TaskMeetingList;")()`.
  *
  * MEETING ACTION ITEMS. A line in the meeting note starting with `->` or `→`
- * is an action item: `-> thing` is mine, `-> Name: thing` is someone else's,
- * and a trailing ` (due Fri)`, ` (due tomorrow)` or ` (due 2026-11-20)` sets
+ * is an action item: `-> thing` is mine, `-> Name: thing` is someone else's
+ * (Name a [[link]], an attendee or a spice/people/ note), and a trailing ` (due Fri)`, ` (due tomorrow)` or ` (due 2026-11-20)` sets
  * its due date. The Make tasks button above the list opens a review modal
  * (one row per unconverted line: checkbox, title, due date). Make tasks
  * creates each ticked row through TaskDialog's create path with
@@ -38,9 +38,9 @@
  *
  * Static API (Node-testable, pure):
  *   TaskMeetingList._matches(task, meetingBasename) → bool
- *   TaskMeetingList.parseActionLine(line) → null | { prefix, owner, thing, dueSpec }
- *   TaskMeetingList.parseDue(spec, baseDate) → 'YYYY-MM-DD' | null
- *   TaskMeetingList.actionItems(text, { base, attendees }) → [{ index, raw, title, due, owner, to }]
+ *   TaskMeetingList.parseActionLine(line, people) → null | { prefix, owner, thing, dueSpec }
+ *   TaskMeetingList.parseDue(spec, baseDate, today) → 'YYYY-MM-DD' | null
+ *   TaskMeetingList.actionItems(text, { base, today, attendees, people }) → [{ index, raw, title, due, owner, to }]
  *   TaskMeetingList.ownerOfTitle(title) → null | { owner, thing }
  *   TaskMeetingList.markConverted(text, made) → { text, marked, missed }
  *
@@ -57,8 +57,8 @@ class TaskMeetingList {
     // ---------- Instance delegators (customJS stores INSTANCES) ----------
 
     _matches(task, meetingBasename) { return TaskMeetingList._matches(task, meetingBasename); }
-    parseActionLine(line) { return TaskMeetingList.parseActionLine(line); }
-    parseDue(spec, baseDate) { return TaskMeetingList.parseDue(spec, baseDate); }
+    parseActionLine(line, people) { return TaskMeetingList.parseActionLine(line, people); }
+    parseDue(spec, baseDate, today) { return TaskMeetingList.parseDue(spec, baseDate, today); }
     baseDate(meetingDate, today) { return TaskMeetingList.baseDate(meetingDate, today); }
     actionItems(text, opts) { return TaskMeetingList.actionItems(text, opts); }
     ownerOfTitle(title) { return TaskMeetingList.ownerOfTitle(title); }
@@ -85,12 +85,49 @@ class TaskMeetingList {
     }
 
     /**
+     * `text` as lines plus each line's own ending ('\n', '\r\n' or '' for
+     * the last), so a rewrite keeps mixed endings exactly as they were.
+     */
+    static _splitLines(text) {
+        const parts = String(text == null ? '' : text).split(/(\r?\n)/);
+        const lines = [];
+        const ends = [];
+        for (let i = 0; i < parts.length; i += 2) {
+            lines.push(parts[i]);
+            ends.push(i + 1 < parts.length ? parts[i + 1] : '');
+        }
+        return { lines, ends };
+    }
+
+    static _joinLines(lines, ends) {
+        let out = '';
+        for (let i = 0; i < lines.length; i++) out += lines[i] + (ends[i] || '');
+        return out;
+    }
+
+    /** Lowercased full names and first names of `names`, for owner matching. */
+    static _knownNames(names) {
+        const set = new Set();
+        for (const n of names || []) {
+            const s = String(n == null ? '' : n).replace(/^\[\[|\]\]$/g, '').split('|')[0];
+            const base = s.slice(s.lastIndexOf('/') + 1).replace(/\.md$/i, '').trim().toLowerCase();
+            if (!base) continue;
+            set.add(base);
+            set.add(base.split(/\s+/)[0]);
+        }
+        return set;
+    }
+
+    /**
      * One meeting-note line as an action item, or null when it is not one (or
      * was already converted). `owner` is '' for mine, else the name before
-     * the colon (wikilink brackets dropped). `dueSpec` is the text inside a
-     * trailing `(due …)`, or '' when there is none. Pure, never throws.
+     * the colon. It is someone else's only when that text is a [[link]], or
+     * matches (case-insensitive, full name or first name) one of `people`
+     * (the meeting's attendees and the notes under spice/people/); anything
+     * else before a colon stays part of my item. `dueSpec` is the text
+     * inside a trailing `(due …)`, or '' when there is none. Pure.
      */
-    static parseActionLine(line) {
+    static parseActionLine(line, people) {
         const s = String(line == null ? '' : line);
         if (TaskMeetingList.CONVERTED_RE.test(s)) return null;
         const m = TaskMeetingList.ACTION_RE.exec(s);
@@ -100,13 +137,13 @@ class TaskMeetingList {
         const d = TaskMeetingList.DUE_RE.exec(rest);
         if (d) { dueSpec = d[1]; rest = rest.slice(0, d.index).trim(); }
         let owner = '';
-        // A name is a [[link]] or one to three capitalised words, so
-        // "-> follow up with legal: x" and "-> 10:30 call" stay mine.
-        const o = /^(\[\[[^\]|\n]+(?:\|[^\]\n]+)?\]\]|[A-ZÀ-Þ][A-Za-zÀ-ɏ.'’-]*(?: [A-ZÀ-Þ][A-Za-zÀ-ɏ.'’-]*){0,2})\s*:\s+(\S.*)$/.exec(rest);
+        const o = /^([^:\n]{1,80}?)\s*:\s+(\S.*)$/.exec(rest);
         if (o) {
-            const link = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/.exec(o[1]);
-            owner = link ? String(link[2] || link[1]).trim() : o[1].trim();
-            rest = o[2].trim();
+            const head = o[1].trim();
+            const link = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/.exec(head);
+            if (link) owner = String(link[2] || link[1]).trim();
+            else if (TaskMeetingList._knownNames(people).has(head.toLowerCase())) owner = head;
+            if (owner) rest = o[2].trim();
         }
         if (!rest) return null;
         return { prefix: m[1], owner, thing: rest, dueSpec };
@@ -127,11 +164,13 @@ class TaskMeetingList {
     /**
      * The due date a `(due …)` spec names, counted from `baseDate`
      * (YYYY-MM-DD): a weekday is the next such day strictly after it,
-     * `tomorrow` the day after it, `today` the day itself, and a YYYY-MM-DD
-     * is taken as written when it is a real date. null when the spec is
-     * none of these. Pure: no clock; the caller supplies the base.
+     * `tomorrow` the day after it, `today` the day itself. None of these
+     * lands before `today` (when given): a weekday rolls forward a week at a
+     * time, `tomorrow` becomes today + 1 and `today` today. A YYYY-MM-DD is
+     * taken as written when it is a real date. null when the spec is none
+     * of these. Pure: no clock; the caller supplies the dates.
      */
-    static parseDue(spec, baseDate) {
+    static parseDue(spec, baseDate, today) {
         const s = String(spec == null ? '' : spec).trim().toLowerCase().replace(/\.$/, '');
         if (!s) return null;
         const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -141,12 +180,18 @@ class TaskMeetingList {
         }
         const base = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(baseDate == null ? '' : baseDate));
         if (!base) return null;
-        if (s === 'today') return base[0];
-        if (s === 'tomorrow') return TaskMeetingList._plusDays(base[0], 1);
+        const now = /^\d{4}-\d{2}-\d{2}$/.test(String(today == null ? '' : today)) ? String(today) : '';
+        if (s === 'today') return now && base[0] < now ? now : base[0];
+        if (s === 'tomorrow') {
+            const t = TaskMeetingList._plusDays(base[0], 1);
+            return now && t < now ? TaskMeetingList._plusDays(now, 1) : t;
+        }
         const day = TaskMeetingList.WEEKDAYS[s];
         if (day == null) return null;
         const cur = new Date(Date.UTC(+base[1], +base[2] - 1, +base[3])).getUTCDay();
-        return TaskMeetingList._plusDays(base[0], ((day - cur + 7) % 7) || 7);
+        let out = TaskMeetingList._plusDays(base[0], ((day - cur + 7) % 7) || 7);
+        while (now && out < now) out = TaskMeetingList._plusDays(out, 7);
+        return out;
     }
 
     /** The meeting's own date (YYYY-MM-DD of its `date:`), else `today`. */
@@ -169,18 +214,22 @@ class TaskMeetingList {
     }
 
     /**
-     * Who a comms note goes to: the attendee whose full name, or (when only
-     * one matches) first name, is `owner`; else `owner` as written.
+     * Who a comms note goes to: the attendee (else the person note) whose
+     * full name, or (when only one matches) first name, is `owner`; else
+     * `owner` as written.
      */
-    static _resolveTo(owner, attendees) {
+    static _resolveTo(owner, attendees, people) {
         const o = String(owner == null ? '' : owner).trim();
         if (!o) return '';
-        const names = TaskMeetingList._attendeeNames(attendees);
         const lower = o.toLowerCase();
-        const full = names.find((n) => n.toLowerCase() === lower);
-        if (full) return full;
-        const first = names.filter((n) => n.split(/\s+/)[0].toLowerCase() === lower);
-        return first.length === 1 ? first[0] : o;
+        for (const names of [TaskMeetingList._attendeeNames(attendees), TaskMeetingList._attendeeNames(people)]) {
+            const full = names.find((n) => n.toLowerCase() === lower);
+            if (full) return full;
+            const first = names.filter((n) => n.split(/\s+/)[0].toLowerCase() === lower);
+            if (first.length === 1) return first[0];
+            if (first.length > 1) return o;
+        }
+        return o;
     }
 
     /** The task title for an action: the thing, or `Hear back from <Name>: <thing>`. */
@@ -196,15 +245,23 @@ class TaskMeetingList {
         return m ? { owner: m[1], thing: m[2] } : null;
     }
 
+    /** An indented code line: 4+ spaces or a tab, and not a list item. */
+    static _indentedCode(line) {
+        const s = String(line == null ? '' : line);
+        return /^(?: {4,}|\t)/.test(s) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(s);
+    }
+
     /**
      * Every unconverted action line of a meeting note's `text`, in note
-     * order, outside the frontmatter and code fences:
-     * [{ index, raw, owner, to, thing, title, due }]. `due` is '' when the
-     * line names none; a `(due …)` that does not parse stays in the title.
+     * order, outside the frontmatter, code fences and indented code:
+     * [{ index, raw, owner, to, thing, title, due }]. `opts` is
+     * { base, today, attendees, people }. `due` is '' when the line names
+     * none; a `(due …)` that does not parse stays in the title.
      */
     static actionItems(text, opts) {
         const o = opts || {};
-        const lines = String(text == null ? '' : text).replace(/\r\n/g, '\n').split('\n');
+        const known = TaskMeetingList._attendeeNames(o.attendees).concat(TaskMeetingList._attendeeNames(o.people));
+        const lines = TaskMeetingList._splitLines(text).lines;
         const out = [];
         let i = 0;
         if (lines[0] === '---') {
@@ -220,16 +277,16 @@ class TaskMeetingList {
                 else if (f[1][0] === fence[0] && f[1].length >= fence.length) fence = '';
                 continue;
             }
-            if (fence) continue;
-            const p = TaskMeetingList.parseActionLine(line);
+            if (fence || TaskMeetingList._indentedCode(line)) continue;
+            const p = TaskMeetingList.parseActionLine(line, known);
             if (!p) continue;
-            const due = p.dueSpec ? TaskMeetingList.parseDue(p.dueSpec, o.base) : '';
+            const due = p.dueSpec ? TaskMeetingList.parseDue(p.dueSpec, o.base, o.today) : '';
             const thing = due === null ? p.thing + ' (due ' + p.dueSpec + ')' : p.thing;
             out.push({
                 index: i,
                 raw: line,
                 owner: p.owner,
-                to: TaskMeetingList._resolveTo(p.owner, o.attendees),
+                to: TaskMeetingList._resolveTo(p.owner, o.attendees, o.people),
                 thing,
                 title: TaskMeetingList.titleFor(p.owner, thing),
                 due: due || '',
@@ -243,11 +300,10 @@ class TaskMeetingList {
      * ` ✓ [[<name>]]`. A line is matched by its exact original text: at its
      * old index when it is still there, else its first unused unconverted
      * copy. A line that changed is left alone and reported in `missed`.
+     * Every line keeps its own ending.
      */
     static markConverted(text, made) {
-        const s = String(text == null ? '' : text);
-        const crlf = /\r\n/.test(s);
-        const lines = s.replace(/\r\n/g, '\n').split('\n');
+        const { lines, ends } = TaskMeetingList._splitLines(text);
         const used = new Set();
         const marked = [];
         const missed = [];
@@ -261,8 +317,7 @@ class TaskMeetingList {
             lines[at] = raw.replace(/\s+$/, '') + ' ✓ [[' + item.name + ']]';
             marked.push(at);
         }
-        const out = lines.join('\n');
-        return { text: crlf ? out.replace(/\n/g, '\r\n') : out, marked, missed };
+        return { text: TaskMeetingList._joinLines(lines, ends), marked, missed };
     }
 
     // ---------- Static pure helper ----------
@@ -403,6 +458,10 @@ class TaskMeetingList {
      * when closed without making anything.
      */
     static async openMakeTasks(appRef, meetingPath) {
+        if (TaskMeetingList._busy().has(String(meetingPath))) {
+            TaskMeetingList._notice(TaskMeetingList.BUSY_TEXT);
+            return null;
+        }
         const file = appRef && appRef.vault ? appRef.vault.getAbstractFileByPath(meetingPath) : null;
         if (!file) { TaskMeetingList._notice('Meeting note not found'); return null; }
         let text = '';
@@ -410,9 +469,12 @@ class TaskMeetingList {
             text = typeof appRef.vault.read === 'function' ? await appRef.vault.read(file) : await appRef.vault.cachedRead(file);
         } catch (_e) { TaskMeetingList._notice('Could not read the meeting note'); return null; }
         const fm = TaskMeetingList._fm(appRef, file);
+        const today = TaskMeetingList._today();
         const items = TaskMeetingList.actionItems(text, {
-            base: TaskMeetingList.baseDate(fm.date, TaskMeetingList._today()),
+            base: TaskMeetingList.baseDate(fm.date, today),
+            today,
             attendees: fm.attendees,
+            people: TaskMeetingList._peopleNames(appRef),
         });
         const SM = typeof window !== 'undefined' && window.customJS && window.customJS.SauceModal;
         const doc = typeof document !== 'undefined' ? document : null;
@@ -482,6 +544,43 @@ class TaskMeetingList {
         });
     }
 
+    static get BUSY_TEXT() { return 'Already making tasks for this meeting'; }
+
+    /** Meeting paths with a Make tasks batch running (one batch per meeting). */
+    static _busy() {
+        if (!TaskMeetingList._inFlight) TaskMeetingList._inFlight = new Set();
+        return TaskMeetingList._inFlight;
+    }
+
+    /** Basenames of the person notes under spice/people/ (not the People index). */
+    static _peopleNames(appRef) {
+        try {
+            return appRef.vault.getMarkdownFiles()
+                .filter((f) => String(f.path || '').indexOf('spice/people/') === 0 && f.basename !== 'People')
+                .map((f) => String(f.basename));
+        } catch (_e) { return []; }
+    }
+
+    /**
+     * The `{ name, slug }` for the meeting's project: the project note's
+     * `project_slug`, else its `slug`, else the slugified name (as
+     * MeetingLeafActions resolves it).
+     */
+    static _project(appRef, name, TD) {
+        const slugify = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        try {
+            for (const f of appRef.vault.getMarkdownFiles()) {
+                if (String(f.path || '').indexOf('spice/projects/') !== 0) continue;
+                const fm = TaskMeetingList._fm(appRef, f);
+                if (!fm || fm.type !== 'project' || String(fm.name || f.basename) !== name) continue;
+                const slug = fm.project_slug || fm.slug;
+                if (slug) return { name, slug: String(slug) };
+                break;
+            }
+        } catch (_e) {}
+        return { name, slug: TD && typeof TD._slugify === 'function' ? TD._slugify(name) : slugify(name) };
+    }
+
     /** `to:` for a row: the resolved attendee while the name is unchanged, else the name as typed. */
     static _toFor(row, owner) {
         const o = String(owner == null ? '' : owner).trim();
@@ -492,32 +591,51 @@ class TaskMeetingList {
      * Make the ticked `rows` ({ index, raw, title, due, on, owner, to }) into
      * tasks, then mark their lines converted. One gesture write through
      * RenderSafe.mutate. Resolves the mutate result; its value is
-     * { made: [{ index, raw, name, path, comms }], skipped, failed }.
+     * { made: [{ index, raw, name, path, comms }], skipped, failed,
+     * commsMissed }. Refuses while a batch for the same meeting is running.
      */
     static async makeTasks(appRef, meetingPath, rows) {
+        const busy = TaskMeetingList._busy();
+        const key = String(meetingPath);
+        if (busy.has(key)) {
+            TaskMeetingList._notice(TaskMeetingList.BUSY_TEXT);
+            return { ok: false, error: new Error('busy') };
+        }
         const RenderSafe = typeof window !== 'undefined' && window.customJS && window.customJS.RenderSafe;
         if (!RenderSafe || typeof RenderSafe.mutate !== 'function') {
             TaskMeetingList._notice('Could not make tasks: render-safe is not loaded');
             return { ok: false, error: new Error('render-safe not loaded') };
         }
-        const res = await RenderSafe.mutate({
-            app: appRef,
-            path: meetingPath,
-            failureMessage: 'Could not make tasks',
-            write: () => TaskMeetingList._convert(appRef, meetingPath, rows),
-        });
-        if (res && res.ok && res.value) {
-            const v = res.value;
-            const n = v.made.length;
-            const parts = [n ? 'Made ' + n + (n === 1 ? ' task' : ' tasks') : 'No tasks made'];
-            if (v.skipped) parts.push(v.skipped + (v.skipped === 1 ? ' line changed, skipped' : ' lines changed, skipped'));
-            if (v.failed) parts.push(v.failed + ' could not be made');
-            TaskMeetingList._notice(parts.join('; '), 5000);
+        busy.add(key);
+        try {
+            const res = await RenderSafe.mutate({
+                app: appRef,
+                path: meetingPath,
+                failureMessage: 'Could not make tasks',
+                write: () => TaskMeetingList._convert(appRef, meetingPath, rows),
+            });
+            if (res && res.ok && res.value) TaskMeetingList._notice(TaskMeetingList._summary(res.value), 5000);
+            return res;
+        } finally {
+            busy.delete(key);
         }
-        return res;
     }
 
-    /** The write behind makeTasks. Throws only when the meeting note is gone. */
+    /** The one notice after a batch. */
+    static _summary(v) {
+        const n = v.made.length;
+        const parts = [n ? 'Made ' + n + (n === 1 ? ' task' : ' tasks') : 'No tasks made'];
+        if (v.skipped) parts.push(v.skipped + (v.skipped === 1 ? ' line changed, skipped' : ' lines changed, skipped'));
+        if (v.failed) parts.push(v.failed + ' could not be made');
+        if (v.commsMissed) parts.push('comms note not made for ' + v.commsMissed);
+        return parts.join('; ');
+    }
+
+    /**
+     * The write behind makeTasks. Throws only when the meeting note is gone.
+     * Every task that was made has its line marked (in a finally), so a
+     * failure part-way never leaves a made task's line to be offered again.
+     */
     static async _convert(appRef, meetingPath, rows) {
         const CJS = (typeof window !== 'undefined' && window.customJS) || {};
         const TD = CJS.TaskDialog;
@@ -528,57 +646,61 @@ class TaskMeetingList {
         if (!file) throw new Error('meeting note not found');
         const meetingName = String(file.basename || String(meetingPath).split('/').pop().replace(/\.md$/i, ''));
         const fm = TaskMeetingList._fm(appRef, file);
-        let project;
         const projectName = fm.project ? (TE && typeof TE._linkText === 'function' ? TE._linkText(fm.project) : String(fm.project).replace(/^\[\[|\]\]$/g, '')) : '';
-        if (projectName) {
-            let slug = '';
-            try {
-                const hit = (TD._loadProjectList(appRef) || []).find((p) => p.name === projectName);
-                slug = hit ? hit.slug : TD._slugify(projectName);
-            } catch (_e) { slug = ''; }
-            project = { name: projectName, slug };
-        }
+        const project = projectName ? TaskMeetingList._project(appRef, projectName, TD) : null;
         const text = await appRef.vault.read(file);
-        const lines = String(text).replace(/\r\n/g, '\n').split('\n');
-        const out = { made: [], skipped: 0, failed: 0 };
+        const lines = TaskMeetingList._splitLines(text).lines;
+        const out = { made: [], skipped: 0, failed: 0, commsMissed: 0 };
         const claimed = new Set();
         let lastPath = '';
-        for (const row of rows || []) {
-            if (!row || !row.on) continue;
-            const title = String(row.title == null ? '' : row.title).replace(/\s+/g, ' ').trim();
-            if (!title) continue;
-            const at = lines[row.index] === row.raw && !claimed.has(row.index)
-                ? row.index
-                : lines.findIndex((l, j) => l === row.raw && !claimed.has(j));
-            if (at < 0) { out.skipped++; continue; }
-            claimed.add(at);
-            const due = /^\d{4}-\d{2}-\d{2}$/.test(String(row.due || '')) ? String(row.due) : '';
-            const payload = { title, due, source: 'meeting', source_note: '[[' + meetingName + ']]', links: [] };
-            if (project) payload.project = project;
-            let created = null;
-            try { created = await TD._create(appRef, payload, '', { reconcile: false, notice: false }); } catch (_e) { created = null; }
-            if (!created || !created.ok || !created.path) { out.failed++; continue; }
-            lastPath = created.path;
-            const name = String(created.path).split('/').pop().replace(/\.md$/i, '');
-            const item = { index: at, raw: row.raw, name, path: created.path, comms: '' };
-            const other = TaskMeetingList.ownerOfTitle(title);
-            if (other && Docs && typeof Docs.create === 'function') {
-                const to = TaskMeetingList._toFor(row, other.owner);
-                const doc = await Docs.create(appRef, created.path, 'comms', 'Message to ' + to);
-                const docFile = doc && doc.ok ? appRef.vault.getAbstractFileByPath(doc.path) : null;
-                if (docFile) {
-                    item.comms = doc.path;
-                    await appRef.vault.process(docFile, (t) => String(t).replace(/\s*$/, '\n\n') + other.thing + '\n');
-                    await appRef.fileManager.processFrontMatter(docFile, (f) => { f.to = to; });
-                }
+        try {
+            for (const row of rows || []) {
+                await TaskMeetingList._convertRow(appRef, row, { lines, claimed, out, TD, Docs, meetingName, project, onMade: (p) => { lastPath = p; } });
             }
-            out.made.push(item);
-        }
-        if (out.made.length) {
-            await appRef.vault.process(file, (t) => TaskMeetingList.markConverted(t, out.made).text);
-            try { if (typeof TD._reconcileAfterCreate === 'function') TD._reconcileAfterCreate(appRef, lastPath); } catch (_e) {}
+        } finally {
+            if (out.made.length) {
+                await appRef.vault.process(file, (t) => TaskMeetingList.markConverted(t, out.made).text);
+                try { if (typeof TD._reconcileAfterCreate === 'function') TD._reconcileAfterCreate(appRef, lastPath); } catch (_e) {}
+            }
         }
         return out;
+    }
+
+    /** One row of _convert: make its task, then its comms note when it is someone else's. */
+    static async _convertRow(appRef, row, ctx) {
+        const { lines, claimed, out, TD, Docs, meetingName, project } = ctx;
+        if (!row || !row.on) return;
+        const title = String(row.title == null ? '' : row.title).replace(/\s+/g, ' ').trim();
+        if (!title) return;
+        const at = lines[row.index] === row.raw && !claimed.has(row.index)
+            ? row.index
+            : lines.findIndex((l, j) => l === row.raw && !claimed.has(j));
+        if (at < 0) { out.skipped++; return; }
+        claimed.add(at);
+        const due = /^\d{4}-\d{2}-\d{2}$/.test(String(row.due || '')) ? String(row.due) : '';
+        const payload = { title, due, source: 'meeting', source_note: '[[' + meetingName + ']]', links: [] };
+        if (project) payload.project = project;
+        let created = null;
+        try { created = await TD._create(appRef, payload, '', { reconcile: false, notice: false }); } catch (_e) { created = null; }
+        if (!created || !created.ok || !created.path) { out.failed++; return; }
+        ctx.onMade(created.path);
+        const name = String(created.path).split('/').pop().replace(/\.md$/i, '');
+        const item = { index: at, raw: row.raw, name, path: created.path, comms: '' };
+        out.made.push(item);
+        const other = TaskMeetingList.ownerOfTitle(title);
+        if (!other) return;
+        try {
+            if (!Docs || typeof Docs.create !== 'function') throw new Error('task notes are not loaded');
+            const to = TaskMeetingList._toFor(row, other.owner);
+            const doc = await Docs.create(appRef, created.path, 'comms', 'Message to ' + to);
+            const docFile = doc && doc.ok ? appRef.vault.getAbstractFileByPath(doc.path) : null;
+            if (!docFile) throw new Error((doc && doc.reason) || 'comms note not created');
+            item.comms = doc.path;
+            await appRef.vault.process(docFile, (t) => String(t).replace(/\s*$/, '\n\n') + other.thing + '\n');
+            await appRef.fileManager.processFrontMatter(docFile, (f) => { f.to = to; });
+        } catch (_e) {
+            out.commsMissed++;
+        }
     }
 
     static get _CSS() {

@@ -191,16 +191,20 @@ function setup(seed) {
     JSON.stringify(TML.parseActionLine('-> Draft the plan')) === JSON.stringify({ prefix: '', owner: '', thing: 'Draft the plan', dueSpec: '' }));
   ok('MA-LINE-ARROW "→ thing" works too, after a list bullet and indentation',
     TML.parseActionLine('  - → Draft the plan').thing === 'Draft the plan' && TML.parseActionLine('  - → Draft the plan').prefix === '  - ');
-  ok('MA-LINE-OTHER "-> Name: thing" is someone else\'s',
-    TML.parseActionLine('-> Jason: send the keys').owner === 'Jason' && TML.parseActionLine('-> Jason: send the keys').thing === 'send the keys'
-    && TML.parseActionLine('-> Matt Hemingway: review').owner === 'Matt Hemingway'
-    && TML.parseActionLine('-> [[Jason Batai]]: send').owner === 'Jason Batai');
-  ok('MA-LINE-NOT-A-NAME lowercase words, long phrases and times before a colon stay mine',
-    TML.parseActionLine('-> follow up with legal: pricing').owner === ''
-    && TML.parseActionLine('-> 10:30 call with ops').owner === ''
-    && TML.parseActionLine('-> Ask The Whole Team Now: x').owner === '');
+  const PEOPLE = ['[[Jason Batai]]', 'Matt Hemingway'];
+  ok('MA-LINE-OTHER "-> Name: thing" is someone else\'s when Name is a known person, by first or full name (any case), or a [[link]]',
+    TML.parseActionLine('-> Jason: send the keys', PEOPLE).owner === 'Jason' && TML.parseActionLine('-> Jason: send the keys', PEOPLE).thing === 'send the keys'
+    && TML.parseActionLine('-> Matt Hemingway: review', PEOPLE).owner === 'Matt Hemingway'
+    && TML.parseActionLine('-> matt: review', PEOPLE).owner === 'matt'
+    && TML.parseActionLine('-> [[Priya Shah]]: send').owner === 'Priya Shah');
+  ok('MA-OWNER-STRICT anything before a colon that is not a known person or a link stays mine, colon and all',
+    TML.parseActionLine('-> Note: check the logs', PEOPLE).owner === '' && TML.parseActionLine('-> Note: check the logs', PEOPLE).thing === 'Note: check the logs'
+    && TML.parseActionLine('-> Jason: send the keys').owner === ''
+    && TML.parseActionLine('-> follow up with legal: pricing', PEOPLE).owner === ''
+    && TML.parseActionLine('-> 10:30 call with ops', PEOPLE).owner === ''
+    && TML.parseActionLine('-> Jason Smith: x', PEOPLE).owner === '');
   ok('MA-LINE-DUE a trailing (due …) is split off the thing',
-    TML.parseActionLine('-> Jason: send keys (due Fri)').dueSpec === 'Fri' && TML.parseActionLine('-> Jason: send keys (due Fri)').thing === 'send keys');
+    TML.parseActionLine('-> Jason: send keys (due Fri)', PEOPLE).dueSpec === 'Fri' && TML.parseActionLine('-> Jason: send keys (due Fri)', PEOPLE).thing === 'send keys');
   ok('MA-LINE-SKIP plain lines, a bare arrow and converted lines are not action items',
     TML.parseActionLine('Draft the plan') === null && TML.parseActionLine('->') === null
     && TML.parseActionLine('- -> Draft ✓ [[Draft]]') === null && TML.parseActionLine('a -> b') === null);
@@ -235,9 +239,12 @@ function setup(seed) {
     JSON.stringify(items.map((i) => i.due)) === JSON.stringify(['2026-11-13', '2026-11-12', '2026-11-20', '']));
   ok('MA-ITEMS-TO a first name resolves to the one attendee who has it; a full name stays',
     items[1].to === 'Jason Batai' && items[2].to === 'Matt Hemingway' && items[0].to === '');
-  ok('MA-ITEMS-TO-AMBIGUOUS a first name two attendees share, or no attendee, stays as written',
+  ok('MA-ITEMS-TO-AMBIGUOUS a first name two attendees share stays as written',
     TML.actionItems('-> Sam: x', { attendees: ['[[Sam A]]', '[[Sam B]]'] })[0].to === 'Sam'
-    && TML.actionItems('-> Priya: x', { attendees: [] })[0].to === 'Priya');
+    && TML.actionItems('-> Sam: x', { attendees: ['[[Sam A]]', '[[Sam B]]'] })[0].owner === 'Sam');
+  ok('MA-ITEMS-PEOPLE a name that is not an attendee but is a spice/people note is someone else\'s, resolved to that note',
+    TML.actionItems('-> Priya: x', { attendees: ['[[Jason Batai]]'], people: ['Priya Shah'] })[0].to === 'Priya Shah'
+    && TML.actionItems('-> Priya: x', { attendees: ['[[Jason Batai]]'] })[0].owner === '');
   ok('MA-ITEMS-UNPARSED-DUE a (due …) that is not a date stays in the title with no due date',
     TML.actionItems('-> Draft (due next week)', { base: '2026-11-11' })[0].title === 'Draft (due next week)'
     && TML.actionItems('-> Draft (due next week)', { base: '2026-11-11' })[0].due === '');
@@ -302,7 +309,7 @@ function setup(seed) {
     ok('MA-REWRITE-PROCESS the meeting note is rewritten once, through vault.process',
       app._log.processes.filter((p) => p === MEETING).length === 1);
     ok('MA-AGAIN a second Make tasks offers only the lines not yet converted',
-      TML.actionItems(after, { base: '2026-11-11' }).map((i) => i.title).join('|')
+      TML.actionItems(after, { base: '2026-11-11', attendees: ['[[Matt Hemingway]]'] }).map((i) => i.title).join('|')
       === 'Hear back from Matt Hemingway: review the PR today|follow up with legal: pricing');
     ok('MA-NOTICE one summary notice, no "Task created" toast per task',
       !notices.includes('Task created') && notices.some((n) => /^Made 2 tasks; 1 line changed, skipped$/.test(n)), JSON.stringify(notices));
@@ -329,6 +336,88 @@ function setup(seed) {
       res.ok === false && app._log.creates.length === 0);
   }
 
+  // ---------- review fixes ----------
+  ok('MA-DUE-NOT-PAST a weekday from an old meeting rolls forward a week at a time to today or later; tomorrow becomes today + 1; an explicit date stays',
+    TML.parseDue('Fri', '2026-10-01', '2026-11-13') === '2026-11-13'
+    && TML.parseDue('Mon', '2026-10-01', '2026-11-13') === '2026-11-16'
+    && TML.parseDue('tomorrow', '2026-10-01', '2026-11-13') === '2026-11-14'
+    && TML.parseDue('today', '2026-10-01', '2026-11-13') === '2026-11-13'
+    && TML.parseDue('2026-10-01', '2026-10-01', '2026-11-13') === '2026-10-01'
+    && TML.parseDue('Fri', '2026-11-11', '2026-11-11') === '2026-11-13'
+    && TML.parseDue('tomorrow', '2026-11-12', '2026-11-11') === '2026-11-13');
+  ok('MA-DUE-NOT-PAST-ITEMS actionItems passes today through',
+    TML.actionItems('-> a (due tomorrow)\n-> b (due 2026-01-02)', { base: '2026-10-01', today: '2026-11-13' }).map((i) => i.due).join('|') === '2026-11-14|2026-01-02');
+  {
+    const text = 'a\r\n-> x\n-> y\r\nz';
+    const items2 = TML.actionItems(text, {});
+    const r = TML.markConverted(text, [{ index: 1, raw: '-> x', name: 'X' }, { index: 2, raw: '-> y', name: 'Y' }]);
+    ok('MA-LINE-ENDINGS mixed line endings: items carry no stray \\r, and every line keeps its own ending after marking',
+      items2.map((i) => i.raw).join('|') === '-> x|-> y'
+      && r.text === 'a\r\n-> x ✓ [[X]]\n-> y ✓ [[Y]]\r\nz', JSON.stringify(r.text));
+  }
+  ok('MA-INDENTED-CODE a line indented 4+ spaces or a tab that is not a list item is code, not an action',
+    TML.actionItems('    -> code sample\n\t-> tabbed\n    - -> nested item\n\t* -> tab item\n  -> two spaces', {}).map((i) => i.title).join('|')
+    === 'nested item|tab item|two spaces');
+
+  {
+    const { app, notices } = setup({ [MEETING]: MEETING_TEXT });
+    const rows = TML.actionItems(MEETING_TEXT, { base: '2026-11-11', attendees: ['[[Jason Batai]]', '[[Matt Hemingway]]'] }).map((it) => ({ ...it, on: true }));
+    window.customJS.TaskDocs.create = async () => { throw new Error('disk full'); };
+    const realRow = TML._convertRow;
+    let calls = 0;
+    TML._convertRow = async (...a) => { calls++; if (calls === 4) throw new Error('crash mid-batch'); return realRow.apply(TML, a); };
+    let res;
+    try { res = await TML.makeTasks(app, MEETING, rows); } finally { TML._convertRow = realRow; }
+    const text = app._files.get(MEETING).text;
+    ok('MA-PARTIAL a crash part-way still marks every line whose task was made, so no task is made twice',
+      res.ok === false && text.includes('(due Fri) ✓ [[') && text.includes('(due tomorrow) ✓ [[') && text.includes('(due 2026-11-20) ✓ [[')
+      && text.includes('- -> follow up with legal: pricing\n')
+      && TML.actionItems(text, { base: '2026-11-11', attendees: ['[[Matt Hemingway]]'] }).map((i) => i.title).join('|') === 'follow up with legal: pricing', text);
+    ok('MA-PARTIAL-COMMS a failing comms note never stops the rows after it',
+      app._files.has('spice/tasks/Hear back from Matt Hemingway review the PR/Hear back from Matt Hemingway review the PR.md'));
+    notices.length = 0;
+    const app2 = setup({ [MEETING]: MEETING_TEXT });
+    app2.win.customJS.TaskDocs.create = async () => ({ ok: false, reason: 'no folder' });
+    const res2 = await TML.makeTasks(app2.app, MEETING, TML.actionItems(MEETING_TEXT, { base: '2026-11-11', attendees: ['[[Jason Batai]]', '[[Matt Hemingway]]'] }).map((it) => ({ ...it, on: true })));
+    ok('MA-COMMS-MISSED a comms note that was not made is counted in the summary notice',
+      res2.ok && res2.value.commsMissed === 2 && res2.value.made.length === 4
+      && app2.notices.includes('Made 4 tasks; comms note not made for 2'), JSON.stringify(app2.notices));
+  }
+
+  {
+    const { app, notices, win } = setup({ [MEETING]: MEETING_TEXT });
+    const rows = TML.actionItems(MEETING_TEXT, { base: '2026-11-11' }).map((it) => ({ ...it, on: true }));
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const realCreate = win.customJS.TaskDialog._create.bind(win.customJS.TaskDialog);
+    win.customJS.TaskDialog._create = async (...a) => { await gate; return realCreate(...a); };
+    win.customJS.SauceModal = { open: () => { throw new Error('must not open while busy'); } };
+    const first = TML.makeTasks(app, MEETING, rows);
+    await new Promise((r) => setImmediate(r));
+    const second = await TML.makeTasks(app, MEETING, rows);
+    const opened = await TML.openMakeTasks(app, MEETING);
+    ok('MA-BUSY while a batch runs, a second Make tasks or modal for the same meeting is refused with a notice',
+      second.ok === false && opened === null
+      && notices.filter((n) => n === 'Already making tasks for this meeting').length === 2);
+    release();
+    const done = await first;
+    ok('MA-BUSY-CLEARS the meeting is free again once the batch ends, and the batch made each task once',
+      done.ok && done.value.made.length === 4 && TML._busy().size === 0
+      && app._log.creates.filter((p) => !p.includes('/notes/')).length === 4);
+  }
+
+  {
+    const { app } = setup({
+      [MEETING]: MEETING_TEXT,
+      'spice/projects/atlas/Atlas.md': '---\ntype: project\nname: Atlas\nslug: atlas-old\nproject_slug: atlas-core\n---\n',
+    });
+    const rows = TML.actionItems(MEETING_TEXT, { base: '2026-11-11' }).map((it) => ({ ...it, on: true }));
+    await TML.makeTasks(app, MEETING, [rows[0]]);
+    const t = app._files.get('spice/tasks/Draft the rollout plan/Draft the rollout plan.md');
+    ok('MA-PROJECT-SLUG the project note\'s project_slug wins over its slug',
+      t && parseFm(t.text).project_slug === 'atlas-core' && parseFm(t.text).project === '[[Atlas]]', t ? t.text : 'missing');
+  }
+
   // ---------- the modal ----------
   {
     const { app, win } = setup({ [MEETING]: MEETING_TEXT });
@@ -347,7 +436,7 @@ function setup(seed) {
       spec.title === 'Make tasks' && rowsEls.length === 4 && boxes.length === 4 && boxes.every((b) => b.checked)
       && titles.map((t) => t.value).join('|') === 'Draft the rollout plan|Hear back from Jason: send the API keys|Hear back from Matt Hemingway: review the PR|follow up with legal: pricing'
       && titles.every((t) => t.type === 'text') && dues.every((d) => d.type === 'date')
-      && dues.map((d) => d.value).join('|') === '2026-11-13|2026-11-12|2026-11-20|');
+      && dues.map((d) => d.value).join('|') === '2026-11-13|2026-11-14|2026-11-20|', dues.map((d) => d.value).join('|'));
     const hints = byClass(body, 'sauce-mtg-review-hint').map((h) => h.textContent);
     ok('MA-MODAL-HINT someone else\'s row says it will also get a comms note, to whom',
       hints[1] === 'Plus a comms note to Jason Batai' && hints[0] === '- -> Draft the rollout plan (due Fri)');
