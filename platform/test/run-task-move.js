@@ -541,8 +541,11 @@ const overOf = (d) => ({ types: d.types.slice(), getData: () => '', dropEffect: 
         ok('TM-DRAG-DOC-DROP a drop outside every row also clears it', T.dragState() === null);
       } finally { global.document = savedDoc; }
       const view = read('platform/blueprints/to-do/helpers/todo-daily-filter-view.js');
-      ok('TM-DRAG-STRIP-END the week-strip drop ends the shared drag too',
-        /return dropOnDay\(from, cell\.date\)/.test(view) && /TTL\.endDrag\(\)/.test(view.slice(view.indexOf("button.addEventListener('drop'"), view.indexOf('return dropOnDay(from, cell.date)'))));
+      const dayDropAt = view.indexOf('const wireDayDrop = ');
+      const dayDrop = dayDropAt >= 0 ? view.slice(dayDropAt, view.indexOf('return dropOnDay(from, date)', dayDropAt)) : '';
+      ok('TM-DRAG-STRIP-END a week-strip or month-day drop ends the shared drag too',
+        /TTL\.endDrag\(\)/.test(dayDrop.slice(dayDrop.indexOf("button.addEventListener('drop'")))
+        && /wireDayDrop\(button, cell\.date, rest\)/.test(view) && /wireDayDrop\(button, cell\.date, ''\)/.test(view));
     }
 
     // ----- Make top-level strip, group headers, note drags -----

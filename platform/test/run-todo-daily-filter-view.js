@@ -1842,6 +1842,38 @@ process.exitCode = 1;
     assert.strictEqual(monthTitle(again.root), 'November 2026');
   });
 
+  await okAsync('RD-DV-MONTH-DROP-END a month-day drop ends the drag, and only a task drag is taken', async () => {
+    const env = makeRenderHarness();
+    env.storage.setItem('sauce-todo-month-open', '1');
+    let ended = 0;
+    env.customJS.TaskTodayList.endDrag = () => { ended += 1; };
+    const { root } = await mount(env);
+    const handle = () => byClass(lastRow(env, 'Today high').row, 'sauce-task-drag')[0];
+    const dt = { types: ['application/x-sauce-task-path'], setData() {}, setDragImage() {}, effectAllowed: '', dropEffect: '' };
+    const other = { types: ['text/plain'], getData: () => 'spice/tasks/Today high.md', dropEffect: '' };
+
+    await handle().fire('dragstart', { dataTransfer: dt });
+    let prevented = false;
+    await monthCell(root, '2026-11-24').fire('dragover', { dataTransfer: other, preventDefault() { prevented = true; } });
+    assert(!prevented, 'a drag without the task type is refused');
+    await monthCell(root, '2026-11-24').fire('drop', { dataTransfer: other });
+    await flush();
+    assert.deepStrictEqual(env.calls.reschedule, [], 'and its drop moves nothing');
+    assert.strictEqual(ended, 1, 'the refused drop still ends the shared drag');
+
+    await handle().fire('dragstart', { dataTransfer: dt });
+    await monthCell(root, '2026-11-24').fire('drop', { dataTransfer: dt });
+    await flush();
+    assert.deepStrictEqual(env.calls.reschedule.map((c) => [c.path, c.newDue]), [['spice/tasks/Today high.md', '2026-11-24']]);
+    assert.strictEqual(ended, 2, 'the drop ends the shared drag (TaskTodayList.endDrag)');
+    prevented = false;
+    await monthCell(root, '2026-11-25').fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(!prevented, 'the view\'s own drag state is cleared: the next day refuses');
+    prevented = false;
+    await weekCells(root)[1].fire('dragover', { dataTransfer: dt, preventDefault() { prevented = true; } });
+    assert(!prevented, 'and so does a strip day');
+  });
+
   await okAsync('RD-DV-FOCUS after a strip or month control repaints, focus returns to that control', async () => {
     const env = makeRenderHarness();
     env.storage.setItem('sauce-todo-month-open', '1');
