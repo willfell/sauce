@@ -2181,11 +2181,27 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
 // production helper must compute the release in a second disposable worktree,
 // run the real installer there, and leave the claimed fixture byte-clean.
 {
-  const realRun = (cmd, args, opts = {}) => execFileSync(cmd, args, {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    ...opts,
-  }).trim();
+  // No child here is fed through stdin. On macOS, Node 20's execFileSync can
+  // write an `input` larger than the 8 KiB unix-socket buffer and never close
+  // the child's stdin, so a child that reads to EOF (git hash-object --stdin)
+  // waits forever and the step dies at the preflight's 900s timeout. Pass
+  // contents through a file instead.
+  const realRun = (cmd, args, opts = {}) => {
+    if (opts.input !== undefined) {
+      throw new Error(`realRun refuses stdin input for ${cmd} ${args.join(' ')}: write it to a file`);
+    }
+    return execFileSync(cmd, args, {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      ...opts,
+    }).trim();
+  };
+  assert.throws(
+    () => realRun('git', ['hash-object', '--stdin'], { input: 'x'.repeat(20000) }),
+    /realRun refuses stdin input/,
+    'GA-P1-NO-STDIN-INPUT realRun refuses to feed a child through stdin',
+  );
+  count++;
   const releaseGateCommitEnv = {
     ...process.env,
     GIT_AUTHOR_NAME: 'Sauce Release Gate',
@@ -2899,9 +2915,12 @@ ok(partialRemoved, 'self-install unregisters a partially-added disposable worktr
         ordinaryPlumbingRun('git', ['read-tree', sourceTree], {
           cwd: root, stdio: 'pipe', env: indexEnv,
         });
-        for (const [sourcePath, contents] of contentsByPath) {
-          const blob = ordinaryPlumbingRun('git', ['hash-object', '-w', '--stdin'], {
-            cwd: root, stdio: 'pipe', env: indexEnv, input: contents,
+        for (const [index, [sourcePath, contents]] of contentsByPath.entries()) {
+          // The contents go through a file, not stdin: see realRun.
+          const contentsPath = path.join(indexRoot, `contents-${index}`);
+          fs.writeFileSync(contentsPath, contents);
+          const blob = ordinaryPlumbingRun('git', ['hash-object', '-w', '--no-filters', '--', contentsPath], {
+            cwd: root, stdio: 'pipe', env: indexEnv,
           });
           ordinaryPlumbingRun('git', [
             'update-index', '--add', '--cacheinfo',
