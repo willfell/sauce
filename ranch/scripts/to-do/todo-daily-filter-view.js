@@ -24,6 +24,23 @@
  * same day again or any tab goes back. The day is held in memory, never in
  * the persisted prefs.
  *
+ * Week strip and month calendar: ‹ and › beside the strip show the week
+ * before or after (a This week button comes back); every strip cell counts
+ * the open tasks due that day, on any week. The calendar button at the end
+ * of the strip row opens a month grid below it (Mon..Sun, always six rows so
+ * the list below never jumps, each day with its count; ‹ › change month,
+ * Today goes back). While it is open it follows the strip: the arrows, This
+ * week and a strip day pick show the month of the new week's Monday or of
+ * the picked day. Picking a month day shows that day and moves the strip to
+ * its week; on desktop a
+ * month day takes a dropped task like a strip day. The shown week and month
+ * are in memory (they survive Dataview re-renders, not a reload); whether
+ * the month is open is saved per device under `sauce-todo-month-open`. On a
+ * phone, or wherever the strip's host is 480px or narrower (a container
+ * query, so a narrow desktop split pane counts), the arrows and calendar
+ * button sit on a line above the cells. After a strip or month control
+ * repaints the view, focus goes back to that control (matched by data-nav).
+ *
  * Subtasks never list as roots: they are out of All open, Backlog, No date,
  * the recurring surface and the recently-done lists, and show in Today /
  * This week / Overdue / a picked day only when their own due falls there (tab
@@ -758,20 +775,27 @@ class ToDoDailyFilterView {
         return TE && typeof TE.renumber === 'function' ? TE.renumber(orderedPaths, rankByPath) : [];
     }
 
-    /**
-     * Cells for the week strip above the tabs: Monday..Sunday of the week
-     * holding `todayStr`, always all seven. `count` is the open tasks due that
-     * day.
-     */
-    static weekStrip(tasks, todayStr, TEref) {
-        const TE = ToDoDailyFilterView._te(TEref);
-        const range = ToDoDailyFilterView.weekRange(todayStr, TE);
-        if (!range) return [];
+    /** Open tasks due per YYYY-MM-DD: the count under every strip and month cell. */
+    static _dueCounts(tasks) {
         const counts = new Map();
         for (const task of ToDoDailyFilterView._openTasks(tasks)) {
             const due = ToDoDailyFilterView._dueOf(task);
             if (due) counts.set(due, (counts.get(due) || 0) + 1);
         }
+        return counts;
+    }
+
+    /**
+     * Cells for the week strip above the tabs: Monday..Sunday of the week
+     * holding `weekOf` (default `todayStr`), always all seven. `count` is the
+     * open tasks due that day; `isToday` marks `todayStr` wherever it falls.
+     */
+    static weekStrip(tasks, todayStr, TEref, weekOf) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        const anchor = weekOf == null || weekOf === '' ? todayStr : weekOf;
+        const range = ToDoDailyFilterView.weekRange(anchor, TE);
+        if (!range) return [];
+        const counts = ToDoDailyFilterView._dueCounts(tasks);
         const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
         const out = [];
         for (let i = 0; i < 7; i += 1) {
@@ -781,6 +805,139 @@ class ToDoDailyFilterView {
             out.push({ date, label: `${days[i]} ${Number(date.slice(8))}`, count, isToday: date === todayStr });
         }
         return out;
+    }
+
+    static get MONTH_NAMES() {
+        return ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+            'August', 'September', 'October', 'November', 'December'];
+    }
+
+    /** 'YYYY-MM' of any 'YYYY-MM…' string with a real month, else ''. */
+    static _monthOf(dateStr) {
+        const m = /^(\d{4})-(\d{2})/.exec(String(dateStr == null ? '' : dateStr));
+        return m && +m[2] >= 1 && +m[2] <= 12 ? `${m[1]}-${m[2]}` : '';
+    }
+
+    /** The 'YYYY-MM' `delta` months from `month`; '' for a bad month. */
+    static _shiftMonth(month, delta) {
+        const ym = ToDoDailyFilterView._monthOf(month);
+        if (!ym) return '';
+        const index = Number(ym.slice(0, 4)) * 12 + Number(ym.slice(5)) - 1 + (Number(delta) || 0);
+        return `${String(Math.floor(index / 12)).padStart(4, '0')}-${String((index % 12) + 1).padStart(2, '0')}`;
+    }
+
+    /** 'November 2026' for '2026-11' (or any date in it). */
+    static _monthTitle(month) {
+        const ym = ToDoDailyFilterView._monthOf(month);
+        return ym ? `${ToDoDailyFilterView.MONTH_NAMES[Number(ym.slice(5)) - 1]} ${Number(ym.slice(0, 4))}` : '';
+    }
+
+    /** 'Week of Nov 16' for the Monday '2026-11-16'. */
+    static _weekOfLabel(monday) {
+        const ym = ToDoDailyFilterView._monthOf(monday);
+        if (!ym) return '';
+        return `Week of ${ToDoDailyFilterView.MONTH_NAMES[Number(ym.slice(5)) - 1].slice(0, 3)} ${Number(String(monday).slice(8, 10))}`;
+    }
+
+    /**
+     * The month calendar for the month holding `monthAnyDateStr`: rows of
+     * seven Monday..Sunday cells `{ date, day, count, inMonth, isToday }`,
+     * from the week holding the 1st, always six rows (42 days) so the
+     * calendar keeps one height; days outside the month have
+     * inMonth false and are drawn dimmed. `count` is the open tasks due that day,
+     * the same rule as the week strip.
+     */
+    static monthGrid(tasks, monthAnyDateStr, todayStr, TEref) {
+        const TE = ToDoDailyFilterView._te(TEref);
+        const ym = ToDoDailyFilterView._monthOf(monthAnyDateStr);
+        if (!TE || !ym) return [];
+        const first = ToDoDailyFilterView.weekRange(`${ym}-01`, TE);
+        if (!first) return [];
+        const counts = ToDoDailyFilterView._dueCounts(tasks);
+        const rows = [];
+        let date = first.from;
+        while (rows.length < 6) {
+            const row = [];
+            for (let i = 0; i < 7; i += 1) {
+                if (!date) return [];
+                row.push({
+                    date,
+                    day: Number(date.slice(8)),
+                    count: counts.get(date) || 0,
+                    inMonth: date.slice(0, 7) === ym,
+                    isToday: date === todayStr,
+                });
+                date = TE.addDays(date, 1);
+            }
+            rows.push(row);
+        }
+        return rows;
+    }
+
+    /** Whether the month calendar is open on this device (best-effort read). */
+    static readMonthOpen(storage) {
+        try {
+            return !!storage && typeof storage.getItem === 'function'
+                && storage.getItem(ToDoDailyFilterView.MONTH_OPEN_KEY) === '1';
+        } catch (_e) { return false; }
+    }
+
+    static writeMonthOpen(storage, open) {
+        try {
+            if (storage && typeof storage.setItem === 'function') {
+                storage.setItem(ToDoDailyFilterView.MONTH_OPEN_KEY, open ? '1' : '0');
+            }
+        } catch (_e) { /* local preference persistence is best-effort */ }
+    }
+
+    static get MONTH_OPEN_KEY() { return 'sauce-todo-month-open'; }
+
+    static get CALENDAR_ICON() {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>';
+    }
+
+    /**
+     * Stylesheet for the strip row (‹ strip › and the calendar button) and
+     * the month calendar. On a phone, or when the above-tabs host (a size
+     * container) is 480px or narrower, the
+     * arrows, week name and calendar button sit on a line above the seven
+     * cells, so the cells keep the full width and every control stays 36px.
+     */
+    static get STRIP_CSS() {
+        const narrow = [
+            '.sauce-todo-strip-row { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "prev title next tools" "cells cells cells cells"; row-gap: 6px; }',
+            '.sauce-todo-strip-row .sauce-todo-week-title { display: block; }',
+            '.sauce-todo-strip-row .sauce-todo-week-strip { gap: 4px !important; }',
+        ];
+        return [
+            '.sauce-todo-above-tabs { container-type: inline-size; width: 100%; }',
+            '.sauce-todo-strip-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "prev cells next tools"; align-items: stretch; column-gap: 6px; width: 100%; box-sizing: border-box; }',
+            '.sauce-todo-strip-row > .sauce-todo-week-nav.is-prev { grid-area: prev; }',
+            '.sauce-todo-strip-row > .sauce-todo-week-nav.is-next { grid-area: next; }',
+            '.sauce-todo-strip-row > .sauce-todo-week-title { grid-area: title; display: none; align-self: center; text-align: center; font-size: 0.85em; font-weight: 600; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+            '.sauce-todo-strip-row > .sauce-todo-week-strip { grid-area: cells; min-width: 0; }',
+            '.sauce-todo-strip-row > .sauce-todo-strip-tools { grid-area: tools; display: flex; align-items: stretch; gap: 6px; }',
+            '.sauce-todo-strip-row button.sauce-todo-week-nav, .sauce-todo-strip-row button.sauce-todo-month-toggle, .sauce-todo-strip-row button.sauce-todo-week-reset, .sauce-todo-month-head button { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; height: auto; padding: 0 8px; box-sizing: border-box; border-radius: var(--radius-m, 6px); border: 1px solid var(--background-modifier-border); background: transparent; box-shadow: none; color: var(--text-muted); cursor: pointer; font-size: 0.85em; }',
+            '.sauce-todo-strip-row button.sauce-todo-week-nav { font-size: 1.2em; line-height: 1; }',
+            '.sauce-todo-strip-row button.sauce-todo-month-toggle.is-active { color: var(--text-accent); border-color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); }',
+            '.sauce-todo-strip-row button.sauce-todo-week-reset { color: var(--text-accent); white-space: nowrap; }',
+            '.sauce-todo-month { display: flex; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m, 8px); }',
+            '.sauce-todo-month-head { display: flex; align-items: center; gap: 6px; }',
+            '.sauce-todo-month-title { flex: 1 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+            '.sauce-todo-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; width: 100%; }',
+            '.sauce-todo-month-dow { text-align: center; font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); padding: 2px 0; }',
+            '.sauce-todo-month-grid button.sauce-todo-month-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; min-width: 0; min-height: 40px; height: auto; padding: 4px 0; box-sizing: border-box; border-radius: var(--radius-s, 4px); border: 1px solid transparent; background: transparent; box-shadow: none; color: var(--text-normal); cursor: pointer; }',
+            '.sauce-todo-month-cell .sauce-todo-month-date { font-size: 0.9em; font-variant-numeric: tabular-nums; line-height: 1.2; }',
+            '.sauce-todo-month-cell .sauce-todo-month-count { font-size: 0.72em; color: var(--text-muted); font-variant-numeric: tabular-nums; line-height: 1.2; }',
+            '.sauce-todo-month-cell .sauce-todo-month-count.is-zero { color: var(--text-faint); }',
+            '.sauce-todo-month-grid button.sauce-todo-month-cell.is-outside { opacity: 0.45; }',
+            '.sauce-todo-month-grid button.sauce-todo-month-cell.is-today { border-color: var(--interactive-accent); color: var(--text-accent); }',
+            '.sauce-todo-month-grid button.sauce-todo-month-cell.is-selected { background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); border-color: var(--interactive-accent); color: var(--text-accent); box-shadow: 0 0 8px color-mix(in srgb, var(--interactive-accent) 30%, transparent); }',
+            '.sauce-todo-month-cell.is-selected .sauce-todo-month-count { color: var(--text-accent); }',
+            '.sauce-todo-month-grid button.sauce-todo-month-cell:not(.is-selected):hover, .sauce-todo-strip-row button.sauce-todo-week-nav:hover, .sauce-todo-month-head button:hover { background: var(--background-modifier-hover); }',
+            `body.is-phone ${narrow.join('\nbody.is-phone ')}`,
+            `@container (max-width: 480px) { ${narrow.join(' ')} }`,
+        ].join('\n');
     }
 
     /**
@@ -823,7 +980,11 @@ class ToDoDailyFilterView {
     /**
      * Per-day gesture state shared by every render of the view: Select mode,
      * the selection, the week-strip day being shown (`day`, a YYYY-MM-DD or
-     * null), in-flight locks ('bulk', 'reorder') and the live render. Each
+     * null), the week the strip shows (`weekStart`, its Monday, or null for
+     * this week), the month the calendar shows (`month`, 'YYYY-MM' or null
+     * for the picked day's or today's), whether the calendar is open
+     * (`monthOpen`, null until toggled: the device's saved choice applies),
+     * in-flight locks ('bulk', 'reorder') and the live render. Each
      * surface keeps its own entry; other days' entries are dropped once they
      * hold no lock. A scoped surface (one project, trip or meeting) keys its
      * entry by `scopeId` too, so Select mode on one note never follows you
@@ -837,7 +998,12 @@ class ToDoDailyFilterView {
         for (const [k, entry] of all) {
             if (k.slice(k.lastIndexOf('|') + 1) !== day && !entry.locks.size) all.delete(k);
         }
-        if (!all.has(key)) all.set(key, { selecting: false, selected: new Set(), locks: new Set(), live: null, day: null, doneAll: false });
+        if (!all.has(key)) {
+            all.set(key, {
+                selecting: false, selected: new Set(), locks: new Set(), live: null, day: null, doneAll: false,
+                weekStart: null, month: null, monthOpen: null,
+            });
+        }
         return all.get(key);
     }
 
@@ -930,6 +1096,7 @@ class ToDoDailyFilterView {
         root.style.cssText = 'display:flex; flex-direction:column; gap:10px; width:100%;';
 
         root.createEl('style').textContent = View.BULKBAR_CSS;
+        if (S.strip) root.createEl('style').textContent = View.STRIP_CSS;
         // Search is in memory only: it narrows the tabs, their counts and the
         // list, and clears when the note reloads.
         let query = '';
@@ -1435,15 +1602,102 @@ class ToDoDailyFilterView {
                 TTL.renderDoneRow(doneHost, task, { TD, notice: View._notice, onUndo: reopen });
             }
         };
+        // Desktop only: a strip or month cell takes a dragged task (a drag
+        // carrying DRAG_MIME) and moves it to that day through dropOnDay. `rest` is the inline background
+        // the cell goes back to when the drag leaves or lands.
+        const carriesTask = (event) => {
+            try {
+                const types = event && event.dataTransfer && event.dataTransfer.types;
+                return !!types && Array.from(types).map(String).includes(dragMime);
+            } catch (_e) { return false; }
+        };
+        const wireDayDrop = (button, date, rest) => {
+            if (isMobile || !button || typeof button.addEventListener !== 'function') return;
+            button.addEventListener('dragover', (event) => {
+                if (!dragPath || !carriesTask(event)) return;
+                try {
+                    event.preventDefault();
+                    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                } catch (_e) { /* the drop still works without dropEffect */ }
+                button.style.background = 'var(--background-modifier-hover)';
+            });
+            button.addEventListener('dragleave', () => { button.style.background = rest; });
+            button.addEventListener('drop', (event) => {
+                try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
+                button.style.background = rest;
+                const from = carriesTask(event) ? droppedPath(event) : null;
+                dragPath = null;
+                // The shared drag (nest / Make top-level) ends here too.
+                try { if (typeof TTL.endDrag === 'function') TTL.endDrag(); } catch (_e) { /* nothing to clear */ }
+                if (!from) return undefined;
+                return dropOnDay(from, date);
+            });
+        };
+        // The strip shows the week starting `state.weekStart` (a Monday), or
+        // this week while that is null. The month calendar shows
+        // `state.month`, or the picked day's month, or today's.
+        const thisMonday = () => {
+            const range = View.weekRange(todayStr, TE);
+            return range ? range.from : todayStr;
+        };
+        const shownMonday = () => state.weekStart || thisMonday();
+        const showWeekOf = (date) => {
+            const range = View.weekRange(date, TE);
+            state.weekStart = range && range.from !== thisMonday() ? range.from : null;
+        };
+        const monthOpen = () => (state.monthOpen != null ? !!state.monthOpen : View.readMonthOpen(storage));
+        const shownMonth = () => state.month || View._monthOf(state.day || todayStr);
+        // While the calendar is open it follows the strip: the month of the
+        // shown week's Monday, or of a day just picked on the strip.
+        const followWeek = () => { if (monthOpen()) state.month = View._monthOf(shownMonday()); };
+        // A paint rebuilds every control, so focus goes back to the one just
+        // pressed (matched by data-nav), or to `fallback` when it is gone.
+        const refocus = (nav, fallback) => {
+            const find = (key) => {
+                const stack = [aboveTabs];
+                while (stack.length) {
+                    const node = stack.shift();
+                    if (node !== aboveTabs && node.dataset && node.dataset.nav === key) return node;
+                    for (const child of Array.from(node.children || [])) stack.push(child);
+                }
+                return null;
+            };
+            try {
+                const target = find(nav) || (fallback ? find(fallback) : null);
+                if (target && typeof target.focus === 'function') target.focus();
+            } catch (_e) { /* focus is a courtesy */ }
+        };
+        const navButton = (parent, cls, text, name, nav, handler, fallback) => {
+            const button = parent.createEl('button', { cls, text });
+            button.setAttribute('type', 'button');
+            button.setAttribute('aria-label', name);
+            button.setAttribute('title', name);
+            button.dataset.nav = nav;
+            button.addEventListener('click', onClick(() => {
+                handler();
+                refocus(nav, fallback);
+            }));
+            return button;
+        };
         const paintStrip = () => {
             clear(aboveTabs);
             if (!S.strip) return;
-            const cells = View.weekStrip(tasks, todayStr, TE);
+            const monday = shownMonday();
+            const cells = View.weekStrip(tasks, todayStr, TE, monday);
             if (!cells.length) return;
-            const strip = aboveTabs.createEl('div', { cls: 'sauce-todo-week-strip' });
+            const away = monday !== thisMonday();
+            const weekName = away ? View._weekOfLabel(monday) : 'This week';
+            const row = aboveTabs.createEl('div', { cls: 'sauce-todo-strip-row' });
+            navButton(row, 'sauce-todo-week-nav is-prev', '‹', 'Previous week', 'prev-week', () => {
+                showWeekOf(TE.addDays(monday, -7));
+                followWeek();
+                paint();
+            });
+            row.createEl('span', { cls: 'sauce-todo-week-title', text: weekName }).setAttribute('aria-hidden', 'true');
+            const strip = row.createEl('div', { cls: 'sauce-todo-week-strip' });
             strip.style.cssText = `display:grid; grid-template-columns:repeat(${cells.length}, minmax(0, 1fr)); gap:8px; width:100%; box-sizing:border-box;`;
             strip.setAttribute('role', 'group');
-            strip.setAttribute('aria-label', 'This week');
+            strip.setAttribute('aria-label', weekName);
             for (const cell of cells) {
                 const picked = state.day === cell.date;
                 const button = strip.createEl('button', {
@@ -1472,28 +1726,90 @@ class ToDoDailyFilterView {
                 count.style.cssText = `font-size:0.75em; color:${picked ? 'var(--text-accent)' : cell.count ? 'var(--text-muted)' : 'var(--text-faint)'}; font-variant-numeric:tabular-nums;`;
                 button.addEventListener('click', onClick(() => {
                     state.day = picked ? null : cell.date;
+                    if (state.day && monthOpen()) state.month = View._monthOf(state.day);
                     paint();
                 }));
-                if (isMobile) continue;
-                button.addEventListener('dragover', (event) => {
-                    if (!dragPath) return;
-                    try {
-                        event.preventDefault();
-                        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-                    } catch (_e) { /* the drop still works without dropEffect */ }
-                    button.style.background = 'var(--background-modifier-hover)';
-                });
-                button.addEventListener('dragleave', () => { button.style.background = rest; });
-                button.addEventListener('drop', (event) => {
-                    try { event.preventDefault(); } catch (_e) { /* default drop is harmless */ }
-                    button.style.background = rest;
-                    const from = droppedPath(event);
-                    dragPath = null;
-                    // The shared drag (nest / Make top-level) ends here too.
-                    try { if (typeof TTL.endDrag === 'function') TTL.endDrag(); } catch (_e) { /* nothing to clear */ }
-                    if (!from) return undefined;
-                    return dropOnDay(from, cell.date);
-                });
+                wireDayDrop(button, cell.date, rest);
+            }
+            navButton(row, 'sauce-todo-week-nav is-next', '›', 'Next week', 'next-week', () => {
+                showWeekOf(TE.addDays(monday, 7));
+                followWeek();
+                paint();
+            });
+            const tools = row.createEl('div', { cls: 'sauce-todo-strip-tools' });
+            if (away) {
+                navButton(tools, 'sauce-todo-week-reset', 'This week', 'Show this week', 'this-week', () => {
+                    state.weekStart = null;
+                    followWeek();
+                    paint();
+                }, 'toggle');
+            }
+            const open = monthOpen();
+            const toggle = tools.createEl('button', { cls: `sauce-todo-month-toggle${open ? ' is-active' : ''}` });
+            toggle.setAttribute('type', 'button');
+            toggle.setAttribute('aria-label', open ? 'Hide month' : 'Show month');
+            toggle.setAttribute('title', open ? 'Hide month' : 'Show month');
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            toggle.dataset.nav = 'toggle';
+            toggle.innerHTML = View.CALENDAR_ICON;
+            toggle.addEventListener('click', onClick(() => {
+                state.monthOpen = !open;
+                View.writeMonthOpen(storage, state.monthOpen);
+                paint();
+                refocus('toggle');
+            }));
+            if (open) paintMonth();
+        };
+        // The month calendar under the strip: picking a day shows it, moves
+        // the strip to its week and leaves the calendar open on this month.
+        const paintMonth = () => {
+            const month = shownMonth();
+            const weeks = View.monthGrid(tasks, month, todayStr, TE);
+            if (!weeks.length) return;
+            const title = View._monthTitle(month);
+            const box = aboveTabs.createEl('div', { cls: 'sauce-todo-month' });
+            box.setAttribute('role', 'group');
+            box.setAttribute('aria-label', title);
+            const head = box.createEl('div', { cls: 'sauce-todo-month-head' });
+            navButton(head, 'sauce-todo-month-nav is-prev', '‹', 'Previous month', 'prev-month', () => {
+                state.month = View._shiftMonth(month, -1);
+                paint();
+            });
+            head.createEl('span', { cls: 'sauce-todo-month-title', text: title });
+            navButton(head, 'sauce-todo-month-today', 'Today', 'Show today', 'month-today', () => {
+                state.month = View._monthOf(todayStr);
+                state.weekStart = null;
+                paint();
+            });
+            navButton(head, 'sauce-todo-month-nav is-next', '›', 'Next month', 'next-month', () => {
+                state.month = View._shiftMonth(month, 1);
+                paint();
+            });
+            const grid = box.createEl('div', { cls: 'sauce-todo-month-grid' });
+            for (const name of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) {
+                grid.createEl('span', { cls: 'sauce-todo-month-dow', text: name }).setAttribute('aria-hidden', 'true');
+            }
+            for (const week of weeks) {
+                for (const cell of week) {
+                    const picked = state.day === cell.date;
+                    const button = grid.createEl('button', {
+                        cls: `sauce-todo-month-cell${cell.isToday ? ' is-today' : ''}${picked ? ' is-selected' : ''}${cell.inMonth ? '' : ' is-outside'}`,
+                    });
+                    button.setAttribute('type', 'button');
+                    button.setAttribute('aria-label', `${View._dayLabel(cell.date)}: ${cell.count} open`);
+                    button.setAttribute('aria-pressed', picked ? 'true' : 'false');
+                    if (cell.isToday) button.setAttribute('aria-current', 'date');
+                    button.dataset.date = cell.date;
+                    button.createEl('span', { cls: 'sauce-todo-month-date', text: String(cell.day) });
+                    button.createEl('span', { cls: `sauce-todo-month-count${cell.count ? '' : ' is-zero'}`, text: String(cell.count) });
+                    button.addEventListener('click', onClick(() => {
+                        state.day = cell.date;
+                        state.month = month;
+                        showWeekOf(cell.date);
+                        paint();
+                    }));
+                    wireDayDrop(button, cell.date, '');
+                }
             }
         };
 
